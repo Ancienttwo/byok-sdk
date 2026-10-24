@@ -56,9 +56,11 @@ export function updateBot(state: CollaborationState, action: UpdateBotAction, mo
 /**
  * The `teamBot` port of a team snapshot (#739 Q4c). A new Bot gets the snapshot id and its first projection.
  * A profile change takes the `update_bot` path, so it queues the same persona projection (T4).
+ * Host persona mode (#879): the Bot takes the Host's profile revision and no projection is queued.
  */
 export function writeSnapshotBot(state: CollaborationState, row: TeamSnapshotBot, models: Record<string, ExecutionTemplate>, readOnlyToolsets: readonly string[] = []): void {
   const bot = state.team.bots[row.id];
+  if (state.team.external?.persona) { writeHostProfile(state, bot, row, models, readOnlyToolsets); return; }
   if (bot) {
     if (bot.name !== row.name || bot.role !== row.role || bot.persona !== row.persona || bot.model !== row.model) {
       updateBot(state, { botId: row.id, name: row.name, role: row.role, persona: row.persona, model: row.model }, models, readOnlyToolsets);
@@ -74,6 +76,33 @@ export function writeSnapshotBot(state: CollaborationState, row: TeamSnapshotBot
     mainBot: false, archived: false, revision: '1', readyRevision: null, execution };
   state.team.bots[row.id] = created;
   projection(state, created);
+}
+/**
+ * Host persona mode (#879). The revision never goes back, and a profile change needs a newer revision. A newer revision
+ * keeps `readyRevision` at the last revision that the Host reported ready: the Bot stays a delegate target, and its
+ * Turns wait for `persona_ready` of the new revision.
+ */
+function writeHostProfile(state: CollaborationState, bot: BotProfile | undefined, row: TeamSnapshotBot, models: Record<string, ExecutionTemplate>,
+  readOnlyToolsets: readonly string[]): void {
+  const revision = row.profileRevision!;
+  if (bot) {
+    const changed = bot.name !== row.name || bot.role !== row.role || bot.persona !== row.persona || bot.model !== row.model;
+    if (BigInt(revision) < BigInt(bot.revision)) throw new Error(`Profile revision ${revision} of ${row.id} is older than ${bot.revision}`);
+    if (revision === bot.revision) {
+      if (changed) throw new Error(`A profile change of ${row.id} needs a newer profile revision`);
+      return;
+    }
+  }
+  const base = models[row.model];
+  if (!base) throw new Error('Unavailable model');
+  admitBotToolsets(base, readOnlyToolsets);
+  const execution = structuredClone(base);
+  // Model selection cannot move the Bot home to another device.
+  if (bot) execution.deviceId = bot.execution.deviceId;
+  execution.payload.agentRef = { agentId: row.id, profileRevision: revision };
+  const fields = { name: row.name, role: row.role, persona: row.persona, model: row.model, revision, execution };
+  if (bot) Object.assign(bot, fields);
+  else state.team.bots[row.id] = { id: row.id, ...fields, mainBot: false, archived: false, readyRevision: null };
 }
 export function applyManagement(state: CollaborationState, actor: string, taskId: string, outcome: BotTurnOutcome,
   models: Record<string, ExecutionTemplate>, accept: (action: string, work: () => void) => void, readOnlyToolsets: readonly string[] = []): void {

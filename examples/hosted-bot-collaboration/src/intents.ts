@@ -1,14 +1,14 @@
 import type { Pool, PoolClient } from 'pg';
-import { agentKey, canonical, fifoHeads, hash, promoteOccurrence, queuedExpiry, submitFrozen, taskId,
+import { agentKey, canonical, fifoHeads, hash, promoteOccurrence, queuedExpiry, RetiredIntentIdentityError, submitFrozen, taskId,
   type Conclusion, type ExecutionTemplate, type FrozenInput, type FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';
-import type { settleDelegations, SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import type { SeatFacts, settleDelegations, SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { activeBinding, DeviceBindingError } from './binding';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { idOf, storedKey } from './layout';
-import { retiredTurns } from './retention';
+import { retiredIntents, retiredTurns } from './retention';
 import { switchDueVersions, type RoutineSlice } from './routines';
 import { inSchema, lockScope } from './store';
 
@@ -20,6 +20,7 @@ export interface RoutineTimes { retryUntil?: number; conclusion?: Conclusion }
 /**
  * Saves one intent with its frozen input and its stable task id, `taskId(key, 0)`. The caller holds the scope lock.
  * A second freeze of the same Turn with the same identity changes nothing; another identity throws, as in K4 `enqueue`.
+ * A Turn whose intent compaction retired throws `RetiredIntentIdentityError`, as K4 `enqueue` refuses a retired key (#793 S8).
  */
 export async function freezeIntent(client: PoolClient, scope: string, freeze: IntentFreeze, routine: RoutineTimes = {}): Promise<FrozenInput> {
   // H never retries a task (#793 D2d option A), so it cannot honor a K4 retry policy. It refuses one instead of dropping it.
@@ -35,6 +36,7 @@ export async function freezeIntent(client: PoolClient, scope: string, freeze: In
     }
     return input;
   }
+  if ((await retiredIntents(client, scopeKey, [freeze.key])).size) throw new RetiredIntentIdentityError();
   // A new intent can create execution, so its device must have an active H binding (#793 D2e).
   await activeBinding(client, scopeKey, freeze.execution.deviceId);
   await client.query(`INSERT INTO intent (scope, key, task_id, ordinal, agent, source, input, wait_until, submission, retry_until, conclusion)
@@ -77,15 +79,27 @@ export async function commandIntentFacts(client: PoolClient, scope: string, turn
   return { intent };
 }
 /**
+ * The K8 room seat facts (#793 S6), from the intent rows of the seat Turns, as K8 `advanceRooms` (rooms.ts) reads L's K4
+ * intents: `admitted` when the seat Turn has an intent, `started` from the reconciliation's claim fact, and the conclusion.
+ * The caller holds the scope lock.
+ */
+export async function seatFacts(client: PoolClient, scope: string, seatIds: readonly string[]): Promise<Record<string, SeatFacts>> {
+  const { intent, started } = await loadIntentFacts(client, scope, seatIds);
+  return Object.fromEntries(seatIds.map(id => {
+    const row = intent(id);
+    return [id, { admitted: row !== undefined, started: started.has(storedKey(id)), ...(row?.conclusion ? { conclusion: row.conclusion } : {}) }];
+  }));
+}
+/**
  * The sync rule facts of these Turns, read in the sync transaction. `started` is the reconciliation's attempt fact
- * (D2d). `retired` reads the Turn tombstones of retention (D2g).
+ * (D2d). `retired` reads the intent tombstones of compaction (S8) and the Turn tombstones of retention (D2g).
  */
 export async function syncFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<SyncFacts> {
   const { intent, started } = await loadIntentFacts(client, scope, turnIds);
-  // H keeps every intent row, so no intent result is retired before it is seen. Retention retires Turn ids (#793 D2g).
-  const retired = await retiredTurns(client, storedKey(scope), turnIds);
+  // Retention retires Turn ids (#793 D2g). Compaction retires intents (#793 S8): a compacted intent comes first, as in L's sync.
+  const retired = await retiredTurns(client, storedKey(scope), turnIds), compacted = await retiredIntents(client, storedKey(scope), turnIds);
   return { intent, executionStarted: turnId => started.has(storedKey(turnId)),
-    retired: turnId => retired.has(turnId) ? 'turn_retired' : undefined };
+    retired: turnId => compacted.has(turnId) ? 'result_retired' : retired.has(turnId) ? 'turn_retired' : undefined };
 }
 
 /**

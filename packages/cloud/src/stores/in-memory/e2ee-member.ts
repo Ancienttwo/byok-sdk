@@ -1,14 +1,19 @@
 import type { TenantId } from '@byok-sdk/core';
 import type {
+  E2eeMemberChainAppendInput,
   E2eeMemberChainAppendResult,
   E2eeMemberChainRow,
   E2eeMemberRegisterResult,
   E2eeMemberRegistrationInput,
   E2eeMemberRegistrationRow,
   E2eeMemberStore,
+  E2eeProvenWrite,
+  E2eeScopeKeyPackagePutInput,
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
 } from '../../e2ee-member';
+import { parseRecordedWriteResult } from '../../e2ee-member';
+import type { RequestReceiptStore } from '../ports';
 
 interface Expiring {
   readonly body: string;
@@ -25,14 +30,42 @@ interface TenantState {
   readonly registrations: Map<string, { readonly memberId: string; readonly bundle: string }>;
   readonly deviceMacs: Map<string, Expiring>;
   readonly clientMacs: Map<string, Expiring>;
+  /** scopeId -> seq of its first shred. */
+  readonly shredded: Map<string, number>;
+  /** `[deviceId, requestId]` JSON -> the proof binding and the JSON result of the write. */
+  readonly requests: Map<string, { readonly binding: string; readonly result: string }>;
+}
+
+const requestKey = (proof: E2eeProvenWrite) => JSON.stringify([proof.deviceId, proof.request.requestId]);
+const binding = ({ request }: E2eeProvenWrite) => JSON.stringify([request.operation, request.resource, request.bodySha256, request.bodySize]);
+
+/** The recorded result of this device request, `request_conflict` for another binding, or `undefined` for a new request. */
+function recorded<T>(state: TenantState, proof: E2eeProvenWrite | undefined, parse: (text: string) => T): T | 'request_conflict' | undefined {
+  const stored = proof === undefined ? undefined : state.requests.get(requestKey(proof));
+  if (stored === undefined) return undefined;
+  return stored.binding === binding(proof!) ? parse(stored.result) : 'request_conflict';
+}
+
+function record<T>(state: TenantState, proof: E2eeProvenWrite | undefined, result: T): T {
+  if (proof !== undefined) state.requests.set(requestKey(proof), { binding: binding(proof), result: JSON.stringify(result) });
+  return result;
 }
 
 /**
  * Reference E2EE member store. Each method checks and writes in one
- * synchronous step, so no other call interleaves with it.
+ * synchronous step, so no other call interleaves with it. A shred receipt
+ * goes to `receipts`, the composition's request receipt store, after that
+ * step. Appends run one at a time through their receipt writes, so a later
+ * shred of a scope cannot record its receipt before the first one.
  */
 export class InMemoryE2eeMemberStore implements E2eeMemberStore {
   readonly #tenants = new Map<TenantId, TenantState>();
+  readonly #receipts: Pick<RequestReceiptStore, 'record'>;
+  #appends: Promise<unknown> = Promise.resolve();
+
+  constructor(receipts: Pick<RequestReceiptStore, 'record'>) {
+    this.#receipts = receipts;
+  }
 
   #state(tenant: TenantId): TenantState {
     let state = this.#tenants.get(tenant);
@@ -44,14 +77,27 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
         registrations: new Map(),
         deviceMacs: new Map(),
         clientMacs: new Map(),
+        shredded: new Map(),
+        requests: new Map(),
       };
       this.#tenants.set(tenant, state);
     }
     return state;
   }
 
-  async appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult> {
-    const { chain } = this.#state(tenant);
+  appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult> {
+    const run = this.#appends.then(() => this.#append(tenant, input));
+    this.#appends = run.catch(() => undefined);
+    return run;
+  }
+
+  async #append(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult> {
+    const state = this.#state(tenant);
+    const replay = recorded(state, input.proof, text => parseRecordedWriteResult('chainAppend', text));
+    if (replay === 'request_conflict') return { outcome: 'request_conflict' };
+    if (replay !== undefined) return replay;
+    const { chain } = state;
+    const { rows } = input;
     const headSeq = chain.size;
     let replayed = 0;
     for (const row of rows) {
@@ -62,7 +108,15 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
     const fresh = rows.slice(replayed);
     if (fresh.length > 0 && fresh[0]!.seq !== headSeq + 1) return { outcome: 'gap', seq: fresh[0]!.seq, headSeq };
     for (const row of fresh) chain.set(row.seq, row.entry);
-    return { outcome: 'appended', appended: fresh.length, replayed };
+    const shreds = input.shreds.filter(shred => shred.seq > headSeq);
+    for (const { seq, scopeId } of shreds) {
+      for (const [key, row] of state.packages) if (row.scopeId === scopeId) state.packages.delete(key);
+      for (const key of state.epochKeyIds.keys()) if ((JSON.parse(key) as [string, number])[0] === scopeId) state.epochKeyIds.delete(key);
+      if (!state.shredded.has(scopeId)) state.shredded.set(scopeId, seq);
+    }
+    const result = record<E2eeMemberChainAppendResult>(state, input.proof, { outcome: 'appended', appended: fresh.length, replayed });
+    for (const { receipt } of shreds) await this.#receipts.record(tenant, receipt);
+    return result;
   }
 
   async readChainEntries(tenant: TenantId, input: { readonly afterSeq: number; readonly limit: number }): Promise<readonly E2eeMemberChainRow[]> {
@@ -74,8 +128,13 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
     return rows;
   }
 
-  async putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult> {
+  async putScopeKeyPackages(tenant: TenantId, { rows, proof }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult> {
     const state = this.#state(tenant);
+    const replay = recorded(state, proof, text => parseRecordedWriteResult('keyPackagePut', text));
+    if (replay === 'request_conflict') return { outcome: 'request_conflict' };
+    if (replay !== undefined) return replay;
+    const shredded = rows.find(row => state.shredded.has(row.scopeId));
+    if (shredded !== undefined) return { outcome: 'scope_shredded', scopeId: shredded.scopeId };
     // The first row of a new scope epoch fixes its keyId for the rest of the call.
     const fixed = new Map<string, string>();
     for (const row of rows) {
@@ -90,7 +149,7 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
       state.epochKeyIds.set(JSON.stringify([row.scopeId, row.epoch]), row.keyId);
       state.packages.set(JSON.stringify([row.scopeId, row.epoch, row.recipient]), { ...row });
     }
-    return { outcome: 'stored', stored: rows.length };
+    return record<E2eeScopeKeyPackagePutResult>(state, proof, { outcome: 'stored', stored: rows.length });
   }
 
   async readScopeKeyPackages(
@@ -107,6 +166,9 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
 
   async registerMember(tenant: TenantId, input: E2eeMemberRegistrationInput): Promise<E2eeMemberRegisterResult> {
     const state = this.#state(tenant);
+    const proof = { deviceId: input.deviceId, request: input.request };
+    const replay = recorded(state, proof, text => parseRecordedWriteResult('memberKeyRegister', text));
+    if (replay !== undefined) return replay;
     const existing = state.registrations.get(input.deviceId);
     if (existing !== undefined && existing.bundle !== input.bundle) return 'device_conflict';
     if (existing === undefined
@@ -115,7 +177,7 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
     }
     if (existing === undefined) state.registrations.set(input.deviceId, { memberId: input.memberId, bundle: input.bundle });
     state.deviceMacs.set(input.deviceId, { body: input.deviceMac, expiresAt: input.macExpiresAt });
-    return existing === undefined ? 'registered' : 'replayed';
+    return record<E2eeMemberRegisterResult>(state, proof, existing === undefined ? 'registered' : 'replayed');
   }
 
   async readMemberRegistration(

@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import {
   createDaemonWithAdapters, type AgentEgressPolicy, type Daemon, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
-  type RuntimeAdapterPrepareResult, type RuntimeOperationStartInput, type Session,
+  type MessageDraftDelta, type RuntimeAdapterPrepareResult, type RuntimeOperationStartInput, type Session,
 } from '@byok-sdk/client';
 import { BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, type AgentEvent, type DispatchSelection } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer } from '@byok-sdk/server';
@@ -77,11 +77,12 @@ export class AdapterEventRecorder {
       this.byTask.set(taskId, list);
     };
     const observeSession = (session: Session, taskId: string): Session => {
-      const events: AsyncIterable<AgentEvent> = {
+      const events: AsyncIterable<AgentEvent | MessageDraftDelta> = {
         [Symbol.asyncIterator]() {
           const iterator = session.events[Symbol.asyncIterator]();
           return {
-            next: async () => { const step = await iterator.next(); if (!step.done) record(taskId, step.value); return step; },
+            // Draft deltas are display-only text, not AgentEvents.
+            next: async () => { const step = await iterator.next(); if (!step.done && step.value.type !== 'message_draft_delta') record(taskId, step.value); return step; },
             ...(iterator.return ? { return: (value?: unknown) => iterator.return!(value) } : {}),
             ...(iterator.throw ? { throw: (error?: unknown) => iterator.throw!(error) } : {}),
           };

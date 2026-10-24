@@ -81,7 +81,7 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `outbox` | projection or delivery to send: a projection's value and send state, or a delivery's scan index (owner §54a, signed) |
 | `intent` | Turn intent: the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
 | `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision and its revoke time |
-| `retired_identity` | K8 identity that retention retired for good: `hash([namespace, id])` |
+| `retired_identity` | K8 identity that retention retired for good, `hash([namespace, id])`, or a compacted intent, `hash(['intent', turnId])` |
 | `archived_row` | row that retention moved out of the state, by namespace and id; a command record has an expiry |
 | `routine` | K4 routine of a Bot: its definition, staged version, lifecycle, status and next slot |
 | `occurrence` | K4 occurrence of a routine slot; its conclusion only when it has no intent |
@@ -100,6 +100,10 @@ keeps the insertion order of each kind.
   keeps the old CHECK, so a new kind needs an explicit `ALTER` in a later migration.
 - H has no migrations while it is unreleased. After a DDL change, recreate the H schema. `migrate()` on a schema
   from an older revision fails in its one transaction and changes nothing.
+- The H reconciler reads an open intent's SDK attempt again after `pollMs` (30 s by default), and L's after 100 ms
+  (`reconcileMs`). The room step reads `started` from the claim that it records, so a Bot that claims its seat Turn
+  less than one poll before the seat deadline can still be marked `busy` and have its work cancelled. The room rule is
+  unchanged; a shorter `pollMs` narrows the window.
 - One commit must not delete a map key and add it back. The store keeps the old ordinal, but a JavaScript
   object moves the key to the end. K8 never deletes a map entry today.
 
@@ -180,10 +184,40 @@ error. A confirmed or rejected card then adds its `action_result` Turn, so the r
 card starts no Turn. The due scheduler syncs a scope when a card's `expiresAt` is reached. H has no connector step (L's
 `flushCards`), so in H a confirmed card never gets its result: it is not reported and gets no `action_result` Turn.
 
-H does not yet run these L sync and pass steps: `advanceRooms`, the reply checks (`reconcileReply`, `retryReply`), the
-device observation (`observeDevices`), and the card and Agent home flushes. The due scheduler syncs a scope when one of
-the due times is reached (see Due scheduler). Until H runs the step that clears it, that sync leaves the scope due, and
-the scheduler reports the scope as stalled.
+### Room step
+
+Each sync round runs the K8 room step (`advanceRoomSeats`, through `./rules/commands`) after the batch seal and the card
+expiry and before the Turn steps, as L's sync runs it (#793 S6). Its seat facts come from the intent row of each seat Turn: `admitted` when the row exists,
+`started` from the reconciliation's claim fact, and the row's conclusion. A seat Turn that the step queues freezes in the
+same round. The step cancels a seat's admitted work through `cancelIntent`, as a delegation cancel does: an untried row
+concludes `cancelled` in that sync, and a tried row keeps its cancel reason for the reconciliation. A seat Turn with no
+intent fails with the seat's conclusion. The due scheduler syncs a scope when a seat's deadline is reached.
+
+### Reply checks
+
+A chain end that succeeded with no Host reply record leaves its delegation `reply_pending`, with a check time
+(`nextCheckAt`). `HostedReplyChecker.check(scope, now)` runs L's `flushReplies` step (#793 S7) on the shared K8 rule:
+- `store.replyChecks(scope, now)` reads the due checks in one snapshot, with no lock. K8 `replyCheckDue` selects them,
+  as L does. Each check has its fence (`checks`, `nextCheckAt`) and the chain end's frozen task from its intent row. A
+  chain end with no intent row has no task.
+- For each check, the checker reads the SDK readback outside any transaction, through the port's `agentMessage`. A read
+  that throws or takes longer than `timeoutMs` (default 10 s) is a failed read, as in L. A chain end with no task is a
+  failed read with no SDK call.
+- `store.settleReplyCheck(scope, delegationId, fence, check, clock)` runs K8 `checkReply` with the store's timers, in one
+  transaction under the scope lock, at the clock read after the lock (the checker's `now` option), as L reads its clock
+  again in its ledger transaction. A reply body that the Host holds answers the delegation; a failed read retries with
+  backoff; otherwise the readback decides (`no_reply`, `reply_held`, or another check). The settle writes nothing when
+  the delegation is gone, is no longer due at that time (it runs `replyCheckDue` again, so a verdict or a later check time
+  stops it), or no longer matches the fence. A throw writes nothing and propagates.
+
+Two checkers may both read the same delegation; only the first settle applies. The SDK read is read only: the SDK
+`readTaskAgentMessage` (`@byok-sdk/cloud` `task-agent-message.ts`) runs SELECTs on the task, its admission and its
+offer receipt, and writes nothing. K8 `delegationDue` puts each check time into `scope.due_at`, so the deployment runs
+the checker from its due scheduler `sync`, before `store.sync`, as L's pass syncs after its reply checks (see
+Deployment config).
+
+H does not yet run these L pass steps: the device observation (`observeDevices`), and the card and Agent home flushes.
+The due scheduler syncs a scope when one of the due times is reached (see Due scheduler).
 
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
 record and keeps the revision. A throw writes nothing. The rule's `executionStarted` fact is the intent's `started`
@@ -273,10 +307,28 @@ root ids are retired in `retired_identity`, and every moved command record answe
 - An accepted Agent message stays accepted for an exact replay after retention. The consumer checks the task's reply
   in the state or in `archived_row`, where retention keeps it with no expiry, as K4 keeps its receipt. A refused message
   replays from its moved record until the record expires, as in L.
-- H keeps every intent row, settled or not. Intent row compaction, and its permanent intent tombstones, is later work.
+- Retention keeps every intent row, settled or not. Only an operator compaction removes one (see Intent compaction).
 - The namespace and id of each archived row, and of each row read (a moved command record or a tombstone), are checked
   against the K4 limits (128 and 1024 characters), as K4 checks every row read in L.
 - A scope with no row has nothing to retain: the call returns zero counts and writes nothing, as L does on an empty ledger.
+
+### Intent compaction
+
+`HostedCollaborationStore.compactIntents(scope, { acknowledgedTurnIds })` removes settled intent rows (#793 S8), as K4
+`compact` removes settled intents in L. The operator calls it; nothing runs it automatically. One transaction under the
+scope lock does all of it, and a refusal or a throw writes nothing.
+
+- The K8 rule `compactVeto` checks each acknowledged Turn with an intent row, the rule that L's `botCompactVeto` runs:
+  the Turn is concluded and reported, no unresolved delegation references it, its room seat is released, and its reply
+  receipt is settled. A refusal throws K4's `CompactVetoError`.
+- The store refuses a row with no conclusion, and a Turn id with neither a row nor an intent tombstone.
+- Each removed row leaves a permanent `hash(['intent', turnId])` row in `retired_identity`. A later call counts that
+  Turn as already compacted. `freezeIntent` refuses the Turn with K4's `RetiredIntentIdentityError`, and the sync fails
+  a Turn that never saw its result as `result_retired`, as L does.
+- It does not cover routine intents, and refuses them. K4 gives a routine occurrence's intent tombstone the expiry of
+  its slot, and `retired_identity` rows never expire.
+- After compaction, an Agent message for the task is refused as `unknown_task`, because its frozen input left with the
+  row.
 
 ## Routines
 
@@ -354,13 +406,23 @@ did not change, so a step that keeps it does not rewrite the scope row. A sync r
 
 `HostedDueScheduler.run()` is one pass over the scopes whose time has come (`scope_due`), in due order, in keyset pages.
 It calls the deployment's `sync(scope, now)`, which runs `store.sync` with the deployment's sync options, and reads the
-clock for each sync; the pass time only selects the scopes. Only syncs count against `batch` (default 100).
+clock for each sync; the pass time only selects the scopes. Only syncs that resolve count against `batch` (default 100).
 
-- A sync that leaves the scope due is reported in `stalled`. That covers the times whose step H does not yet run: seat
-  deadlines (`advanceRooms`, S6) and the reply checks (S7). A sync that
-  throws is reported in `failed` and wrote nothing. Either scope waits `backoffMs` (default 60 s, in memory only)
+- A sync that leaves the scope due is reported in `stalled`, for example a reply check time when the deployment's
+  `sync` does not run `HostedReplyChecker` first. A sync that
+  throws is reported in `failed`. With the composed `sync` (the reply checker, then `store.sync`), each reply settle
+  commits in its own transaction: if a later settle or `store.sync` throws, the earlier settles of that pass stay
+  committed, and one settle never writes partly. Either scope waits `backoffMs` (default 60 s, in memory only)
   before its next sync, so it is synced at most once per backoff, and each pass reports it again when it is retried.
-- H has no timer. The deployment runs `run()` on its own interval, which bounds how late a due step runs.
+- H has no timer. The deployment runs `run()` on its own interval, which bounds how late a due step runs in a scope that
+  is not stalled. A stalled scope keeps the due time that H cannot clear, so each of its other due times can run up to
+  `backoffMs` late.
+- Stalled and failed scopes sort first, because their due time has passed. Only a stalled scope uses up the batch: its
+  sync resolves, so it counts. Once there are about `batch × backoffMs / interval` of them (1,200 with the defaults and
+  a 5 s interval), each pass spends its whole batch on them, and a fresh due scope waits. A failed scope (a sync that
+  throws, for example a settle that keeps throwing) does not count, so the pass pages on to the fresh due scopes. It is
+  retried once per `backoffMs`, and each retry adds the time of a failing sync to the pass. Each pass also reads every
+  backed-off due row. So H must run every step that clears a due time before it deploys.
 
 ## Outbox sender
 
@@ -438,8 +500,8 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   `accessKeyId`, `secretAccessKey`, `region` and a `signingClock`, passed to `createPostgresCoreStores` and
   `createPostgresCloudStores`. H stores no objects itself.
 - **Host auth.** The Host resolves each request to the product user that owns it, and passes that user's scope. One
-  scope belongs to one SDK tenant: the submitter's and reconciler's `port(scope)` and the message consumer's
-  `scopeOf(tenant)` are inverse maps, and that map is the tenant check (see Message consumer). A command for another
+  scope belongs to one SDK tenant: the submitter's, reconciler's and reply checker's `port(scope)` and the message
+  consumer's `scopeOf(tenant)` are inverse maps, and that map is the tenant check (see Message consumer). A command for another
   scope is a `scope_mismatch` conflict. A K4 callback command from the entry is a `CallbackCommandError` (see Commit
   store). The command entry comes in a later slice of #793.
 - **Enrollment.** A device pairs with the SDK through a pairing code (`cloud.createPairingCode(tenant, { productId })`).
@@ -449,14 +511,31 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   port (`createWebCrypto()`). The key is a deployment secret; H never reads it.
 - **Retention.** The Host calls `retain(scope, input, limits)` with the acknowledged roots. `retentionMs` must be at
   least seven days (see Retention). The SDK side has its own `retentionPolicyId` in the tenant's entitlement.
+- **Intent compaction.** The operator calls `compactIntents(scope, { acknowledgedTurnIds })` for settled Turns; routine
+  intents stay (see Intent compaction).
 - **Workers.** The Host runs, each on its own interval: `HostedSubmitter.run()`, `HostedReconciler.run()`,
   `store.sync(scope, …)` for each scope that changed (the `changed` option of `HostedReconciler`, for a conclusion or
   a first claim, and of `HostedRoutineScheduler`, for a fire, and the scope of each commit and consume),
   `HostedDueScheduler.run()` for the due scopes, `HostedOutboxSender.run()` with the projection receiver and the channel,
   and `HostedRoutineScheduler.run()` every `intervalMs` after one `start()`. A Host with a channel opens its store with
   `{ channel: true }`, a Host that coalesces inputs with `{ coalesce }`, and a Host with its own delegation timers with
-  `{ timers }`.
+  `{ timers }`. Every store over one schema must be built with the same `timers`, because each writes `due_at` with its
+  own.
+- **Reply checks.** The due scheduler's `sync` runs the reply checker first. `tenantOf` is the deployment's map from a
+  scope to its SDK tenant (see Host auth):
+  ```ts
+  const checker = new HostedReplyChecker(store, { port: scope => ({
+    agentMessage: (taskId, deviceId, agentRef) => cloud.readTaskAgentMessage(tenantOf(scope), deviceId, taskId, agentRef) }) });
+  const due = new HostedDueScheduler(pool, store, { sync: async (scope, now) => {
+    await checker.check(scope, now);
+    return store.sync(scope, { ...syncOptions, now });
+  } });
+  ```
   `hostedMessageConsumer(store, …)` is the `agentMessage` option of `createByokCloud`.
+  The checker reads one due check at a time, each with a `timeoutMs` limit (default 10 s), and the due scheduler syncs
+  scopes one at a time. During an SDK outage one pass can take up to the number of due checks in its batch times the
+  timeout, which delays the due steps of other scopes. A timed-out read is not cancelled. A failed read backs off, so
+  there is no hot loop.
 
 ## Tests
 
@@ -476,6 +555,8 @@ three and runs these suites.
 - The message consumer tests port the K4 Host-side message vectors (`host-execution-core/src/message.test.ts`).
 - The device binding tests use an SDK tenant in memory for the submit checks.
 - The K8 retention vectors (`retentionVectors`) run on the store, with H tests for message replays after retention.
+- The compaction tests cover a settled intent and its tombstone, a repeated call, a refused freeze of a retired Turn, a
+  K8 veto, an unsettled row, an unknown Turn id, a routine intent, and the sync's `result_retired`.
 - The routine tests seed each occurrence as the scheduler records it. They cover the outcome actions, the owner API,
   promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, and the
   `bot-routine` refusal.
@@ -500,14 +581,25 @@ three and runs these suites.
   input admission that a caller cannot replace, and an idle seal in a later round of one sync.
 - The K8 card vectors (`cardVectors`) run on the store, as on L: the expiry before a freeze, the decision projection once,
   the `action_result` Turn of a rejected card, and a confirmed card that waits for its result.
+- The K8 room vectors (`roomVectors`) run on the store, as on L: the first seat queued and frozen, the deadline cancel of
+  an unclaimed seat, a claimed seat released late, a concluded seat, and a Bot that left the room with and without an
+  intent. H tests add the conclusion of an untried cancelled seat intent, a tried one kept open, a second room step in
+  the same sync after a Turn step blocks a seat, and a rollback.
 - The settlement tests build each delegation through the product path (an outcome `delegate`, then a sync), and cover
   each verdict, the units, `target_archived`, the timers, the late terminal audit, the Main Bot cancel in the terminal
   transaction, a rollback, the settlement facts, a verdict at the sync of a reported scope, and the store's refusal of
   invalid delegation timers.
+- The K8 reply vectors (`replyVectors`) run on the store, as on L: a reply body that the Host holds answers, after a
+  pending read and after a read that throws; no message and a refused message fail with `no_reply`; a held message
+  holds; a pending read checks again with backoff, not before its time, and becomes `uncertain` after
+  `uncertainAfterMs`; a read that throws and an accepted message with no Host record check again. H tests add the due
+  check selection, the settle that writes nothing (a stale fence, after the delegation was answered, before the check
+  time), two checkers on one delegation, a chain end with no intent row, a read timeout, and a settle that throws.
 - The due tests check the stored due time against the K8 rule after each seed, commit, sync and finish, a cancel commit
   with the store's timers, a command that throws, a step that keeps the time, and the DDL check. The due scheduler tests
   cover a due scope whose sync clears it, the clock read for each sync, a stalled scope and a failed sync with their
-  backoff, the batch in due order, and the version filter.
+  backoff, the batch in due order, the version filter, and a reply check in the deployment's `sync` that clears its
+  check time.
 - The sync test freezes the same Turns in an L ledger with K4 `enqueue`. Each H input is byte-equal to the K4
   execution input, and the H state bytes equal the L state bytes.
 - The submitter tests use the hosted SDK composition (`createByokCloud` over `createPostgresCloudStores`, with

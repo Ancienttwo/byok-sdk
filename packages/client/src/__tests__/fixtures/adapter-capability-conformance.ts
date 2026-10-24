@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import { SteerUnsupportedError, type RuntimeAdapter, type Session } from '../../types';
+import { SteerUnsupportedError, type RuntimeAdapter, type Session, type MessageDraftDelta } from '../../types';
 
 /**
  * Test-only qualification boundary. A case must exercise a real adapter with a
@@ -33,8 +33,8 @@ export interface AdapterCapabilityQualification {
   create(): Promise<AdapterCapabilityFixture>;
 }
 
-export async function collectAdapterTurn(session: Session): Promise<AgentEvent[]> {
-  const events: AgentEvent[] = [];
+export async function collectAdapterTurn(session: Session): Promise<Array<AgentEvent | MessageDraftDelta>> {
+  const events: Array<AgentEvent | MessageDraftDelta> = [];
   for await (const event of session.events) {
     events.push(event);
     if (event.type === 'turn_end') return events;

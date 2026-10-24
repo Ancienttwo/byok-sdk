@@ -13,13 +13,16 @@ import { E2EE_MEMBER_SCHEMA, SqliteE2eeMemberStore } from '../stores/sqlite/e2ee
 const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
 const TENANT = tenantId('sqlite-e2ee');
 const EXPIRES = '2099-01-01T00:00:00.000Z';
+let requests = 0;
+/** A device-proof binding with a requestId no other write has used. */
+const freshRequest = () => ({ requestId: `request-${++requests}`, operation: 'e2ee-member-key.register', resource: '/byok/e2ee/member-key', bodySha256: 'sha256', bodySize: 1 });
 const open = (path: string) => createSqliteEmbeddedStores({ path }, { clock: createMutableClock(), crypto: createWebCrypto() });
 
 if (isSqliteAvailable()) {
   runE2eeMemberStoreConformance('sqlite', {
     create() {
       const stores = open(':memory:');
-      return { store: stores.e2eeMember, dispose: () => stores.close() };
+      return { store: stores.e2eeMember, receipts: stores.cloud.receipts, dispose: () => stores.close() };
     },
   });
 }
@@ -30,10 +33,10 @@ async function seed(stores: SqliteEmbeddedStores, deviceId: string, machineId?: 
     ...(machineId === undefined ? {} : { machineId }),
   });
   const memberId = `member-${deviceId}`;
-  expect(await stores.e2eeMember.registerMember(TENANT, { deviceId, memberId, bundle: `{"m":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: EXPIRES }))
+  expect(await stores.e2eeMember.registerMember(TENANT, { deviceId, memberId, bundle: `{"m":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: EXPIRES, request: freshRequest() }))
     .toBe('registered');
   expect(await stores.e2eeMember.putClientPairingMac(TENANT, { deviceId, body: '{"mac":"client"}', expiresAt: EXPIRES })).toBe('stored');
-  expect(await stores.e2eeMember.putScopeKeyPackages(TENANT, [{ scopeId: 'scope', epoch: 1, recipient: memberId, keyId: 'key', sender: memberId, package: '{}' }]))
+  expect(await stores.e2eeMember.putScopeKeyPackages(TENANT, { rows: [{ scopeId: 'scope', epoch: 1, recipient: memberId, keyId: 'key', sender: memberId, package: '{}' }] }))
     .toEqual({ outcome: 'stored', stored: 1 });
   return memberId;
 }
@@ -61,7 +64,7 @@ describeSqlite('SQLite E2EE member state', () => {
     const path = tempPath();
     const first = open(path);
     const memberId = await seed(first, 'device-1');
-    expect(await first.e2eeMember.appendChainEntries(TENANT, [{ seq: 1, entry: '{"seq":1}' }])).toMatchObject({ outcome: 'appended' });
+    expect(await first.e2eeMember.appendChainEntries(TENANT, { rows: [{ seq: 1, entry: '{"seq":1}' }], shreds: [] })).toMatchObject({ outcome: 'appended' });
     await first.close();
 
     const second = open(path);
@@ -84,7 +87,7 @@ describeSqlite('SQLite E2EE member state', () => {
 
     const reopened = open(path);
     try {
-      expect(await reopened.e2eeMember.appendChainEntries(TENANT, [{ seq: 1, entry: '{}' }])).toMatchObject({ outcome: 'appended' });
+      expect(await reopened.e2eeMember.appendChainEntries(TENANT, { rows: [{ seq: 1, entry: '{}' }], shreds: [] })).toMatchObject({ outcome: 'appended' });
     } finally {
       await reopened.close();
     }
@@ -101,6 +104,66 @@ describeSqlite('SQLite E2EE member state', () => {
     raw.exec('CREATE TABLE e2ee_member_key (tenant_id TEXT, device_id TEXT)');
     raw.close();
     expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID' }));
+  });
+
+  it('refuses a replay whose stored result is not a valid result of that write', async () => {
+    const path = tempPath();
+    const proof = { deviceId: 'device-1', request: { requestId: 'corrupt', operation: 'e2ee-member-chain.append', resource: '/byok/e2ee/chain', bodySha256: 'sha256', bodySize: 1 } };
+    const append = { rows: [{ seq: 1, entry: '{"seq":1}' }], shreds: [], proof };
+    const first = open(path);
+    expect(await first.e2eeMember.appendChainEntries(TENANT, append)).toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
+    await first.close();
+
+    const raw = new DatabaseSync(path);
+    raw.prepare("UPDATE proof_request_receipt SET response_body = '{\"outcome\":\"stored\",\"stored\":1}' WHERE request_id = 'corrupt'").run();
+    raw.close();
+
+    const second = open(path);
+    try {
+      await expect(second.e2eeMember.appendChainEntries(TENANT, append)).rejects.toMatchObject({ code: 'e2ee_member_state_unreadable' });
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('refuses a replay of a key package put whose stored result is not a valid result of that write', async () => {
+    const path = tempPath();
+    const proof = { deviceId: 'device-1', request: { requestId: 'corrupt-put', operation: 'e2ee-scope-key-package.put', resource: '/byok/e2ee/key-packages', bodySha256: 'sha256', bodySize: 1 } };
+    const put = { rows: [{ scopeId: 'scope', epoch: 1, recipient: 'member-1', keyId: 'key', sender: 'member-1', package: '{}' }], proof };
+    const first = open(path);
+    expect(await first.e2eeMember.putScopeKeyPackages(TENANT, put)).toEqual({ outcome: 'stored', stored: 1 });
+    await first.close();
+
+    const raw = new DatabaseSync(path);
+    raw.prepare("UPDATE proof_request_receipt SET response_body = '{\"outcome\":\"appended\",\"appended\":1,\"replayed\":0}' WHERE request_id = 'corrupt-put'").run();
+    raw.close();
+
+    const second = open(path);
+    try {
+      await expect(second.e2eeMember.putScopeKeyPackages(TENANT, put)).rejects.toMatchObject({ code: 'e2ee_member_state_unreadable' });
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('refuses a replay of a member key register whose stored result is not a valid result of that write', async () => {
+    const path = tempPath();
+    const request = { requestId: 'corrupt-register', operation: 'e2ee-member-key.register', resource: '/byok/e2ee/member-key', bodySha256: 'sha256', bodySize: 1 };
+    const register = { deviceId: 'device-1', memberId: 'member-1', bundle: '{"m":"member-1"}', deviceMac: 'mac', macExpiresAt: EXPIRES, request };
+    const first = open(path);
+    expect(await first.e2eeMember.registerMember(TENANT, register)).toBe('registered');
+    await first.close();
+
+    const raw = new DatabaseSync(path);
+    raw.prepare("UPDATE proof_request_receipt SET response_body = '\"device_conflict\"' WHERE request_id = 'corrupt-register'").run();
+    raw.close();
+
+    const second = open(path);
+    try {
+      await expect(second.e2eeMember.registerMember(TENANT, register)).rejects.toMatchObject({ code: 'e2ee_member_state_unreadable' });
+    } finally {
+      await second.close();
+    }
   });
 
   it('deletes a device member state on revoke and on machine supersession, and keeps the rest', async () => {
@@ -144,7 +207,7 @@ describeSqlite('SQLite pairing MAC map', () => {
     const macs = new Map<string, { readonly body: string; readonly expiresAt: string }>();
     const store = new SqliteE2eeMemberStore(coordinator, clock, macs);
     const register = (deviceId: string, expiresAt: string) =>
-      store.registerMember(TENANT, { deviceId, memberId: `member-${deviceId}`, bundle: `{"m":"${deviceId}"}`, deviceMac: 'mac', macExpiresAt: expiresAt });
+      store.registerMember(TENANT, { deviceId, memberId: `member-${deviceId}`, bundle: `{"m":"${deviceId}"}`, deviceMac: 'mac', macExpiresAt: expiresAt, request: freshRequest() });
     try {
       expect(await register('ending', '2026-10-24T00:10:00.000Z')).toBe('registered');
       expect(await store.putClientPairingMac(TENANT, { deviceId: 'ending', body: '{}', expiresAt: '2026-10-24T00:10:00.000Z' })).toBe('stored');

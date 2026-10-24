@@ -6,7 +6,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
-import type { Session } from '../types';
+import type { Session, MessageDraftDelta } from '../types';
 import {
   RuntimeExecutionFailure,
   RuntimeDisposalFailure,
@@ -72,7 +72,7 @@ function gone(pid: number): boolean {
   try { process.kill(pid, 0); return false; } catch { return true; }
 }
 async function turn(s: Session) {
-  const out: AgentEvent[] = [];
+  const out: Array<AgentEvent | MessageDraftDelta> = [];
   for await (const e of s.events) {
     out.push(e);
     if (e.type === 'turn_end') break;
@@ -107,6 +107,7 @@ describe('Codex persistent app-server adapter', () => {
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
+      messageDraft: true,
     });
     // Codex reads MCP tools itself; the daemon takes no tools/list observation for it.
     expect(adapter().descriptor.requiresMcpToolsetToolObservation).not.toBe(true);
@@ -355,7 +356,7 @@ describe('Codex persistent app-server adapter', () => {
         FAKE_CODEX_FAIL_MESSAGE: 'quota',
       }),
     );
-    const out: AgentEvent[] = [];
+    const out: Array<AgentEvent | MessageDraftDelta> = [];
     await expect(
       (async () => {
         for await (const e of s.events) out.push(e);

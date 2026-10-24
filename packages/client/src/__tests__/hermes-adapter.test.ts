@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { HermesAdapter, type HermesAdapterOptions } from '../adapters/hermes/hermes-adapter';
 import { hermesProfileConfig } from '../adapters/hermes/hermes-home';
-import { sealRuntimeOperationManifest, SteerUnsupportedError, type Session } from '../types';
+import { sealRuntimeOperationManifest, SteerUnsupportedError, type Session, type MessageDraftDelta } from '../types';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
@@ -93,8 +93,8 @@ async function withAmbientReceipt<T>(run: (read: () => Promise<Array<Record<stri
   }
 }
 
-async function turn(session: Session): Promise<AgentEvent[]> {
-  const events: AgentEvent[] = [];
+async function turn(session: Session): Promise<Array<AgentEvent | MessageDraftDelta>> {
+  const events: Array<AgentEvent | MessageDraftDelta> = [];
   for await (const event of session.events) {
     events.push(event);
     if (event.type === 'turn_end') return events;
@@ -149,7 +149,7 @@ describe('HermesAdapter construction and descriptor', () => {
       supportsDispatchSelection: false,
       requiresMcpToolsetToolObservation: false,
       platforms: ['darwin', 'linux'],
-      capabilities: { steer: false, resume: false, approvalInteractive: false, mcpToolsets: true },
+      capabilities: { steer: false, resume: false, approvalInteractive: false, mcpToolsets: true, messageDraft: true },
     });
     expect(Object.isFrozen(descriptor)).toBe(true);
     expect(Object.isFrozen(descriptor.capabilities)).toBe(true);

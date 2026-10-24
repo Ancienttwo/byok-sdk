@@ -113,15 +113,21 @@ export type {
   TaskRedactionTaskResult,
 } from './task-redaction';
 
+export { parseRecordedWriteResult } from './e2ee-member';
 export type {
+  E2eeMemberChainAppendInput,
   E2eeMemberChainAppendResult,
   E2eeMemberChainRow,
   E2eeMemberRegisterResult,
   E2eeMemberRegistrationInput,
   E2eeMemberRegistrationRow,
   E2eeMemberStore,
+  E2eeProofRequest,
+  E2eeProvenWrite,
+  E2eeScopeKeyPackagePutInput,
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
+  E2eeScopeShred,
 } from './e2ee-member';
 
 // Capability declaration (ADR-010)
@@ -199,6 +205,7 @@ export type {
   TenantBoundDedup,
   TenantBoundDevices,
   TenantBoundMailbox,
+  TenantBoundObjects,
   TenantBoundPresence,
   TenantBoundQuota,
   TenantBoundRateLimiter,

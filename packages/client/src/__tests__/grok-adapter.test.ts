@@ -39,6 +39,7 @@ async function open(a: GrokAdapter, offer: TaskOfferPayload, resources: Prepared
 async function turn(s: Session): Promise<AgentEvent[]> {
   const out: AgentEvent[] = [];
   for await (const e of s.events) {
+    if (e.type === 'message_draft_delta') continue; // Display-only; the draft lane has its own tests.
     out.push(e);
     if (e.type === 'turn_end') break;
   }
@@ -89,7 +90,7 @@ describe('GrokAdapter sessions', () => {
     const a = adapter();
     expect(a.descriptor).toEqual({
       id: 'grok', supportsDispatchSelection: false, requiresMcpToolsetToolObservation: false, platforms: ['darwin', 'linux'],
-      capabilities: { steer: false, resume: true, approvalInteractive: false, mcpToolsets: true },
+      capabilities: { steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true },
     });
     const prepared = await a.prepare({
       offer: { instruction: 'x', dispatchSelection: { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'm' } },

@@ -8,7 +8,8 @@
  *
  * - `gated`: the sender must not emit the surface unless the receiver
  *   durably advertised `capability`. A field entry applies when the payload
- *   carries the field (and, with `value`, when the field equals it); a type
+ *   carries the field (and, with `value`, when the field equals it); a
+ *   dotted field names a nested field, for example `sealed.ciphertextRef`. A type
  *   entry applies to every message of that type. Server-to-daemon surfaces
  *   are gated by a device flag, daemon-to-server surfaces by a server flag.
  * - `strip-safe`: an optional field an older receiver drops without changing
@@ -30,7 +31,7 @@
  * table, so it stays free of zod.
  */
 import type { MessageType } from './messages';
-import { SEALED_SPLIT_TABLE, type SealedMessageType } from './sealed-split-table';
+import { SEALED_SPLIT_TABLE, type SealedMessageType, type SealedSplitEntry } from './sealed-split-table';
 import type { CapabilityFlag } from './version';
 
 type HttpWireSurface =
@@ -73,8 +74,9 @@ const EGRESS_OFFER_FIELDS = (surface: MessageType): readonly WireAddition[] => [
  * daemon-to-server type on the server flag. A decoder that does not know the
  * type refuses it. A sealed type also takes every row of its plaintext type,
  * except the rows of the fields it moves or drops, so sealing never removes a
- * gate that the same plaintext fields would need. The four sealed failure
- * codes on the plaintext `task.decline` are value gates.
+ * gate that the same plaintext fields would need. A sealed task output that
+ * may name its ciphertext blob is also gated on that field. The four sealed
+ * failure codes on the plaintext `task.decline` are value gates.
  */
 function sealedRows(plainRows: readonly WireAddition[]): WireAddition[] {
   return (Object.keys(SEALED_SPLIT_TABLE) as SealedMessageType[]).flatMap((surface) => {
@@ -86,7 +88,11 @@ function sealedRows(plainRows: readonly WireAddition[]): WireAddition[] {
       if (row.field !== undefined && dropped.includes(row.field.split(/[.[]/u)[0]!)) return [];
       return [{ ...row, surface }];
     });
-    return [{ kind: 'envelope', rule: 'gated', surface, capability: 'sealed-payload-v1', advertisedBy }, ...inherited];
+    const entry: SealedSplitEntry = SEALED_SPLIT_TABLE[surface];
+    const byReference: WireAddition[] = advertisedBy === 'server' && entry.inlineOnly !== true
+      ? [{ kind: 'envelope', rule: 'gated', surface, field: 'sealed.ciphertextRef', capability: 'sealed-output-ciphertext-ref', advertisedBy }]
+      : [];
+    return [{ kind: 'envelope', rule: 'gated', surface, capability: 'sealed-payload-v1', advertisedBy }, ...inherited, ...byReference];
   });
 }
 const SEALED_DECLINE_CODE = (value: string): WireAddition =>
@@ -168,7 +174,10 @@ export function requiredReceiverCapabilities(type: MessageType, payload: unknown
   for (const entry of WIRE_ADDITIONS) {
     if (entry.kind !== 'envelope' || entry.rule !== 'gated' || entry.surface !== type) continue;
     if (entry.field !== undefined) {
-      const value = fields[entry.field];
+      const value = entry.field.split('.').reduce<unknown>(
+        (parent, segment) => (parent !== null && typeof parent === 'object' ? (parent as Record<string, unknown>)[segment] : undefined),
+        fields,
+      );
       if (value === undefined) continue;
       if (entry.value !== undefined && value !== entry.value) continue;
     }

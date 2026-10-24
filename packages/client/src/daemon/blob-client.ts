@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { BYOK_BLOBS_PATH, byokBlobFinalizePath, byokBlobUrlPath } from '@byok-sdk/protocol';
 import type { BlobRef } from '@byok-sdk/protocol';
 import type { AuthManager } from './auth-manager';
+import { BlobHttpError } from './blob-http-error';
 import { authedFetch } from './http-client';
 import { toHttpBase } from './url';
 
@@ -120,7 +121,7 @@ export class BlobClient implements BlobResolver {
       options.signal,
     );
     if (!createRes.ok) {
-      throw new Error(`failed to create blob: HTTP ${createRes.status} ${await this.#safeErrorText(createRes, options.signal)}`.trimEnd());
+      throw new BlobHttpError(`failed to create blob: HTTP ${createRes.status} ${await this.#safeErrorText(createRes, options.signal)}`.trimEnd(), createRes.status);
     }
     const { blobId, uploadUrl } = await this.#readJson<{ blobId?: unknown; uploadUrl?: unknown }>(createRes, options.signal);
     if (typeof blobId !== 'string' || blobId.length === 0 || typeof uploadUrl !== 'string' || uploadUrl.length === 0) {
@@ -142,7 +143,7 @@ export class BlobClient implements BlobResolver {
       options.signal,
     );
     if (!putRes.ok) {
-      throw new Error(`failed to upload blob content: HTTP ${putRes.status}`);
+      throw new BlobHttpError(`failed to upload blob content: HTTP ${putRes.status}`, putRes.status, true);
     }
 
     this.#throwIfAborted(options.signal);
@@ -199,8 +200,9 @@ export class BlobClient implements BlobResolver {
       }
       if (response.ok) return;
       if (response.status < 500 || attempt === 2) {
-        throw new Error(
+        throw new BlobHttpError(
           `failed to finalize blob: HTTP ${response.status} ${await this.#safeErrorText(response, signal)}`.trimEnd(),
+          response.status,
         );
       }
       lastFailure = new Error(`failed to finalize blob: HTTP ${response.status}`);

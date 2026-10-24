@@ -16,6 +16,7 @@ import {
   type RuntimeDetectResult,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
+  type MessageDraftDelta,
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
@@ -99,6 +100,7 @@ export class CodexAdapter implements RuntimeAdapter {
       approvalInteractive: false,
       ...(this.options.nativeInteractions === undefined ? {} : { nativeInteractions: { approvalDecisions: ['allow-once', 'allow-session', 'deny', 'cancel'] as const, structuredQuestions: true } }),
       mcpToolsets: true,
+      messageDraft: true,
     },
   }); }
   constructor(private readonly options: CodexAdapterOptions = {}) {
@@ -325,7 +327,7 @@ class CodexSession implements Session {
   private child?: { dispose(): Promise<void>; kill(): void };
   private projection?: CodexProjection;
   private readonly stream = {};
-  private readonly queue = new AsyncQueue<AgentEvent>();
+  private readonly queue = new AsyncQueue<AgentEvent | MessageDraftDelta>();
   private failure?: RuntimeExecutionFailure;
   private active = false;
   private readonly interruptWaiters = new Set<() => void>();
@@ -460,7 +462,7 @@ class CodexSession implements Session {
   exited(): void {
     if (!this.stopping) this.fail(infrastructure('codex app-server exited', { class: 'runtime_exited' }));
   }
-  get events(): AsyncIterable<AgentEvent> {
+  get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
     const self = this;
     return (async function* () {
       try {

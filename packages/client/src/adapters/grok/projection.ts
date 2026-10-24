@@ -1,6 +1,7 @@
 import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
 import { runtimeFailureClassOf } from '../../runtime-failure';
 import type { AcpRecord } from '../../runtime/acp-session-runtime';
+import type { MessageDraftDelta } from '../../types';
 
 type Usage = Extract<AgentEvent, { type: 'usage' }>;
 type Tokens = { input?: unknown; output?: unknown; reasoning?: unknown; cacheRead?: unknown };
@@ -26,7 +27,8 @@ const count = (value: unknown): number | undefined =>
  *
  * Streamed text is buffered and emitted as one `progress` per text run: a
  * tool call or the turn end closes the run. The daemon keeps the last run
- * after the last tool interaction as the closing reply.
+ * after the last tool interaction as the closing reply. Each delta also goes
+ * to the display-only draft; the run's `progress` then reconciles it.
  */
 export class GrokProjection {
   private text = '';
@@ -38,7 +40,7 @@ export class GrokProjection {
   constructor(private readonly rootSessionId: string) {}
 
   /** Events for one record; `outcome` receives the root turn end, after its events. */
-  consume(input: AcpRecord, emit: (event: AgentEvent) => void, outcome: (turn: GrokTurnOutcome) => void): void {
+  consume(input: AcpRecord, emit: (event: AgentEvent | MessageDraftDelta) => void, outcome: (turn: GrokTurnOutcome) => void): void {
     if (input.kind !== 'frame' || input.sessionId !== this.rootSessionId || input.agentPath.length > 0) return;
     const events = record(input.body)?.events;
     if (!Array.isArray(events)) return;
@@ -48,7 +50,9 @@ export class GrokProjection {
       const event = record(value);
       switch (event?.kind) {
         case 'text_delta':
-          if (typeof event.text === 'string') this.text += event.text;
+          if (typeof event.text !== 'string') break;
+          this.text += event.text;
+          emit({ type: 'message_draft_delta', text: event.text, startsMessage: false });
           break;
         case 'tool_call_started': {
           if (typeof event.callId !== 'string' || typeof event.tool !== 'string') break;

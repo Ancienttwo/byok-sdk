@@ -4,6 +4,8 @@ This copy-and-own example implements K8a and K8b in the Bot PRD.
 It uses the K4 Host execution core and K8-S public schema and calendar APIs.
 It has no paid runtime call. Tests use a synthetic adapter with the real SDK,
 daemon, HTTP transport, SQLite stores, and `submit_result` helper.
+To copy K8 into a Host repository, see [src/VENDOR.md](src/VENDOR.md): what
+to copy in each layer, how to resolve K4, and how to record the source.
 
 ## Run
 
@@ -52,10 +54,26 @@ Effectful actions still use `confirmable_action` and owner confirmation.
 This is the same-device read-only toolset slice of #606; external-authority
 storage and two-process relay remain separate.
 
-The allowlist governs Bot turns only. `bot.core` is public. The rule to avoid
-direct K4 mutation calls still holds. If a Host calls `bot.core.enqueue` itself,
-that call uses the Host's own authority. It bypasses Bot policy and this
-allowlist. Never route Bot output to that call.
+`bot.core` is public, but the rule to avoid direct K4 mutation calls still
+holds. To run the Host's own work on this tenant's core, register a handler in
+`hostIntents` and call `enqueueHostIntent(input, handler)` (#882). One ledger
+transaction enqueues the K4 intent and stores the handler name, so the owner of
+the intent survives a restart. A restart refuses an open Host intent whose
+handler is not registered. At a `task.complete` terminal, the handler runs
+synchronously in the terminal transaction with the result document. Bot output
+never reaches it. The call uses the Host's own authority and bypasses Bot
+policy. Its execution still passes the read-only toolset admission, because a
+restart admits every open intent. A Host intent shares the FIFO of its Agent: on
+a Bot's agentRef, that Bot's later Turns wait until it settles. An exact replay
+returns the same intent while K4 keeps it.
+
+A K4 terminal that K8 cannot apply leaves its intent open: a key that is neither
+a Bot Turn nor a Host intent, for example from a direct `bot.core.enqueue`, or a
+Host handler that throws or returns a promise. Then `drain()` rejects with
+`IntentOutcomeError`, and so does every API that runs a pass, including `input`
+and the `wake.consume` hook. The audit gets one row for each key and reason. The
+intent stays at the head of its FIFO until its outcome applies. `BotOptions`
+passes `reconcileMs` (default 100) and `onOutbox` to the K4 core.
 
 ## Actions and context
 
@@ -73,6 +91,22 @@ root budget. Self delegation permits four continuations for that root. A
 continuation keeps the hop, authority, and open delegation of its parent.
 It does not consume the Bot budget. A refused action
 enters only its originating Bot's `ContextPack.rejectedActions`. Other accepted actions still apply.
+
+`BotOptions.outcome` narrows that offer (#881). `actions.turn` lists the
+actions of a Bot Turn outside a room, from `delegate`, `ask_user`,
+`confirmable_action` and the three routine actions. `actions.main` lists the
+extra actions of an owner Main Bot Turn, from the Bot and room management
+actions, `team_note` and `cancel_delegation`. A list only removes actions, and
+an empty list removes all of that kind. `timeZones` holds 1 to 8 IANA zones for
+`create_routine` and `update_routine`, checked by the `@byok-sdk/core` routine
+calendar. The default is `UTC` and `America/New_York`. `confirmable` holds the
+`confirmable_action` branches, each an action name and its draft schema. The
+default is `send_message`, and the connector receives only the offered names.
+The constructor checks the offer and composes one schema with it. Turns that
+froze before keep their schema. A room seat always gets `speech`. A schema
+that is over budget even in the flat shape blocks its Turn, as before. The H
+sync takes the same offer as `SyncOptions.offer`, a value from `outcomeOffer`.
+The system prompt does not change with the offer.
 
 Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same
@@ -109,6 +143,13 @@ ContextPack and the order of outcome actions. They take rows and K4 intent
 facts, do no I/O and import no ledger type. The ContextPack functions take the
 Bot's history as an argument. This example reads that history from the device
 ledger. The other `src/` files are the K8 adapter around these rules.
+
+From K4, the rules import only `hash` and `canonical`, from the
+`@byok-sdk/example-host-execution-core/canonical` entry (#884). That entry
+imports only `node:crypto`. The K4 root entry also loads `node:sqlite` and
+`node:async_hooks`, so the rules never import it. `src/rules-boundary.test.ts`
+holds both rules. The rules still need `node:crypto` and the global `Buffer`.
+Workers with `nodejs_compat` have both.
 
 ## Routine invariants
 
@@ -308,7 +349,7 @@ the state change, the command record and the outbox rows.
 The keyed commands are owner input, received IM input, room input, answers,
 card decisions, team snapshots, and three K4 callbacks: a terminal outcome, an Agent message
 and a Bot routine occurrence. The keyless commands are `setMainBot`,
-`updateRoom`, `retryPersona`, `enablePushRoute`, `revokePushRoute`,
+`updateRoom`, `retryPersona`, `personaReady`, `enablePushRoute`, `revokePushRoute`,
 `resendDelivery`, `cancelDelegation`, `abandonDelegation`, `cancelTurn` and `endRoutine`.
 `src/rules/commands.ts` decides all of them. The Host checks the principal
 and the channel before the commit, and it calls K4 cancel and delivers cancel
@@ -370,6 +411,23 @@ card's expiry, each unreleased seat's deadline, and the delegation times
 these times and its own L-only ones. H stores their minimum as the scope's due
 time (#793 S4). Routine slots are K4's, so they are not in the list.
 
+The room step of a Host sync is `advanceRoomSeats(state, facts, now, add)` in
+`src/rules/rooms.ts` (#793 S6). It runs `advanceRooms` on the seat facts,
+fails a seat Turn whose work was not admitted, queues each new seat Turn
+through `add` (`seatTurn` gives its fields), and returns the seats whose
+admitted work the Host cancels. `src/rules/commands.ts` exports both. L builds
+the facts from its K4 intents; H builds them from its intent rows. The
+`roomVectors` run on both.
+
+`checkReply(state, d, check, now, emit, uncertainAfterMs)` in
+`src/rules/delegation.ts` decides one reply check of a `reply_pending`
+delegation: a reply body that the Host holds answers it, a failed read
+retries with backoff, and otherwise the SDK readback decides.
+`replyCheckDue(d, now)` selects the due checks. `src/rules/commands.ts`
+exports both. L's `flushReplies` runs them with its own SDK read, and H runs
+them in `HostedReplyChecker` (#793 S7). The `replyVectors` hold the decision
+for L and H.
+
 Known L limit: K4 stores the whole Host ledger, with the collaboration state,
 in one JSON row per tenant. Turns, replies, audit rows and command records
 make that row grow. Command records are dedup evidence; retention must not
@@ -396,6 +454,27 @@ transaction freezes only a Turn that still has no offer.
   messages, so they read no history.
 - A read that throws or returns another shape leaves the Turn queued. The
   timer reads again after about one second.
+
+With the `roomHistory` option, the room messages of a seat ContextPack come
+from an external authority too (#883). Before a seat Turn freezes its offer,
+the Host calls `roomHistory({ roomId, botId, turnId })` outside the ledger
+transaction, in the same phase as `history`.
+
+- The authority returns the messages that this seat's Bot can see, oldest
+  first, as `{ id, from, text, late }` rows. The authority selects them for
+  that Bot, so K8 applies no `visibleFrom` of its own. Rows in another shape
+  are refused.
+- The rows replace `room.messages` in that ContextPack, in the same message
+  window. The state does not store them. The seat Turn keeps their hash in
+  `historyDigest`.
+- K8 still writes `room.messages`. Round counts, mention seats and the seat
+  request text read it.
+- A read that throws or returns another shape leaves the seat queued, and the
+  timer reads again. A read still open at the seat deadline counts as failed.
+  The seat deadline still applies, so a seat whose read never succeeds is
+  released as `busy` and its Turn expires.
+- No projection carries an accepted room post yet. The Host reads posts from
+  `snapshot().team.rooms` to write them to its authority.
 
 The team comes from this ledger, unless the `team: 'external'` option is set.
 
@@ -429,6 +508,27 @@ template.
   local.
 - The ledger stores the mode. A ledger with a local team cannot open in
   external mode, and an external ledger cannot open without the option.
+
+With `persona: 'external'` as well, the Host owns the persona projection of
+each Bot (#879). The Host projects the Agent home with its own daemon hook, so
+there is one projection writer and one revision for each agentRef.
+
+- Each snapshot Bot carries the Host's `profileRevision`, a decimal string.
+  K8 uses it as the Bot revision and as the agentRef `profileRevision` of its
+  execution. K8 queues no projection and counts no revision of its own.
+- The revision never goes back. A changed name, role, persona or model needs a
+  newer revision. A snapshot that breaks either rule is refused, and nothing
+  changes. Without the option, a snapshot with `profileRevision` is refused.
+- `personaReady(botId, revision)` reports that the Host applied this revision.
+  The current revision readies the Bot, an older one changes nothing, and a
+  newer one refuses. A Bot's Turns freeze their offers only when it is ready,
+  as before. After a newer revision, the Bot keeps its last ready revision, so
+  it stays a delegate target while its Turns wait. The Host reports
+  `personaReady` only after the snapshot that introduces that revision
+  resolves: an earlier report is refused, not stored.
+- `retryPersona` refuses with `external_persona`.
+- The ledger stores this mode too, so a restart cannot change it. The mode is
+  fixed once stored, with no migration. The option needs `team: 'external'`.
 
 With `history` and `team: 'external'` together, the device ledger holds
 neither the history nor the team authority.

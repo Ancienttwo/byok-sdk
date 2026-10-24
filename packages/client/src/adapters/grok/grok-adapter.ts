@@ -13,6 +13,7 @@ import {
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
   type RuntimeDetectResult,
+  type MessageDraftDelta,
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
@@ -83,6 +84,7 @@ export class GrokAdapter implements RuntimeAdapter {
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
+      messageDraft: true,
     },
   }); }
 
@@ -232,7 +234,7 @@ class GrokSession implements Session {
   private raw?: RawAcpSession;
   private child?: { dispose(): Promise<void>; kill(): void };
   private projection?: GrokProjection;
-  private readonly queue = new AsyncQueue<AgentEvent>();
+  private readonly queue = new AsyncQueue<AgentEvent | MessageDraftDelta>();
   private failure?: RuntimeExecutionFailure;
   private active = false;
   private readonly interruptWaiters = new Set<() => void>();
@@ -307,7 +309,7 @@ class GrokSession implements Session {
   exited(): void {
     if (!this.stopping) this.fail(infrastructure('grok agent exited', { class: 'runtime_exited' }));
   }
-  get events(): AsyncIterable<AgentEvent> {
+  get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
     const self = this;
     return (async function* () {
       try {

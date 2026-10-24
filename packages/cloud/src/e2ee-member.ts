@@ -1,10 +1,16 @@
 /**
  * Host storage for member keys, the member chain and scope key packages
- * (#654 design §7.2–§7.4, E2c).
+ * (#654 design §7.2–§7.4, E2c), and the Host part of crypto-shredding
+ * (§11.2, E5b-1).
  *
  * The Host holds no key. It checks shapes, keeps the chain contiguous and
  * first-writer-wins per seq, fixes one `keyId` per scope epoch, and relays
  * the pairing MACs. Members verify everything else (§7.3).
+ *
+ * A `shred` entry deletes its scope's key packages and epochs in the append
+ * that stores it, and later package puts for that scope are refused. The
+ * Host verifies no signature, so any paired device of the tenant can append
+ * a well-shaped `shred` (owner batch §50g A, `docs/security.md`).
  *
  * Every input is read once into canonical JSON text. The store keeps that
  * text, so a replay compares by bytes and a later read returns the same
@@ -29,7 +35,7 @@ import {
   type E2eeMemberKeyBundle,
   type E2eeScopeKeyPackage,
 } from '@byok-sdk/protocol';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { PAIRING_CODE_TTL_MS } from './auth/plane';
 import type { DeviceDirectory } from './stores/ports';
 import { ByokCloudError } from './errors';
@@ -39,6 +45,52 @@ export interface E2eeMemberChainRow {
   readonly seq: number;
   readonly entry: string;
 }
+
+/**
+ * The binding of a device-proof write (owner batch §41a A). The proof's
+ * `requestId` is single-use per device, as on the truth put: a store records
+ * it with the write and its result. A later write with the same `requestId`
+ * and the same binding gets the stored result and writes nothing; one with
+ * another binding is refused.
+ */
+export interface E2eeProofRequest {
+  readonly requestId: string;
+  readonly operation: string;
+  readonly resource: string;
+  readonly bodySha256: string;
+  readonly bodySize: number;
+}
+
+/** A device write: the proven device and its proof binding. A Host control-plane write has none. */
+export interface E2eeProvenWrite {
+  readonly deviceId: string;
+  readonly request: E2eeProofRequest;
+}
+
+/** The audit receipt key prefix of a scope shred. It is an identity receipt and never expires. */
+export const E2EE_SCOPE_SHRED_RECEIPT_PREFIX = 'e2ee-scope-shred:';
+
+/** A `shred` entry of an append, read by cloud from the entry's strict subject. */
+export interface E2eeScopeShred {
+  /** The seq of the `shred` entry. It is one of the appended rows. */
+  readonly seq: number;
+  readonly scopeId: string;
+  /** The audit receipt cloud built. The store writes it in the receipt store, first writer wins. */
+  readonly receipt: { readonly key: string; readonly body: string };
+}
+
+export interface E2eeMemberChainAppendInput {
+  readonly rows: readonly E2eeMemberChainRow[];
+  /** The `shred` entries among `rows`, in seq order. */
+  readonly shreds: readonly E2eeScopeShred[];
+  /** Set for a device write, absent for a Host control-plane write. */
+  readonly proof?: E2eeProvenWrite;
+}
+
+/** Who wrote: the Host control plane, or a device through its proof route. A shred receipt records it. */
+export type E2eeMemberWriter =
+  | { readonly kind: 'host' }
+  | { readonly kind: 'device'; readonly proof: E2eeProvenWrite };
 
 export type E2eeMemberChainAppendResult =
   | {
@@ -51,7 +103,9 @@ export type E2eeMemberChainAppendResult =
   /** A different entry is stored at `seq`. Nothing was written. */
   | { readonly outcome: 'conflict'; readonly seq: number }
   /** The first new entry does not follow the stored head. Nothing was written. */
-  | { readonly outcome: 'gap'; readonly seq: number; readonly headSeq: number };
+  | { readonly outcome: 'gap'; readonly seq: number; readonly headSeq: number }
+  /** The device already used this `requestId` with another binding. Nothing was written. */
+  | { readonly outcome: 'request_conflict' };
 
 /** One stored scope key package, with the columns the store keys and filters on. */
 export interface E2eeScopeKeyPackageRow {
@@ -64,10 +118,21 @@ export interface E2eeScopeKeyPackageRow {
   readonly package: string;
 }
 
+export interface E2eeScopeKeyPackagePutInput {
+  /** Sorted by `(scopeId, epoch, recipient)` in code point order, one row per scope epoch and recipient. */
+  readonly rows: readonly E2eeScopeKeyPackageRow[];
+  /** Set for a device write, absent for a Host control-plane write. */
+  readonly proof?: E2eeProvenWrite;
+}
+
 export type E2eeScopeKeyPackagePutResult =
   | { readonly outcome: 'stored'; readonly stored: number }
   /** The first package of this scope epoch fixed another `keyId`. Nothing was written. */
-  | { readonly outcome: 'key_id_conflict'; readonly scopeId: string; readonly epoch: number; readonly keyId: string };
+  | { readonly outcome: 'key_id_conflict'; readonly scopeId: string; readonly epoch: number; readonly keyId: string }
+  /** The member chain shredded this scope. Nothing was written. */
+  | { readonly outcome: 'scope_shredded'; readonly scopeId: string }
+  /** The device already used this `requestId` with another binding. Nothing was written. */
+  | { readonly outcome: 'request_conflict' };
 
 export interface E2eeMemberRegistrationInput {
   readonly deviceId: string;
@@ -77,6 +142,8 @@ export interface E2eeMemberRegistrationInput {
   /** The device pairing MAC (§7.2 step 3). */
   readonly deviceMac: string;
   readonly macExpiresAt: string;
+  /** The proof binding of the registration write; its device is `deviceId`. */
+  readonly request: E2eeProofRequest;
 }
 
 /**
@@ -84,8 +151,9 @@ export interface E2eeMemberRegistrationInput {
  * - `replayed`: the same bundle was already stored; the MAC and its expiry were replaced.
  * - `device_conflict`: the device registered another bundle. Nothing changed.
  * - `member_conflict`: another device registered this member id. Nothing changed.
+ * - `request_conflict`: the device already used this `requestId` with another binding. Nothing changed.
  */
-export type E2eeMemberRegisterResult = 'registered' | 'replayed' | 'device_conflict' | 'member_conflict';
+export type E2eeMemberRegisterResult = 'registered' | 'replayed' | 'device_conflict' | 'member_conflict' | 'request_conflict';
 
 export interface E2eeMemberRegistrationRow {
   readonly memberId: string;
@@ -98,24 +166,40 @@ export interface E2eeMemberRegistrationRow {
 /**
  * Durable E2EE member state. Every method is scoped to `tenant`. Each write
  * is atomic: a refused write leaves nothing behind.
+ *
+ * A device write carries its proof binding (`proof`, or `request` on a
+ * registration). In the same atomic write, the store records the device's
+ * `requestId`, its binding and the write's result. If that `requestId` is
+ * already recorded for the device, the store writes nothing: with the same
+ * binding it returns the recorded result, and with another binding it
+ * returns `request_conflict`. A refused write records nothing.
  */
 export interface E2eeMemberStore {
   /**
    * Rows have contiguous ascending seqs. A row at a stored seq must hold the
    * same bytes (a replay). The first new row must be the stored head plus one.
+   *
+   * For each shred whose row this call newly stores, in the same atomic
+   * write: delete the scope's key packages, then its epochs, record the scope
+   * as shredded with the seq of its first shred, and record the shred's
+   * receipt in the deployment's request receipt store unless that key is
+   * already there. A replayed row shreds nothing again. A refused append
+   * deletes nothing. A store that has concurrent writers serializes each
+   * shred with every package put of the same scope.
    */
-  appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult>;
+  appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult>;
   /** Entries with `seq > afterSeq`, ascending, at most `limit`. */
   readChainEntries(
     tenant: TenantId,
     input: { readonly afterSeq: number; readonly limit: number },
   ): Promise<readonly E2eeMemberChainRow[]>;
   /**
-   * The first package of a `(scopeId, epoch)` fixes its `keyId`, also within
-   * this call: a second `keyId` for that scope epoch refuses the whole put. A
-   * package with that `keyId` inserts or replaces the row of its recipient.
+   * A row of a shredded scope refuses the whole put. The first package of a
+   * `(scopeId, epoch)` fixes its `keyId`, also within this call: a second
+   * `keyId` for that scope epoch refuses the whole put. A package with that
+   * `keyId` inserts or replaces the row of its recipient.
    */
-  putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult>;
+  putScopeKeyPackages(tenant: TenantId, input: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult>;
   /** Ordered by epoch, then recipient. */
   readScopeKeyPackages(
     tenant: TenantId,
@@ -143,6 +227,14 @@ function invalid(message: string): ByokCloudError {
   return new ByokCloudError('coordination_input_invalid', message);
 }
 
+function requestConflict(): ByokCloudError {
+  return new ByokCloudError('proof_request_conflict', 'This device already used the proof requestId with another request.');
+}
+
+function proofOf(writer: E2eeMemberWriter): { readonly proof?: E2eeProvenWrite } {
+  return writer.kind === 'host' ? {} : { proof: writer.proof };
+}
+
 /** A stored row must still be the value its schema requires; only the store writes it. */
 function storedValue<S extends z.ZodType>(schema: S, text: string, what: string): z.infer<S> {
   let parsed: z.ZodSafeParseResult<z.infer<S>> | undefined;
@@ -153,6 +245,33 @@ function storedValue<S extends z.ZodType>(schema: S, text: string, what: string)
     throw new ByokCloudError('e2ee_member_state_unreadable', `A stored ${what} is not valid. The store contract is broken.`);
   }
   return parsed.data;
+}
+
+const CHAIN_APPEND_RESULT = z.strictObject({
+  outcome: z.literal('appended'),
+  appended: z.number().int().nonnegative(),
+  replayed: z.number().int().nonnegative(),
+});
+const KEY_PACKAGE_PUT_RESULT = z.strictObject({ outcome: z.literal('stored'), stored: z.number().int().nonnegative() });
+const MEMBER_KEY_REGISTER_RESULT = z.enum(['registered', 'replayed']);
+
+/**
+ * The result a store recorded with a device write, read back for a replay.
+ * A store records only a successful result, so any other stored text breaks
+ * the store contract and fails closed.
+ */
+export function parseRecordedWriteResult(write: 'chainAppend', text: string): Extract<E2eeMemberChainAppendResult, { readonly outcome: 'appended' }>;
+export function parseRecordedWriteResult(write: 'keyPackagePut', text: string): Extract<E2eeScopeKeyPackagePutResult, { readonly outcome: 'stored' }>;
+export function parseRecordedWriteResult(write: 'memberKeyRegister', text: string): Extract<E2eeMemberRegisterResult, 'registered' | 'replayed'>;
+export function parseRecordedWriteResult(write: 'chainAppend' | 'keyPackagePut' | 'memberKeyRegister', text: string) {
+  switch (write) {
+    case 'chainAppend':
+      return storedValue(CHAIN_APPEND_RESULT, text, 'recorded request result');
+    case 'keyPackagePut':
+      return storedValue(KEY_PACKAGE_PUT_RESULT, text, 'recorded request result');
+    case 'memberKeyRegister':
+      return storedValue(MEMBER_KEY_REGISTER_RESULT, text, 'recorded request result');
+  }
 }
 
 function scopeIdValid(scopeId: unknown): scopeId is string {
@@ -207,20 +326,43 @@ export interface E2eeMemberContext {
 export async function appendMemberChainEntries(
   ctx: E2eeMemberContext,
   input: { readonly entries: readonly E2eeMemberChainEntry[] },
+  writer: E2eeMemberWriter,
 ): Promise<{ readonly appended: number; readonly replayed: number }> {
   const list = boundedList(() => input.entries, E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, 'Member chain entries');
+  const shreds: E2eeScopeShred[] = [];
+  const shreddedAt = ctx.now().toISOString();
   const rows = list.map((input, index) => {
     const { text, value } = canonicalParse(E2eeMemberChainEntrySchema, input, `Member chain entry ${index}`);
     if (new TextEncoder().encode(text).byteLength > E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES) {
       throw invalid(`Member chain entry ${index} exceeds ${E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES} bytes`);
     }
     if (value.tenantId !== ctx.tenant) throw invalid(`Member chain entry ${index} names another tenant`);
+    // The entry schema has checked that a shred subject is exactly { scopeId }.
+    const scopeId = value.op === 'shred' ? (value.subject as { readonly scopeId: string }).scopeId : undefined;
+    // A scope id over the Host limit gets no shred record: every put and read
+    // refuses that id, so it has no packages or epochs. It would also not fit
+    // a Postgres index entry.
+    if (scopeId !== undefined && scopeIdValid(scopeId)) {
+      shreds.push({
+        seq: value.seq,
+        scopeId,
+        receipt: {
+          key: `${E2EE_SCOPE_SHRED_RECEIPT_PREFIX}${scopeId}`,
+          body: canonicalizeJson({
+            chainSeq: value.seq,
+            shreddedAt,
+            writer: writer.kind === 'host' ? writer : { kind: 'device', deviceId: writer.proof.deviceId },
+          }),
+        },
+      });
+    }
     return { seq: value.seq, entry: text };
   });
   if (rows.some((row, index) => row.seq !== rows[0]!.seq + index)) {
     throw invalid('Member chain entries must have contiguous ascending seqs');
   }
-  const result = await ctx.store.appendChainEntries(ctx.tenant, rows);
+  const result = await ctx.store.appendChainEntries(ctx.tenant, { rows, shreds, ...proofOf(writer) });
+  if (result.outcome === 'request_conflict') throw requestConflict();
   if (result.outcome === 'conflict') {
     throw new ByokCloudError('e2ee_member_chain_conflict', `A different member chain entry is stored at seq ${result.seq}.`);
   }
@@ -249,6 +391,7 @@ export async function readMemberChain(
 export async function putScopeKeyPackages(
   ctx: E2eeMemberContext,
   input: { readonly packages: readonly E2eeScopeKeyPackage[] },
+  writer: E2eeMemberWriter,
 ): Promise<{ readonly stored: number; readonly skippedDeviceIds: readonly string[] }> {
   const list = boundedList(() => input.packages, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, 'Scope key packages');
   const rows = list.map((input, index) => {
@@ -276,7 +419,11 @@ export async function putScopeKeyPackages(
     if (previous.keyId !== row.keyId) throw invalid(`Scope key packages name two keyIds for scope ${row.scopeId} epoch ${row.epoch}`);
     if (previous.recipient === row.recipient) throw invalid(`Scope key packages repeat a recipient of scope ${row.scopeId} epoch ${row.epoch}`);
   }
-  const result = await ctx.store.putScopeKeyPackages(ctx.tenant, rows);
+  const result = await ctx.store.putScopeKeyPackages(ctx.tenant, { rows, ...proofOf(writer) });
+  if (result.outcome === 'request_conflict') throw requestConflict();
+  if (result.outcome === 'scope_shredded') {
+    throw new ByokCloudError('e2ee_scope_shredded', `Scope ${result.scopeId} was shredded on the member chain.`);
+  }
   if (result.outcome === 'key_id_conflict') {
     throw new ByokCloudError(
       'e2ee_scope_key_conflict',
@@ -395,9 +542,10 @@ export async function relayClientPairingMac(
  */
 export async function registerDeviceMemberKey(
   ctx: E2eeMemberContext,
-  deviceId: string,
+  proof: E2eeProvenWrite,
   input: unknown,
 ): Promise<{ readonly memberId: string }> {
+  const { deviceId } = proof;
   const { value } = canonicalParse(E2eeMemberKeyRegisterRequestSchema, input, 'Member key registration');
   if (value.member.deviceId !== deviceId) throw invalid('The member key bundle names another device');
   const result = await ctx.store.registerMember(ctx.tenant, {
@@ -406,7 +554,9 @@ export async function registerDeviceMemberKey(
     bundle: canonicalizeJson(value.member as unknown as JsonValue),
     deviceMac: value.mac,
     macExpiresAt: new Date(ctx.now().getTime() + PAIRING_CODE_TTL_MS).toISOString(),
+    request: proof.request,
   });
+  if (result === 'request_conflict') throw requestConflict();
   if (result === 'device_conflict' || result === 'member_conflict') {
     throw new ByokCloudError(
       'e2ee_member_key_conflict',

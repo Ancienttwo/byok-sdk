@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
+import type { MessageDraftDelta } from '../types';
 import { CodexProjection } from '../adapters/codex/projection';
 import { createSessionKernel } from '../../vendor/oar/44d7d61/shared/session-kernel';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 function setup() {
   const kernel = createSessionKernel('root');
   const projection = new CodexProjection('/workspace', 'root');
-  const output: AgentEvent[] = [];
+  const output: Array<AgentEvent | MessageDraftDelta> = [];
   const feed = (
     type: string,
     native: unknown,
@@ -135,7 +136,7 @@ describe('required Codex native projection', () => {
       origin: 'byok-native',
     } as never);
     let ordinal = 0;
-    const first: AgentEvent[] = [];
+    const first: Array<AgentEvent | MessageDraftDelta> = [];
     expect(() =>
       s.projection.consume(s.kernel, row, (e) => {
         if (ordinal++ === 1) throw new Error('sink failed');
@@ -219,7 +220,7 @@ describe('required Codex native projection', () => {
   it('keeps resumed usage unknown until a reliable cumulative boundary exists', () => {
     const kernel = createSessionKernel('root');
     const projection = new CodexProjection('/workspace', 'root', false);
-    const out: AgentEvent[] = [];
+    const out: Array<AgentEvent | MessageDraftDelta> = [];
     const feed = (type: string, native: unknown) => {
       const body = { type, native, origin: 'byok-native', events: [] };
       projection.consume(kernel, kernel.frame(body), (e) => out.push(e));
@@ -321,4 +322,30 @@ it('uses native MCP completion metadata even without a matching start', () => {
   const unknown = setup();
   unknown.feed('item/started', { item: { type: 'mcpToolCall', id: 'missing', arguments: { server: 'untrusted', tool: 'guess' } } });
   expect(unknown.output[0]).not.toHaveProperty('mcp');
+});
+describe('Codex agentMessage draft deltas', () => {
+  const delta = (itemId: string, text: string, turnId = 'turn-1') => ({ threadId: 'root', turnId, itemId, delta: text });
+
+  it('maps deltas of the active turn and starts a draft at the first non-blank delta of each item', () => {
+    const s = setup();
+    s.feed('turn/started', { threadId: 'root', turn: { id: 'turn-1' } });
+    for (const [itemId, text] of [['m1', ' '], ['m1', 'Hi'], ['m1', ' there'], ['m2', 'Next']])
+      s.feed('item/agentMessage/delta', delta(itemId!, text!));
+    s.feed('item/completed', { threadId: 'root', turnId: 'turn-1', item: { id: 'm2', type: 'agentMessage', text: 'Next' } });
+    expect(s.output).toEqual([
+      { type: 'message_draft_delta', text: ' ', startsMessage: false },
+      { type: 'message_draft_delta', text: 'Hi', startsMessage: true },
+      { type: 'message_draft_delta', text: ' there', startsMessage: false },
+      { type: 'message_draft_delta', text: 'Next', startsMessage: true },
+      { type: 'progress', text: 'Next' },
+    ]);
+  });
+
+  it('drops a delta of a stale turn and a delta without string text', () => {
+    const s = setup();
+    s.feed('turn/started', { threadId: 'root', turn: { id: 'turn-2' } });
+    s.feed('item/agentMessage/delta', delta('old', 'STALE', 'turn-1'));
+    s.feed('item/agentMessage/delta', { threadId: 'root', turnId: 'turn-2', itemId: 'm1', delta: 7 });
+    expect(s.output).toEqual([]);
+  });
 });

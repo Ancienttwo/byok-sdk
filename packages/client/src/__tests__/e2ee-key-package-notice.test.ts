@@ -1,7 +1,8 @@
 /**
  * #654 E2d-2: the daemon consumes `e2ee.key_package.available` before the
  * journal, like `provider.provisioning.available`. It keeps the row while
- * the member resumes or a Host read fails, and acknowledges every other end.
+ * the member resumes or a Host read fails, and acknowledges every other end,
+ * a final Host answer included.
  */
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { randomUUID } from 'node:crypto';
@@ -12,6 +13,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { CursorStore } from '../daemon/cursor-store';
+import { MEMBER_CHAIN_MAX_ENTRIES } from '../daemon/e2ee-member-client';
 import { testDeviceMemberCustody } from './fixtures/credential-backend';
 import { E2eeWebClient } from './fixtures/e2ee-web-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -139,5 +141,39 @@ describe('e2ee.key_package.available (E2d-2)', () => {
     server.pushLongPollEvent(envelope);
     await vi.waitFor(async () => expect(await cursor(deviceId)).toBe(envelope.seq), { timeout: 5_000 });
     expect(server.e2ee.packageReads).toBe(1);
+  });
+
+  it('acknowledges a notice whose package read the Host refuses for good (#863 M2)', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    const { server, daemon, web, custody, cursor } = await setup();
+    const { deviceId } = await daemon.pair('pair-code', { verificationSecret: web.verificationSecret });
+    const device = await web.approve(deviceId);
+    await daemon.start();
+    await vi.waitFor(() => expect(anchored(custody)).toBe(true), { timeout: 5_000 });
+    await web.putScope('scope-a', [device]);
+    server.e2ee.rejectPackageReads = 403;
+    const envelope = notice(server, 'scope-a');
+    server.pushLongPollEvent(envelope);
+    await vi.waitFor(async () => expect(await cursor(deviceId)).toBe(envelope.seq), { timeout: 5_000 });
+    expect(logged(warn, "the Host's answer is final (key package read failed with HTTP 403 (forbidden))")).toBe(true);
+    const final = warn.mock.calls.map((args) => args.map(String).join(' ')).find((line) => line.includes("the Host's answer is final"));
+    expect(final).toBeDefined();
+    expect(final).not.toContain('scope-a');
+  });
+
+  it('acknowledges a notice whose catch-up meets a chain over the cap (#863 M2)', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    const { server, daemon, web, custody, cursor } = await setup();
+    const { deviceId } = await daemon.pair('pair-code', { verificationSecret: web.verificationSecret });
+    const device = await web.approve(deviceId);
+    await daemon.start();
+    await vi.waitFor(() => expect(anchored(custody)).toBe(true), { timeout: 5_000 });
+    await web.putScope('scope-a', [device]);
+    server.e2ee.chainResponse = Array.from({ length: 256 }, () => ({}));
+    const envelope = notice(server, 'scope-a');
+    server.pushLongPollEvent(envelope);
+    await vi.waitFor(async () => expect(await cursor(deviceId)).toBe(envelope.seq), { timeout: 5_000 });
+    expect(logged(warn, `the member chain is longer than ${MEMBER_CHAIN_MAX_ENTRIES} entries`)).toBe(true);
+    expect(server.e2ee.packageReads).toBe(0);
   });
 });

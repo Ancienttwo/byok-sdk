@@ -7,10 +7,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import type { SpawnFn } from '../adapters/claude/process-client';
-import { SteerUnsupportedError, type Session } from '../types';
+import { SteerUnsupportedError, type Session, type MessageDraftDelta } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { observationOf } from './fixtures/mcp-observation';
+import { testExecutionScratch } from './fixtures/execution-scratch';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -18,8 +19,8 @@ function fakeClaudeAdapter(): ClaudeAdapter {
   return new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }) });
 }
 
-async function takeEvents(session: Session, count: number): Promise<AgentEvent[]> {
-  const results: AgentEvent[] = [];
+async function takeEvents(session: Session, count: number): Promise<Array<AgentEvent | MessageDraftDelta>> {
+  const results: Array<AgentEvent | MessageDraftDelta> = [];
   for await (const event of session.events) {
     results.push(event);
     if (results.length >= count) break;
@@ -27,8 +28,8 @@ async function takeEvents(session: Session, count: number): Promise<AgentEvent[]
   return results;
 }
 
-async function takeTurn(session: Session): Promise<AgentEvent[]> {
-  const events: AgentEvent[]=[];
+async function takeTurn(session: Session): Promise<Array<AgentEvent | MessageDraftDelta>> {
+  const events: Array<AgentEvent | MessageDraftDelta>=[];
   for await (const event of session.events) { events.push(event); if(event.type==='turn_end')break; }
   return events;
 }
@@ -115,6 +116,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
+      messageDraft: true,
     });
     // Claude reads MCP tools itself; the daemon takes no tools/list observation for it.
     expect(adapter.descriptor.requiresMcpToolsetToolObservation).not.toBe(true);
@@ -382,7 +384,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     // resolving). Post-fix, the iterator itself ends once this turn's own
     // `result` frame has been fully drained, so this loop terminates well
     // under the timeout without the process ever being killed here.
-    const events: AgentEvent[] = [];
+    const events: Array<AgentEvent | MessageDraftDelta> = [];
     let failure: unknown;
     try {
       for await (const event of session.events) events.push(event);
@@ -579,6 +581,143 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
     const matching = warnSpy.mock.calls.filter((call) => String(call[0]).includes('assistant-block:totally_novel_block_type'));
     expect(matching).toHaveLength(1);
+  });
+});
+
+describe('ClaudeAdapter agentUserContext', () => {
+  const openSessions: Session[] = [];
+  afterEach(async () => { await Promise.all(openSessions.splice(0).map((s) => s.close())); });
+
+  function recordingAdapter(agentUserContext?: 'inherit' | 'excluded'): { adapter: ClaudeAdapter; spawned: string[][] } {
+    const spawned: string[][] = [];
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      ...(agentUserContext === undefined ? {} : { agentUserContext }),
+      spawnFn: ((command: string, args: readonly string[] = [], options: object = {}) => {
+        spawned.push([...args]);
+        return realSpawn(command, [...args], options);
+      }) as unknown as SpawnFn,
+    });
+    return { adapter, spawned };
+  }
+
+  async function agentCtx(): Promise<PreparedOperationResources & { configDir: string }> {
+    const ctx = await makeCtx();
+    const configDir = path.join(ctx.workspaceDir, '..', `${path.basename(ctx.workspaceDir)}-config`);
+    return { ...ctx, env: { ...process.env, CLAUDE_CONFIG_DIR: configDir }, agentHome: ctx.workspaceDir, configDir };
+  }
+
+  const flagValue = (args: string[], flag: string): string => {
+    const value = args[args.indexOf(flag) + 1];
+    if (!args.includes(flag) || typeof value !== 'string') throw new Error(`missing ${flag}`);
+    return value;
+  };
+  const slash = (file: string) => file.replaceAll('\\', '/');
+
+  it('rejects an unknown option value', () => {
+    expect(() => new ClaudeAdapter({ agentUserContext: 'strict' as never })).toThrow(TypeError);
+  });
+
+  it('leaves the default Agent launch additive, with no strict MCP flag or settings file', async () => {
+    const { adapter, spawned } = recordingAdapter();
+    const ctx = await agentCtx();
+    openSessions.push(await startAdapter(adapter, baseTask, ctx));
+    expect(spawned[0]).not.toContain('--strict-mcp-config');
+    expect(spawned[0]).not.toContain('--settings');
+  });
+
+  it('starts an Agent task with only the task servers, the parent and config instruction files excluded, and auto memory off', async () => {
+    const { adapter, spawned } = recordingAdapter('excluded');
+    const ctx = await agentCtx();
+    ctx.mcpServers = { salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'] } };
+    ctx.mcpToolsetTools = observationOf({ salesko: ['find_leads'] });
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+    const args = spawned[0] ?? [];
+    expect(args).toContain('--strict-mcp-config');
+    expect(args).toContain('--dangerously-skip-permissions');
+    expect(args).not.toContain('--setting-sources');
+    const mcpConfigPath = flagValue(args, '--mcp-config');
+    expect(JSON.parse(await fs.readFile(mcpConfigPath, 'utf8'))).toEqual({ mcpServers: ctx.mcpServers });
+
+    const settingsPath = flagValue(args, '--settings');
+    expect(path.dirname(settingsPath)).toBe(path.dirname(mcpConfigPath));
+    if (process.platform !== 'win32') expect((await fs.stat(settingsPath)).mode & 0o777).toBe(0o600);
+    const settings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as { claudeMdExcludes: string[]; env: unknown };
+    expect(settings.env).toEqual({ CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' });
+    const parentDir = path.dirname(ctx.workspaceDir);
+    expect(settings.claudeMdExcludes).toEqual(expect.arrayContaining([
+      slash(path.join(ctx.configDir, 'CLAUDE.md')),
+      slash(path.join(parentDir, 'CLAUDE.md')),
+      slash(path.join(parentDir, 'CLAUDE.local.md')),
+      slash(path.join(parentDir, '.claude', 'CLAUDE.md')),
+    ]));
+    expect(settings.claudeMdExcludes.some(pattern => pattern.startsWith(`${slash(ctx.workspaceDir)}/`))).toBe(false);
+
+    await session.close();
+    openSessions.pop();
+    await expect(fs.access(settingsPath)).rejects.toThrow();
+    await expect(fs.access(mcpConfigPath)).rejects.toThrow();
+  });
+
+  it('passes the strict MCP flag without --mcp-config when the Agent task has no servers', async () => {
+    const { adapter, spawned } = recordingAdapter('excluded');
+    openSessions.push(await startAdapter(adapter, baseTask, await agentCtx()));
+    expect(spawned[0]).toContain('--strict-mcp-config');
+    expect(spawned[0]).toContain('--settings');
+    expect(spawned[0]).not.toContain('--mcp-config');
+  });
+
+  it('anchors a memory reader in its run directory on the canonical home', async () => {
+    const { adapter, spawned } = recordingAdapter('excluded');
+    const ctx = await agentCtx();
+    const runDir = path.join(ctx.workspaceDir, '.byok', 'runs', 't1');
+    await fs.mkdir(runDir, { recursive: true });
+    openSessions.push(await startAdapter(adapter, baseTask, { ...ctx, workspaceDir: runDir, agentHome: undefined, reader: { canonicalHome: ctx.workspaceDir } }));
+    const settings = JSON.parse(await fs.readFile(flagValue(spawned[0] ?? [], '--settings'), 'utf8')) as { claudeMdExcludes: string[] };
+    expect(settings.claudeMdExcludes).toContain(slash(path.join(path.dirname(ctx.workspaceDir), 'CLAUDE.md')));
+    expect(settings.claudeMdExcludes.some(pattern => pattern.startsWith(`${slash(ctx.workspaceDir)}/`))).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps the home files when CLAUDE_CONFIG_DIR is a symlink into the Agent home', async () => {
+    const { adapter, spawned } = recordingAdapter('excluded');
+    const ctx = await agentCtx();
+    await fs.mkdir(path.join(ctx.workspaceDir, '.claude'));
+    await fs.symlink(path.join(ctx.workspaceDir, '.claude'), ctx.configDir);
+    openSessions.push(await startAdapter(adapter, baseTask, ctx));
+    const settings = JSON.parse(await fs.readFile(flagValue(spawned[0] ?? [], '--settings'), 'utf8')) as { claudeMdExcludes: string[] };
+    expect(settings.claudeMdExcludes.some(pattern => pattern.startsWith(`${slash(ctx.configDir)}/`))).toBe(false);
+    expect(settings.claudeMdExcludes).toContain(slash(path.join(path.dirname(ctx.workspaceDir), 'CLAUDE.md')));
+  });
+
+  it('leaves an ordinary task unchanged', async () => {
+    const { adapter, spawned } = recordingAdapter('excluded');
+    const ctx = await makeCtx();
+    ctx.mcpServers = { salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'] } };
+    ctx.mcpToolsetTools = observationOf({ salesko: ['find_leads'] });
+    openSessions.push(await startAdapter(adapter, baseTask, ctx));
+    expect(spawned[0]).toContain('--mcp-config');
+    expect(spawned[0]).not.toContain('--strict-mcp-config');
+    expect(spawned[0]).not.toContain('--settings');
+  });
+
+  it.each([
+    ['an Agent home that is not absolute', async (ctx: PreparedOperationResources) => ({ ...ctx, agentHome: 'agents/a1' })],
+    ['a cwd outside the Agent home', async (ctx: PreparedOperationResources) => ({ ...ctx, agentHome: undefined, reader: { canonicalHome: await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-other-home-')) } })],
+  ])('refuses %s before spawning or writing any file', async (_label, shape) => {
+    const { adapter, spawned } = recordingAdapter('excluded');
+    const ctx = await agentCtx();
+    ctx.mcpServers = { salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'] } };
+    ctx.mcpToolsetTools = observationOf({ salesko: ['find_leads'] });
+    const owned = await testExecutionScratch();
+    let filesAtRelease: string[] | undefined;
+    const scratch = { ...owned, release: async () => { filesAtRelease ??= await fs.readdir(owned.sdkDir); await owned.release(); } };
+    const failure = await startAdapter(adapter, baseTask, { ...await shape(ctx), scratch }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect((failure as Error).message).not.toContain(path.basename(ctx.workspaceDir));
+    expect(spawned).toEqual([]);
+    expect(filesAtRelease).toEqual([]);
   });
 });
 

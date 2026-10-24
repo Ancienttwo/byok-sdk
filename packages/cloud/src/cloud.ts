@@ -37,7 +37,6 @@ import {
   type BoardPage,
   type CapabilityDeclaration,
   type Clock,
-  type ContentHash,
   type ControlPlanePrincipal,
   type CoreStores,
   type DevicePrincipal,
@@ -84,7 +83,6 @@ import {
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
-  type BlobRef,
   type Envelope,
   type TaskOfferType,
   isTaskOfferType,
@@ -253,6 +251,13 @@ import {
   type TaskRedactionTaskResult,
 } from './task-redaction';
 import { tenantStoresFor, type CloudRootStores, type TenantStores } from './tenant-stores';
+import {
+  releaseSealedCiphertext,
+  retainSealedCiphertext,
+  SEALED_TASK_REFERENCE_KIND,
+  sealedCiphertextCommitted,
+  sealedCiphertextRef,
+} from './sealed-ciphertext';
 import * as e2eeMember from './e2ee-member';
 import type { E2eeMemberStore } from './e2ee-member';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
@@ -524,14 +529,6 @@ function refuseSealedFields(payload: unknown, fields: readonly string[], sealedE
   if (present.length > 0) {
     throw new ByokCloudError('coordination_input_invalid', `${present.join(', ')} belongs to the sealed lane; use ${sealedEntry}`);
   }
-}
-
-/** The object reference kind of a sealed ciphertext blob that a task names (#654). Its id is the task id. */
-const SEALED_TASK_REFERENCE_KIND = 'sealed-task';
-
-/** The ciphertext blob that a sealed member names, if any. */
-function sealedCiphertextRef(payload: object): BlobRef | undefined {
-  return Object(Object(payload).sealed).ciphertextRef as BlobRef | undefined;
 }
 
 /** Resume-only Agent lanes refuse a payload without an exact `sessionRef`. */
@@ -822,6 +819,10 @@ export interface ByokCloud {
    * replay, and a different one throws `e2ee_member_chain_conflict`. The
    * first new entry must follow the stored head. The Host checks shapes and
    * the tenant only; members verify signatures and links.
+   *
+   * A newly stored `shred` entry, whose subject must be exactly `{ scopeId }`,
+   * deletes that scope's key packages and epochs in the same write, marks the
+   * scope shredded, and records an `e2ee-scope-shred:<scopeId>` receipt.
    */
   appendMemberChainEntries(
     tenant: TenantId,
@@ -835,7 +836,8 @@ export interface ByokCloud {
   /**
    * Host control plane: store scope key packages. The first package of a
    * scope epoch fixes its `keyId`; a package with another `keyId` throws
-   * `e2ee_scope_key_conflict`, and the call stores nothing.
+   * `e2ee_scope_key_conflict`, and the call stores nothing. A package of a
+   * shredded scope throws `e2ee_scope_shredded`, and the call stores nothing.
    *
    * After the commit, each recipient that is a registered device gets one
    * `e2ee.key_package.available` notice per scope epoch, also on a replay.
@@ -1440,7 +1442,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       offerPayload = first;
     }
 
-    await retainSealedCiphertext(tenant, taskId, offerPayload);
+    await retainTaskCiphertext(tenant, taskId, offerPayload);
     await beforeMailbox?.(stores, taskId);
     // The attempt is already open, so a refused append must name it: a Host
     // that let cloud allocate the id has no other way to retry or cancel it.
@@ -1487,28 +1489,17 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     return { taskId, seq: message.seq, envelope, attempt: openedBeforeAppend };
   }
 
-  /**
-   * A sealed member above the inline limit names its ciphertext blob (#654).
-   * The object with the declared hash must be committed in this tenant, with
-   * the declared size (the schema fixes it at `paddedLength + 16`) and
-   * content type. The receiver checks the SHA-256 of the bytes it fetches.
-   * This check writes nothing, so a lane runs it before any task, receipt or
-   * mailbox write.
-   */
+  /** A sealed member above the inline limit names its ciphertext blob (#654); see {@link sealedCiphertextCommitted}. */
   async function assertSealedCiphertext(tenant: TenantId, payload: object): Promise<void> {
     const ref = sealedCiphertextRef(payload);
-    if (ref === undefined) return;
-    const object = await options.core.objects.get(tenant, ref.contentHash as ContentHash);
-    if (object?.state !== 'committed' || object.byteSize !== BigInt(ref.size) || object.contentType !== ref.contentType) {
+    if (ref !== undefined && !(await sealedCiphertextCommitted(tenantStoresFor(controlPlane(tenant), root).objects, ref))) {
       throw new ByokCloudError('coordination_input_invalid', 'A sealed ciphertextRef must name a committed object of this tenant with its size and content type.');
     }
   }
 
-  /** The task holds its ciphertext blob, so orphan GC keeps it while the task lives. `redactTasks` releases it. */
-  async function retainSealedCiphertext(tenant: TenantId, taskId: string, payload: object): Promise<void> {
+  async function retainTaskCiphertext(tenant: TenantId, taskId: string, payload: object): Promise<void> {
     const ref = sealedCiphertextRef(payload);
-    if (ref === undefined) return;
-    await options.core.objects.addReference(tenant, { hash: ref.contentHash as ContentHash, refKind: SEALED_TASK_REFERENCE_KIND, refId: taskId });
+    if (ref !== undefined) await retainSealedCiphertext(tenantStoresFor(controlPlane(tenant), root).objects, taskId, ref);
   }
 
   async function assertAgentCapabilities(
@@ -1911,7 +1902,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     const ownerDeviceId = await runningSteerTarget(tenant, taskId);
     await assertAgentCapabilities(tenant, ownerDeviceId, requiredReceiverCapabilities('task.steer_sealed', sealed));
     await assertSealedCiphertext(tenant, sealed);
-    await retainSealedCiphertext(tenant, taskId, sealed);
+    await retainTaskCiphertext(tenant, taskId, sealed);
     // One steer id names one steer: a retry finds the same mailbox row. A
     // retry that seals the same text again keeps the first ciphertext (§9.2).
     // Mailbox retention deletes an acknowledged row while the task runs, so a
@@ -1926,11 +1917,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     // row keeps its own blob, so the task does not hold the new one.
     const proposedRef = sealedCiphertextRef(sealed);
     if (proposedRef !== undefined && sealedCiphertextRef(enqueued.envelope.payload)?.contentHash !== proposedRef.contentHash) {
-      await options.core.objects.removeReference(tenant, {
-        hash: proposedRef.contentHash as ContentHash,
-        refKind: SEALED_TASK_REFERENCE_KIND,
-        refId: taskId,
-      });
+      await releaseSealedCiphertext(tenantStoresFor(controlPlane(tenant), root).objects, taskId, proposedRef);
     }
     if (enqueued.envelope.type !== 'task.steer_sealed' || !sameSealedProjection(enqueued.envelope.payload, sealed)) {
       throw new ByokCloudError('coordination_input_invalid', `Task ${taskId} already has a different steer ${sealed.steerId}.`);
@@ -2701,13 +2688,13 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     redactTasks,
 
     async appendMemberChainEntries(tenant, input) {
-      return e2eeMember.appendMemberChainEntries(e2eeMemberContext(tenant), input);
+      return e2eeMember.appendMemberChainEntries(e2eeMemberContext(tenant), input, { kind: 'host' });
     },
     async readMemberChain(tenant, input) {
       return e2eeMember.readMemberChain(e2eeMemberContext(tenant), input);
     },
     async putScopeKeyPackages(tenant, input) {
-      return e2eeMember.putScopeKeyPackages(e2eeMemberContext(tenant), input);
+      return e2eeMember.putScopeKeyPackages(e2eeMemberContext(tenant), input, { kind: 'host' });
     },
     enqueueScopeKeyPackageNotice,
     async readScopeKeyPackages(tenant, input) {

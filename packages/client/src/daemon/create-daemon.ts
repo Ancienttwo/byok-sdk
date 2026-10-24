@@ -253,6 +253,14 @@ const SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS = 10_000;
 /** Finding F5(b): default bound on how long `performControlShutdown` waits for the outbox to actually drain before closing the connection — see `ConnectionManager.stop`'s own doc comment. Overridable via `DaemonOverrides.shutdown.outboxDrainTimeoutMs`. */
 const DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS = 5_000;
 
+/** The pairing is saved, but a member step after it failed: the device is paired without E2EE. */
+class PairedWithoutMemberError extends Error {
+  constructor(deviceId: string, what: string, cause: unknown) {
+    super(`device ${deviceId} is paired, but ${what}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = 'PairedWithoutMemberError';
+  }
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -1798,6 +1806,13 @@ export function buildDaemonWithAdapters(
 
   let connection: ConnectionManager | undefined;
   let blobLifecycleAbort: AbortController | undefined;
+  // #654: sealed output uploads its ciphertext through its own blob client,
+  // which shutdown aborts only after the terminal commit barrier. A queued
+  // terminal can outlive its run, so its upload reads the current client.
+  let sealedUploadAbort: AbortController | undefined;
+  let sealedUploads: BlobClient | undefined;
+  // A start under way opens a session, so a sealed output waits for its flags.
+  let startInProgress = false;
   let sealedOutputSettled: (() => Promise<void>) | undefined;
   let inputPreparationStatusAbort: AbortController | undefined;
   let lifecycle: DaemonLifecycle = { phase: 'stopped' };
@@ -2006,8 +2021,13 @@ export function buildDaemonWithAdapters(
       if (previous && previous.deviceId !== record.deviceId) {
         await cursorStore.clear(config.serverUrl, previous.deviceId);
       }
+      observer.notePaired(record.deviceId);
       // A new enrollment is a new member (§7.5); the previous one's entries are void (10b).
-      await memberRecords?.clear();
+      try {
+        await memberRecords?.clear();
+      } catch (error) {
+        throw new PairedWithoutMemberError(record.deviceId, 'the previous E2EE member entries could not be deleted', error);
+      }
       if (verificationSecret !== undefined) {
         try {
           await enrollDeviceMember({
@@ -2015,10 +2035,9 @@ export function buildDaemonWithAdapters(
             verificationSecret, log: logMember,
           });
         } catch (error) {
-          throw new Error(`device ${record.deviceId} is paired, but its E2EE member enrollment failed; re-pair to enable E2EE: ${error instanceof Error ? error.message : String(error)}`);
+          throw new PairedWithoutMemberError(record.deviceId, 'its E2EE member enrollment failed; re-pair to enable E2EE', error);
         }
       }
-      observer.notePaired(record.deviceId);
       if (acquiredHere) {
         await daemonOwnerLease?.release();
         daemonOwnerLease = undefined;
@@ -2106,6 +2125,15 @@ export function buildDaemonWithAdapters(
   }
 
   async function startUnderLease(): Promise<void> {
+    startInProgress = true;
+    try {
+      await runStartUnderLease();
+    } finally {
+      startInProgress = false;
+    }
+  }
+
+  async function runStartUnderLease(): Promise<void> {
     terminalCommits.resume();
     // A new run begins; a previous run's halt or crash no longer describes it.
     if (lifecycle.phase === 'halted' || lifecycle.phase === 'crashed') setLifecycle({ phase: 'stopped' });
@@ -2251,6 +2279,11 @@ export function buildDaemonWithAdapters(
           || payload.terminalProjection?.mode !== 'result-document' || typeof payload.terminalProjection.contract !== 'string')) {
           throw new Error('durable result-reply failure does not match its original offer');
         }
+        // A start after a failed stop in this process: the commit queue still
+        // holds this task's real terminal and `resume()` above retries it. The
+        // journal keeps the first terminal it records, so a recovery terminal
+        // here would replace that result.
+        if (terminalCommits.hasPending(task.taskId)) continue;
         if (resultFailure) { resultReplyRecoveryTasks.set(task.taskId, { agentRef: payload.agentRef!, contract: payload.messageEgress!.contract! }); continue; }
         await recordRecoveryFailure(task, 'daemon_interrupted', true);
       }
@@ -2396,11 +2429,24 @@ export function buildDaemonWithAdapters(
     capabilities.push('custom-harness');
     if (sealedPayload !== undefined) {
       capabilities.push(SEALED_PAYLOAD_CAPABILITY);
+      sealedUploadAbort = new AbortController();
+      sealedUploads = new BlobClient(config.serverUrl, auth, { signal: sealedUploadAbort.signal });
       const opened = new SealedTasks({
         keyring: sealedPayload.keyring,
         tenantId: record.tenantId,
         deviceId: record.deviceId,
-        blobs: { download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }) },
+        blobs: {
+          download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }),
+          upload: (ciphertext) => sealedUploads!.uploadArtifact(ciphertext, 'application/octet-stream'),
+        },
+        // Between sessions, and while a start is under way, the next
+        // session's flags are unknown. Once the daemon stopped, halted or
+        // crashed with no start under way, no session will advertise any.
+        serverCapabilities: () => {
+          if (lifecycle.phase === 'halted' || lifecycle.phase === 'crashed') return [];
+          if (lifecycle.phase === 'running') return connection?.isOpen() === true ? connection.getServerCapabilities() : undefined;
+          return startInProgress ? undefined : [];
+        },
       });
       sealedTasks = opened;
       sealedOutputSettled = () => opened.settled();
@@ -2421,12 +2467,19 @@ export function buildDaemonWithAdapters(
       // A sealed terminal is sealed once and its bytes are journaled; a retry
       // of the commit reuses them and never seals or uploads again (§9.2).
       let sealing: Promise<Envelope | undefined> | undefined;
+      // The seal and its upload run before the commit joins the one commit
+      // tail, so a slow upload holds no other task's terminal.
+      const seal = typeof terminal === 'function'
+        ? async (): Promise<void> => {
+          sealing ??= terminal();
+          try { await sealing; } catch (error) { sealing = undefined; throw error; }
+        }
+        : undefined;
       terminalCommits.enqueue(taskId, async () => {
         if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
         let envelope: Envelope | undefined;
         if (typeof terminal === 'function') {
-          sealing ??= terminal();
-          try { envelope = await sealing; } catch (error) { sealing = undefined; throw error; }
+          envelope = await sealing;
           if (envelope === undefined) return;
         } else envelope = terminal;
         const bytes = plainBytes ?? encodeEnvelope(envelope);
@@ -2470,7 +2523,7 @@ export function buildDaemonWithAdapters(
           // canonicalization failure remains visible and requires operator
           // recovery; the oversized result itself is never silently dropped.
         }
-      });
+      }, seal);
     };
 
     // #654: a task waits on its approval request. One that cannot be sealed
@@ -2501,13 +2554,23 @@ export function buildDaemonWithAdapters(
           commitTerminal(envelope.task_id!, () => sealedTaskOutput.sealOutbound(envelope));
           return;
         }
-        void sealedTaskOutput.sealOutbound(envelope).then(
+        // Without a journal no commit queue holds a terminal, so a terminal
+        // whose seal fails (its ciphertext upload) is sealed again each second
+        // here, as the queue would, until shutdown aborts the uploads.
+        const uploads = sealedUploadAbort?.signal;
+        const retries = terminalKindOf(envelope.type) !== undefined && uploads !== undefined;
+        const send = (): void => void sealedTaskOutput.sealOutbound(envelope).then(
           (sealed) => { if (sealed !== undefined) connection?.send(sealed); else denyUnsentApproval(envelope); },
           (error: unknown) => {
             console.error(`[byok/client] ${envelope.type} for sealed task ${envelope.task_id} not sent`, error);
+            if (retries && !uploads.aborted) {
+              setTimeout(() => { if (!uploads.aborted) send(); }, 1_000).unref?.();
+              return;
+            }
             denyUnsentApproval(envelope);
           },
         );
+        send();
         return;
       }
       if (!terminal) {
@@ -2823,7 +2886,8 @@ export function buildDaemonWithAdapters(
     const handleE2eeKeyPackageEnvelope = async (envelope: Envelope): Promise<boolean> => {
       if (envelope.type !== 'e2ee.key_package.available') return false;
       // Task-free and never journaled, like provisioning. It throws only while
-      // the member resumes or when a Host read fails, which keeps the row.
+      // the member resumes or when a Host read fails or times out, which keeps
+      // the row; a final Host answer is acknowledged.
       await processE2eeKeyPackageNotice(envelope.payload, memberStatus(), logMember);
       return true;
     };
@@ -3155,6 +3219,9 @@ export function buildDaemonWithAdapters(
     await connection.start();
     daemonStarted = true;
     } catch (err) {
+      // A failed start opens no session: its teardown settles a queued
+      // terminal as a stop does.
+      startInProgress = false;
       const haltReason = startupHaltReason(err);
       if (haltReason === undefined) {
         // #394: a crash, the one start failure a restart may fix. Recorded so
@@ -3388,10 +3455,11 @@ export function buildDaemonWithAdapters(
     const abort = new AbortController();
     const options = {
       records: memberRecords, client: memberClient(record, abort.signal), tenantId: record.tenantId, deviceId: record.deviceId, log: logMember,
+      signal: abort.signal,
     };
     memberAbort = abort;
     memberResuming = true;
-    memberResume = resumeDeviceMember({ ...options, signal: abort.signal }).then((session) => {
+    memberResume = resumeDeviceMember(options).then((session) => {
       if (abort.signal.aborted) return;
       memberResuming = false;
       if (session === undefined) return;
@@ -3520,6 +3588,7 @@ export function buildDaemonWithAdapters(
     // journal, before the drain below decides the connection is idle.
     await attempt(() => sealedOutputSettled?.(), false);
     const journalTailSettled = journal ? await attempt(() => terminalCommits.stop(), true) : true;
+    sealedUploadAbort?.abort();
     // stop() cleared the maintenance timer synchronously above. Await the pass
     // that may already have been inside SQLite only here, immediately before
     // closing the owned journal, so task interruption is not held behind a
@@ -3695,7 +3764,7 @@ export function buildDaemonWithAdapters(
         if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
       }
       // The member entries go first: if their deletion fails, the device
-      // stays paired and E2EE-enrolled, and the unpair reports the failure.
+      // stays paired, and the unpair reports the failure.
       await memberRecords?.clear();
       try {
         await store.credentials.clear();
@@ -3904,27 +3973,31 @@ export function buildDaemonWithAdapters(
           throw new ControlError('pairing_in_progress', 'service enrollment is already in progress');
         }
         serviceEnrollmentTransitioning = true;
-        let record: DeviceRecord;
-        try {
-          record = await runLifecycleMutation(() => pairUnderLease(parsed.pairingCode, verificationSecret));
-        } catch (err) {
-          serviceEnrollmentTransitioning = false;
-          throw err;
-        }
-
         // `control-server.ts` writes this handler's result in the current
         // microtask. Starting on the next macrotask lets that persisted-id
         // receipt leave before normal startup replaces the enrollment-only
         // listener. A crash in this narrow window is safe: WinSW restarts,
         // loadExisting() sees the already-persisted credential, and takes the
         // same normal startup path.
-        setImmediate(() => {
-          void runLifecycleMutation(startUnderLease).catch(() => {
-            // Do not project provider/server exception text into service logs;
-            // the stopped/non-ready daemon is the fail-closed observable fact.
-            console.error('[byok/client] service enrollment persisted but normal daemon startup failed');
+        const startAfterEnrollment = (): void => {
+          setImmediate(() => {
+            void runLifecycleMutation(startUnderLease).catch(() => {
+              // Do not project provider/server exception text into service logs;
+              // the stopped/non-ready daemon is the fail-closed observable fact.
+              console.error('[byok/client] service enrollment persisted but normal daemon startup failed');
+            });
           });
-        });
+        };
+        let record: DeviceRecord;
+        try {
+          record = await runLifecycleMutation(() => pairUnderLease(parsed.pairingCode, verificationSecret));
+        } catch (err) {
+          // The pairing is saved, so the service starts as a device without E2EE.
+          if (err instanceof PairedWithoutMemberError) startAfterEnrollment();
+          else serviceEnrollmentTransitioning = false;
+          throw err;
+        }
+        startAfterEnrollment();
         return { deviceId: record.deviceId };
       },
       /**

@@ -391,7 +391,8 @@
       "path": "shared/acp/turns.ts",
       "sourcePath": "packages/oar/src/shared/acp/turns.ts",
       "upstreamSha256": "a10a8ead6b16be8609c3a0fffb23f31c9e4a1ed970f5d97226eaa13f280eda5b",
-      "vendoredSha256": "a10a8ead6b16be8609c3a0fffb23f31c9e4a1ed970f5d97226eaa13f280eda5b"
+      "vendoredSha256": "bfff9ad6c1348730b855c49c4555cd6b9864bcf483bdeae6f16d9345fe6fcfe6",
+      "delta": "Failed-prompt settle: a rejected session/prompt yields one event-loop turn before it reads its turn frames, so a notification from the same pipe read (grok's retry_state) is recorded first and the failure reader sees it. The success path already yields in promptAcp."
     },
     {
       "path": "shared/acp/usage-wait.ts",

@@ -5,13 +5,15 @@
  *
  * Resolving acknowledges the notice. Only a state that a redelivery can still
  * change throws, which keeps the mailbox row and the cursor: a member whose
- * resume has not finished, or a failed Host read. Every other end resolves
- * with a log line, and the first open or seal at that epoch fetches again on
- * its cache miss.
+ * resume has not finished, or a Host read that failed or timed out. A final
+ * Host answer (a 4xx other than 429, a chain or body past its cap, more than
+ * one package) and every other end resolve with a log line, and the first
+ * open or seal at that epoch fetches again on its cache miss.
  */
 import type { E2eeKeyPackageAvailablePayload } from '@byok-sdk/protocol';
 import type { DeviceMemberLog } from './device-member';
-import type { DeviceMemberKeyring } from './e2ee-keyring';
+import type { DeviceMemberKeyring, ScopeKeyFetchResult } from './e2ee-keyring';
+import { E2eeMemberClientError } from './e2ee-member-client';
 
 /** This run's member: still resuming, none, or the verified keyring. */
 export type DeviceMemberStatus = 'resuming' | 'none' | DeviceMemberKeyring;
@@ -24,6 +26,13 @@ export async function processE2eeKeyPackageNotice(
   if (member === 'resuming') throw new Error('the E2EE member is still resuming; the key package notice waits for redelivery');
   const at = `epoch ${payload.epoch} of scope ${JSON.stringify(payload.scopeId)}`;
   if (member === 'none') return log(`a key package notice for ${at} reached a device that is no E2EE member; ignored`);
-  const result = await member.fetch(payload.scopeId, payload.epoch);
+  let result: ScopeKeyFetchResult;
+  try {
+    result = await member.fetch(payload.scopeId, payload.epoch);
+  } catch (error) {
+    if (!(error instanceof E2eeMemberClientError && error.final)) throw error;
+    // No scope id: the line holds only the checked epoch and client text (a status, a bounded Host code, or a cap).
+    return log(`a key package notice for epoch ${payload.epoch} was acknowledged; the Host's answer is final (${error.message})`);
+  }
   if (!result.ok) log(`the key package for ${at} was not opened (${result.reason})`);
 }

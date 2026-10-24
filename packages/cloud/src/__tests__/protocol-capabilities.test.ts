@@ -40,6 +40,7 @@ const EXPECTED_CAPABILITIES = [
   'agent-content-transcript-read',
   'agent-content-artifact-read',
   'sealed-payload-v1',
+  'sealed-output-ciphertext-ref',
   'runtime-failure-class',
 ];
 

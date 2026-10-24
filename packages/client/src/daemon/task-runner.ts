@@ -4162,6 +4162,11 @@ export class TaskRunner {
         // guarantees for genuinely stale terminal messages. Mirrors the
         // same check already used below for the non-turn_end loop exits.
         if (this.tasks.get(active.taskId) !== active) return;
+        // Display only: a delta never reaches the batcher, the record or the reply.
+        if (event.type === 'message_draft_delta') {
+          active.messageDraft?.pushDelta(event.text, event.startsMessage);
+          continue;
+        }
 
         // DaemonConfig.maxInlineEventBytes: bound this ONE event before it is
         // counted, batched, or sent. An oversized `tool_use.input` /

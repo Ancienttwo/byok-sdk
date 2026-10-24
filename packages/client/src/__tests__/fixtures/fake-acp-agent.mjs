@@ -8,7 +8,10 @@
 // The prompt text selects the scenario (see `prompt` below).
 // FAKE_ACP_LOG, when set in the child env, receives one JSON line per
 // observed fact (argv, env, cwd, requests) so a test can assert the wire.
-import { appendFileSync } from 'node:fs';
+// FAKE_ACP_REPLY_GATE=<dir>: the default reply waits for `<dir>/release`
+// after its two chunks and before the prompt answer.
+import { appendFileSync, existsSync } from 'node:fs';
+import path from 'node:path';
 import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
@@ -72,6 +75,15 @@ async function prompt(message) {
     error(message.id, -32603, 'Internal error');
     return;
   }
+  // Grok names the cause of a -32603 in the retry_state that ended its
+  // retries. Both lines go out in one write, so the client reads them in one
+  // pipe chunk, as it does under load.
+  if (input.startsWith('retry-failed-one-write:')) {
+    const retry = { method: '_x.ai/session_notification', params: { sessionId: SESSION, update: { sessionUpdate: 'retry_state', type: 'failed', error_type: input.slice('retry-failed-one-write:'.length) } } };
+    const failed = { id: message.id, error: { code: -32603, message: 'Internal error' } };
+    process.stdout.write([retry, failed].map((frame) => `${JSON.stringify({ jsonrpc: '2.0', ...frame })}\n`).join(''));
+    return;
+  }
   if (input === 'huge') { text('x'.repeat(256 * 1024)); result(message.id, answer()); return; }
   if (input === 'tool') {
     text('Let me look. ');
@@ -129,6 +141,8 @@ async function prompt(message) {
   }
   text('echo:');
   text(input);
+  const gate = process.env.FAKE_ACP_REPLY_GATE;
+  while (gate && !existsSync(path.join(gate, 'release'))) await new Promise((resolve) => setTimeout(resolve, 10));
   result(message.id, answer());
 }
 

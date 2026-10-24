@@ -133,6 +133,21 @@
 //                                          between, as reported downstream
 //                                          in #501. `result.result` carries
 //                                          the text once.
+//   FAKE_CLAUDE_PARTIAL_MESSAGES=1      -> with `--include-partial-messages`
+//                                          in argv, its frames, in the order captured
+//                                          from claude 2.1.302: one
+//                                          `message_start` per message id,
+//                                          then per content block its
+//                                          `content_block_start`, its deltas
+//                                          (two text halves, a thinking and
+//                                          a signature delta, or the tool
+//                                          input JSON), a one-block
+//                                          `assistant` frame, and
+//                                          `content_block_stop`.
+//   FAKE_CLAUDE_REPLY_GATE=<dir>        -> with partial messages, each text
+//                                          block waits for `<dir>/release`
+//                                          after its deltas and before its
+//                                          `assistant` frame.
 //   FAKE_CLAUDE_MCP_STATUS=<json>       -> the `mcp_status` control response
 //                                          body, instead of listing each
 //                                          `--mcp-config` server's tools.
@@ -166,7 +181,7 @@
 //                                          whole point of this toggle.
 
 import { spawn } from 'node:child_process';
-import { appendFileSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { spawnProcessTreeDescendant } from './process-tree-receipt.mjs';
@@ -369,6 +384,7 @@ function runProbeOrTurnFlow() {
     '--input-format': true,
     '--output-format': true,
     '--verbose': false,
+    '--include-partial-messages': false,
     '--model': true,
     '--resume': true,
     '--dangerously-skip-permissions': false,
@@ -376,6 +392,7 @@ function runProbeOrTurnFlow() {
     '--permission-prompt-tool': true,
     '--mcp-config': true,
     '--strict-mcp-config': false,
+    '--settings': true,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -428,6 +445,33 @@ function runProbeOrTurnFlow() {
 
   function send(obj) {
     process.stdout.write(`${JSON.stringify(obj)}\n`);
+  }
+
+  let streamedMessage;
+  async function sendAssistant(frame) {
+    // Real claude streams these frames only under the flag; a dropped flag must fail a test.
+    if (process.env.FAKE_CLAUDE_PARTIAL_MESSAGES !== '1' || !argv.includes('--include-partial-messages')) return send(frame);
+    const message = frame.message;
+    const stream = (event) => send({ type: 'stream_event', event, session_id: reportedSessionId, parent_tool_use_id: null, api_message_id: message.id });
+    if (streamedMessage?.id !== message.id) {
+      streamedMessage = { id: message.id, index: 0 };
+      stream({ type: 'message_start', message: { ...message, content: [] } });
+    }
+    for (const block of message.content) {
+      const index = streamedMessage.index++;
+      const deltas = block.type === 'text'
+        ? [block.text.slice(0, Math.ceil(block.text.length / 2)), block.text.slice(Math.ceil(block.text.length / 2))].map((text) => ({ type: 'text_delta', text }))
+        : block.type === 'thinking'
+          ? [{ type: 'thinking_delta', thinking: block.thinking }, { type: 'signature_delta', signature: block.signature }]
+          : block.type === 'tool_use' ? [{ type: 'input_json_delta', partial_json: JSON.stringify(block.input) }] : [];
+      const empty = block.type === 'text' ? { type: 'text', text: '' } : block.type === 'thinking' ? { type: 'thinking', thinking: '', signature: '' } : { ...block, ...(block.type === 'tool_use' ? { input: {} } : {}) };
+      stream({ type: 'content_block_start', index, content_block: empty });
+      for (const delta of deltas) stream({ type: 'content_block_delta', index, delta });
+      const gate = process.env.FAKE_CLAUDE_REPLY_GATE;
+      while (gate && block.type === 'text' && !existsSync(path.join(gate, 'release'))) await new Promise((resolve) => setTimeout(resolve, 10));
+      send({ ...frame, message: { ...message, content: [block] } });
+      stream({ type: 'content_block_stop', index });
+    }
   }
 
   const rl = createInterface({ input: process.stdin, terminal: false });
@@ -492,7 +536,7 @@ function runProbeOrTurnFlow() {
 
     if (incomingText === 'salesko:find-leads') {
       const toolInput = { company: 'Acme', limit: 2 };
-      send({
+      await sendAssistant({
         type: 'assistant',
         message: { model: 'fake-model', id: `msg_${turn}`, role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: 'mcp__salesko__find_leads', input: toolInput }] },
         session_id: reportedSessionId,
@@ -507,7 +551,7 @@ function runProbeOrTurnFlow() {
       });
     } else if (artifactPath) {
       const resolved = path.resolve(process.cwd(), artifactPath);
-      send({
+      await sendAssistant({
         type: 'assistant',
         message: { model: 'fake-model', id: `msg_${turn}`, role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: 'Write', input: { file_path: resolved, content: process.env.FAKE_CLAUDE_ARTIFACT_CONTENT ?? 'artifact-body' } }] },
         session_id: reportedSessionId,
@@ -531,7 +575,7 @@ function runProbeOrTurnFlow() {
         });
       }
     } else {
-      send({
+      await sendAssistant({
         type: 'assistant',
         message: { model: 'fake-model', id: `msg_${turn}`, role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: 'Bash', input: { command: 'echo hi' } }] },
         session_id: reportedSessionId,
@@ -589,13 +633,13 @@ function runProbeOrTurnFlow() {
       const blocks = [content[0], { type: 'text', text: finalText.slice(0, half) }, { type: 'text', text: finalText.slice(half) }];
       for (const block of blocks) {
         send({ type: 'system', subtype: 'thinking_tokens', session_id: reportedSessionId });
-        send({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}b`, role: 'assistant', content: [block] }, session_id: reportedSessionId });
+        await sendAssistant({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}b`, role: 'assistant', content: [block] }, session_id: reportedSessionId });
       }
     } else {
-      send({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}b`, role: 'assistant', content }, session_id: reportedSessionId });
+      await sendAssistant({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}b`, role: 'assistant', content }, session_id: reportedSessionId });
     }
     if (process.env.FAKE_CLAUDE_REPEAT_CLOSING_TEXT === '1') {
-      send({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}c`, role: 'assistant', content: [{ type: 'text', text: finalText }] }, session_id: reportedSessionId });
+      await sendAssistant({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}c`, role: 'assistant', content: [{ type: 'text', text: finalText }] }, session_id: reportedSessionId });
     }
 
     send({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed' }, session_id: reportedSessionId });

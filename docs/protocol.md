@@ -1142,7 +1142,11 @@ know a sealed type refuses it with `UnknownMessageTypeError`. A sealed type
 also takes every gate of its plaintext type, except the gates of the moved and
 dropped fields. For example, `task.offer_for_agent_sealed` also needs
 `agent-home-contract`, and `harnessId` on `task.offer_sealed` also needs
-`custom-harness`. Sealing never removes a gate.
+`custom-harness`. Sealing never removes a gate. A sealed task output that
+names its ciphertext blob (`sealed.ciphertextRef`) also needs the server flag
+`sealed-output-ciphertext-ref`. The split table marks `task.progress_sealed`
+and `task.await_approval_sealed` `inlineOnly`, so they have no such gate: they
+are always inline.
 
 `PROTOCOL_VERSION` stays 3. `task.offer_prepared`, input preparation, Agent
 messages, egress, drafts and memory projections are not sealed in v1.
@@ -1200,18 +1204,32 @@ family `routine.template`, for every occurrence of one routine version (design
 - `paddedLength` above 256 KiB: `ciphertextRef`, a `BlobRef` without `url`
   whose `size` is `paddedLength + 16`.
 
-**Host check of a `ciphertextRef`.** A sealed hosted entry accepts a
-`ciphertextRef` only when the object with its `contentHash` is `committed` in
-the same tenant, with the declared `size` and `contentType`. Otherwise it
-fails with `coordination_input_invalid` before any task, receipt or mailbox
-write. The receiver checks that the SHA-256 of the bytes it fetches by
+**Host check of a `ciphertextRef`.** A sealed hosted entry, and a sealed
+daemon output, is accepted with a `ciphertextRef` only when the object with
+its `contentHash` is `committed` in the same tenant, with the declared `size`
+and `contentType`. Otherwise a hosted entry fails with
+`coordination_input_invalid`, and a daemon output is refused with
+`payload_invalid`, before any task, receipt or mailbox write. The check binds
+a `ciphertextRef` to the tenant, not to the device that uploaded the object.
+The receiver checks that the SHA-256 of the bytes it fetches by
 `blobId` equals `contentHash`, before it opens them. The task then holds an
 object reference to the object (kind `sealed-task`, id the task id), so
 orphan GC keeps the ciphertext while the task lives. `redactTasks` releases
 the reference. It deletes the object when a stored row of the task still
-names it. Retention can prune the mailbox row of a delivered steer. Then no
-row names its object, and orphan GC deletes the object later. Tenant erasure
-also releases the reference.
+names it. Retention can prune the mailbox row of a delivered steer, and the
+cloud stores no artifact. Then no row names the object, and orphan GC deletes
+it later. `redactTasks` releases the references again after it replaces the
+bodies, so a report that adds a reference while redaction runs holds nothing
+afterwards, and orphan GC deletes its object. Tenant erasure also releases the
+reference. A terminal that loses to the first terminal releases its
+reference only when no reference held the object before it, so one that names
+the task's offer or steer blob leaves that reference in place. A terminal that loses to a redaction tombstone always releases its reference. A losing terminal that names a blob another task holds keeps its own hold until this task is redacted. An artifact that arrives once its task is terminal changes no
+reference: a new one holds nothing, and a replay keeps the reference of its
+earlier delivery. A terminal replayed after redaction is complete as received,
+so the Host does not check its blob. A terminal replay that arrives after
+redaction deleted the object but before it committed its audit receipt fails
+the object check with `payload_invalid`, and the daemon treats that terminal
+as rejected.
 
 **Host comparison of a sealed retry.** The Host compares two sealed
 submissions of one identity by their comparison projection: the plaintext
@@ -1288,10 +1306,32 @@ place of `event`, and `eventIndex` 0, so the tail capacity counts it once. A
 `approvalId` and `sealed`, and no `summary`. The Host resolves it by
 `approvalId`, the same as a plaintext request. A replay under the same source
 envelope is the same entry when its comparison projection (above) is the
-same. A sealed output is inline only: the cloud refuses a sealed output
-that carries `ciphertextRef`, because it does not retain that blob. The cloud
-advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`, because
-it accepts all seven sealed output types.
+same. A sealed terminal or `task.artifact_sealed` carries `ciphertextRef`
+above the inline limit, and the task holds its blob (above), so the
+plaintext limit of each is 2 MiB. `task.progress_sealed` and
+`task.await_approval_sealed` are inline only (`inlineOnly`): their tail rows
+expire, so the cloud refuses either one with `ciphertextRef`
+(`sealed_payload_unsupported`). The device uploads a ciphertext blob first.
+If the device sends the terminal more than one day after the upload, orphan
+GC may have deleted the blob, and the Host then refuses the terminal.
+When the Host refuses a terminal sent by reference for good, because it no
+longer declares `sealed-output-ciphertext-ref` or orphan GC has deleted the
+blob, the daemon settles that terminal once and sends no other terminal, so
+the Host receives none for the task. This is a known limit of this version; a
+later version is to replace the queued terminal with a closed form.
+
+The cloud advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`,
+because it accepts all seven sealed output types. It also advertises
+`sealed-output-ciphertext-ref`, because it holds the blob of a sealed
+terminal or artifact. A device sends a sealed output by `ciphertextRef` only
+to a server that advertises this flag. Without it, the device keeps every
+sealed output inline: a terminal over the inline frame becomes the sealed
+`task.fail` with `reason` `terminal_result_unsealable`, and an artifact over
+it becomes an error event. A terminal whose ciphertext blob the server
+refuses for good also becomes that sealed `task.fail`: a 4xx other than 408
+or 429, except a 401 or 403 from the signed content URL, which the device
+retries with a new reservation. §7.1 answers 401 for a missing, malformed or
+expired signature; an external presigned store may answer 403 instead.
 
 **Drafts and `cloud-do`.** An `agent.message.draft` is plaintext. So the Host
 refuses a draft for a task whose offer has any `sealing`, with
@@ -1334,15 +1374,35 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   top-level field gets 400. The chain append and the package put run the
   same checks as the Host control plane calls `appendMemberChainEntries` and
   `putScopeKeyPackages`.
-- **Proof replay.** A device proof is not single-use on the three writes.
-  Anyone who captures a proof and its body can send them again while the
-  proof's `issuedAt` is within the Host clock skew (60 s by default). A
-  replayed registration extends the pairing MAC expiry, or puts back an older
-  MAC for the same bundle. A replayed package put can overwrite a newer
-  package for the same scope epoch, `keyId` and recipient. A replayed chain
-  append changes nothing. The owner accepted this window for now (owner batch
-  §41a A). Before E2d-5, `requestId` becomes single-use on the three writes,
-  as on the truth put.
+- **Shred.** A chain entry with `op: 'shred'` must have exactly the subject
+  `{ scopeId }` (a nonempty string); any other subject gets 400. A `scopeId`
+  over 512 UTF-16 code units names no Host scope, so the Host stores that
+  entry and does nothing else for it. When the append newly stores a `shred`
+  entry for a shorter `scopeId`, the Host, in the same transaction,
+  deletes the scope's key packages and epochs, records the scope as
+  shredded, and writes the receipt `e2ee-scope-shred:<scopeId>` (an identity
+  receipt) with the entry's seq, the time and who appended it. A replayed
+  `shred` entry deletes nothing again, and a later `shred` of the same scope
+  keeps the first receipt. After a shred, a package put that names the scope
+  gets 409 `e2ee_scope_shredded` and stores nothing, for any epoch. The Host
+  verifies no signature, so any paired device of the tenant can shred a
+  scope on the Host ([security](security.md#deletion-paths)). The Host
+  control plane `appendMemberChainEntries` does the same.
+- **Proof replay.** The proof's `requestId` is single-use per device on the
+  three writes, as on the truth put (owner batch §41a A). The Host records
+  the `requestId` with its binding (`operation`, `resource`, `bodySha256`,
+  `bodySize`) and the write's result, in the same transaction as the write;
+  in Postgres this is `proof_request_receipt`, the table the truth put uses,
+  so a `requestId` is single-use across both. A request with a recorded
+  `requestId` and the same binding writes nothing and gets the recorded
+  result: a replayed registration does not touch the pairing MAC or its
+  expiry, a replayed package put does not overwrite a newer package, and a
+  replayed chain append returns the first counts. A replayed package put
+  still sends the key package notices again, as any successful put does. A
+  recorded `requestId` with another binding gets 409 `proof_request_conflict`
+  and writes nothing. A refused write (any 4xx) records nothing, so the same
+  request can succeed later. A Host control-plane write has no proof and
+  records nothing.
 - **Reads.** A device route checks the bearer against the device row, so a
   revoked or superseded device gets 401. The package read returns only the
   packages addressed to the device's registered member; a query names no
@@ -1356,7 +1416,7 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   | 400 | `coordination_input_invalid`, or an unreadable body |
   | 401 | `unauthorized` |
   | 404 | `e2ee_pairing_mac_not_found` |
-  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_member_key_conflict`, `e2ee_member_not_registered` |
+  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_scope_shredded`, `e2ee_member_key_conflict`, `e2ee_member_not_registered`, `proof_request_conflict` |
   | 413 | the body is over `maxE2eeRequestBytes` |
   | 500 | `e2ee_member_state_unreadable` |
 
@@ -1367,6 +1427,13 @@ pairs with the pairing verification secret `pv` (design §7.2):
 <code>.<pv>`. The CLI splits on the last `.` only under `--e2ee`, because a
 Host's own pairing code may hold a `.`. `pv` never reaches the Host.
 
+A string `<code>.<pv>` that was used once without `--e2ee` is burned. Without
+`--e2ee` the CLI sends the whole string to the Host as the pairing code, so the
+Host learns `pv`. Do not retry that string with `--e2ee`: start a new
+registration from the Host, which gives a new code and a new `pv`. A Host's
+pairing page shows the complete command, with `--e2ee`, so that users copy the
+command and not only the string.
+
 - At pair time the device creates its member keys for the new enrollment,
   stores `pv` with a 10-minute deadline and its bundle in its OS credential
   store, and registers the bundle. A failed registration is retried at start
@@ -1376,10 +1443,22 @@ Host's own pairing code may hold a `.`. `pv` never reaches the Host.
   client's signing key, and walks the chain from seq 1 to the `add(device)`
   that key signed. It stores the anchor and the verified head, then deletes
   `pv`. A relay that does not verify only waits for the next one.
+- Each member request is cut off after 60 s
+  (`MEMBER_REQUEST_TIMEOUT_MS`), and a request of the pairing steps is also
+  cut off at the deadline. An answer that comes back at or after the
+  deadline is not used. The device reads at most 16384 chain entries
+  (`MEMBER_CHAIN_MAX_ENTRIES`, 64 full pages); a longer chain fails closed.
+- Each answer body has a byte cap, and a longer body is cut off unparsed: a
+  chain page at 256 times the largest entry (`MEMBER_CHAIN_PAGE_MAX_BYTES`),
+  a key package, relayed MAC or registration answer at 8 KiB
+  (`MEMBER_OBJECT_MAX_BYTES`), an error body at 1 KiB. A key package read
+  that returns more than one package is refused.
 - Each later start walks the chain from seq 1 again. The stored head must be
   on the new walk, with the same hash at the same seq. A shorter chain or
   another history keeps E2EE off for that run, so a Host cannot rewind the
-  chain to hide a `remove`.
+  chain to hide a `remove`. The start retries the chain read for 10 minutes
+  (`MEMBER_REWALK_TIMEOUT_MS`), then keeps E2EE off for that run. It also
+  deletes a `pv` left over from a pairing whose delete failed.
 - Without `pv`, or with an expired one, the device is no member. Missing or
   malformed member keys are never replaced: the Host keeps the first bundle
   per device, so the recovery is a re-pair, which mints a new device id.
@@ -1435,11 +1514,13 @@ journal, like `provider.provisioning.available`, and never journals it.
   the scope is in its verified chain state and the scope's latest
   `scope-policy` holds both the device and the sender. The sender's signing
   key comes from the verified chain. The opened key stays in memory.
+- Each Host read is cut off after 60 s (`MEMBER_REQUEST_TIMEOUT_MS`).
 - It keeps the row (does not acknowledge) only while the member is still
-  resuming at start, or when a Host read fails. It acknowledges every other
-  end with a log line: no member, an unknown scope, a missing package, or a
-  package that does not open. The first open or seal at that epoch fetches
-  again on its cache miss (E2d-3).
+  resuming at start, or when a Host read fails or times out. It acknowledges
+  every other end with a log line: no member, an unknown scope, a missing
+  package, a package that does not open, or a final Host answer (a 4xx other
+  than 429, a chain or body past its cap, more than one package). The first
+  open or seal at that epoch fetches again on its cache miss (E2d-3).
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
@@ -3183,8 +3264,10 @@ The durable pre-claim admission boundary precedes runtime execution. Startup
 leaves unacknowledged/uncommitted offers for cloud mailbox redelivery, so host
 cancellation can suppress them. An acknowledged or committed unfinished task
 produces `task.fail` with `reason: daemon_interrupted`, `retryable: false`, and
-its original exact AgentRef. The interruption marker and report bytes commit
-atomically. Startup never automatically repeats runtime side effects. The
+its original exact AgentRef, unless the same process still holds that task's
+terminal for commit after a failed stop; that terminal is sent instead. The
+interruption marker and report bytes commit atomically. Startup never
+automatically repeats runtime side effects. The
 existing tenant/task_id remains an immutable execution identity; dispatch with
 an already delivered identity is refused even after mailbox retention.
 

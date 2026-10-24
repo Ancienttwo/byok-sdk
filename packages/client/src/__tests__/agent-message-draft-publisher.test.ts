@@ -198,15 +198,120 @@ describe('AgentMessageDraftPublisher', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('maps Pi opt-in and explicit false while leaving Claude and Codex unset', () => {
+  it('maps Pi opt-in and explicit false, and maps the Claude and Codex opt-in', () => {
     expect(toRuntimeInfoCapabilities(new PiAdapter().descriptor.capabilities).messageDraft).toBe(true);
     expect(toRuntimeInfoCapabilities({ steer: false, resume: false, approvalInteractive: false, messageDraft: false }).messageDraft).toBe(false);
     const claude = new ClaudeAdapter();
     expect(claude.descriptor.progressEventsAreMessages).toBe(true);
     for (const adapter of [claude, new CodexAdapter()]) {
-      expect(adapter.descriptor.capabilities).not.toHaveProperty('messageDraft');
-      expect(toRuntimeInfoCapabilities(adapter.descriptor.capabilities)).not.toHaveProperty('messageDraft');
+      expect(adapter.descriptor.capabilities.messageDraft).toBe(true);
+      expect(toRuntimeInfoCapabilities(adapter.descriptor.capabilities).messageDraft).toBe(true);
     }
+  });
+});
+
+describe('AgentMessageDraftPublisher draft deltas', () => {
+  const payloads = (sent: Draft[]) => sent.map(({ payload: { revision, offset, text } }) => ({ revision, offset, text }));
+
+  it('adds no frame or revision when the progress event matches its deltas', () => {
+    const { publisher, sent, push } = fixture();
+    publisher.pushDelta('Hello ', true);
+    publisher.pushDelta('world', false);
+    publisher.flush();
+    push('Hello world', true);
+    publisher.flush();
+    expect(payloads(sent)).toEqual([{ revision: 2, offset: 0, text: 'Hello world' }]);
+  });
+
+  it('appends the rest when the progress event extends its deltas', () => {
+    const { publisher, sent, push } = fixture();
+    publisher.pushDelta('Hel', true);
+    publisher.flush();
+    push('Hello', true);
+    publisher.flush();
+    expect(payloads(sent)).toEqual([{ revision: 2, offset: 0, text: 'Hel' }, { revision: 2, offset: 3, text: 'lo' }]);
+  });
+
+  it('opens a new revision with the progress text when it diverges from its deltas', () => {
+    const { publisher, sent, push } = fixture();
+    publisher.pushDelta('Helo', true);
+    publisher.flush();
+    push('Hello', true);
+    publisher.flush();
+    expect(payloads(sent)).toEqual([{ revision: 2, offset: 0, text: 'Helo' }, { revision: 3, offset: 0, text: 'Hello' }]);
+  });
+
+  it('resets once at a delta start and still resets at a later message without deltas', () => {
+    const { publisher, sent, push } = fixture();
+    for (const text of ['first', 'second']) {
+      publisher.pushDelta(text, true);
+      push(text, true);
+      publisher.flush();
+    }
+    push('third', true);
+    publisher.flush();
+    expect(payloads(sent)).toEqual([
+      { revision: 2, offset: 0, text: 'first' },
+      { revision: 3, offset: 0, text: 'second' },
+      { revision: 4, offset: 0, text: 'third' },
+    ]);
+  });
+
+  it('reconciles each block of one message against the whole message', () => {
+    const { publisher, sent, push } = fixture();
+    publisher.pushDelta('Part ', true);
+    publisher.pushDelta('one.', false);
+    push('Part one.', true);
+    publisher.pushDelta(' Part two.', false);
+    push(' Part two.', false);
+    publisher.flush();
+    expect(payloads(sent)).toEqual([{ revision: 2, offset: 0, text: 'Part one. Part two.' }]);
+  });
+
+  it('keeps a blank message in the open revision', () => {
+    const { publisher, sent, push } = fixture();
+    publisher.pushDelta('first', true);
+    push('first', true);
+    publisher.pushDelta(' \n', false);
+    push(' \n', false);
+    publisher.flush();
+    expect(payloads(sent)).toEqual([{ revision: 2, offset: 0, text: 'first \n' }]);
+  });
+
+  it('resets at a tool event and keeps unmarked deltas of the next run in one revision', () => {
+    const { publisher, sent, push } = fixture();
+    publisher.pushDelta('Let me look.', false);
+    push('Let me look.');
+    publisher.flush();
+    publisher.push({ type: 'tool_use', tool: 'read', input: {} });
+    publisher.pushDelta('Found ', false);
+    publisher.pushDelta('it.', false);
+    push('Found it.');
+    publisher.flush();
+    expect(payloads(sent)).toEqual([
+      { revision: 1, offset: 0, text: 'Let me look.' },
+      { revision: 2, offset: 0, text: 'Found it.' },
+    ]);
+  });
+
+  it('adds no frame after overflow until the next reset', () => {
+    const { publisher, sent, push } = fixture({ maxBytes: 4 });
+    publisher.pushDelta('hello', true);
+    push('hello', true);
+    publisher.flush();
+    expect(sent.map(e => e.payload)).toEqual([{ agentRef, revision: 2, offset: 0, text: 'hell', overflow: true }]);
+  });
+
+  it('ignores deltas without the server capability and after stop', () => {
+    const quiet = fixture({ capabilities: [] });
+    quiet.publisher.pushDelta('hidden', true);
+    quiet.publisher.flush();
+    expect(quiet.sent).toEqual([]);
+    const { publisher, sent } = fixture();
+    publisher.stop();
+    publisher.pushDelta('late', true);
+    publisher.flush();
+    expect(sent).toEqual([]);
   });
 });
 
@@ -275,7 +380,7 @@ describe('TaskRunner draft reconciliation before publish', () => {
       expect(sent.indexOf(publish)).toBeGreaterThan(sent.findLastIndex(e => e.type === 'agent.message.draft'));
       return { publish, lastFrames };
     };
-    return { runner, session: adapter.sessions[0]!, frames, published,
+    return { runner, sent, session: adapter.sessions[0]!, frames, published,
       contextToken: adapter.startCalls[0]!.ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT! };
   }
 
@@ -384,5 +489,19 @@ describe('TaskRunner draft reconciliation before publish', () => {
     const { publish } = await f.published();
     expect(publish.payload.body).toBe('second');
     expect(f.frames()).toEqual(before);
+  });
+
+  it('routes draft deltas only to the draft lane', async () => {
+    const f = await start(true);
+    f.session.emit({ type: 'message_draft_delta', text: 'draft-only ', startsMessage: true });
+    await vi.waitFor(() => expect(f.frames()).toHaveLength(1));
+    f.session.emit({ type: 'progress', text: 'accepted reply' });
+    f.session.emit({ type: 'turn_end' });
+    const { publish, lastFrames } = await f.published();
+    expect(publish.payload.body).toBe('accepted reply');
+    expect(lastFrames[0]?.payload.revision).toBe(3);
+    const wire = JSON.stringify(f.sent.filter(e => e.type !== 'agent.message.draft'));
+    expect(wire).not.toContain('draft-only');
+    expect(wire).not.toContain('message_draft_delta');
   });
 });

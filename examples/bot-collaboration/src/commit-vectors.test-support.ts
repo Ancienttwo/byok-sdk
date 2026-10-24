@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hash, taskId } from '@byok-sdk/example-host-execution-core';
+import { hash, taskId, type ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from './model';
 import { outcomeSchema } from './schema';
@@ -8,9 +8,10 @@ import type { Command } from './rules/commands';
 import { TeamModeError, type TeamSnapshotBot } from './rules/team';
 import { BOT_TURN_OUTCOME_CONTRACT } from '@byok-sdk/protocol';
 import { OFFER_WAIT_MS, syncTurn, type SyncFacts, type SyncOptions, type SyncStep } from './rules/sync';
-import type { Conclusion, DelegationTimers } from './rules/delegation';
+import type { Conclusion, DelegationTimers, ReplyReadback } from './rules/delegation';
 import type { Json } from './rules/turn';
 import type { CoalescePolicy } from './rules/coalesce';
+import { ROOM_GRACE_MS, roomFields, roomInput, type Seat } from './rules/rooms';
 
 /**
  * #739 D1 commit contract vectors. Each store runs the same cases: the K8 L ledger now, and the H adapter in D2.
@@ -326,46 +327,51 @@ export interface SettlementSubject extends SyncSubject {
   /** A test edit: the intent concludes, with the K4 cancel reason when one is given. */
   conclude(turnId: string, conclusion: Conclusion, cancelReason?: 'cancelled' | 'expired'): void | Promise<void>;
 }
+/** The settlement vectors' steps on the subjects that `open` gives. */
+function settlementSteps<Subject extends SettlementSubject>(open: () => Subject | Promise<Subject>) {
+  /** Syncs until a sync writes nothing. */
+  const settled = async (subject: SettlementSubject, now = VECTOR_NOW, timers?: DelegationTimers) => {
+    for (let round = 0; round < 5; round++) {
+      const before = await subject.stored();
+      await subject.settle(now, timers);
+      if (await subject.stored() === before) return;
+    }
+    throw new Error('The sync does not settle');
+  };
+  let commands = 0;
+  const commit = async (subject: SettlementSubject, command: Command) => {
+    const result = await subject.commit({ scope: subject.scope, commandId: `settle-${++commands}`, command });
+    if (result.disposition.outcome !== 'accepted') throw new Error(`Refused ${command.kind}: ${JSON.stringify(result.disposition)}`);
+    return (result.disposition as { value?: unknown }).value;
+  };
+  /** An owner Turn of the Main Bot that ends with `document` as its outcome. */
+  const owner = async (subject: SettlementSubject, key: string, document: Json) => {
+    const turnId = await commit(subject, { kind: 'input', botId: 'main', key, request: key, sender: 'owner' }) as string;
+    await settled(subject);
+    await commit(subject, { kind: 'outcome', turnId, taskId: taskId(turnId, 0), document });
+    await subject.terminal(turnId, 'task.complete', { document });
+    await subject.conclude(turnId, 'succeeded');
+    await settled(subject);
+    return turnId;
+  };
+  /** The Main Bot delegated to Bot `b`, and B's request Turn froze. Returns the delegation id, which is also that Turn's id. */
+  const delegated = async () => {
+    const subject = await open();
+    await subject.change(state => {
+      Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+      state.team.bots.b = { ...state.team.bots.main!, id: 'b', name: 'B', role: 'Reviewer', mainBot: false, execution: template('device', 'b') };
+    });
+    const root = await owner(subject, 'r1', { delegate: [{ to: 'b', request: 'Check' }] });
+    const id = hash([taskId(root, 0), 'delegate', 0]);
+    expect(await subject.intent(id)).toMatchObject({ key: id });
+    return { subject, root, id, delegation: async () => (await subject.state()).delegations[id]! };
+  };
+  return { settled, commit, owner, delegated };
+}
 export function settlementVectors(name: string, open: () => SettlementSubject | Promise<SettlementSubject>): void {
   describe(`settlement contract: ${name}`, () => {
     const TIMERS: DelegationTimers = { cancelGraceMs: 1_000, uncertainAfterMs: 5_000 };
-    /** Syncs until a sync writes nothing. */
-    const settled = async (subject: SettlementSubject, now = VECTOR_NOW, timers?: DelegationTimers) => {
-      for (let round = 0; round < 5; round++) {
-        const before = await subject.stored();
-        await subject.settle(now, timers);
-        if (await subject.stored() === before) return;
-      }
-      throw new Error('The sync does not settle');
-    };
-    let commands = 0;
-    const commit = async (subject: SettlementSubject, command: Command) => {
-      const result = await subject.commit({ scope: subject.scope, commandId: `settle-${++commands}`, command });
-      if (result.disposition.outcome !== 'accepted') throw new Error(`Refused ${command.kind}: ${JSON.stringify(result.disposition)}`);
-      return (result.disposition as { value?: unknown }).value;
-    };
-    /** An owner Turn of the Main Bot that ends with `document` as its outcome. */
-    const owner = async (subject: SettlementSubject, key: string, document: Json) => {
-      const turnId = await commit(subject, { kind: 'input', botId: 'main', key, request: key, sender: 'owner' }) as string;
-      await settled(subject);
-      await commit(subject, { kind: 'outcome', turnId, taskId: taskId(turnId, 0), document });
-      await subject.terminal(turnId, 'task.complete', { document });
-      await subject.conclude(turnId, 'succeeded');
-      await settled(subject);
-      return turnId;
-    };
-    /** The Main Bot delegated to Bot `b`, and B's request Turn froze. Returns the delegation id, which is also that Turn's id. */
-    const delegated = async () => {
-      const subject = await open();
-      await subject.change(state => {
-        Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
-        state.team.bots.b = { ...state.team.bots.main!, id: 'b', name: 'B', role: 'Reviewer', mainBot: false, execution: template('device', 'b') };
-      });
-      const root = await owner(subject, 'r1', { delegate: [{ to: 'b', request: 'Check' }] });
-      const id = hash([taskId(root, 0), 'delegate', 0]);
-      expect(await subject.intent(id)).toMatchObject({ key: id });
-      return { subject, root, id, delegation: async () => (await subject.state()).delegations[id]! };
-    };
+    const { settled, commit, owner, delegated } = settlementSteps(open);
     const unit = (state: CollaborationState, id: string) => state.units[hash([id, 'B'])]!.state;
 
     const ends: Array<[string, (subject: SettlementSubject, id: string) => Promise<void>, { verdict: string; reason?: string }, 'spent' | 'released']> = [
@@ -480,6 +486,100 @@ export function settlementVectors(name: string, open: () => SettlementSubject | 
         await subject.conclude(id, 'cancelled', 'cancelled');
         await settled(subject);
         expect(await delegation()).toMatchObject({ verdict: 'cancelled', reason: 'main_bot_cancelled', status: 'resolved' });
+      });
+    }
+  });
+}
+
+/** A reply readback through the SDK `tasks.agentMessage`, as the Host binds it. */
+export type ReplyRead = (taskId: string, deviceId: string, agentRef: ExecutionTemplate['payload']['agentRef']) => Promise<ReplyReadback>;
+/**
+ * #793 S7 reply checks. `checkReplies(now, read, timers)` is the Host's reply check at `now`, as L's `flushReplies` runs it:
+ * for each delegation that K8 `replyCheckDue` selects, the chain end's readback through `read`, outside any transaction,
+ * then the K8 `checkReply` decision. It runs no sync. `timers` gives `uncertainAfterMs`.
+ */
+export interface ReplySubject extends SettlementSubject {
+  checkReplies(now: number, read: ReplyRead, timers?: DelegationTimers): void | Promise<void>;
+}
+export function replyVectors(name: string, open: () => ReplySubject | Promise<ReplySubject>): void {
+  describe(`reply check contract: ${name}`, () => {
+    const TIMERS: DelegationTimers = { cancelGraceMs: 1_000, uncertainAfterMs: 5_000 };
+    const { settled, commit, delegated } = settlementSteps(open);
+    /** B's chain end succeeded with no Host reply record, so its delegation waits for a reply check at `VECTOR_NOW`. */
+    const pending = async () => {
+      const h = await delegated();
+      await commit(h.subject, { kind: 'outcome', turnId: h.id, taskId: taskId(h.id, 0), document: {} });
+      await h.subject.terminal(h.id, 'task.complete', { document: {} });
+      await h.subject.conclude(h.id, 'succeeded');
+      await settled(h.subject);
+      expect(await h.delegation()).toMatchObject({ status: 'reply_pending', checks: 0, nextCheckAt: VECTOR_NOW, pendingSince: VECTOR_NOW });
+      const reads: unknown[][] = [];
+      /** A read that records its arguments, then throws `readback` when it is an error, or returns it. */
+      const reader = (readback: ReplyReadback | Error): ReplyRead => async (...args) => {
+        reads.push(args);
+        if (readback instanceof Error) throw readback;
+        return readback;
+      };
+      return { ...h, reads, reader };
+    };
+    const projected = async (h: Awaited<ReturnType<typeof pending>>) => h.subject.projection(`delegation:${h.id}:${(await h.delegation()).revision}`);
+
+    for (const [read, readback] of [['a pending read', {}], ['a read that throws', new Error('down')]] as const) {
+      it(`answers a delegation whose reply body the Host holds, after ${read}`, async () => {
+        const h = await pending();
+        await h.subject.change(state => {
+          state.replies[taskId(h.id, 0)] = { turnId: h.id, messageId: 'm1', contentHash: 'sha256:m1', contentType: 'text/markdown', acceptedAt: VECTOR_NOW, body: 'Done' };
+        });
+        await h.subject.checkReplies(VECTOR_NOW, h.reader(readback));
+        expect(h.reads).toEqual([[taskId(h.id, 0), 'device', template('device', 'b').payload.agentRef]]);
+        const d = await h.delegation();
+        expect(d).toMatchObject({ verdict: 'answered', status: 'resolved', reply: taskId(h.id, 0), replyTurnId: hash(['bot_reply', h.id]) });
+        expect(d).not.toHaveProperty('nextCheckAt');
+        expect(await projected(h)).toEqual([expect.objectContaining({ status: 'resolved', verdict: 'answered' })]);
+      });
+    }
+
+    for (const [read, readback] of [['no message', undefined], ['a refused message', { disposition: { outcome: 'refused' } }]] as const) {
+      it(`fails a delegation whose readback has ${read} (no_reply)`, async () => {
+        const h = await pending();
+        await h.subject.checkReplies(VECTOR_NOW, h.reader(readback));
+        expect(await h.delegation()).toMatchObject({ verdict: 'failed', reason: 'no_reply', status: 'resolved', replyTurnId: hash(['bot_reply', h.id]) });
+      });
+    }
+
+    it('holds a delegation whose message is held, with no verdict and no next check', async () => {
+      const h = await pending();
+      await h.subject.checkReplies(VECTOR_NOW, h.reader({ disposition: { outcome: 'held' } }));
+      const d = await h.delegation();
+      expect(d.status).toBe('reply_held');
+      expect(d).not.toHaveProperty('verdict');
+      expect(d).not.toHaveProperty('nextCheckAt');
+      expect(await projected(h)).toEqual([expect.objectContaining({ status: 'reply_held' })]);
+    });
+
+    it('checks a pending readback again with backoff, not before its time, and shows it as uncertain once uncertainAfterMs passed', async () => {
+      const h = await pending(), read = h.reader({});
+      await h.subject.checkReplies(VECTOR_NOW, read, TIMERS);
+      expect(await h.delegation()).toMatchObject({ status: 'reply_pending', checks: 1, nextCheckAt: VECTOR_NOW + 1000 });
+      await h.subject.checkReplies(VECTOR_NOW + 999, read, TIMERS);
+      expect(h.reads).toHaveLength(1);
+      await h.subject.checkReplies(VECTOR_NOW + 1000, read, TIMERS);
+      expect(await h.delegation()).toMatchObject({ status: 'reply_pending', checks: 2, nextCheckAt: VECTOR_NOW + 3000 });
+      await h.subject.checkReplies(VECTOR_NOW + TIMERS.uncertainAfterMs, read, TIMERS);
+      const d = await h.delegation();
+      expect(d).toMatchObject({ status: 'uncertain', uncertainSince: VECTOR_NOW + TIMERS.uncertainAfterMs, checks: 3,
+        nextCheckAt: VECTOR_NOW + TIMERS.uncertainAfterMs + 4000 });
+      expect(d).not.toHaveProperty('verdict');
+      expect(h.reads).toHaveLength(3);
+    });
+
+    for (const [read, readback] of [['a read that throws', new Error('down')], ['an accepted message with no Host record', { disposition: { outcome: 'accepted' } }]] as const) {
+      it(`checks again after ${read}`, async () => {
+        const h = await pending();
+        await h.subject.checkReplies(VECTOR_NOW, h.reader(readback));
+        const d = await h.delegation();
+        expect(d).toMatchObject({ status: 'reply_pending', checks: 1, nextCheckAt: VECTOR_NOW + 1000 });
+        expect(d).not.toHaveProperty('verdict');
       });
     }
   });
@@ -655,6 +755,111 @@ export function cardVectors(name: string, open: () => CardSubject | Promise<Card
       expect(await subject.projection('card:c1:confirmed')).toEqual([expect.objectContaining({ id: 'c1', state: 'confirmed', result: { sent: true } })]);
       expect((await subject.state()).turns[result]).toMatchObject({ source: 'action_result',
         request: JSON.stringify({ cardId: 'c1', state: 'confirmed', conclusion: 'succeeded', result: { sent: true } }) });
+    });
+  });
+}
+
+/**
+ * #793 S6: the room step of the Host sync. `sync(now)` is one Host sync at `now`, in L's order: the room step (K8
+ * `advanceRoomSeats` on the seat facts of the K4 intents), then the Turn steps of the sync contract. A store may run more
+ * rounds in one sync. `claim` is a test edit: a device claimed the first attempt of the Turn's intent (K4 `Execution.started`).
+ * `cancelReason` reads the K4 cancel reason of the Turn's intent.
+ */
+export interface RoomSubject extends Omit<SyncSubject, 'sync'> {
+  sync(now: number): void | Promise<void>;
+  claim(turnId: string): void | Promise<void>;
+  cancelReason(turnId: string): string | undefined | Promise<string | undefined>;
+}
+export { ROOM_GRACE_MS };
+/**
+ * The room vectors' seed edit: `t1` concluded, the card `c1` kept pending, Bot `b` beside `main` on the same device, and room
+ * `r` with both. An owner message mentions `b`, then `main`, so its round has `b`'s seat first.
+ */
+export function seedRoom(state: CollaborationState): void {
+  Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+  state.cards.c1!.expiresAt = Number.MAX_SAFE_INTEGER;
+  state.team.bots.b = { ...state.team.bots.main!, id: 'b', name: 'B', role: 'Reviewer', mainBot: false, execution: template('device', 'b') };
+  state.team.rooms.r = { id: 'r', ...roomFields(state.team, { name: 'Room', members: ['main', 'b'] }), messages: [] };
+  roomInput(state.team, 'm1', 'r', 'Hello', ['b', 'main']);
+}
+export function roomVectors(name: string, open: () => RoomSubject | Promise<RoomSubject>): void {
+  describe(`room contract: ${name}`, () => {
+    const opened = async () => {
+      const subject = await open();
+      await subject.change(seedRoom);
+      const round = Object.values((await subject.state()).team.rounds)[0]!;
+      const seats = async (): Promise<Seat[]> => { const team = (await subject.state()).team; return round.seats.map(id => team.seats[id]!); };
+      return { subject, round, first: round.seats[0]!, second: round.seats[1]!, seats };
+    };
+
+    it('queues the first seat as a room_slot Turn with Bot authority, and freezes it in the same sync', async () => {
+      const { subject, round, first, second, seats } = await opened();
+      await subject.sync(VECTOR_NOW);
+      expect(await seats()).toMatchObject([{ botId: 'b', status: 'queued', released: false, deadline: VECTOR_NOW + ROOM_GRACE_MS },
+        { botId: 'main', status: 'waiting', released: false }]);
+      const state = await subject.state();
+      expect(state.turns[first]).toMatchObject({ id: first, root: first, source: 'room_slot', botId: 'b', hop: 0, authority: 'bot',
+        request: JSON.stringify({ roomId: 'r', roundId: round.id, request: 'Hello', requestFrom: 'user' }) });
+      expect(await subject.intent(first)).toMatchObject({ key: first, source: 'bot' });
+      expect(state.turns[second]).toBeUndefined();
+      const before = await subject.stored();
+      await subject.sync(VECTOR_NOW);
+      expect(await subject.stored()).toBe(before);
+    });
+
+    it('cancels an unclaimed seat at its deadline as busy, and queues the next seat', async () => {
+      const { subject, first, second, seats } = await opened(), deadline = VECTOR_NOW + ROOM_GRACE_MS;
+      await subject.sync(VECTOR_NOW);
+      await subject.sync(deadline - 1);
+      expect((await seats())[0]).toMatchObject({ status: 'queued', released: false });
+      expect(await subject.cancelReason(first)).toBeUndefined();
+      await subject.sync(deadline);
+      expect(await seats()).toMatchObject([{ status: 'busy', released: true }, { status: 'queued', released: false, deadline: deadline + ROOM_GRACE_MS }]);
+      expect(await subject.cancelReason(first)).toBe('cancelled');
+      expect((await subject.state()).turns[second]).toMatchObject({ source: 'room_slot', botId: 'main', authority: 'bot' });
+      expect(await subject.intent(second)).toMatchObject({ key: second, source: 'bot' });
+    });
+
+    it('releases a claimed seat as late at its running deadline, with no cancel, and queues the next seat', async () => {
+      const { subject, first, seats } = await opened(), started = VECTOR_NOW + 5;
+      await subject.sync(VECTOR_NOW);
+      await subject.claim(first);
+      await subject.sync(started);
+      expect((await seats())[0]).toMatchObject({ status: 'running', released: false, startedAt: started, deadline: started + ROOM_GRACE_MS });
+      await subject.sync(started + ROOM_GRACE_MS);
+      expect(await seats()).toMatchObject([{ status: 'late', late: true, released: true }, { status: 'queued', released: false }]);
+      expect(await subject.cancelReason(first)).toBeUndefined();
+    });
+
+    it('releases a seat whose Turn concluded with no speech as failed, and queues the next seat', async () => {
+      const { subject, first, seats } = await opened();
+      await subject.sync(VECTOR_NOW);
+      await subject.concludeIntent(first, 'failed');
+      await subject.sync(VECTOR_NOW + 1);
+      expect(await seats()).toMatchObject([{ status: 'failed', released: true, reason: 'failed' }, { status: 'queued', released: false }]);
+    });
+
+    it('removes the admitted seat of a Bot that left the room, cancels its work, and queues the next seat', async () => {
+      const { subject, first, second, seats } = await opened();
+      await subject.sync(VECTOR_NOW);
+      await subject.change(state => { state.team.rooms.r!.members = ['main']; });
+      await subject.sync(VECTOR_NOW + 1);
+      expect(await seats()).toMatchObject([{ status: 'removed', released: true }, { status: 'queued', released: false }]);
+      expect(await subject.cancelReason(first)).toBe('cancelled');
+      expect((await subject.state()).turns[second]).toMatchObject({ source: 'room_slot', botId: 'main' });
+    });
+
+    it('fails the unadmitted seat Turn of a Bot that left the room with cancelled', async () => {
+      const { subject, second, seats } = await opened();
+      // The second seat Turn exists without an intent: the room step has not queued it, so nothing froze it.
+      await subject.change(state => {
+        state.turns[second] = { id: second, root: second, source: 'room_slot', request: '{}', botId: 'main', hop: 0, authority: 'bot', status: 'queued' };
+        state.team.rooms.r!.members = ['b'];
+      });
+      await subject.sync(VECTOR_NOW);
+      expect((await seats())[1]).toMatchObject({ status: 'removed', released: true });
+      expect((await subject.state()).turns[second]).toMatchObject({ status: 'failed', conclusion: 'cancelled' });
+      expect(await subject.intent(second)).toBeUndefined();
     });
   });
 }

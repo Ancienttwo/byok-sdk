@@ -1,31 +1,19 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
+import { code, imports } from './import-scan.test-support';
 
 /**
  * #606 §5.5: `rules/` can be copied alone. Its files import only `@byok-sdk/protocol`, `@byok-sdk/core`,
- * `hash` and `canonical` of the K4 core, and other files in `rules/`. Rule tests can also import vitest.
+ * `hash` and `canonical` of the K4 `/canonical` entry, and other files in `rules/`. Rule tests can also import vitest.
  * So no rule and no rule test reaches `LedgerState`, `HostLedger`, `stateOf` or `CollaborationState`.
+ * #884: the K4 root entry loads `node:sqlite` and `node:async_hooks`, so the rules never import it.
  */
 const RULES = new URL('./rules/', import.meta.url);
-const K4 = '@byok-sdk/example-host-execution-core';
+const K4_ROOT = new URL('../../host-execution-core/', import.meta.url);
+const K4 = '@byok-sdk/example-host-execution-core/canonical';
 const K4_NAMES = new Set(['hash', 'canonical']);
 const HOST_STATE = /\b(?:LedgerState|HostLedger|stateOf|CollaborationState)\b/;
 
-/** Drops comments, so a scan sees code and not prose about code. */
-function code(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
-}
-/** Static imports and re-exports, also on several lines, with their named bindings; then side-effect imports, `import()` and `require()`. */
-function imports(source: string): Array<{ from: string; names?: string[] }> {
-  const text = code(source), found: Array<{ from: string; names?: string[] }> = [];
-  for (const [, clause, from] of text.matchAll(/\b(?:import|export)\b([^'"`;]*?)\bfrom\s*['"]([^'"]+)['"]/g)) {
-    const list = /\{([^}]*)\}/.exec(clause!)?.[1];
-    found.push({ from: from!, ...(list === undefined ? {} : {
-      names: list.split(',').map(name => name.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]!).filter(Boolean) }) });
-  }
-  for (const [, from] of text.matchAll(/\b(?:import\s*\(?|require\s*\()\s*['"]([^'"]+)['"]/g)) found.push({ from: from! });
-  return found;
-}
 function violations(file: string, source: string): string[] {
   const allowed = ({ from, names }: { from: string; names?: string[] }) => from === '@byok-sdk/protocol' || from === '@byok-sdk/core'
     || from === K4 && !!names?.length && names.every(name => K4_NAMES.has(name))
@@ -56,7 +44,15 @@ it('finds a boundary break in each import form that it reads', () => {
     'sample.ts: @byok-sdk/example-host-execution-core', 'sample.ts: vitest {expect}', 'sample.ts: node:fs', 'sample.ts: ./../team',
     'sample.ts: names Host ledger state',
   ]);
-  expect(violations('sample.test.ts', "import { expect } from 'vitest';\nimport { canonical, hash } from '@byok-sdk/example-host-execution-core';")).toEqual([]);
+  expect(violations('sample.test.ts', "import { expect } from 'vitest';\nimport { canonical, hash } from '@byok-sdk/example-host-execution-core/canonical';")).toEqual([]);
+  expect(violations('sample.ts', "import { hash } from '@byok-sdk/example-host-execution-core';"))
+    .toEqual(['sample.ts: @byok-sdk/example-host-execution-core {hash}']);
+});
+
+it('#884: the K4 entry of the rules loads only node:crypto', () => {
+  const exports = (JSON.parse(readFileSync(new URL('package.json', K4_ROOT), 'utf8')) as { exports: Record<string, string> }).exports;
+  const entry = new URL(exports['./canonical']!, K4_ROOT);
+  expect(imports(readFileSync(entry, 'utf8'))).toEqual([{ from: 'node:crypto', names: ['createHash'] }]);
 });
 
 it('holds the #739 D1 pure modules under the boundary', () => {

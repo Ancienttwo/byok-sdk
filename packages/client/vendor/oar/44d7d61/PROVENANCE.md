@@ -2,7 +2,7 @@
 
 Source: https://github.com/botiverse/oar, version 0.70.0, fixed commit `44d7d61c558eef8ac3e61ecc54a8d4962eacadbd`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 81 source files plus LICENSE. Seventy-three source files keep upstream bytes. Eight source files contain BYOK changes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) and the Grok Build session (`runtimes/grok/session.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok install, update, inventory, model-list and account-usage modules are not included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 81 source files plus LICENSE. Seventy-two source files keep upstream bytes. Nine source files contain BYOK changes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) and the Grok Build session (`runtimes/grok/session.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok install, update, inventory, model-list and account-usage modules are not included.
 
 The SDK typechecks this source with the ES2024 library (`packages/client/tsconfig.json`, `scripts/api-surface/tsconfig.oar-bridge.json`). The emit target stays ES2022, and the Node 24 engine floor provides the ES2023/ES2024 built-ins upstream uses (`Array.prototype.toSorted`, `Promise.withResolvers`).
 
@@ -18,6 +18,7 @@ Policy: follow upstream. A file is maintained only where the SDK's ownership of 
 - `shared/acp/session.ts`. Invariants: the caller owns every process and the environment, and the record consumer sees every record. `acpSession(profile)` returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit env. It returns the raw AdapterSession without `sealSession` or `withSessionCredentials`. It builds one `sessionCredentialRedactor` per open, creates the upstream kernel with it as the `redact` hook, and redacts errors from the open path and every control. The `onRecord` hook is registered as a kernel observer before the recorder binds.
 - `shared/acp/terminal.ts`. Invariant: every process the SDK starts is inside its process-tree authority. Each `terminal/create` command is spawned, adopted and reaped by the injected terminal spawn, with the session env plus the request's env entries. A released or disposed terminal stays tracked until its tree is gone. One disposal serves concurrent callers, so the session's dispose waits for the reap that the exit observer started. A failed reap is reported, and a later dispose retries every tree still alive. A `terminal/create` after disposal began is refused.
 - `shared/acp/client-app.ts`. Invariant: no permission request gets a permissive fallback. Every `session/request_permission` is answered `cancelled`, and the request and answer stay recorded.
+- `shared/acp/turns.ts`. Invariant: a failed prompt reads its turn frames only after the notifications received before the failure are recorded. A rejected `session/prompt` yields one event-loop turn before it reads its frames and picks the failure outcome, as `promptAcp` already does after a successful answer. The yield is bounded by that one turn, because the official SDK dispatches a notification through promise handlers only, with no timers.
 
 The SDK adapters own the retained-record budget (`maxRetainedBytes`, default 16 MiB) and the Codex operation deadlines (`operationTimeoutMs`, default 30000ms); see the last history section. The SDK releases the retained stream at completion. The SDK JS/declaration bridge (`src/runtime/codex-session-runtime.{js,d.ts}`) exposes text-only `prompt` and `steer`, `abort`, `records` and `dispose`; `scripts/api-surface/oar-bridge-types.ts` checks it against these sources.
 
@@ -393,6 +394,25 @@ browser handling (0.69.0), and `@cursor/sdk` 1.0.38 → 1.0.40 with Cursor
 runtime strings (0.70.0). The source inventory and npm dependencies stay the
 same. Build assets copy this source provenance to
 `dist/assets/provenance/oar/44d7d61/`.
+
+### Failed-prompt settle (#869)
+
+Same base commit `44d7d61c558eef8ac3e61ecc54a8d4962eacadbd`. `shared/acp/turns.ts`
+becomes maintained, so the maintained set grows from eight files to nine.
+
+The race: grok sends a `retry_state` notification and then the `-32603` error
+for the same prompt. When both lines arrive in one pipe read, ACP SDK 1.4.0
+runs the notification through its async handler chain but rejects the pending
+prompt at once. The error branch then read the turn frames before the
+notification was recorded, so `grokFailureOutcome` found no `retry_state` and
+the generic text rule classified "Internal error" as `provider`. Under load
+this lost the real class (`input_too_large`, `auth`, `rate_limited`).
+
+BYOK change: the error branch yields one event-loop turn (`setImmediate`)
+before it reads the turn frames, the same yield `promptAcp` takes on success.
+The process-exit branch, the success path and the failure tables are
+unchanged. Upstream OAR `main` still reads the frames without the yield. When
+upstream fixes it, a re-vendor returns this file to upstream bytes.
 
 ### Failure class reaches the terminal (#869)
 
