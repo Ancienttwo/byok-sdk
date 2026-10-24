@@ -411,7 +411,7 @@ export function selectImpact(paths, context = {}) {
     }
     if (oarSnapshotListed(path, context)) { dirs.add('packages/client'); continue; }
     // The client build copies vendor notices and OAR provenance into dist.
-    if (path === 'packages/client/scripts/build-todo-assets.mjs' || path === 'packages/client/vendor/THIRD-PARTY.md') {
+    if (path === 'packages/client/scripts/build-todo-assets.mjs' || path === 'packages/client/vendor/THIRD-PARTY.md' || path === 'packages/client/vendor/third-party-manifest.json') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
     // The OAR bridge contract: run-targeted runs check-oar-bridge.test.mjs
