@@ -171,11 +171,19 @@ The terminal transaction delivers the Main Bot cancel that its outcome froze, af
 version switch, as L runs `core.cancel` after its terminal transaction. An untried target concludes `cancelled` there;
 the verdict comes at the next sync of the scope.
 
-H does not yet run these L sync and pass steps: card expiry, `advanceRooms`, the card decision projections and their
-`action_result` Turns, the reply checks (`reconcileReply`, `retryReply`), the device observation (`observeDevices`),
-and the card and Agent home flushes. The due scheduler syncs a scope when one of the due times is reached (see Due
-scheduler). Until H runs the step that clears it, that sync leaves the scope due, and the scheduler reports the scope as
-stalled.
+### Card steps
+
+Each sync round runs the K8 card rule (`rules/cards.ts`, through `./rules/commands`) at L's positions (#793 S5):
+`expireCards` before the Turn steps, so a ContextPack frozen in that round shows each expiry, and `reportCardDecisions`
+after the settlement. A decided card is projected once as `card:<id>:<state>`; a confirmed card waits for its result or
+error. A confirmed or rejected card then adds its `action_result` Turn, so the round runs again and freezes it. An expired
+card starts no Turn. The due scheduler syncs a scope when a card's `expiresAt` is reached. H has no connector step (L's
+`flushCards`), so in H a confirmed card never gets its result: it is not reported and gets no `action_result` Turn.
+
+H does not yet run these L sync and pass steps: `advanceRooms`, the reply checks (`reconcileReply`, `retryReply`), the
+device observation (`observeDevices`), and the card and Agent home flushes. The due scheduler syncs a scope when one of
+the due times is reached (see Due scheduler). Until H runs the step that clears it, that sync leaves the scope due, and
+the scheduler reports the scope as stalled.
 
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
 record and keeps the revision. A throw writes nothing. The rule's `executionStarted` fact is the intent's `started`
@@ -285,6 +293,10 @@ occurrences (D2f-3).
   `routineCommands` with the K8 calendar.
 - `updateRoutine(scope, botId, action, now)` and `setRoutineLifecycle(scope, botId, id, lifecycle, now)` are the owner
   API for the Main Bot's routines, as in L. The caller names the acting Bot, and it must be the Main Bot.
+- The keyless K8 `end_routine { botId, routineId }` command, through `commit`, completes any open Bot routine, an archived
+  owner's too, as L `endRoutine` does (§55c). The store loads the slice for it and owns its `routines` port, so a caller's
+  port never reaches the command. A new acceptance writes the slice back and switches each due version of the scope, as
+  the owner API does.
 - H runs only `bot-routine` routines. A Host-job or execution-template routine is refused.
 - Each transaction that can conclude routine work then switches a staged version that is due: the claim expiry, the
   sync, the reconciliation conclude, the terminal transaction and the owner API. K4 does this after each drain; H has
@@ -344,8 +356,8 @@ did not change, so a step that keeps it does not rewrite the scope row. A sync r
 It calls the deployment's `sync(scope, now)`, which runs `store.sync` with the deployment's sync options, and reads the
 clock for each sync; the pass time only selects the scopes. Only syncs count against `batch` (default 100).
 
-- A sync that leaves the scope due is reported in `stalled`. That covers the times whose step H does not yet run: card
-  expiry (#864), seat deadlines (`advanceRooms`, S6) and the reply checks (S7). A sync that
+- A sync that leaves the scope due is reported in `stalled`. That covers the times whose step H does not yet run: seat
+  deadlines (`advanceRooms`, S6) and the reply checks (S7). A sync that
   throws is reported in `failed` and wrote nothing. Either scope waits `backoffMs` (default 60 s, in memory only)
   before its next sync, so it is synced at most once per backoff, and each pass reports it again when it is retried.
 - H has no timer. The deployment runs `run()` on its own interval, which bounds how late a due step runs.
@@ -468,7 +480,7 @@ three and runs these suites.
   promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, and the
   `bot-routine` refusal.
 - The D2f-1 routine vectors (`routineVectors`) run on the store, with the scheduler fire and a submitter pass on an SDK
-  tenant in memory.
+  tenant in memory. The `end_routine` tests cover a refusal that writes nothing and a caller's `routines` port.
 - The K8 delivery vectors (`deliveryVectors`) run on the store, its inbound entry and the outbox sender, all 21. After each Host step, the delivery outbox index matches the K8 entities. The
   sender tests cover the projection claim, lease, fence, backoff, race, order and version filter, the archived and
   missing delivery entity, the retention refusal of an unsettled delivery row, a terminal delivery on the reply route,
@@ -486,6 +498,8 @@ three and runs these suites.
 - The K8 coalesce vectors (`coalesceVectors`) run on the store, as on L: a busy Bot's inputs join one batch, the window
   and idle seals, a full batch sealed before any sync, and no batch without a policy. H tests add the policy checks, an
   input admission that a caller cannot replace, and an idle seal in a later round of one sync.
+- The K8 card vectors (`cardVectors`) run on the store, as on L: the expiry before a freeze, the decision projection once,
+  the `action_result` Turn of a rejected card, and a confirmed card that waits for its result.
 - The settlement tests build each delegation through the product path (an outcome `delegate`, then a sync), and cover
   each verdict, the units, `target_archived`, the timers, the late terminal audit, the Main Bot cancel in the terminal
   transaction, a rollback, the settlement facts, a verdict at the sync of a reported scope, and the store's refusal of

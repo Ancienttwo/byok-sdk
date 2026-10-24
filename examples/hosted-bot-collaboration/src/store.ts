@@ -1,13 +1,13 @@
 import type { Pool, PoolClient } from 'pg';
 import { canonical, hash, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
-import { botRoutines, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
+import { botRoutines, endable, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
 import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { collaborationDue, commitCommand, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type SyncOptions,
-  type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { collaborationDue, commitCommand, expireCards, reportCardDecisions, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers,
+  type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, bindDevice, revokeDevice } from './binding';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
@@ -47,10 +47,11 @@ export interface SyncResult { dueAt: number | null }
 export type PortsFactory = (state: CollaborationState, publish: Publish) => Omit<CommandPorts, 'intents' | 'deliver'>;
 /**
  * The ports of `commit()`. It refuses the callback commands, so it takes no callback ports (#793 D2f-6). The store owns the
- * inbound `remember` port, which only `receive()` gives (#793 D2b-out-3), and the input admission, with its coalesce policy.
+ * inbound `remember` port, which only `receive()` gives (#793 D2b-out-3), the input admission, with its coalesce policy, and
+ * the `routines` port of `end_routine` (§55c).
  */
-export type CommitPorts = Omit<CommandPorts, 'intents' | 'deliver' | 'outcome' | 'occurrence' | 'remember' | 'admitInput'>
-  & { outcome?: never; occurrence?: never; remember?: never; admitInput?: never };
+export type CommitPorts = Omit<CommandPorts, 'intents' | 'deliver' | 'outcome' | 'occurrence' | 'remember' | 'admitInput' | 'routines'>
+  & { outcome?: never; occurrence?: never; remember?: never; admitInput?: never; routines?: never };
 export type CommitPortsFactory = (state: CollaborationState, publish: Publish) => CommitPorts;
 /**
  * The ports of `finish()`: the commit ports and the team management port of an outcome. The store builds the committed
@@ -155,6 +156,9 @@ export class HostedCollaborationStore {
    * host.ts `cancelTurn`): the commit, the cancel of the intent, then the version switch check (#793 D2f-4). A new commit
    * that leaves a delegation cancel fact to deliver (`cancel_turn` of an open chain, `cancel_delegation`,
    * `abandon_delegation`) delivers it in the same transaction, as L `settleChain` does after its commit.
+   *
+   * `end_routine` (§55c) runs on the routine slice of the scope, as L `endRoutine` runs K4 `setLifecycle` in its commit: the store
+   * gives the K8 rule its `routines` port, and a new acceptance writes the slice back.
    */
   commit(scope: string, request: CommitRequest<Command>, ports: CommitPortsFactory): Promise<CommitResult> {
     if (CALLBACK_KINDS.has(request.command.kind)) return Promise.reject(new CallbackCommandError(request.command.kind));
@@ -223,9 +227,12 @@ export class HostedCollaborationStore {
     const key = storedKey(scope);
     return this.change(scope, request.commandId, async (state, publish, client) => {
       // The store admits each input with its own policy, as L does (K8 host.ts `commitOwner`), so the admission and the sync's
-      // seal use one policy. The key is always set, so a caller's port never reaches the command.
+      // seal use one policy. The keys are always set, so a caller's port never reaches the command, even through a cast.
       const own = ports(state, publish), head = revisionOf(state);
-      const base = { ...own, admitInput: (fields: InputFields) => admitUserInput(state, fields, this.coalesce, own.now()) };
+      const slice = request.command.kind === 'end_routine' ? await loadSlice(client, key) : undefined;
+      const commands = slice && hostedRoutineCommands(slice, own.now());
+      const base = { ...own, admitInput: (fields: InputFields) => admitUserInput(state, fields, this.coalesce, own.now()),
+        routines: commands && { end: (id: string) => commands.lifecycle(endable(commands.list(), id).definition.id, 'completed') } };
       const result = await commitStored(client, scope, state, request, base, this.channel);
       // A new commit moves the head by 1. A replay returns its first result and writes nothing.
       if (result.revision !== head + 1) return { value: result, outbox: [] };
@@ -236,6 +243,10 @@ export class HostedCollaborationStore {
         await cancelIntent(client, scope, value.target, now);
         await switchDueVersions(client, key, now);
       } else if (value?.deliver) await deliverCancels(client, scope, state, base.now());
+      if (slice && result.disposition.outcome === 'accepted') {
+        await writeSlice(client, key, slice);
+        await switchDueVersions(client, key, base.now());
+      }
       return { value: result, outbox: result.outbox, now: base.now() };
     });
   }
@@ -266,7 +277,7 @@ export class HostedCollaborationStore {
       for (const query of [
         'SELECT state_version, frame::text, due_at::text FROM scope WHERE scope = $1',
         'SELECT kind, key, ordinal::text, body::text FROM entity WHERE scope = $1 ORDER BY kind, key',
-        'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, position',
+        'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, entry.position',
         'SELECT key, ordinal::text, evidence, result::text, root FROM command WHERE scope = $1 ORDER BY key',
         'SELECT key, ordinal::text, kind, body::text FROM outbox WHERE scope = $1 ORDER BY key',
         `SELECT key, task_id, ordinal::text, agent, source, input::text, wait_until::text, submission, tries, next_at::text, last_error,
@@ -292,11 +303,12 @@ export class HostedCollaborationStore {
    *
    * Each round then runs the K8 delegation settlement at L's position, after the Turn steps (K8 host.ts sync), on the intent
    * facts read again after those steps wrote. Then it delivers each new delegation cancel fact in the same transaction, as
-   * the L pass does after its sync (#793 D2f-5).
+   * the L pass does after its sync (#793 D2f-5). The K8 card steps run at L's positions too (#793 S5): `expireCards` before
+   * the Turn steps, and `reportCardDecisions` after the settlement. A decided card's `action_result` Turn starts a new round.
    *
    * It runs to a fixed point, as the L pass drains again after a step that changed K4 (K8 host.ts pass): while a round
    * froze, promoted or concluded an intent or an occurrence, delivered a cancel fact, or added a Turn (the `bot_reply` of a
-   * batch join), it reads the facts again and runs the Turns again. Each such step happens once per intent, occurrence,
+   * batch join, or an `action_result`), it reads the facts again and runs the Turns again. Each such step happens once per intent, occurrence,
    * fact or join, so the rounds end.
    */
   async sync(scope: string, options: HostedSyncOptions): Promise<SyncResult> {
@@ -311,6 +323,8 @@ export class HostedCollaborationStore {
       while (more) {
         // As L's sync, a batch sealed here gets its Turn's step in this round, before later Turns of its Bot.
         sealDueBatches(state, this.coalesce, options.now);
+        // As L's sync, card expiry runs before the Turn steps, so a ContextPack frozen in this round shows it.
+        expireCards(state, options.now);
         const facts = await syncFacts(client, scope, Object.keys(state.turns));
         const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
         for (const turn of Object.values(state.turns)) {
@@ -321,6 +335,7 @@ export class HostedCollaborationStore {
         for (const [turn, step] of steps) more = await writeSyncStep(client, scope, turn, step, slice, options.now) || more;
         const turns = Object.keys(state.turns).length;
         settleDelegations(state, await settleFacts(client, scope, Object.keys(state.turns)), options.now, emit, this.timers);
+        reportCardDecisions(state, emit);
         more = await deliverCancels(client, scope, state, options.now) || Object.keys(state.turns).length > turns || more;
       }
       await writeSlice(client, key, slice);
@@ -634,14 +649,14 @@ export class HostedCollaborationStore {
     const rows: Split & { ordinals: Map<EntityKind, Map<string, number>> } =
       { frame, entities: new Map(), entries: new Map(), commands: new Map(), ordinals: new Map() };
     const entities = await client.query<{ kind: EntityKind; key: string; ordinal: string; body: string }>(
-      'SELECT kind, key, ordinal::text, body::text FROM entity WHERE scope = $1 ORDER BY kind, ordinal', [scopeKey]);
+      'SELECT kind, key, ordinal::text, body::text FROM entity WHERE scope = $1 ORDER BY kind, entity.ordinal', [scopeKey]);
     for (const row of entities.rows) {
       if (!rows.entities.has(row.kind)) { rows.entities.set(row.kind, new Map()); rows.ordinals.set(row.kind, new Map()); }
       rows.entities.get(row.kind)!.set(row.key, row.body);
       rows.ordinals.get(row.kind)!.set(row.key, Number(row.ordinal));
     }
     const entries = await client.query<{ kind: EntryKind; owner: string; position: string; body: string }>(
-      'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, position', [scopeKey]);
+      'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, entry.position', [scopeKey]);
     for (const row of entries.rows) {
       const group = entryGroup(row.kind, row.owner);
       if (!rows.entries.has(group)) rows.entries.set(group, { kind: row.kind, owner: row.owner, bodies: [] });
