@@ -31,8 +31,8 @@ export async function processE2eeKeyPackageNotice(
     result = await member.fetch(payload.scopeId, payload.epoch);
   } catch (error) {
     if (!(error instanceof E2eeMemberClientError && error.final)) throw error;
-    // The message is client text: the status, a bounded Host code, or the cap that refused the answer.
-    return log(`the key package for ${at} was not fetched; the Host's answer is final (${error.message})`);
+    // No scope id: the line holds only the checked epoch and client text (a status, a bounded Host code, or a cap).
+    return log(`a key package notice for epoch ${payload.epoch} was acknowledged; the Host's answer is final (${error.message})`);
   }
   if (!result.ok) log(`the key package for ${at} was not opened (${result.reason})`);
 }
