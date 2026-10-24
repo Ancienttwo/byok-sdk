@@ -106,6 +106,11 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
       let child = first;
       /** A worker ended on its own, and its recovery is in progress or was refused. */
       let crashed = false;
+      /** An acknowledgement the worker's own exit rejected ends the run as that exit. */
+      const ack = (message: Parameters<PiRpcClient['send']>[0]) => child.send(message).catch((error: unknown) => {
+        crashed = child.processExited;
+        throw error;
+      });
       try {
         for (;;) {
           let fatal = false;
@@ -115,13 +120,13 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
               if(typeof frame.pid!=='number'||workerPid===undefined||closing||!context.lifecycle.ownsLease())throw new Error('durable shell ownership refused');
               assertDurableShellOwner(frame.pid,workerPid);shellGroups.add(frame.pid);
               if(closing||!context.lifecycle.ownsLease())throw new Error('durable shell lease ended');
-              await child.send({type:'shell_ack',pid:frame.pid});
+              await ack({ type: 'shell_ack', pid: frame.pid });
             } else if(frame.type==='tool_process_closed'){
               if(typeof frame.pid!=='number'||!shellGroups.delete(frame.pid))throw new Error('invalid durable shell disposal receipt');
             } else if (frame.type === 'tool_intent') {
               if (typeof frame.toolCallId !== 'string') throw new Error('invalid durable tool intent');
               await recovery.beforeTool(frame.toolCallId);
-              await child.send({ type: 'tool_ack', toolCallId: frame.toolCallId });
+              await ack({ type: 'tool_ack', toolCallId: frame.toolCallId });
             } else if (frame.type === 'tool_committed') {
               if (typeof frame.toolCallId !== 'string') throw new Error('invalid durable tool receipt');
               await recovery.committedTool(frame.toolCallId);

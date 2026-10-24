@@ -1368,8 +1368,10 @@ Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes) and Hermes report 
 runtime process that ends on its own before its terminal, during start or a turn,
 as `runtime_exited`; an exit the SDK or the vendored session asked for is not one.
 Pi's durable lane recovers a worker that ends on its own during a run (within its
-respawn limit). When that recovery is refused, or a respawned worker ends on its
-own before its start receipt, the run fails as `runtime_exited`; a reported worker
+respawn limit). When that recovery is refused, the worker ends on its own while
+the daemon awaits its reply to a tool or shell acknowledgement, or a respawned
+worker ends on its own before its start receipt, the run fails as
+`runtime_exited`; a reported worker
 failure, a refused or changed start receipt and a protocol violation are `unknown`.
 Its start failures are typed and not retryable: a worker that ends on its own
 before its start receipt is `runtime_exited`, any other is `unknown`.
