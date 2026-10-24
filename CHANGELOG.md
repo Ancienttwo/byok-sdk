@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fixed (client)** — when a Codex app-server ends on its own and the
+  adapter's record consumer then fails on a record that exit produced (the
+  exit record, or a control settled as exited), the task now fails as
+  `runtime_exited` with the consumer's reason, instead of `unknown` (#869).
+
 ## 0.30.1 — source candidate
 
 0.30.1 is a PATCH release under a one-release exception to the pre-1.0

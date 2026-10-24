@@ -19,6 +19,7 @@ import {
 import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
 import { CodexProjection } from '../adapters/codex/projection';
+import * as vendoredProjection from '../../vendor/oar/c88a514/runtimes/codex/projection';
 const fixture = fileURLToPath(
   new URL('./fixtures/fake-codex.mjs', import.meta.url),
 );
@@ -521,6 +522,28 @@ describe('Codex persistent app-server adapter', () => {
     expect(failure).toMatchObject({ category: 'infrastructure', message: 'projection failed' });
     await s.close();
     await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
+  });
+  it('a vendored fold failure during a turn kills the app-server and keeps the fold reason, unknown (#869)', async () => {
+    const { pids, spawnFn } = tracked();
+    const s = await open(adapter({ spawnFn }), task, await ctx({ FAKE_CODEX_HANG: '1' }));
+    vi.spyOn(vendoredProjection, 'foldCodexNotification').mockImplementation(() => { throw new Error('projection failed'); });
+    await s.steer('next').catch(() => {});
+    const failure = await turn(s).then(() => undefined, (error) => error);
+    expect(failure).toMatchObject({ category: 'infrastructure', message: 'projection failed', failure: { class: 'unknown' } });
+    await s.close();
+    await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
+  });
+  it('a record consumer that fails on the record of an exit the app-server made on its own keeps runtime_exited (#869)', async () => {
+    const consume = CodexProjection.prototype.consume;
+    vi.spyOn(CodexProjection.prototype, 'consume').mockImplementation(function (this: CodexProjection, ...args: Parameters<CodexProjection['consume']>) {
+      const record = args[1] as { kind: string; body: { kind?: string } };
+      if (record.kind === 'response' && record.body.kind === 'exited') throw new Error('projection failed on the exit record');
+      return consume.apply(this, args);
+    });
+    const s = await open(adapter(), task, await ctx({ FAKE_CODEX_EXIT_NO_TERMINAL: '1' }));
+    await expect(turn(s)).rejects.toMatchObject({
+      category: 'infrastructure', message: 'projection failed on the exit record', failure: { class: 'runtime_exited' },
+    });
   });
   it('rejects an invalid operation timeout', () => {
     for (const operationTimeoutMs of [0, -1, Infinity, Number.NaN, 2_147_483_648])
