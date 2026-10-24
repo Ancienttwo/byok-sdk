@@ -11,6 +11,22 @@
   bound when it became ready, so a terminal made after that member retired
   at shutdown seals with a next run of the same member instead of taking the
   closed form.
+- **Breaking (client)** — a sealed terminal that the daemon sent by
+  `ciphertextRef` and that the Host refused now reaches the Host as one
+  replacement terminal (#654, owner batch §77b). The Host refuses one when it
+  no longer declares `sealed-output-ciphertext-ref`, or when orphan GC deleted
+  the blob. Before, the daemon recorded the refusal and sent nothing else, so
+  the Host got no terminal for the task. The replacement is the sealed
+  `task.fail` with `reason: 'terminal_result_unsealable'` when the member that
+  sealed the refused terminal is ready, and the plaintext `task.fail` with
+  `reason: 'sealed_key_unavailable'` otherwise. A refusal that an earlier run,
+  or a 0.30.1 daemon, left in the journal is replaced at the next start, after
+  the member resumes. A refused inline terminal is not replaced. The journal
+  replaces the refused row in place and keeps the refused hash as a task
+  transition; it adds no table or column. Compatibility: `LocalTaskJournal`
+  gets the required method `replaceRefusedTerminal`, and its `confirmTerminal`
+  and `rejectTerminal` must accept the hash of replaced bytes as a no-op. A
+  Host that injects its own journal must implement both.
 
 ## 0.30.1 — source candidate
 
