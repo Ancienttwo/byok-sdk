@@ -11,6 +11,7 @@ import { advanceRoomSeats, checkReply, collaborationDue, commitCommand, expireCa
   syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, bindDevice, revokeDevice } from './binding';
+import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { cancelIntent, deliverCancels, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
@@ -506,6 +507,25 @@ export class HostedCollaborationStore {
     return this.transaction(async client => {
       if (!(await client.query('SELECT 1 FROM scope WHERE scope = $1', [key])).rowCount) return decideRetention(client, key, stateOf({}), input, limits);
       return this.decideIn(client, key, undefined, async state => ({ value: await decideRetention(client, key, state, input, limits), outbox: [] }));
+    }, false);
+  }
+
+  /**
+   * Operator compaction of settled intent rows on `scope` (#793 S8), as K4 `compact`: never automatic. In one transaction
+   * under the scope lock, the K8 veto `compactVeto` checks each acknowledged Turn, and each settled intent row leaves with a
+   * permanent `hash(['intent', turnId])` row in `retired_identity`. A Turn id with no row counts as already compacted when
+   * its intent tombstone exists. A routine intent is refused. A refusal or a throw writes nothing. A scope with no row has
+   * no intents.
+   */
+  compactIntents(scope: string, input: IntentCompactionInput): Promise<IntentCompaction> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      if (!(await client.query('SELECT 1 FROM scope WHERE scope = $1', [key])).rowCount) {
+        // No scope row means no intent and no tombstone (`retired_identity` references `scope`), so no lock is needed.
+        if (acknowledgedTurnIds(input).length) throw new Error('Acknowledged intent not found');
+        return { compactedIntents: 0, alreadyCompactedIntents: 0 };
+      }
+      return this.decideIn(client, key, undefined, async state => ({ value: await decideCompaction(client, key, state, input), outbox: [] }));
     }, false);
   }
 

@@ -78,8 +78,9 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 -- The sender scan: unsettled rows by due time, across scopes.
 CREATE INDEX IF NOT EXISTS outbox_due ON outbox (next_at, scope, ordinal) WHERE settled_at IS NULL;
--- One row per Turn intent (#793 D2b). No intent row is deleted before D2g adds tombstones:
--- a deleted row would let the same Turn freeze again under the same task id.
+-- One row per Turn intent (#793 D2b). Only operator intent compaction deletes a row (#793 S8), and it writes the
+-- permanent hash(['intent', turn id]) row in retired_identity in the same transaction: a row deleted without it would
+-- let the same Turn freeze again under the same task id.
 CREATE TABLE IF NOT EXISTS intent (
   scope          text    NOT NULL REFERENCES scope (scope),
   -- JSON.stringify(turn id): one intent per Turn.
@@ -181,10 +182,10 @@ CREATE TABLE IF NOT EXISTS occurrence (
   FOREIGN KEY (scope, routine_id) REFERENCES routine (scope, id)
 );
 CREATE INDEX IF NOT EXISTS occurrence_open ON occurrence (scope, routine_id) WHERE conclusion IS NULL;
--- Permanent K8 row tombstones (K4 kind 'row'). They never expire.
+-- Permanent tombstones. They never expire: K8 row tombstones (K4 kind 'row'), and compacted intents (#793 S8).
 CREATE TABLE IF NOT EXISTS retired_identity (
   scope     text NOT NULL REFERENCES scope (scope),
-  -- K4 hash([namespace, id]).
+  -- K4 hash([namespace, id]), or hash(['intent', turn id]) for a compacted intent.
   identity  text NOT NULL,
   PRIMARY KEY (scope, identity)
 );
