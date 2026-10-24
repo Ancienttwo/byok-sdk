@@ -222,6 +222,11 @@ describe('Claude native interactions through prepared process transport', () => 
     expect(frames.some(frame => frame.type === 'user')).toBe(false);
   });
 
+  it('marks an exit during the native handshake runtime_exited and a refused handshake unknown (#869)', async () => {
+    await expect(start('init-exit', { onRequest: () => {} })).rejects.toMatchObject({ phase: 'start', failure: { class: 'runtime_exited' } });
+    await expect(start('init-error', { onRequest: () => {} })).rejects.toMatchObject({ phase: 'start', failure: { class: 'unknown' } });
+  });
+
 });
 
 describe('Claude native bridge transport fencing', () => {

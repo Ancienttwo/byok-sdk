@@ -44,6 +44,11 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** A start step claude's own exit ended, before any adoption, transport or spawn failure, is `runtime_exited`. */
+function startupExit(client: ClaudeProcessClient) {
+  return client.processExited ? { class: 'runtime_exited' as const } : undefined;
+}
+
 /** One owner covers process teardown and task config on every failed start. */
 async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | undefined, scratch: ExecutionScratch, retainPendingDisposal = false): Promise<never> {
   const failure = isRuntimeExecutionFailure(cause) ? cause : new RuntimeExecutionFailure({
@@ -373,6 +378,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         if (!initialized) throw new RuntimeExecutionFailure({
           phase: 'start', category: 'infrastructure', retry: 'retryable',
           reason: 'Claude native control initialization failed',
+          failure: startupExit(client),
         });
         throwIfCancelled();
         native.beginTurn();
@@ -392,6 +398,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         throw new RuntimeExecutionFailure({
           phase: 'start', category: 'infrastructure', retry: 'retryable',
           reason: 'claude initial instruction transport failed',
+          failure: startupExit(client),
         }, { cause });
       }
 
@@ -418,6 +425,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         throw new RuntimeExecutionFailure({
           phase: 'start', category: 'infrastructure', retry: 'retryable',
           reason: `claude exited before yielding an authoritative session id: ${errorMessage(err)}`,
+          failure: startupExit(client),
         }, { cause: err });
       }
 

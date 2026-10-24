@@ -265,6 +265,7 @@ export declare class ClaudeProcessClient {
     private readonly eventQueue;
     private closed;
     private exitError;
+    private exited;
     private transportError;
     private readonly pendingWrites;
     private readonly closedPromise;
@@ -312,6 +313,7 @@ export declare class ClaudeProcessClient {
     get events(): AsyncIterable<ClaudeStreamMessage>;
     /** Local transport diagnostic retained when the process closes; consumers classify it at the session boundary. */
     get terminalError(): Error | undefined;
+    get processExited(): boolean;
     /**
      * Record a claude stream-json frame/subtype/content-block label that
      * `ClaudeSession`'s event iterator (`../claude-adapter.ts`) decided has

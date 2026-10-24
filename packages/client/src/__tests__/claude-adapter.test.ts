@@ -451,6 +451,13 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await expect(takeTurn(session)).rejects.toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });
   });
 
+  it('marks claude exiting before system/init on a --resume of a missing session runtime_exited (#869)', async () => {
+    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
+    await expect(startAdapter(fakeClaudeAdapter(), task, await makeCtx())).rejects.toMatchObject({
+      phase: 'start', category: 'infrastructure', message: expect.stringMatching(/No conversation found/), failure: { class: 'runtime_exited' },
+    });
+  });
+
   it('followUp() fails closed on a blob-ref instruction, same as start()', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
