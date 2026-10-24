@@ -329,7 +329,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
       { port: () => sdk.port, ports: vectorPorts, pollMs: 0, now: () => clock, changed: scope => { changed.push(scope); } }).run();
     expect([pass.concluded, pass.failed.map(failure => [failure.turnId, (failure.error as Error).message])])
       .toEqual([3, [['b1', 'Attempt identity conflict'], ['c1', 'Projection identity conflict']]]);
-    expect(changed).toEqual([a.scope, e.scope]);
+    // c committed its first claim before its terminal transaction rolled back, so the Host syncs it too.
+    expect(changed).toEqual([a.scope, c.scope, e.scope]);
     expect(await row(c.scope, 'c1')).toMatchObject({ conclusion: null, terminal: null });
     expect(await row(d.scope, 'd1')).toMatchObject({ conclusion: null });
   });

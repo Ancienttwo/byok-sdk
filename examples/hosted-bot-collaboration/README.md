@@ -373,8 +373,8 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
 - **Retention.** The Host calls `retain(scope, input, limits)` with the acknowledged roots. `retentionMs` must be at
   least seven days (see Retention). The SDK side has its own `retentionPolicyId` in the tenant's entitlement.
 - **Workers.** The Host runs, each on its own interval: `HostedSubmitter.run()`, `HostedReconciler.run()`,
-  `store.sync(scope, …)` for each scope that changed (the `changed` option of `HostedReconciler` and
-  `HostedRoutineScheduler`, and the scope of each commit and consume), and for every scope on its own interval as
+  `store.sync(scope, …)` for each scope that changed (the `changed` option of `HostedReconciler`, for a conclusion or
+  a first claim, and of `HostedRoutineScheduler`, for a fire, and the scope of each commit and consume), and for every scope on its own interval as
   the fallback for timers (there is no due index), `HostedOutboxSender.run()` with the projection receiver and the channel,
   and `HostedRoutineScheduler.run()` every `intervalMs` after one `start()`. A Host with a channel opens its store with
   `{ channel: true }`.
