@@ -296,9 +296,9 @@ export class HostedCollaborationStore {
    * the L pass does after its sync (#793 D2f-5).
    *
    * It runs to a fixed point, as the L pass drains again after a step that changed K4 (K8 host.ts pass): while a round
-   * froze, promoted or concluded an intent or an occurrence, delivered a cancel fact, or added a Turn (the `bot_reply` of a
-   * batch join), it reads the facts again and runs the Turns again. Each such step happens once per intent, occurrence,
-   * fact or join, so the rounds end.
+   * froze, promoted or concluded an intent or an occurrence, delivered a cancel fact, added a Turn (the `bot_reply` of a
+   * batch join), or released a seat (a blocked or retired seat Turn), it reads the facts again and runs the Turns again.
+   * Each such step happens once per intent, occurrence, fact, join or seat, so the rounds end.
    */
   async sync(scope: string, options: HostedSyncOptions): Promise<SyncResult> {
     // As L checks its coalesce policy against its ContextPack budget (K8 host.ts constructor).

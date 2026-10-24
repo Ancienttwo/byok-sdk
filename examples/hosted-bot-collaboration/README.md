@@ -100,6 +100,10 @@ keeps the insertion order of each kind.
   keeps the old CHECK, so a new kind needs an explicit `ALTER` in a later migration.
 - H has no migrations while it is unreleased. After a DDL change, recreate the H schema. `migrate()` on a schema
   from an older revision fails in its one transaction and changes nothing.
+- The H reconciler reads an open intent's SDK attempt again after `pollMs` (30 s by default), and L's after 100 ms
+  (`reconcileMs`). The room step reads `started` from the claim that it records, so a Bot that claims its seat Turn
+  less than one poll before the seat deadline can still be marked `busy` and have its work cancelled. The room rule is
+  unchanged; a shorter `pollMs` narrows the window.
 - One commit must not delete a map key and add it back. The store keeps the old ordinal, but a JavaScript
   object moves the key to the end. K8 never deletes a map entry today.
 
@@ -496,7 +500,8 @@ three and runs these suites.
   input admission that a caller cannot replace, and an idle seal in a later round of one sync.
 - The K8 room vectors (`roomVectors`) run on the store, as on L: the first seat queued and frozen, the deadline cancel of
   an unclaimed seat, a claimed seat released late, a concluded seat, and a Bot that left the room with and without an
-  intent. H tests add the conclusion of an untried cancelled seat intent, a tried one kept open, and a rollback.
+  intent. H tests add the conclusion of an untried cancelled seat intent, a tried one kept open, a second room step in
+  the same sync after a Turn step blocks a seat, and a rollback.
 - The settlement tests build each delegation through the product path (an outcome `delegate`, then a sync), and cover
   each verdict, the units, `target_archived`, the timers, the late terminal audit, the Main Bot cancel in the terminal
   transaction, a rollback, the settlement facts, a verdict at the sync of a reported scope, and the store's refusal of
