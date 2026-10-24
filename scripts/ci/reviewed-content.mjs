@@ -46,6 +46,10 @@ const K8_HOSTED_EXPORTS = Object.freeze({
   './team': './src/team.ts',
   './test-support': './src/commit-vectors.test-support.ts',
 });
+// #884: the K4 entries before the I/O-free entry, and that entry. It exports only
+// hash and canonical and imports only node:crypto, so K8 rules/ loads no ledger.
+const K4_EXPORTS = Object.freeze({ '.': './src/index.ts', './test-support': './src/test-support.ts' });
+const K4_CANONICAL_EXPORTS = Object.freeze({ './canonical': './src/canonical.ts' });
 // #793 D2g: the K8 retention rule and its shared vectors, added to the hosted
 // entries for H's retention slice (owner question §53d).
 const K8_RETENTION_EXPORTS = Object.freeze({
@@ -208,6 +212,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     // #793 D2b-out-1: the delivery entries, only on top of exactly the hosted, retention and routine entries.
     const routed = { ...retained, ...K8_ROUTINE_EXPORTS };
     if (isDeepStrictEqual(before.exports, routed) && isDeepStrictEqual(after.exports, { ...routed, ...K8_DELIVERY_EXPORTS })) {
+      after.exports = before.exports;
+    }
+  } else if (path === 'examples/host-execution-core/package.json') {
+    if (before.private !== true || after.private !== true) throw new Error('The host execution core example must stay private');
+    // #884: only the ./canonical entry, only on top of exactly the existing entries.
+    if (isDeepStrictEqual(before.exports, K4_EXPORTS) && isDeepStrictEqual(after.exports, { ...K4_EXPORTS, ...K4_CANONICAL_EXPORTS })) {
       after.exports = before.exports;
     }
   } else if (path === 'package.json') {

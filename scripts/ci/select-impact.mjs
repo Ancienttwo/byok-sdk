@@ -349,6 +349,11 @@ export function selectImpact(paths, context = {}) {
       verifyReviewedContent(path, context);
       dirs.add('examples/bot-collaboration'); continue;
     }
+    // #884: the private K4 manifest, checked by its reviewed shape. Its suite and the suites of its dependents run.
+    if (path === 'examples/host-execution-core/package.json') {
+      verifyReviewedContent(path, context);
+      dirs.add('examples/host-execution-core'); continue;
+    }
     // #793 D2: the private hosted example manifest, checked by its reviewed shape.
     if (path === 'examples/hosted-bot-collaboration/package.json') {
       verifyReviewedContent(path, context);

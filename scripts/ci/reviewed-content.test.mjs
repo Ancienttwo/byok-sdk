@@ -520,3 +520,26 @@ test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
     assert.throws(() => selectImpact([path], f), /more than/, spec);
   }
 });
+
+test('#884: the K4 manifest admits only the I/O-free ./canonical entry', t => {
+  const f = fixture(t);
+  const path = 'examples/host-execution-core/package.json';
+  const exports = { '.': './src/index.ts', './test-support': './src/test-support.ts' };
+  const manifest = { name: '@byok-sdk/example-host-execution-core', private: true, version: '0.0.1', exports };
+  f.write(path, manifest);
+  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K4 without the canonical entry');
+  f.base = git('rev-parse', 'HEAD').trim();
+  f.write(path, { ...manifest, exports: { '.': './src/index.ts', './canonical': './src/canonical.ts', './test-support': './src/test-support.ts' } });
+  assert.ok(selectImpact([path], f).dirs.includes('examples/host-execution-core'));
+  for (const [candidate, reason] of [
+    [{ ...manifest, exports: { ...exports, './canonical': './src/model.ts' } }, 'the entry retargeted to another file'],
+    [{ ...manifest, exports: { ...exports, './canonical': './src/canonical.ts', './ledger': './src/ledger.ts' } }, 'a second new entry'],
+    [{ ...manifest, exports: { ...exports, './canonical': './src/canonical.ts' }, dependencies: { x: '1.0.0' } }, 'a dependency change'],
+  ]) {
+    f.write(path, candidate);
+    assert.throws(() => selectImpact([path], f), /more than/, reason);
+  }
+  f.write(path, { ...manifest, private: false, exports: { ...exports, './canonical': './src/canonical.ts' } });
+  assert.throws(() => selectImpact([path], f), /must stay private/);
+});
