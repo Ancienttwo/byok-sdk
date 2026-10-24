@@ -1168,18 +1168,20 @@ family `routine.template`, for every occurrence of one routine version (design
 - `paddedLength` above 256 KiB: `ciphertextRef`, a `BlobRef` without `url`
   whose `size` is `paddedLength + 16`.
 
-**Host check of a `ciphertextRef`.** A sealed hosted entry accepts a
-`ciphertextRef` only when the object with its `contentHash` is `committed` in
-the same tenant, with the declared `size` and `contentType`. Otherwise it
-fails with `coordination_input_invalid` before any task, receipt or mailbox
-write. The receiver checks that the SHA-256 of the bytes it fetches by
+**Host check of a `ciphertextRef`.** A sealed hosted entry, and a sealed
+daemon output, is accepted with a `ciphertextRef` only when the object with
+its `contentHash` is `committed` in the same tenant, with the declared `size`
+and `contentType`. Otherwise a hosted entry fails with
+`coordination_input_invalid`, and a daemon output is refused with
+`payload_invalid`, before any task, receipt or mailbox write. The receiver checks that the SHA-256 of the bytes it fetches by
 `blobId` equals `contentHash`, before it opens them. The task then holds an
 object reference to the object (kind `sealed-task`, id the task id), so
 orphan GC keeps the ciphertext while the task lives. `redactTasks` releases
 the reference. It deletes the object when a stored row of the task still
-names it. Retention can prune the mailbox row of a delivered steer. Then no
-row names its object, and orphan GC deletes the object later. Tenant erasure
-also releases the reference.
+names it. Retention can prune the mailbox row of a delivered steer, and the
+cloud stores no artifact. Then no row names the object, and orphan GC deletes
+it later. Tenant erasure also releases the reference. A terminal that loses
+to the first terminal releases its own reference.
 
 **Host comparison of a sealed retry.** The Host compares two sealed
 submissions of one identity by their comparison projection: the plaintext
@@ -1256,8 +1258,14 @@ place of `event`, and `eventIndex` 0, so the tail capacity counts it once. A
 `approvalId` and `sealed`, and no `summary`. The Host resolves it by
 `approvalId`, the same as a plaintext request. A replay under the same source
 envelope is the same entry when its comparison projection (above) is the
-same. A sealed output is inline only: the cloud refuses a sealed output
-that carries `ciphertextRef`, because it does not retain that blob. The cloud
+same. A sealed terminal or `task.artifact_sealed` carries `ciphertextRef`
+above the inline limit, and the task holds its blob (above), so the
+plaintext limit of each is 2 MiB. `task.progress_sealed` and
+`task.await_approval_sealed` are inline only: their tail rows expire, so the
+cloud refuses either one with `ciphertextRef` (`sealed_payload_unsupported`).
+The device uploads a ciphertext blob first. If the device sends the terminal
+more than one day after the upload, orphan GC may have deleted the blob, and
+the Host then refuses the terminal. The cloud
 advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`, because
 it accepts all seven sealed output types.
 

@@ -353,6 +353,58 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
     }
   }, 120_000);
 
+  it('releases the reference that a sealed terminal holds to its ciphertext blob, and deletes that blob (#654 §58a)', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const storage = await createObjectStorageScope();
+      const host = await composeRedactionHost(scope.pool, storage);
+      const device = await pairDevice(host, TENANT_1, ['sealed-payload-v1']);
+      const taskId = `task-sealed-terminal-${randomUUID()}`;
+      const sealing = { ...SEALING, categories: ['task-output'] } as const;
+      await host.cloud.enqueueSealedOffer(TENANT_1, device.deviceId, {
+        taskId,
+        payload: { instruction: 'answer at length', runtime: 'pi', sealing } as never,
+      });
+      expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.offer_sealed', taskId]]);
+      await sendAll(device, [
+        createEnvelope('task.claim', { deviceId: device.deviceId, runtime: 'pi' }, { taskId }),
+        createEnvelope('task.started', {}, { taskId }),
+      ]);
+
+      const content = await sealContent({
+        scopeKey: new Uint8Array(32).fill(7),
+        scope: { id: sealing.scopeId, epoch: sealing.epoch },
+        chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+        sender: 'A'.repeat(43),
+        category: 'task-output',
+        binding: {
+          tenantId: TENANT_1, family: 'task.complete', direction: 'daemon-to-server', identity: { taskId },
+          deviceId: device.deviceId, agentRef: null, categories: [...sealing.categories], notAfter: null,
+        },
+        plaintext: { summary: BY_REFERENCE_TEXT },
+        maxContentLength: 2 * 1024 * 1024,
+      });
+      const blob = await uploadObject(device, content.ciphertext, 'application/octet-stream');
+      const hash = (blob.ref as { contentHash: ContentHash }).contentHash;
+      const key = `tenants/${TENANT_1}/objects/sha256/${blob.hex}`;
+      await sendAll(device, [createEnvelope('task.complete_sealed', {
+        sessionRef: 'session-sealed-terminal',
+        sealed: { ...content.header, ciphertextRef: blob.ref },
+      } as never, { taskId })]);
+      await device.poll();
+      expect((await host.core.objects.get(TENANT_1, hash))?.refCount).toBe(1);
+      expect((await readObjects(storage)).has(key)).toBe(true);
+
+      expect((await host.cloud.redactTasks(TENANT_1, { taskIds: [taskId] })).tasks)
+        .toMatchObject([{ taskId, outcome: 'redacted', counts: { objectsDeleted: 1 } }]);
+      expect((await readObjects(storage)).has(key)).toBe(false);
+      expect(await host.core.objects.get(TENANT_1, hash)).toMatchObject({ refCount: 0, state: 'deleted' });
+    } finally {
+      await scope.dispose();
+    }
+  }, 120_000);
+
   it('retries safely after a failure between the object step and the row step', async () => {
     const scope = await createDataplaneScope();
     try {
