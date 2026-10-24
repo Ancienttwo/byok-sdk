@@ -1489,12 +1489,14 @@ rotation yet. The steps:
    opened; otherwise the rotation stops before any put of that scope. The
    senders are checked against one verified view; when a catch-up moves the
    view before the put, the scope starts again, at most three times.
-4. It reads back each epoch it re-wrapped or found already wrapped to the
-   next key. Each must open with the next key under its `keyId`; a missing
-   package, or one that opens only with the old key, stops the rotation and
-   keeps the old key.
-5. Once every scope is done, it reads every one of those epochs back again,
-   across all scopes, with the same rule.
+4. It reads the scope's epochs again, with the same range and stops. Each
+   epoch it re-wrapped or found already wrapped to the next key must open
+   with the next key under its `keyId`, and no package from an accepted
+   sender may still open only with the old key. Otherwise the rotation stops
+   and keeps the old key.
+5. Once every scope is done, it reads each epoch it re-wrapped or found
+   already wrapped to the next key back again, across all scopes, and each
+   must still open with the next key under its `keyId`.
 6. Only then does it drop the old private key from the record.
 
 Every Host request of the rotation, the reads, the `rotate` append and the

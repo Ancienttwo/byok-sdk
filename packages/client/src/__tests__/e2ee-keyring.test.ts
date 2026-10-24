@@ -873,6 +873,25 @@ describe('device member KEM rotation (E2d-5)', () => {
     expect(await (await restart()).fetch('scope-a', 1)).toMatchObject({ ok: true, key: { scopeKey } });
   });
 
+  it('keeps the old key when a client that has not seen the rotate puts an old-key package after the scan', async () => {
+    const { server, web, device, custody, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    const handle = server.e2ee.handle.bind(server.e2ee);
+    let landed = false;
+    server.e2ee.handle = async (req, res, url) => {
+      const handled = await handle(req, res, url);
+      if (!landed && req.method === 'POST' && url.pathname.endsWith('/key-packages')) {
+        landed = true;
+        // `device` is the bundle from before the rotation, so this package is wrapped to the old key.
+        server.e2ee.clientPutPackages(await web.sealPackage('scope-a', device, new Uint8Array(32).fill(9), 2));
+      }
+      return handled;
+    };
+    expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'rewrap_unverified' });
+    expect(landed).toBe(true);
+    expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+  });
+
   it('keeps the old key when the Host reads no package at an epoch whose key it holds', async () => {
     const { server, web, device, custody, logs, keyring } = await member();
     await web.putScope('scope-a', [device]);

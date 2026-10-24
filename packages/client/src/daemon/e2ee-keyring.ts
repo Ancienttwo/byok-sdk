@@ -544,7 +544,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
    * catch-up moves the view during the try, it starts again, at most three
    * times. Every package found that `fetch` accepts, and every epoch this
    * run holds a key of, must then read back and open with `next` under its
-   * `keyId`.
+   * `keyId`, and no package `fetch` accepts may still open only with the old
+   * key.
    */
   async #rewrapScope(scopeId: string, next: MemberKemKey): Promise<KemRotationFailure | ReadonlyMap<number, string>> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -588,9 +589,36 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       for (let at = 0; at < rewrapped.length; at += E2EE_SCOPE_KEY_PACKAGE_PUT_MAX) {
         await this.options.client.putKeyPackages(rewrapped.slice(at, at + E2EE_SCOPE_KEY_PACKAGE_PUT_MAX), this.#requestSignal());
       }
-      return await this.#confirm(this.#session ?? view, scopeId, expected, next) ?? expected;
+      return await this.#readBack(this.#session ?? view, scopeId, expected, next, old) ?? expected;
     }
     return 'chain_moved';
+  }
+
+  /**
+   * Read the scope's epochs again: each epoch of `expected` must open with
+   * `next` under its `keyId`, and a package that landed since, such as one a
+   * client that has not walked the `rotate` yet wrapped to `old`, must not
+   * open only with `old`.
+   */
+  async #readBack(
+    view: DeviceMemberSession, scopeId: string, expected: ReadonlyMap<number, string>, next: MemberKemKey, old: MemberKemKey,
+  ): Promise<KemRotationFailure | undefined> {
+    const found = await this.#readEpochs(scopeId);
+    if (found === undefined) return 'scope_epochs_exceeded';
+    for (const epoch of expected.keys()) if (!found.has(epoch)) return 'rewrap_unverified';
+    for (const [epoch, pkg] of found) {
+      const current = await this.#openAccepted(view, scopeId, epoch, pkg, next);
+      current?.scopeKey.fill(0);
+      if (current !== undefined) {
+        if (expected.has(epoch) && expected.get(epoch) !== current.keyId) return 'rewrap_unverified';
+        continue;
+      }
+      if (expected.has(epoch)) return 'rewrap_unverified';
+      const held = await this.#openAccepted(view, scopeId, epoch, pkg, old);
+      held?.scopeKey.fill(0);
+      if (held !== undefined) return 'rewrap_unverified';
+    }
+    return undefined;
   }
 
   /**
@@ -622,9 +650,9 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   }
 
   /**
-   * Read back each epoch of `expected`, that many at a time: each must hold a
-   * package from a sender `fetch` accepts in `view` that opens with `next`
-   * under its `keyId`.
+   * Read back each epoch of `expected`, {@link ROTATION_EPOCH_READS} at a
+   * time: each must hold a package from a sender `fetch` accepts in `view`
+   * that opens with `next` under its `keyId`.
    */
   async #confirm(view: DeviceMemberSession, scopeId: string, expected: ReadonlyMap<number, string>, next: MemberKemKey): Promise<KemRotationFailure | undefined> {
     const epochs = [...expected.keys()];
