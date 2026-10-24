@@ -178,8 +178,7 @@ describe('the failure class of a sealed task (#869)', () => {
 
   it('is unknown on a replacement failure the daemon makes, and absent when the replaced terminal had none', async () => {
     // The key is there when the offer opens and gone when the terminal seals.
-    const keyring = new GatedKeyring();
-    const keyless = { openingKey: () => keyring.openingKey(), sealingKey: () => keyring.sealingKey() } as SealedScopeKeyring;
+    const keyless: SealedScopeKeyring = new GatedKeyring();
     const tasks = await sealedTasks(keyless, 'keyless');
     const other = await sealedTasks(keyless, 'keyless-2');
     keyless.sealingKey = async () => undefined;
