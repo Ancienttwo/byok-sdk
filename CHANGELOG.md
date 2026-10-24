@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Breaking (cloud)** — the Host shreds a sealed scope when the member chain
+  appends a `shred` (#654 E5b-1, design §11.2). A `shred` subject must now be
+  exactly `{ scopeId }`; another subject gets `coordination_input_invalid`.
+  The append that stores the entry deletes the scope's key packages and
+  epochs, records the scope as shredded, and writes the identity receipt
+  `e2ee-scope-shred:<scopeId>` with the seq, the time and who appended it.
+  A later package put for the scope gets 409 `e2ee_scope_shredded`. The Host
+  verifies no signature, so any paired device of the tenant can shred a
+  scope on the Host (`docs/security.md`). Store implementers:
+  `E2eeMemberStore.appendChainEntries` takes `{ rows, shreds }`,
+  `putScopeKeyPackages` takes `{ rows }` and can return `scope_shredded`, and
+  `InMemoryE2eeMemberStore` takes the composition's `RequestReceiptStore`.
+  Postgres needs migration `0028_e2ee_scope_shred.sql`; SQLite adds the table
+  on open.
+
 - **Feature (protocol, cloud)** — a sealed
   `task.offer_for_agent_with_egress_fresh_sealed` can carry a plaintext
   `routineRef: { routineId, definitionVersion, notAfter }` (#654 E3d). Its
