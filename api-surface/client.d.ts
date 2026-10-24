@@ -8311,9 +8311,10 @@ export declare class SealedTasks {
      * A terminal the daemon builds from a journaled offer (recovery, or a
      * result over the journal bound), sealed with that offer's context when it
      * seals output. A closed plaintext form, such as `daemon_interrupted`,
-     * stays plaintext.
+     * stays plaintext. With `sealable` false (the keyring is another member's),
+     * a terminal that seals output takes its closed plaintext form.
      */
-    sealRecovered(offer: Envelope, terminal: Envelope): Promise<Envelope>;
+    sealRecovered(offer: Envelope, terminal: Envelope, sealable?: boolean): Promise<Envelope>;
     /** The plaintext envelope a sealed outbound replaced, so the local observer keeps reading plaintext. */
     plainOf(envelope: Envelope): Envelope;
     /** The closed plaintext form of a terminal that has no sealing key (decision 12d). */
