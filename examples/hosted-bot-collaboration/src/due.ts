@@ -14,7 +14,7 @@ export interface DueSchedulerOptions {
   /** How long a scope that is still due after its sync, or whose sync threw, waits before the next try. In memory only. */
   backoffMs?: number;
 }
-/** A scope whose sync threw. Nothing was written. */
+/** A scope whose sync threw. The failed step wrote nothing; with a composed `sync`, earlier steps of that pass may have committed. */
 export interface DueFailure { scope: string; error: unknown }
 /** `stalled`: the scopes that were still due after their sync, because no H step clears what made them due. */
 export interface DuePass { synced: number; stalled: string[]; failed: DueFailure[] }
