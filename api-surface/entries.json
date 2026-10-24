@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2247679,
+      "budgetBytes": 2253346,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -100,7 +100,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 415785,
+      "budgetBytes": 418514,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -361,7 +361,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 378970,
+      "budgetBytes": 383131,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1220,7 +1220,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 605604,
+      "budgetBytes": 610484,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1273,7 +1273,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 875287,
+      "budgetBytes": 884801,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1398,7 +1398,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 830504,
+      "budgetBytes": 839996,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1860,7 +1860,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 153122,
+      "budgetBytes": 153386,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1969,7 +1969,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 761528,
+      "budgetBytes": 770388,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2066,7 +2066,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 633933,
+      "budgetBytes": 638813,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2148,7 +2148,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2189151,
+      "budgetBytes": 2194662,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

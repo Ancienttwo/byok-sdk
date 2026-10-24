@@ -610,6 +610,7 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 - MAC 密钥一起销毁。留下的 MAC 不能再用来确认猜测。
 - 备份缺口：备份里可能还有 key package。只要某个成员的 KEM 私钥还在，就能打开它们。处理方法是 shred 之后每个成员轮换 KEM 密钥，并删除旧私钥（§7.5）。另一个选项是 key package 只在投递窗口内保留，代价是成员丢失本地密钥后无法恢复（§14 D5）。
 - 不覆盖：明文类别；已导出或截图的明文；元数据。
+- E5b-1 的 Host 部分（owner batch §50g A、§50h A）：Host 在追加链条目的同一个事务里识别 `op: 'shred'`（协议把它的主体限定为严格的 `{ scopeId }`），先删这个 scope 的 key package，再删它的 epoch，把 scope 记进 `e2ee_scope_shred`（迁移 0028），并写 `e2ee-scope-shred:<scopeId>` 审计 receipt。之后对这个 scope 的 key package 写入返回 409 `e2ee_scope_shredded`。Postgres 里 shred 和写入都先拿 `(tenant, scope)` 的事务 advisory 锁。Host 不验签名，`docs/security.md` 记录了这个代价。
 
 ### 11.3 scoped row-delete（脱敏删除）
 
@@ -625,6 +626,7 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
   - outbox：E5a 直接把 `acked` 和 `expired` 行的正文换成 tombstone，行保留。原因：不改写时，canary 扫描在保留期结束前不能到零；`discardDeadLetter` 只在 Node 上运行，所以 Workers 上不能处理丢失设备的 task。行保留，所以 `recoverableFrom` 下限和 message-id 唯一键不变。有 `pending` 行时仍返回可重试的拒绝。
   - 草稿、activity 和 approval 行：E5a 直接删除，不等 TTL。
   - 摘要：明文 SHA-256 让能读数据库的人确认一个猜测的正文。`docs/security.md` 记录这个代价。
+- E5b 与本节的偏差（owner batch §50i A）：不做 `redactScope`。明文行不带 `scope_id` 列，做它要加列并从 JSON 正文回填。Host 改为用这个 scope 的 taskId 调用 `redactTasks`。
 
 ### 11.4 对比
 

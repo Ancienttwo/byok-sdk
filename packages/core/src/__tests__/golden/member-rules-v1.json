@@ -411,5 +411,138 @@
         "outcome": "ok"
       }
     ]
+  },
+  "shred": {
+    "entries": [
+      {
+        "v": 1,
+        "tenantId": "tenant-vector-1",
+        "seq": 5,
+        "prev": "sha256:7da815b6d3702d929392c9b47a535357fcfc6a70132ca376a8da224526533489",
+        "op": "shred",
+        "subject": {
+          "scopeId": "scope-device"
+        },
+        "signer": "bifZEcU9uFUqVQR6zUKTt7Pp_jnJGasueUwgD1R0-vg",
+        "sig": "3oi_lB6_bwXljkFtiQycGJFzRc67Yn7DIfAwz23_va6RF37k2GgSczlu5fphi7iTlTVmpQF6E7Hqt7p2Sdub_g"
+      },
+      {
+        "v": 1,
+        "tenantId": "tenant-vector-1",
+        "seq": 6,
+        "prev": "sha256:f77e3c2f7b9719a7e53d5f9a5d825c4e4d9332c77c86451064c52cc854fd1a5a",
+        "op": "scope-policy",
+        "subject": {
+          "categories": [
+            "task-input"
+          ],
+          "members": [
+            "bifZEcU9uFUqVQR6zUKTt7Pp_jnJGasueUwgD1R0-vg"
+          ],
+          "scopeId": "scope-client"
+        },
+        "signer": "bifZEcU9uFUqVQR6zUKTt7Pp_jnJGasueUwgD1R0-vg",
+        "sig": "sjoW6e4tmuSev3YhiRTc7q9O6BVQkVpQ-lU711TtSmEd0pR___pG4uRBvlcrnQYuVV9b3EKhUldLHevgwNqZGw"
+      }
+    ],
+    "hashes": [
+      "sha256:f77e3c2f7b9719a7e53d5f9a5d825c4e4d9332c77c86451064c52cc854fd1a5a",
+      "sha256:5172985ff8f140d241ddd77158f2550a41cb72fb02feb3a34594f0321782df3a"
+    ],
+    "cases": [
+      {
+        "name": "policy-after-shred",
+        "entry": {
+          "v": 1,
+          "tenantId": "tenant-vector-1",
+          "seq": 7,
+          "prev": "sha256:5172985ff8f140d241ddd77158f2550a41cb72fb02feb3a34594f0321782df3a",
+          "op": "scope-policy",
+          "subject": {
+            "categories": [
+              "task-input"
+            ],
+            "members": [
+              "bifZEcU9uFUqVQR6zUKTt7Pp_jnJGasueUwgD1R0-vg",
+              "kUC06wQwgjkfgi7g7rhQcDDcou_SvsywV-xs5DXVQ_E"
+            ],
+            "scopeId": "scope-device"
+          },
+          "signer": "kUC06wQwgjkfgi7g7rhQcDDcou_SvsywV-xs5DXVQ_E",
+          "sig": "1aKpPOEmhho--fuFtEeTZlOSLUbCeCBsWo4SU-HUJ3NQ5tK-EYB8lRkSr5G1PJ5a2UXu6bf7Qb_EJsKXc3oOFA"
+        },
+        "hash": "sha256:9a3ba3569de90fdbfa440b5e939b4a9d14f52d2fc3ce57f9dbccef509f7e2d58",
+        "outcome": "member_chain_subject_invalid"
+      },
+      {
+        "name": "shred-again",
+        "entry": {
+          "v": 1,
+          "tenantId": "tenant-vector-1",
+          "seq": 7,
+          "prev": "sha256:5172985ff8f140d241ddd77158f2550a41cb72fb02feb3a34594f0321782df3a",
+          "op": "shred",
+          "subject": {
+            "scopeId": "scope-device"
+          },
+          "signer": "bifZEcU9uFUqVQR6zUKTt7Pp_jnJGasueUwgD1R0-vg",
+          "sig": "JMqxzEB2D1F3xuv_mIOWesmN1gz7mTF3V6e9_6WFB4EwUV2diBZc_3XMitCIDc4Aq07eG7Nqwbk61R5PNDYR5Q"
+        },
+        "hash": "sha256:cd92f112b85707f7145d5fcf0de0fa9a4f69284b12f0b159735c6179df02bc1b",
+        "outcome": "member_chain_subject_invalid"
+      },
+      {
+        "name": "shred-unknown-scope",
+        "entry": {
+          "v": 1,
+          "tenantId": "tenant-vector-1",
+          "seq": 7,
+          "prev": "sha256:5172985ff8f140d241ddd77158f2550a41cb72fb02feb3a34594f0321782df3a",
+          "op": "shred",
+          "subject": {
+            "scopeId": "scope-unknown"
+          },
+          "signer": "bifZEcU9uFUqVQR6zUKTt7Pp_jnJGasueUwgD1R0-vg",
+          "sig": "AZWZVOmPFIcdcTgqvMcUw1k2hqeJUMnANHRZd3wpdQaB1gxORfRN7xGyDgQUky_rta3iWUE2hEym9F2dC-t2yw"
+        },
+        "hash": "sha256:774c04b92c7f79830764ea066115577db52c5da5a214aa48cf8adcb3bea8e36a",
+        "outcome": "member_chain_subject_invalid"
+      },
+      {
+        "name": "shred-extra-key",
+        "entry": {
+          "v": 1,
+          "tenantId": "tenant-vector-1",
+          "seq": 7,
+          "prev": "sha256:5172985ff8f140d241ddd77158f2550a41cb72fb02feb3a34594f0321782df3a",
+          "op": "shred",
+          "subject": {
+            "reason": "cleanup",
+            "scopeId": "scope-client"
+          },
+          "signer": "bifZEcU9uFUqVQR6zUKTt7Pp_jnJGasueUwgD1R0-vg",
+          "sig": "b5oZ6AjQPTYn3NTH1WFuMD3hgItQ86S8kD-web1GILVJtB7P3cQLTrk-gnZEWh9l-BQjcFAknmKcSf0dHswHOg"
+        },
+        "hash": "sha256:d0f22510f0efbdbf214794e33732ebac656aedf84bf0dcc51a9281245d674aa9",
+        "outcome": "member_chain_subject_invalid"
+      },
+      {
+        "name": "shred-other-scope",
+        "entry": {
+          "v": 1,
+          "tenantId": "tenant-vector-1",
+          "seq": 7,
+          "prev": "sha256:5172985ff8f140d241ddd77158f2550a41cb72fb02feb3a34594f0321782df3a",
+          "op": "shred",
+          "subject": {
+            "scopeId": "scope-client"
+          },
+          "signer": "bifZEcU9uFUqVQR6zUKTt7Pp_jnJGasueUwgD1R0-vg",
+          "sig": "lqUbUQnqIjfbxajTJZN1Le1c3YNn3pqQNCKPXESihWO8xg9M-EnxYnpsflYg9qumZC0j1o3x9cWYr5-SX7bWxg"
+        },
+        "hash": "sha256:76eaf67feab25dcd84950038bfc65d50432c8ddc1921970df3ebae31fb9228bf",
+        "outcome": "ok"
+      }
+    ]
   }
 }

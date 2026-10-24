@@ -16,14 +16,21 @@ export function admitBotToolsets(execution: { readonly payload: { readonly requi
   }
 }
 
-/** One Bot of an external team snapshot (#739 Q4c, T1). The Host maps `model` to its own execution template. */
-export interface TeamSnapshotBot { id: string; name: string; role: string; persona: string; model: string; mainBot: boolean }
+/**
+ * One Bot of an external team snapshot (#739 Q4c, T1). The Host maps `model` to its own execution template.
+ * `profileRevision` is the Host's profile revision, a decimal string. It is required when the Host owns the persona
+ * projection (#879), and refused otherwise.
+ */
+export interface TeamSnapshotBot { id: string; name: string; role: string; persona: string; model: string; mainBot: boolean; profileRevision?: string }
 /** `revision` is the authority's team revision. It is not the collaboration commit revision. */
 export interface TeamSnapshot { revision: number; bots: TeamSnapshotBot[] }
-/** The team mode marker. Present: an external authority owns the Bots, and `revision` is its last applied team revision. */
-export interface ExternalTeam { revision: number }
+/**
+ * The team mode marker. Present: an external authority owns the Bots, and `revision` is its last applied team revision.
+ * `persona` (#879): the Host projects each Bot's Agent home and reports readiness with `persona_ready`. The ledger keeps it.
+ */
+export interface ExternalTeam { revision: number; persona?: true }
 export const TEAM_BOT_LIMIT = 24;
-export type TeamModeCode = 'external_team' | 'stale_team';
+export type TeamModeCode = 'external_team' | 'stale_team' | 'external_persona';
 export class TeamModeError extends Error {
   constructor(readonly code: TeamModeCode, message: string) { super(message); this.name = 'TeamModeError'; }
 }
@@ -32,6 +39,12 @@ export function refuseExternalTeam(team: { readonly external?: ExternalTeam }, a
   if (team.external) throw new TeamModeError('external_team', `external_team: ${action} is owned by the team authority`);
 }
 const text = (value: unknown): value is string => typeof value === 'string';
+const PROFILE_REVISION_MAX = 9223372036854775807n;
+/** A profile revision is a canonical decimal string, at most the largest signed 64-bit integer, as K8 counts its own. */
+export function profileRevision(value: unknown): string {
+  if (!text(value) || !/^(?:0|[1-9][0-9]*)$/.test(value) || BigInt(value) > PROFILE_REVISION_MAX) throw new Error('Invalid profile revision');
+  return value;
+}
 /** The persona projection value of a Bot profile. `update_bot` and a team snapshot write the same value. */
 export function profileProjection(bot: { readonly name: string; readonly role: string; readonly persona: string; readonly model: string }) {
   return { schemaVersion: 'bot-profile.v1', name: bot.name, role: bot.role, persona: bot.persona, model: bot.model };
@@ -50,7 +63,8 @@ export function teamSnapshot(value: unknown): TeamSnapshot {
     if (bot.id in Object.prototype || !AgentHomeProjectionAgentRefSchema.safeParse({ agentId: bot.id, profileRevision: '1' }).success) {
       throw new Error('Invalid team snapshot Bot id');
     }
-    const row = { id: bot.id, name: bot.name, role: bot.role, persona: bot.persona, model: bot.model, mainBot: bot.mainBot };
+    const row: TeamSnapshotBot = { id: bot.id, name: bot.name, role: bot.role, persona: bot.persona, model: bot.model, mainBot: bot.mainBot,
+      ...(bot.profileRevision === undefined ? {} : { profileRevision: profileRevision(bot.profileRevision) }) };
     // A projection that the server refuses would leave the Bot never ready, so the snapshot is refused first.
     if (!AgentHomeProjectionValueSchema.safeParse(profileProjection(row)).success) throw new Error('Team snapshot Bot projection is too large');
     return row;

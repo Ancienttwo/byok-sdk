@@ -822,6 +822,10 @@ export interface ByokCloud {
    * replay, and a different one throws `e2ee_member_chain_conflict`. The
    * first new entry must follow the stored head. The Host checks shapes and
    * the tenant only; members verify signatures and links.
+   *
+   * A newly stored `shred` entry, whose subject must be exactly `{ scopeId }`,
+   * deletes that scope's key packages and epochs in the same write, marks the
+   * scope shredded, and records an `e2ee-scope-shred:<scopeId>` receipt.
    */
   appendMemberChainEntries(
     tenant: TenantId,
@@ -835,7 +839,8 @@ export interface ByokCloud {
   /**
    * Host control plane: store scope key packages. The first package of a
    * scope epoch fixes its `keyId`; a package with another `keyId` throws
-   * `e2ee_scope_key_conflict`, and the call stores nothing.
+   * `e2ee_scope_key_conflict`, and the call stores nothing. A package of a
+   * shredded scope throws `e2ee_scope_shredded`, and the call stores nothing.
    *
    * After the commit, each recipient that is a registered device gets one
    * `e2ee.key_package.available` notice per scope epoch, also on a replay.
@@ -2701,13 +2706,13 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     redactTasks,
 
     async appendMemberChainEntries(tenant, input) {
-      return e2eeMember.appendMemberChainEntries(e2eeMemberContext(tenant), input);
+      return e2eeMember.appendMemberChainEntries(e2eeMemberContext(tenant), input, { kind: 'host' });
     },
     async readMemberChain(tenant, input) {
       return e2eeMember.readMemberChain(e2eeMemberContext(tenant), input);
     },
     async putScopeKeyPackages(tenant, input) {
-      return e2eeMember.putScopeKeyPackages(e2eeMemberContext(tenant), input);
+      return e2eeMember.putScopeKeyPackages(e2eeMemberContext(tenant), input, { kind: 'host' });
     },
     enqueueScopeKeyPackageNotice,
     async readScopeKeyPackages(tenant, input) {

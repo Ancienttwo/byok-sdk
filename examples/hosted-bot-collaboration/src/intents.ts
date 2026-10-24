@@ -4,7 +4,7 @@ import { agentKey, canonical, fifoHeads, hash, promoteOccurrence, queuedExpiry, 
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';
-import type { settleDelegations, SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import type { SeatFacts, settleDelegations, SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { activeBinding, DeviceBindingError } from './binding';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { idOf, storedKey } from './layout';
@@ -75,6 +75,18 @@ async function loadIntentFacts(client: PoolClient, scope: string, turnIds: reado
 export async function commandIntentFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<Pick<SyncFacts, 'intent'>> {
   const { intent } = await loadIntentFacts(client, scope, turnIds);
   return { intent };
+}
+/**
+ * The K8 room seat facts (#793 S6), from the intent rows of the seat Turns, as K8 `advanceRooms` (rooms.ts) reads L's K4
+ * intents: `admitted` when the seat Turn has an intent, `started` from the reconciliation's claim fact, and the conclusion.
+ * The caller holds the scope lock.
+ */
+export async function seatFacts(client: PoolClient, scope: string, seatIds: readonly string[]): Promise<Record<string, SeatFacts>> {
+  const { intent, started } = await loadIntentFacts(client, scope, seatIds);
+  return Object.fromEntries(seatIds.map(id => {
+    const row = intent(id);
+    return [id, { admitted: row !== undefined, started: started.has(storedKey(id)), ...(row?.conclusion ? { conclusion: row.conclusion } : {}) }];
+  }));
 }
 /**
  * The sync rule facts of these Turns, read in the sync transaction. `started` is the reconciliation's attempt fact
