@@ -15,6 +15,34 @@
   `E2eeMemberRegistrationInput` takes `request`; the results can be
   `request_conflict`.
 
+- **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
+  select `agentMemory: 'read-write-if-admitted'` (#833). It runs exactly as
+  `read-write` when the daemon admits the memory MCP, and exactly as `none`
+  when it does not. It never gets `agent_memory_unavailable`. A task that is
+  useless without memory selects `read-write` instead, which declines. A
+  `memory-reader` Attempt cannot select the value: the reference server
+  refuses it before the task exists, and the daemon declines it with
+  `agent_memory_selection_invalid`. Prepared offers do not accept the value.
+  The other values and an absent field do not change. The value is a gated
+  wire addition on the three ordinary Agent offers and their sealed forms:
+  every daemon with an Agent home advertises the new device capability
+  `agent-memory-read-write-if-admitted`
+  (`AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY`), and server and hosted
+  cloud refuse the value to a device without it, before the task exists. The
+  terminal does not report which mode ran.
+- **Feature (examples)** — K8 runs the Host's own K4 work on the Bot tenant's
+  core (#882). `enqueueHostIntent(input, handler)` enqueues a K4 intent and
+  stores the name of its `BotOptions.hostIntents` handler in one transaction.
+  The handler gets the result document in the terminal transaction. The intent
+  shares the FIFO of its Agent. `BotOptions` passes `reconcileMs` and
+  `onOutbox` to the K4 core. `CollaborationState` gets the optional
+  `hostIntents`, and its version stays 3.
+- **Breaking (examples)** — K8 `drain()` rejects with `IntentOutcomeError`
+  when a K4 terminal cannot apply (#882): its key is neither a Bot Turn nor a
+  Host intent, or its Host handler throws or is async. Before, an intent from a
+  direct `bot.core.enqueue` stayed in flight with only a K4 `lastError`. Every
+  API that runs a pass rejects until the outcome applies, and the audit gets
+  one row for each key and reason.
 - **Breaking (cloud)** — the Host shreds a sealed scope when the member chain
   appends a `shred` (#654 E5b-1, design §11.2). A `shred` subject must now be
   exactly `{ scopeId }`; another subject gets `coordination_input_invalid`.
@@ -29,6 +57,10 @@
   `InMemoryE2eeMemberStore` takes the composition's `RequestReceiptStore`.
   Postgres needs migration `0028_e2ee_scope_shred.sql`; SQLite adds the table
   on open.
+  Upgrade note: a `shred` entry that a 0.30.0 Host already stored is not
+  applied, so that scope keeps its packages and accepts new puts. A stored
+  `shred` entry whose subject is not `{ scopeId }` makes every chain read that
+  includes it fail with `e2ee_member_state_unreadable`.
 
 ## 0.30.0 — 2026-10-24 (published)
 

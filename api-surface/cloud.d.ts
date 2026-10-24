@@ -316,6 +316,7 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
             read: "read";
             "read-if-admitted": "read-if-admitted";
             "read-write": "read-write";
+            "read-write-if-admitted": "read-write-if-admitted";
         }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
@@ -423,6 +424,7 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
             read: "read";
             "read-if-admitted": "read-if-admitted";
             "read-write": "read-write";
+            "read-write-if-admitted": "read-write-if-admitted";
         }>>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{

@@ -376,9 +376,25 @@ describe('compat v3: corpus coverage and WIRE_ADDITIONS', () => {
         expect(requiredReceiverCapabilities(type, { agentMemory }), `${type} ${agentMemory}`).not.toContain('agent-memory-read-if-admitted');
       }
     }
-    expect(AgentMemorySelectionSchema.options).toEqual(['none', 'read', 'read-write', 'read-if-admitted']);
+    expect(AgentMemorySelectionSchema.options).toEqual(['none', 'read', 'read-write', 'read-if-admitted', 'read-write-if-admitted']);
     // The prepared offer keeps the three prepared modes.
     expect(TaskOfferPreparedPayloadSchema.shape.agentMemory.safeParse('read-if-admitted').success).toBe(false);
+  });
+
+  it('gates agentMemory read-write-if-admitted on its own flag, on the plain and sealed ordinary Agent offers only (#833)', () => {
+    for (const type of [
+      'task.offer_for_agent', 'task.offer_for_agent_with_egress', 'task.offer_for_agent_with_egress_fresh',
+      'task.offer_for_agent_sealed', 'task.offer_for_agent_with_egress_sealed', 'task.offer_for_agent_with_egress_fresh_sealed',
+    ] as const) {
+      const required = requiredReceiverCapabilities(type, { agentMemory: 'read-write-if-admitted' });
+      expect(required, type).toEqual(expect.arrayContaining(['agent-memory-selection', 'agent-memory-read-write-if-admitted']));
+      expect(required, type).not.toContain('agent-memory-read-if-admitted');
+      for (const agentMemory of ['none', 'read', 'read-write', 'read-if-admitted'] as const) {
+        expect(requiredReceiverCapabilities(type, { agentMemory }), `${type} ${agentMemory}`).not.toContain('agent-memory-read-write-if-admitted');
+      }
+    }
+    // The prepared offer keeps the three prepared modes.
+    expect(TaskOfferPreparedPayloadSchema.shape.agentMemory.safeParse('read-write-if-admitted').success).toBe(false);
   });
 
   it('requiredReceiverCapabilities derives field and value gates from the table; document and the v2 strip-safe fields need none', () => {
