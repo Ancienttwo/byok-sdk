@@ -1314,15 +1314,21 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   verifies no signature, so any paired device of the tenant can shred a
   scope on the Host ([security](security.md#deletion-paths)). The Host
   control plane `appendMemberChainEntries` does the same.
-- **Proof replay.** A device proof is not single-use on the three writes.
-  Anyone who captures a proof and its body can send them again while the
-  proof's `issuedAt` is within the Host clock skew (60 s by default). A
-  replayed registration extends the pairing MAC expiry, or puts back an older
-  MAC for the same bundle. A replayed package put can overwrite a newer
-  package for the same scope epoch, `keyId` and recipient. A replayed chain
-  append changes nothing. The owner accepted this window for now (owner batch
-  §41a A). Before E2d-5, `requestId` becomes single-use on the three writes,
-  as on the truth put.
+- **Proof replay.** The proof's `requestId` is single-use per device on the
+  three writes, as on the truth put (owner batch §41a A). The Host records
+  the `requestId` with its binding (`operation`, `resource`, `bodySha256`,
+  `bodySize`) and the write's result, in the same transaction as the write;
+  in Postgres this is `proof_request_receipt`, the table the truth put uses,
+  so a `requestId` is single-use across both. A request with a recorded
+  `requestId` and the same binding writes nothing and gets the recorded
+  result: a replayed registration does not touch the pairing MAC or its
+  expiry, a replayed package put does not overwrite a newer package, and a
+  replayed chain append returns the first counts. A replayed package put
+  still sends the key package notices again, as any successful put does. A
+  recorded `requestId` with another binding gets 409 `proof_request_conflict`
+  and writes nothing. A refused write (any 4xx) records nothing, so the same
+  request can succeed later. A Host control-plane write has no proof and
+  records nothing.
 - **Reads.** A device route checks the bearer against the device row, so a
   revoked or superseded device gets 401. The package read returns only the
   packages addressed to the device's registered member; a query names no
@@ -1336,7 +1342,7 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   | 400 | `coordination_input_invalid`, or an unreadable body |
   | 401 | `unauthorized` |
   | 404 | `e2ee_pairing_mac_not_found` |
-  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_scope_shredded`, `e2ee_member_key_conflict`, `e2ee_member_not_registered` |
+  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_scope_shredded`, `e2ee_member_key_conflict`, `e2ee_member_not_registered`, `proof_request_conflict` |
   | 413 | the body is over `maxE2eeRequestBytes` |
   | 500 | `e2ee_member_state_unreadable` |
 

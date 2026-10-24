@@ -18,6 +18,9 @@ const TENANT_A = tenantId('e2ee-cleanup-a');
 const TENANT_B = tenantId('e2ee-cleanup-b');
 const EXPIRES = '2099-01-01T00:00:00.000Z';
 const MACHINE = 'b'.repeat(64);
+let requests = 0;
+/** A device-proof binding with a requestId no other write has used. */
+const freshRequest = () => ({ requestId: `request-${++requests}`, operation: 'e2ee-member-key.register', resource: '/byok/e2ee/member-key', bodySha256: 'sha256', bodySize: 1 });
 
 if (SKIP_DATAPLANE) {
   describe.skip(`E2EE member store [postgres] — ${SKIP_REASON}`, () => { it('needs a dataplane substrate', () => undefined); });
@@ -69,7 +72,7 @@ async function seed(devices: PostgresDeviceDirectory, store: PostgresE2eeMemberS
     ...(machineId === undefined ? {} : { machineId }),
   });
   const memberId = `member-${deviceId}`;
-  expect(await store.registerMember(tenant, { deviceId, memberId, bundle: `{"memberId":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: EXPIRES })).toBe('registered');
+  expect(await store.registerMember(tenant, { deviceId, memberId, bundle: `{"memberId":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: EXPIRES, request: freshRequest() })).toBe('registered');
   expect(await store.putClientPairingMac(tenant, { deviceId, body: '{"mac":"client"}', expiresAt: EXPIRES })).toBe('stored');
   expect(await store.putScopeKeyPackages(tenant, { rows: [{
     scopeId: 'scope', epoch: 1, recipient: memberId, keyId: 'key', sender: memberId, package: `{"recipient":"${memberId}"}`,
@@ -202,6 +205,33 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres shred serializes with package puts of 
       await expect(store.putScopeKeyPackages(TENANT_A, { rows: [row(2, 'k2')] })).resolves.toEqual({ outcome: 'scope_shredded', scopeId: 'scope' });
     } finally {
       holder.release();
+      await scope.dispose();
+    }
+  });
+});
+
+describe.skipIf(SKIP_DATAPLANE)('Postgres single-use device requests share proof_request_receipt with the truth put', () => {
+  it('refuses an E2EE write whose requestId a truth put already used, and records an E2EE write there', async () => {
+    const scope = await createDataplaneScope(2);
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const store = new PostgresE2eeMemberStore(scope.pool, createMutableClock());
+      await scope.pool.query(
+        `INSERT INTO proof_request_receipt (tenant_id, device_id, request_id, operation, resource, body_sha256, body_size, response_status, response_body, recorded_at)
+         VALUES ($1, 'dev-1', 'shared', 'truth.write', 'memory/key', 'sha256-truth', 5, 200, '{}', now())`, [TENANT_A]);
+      const request = (requestId: string) => ({ requestId, operation: 'e2ee-member-chain.append', resource: '/byok/e2ee/chain', bodySha256: 'sha256-e2ee', bodySize: 7 });
+      expect(await store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], shreds: [], proof: { deviceId: 'dev-1', request: request('shared') } }))
+        .toEqual({ outcome: 'request_conflict' });
+      expect(await store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{}' }], shreds: [], proof: { deviceId: 'dev-1', request: request('fresh') } }))
+        .toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
+      const stored = await scope.pool.query(
+        `SELECT operation, resource, body_sha256, body_size::int AS body_size, response_status, response_body FROM proof_request_receipt
+          WHERE tenant_id = $1 AND device_id = 'dev-1' AND request_id = 'fresh'`, [TENANT_A]);
+      expect(stored.rows).toEqual([{
+        operation: 'e2ee-member-chain.append', resource: '/byok/e2ee/chain', body_sha256: 'sha256-e2ee', body_size: 7,
+        response_status: 200, response_body: '{"outcome":"appended","appended":1,"replayed":0}',
+      }]);
+    } finally {
       await scope.dispose();
     }
   });
