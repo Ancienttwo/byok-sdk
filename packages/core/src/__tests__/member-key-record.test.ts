@@ -153,7 +153,9 @@ describe('member key record KEM rotation (E2d-5)', () => {
     expect(after.kem).toMatchObject({ epoch: 2, publicJwk: keys.nextKem!.publicJwk });
     expect(finished).not.toContain((JSON.parse(begun) as { kemJwk: { d: string } }).kemJwk.d);
     expect((await openSelf(after, after.kem, next)).ok).toBe(true);
-    expect((await openSelf(after, after.kem, old)).ok).toBe(false);
+    expect(await openSelf(after, after.kem, old)).toEqual({ ok: false, reason: 'key_package_invalid' });
+    // Even when the opener claims the old epoch, the new key cannot decrypt a package wrapped to the old one.
+    expect(await openSelf(after, { ...after.kem, epoch: 1 }, old)).toEqual({ ok: false, reason: 'key_package_open_failed' });
     // A repeat finish changes nothing, and the next rotation goes from 2 to 3.
     expect(finishMemberKemRotation(finished, 2)).toBe(finished);
     expect((await openMemberKeyRecord(await beginMemberKemRotation(finished)))?.nextKem?.epoch).toBe(3);
