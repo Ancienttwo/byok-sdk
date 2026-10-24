@@ -68,6 +68,15 @@ export function owned(routines: readonly Routine[], owner: string, id: string): 
   if (!routine || fields(routine)?.owner !== owner || routine.lifecycle === 'completed') throw new Error('Routine is unavailable to this Bot');
   return routine;
 }
+/**
+ * The routine that `end_routine` completes (§55c): any Bot routine that is open, whatever its owner, so the Main Bot can end
+ * the routine of an archived Bot. The command checks the Main Bot role.
+ */
+export function endable(routines: readonly Routine[], id: string): Routine {
+  const routine = routines.find(row => row.definition.id === id);
+  if (!routine || !fields(routine) || routine.lifecycle === 'completed') throw new Error('No open Bot routine has this id');
+  return routine;
+}
 /** The next version for `RoutineCommands.update`. It builds on `pending` when one is staged. */
 export function updateDefinition(routines: readonly Routine[], owner: string, action: UpdateRoutineAction): HostOccurrenceRoutineDefinition {
   const routine = owned(routines, owner, action.routineId);

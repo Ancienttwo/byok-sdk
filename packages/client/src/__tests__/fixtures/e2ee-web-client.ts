@@ -9,15 +9,19 @@ import {
   encodePairingVerificationSecret,
   generateMemberKeyRecord,
   generatePairingVerificationSecret,
+  generateScopeKey,
   memberChainEntryHash,
   openMemberKeyRecord,
   parseMemberKeyBundle,
+  sealScopeKeyPackage,
   signMemberChainEntry,
   verifyDevicePairingMac,
   type MemberChainEntryV1,
   type MemberChainOp,
   type MemberKeyBundleV1,
   type MemberKeys,
+  type ScopeKeyPackageV1,
+  type SealedCategory,
 } from '@byok-sdk/core/sealed-payload';
 import type { E2eeTestHost } from './e2ee-test-host';
 
@@ -74,6 +78,31 @@ export class E2eeWebClient {
   /** The relay body of step 4: the client MAC over `head`. */
   async relayBody(head = this.head!): Promise<{ mac: string; member: MemberKeyBundleV1; chainHead: { seq: number; hash: string } }> {
     return { mac: await computeClientPairingMac(this.pv, { member: this.member, chainHead: head }), member: this.member, chainHead: head };
+  }
+
+  /**
+   * Create or update a scope: sign its `scope-policy` for this client and
+   * `members`, then put a package of `scopeKey` at `epoch` for each of them.
+   */
+  async putScope(
+    scopeId: string,
+    members: readonly MemberKeyBundleV1[],
+    options: { readonly epoch?: number; readonly scopeKey?: Uint8Array; readonly categories?: readonly SealedCategory[] } = {},
+  ): Promise<Uint8Array> {
+    const scopeKey = options.scopeKey ?? generateScopeKey();
+    const ids = [this.member.memberId, ...members.map((member) => member.memberId)].sort();
+    await this.append('scope-policy', { scopeId, categories: options.categories ?? ['task-input', 'task-output'], members: ids });
+    this.host.clientPutPackages(...await Promise.all(members.map((member) => this.sealPackage(scopeId, member, scopeKey, options.epoch))));
+    return scopeKey;
+  }
+
+  /** One key package of `scopeKey`, from this client to `recipient`. */
+  sealPackage(scopeId: string, recipient: MemberKeyBundleV1, scopeKey: Uint8Array, epoch = 1): Promise<ScopeKeyPackageV1> {
+    return sealScopeKeyPackage({
+      scopeKey, tenantId: this.tenantId, scopeId, epoch,
+      recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk },
+      sender: { signingPublicJwk: this.keys.signing.publicJwk, signingPrivateKey: this.keys.signing.privateKey },
+    });
   }
 
   /** Relay the client MAC over the current head. */

@@ -3,16 +3,17 @@ import { afterAll, beforeAll, describe } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { hash, taskId, type Conclusion, type FrozenInput, type FrozenSubmitPort, type Intent, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { admitUserInput } from '@byok-sdk/example-bot-collaboration/coalesce';
 import type { CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { routineVectors, type OccurrenceRow, type RoutineSubject } from '@byok-sdk/example-bot-collaboration/routine-vectors';
+import { createDefinition } from '@byok-sdk/example-bot-collaboration/routines';
 import { SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { HostedSubmitter } from './intents';
 import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import type { TaskEvidence } from './reconcile';
-import type { FinishPortsFactory } from './store';
+import { hostedRoutineCommands, loadSlice, writeSlice } from './routines';
+import { inSchema, lockScope, type FinishPortsFactory } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -46,8 +47,7 @@ async function hostedSubject(): Promise<RoutineSubject> {
   });
   await store().bindDevice(scope, 'device');
   const submitter = new HostedSubmitter(opened!.pool, store().schema, { port: () => fakePort(), now: () => clock, leaseMs: 60_000, backoffMs: 1000 });
-  const ports: FinishPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => clock,
-    admitInput: fields => admitUserInput(state, fields, undefined, clock) });
+  const ports: FinishPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => clock });
   /** Runs the Host as the L pass does: the sync, then the submit of each FIFO head, then the sync again. */
   const run = async () => {
     await store().sync(scope, { ...SYNC_OPTIONS, now: clock, history: undefined });
@@ -61,6 +61,14 @@ async function hostedSubject(): Promise<RoutineSubject> {
     now: () => clock,
     at: now => { clock = now; },
     change: edit => store().seed(scope, edit),
+    addRoutine: (owner, schedule) => inSchema(opened!.pool, store().schema, async client => {
+      await lockScope(client, storedKey(scope));
+      const slice = await loadSlice(client, storedKey(scope)), commands = hostedRoutineCommands(slice, clock);
+      const definition = createDefinition(commands.list(), owner, taskId(`seed:${owner}`, 0), 0, { localId: 'new_routine_1', schedule, prompt: 'Daily report' }, 'bot');
+      commands.create(definition);
+      await writeSlice(client, storedKey(scope), slice);
+      return definition.id;
+    }),
     input: async (key, request) => {
       const result = await store().commit(scope, { scope, commandId: hash(['input', 'main', key]),
         command: { kind: 'input', botId: 'main', key, request, sender: 'owner' } }, ports);
@@ -87,6 +95,11 @@ async function hostedSubject(): Promise<RoutineSubject> {
     },
     update: async action => { await store().updateRoutine(scope, 'main', action, clock); await run(); },
     lifecycle: async (id, value) => { await store().setRoutineLifecycle(scope, 'main', id, value, clock); await run(); },
+    // A keyless owner command, as L `endRoutine`, by the Main Bot.
+    end: async id => {
+      await store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'end_routine', botId: 'main', routineId: id } }, ports);
+      await run();
+    },
     routine: async id => {
       const row = (await query<{ definition: RoutineDefinition; pending: RoutineDefinition | null; lifecycle: RoutineSubjectRow['lifecycle'];
         status: RoutineSubjectRow['status']; next_at: string | null; calendar_errors: unknown[] | null }>(`SELECT definition, pending, lifecycle, status,
@@ -94,6 +107,9 @@ async function hostedSubject(): Promise<RoutineSubject> {
       return row && { id, version: row.definition.version, pending: row.pending?.version ?? null, lifecycle: row.lifecycle, status: row.status,
         nextAt: row.next_at === null ? null : Number(row.next_at), calendarErrors: row.calendar_errors?.length ?? 0 };
     },
+    // The predicate of the scheduler's `routine_due` index.
+    reserved: async id => (await query<{ next_at: string }>(`SELECT next_at::text FROM ${table('routine')} WHERE scope = $1 AND id = $2
+      AND lifecycle = 'active' AND next_at IS NOT NULL`, [storedKey(scope), storedKey(id)])).map(row => Number(row.next_at)),
     occurrences: async id => (await query<{ key: string; definition_version: number; trigger_kind: OccurrenceRow['trigger']['kind']; planned_at: string;
       recorded_at: string; next_at: string | null; execution_superseded: boolean; conclusion: Conclusion | null; intent: string | null;
       intent_conclusion: Conclusion | null }>(`SELECT o.key, o.definition_version, o.trigger_kind, o.planned_at::text, o.recorded_at::text, o.next_at::text,
