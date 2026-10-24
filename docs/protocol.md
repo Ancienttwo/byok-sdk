@@ -1110,7 +1110,11 @@ know a sealed type refuses it with `UnknownMessageTypeError`. A sealed type
 also takes every gate of its plaintext type, except the gates of the moved and
 dropped fields. For example, `task.offer_for_agent_sealed` also needs
 `agent-home-contract`, and `harnessId` on `task.offer_sealed` also needs
-`custom-harness`. Sealing never removes a gate.
+`custom-harness`. Sealing never removes a gate. A sealed task output that
+names its ciphertext blob (`sealed.ciphertextRef`) also needs the server flag
+`sealed-output-ciphertext-ref`. The split table marks `task.progress_sealed`
+and `task.await_approval_sealed` `inlineOnly`, so they have no such gate: they
+are always inline.
 
 `PROTOCOL_VERSION` stays 3. `task.offer_prepared`, input preparation, Agent
 messages, egress, drafts and memory projections are not sealed in v1.
@@ -1261,13 +1265,20 @@ envelope is the same entry when its comparison projection (above) is the
 same. A sealed terminal or `task.artifact_sealed` carries `ciphertextRef`
 above the inline limit, and the task holds its blob (above), so the
 plaintext limit of each is 2 MiB. `task.progress_sealed` and
-`task.await_approval_sealed` are inline only: their tail rows expire, so the
-cloud refuses either one with `ciphertextRef` (`sealed_payload_unsupported`).
-The device uploads a ciphertext blob first. If the device sends the terminal
-more than one day after the upload, orphan GC may have deleted the blob, and
-the Host then refuses the terminal. The cloud
-advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`, because
-it accepts all seven sealed output types.
+`task.await_approval_sealed` are inline only (`inlineOnly`): their tail rows
+expire, so the cloud refuses either one with `ciphertextRef`
+(`sealed_payload_unsupported`). The device uploads a ciphertext blob first.
+If the device sends the terminal more than one day after the upload, orphan
+GC may have deleted the blob, and the Host then refuses the terminal.
+
+The cloud advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`,
+because it accepts all seven sealed output types. It also advertises
+`sealed-output-ciphertext-ref`, because it holds the blob of a sealed
+terminal or artifact. A device sends a sealed output by `ciphertextRef` only
+to a server that advertises this flag. Without it, the device keeps every
+sealed output inline: a terminal over the inline frame becomes the sealed
+`task.fail` with `reason` `terminal_result_unsealable`, and an artifact over
+it becomes an error event.
 
 **Drafts and `cloud-do`.** An `agent.message.draft` is plaintext. So the Host
 refuses a draft for a task whose offer has any `sealing`, with

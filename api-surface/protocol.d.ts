@@ -1657,6 +1657,12 @@ export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparatio
  * `WIRE_ADDITIONS`.
  */
 export declare const SEALED_PAYLOAD_CAPABILITY: 'sealed-payload-v1';
+/**
+ * A server advertises it before a device may send a sealed task output that
+ * names its ciphertext blob (`sealed.ciphertextRef`) instead of carrying it
+ * inline. The server then holds the blob for the life of the task.
+ */
+export declare const SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY: 'sealed-output-ciphertext-ref';
 /** Single value authority shared by schema validation and schema-free consumers. */
 export declare const PREPARED_AGENT_MEMORY_MODES: readonly ['none', 'read', 'read-write'];
 export declare function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREPARED_AGENT_MEMORY_MODES)[number];
@@ -7508,6 +7514,12 @@ export interface SealedSplitEntry {
     readonly limits?: {
         readonly [field: string]: number;
     };
+    /**
+     * The sealed form carries inline ciphertext only, never `ciphertextRef`
+     * (decision 12e). The Host keeps it in a tail row that expires, so it holds
+     * no blob for it. The schema does not check this; the Host and the device do.
+     */
+    readonly inlineOnly?: true;
 }
 /**
  * The split table (design §8.3): each sealed message type, the plaintext type
@@ -7596,6 +7608,7 @@ export declare const SEALED_SPLIT_TABLE: Readonly<{
         readonly digests: {
             readonly 'events[].spill.blob.contentHash': 'sealed';
         };
+        readonly inlineOnly: true;
     };
     readonly 'task.artifact_sealed': {
         readonly plainType: 'task.artifact';
@@ -7617,6 +7630,7 @@ export declare const SEALED_SPLIT_TABLE: Readonly<{
         readonly moved: readonly ["summary"];
         readonly forbidden: readonly [];
         readonly digests: {};
+        readonly inlineOnly: true;
     };
 }>;
 export type SealedMessageType = keyof typeof SEALED_SPLIT_TABLE;
@@ -7766,7 +7780,7 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", 'agent-message-draft', "sealed-payload-v1"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", 'agent-message-draft', "sealed-payload-v1", "sealed-output-ciphertext-ref"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 /**
@@ -7779,7 +7793,8 @@ export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
  *
  * - `gated`: the sender must not emit the surface unless the receiver
  *   durably advertised `capability`. A field entry applies when the payload
- *   carries the field (and, with `value`, when the field equals it); a type
+ *   carries the field (and, with `value`, when the field equals it); a
+ *   dotted field names a nested field, for example `sealed.ciphertextRef`. A type
  *   entry applies to every message of that type. Server-to-daemon surfaces
  *   are gated by a device flag, daemon-to-server surfaces by a server flag.
  * - `strip-safe`: an optional field an older receiver drops without changing

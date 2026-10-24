@@ -56,6 +56,12 @@ export interface SealedSplitEntry {
    * bounds the whole opened content.
    */
   readonly limits?: { readonly [field: string]: number };
+  /**
+   * The sealed form carries inline ciphertext only, never `ciphertextRef`
+   * (decision 12e). The Host keeps it in a tail row that expires, so it holds
+   * no blob for it. The schema does not check this; the Host and the device do.
+   */
+  readonly inlineOnly?: true;
 }
 
 const OFFER_DIGESTS = {
@@ -125,6 +131,7 @@ export const SEALED_SPLIT_TABLE = Object.freeze({
   },
   'task.progress_sealed': {
     plainType: 'task.progress', category: 'task-output', identity: ['seq'], moved: ['events'], forbidden: [], digests: { 'events[].spill.blob.contentHash': 'sealed' },
+    inlineOnly: true,
   },
   'task.artifact_sealed': {
     plainType: 'task.artifact', category: 'task-output', identity: ['artifactId'], moved: ['inline'], forbidden: ['blobRef'], digests: { 'blobRef.contentHash': 'forbidden' },
@@ -132,6 +139,7 @@ export const SEALED_SPLIT_TABLE = Object.freeze({
   },
   'task.await_approval_sealed': {
     plainType: 'task.await_approval', category: 'task-output', identity: ['approvalId'], moved: ['summary'], forbidden: [], digests: {},
+    inlineOnly: true,
   },
 } as const satisfies { readonly [type: string]: SealedSplitEntry });
 

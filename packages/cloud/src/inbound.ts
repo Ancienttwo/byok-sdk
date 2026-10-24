@@ -63,6 +63,7 @@ import {
   type AgentMessageServerContext,
   type Envelope,
   type MessageType,
+  type SealedSplitEntry,
 } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';
 import {
@@ -605,9 +606,10 @@ async function applyInboundGate(
 
   if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) return refuse('type_not_allowed');
   // Progress and approval rows expire and release nothing, so their sealed
-  // forms are inline only (12e).
+  // forms are inline only (12e, the split table's `inlineOnly`).
   const ciphertextRef = sealedCiphertextRef(envelope.payload);
-  if (ciphertextRef !== undefined && INLINE_ONLY_SEALED_TYPES.includes(envelope.type)) return refuse('sealed_payload_unsupported');
+  if (ciphertextRef !== undefined && isSealedMessageType(envelope.type)
+    && (SEALED_SPLIT_TABLE[envelope.type] as SealedSplitEntry).inlineOnly === true) return refuse('sealed_payload_unsupported');
 
   if (envelope.type === 'agent.message.draft') {
     const parsed = AgentMessageDraftPayloadSchema.safeParse(envelope.payload);
@@ -790,7 +792,6 @@ async function applyInboundGate(
 }
 
 const REDACTABLE_REPORT_TYPES: readonly string[] = ['task.progress', 'task.artifact', 'task.await_approval', 'task.approval_resolved'];
-const INLINE_ONLY_SEALED_TYPES: readonly string[] = ['task.progress_sealed', 'task.await_approval_sealed'];
 const TERMINAL_TASK_STATUSES: readonly string[] = ['complete', 'failed', 'cancelled'];
 
 /** Marks an envelope complete only after all of its authoritative facts converged. */
