@@ -11,6 +11,14 @@ export interface IntentCompactionInput {
 }
 export interface IntentCompaction { compactedIntents: number; alreadyCompactedIntents: number }
 
+/** The distinct, valid Turn ids of `input`; throws on a malformed input. */
+export function acknowledgedTurnIds(input: IntentCompactionInput): string[] {
+  if (!Array.isArray(input?.acknowledgedTurnIds)) throw new Error('Acknowledged Turn ids must be an array');
+  const turnIds: string[] = [...new Set(input.acknowledgedTurnIds)];
+  if (turnIds.some(id => typeof id !== 'string' || !id.trim())) throw new Error('Invalid acknowledged Turn id');
+  return turnIds;
+}
+
 /**
  * Removes the settled intent rows of the acknowledged Turns, as K4 `compact` removes settled intents (#793 S8). The caller
  * holds the scope lock and passes the state of its transaction. Each removed row leaves a permanent intent tombstone in the
@@ -21,9 +29,7 @@ export interface IntentCompaction { compactedIntents: number; alreadyCompactedIn
  */
 export async function decideCompaction(client: PoolClient, scopeKey: string, state: CollaborationState,
   input: IntentCompactionInput): Promise<IntentCompaction> {
-  if (!Array.isArray(input?.acknowledgedTurnIds)) throw new Error('Acknowledged Turn ids must be an array');
-  const turnIds: string[] = [...new Set(input.acknowledgedTurnIds)];
-  if (turnIds.some(id => typeof id !== 'string' || !id.trim())) throw new Error('Invalid acknowledged Turn id');
+  const turnIds = acknowledgedTurnIds(input);
   const found = await client.query<{ key: string; source: string; conclusion: string | null }>(
     'SELECT key, source, conclusion FROM intent WHERE scope = $1 AND key = ANY($2::text[])', [scopeKey, turnIds.map(storedKey)]);
   const rows = new Map(found.rows.map(row => [row.key, row]));

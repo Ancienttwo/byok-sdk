@@ -11,7 +11,7 @@ import { advanceRoomSeats, checkReply, collaborationDue, commitCommand, expireCa
   syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, bindDevice, revokeDevice } from './binding';
-import { decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
+import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { cancelIntent, deliverCancels, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
@@ -520,7 +520,11 @@ export class HostedCollaborationStore {
   compactIntents(scope: string, input: IntentCompactionInput): Promise<IntentCompaction> {
     const key = storedKey(scope);
     return this.transaction(async client => {
-      if (!(await client.query('SELECT 1 FROM scope WHERE scope = $1', [key])).rowCount) return decideCompaction(client, key, stateOf({}), input);
+      if (!(await client.query('SELECT 1 FROM scope WHERE scope = $1', [key])).rowCount) {
+        // No scope row means no intent and no tombstone (`retired_identity` references `scope`), so no lock is needed.
+        if (acknowledgedTurnIds(input).length) throw new Error('Acknowledged intent not found');
+        return { compactedIntents: 0, alreadyCompactedIntents: 0 };
+      }
       return this.decideIn(client, key, undefined, async state => ({ value: await decideCompaction(client, key, state, input), outbox: [] }));
     }, false);
   }
