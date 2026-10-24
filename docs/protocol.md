@@ -1441,8 +1441,8 @@ unless `includeE2eeMember` is set.
 `e2ee.member.kem-epoch` (#654 E5b-2, owner batch §77a) is declared exactly
 when `e2ee.member` is. It says the Host takes version 2 key packages only,
 keeps a KEM floor per member from `rotate` entries, and serves the paged
-package read with the scope head. A Host that declares `e2ee.member` without
-it is a 0.30.1 or older Host.
+package read with the scope head. A 0.30.1 or older Host declares
+`e2ee.member` without it.
 
 The three writes are device-proof routes (`x-byok-device-proof`). The proof's
 `operation` is the constant in the table, and its `resource` is the route path.

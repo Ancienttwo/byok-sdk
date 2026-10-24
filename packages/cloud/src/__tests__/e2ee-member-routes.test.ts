@@ -136,14 +136,14 @@ describe('E2EE member device routes', () => {
     expect(e2eeRoutes(setup().cloud)).toEqual(E2EE_ROUTES);
     expect(e2eeRoutes(setup({ capabilities: fullCapabilityDeclaration() }).cloud)).toEqual({});
     expect(fullCapabilityDeclaration().capabilities).not.toContain(CLOUD_CAPABILITIES.e2eeMember);
-    expect(fullCapabilityDeclaration().capabilities).not.toContain(CLOUD_CAPABILITIES.e2eeMemberKemEpoch);
+    expect(() => setup({ e2eeMemberStore: undefined })).toThrowError(expect.objectContaining({ code: 'capability_over_declared' }));
   });
 
   it('declares e2ee.member.kem-epoch exactly with e2ee.member', async () => {
     expect(CLOUD_CAPABILITIES.e2eeMemberKemEpoch).toBe('e2ee.member.kem-epoch');
+    expect(fullCapabilityDeclaration().capabilities).not.toContain(CLOUD_CAPABILITIES.e2eeMemberKemEpoch);
     const declared = (await answer(await setup().fetch('/byok/capabilities'))).body as { capabilities: string[] };
     expect(declared.capabilities).toEqual(expect.arrayContaining(['e2ee.member', 'e2ee.member.kem-epoch']));
-    expect(() => setup({ e2eeMemberStore: undefined })).toThrowError(expect.objectContaining({ code: 'capability_over_declared' }));
   });
 
   it('registers the device bundle and MAC under device proof, and refuses another bundle or device', async () => {
