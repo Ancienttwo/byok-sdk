@@ -23,8 +23,8 @@ import {
   deriveSealedContentKey,
   deriveSealedMacKey,
   openScopeKeyPackage,
+  type ScopeKeyPackage,
   type ScopeKeyPackageOpenResult,
-  type ScopeKeyPackageV1,
 } from '../../sealed-payload/scope-key';
 import {
   SEALED_CATEGORIES,
@@ -160,7 +160,9 @@ export interface KeyPackageVector {
   readonly sender: string;
   readonly recipient: string;
   readonly expected: { readonly tenantId: string; readonly scopeId: string; readonly epoch: number };
-  readonly package: ScopeKeyPackageV1;
+  readonly package: ScopeKeyPackage;
+  /** The KEM epoch of the recipient key the checker opens with; 1 when absent. */
+  readonly recipientKemEpoch?: number;
   readonly expect: 'ok' | Extract<ScopeKeyPackageOpenResult, { ok: false }>['reason'];
 }
 
@@ -735,6 +737,7 @@ async function checkKeyPackages(vectors: SealedPayloadVectors, scopeKey: Uint8Ar
         memberId: recipient.memberId,
         kemPublicJwk: publicJwk(recipient.kem),
         kemPrivateKey: await importVectorPrivateKey(recipient.kem, 'kem'),
+        kemEpoch: vector.recipientKemEpoch ?? 1,
       },
       senderSigningPublicJwk: publicJwk(sender.signing),
     });
