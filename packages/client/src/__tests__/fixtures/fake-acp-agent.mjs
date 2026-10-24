@@ -66,6 +66,12 @@ async function prompt(message) {
   if (input === 'exit') { process.exit(9); }
   if (input === 'fail') { error(message.id, -32603, 'model provider failed'); return; }
   if (input === 'rate-limited') { error(message.id, -32003, 'Rate limited'); return; }
+  // Grok names the cause of a -32603 in the retry_state that ended its retries.
+  if (input.startsWith('retry-failed:')) {
+    vendor({ sessionUpdate: 'retry_state', type: 'failed', error_type: input.slice('retry-failed:'.length) });
+    error(message.id, -32603, 'Internal error');
+    return;
+  }
   if (input === 'huge') { text('x'.repeat(256 * 1024)); result(message.id, answer()); return; }
   if (input === 'tool') {
     text('Let me look. ');

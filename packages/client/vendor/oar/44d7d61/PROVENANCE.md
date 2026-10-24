@@ -21,6 +21,8 @@ Policy: follow upstream. A file is maintained only where the SDK's ownership of 
 
 The SDK adapters own the retained-record budget (`maxRetainedBytes`, default 16 MiB) and the Codex operation deadlines (`operationTimeoutMs`, default 30000ms); see the last history section. The SDK releases the retained stream at completion. The SDK JS/declaration bridge (`src/runtime/codex-session-runtime.{js,d.ts}`) exposes text-only `prompt` and `steer`, `abort`, `records` and `dispose`; `scripts/api-surface/oar-bridge-types.ts` checks it against these sources.
 
+The SDK bridge `src/runtime/oar-failure-runtime.{js,d.ts}` re-exports two upstream failure tables: `codexFailure` (`runtimes/codex/failure.ts`) and `failureFromStatus` (`shared/failure-class.ts`). The Codex and Claude adapters classify a failed turn with them, so the class reaches the `task.fail` terminal (#869), not BYOK events. `scripts/api-surface/oar-bridge-types.ts` checks the bridge and that the protocol's `RuntimeFailureClass` equals `FailureClass`.
+
 The SDK bridge `src/runtime/acp-session-runtime.{js,d.ts}` declares one start signature for every vendored ACP runtime: text-only `prompt`, `abort`, `records` and `dispose`. It exports `grokSession` from the Grok profile, which keeps upstream bytes. The build emits it as the private `#byok-acp-runtime` entry, so `@agentclientprotocol/sdk` loads only when an ACP session starts, never with `@byok-sdk/client/adapters`. `scripts/api-surface/oar-bridge-types.ts` checks it against these sources.
 
 Not vendored: `shared/session-credentials.ts`, `shared/seal-session.ts`, `shared/environment.ts`, `shared/home-initialization.ts`, the executable manager, observe modules other than `graph.ts`, and all runtimes other than Codex and the Grok session. One upstream npm dependency enters the SDK: `@agentclientprotocol/sdk`, exact pin `1.4.0` (the version in OAR's lockfile at this commit, Apache-2.0), which owns the ACP wire. `cross-spawn` does not enter; the terminal delta replaces it.
@@ -391,3 +393,7 @@ browser handling (0.69.0), and `@cursor/sdk` 1.0.38 → 1.0.40 with Cursor
 runtime strings (0.70.0). The source inventory and npm dependencies stay the
 same. Build assets copy this source provenance to
 `dist/assets/provenance/oar/44d7d61/`.
+
+### Failure class reaches the terminal (#869)
+
+No vendored file changes. The new private bridge `src/runtime/oar-failure-runtime.{js,d.ts}` re-exports `codexFailure` and `failureFromStatus`. The Codex adapter classifies a failed turn from the native frame's `turn.error` with `codexFailure`, and the Claude adapter reads a result's `api_error_status` with `failureFromStatus`. The Grok adapter passes the class of its vendored turn outcome and of the start `RuntimeFailureError` through. The class goes onto `task.fail.failure`. SDK events still read native frames only, so the derived failure class still does not reach BYOK events.

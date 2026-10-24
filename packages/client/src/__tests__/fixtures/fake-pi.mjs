@@ -86,6 +86,7 @@
 //                                    path to complete correctly.
 //   FAKE_PI_AUTO_RETRY_FAIL=1    -> emit an exhausted native retry terminal
 //                                    instead of agent_settled.
+//   FAKE_PI_AUTO_RETRY_FINAL_ERROR=<text> -> that terminal's `finalError`.
 //   FAKE_PI_TRAJECTORY=<gap>     -> one trajectory gap for the execution
 //                                    record (Octop T1); the rest of the
 //                                    sequence is unchanged:
@@ -322,7 +323,7 @@ async function handleCommand(msg) {
         break; // stay Running indefinitely — see FAKE_PI_HANG_AFTER_TOOL above
       }
       if (process.env.FAKE_PI_AUTO_RETRY_FAIL === '1') {
-        send({ type: 'auto_retry_end', success: false, attempt: 3, finalError: 'provider still unavailable' });
+        send({ type: 'auto_retry_end', success: false, attempt: 3, finalError: process.env.FAKE_PI_AUTO_RETRY_FINAL_ERROR ?? 'provider still unavailable' });
         break;
       }
 

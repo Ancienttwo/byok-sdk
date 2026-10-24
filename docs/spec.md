@@ -1342,6 +1342,23 @@ TaskRunner projects the typed retry disposition onto the existing
 event variants do not change. Interruption/close evidence is a separate
 teardown lifecycle and cannot rewrite an already established semantic result.
 
+A `RuntimeExecutionFailure` also carries `failure`, a closed runtime failure
+class with an optional quota `resetsAt` (#869). An adapter sets it from
+structured runtime fields only, never from prose; without one the class is
+`unknown`. TaskRunner copies it to `task.fail.failure` when the server
+advertises `runtime-failure-class`, and gives a failure it makes itself
+`unknown`. The class never changes `retry`.
+
+| Runtime | Evidence |
+|---|---|
+| Claude | the turn's last `assistant.error`; a `rate_limit` with a `rejected` `rate_limit_event` is `quota` with its `resetsAt`, otherwise `rate_limited`; else `result.api_error_status` |
+| Codex | `turn.error.codexErrorInfo`, through the vendored OAR table; `unauthorized` stays `unknown` |
+| Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited` |
+| Pi, Hermes | no structured field: `unknown` |
+
+Every adapter reports a runtime process that ends before its terminal as
+`runtime_exited`.
+
 ### Terminal inference usage observation
 
 The three terminal messages may carry one bounded `TerminalInferenceUsage`
@@ -2903,7 +2920,9 @@ Cloud `readTaskResult` and the embedded `TaskResult` (`tasks.get().result`,
 `handle.result()`) copy the code verbatim (#496). If the code is absent, these
 projections omit it. Hosts classify busy through this code on the cloud result,
 the embedded `TaskResult` or the canonical `tasks.deviceTerminal` envelope.
-Hosts never parse `reason` for classification. The `task.decline.code` field
+Hosts never parse `reason` for classification. A failed task's runtime
+failure class is copied the same way, as `TerminalResult.failure` and
+`TaskResult.failure` (#869). The `task.decline.code` field
 landed as an additive optional field on wire v2 and is carried unchanged on
 wire v3 (K7 moved `PROTOCOL_VERSION` to 3).
 Host cancellation alone returns no device terminal.

@@ -9955,6 +9955,8 @@ export declare class TaskRunner {
      * decline before the open: the task's output could not be sent to it.
      */
     private handleSealedOffer;
+    /** `task.fail.failure` when the server advertised its gate. */
+    private failurePayload;
     private sealedCodesAllowed;
     /**
      * Declines a sealed offer once, non-retryably, before any claim. To a server
@@ -13176,6 +13178,7 @@ export declare function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescrip
     readonly harnessId: string;
 };
 // ==== @byok-sdk/client dist/runtime-failure.d.ts ====
+import type { RuntimeFailureClass, TaskFailure } from '@byok-sdk/protocol';
 /** Closed lifecycle phases for failures after an offer has been admitted. */
 export type RuntimeFailurePhase = 'start' | 'run';
 /** Closed semantic axis. Retryability is explicit and is never inferred from this field. */
@@ -13195,6 +13198,12 @@ export interface RuntimeExecutionFailureInput {
     retry: RuntimeRetryDisposition;
     /** Stable operator-facing reason. Provider diagnostics may be included, but are never parsed by TaskRunner. */
     reason: string;
+    /**
+     * The runtime's failure class, from structured runtime evidence only (#869);
+     * omitted means `unknown`. `resetsAt` exists only on `quota`, only when the
+     * runtime reported it, written as `Date#toISOString` writes it.
+     */
+    failure?: TaskFailure;
 }
 /**
  * Expected failure of an owned runtime-resource disposal barrier. This never
@@ -13215,12 +13224,16 @@ export declare class RuntimeExecutionFailure extends Error {
     readonly phase: RuntimeFailurePhase;
     readonly category: RuntimeFailureCategory;
     readonly retry: RuntimeRetryDisposition;
+    readonly failure: TaskFailure;
     constructor(input: RuntimeExecutionFailureInput, options?: ErrorOptions);
 }
+/** A class string a runtime reported, or `unknown` when it is none of the closed classes. */
+export declare function runtimeFailureClassOf(value: unknown): RuntimeFailureClass;
 export declare function isRuntimeExecutionFailure(value: unknown): value is RuntimeExecutionFailure;
 export interface RuntimeFailureProjection {
     reason: string;
     retryable: boolean;
+    failure: TaskFailure;
 }
 /**
  * Exhaustive wire projection for a valid typed failure. A failure from the

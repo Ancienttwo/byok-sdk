@@ -10,7 +10,7 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import vm from 'node:vm';
 import { generateScopeKey } from '@byok-sdk/core/sealed-payload';
-import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, decodeEnvelope, encodeEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentHomeManager } from '../agent-home';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -149,5 +149,38 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
     const { sent } = await runEgressTask({ scopeId: 'scope-a', epoch: 1, categories: ['task-output'] });
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(sent.filter((envelope) => envelope.type === 'agent.message.draft')).toEqual([]);
+  });
+});
+
+describe('the failure class of a sealed task (#869)', () => {
+  const sealedTasks = async (keyring: SealedScopeKeyring, taskId: string) => {
+    const tasks = new SealedTasks({ keyring, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); } } });
+    await tasks.openOffer(createEnvelope('task.offer_sealed', {
+      instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+    } as never, { taskId, seq: 1 }));
+    return tasks;
+  };
+  const failure = { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' } as const;
+
+  it('stays plaintext on task.fail_sealed', async () => {
+    const tasks = await sealedTasks(new GatedKeyring(), 'sealed-fail');
+    const sealed = await tasks.sealOutbound(createEnvelope('task.fail', { reason: 'secret reason', retryable: false, failure }, { taskId: 'sealed-fail' }));
+    expect(sealed?.type).toBe('task.fail_sealed');
+    // The strict sealed decoder accepts it.
+    expect(decodeEnvelope(encodeEnvelope(sealed!)).payload).toMatchObject({ retryable: false, failure });
+    expect(JSON.stringify(sealed!.payload)).not.toContain('secret reason');
+  });
+
+  it('is unknown on a replacement failure the daemon makes, and absent when the replaced terminal had none', async () => {
+    // The key is there when the offer opens and gone when the terminal seals.
+    const keyring = new GatedKeyring();
+    const keyless = { openingKey: () => keyring.openingKey(), sealingKey: () => keyring.sealingKey() } as SealedScopeKeyring;
+    const tasks = await sealedTasks(keyless, 'keyless');
+    const other = await sealedTasks(keyless, 'keyless-2');
+    keyless.sealingKey = async () => undefined;
+    const withClass = await tasks.sealOutbound(createEnvelope('task.fail', { reason: 'r', retryable: false, failure }, { taskId: 'keyless' }));
+    expect(withClass?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' } });
+    const withoutClass = await other.sealOutbound(createEnvelope('task.fail', { reason: 'r', retryable: false }, { taskId: 'keyless-2' }));
+    expect(withoutClass?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false });
   });
 });

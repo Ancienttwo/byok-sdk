@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Feature (client, protocol, server, cloud)** — a failed task now carries
+  `failure.class`, a closed runtime failure class (the vendored OAR
+  `FailureClass` values, `unknown` included), and `failure.resetsAt` when the
+  runtime reported when a quota resets (#869). Read it from `task.fail`,
+  `TaskResult.failure` (`tasks.get()`) and `TerminalResult.failure`; `reason`
+  stays display text. Claude reads its assistant error, result status and
+  `rate_limit_event`; Codex reads `codexErrorInfo`; Grok passes its OAR
+  outcome through; Pi and Hermes report `unknown`. A runtime process that ends
+  before its terminal is `runtime_exited`, and a failure the daemon makes
+  itself is `unknown`. The field is gated on the new server flag
+  `runtime-failure-class` (`RUNTIME_FAILURE_CLASS_CAPABILITY`), which the
+  reference server and the hosted cloud advertise. It stays plaintext on
+  `task.fail_sealed`. `RuntimeExecutionFailure` takes an optional `failure`.
+
 ## 0.30.0 — 2026-10-24 (published)
 
 0.30.0 is a MINOR release under the default pre-1.0 policy, with no exception.

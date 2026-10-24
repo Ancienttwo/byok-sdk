@@ -218,6 +218,24 @@ describe('GrokAdapter sessions', () => {
     expect(limited).toMatchObject({ phase: 'run', category: 'semantic', retry: 'retryable' });
   });
 
+  it('passes the vendored OAR failure class through, with the reason unchanged (#869)', async () => {
+    const classOf = async (instruction: string) => {
+      const failed = await failureOf(await open(adapter(), { instruction }, await ctx()));
+      return { failure: (failed as RuntimeExecutionFailure).failure, message: (failed as RuntimeExecutionFailure).message };
+    };
+    // -32003 covers every 429, a usage limit included: Grok cannot show quota.
+    expect(await classOf('rate-limited')).toEqual({ failure: { class: 'rate_limited' }, message: 'Rate limited' });
+    expect(await classOf('retry-failed:auth')).toEqual({ failure: { class: 'auth' }, message: 'Internal error' });
+    expect(await classOf('retry-failed:context_length')).toEqual({ failure: { class: 'input_too_large' }, message: 'Internal error' });
+    // A -32603 with no retry_state names no cause.
+    expect(await classOf('fail')).toEqual({ failure: { class: 'unknown' }, message: 'model provider failed' });
+    expect((await failureOf(await open(adapter(), { instruction: 'exit' }, await ctx())) as RuntimeExecutionFailure).failure).toEqual({ class: 'runtime_exited' });
+    const refusedLogin = await startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_AUTH: 'refuse' })).catch(error => error);
+    expect(refusedLogin).toMatchObject({ phase: 'start', failure: { class: 'auth' } });
+    const refusedModel = await startPreparedOperation(adapter({ model: 'no-such-model' }), { instruction: 'x' }, await ctx()).catch(error => error);
+    expect(refusedModel).toMatchObject({ phase: 'start', failure: { class: 'model_unavailable' } });
+  });
+
   it('fails the session and ends the agent when retained records exceed the byte budget', async () => {
     const resources = await ctx();
     // 'huge' streams 256 KiB of text: the open fits the budget, the turn does not.

@@ -371,6 +371,17 @@ describe('HermesAdapter session', () => {
     expect(failure).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', message: 'hermes turn failed' });
   });
 
+  it('reports unknown for a failed turn and runtime_exited for a gateway exit (#869)', async () => {
+    const failed = await setup({ FAKE_HERMES_FAIL_DETAILS: 'admitted_turn_failed' });
+    const failure = await turn(await failed.open()).then(() => undefined, (error: unknown) => error);
+    expect((failure as RuntimeExecutionFailure).failure).toEqual({ class: 'unknown' });
+    const exited = await setup({ FAKE_HERMES_KILL_GATEWAY_ON_PROMPT: '1' });
+    const session = await exited.open();
+    const exit = await turn(session).then(() => undefined, (error: unknown) => error);
+    expect(exit).toMatchObject({ category: 'infrastructure', message: 'hermes gateway exited', failure: { class: 'runtime_exited' } });
+    await session.close();
+  });
+
   it('refuses to start when another gateway serves the execution profile', async () => {
     const { open, root, entries } = await setup({ FAKE_HERMES_GATEWAY_WRONG_PID: '1' });
     await expect(open()).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', message: 'another Hermes gateway serves the execution profile' });
