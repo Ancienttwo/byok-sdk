@@ -262,7 +262,7 @@ export function parseRecordedWriteResult<K extends keyof typeof RECORDED_WRITE_R
   write: K,
   text: string,
 ): z.infer<(typeof RECORDED_WRITE_RESULTS)[K]> {
-  return storedValue(RECORDED_WRITE_RESULTS[write], text, 'recorded request result');
+  return storedValue<(typeof RECORDED_WRITE_RESULTS)[K]>(RECORDED_WRITE_RESULTS[write], text, 'recorded request result');
 }
 
 function scopeIdValid(scopeId: unknown): scopeId is string {
