@@ -1166,6 +1166,25 @@ describe('device member KEM rotation (E2d-5)', () => {
     expect(stored(custody).nextKem).toBeUndefined();
   });
 
+  it('opens a package that a concurrent KEM rotation re-wrapped while the fetch read it', async () => {
+    const { server, web, device, logs, keyring } = await member();
+    const scopeKey = await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    let release!: () => void;
+    server.e2ee.holdPackageReads = new Promise<void>((resolve) => { release = resolve; });
+    const reads = server.e2ee.packageReads;
+    const opening = keyring.openingKey({ id: 'scope-a', epoch: 1 });
+    while (server.e2ee.packageReads === reads) await new Promise((resolve) => setTimeout(resolve, 5));
+    // Only the fetch's read stays held; the rotation reads and re-wraps the package.
+    server.e2ee.holdPackageReads = undefined;
+    expect(await keyring.rotateKem()).toEqual({ ok: true, epoch: 2 });
+    const own = server.e2ee.packages.find((pkg) => pkg.scopeId === 'scope-a' && pkg.epoch === 1 && pkg.recipient === device.memberId);
+    expect(own?.sender).toBe(device.memberId);
+    release();
+    expect(await opening).toEqual(scopeKey);
+    expect(logs.join('\n')).not.toContain('no scope key');
+  });
+
   it('shares one rotation between concurrent calls, and refuses one after the member is lost', async () => {
     const { server, web, device, keyring } = await member();
     await web.putScope('scope-a', [device]);

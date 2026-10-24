@@ -10,7 +10,15 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { openSealedContent, sealContent, type SealedBinding, type SealedCategory } from '@byok-sdk/core/sealed-payload';
+import {
+  createMemberKeyBundle,
+  generateMemberKeyRecord,
+  openMemberKeyRecord,
+  openSealedContent,
+  sealContent,
+  type SealedBinding,
+  type SealedCategory,
+} from '@byok-sdk/core/sealed-payload';
 import {
   EnvelopeSchema,
   HOST_MCP_TASK_CONTEXT_CAPABILITY,
@@ -120,6 +128,16 @@ async function makeStale(member: ScopeMember, device: { readonly memberId: strin
   const notice = createEnvelope('e2ee.key_package.available', { scopeId: SCOPE, epoch: EPOCH }, { seq: server!.nextSeq() });
   server!.send(notice);
   await vi.waitFor(async () => expect(await cursor()).toBe(notice.seq), BUDGET_MS);
+}
+
+/** A member bundle of another device, added to the chain by the web client. */
+async function otherDevice(member: ScopeMember) {
+  const keys = (await openMemberKeyRecord(await generateMemberKeyRecord({ tenantId: TENANT, deviceId: 'device-other' })))!;
+  const bundle = await createMemberKeyBundle({
+    signingPublicJwk: keys.signing.publicJwk, signingPrivateKey: keys.signing.privateKey, kemPublicJwk: keys.kem.publicJwk, kemEpoch: keys.kem.epoch, deviceId: 'device-other',
+  });
+  await member.web.append('add', { member: bundle });
+  return bundle;
 }
 
 function binding(family: MessageType, direction: SealedBinding['direction'], identity: SealedBinding['identity'], deviceId: string, sealing: TaskSealing): SealedBinding {
@@ -467,6 +485,39 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
     server.send({ ...steer, id: randomUUID(), seq: server.nextSeq() });
     await vi.waitFor(() => expect(session.steerCalls).toEqual(['go right']), BUDGET_MS);
+  });
+
+  it('applies a sealed steer past a harmless chain advance, and drops one after a scope policy adds another device', async () => {
+    const { server, adapter, deviceId, member, device } = await start();
+    server.send(await sealedOffer(member, 'steer-shared', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    const session = adapter.sessions[0]!;
+    const steer = async (text: string) => {
+      const steerId = randomUUID();
+      const { header, ciphertext } = await sealedMember(member, { text }, binding('task.steer', 'server-to-daemon', { taskId: 'steer-shared', steerId }, deviceId, BOTH));
+      return createEnvelope('task.steer_sealed', { steerId, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never,
+        { taskId: 'steer-shared', seq: server.nextSeq() });
+    };
+    // No notice reaches the device: each steer's header names a chain head it has not seen, so the open catches up.
+    await member.web.append('scope-policy', { scopeId: 'scope-b', categories: BOTH.categories, members: [member.web.member.memberId, device.memberId].sort() });
+    server.send(await steer('go left'));
+    await vi.waitFor(() => expect(session.steerCalls).toEqual(['go left']), BUDGET_MS);
+
+    const other = await otherDevice(member);
+    await member.web.append('scope-policy', {
+      scopeId: SCOPE, categories: BOTH.categories, members: [member.web.member.memberId, device.memberId, other.memberId].sort(),
+    });
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      server.send(await steer('go right'));
+      await vi.waitFor(() => {
+        const dropped = diagnostic.mock.calls.some(([line]) => String(line).includes('sealed task.steer for task steer-shared dropped'));
+        expect(dropped || session.steerCalls.length > 1).toBe(true);
+      }, BUDGET_MS);
+      expect(session.steerCalls).toEqual(['go left']);
+    } finally {
+      diagnostic.mockRestore();
+    }
   });
 
   it('seals an approval request, a cancel and a runtime failure', async () => {
