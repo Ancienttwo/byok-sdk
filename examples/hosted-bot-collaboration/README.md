@@ -77,7 +77,7 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `entity` | map entry of the state (Turn, card, Bot, room, delivery, ...), keyed by its id |
 | `entry` | element of a list (audit, rejected, team note, home operation, room message), keyed by position |
 | `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
-| `outbox` | projection or delivery to send: a projection's value and send state, or a delivery's scan index (pending owner §54a) |
+| `outbox` | projection or delivery to send: a projection's value and send state, or a delivery's scan index (owner §54a, signed) |
 | `intent` | Turn intent: the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
 | `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision and its revoke time |
 | `retired_identity` | K8 identity that retention retired for good: `hash([namespace, id])` |
@@ -153,7 +153,8 @@ the verdict comes at the next sync of the scope.
 H does not yet run these L sync and pass steps: `sealDueBatches`, card expiry, `advanceRooms`, the card decision
 projections and their `action_result` Turns, `projectInputBatches`, the reply checks (`reconcileReply`, `retryReply`),
 the device observation (`observeDevices`), and the card and Agent home flushes. Some of them (the batch seal, card
-expiry and the reply checks) need a due time per scope, which H does not store; their placement is owner item O-4.
+expiry and the reply checks) need a due time per scope, which H does not store. These steps come after 0.30.0, in a
+later #793 slice, with a per-scope due index.
 
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
 record and keeps the revision. A throw writes nothing. The rule's `executionStarted` fact is the intent's `started`
@@ -313,7 +314,7 @@ interval every slot would fire as `catch_up`, and its occurrence key would diffe
 
 `HostedOutboxSender.run()` is one pass over the unsettled outbox rows that are due, across scopes (`outbox_due`). Each row
 runs in its own steps, and a failed row does not stop the later rows. A scope of an unknown store version is left out
-before the limit. The outbox DDL is the D2b-out plan text, pending owner §54a. Each claim and settle reads the clock after
+before the limit. The outbox DDL is the D2b-out plan text, signed by the owner (§54a). Each claim and settle reads the clock after
 the scope lock. After a step that threw, the row waits `backoffMs`. That wait never moves `next_at` earlier, so it cannot
 shorten the lease of a newer claim. If the wait cannot be written, `run()` rejects and that pass's result is lost.
 

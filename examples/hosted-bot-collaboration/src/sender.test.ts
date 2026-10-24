@@ -48,7 +48,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
   const row = async (scope: string, id: string) => (await query<OutboxRow>(`SELECT next_at::text, tries, last_error, settled_at::text
     FROM ${table('outbox')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(id)]))[0];
 
-  describe('outbox DDL (pending owner §54a)', () => {
+  describe('outbox DDL (owner §54a)', () => {
     it('refuses tries or a last error on a delivery row, and a projection row with no body', async () => {
       const scope = await scoped();
       const insert = (kind: string, body: string | null, tries: number, error: string | null) => query(`INSERT INTO ${table('outbox')}
