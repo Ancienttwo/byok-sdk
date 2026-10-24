@@ -93,6 +93,8 @@ export class E2eeTestHost {
   dropPackagePuts = false;
   /** Every device chain append body, in order. */
   readonly deviceAppends: unknown[][] = [];
+  /** When set, each device chain append waits for it before it stores. */
+  holdChainAppends: Promise<void> | undefined;
 
   constructor(private readonly deps: E2eeTestHostDeps) {}
 
@@ -162,8 +164,13 @@ export class E2eeTestHost {
       const recipient = this.registration(device.deviceId)?.member.memberId;
       const scopeId = url.searchParams.get('scopeId');
       const epoch = url.searchParams.get('epoch');
+      // The Host reads one epoch per request.
+      if (epoch === null) {
+        respond(res, 400, { error: 'coordination_input_invalid' });
+        return true;
+      }
       respond(res, 200, {
-        packages: this.packages.filter((pkg) => pkg.recipient === recipient && pkg.scopeId === scopeId && (epoch === null || pkg.epoch === Number(epoch))),
+        packages: this.packages.filter((pkg) => pkg.recipient === recipient && pkg.scopeId === scopeId && pkg.epoch === Number(epoch)),
       });
       return true;
     }
@@ -252,6 +259,7 @@ export class E2eeTestHost {
     }
     const { entries } = JSON.parse(body.toString('utf8')) as { entries: Array<{ seq: number }> };
     this.deviceAppends.push(entries);
+    await this.holdChainAppends;
     let appended = 0;
     let replayed = 0;
     for (const entry of entries) {

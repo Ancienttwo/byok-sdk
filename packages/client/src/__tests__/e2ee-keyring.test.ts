@@ -16,6 +16,7 @@ import {
   openScopeKeyPackage,
   type MemberKeyBundleV1,
   type MemberKeys,
+  type ScopeKeyPackageV1,
   type SealedContentHeaderV1,
 } from '@byok-sdk/core/sealed-payload';
 import { E2EE_SCOPE_KEY_PACKAGE_PUT_MAX } from '@byok-sdk/protocol';
@@ -796,6 +797,98 @@ describe('device member KEM rotation (E2d-5)', () => {
     custody.entries.set('member-keys', before);
     expect(await resume()).toBeUndefined();
     expect(logs.at(-1)).toContain('do not hold the KEM key the member chain names for this device');
+  });
+
+  it('reads each epoch up to four above the newest one it knows, and keeps the old key when the top one holds a package', async () => {
+    const { server, web, device, custody, logs, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    const reads = server.e2ee.packageReads;
+    server.e2ee.packageResponse = [{}];
+    expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'scope_epochs_exceeded' });
+    expect(server.e2ee.packageReads - reads).toBe(4);
+    expect(logs.join('\n')).toContain('the Host holds epoch 4 of scope "scope-a", beyond the epochs a KEM rotation reads');
+    expect(server.e2ee.devicePuts).toHaveLength(0);
+    expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+  });
+
+  it('keeps the old key without a read when a scope epoch it knows is too close to the 256 epochs it reads', async () => {
+    const { server, web, device, custody, logs, keyring } = await member();
+    await web.putScope('scope-a', [device], { epoch: 253 });
+    expect((await keyring.fetch('scope-a', 253)).ok).toBe(true);
+    const reads = server.e2ee.packageReads;
+    expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'scope_epochs_exceeded' });
+    expect(server.e2ee.packageReads).toBe(reads);
+    expect(logs.join('\n')).toContain('scope "scope-a" has epochs past the 256 a KEM rotation reads');
+    expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+  });
+
+  it('cuts off a hung rotate append, and keeps the old key', async () => {
+    const { server, web, device, custody, keyring } = await member({ requestTimeoutMs: 50 });
+    await web.putScope('scope-a', [device]);
+    let release!: () => void;
+    server.e2ee.holdChainAppends = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      await expect(keyring.rotateKem()).rejects.toMatchObject({ name: 'TimeoutError' });
+      expect(server.e2ee.devicePuts).toHaveLength(0);
+      expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+    } finally {
+      release();
+    }
+  });
+
+  it('cuts off a hung re-wrap put, and keeps the old key', async () => {
+    const { server, web, device, custody, keyring } = await member({ requestTimeoutMs: 50 });
+    await web.putScope('scope-a', [device]);
+    let release!: () => void;
+    server.e2ee.holdPackagePuts = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      await expect(keyring.rotateKem()).rejects.toMatchObject({ name: 'TimeoutError' });
+      expect(server.e2ee.devicePuts).toHaveLength(1);
+      expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+    } finally {
+      release();
+    }
+  });
+
+  it('keeps the old key when an old-key package lands after the read-back and before the final read-back', async () => {
+    const { server, web, device, custody, keyring, restart } = await member();
+    const scopeKey = await web.putScope('scope-a', [device]);
+    const ownAtOne = (pkg: ScopeKeyPackageV1) => pkg.recipient === device.memberId && pkg.scopeId === 'scope-a' && pkg.epoch === 1;
+    const original = server.e2ee.packages.find(ownAtOne)!;
+    const handle = server.e2ee.handle.bind(server.e2ee);
+    let reads = 0;
+    server.e2ee.handle = async (req, res, url) => {
+      if (req.method === 'GET' && url.pathname.endsWith('/key-packages') && url.searchParams.get('epoch') === '1') {
+        reads += 1;
+        // The reads of epoch 1 are the scan, the scope's read-back and the final read-back: a held-back old-key put lands before the last.
+        if (reads === 3) server.e2ee.packages.splice(server.e2ee.packages.findIndex(ownAtOne), 1, original);
+      }
+      return handle(req, res, url);
+    };
+    expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'rewrap_unverified' });
+    expect(reads).toBe(3);
+    expect(server.e2ee.devicePuts.flat().map((pkg) => pkg.epoch)).toEqual([1]);
+    expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+    expect(await (await restart()).fetch('scope-a', 1)).toMatchObject({ ok: true, key: { scopeKey } });
+  });
+
+  it('keeps the old key when the Host reads no package at an epoch whose key it holds', async () => {
+    const { server, web, device, custody, logs, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    expect((await keyring.fetch('scope-a', 1)).ok).toBe(true);
+    const handle = server.e2ee.handle.bind(server.e2ee);
+    server.e2ee.handle = async (req, res, url) => {
+      if (req.method === 'GET' && url.pathname.endsWith('/key-packages') && url.searchParams.get('epoch') === '1') {
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ packages: [] }));
+        return true;
+      }
+      return handle(req, res, url);
+    };
+    expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'key_package_missing' });
+    expect(logs.join('\n')).toContain('epoch 1 of scope "scope-a" is held but its key package was not read');
+    expect(server.e2ee.devicePuts).toHaveLength(0);
+    expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
   });
 
   it('shares one rotation between concurrent calls, and refuses one after the member is lost', async () => {
