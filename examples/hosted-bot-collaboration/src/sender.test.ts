@@ -11,7 +11,7 @@ import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import type { TaskEvidence } from './reconcile';
 import { HostedOutboxSender, type ProjectionPort, type SenderOptions } from './sender';
-import { HostedCollaborationStore, type CommitPorts, type FinishPortsFactory } from './store';
+import { HostedCollaborationStore, lockScope, UNKNOWN_WAIT_MS, type CommitPorts, type DeliveryClaim, type FinishPortsFactory } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -58,6 +58,15 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       await expect(insert('projection', null, 0, null)).rejects.toThrow('check constraint');
       await expect(insert('delivery', null, 0, null)).resolves.toBeDefined();
     });
+  });
+
+  it('refuses a backoff, readback wait or batch that is not a positive integer', () => {
+    for (const bad of [0, -1, 1.5, Number.NaN]) {
+      for (const key of ['backoffMs', 'readbackMs', 'batch'] as const) {
+        expect(() => sender({ projections: receiver().port, [key]: bad })).toThrow('The outbox backoff, readback wait and batch must be positive integers');
+      }
+    }
+    expect(() => sender({ projections: receiver().port, backoffMs: 1, readbackMs: 1, batch: 1 })).not.toThrow();
   });
 
   describe('projections', () => {
@@ -223,19 +232,21 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       expect((await store().read(scope)).channel!.deliveries.d1).toBeUndefined();
     });
 
-    it('settles a delivery row whose entity retention archived, and fails a row with no entity anywhere', async () => {
+    it('fails an unsettled delivery row whose entity retention archived as drift, as a row with no entity anywhere', async () => {
       const scope = `tenant:${randomUUID()}`;
       await store().seed(scope, settledDelivery);
       await indexRow(scope, 'd1', NOW);
       expect(await retain(scope)).toMatchObject({ archivedRoots: 1 });
+      // Drift: E7 archives a delivery only after its row settled.
       await query(`UPDATE ${table('outbox')} SET settled_at = NULL WHERE scope = $1`, [storedKey(scope)]);
       await indexRow(scope, 'ghost', null);
       const calls: string[] = [];
       clock = NOW + 1;
       const pass = await sender({ projections: receiver().port, channel: channel(calls) }).run();
-      expect(pass).toMatchObject({ steps: 1, failed: [{ scope, id: 'ghost', error: new Error('Delivery not found') }] });
+      expect(pass).toEqual({ steps: 0, failed: [{ scope, id: 'd1', error: new Error('Delivery outbox row unsettled for an archived entity') },
+        { scope, id: 'ghost', error: new Error('Delivery not found') }] });
       expect(calls).toEqual([]);
-      expect(await row(scope, 'd1')).toMatchObject({ settled_at: String(NOW + 1) });
+      expect(await row(scope, 'd1')).toMatchObject({ settled_at: null, next_at: String(NOW + 1 + 5_000) });
       expect(await row(scope, 'ghost')).toMatchObject({ settled_at: null, next_at: String(NOW + 1 + 5_000) });
     });
 
@@ -275,10 +286,10 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
     it('keeps a claimed delivery for a sender whose scan saw it due before the claim, until the claim lease passed (D1)', async () => {
       const { channelStore, scope, turnId } = await received();
       await claimed(channelStore, scope, turnId);
-      expect(await channelStore.claimDelivery(scope, 'd1', NOW + TIMES.leaseMs - 1, TIMES)).toEqual({ kind: 'none' });
+      expect(await channelStore.claimDelivery(scope, 'd1', () => NOW + TIMES.leaseMs - 1, TIMES)).toEqual({ kind: 'none' });
       expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'sending', attempts: 1 });
       expect(await row(scope, 'd1')).toMatchObject({ next_at: String(NOW + TIMES.leaseMs) });
-      expect(await channelStore.claimDelivery(scope, 'd1', NOW + TIMES.leaseMs, TIMES)).toEqual({ kind: 'none' });
+      expect(await channelStore.claimDelivery(scope, 'd1', () => NOW + TIMES.leaseMs, TIMES)).toEqual({ kind: 'moved' });
       expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'unknown', attempts: 1, code: 'interrupted' });
     });
 
@@ -287,7 +298,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       await claimed(channelStore, scope, turnId);
       // The claim's lease has passed: it becomes unknown, due for a readback at once.
       clock = NOW + TIMES.leaseMs;
-      expect(await channelStore.claimDelivery(scope, 'd1', clock, { ...TIMES, readback: true })).toEqual({ kind: 'none' });
+      expect(await channelStore.claimDelivery(scope, 'd1', () => clock, { ...TIMES, readback: true })).toEqual({ kind: 'moved' });
       // A projection of another scope is due after it in the same pass.
       const other = await scoped('b');
       await project(other, 'bot-turn:t9', { status: 'done' });
@@ -301,13 +312,153 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       expect(await row(scope, 'd1')).toMatchObject({ next_at: String(clock + 30_000), settled_at: null });
     });
 
+    /** `claimed`, then a claim after the lease: `d1` is `unknown` at attempt 1 and due for a readback at `NOW + leaseMs`. */
+    async function unknownAt(channelStore: HostedCollaborationStore, scope: string, turnId: string): Promise<number> {
+      await claimed(channelStore, scope, turnId);
+      const at = NOW + TIMES.leaseMs;
+      expect(await channelStore.claimDelivery(scope, 'd1', () => at, { ...TIMES, readback: true })).toEqual({ kind: 'moved' });
+      expect(await row(scope, 'd1')).toMatchObject({ next_at: String(at) });
+      return at;
+    }
+    /** Runs `step` while another transaction holds the scope lock, and moves `clock` on by `ms` once `step` waits for it. */
+    async function underLock(scope: string, ms: number, step: () => Promise<unknown>): Promise<unknown> {
+      const holder = await opened!.pool.connect();
+      try {
+        await holder.query('BEGIN');
+        await holder.query(`SET LOCAL search_path TO "${store().schema}"`);
+        await lockScope(holder, storedKey(scope));
+        const pid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
+        const running = step();
+        for (let tries = 0; !(await query<{ waiting: number }>('SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))',
+          [pid]))[0]!.waiting; tries++) {
+          if (tries === 200) throw new Error('The step never waited for the scope lock');
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        clock += ms;
+        await holder.query('COMMIT');
+        return await running;
+      } finally { holder.release(); }
+    }
+
+    it('counts no step for a delivery claim that changes nothing, and one for a claim that only moves the entity', async () => {
+      const { channelStore, scope, turnId } = await received();
+      await claimed(channelStore, scope, turnId);
+      await channelStore.seed(scope, state => { Object.assign(state.channel!.deliveries.d1!, { state: 'pending', attempts: 0 }); });
+      await query(`UPDATE ${table('outbox')} SET next_at = 0 WHERE scope = $1`, [storedKey(scope)]);
+      // Another sender claims the row after this pass's scan saw it due, and before this pass claims it.
+      let raced = false;
+      class Racing extends HostedCollaborationStore {
+        override async claimDelivery(...args: Parameters<HostedCollaborationStore['claimDelivery']>): Promise<DeliveryClaim> {
+          if (!raced) { raced = true; expect(await channelStore.claimDelivery(...args)).toMatchObject({ kind: 'send', attempt: 1 }); }
+          return super.claimDelivery(...args);
+        }
+      }
+      const calls: string[] = [];
+      const run = (on: HostedCollaborationStore) => new HostedOutboxSender(opened!.pool, on, { projections: receiver().port, channel: channel(calls),
+        now: () => clock, leaseMs: TIMES.leaseMs, sendTimeoutMs: 10_000 }).run();
+      clock = NOW;
+      expect(await run(new Racing(opened!.pool, store().schema, { channel: true }))).toEqual({ steps: 0, failed: [] });
+      expect(raced).toBe(true);
+      // The other sender died before its send settled. Once its lease passed, a claim recovers the attempt, with no call.
+      clock = NOW + TIMES.leaseMs;
+      expect(await run(channelStore)).toEqual({ steps: 1, failed: [] });
+      expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'unknown', attempts: 1, code: 'interrupted' });
+      expect(calls).toEqual([]);
+    });
+
+    it('reports a claim that refuses a route, or that moves the wait of an unknown row, as moved', async () => {
+      const { channelStore, scope, turnId } = await received();
+      await claimed(channelStore, scope, turnId);
+      // With no readback, the recovered attempt waits an hour, and the claim after that hour moves the wait again.
+      expect(await channelStore.claimDelivery(scope, 'd1', () => NOW + TIMES.leaseMs, TIMES)).toEqual({ kind: 'moved' });
+      const later = NOW + TIMES.leaseMs + UNKNOWN_WAIT_MS;
+      expect(await channelStore.claimDelivery(scope, 'd1', () => later, TIMES)).toEqual({ kind: 'moved' });
+      expect(await row(scope, 'd1')).toMatchObject({ next_at: String(later + UNKNOWN_WAIT_MS) });
+      // A due row on a revoked push route is refused.
+      await channelStore.seed(scope, state => {
+        Object.assign(state.channel!.deliveries.d1!, { state: 'pending', attempts: 0 });
+        Object.values(state.channel!.pushRoutes)[0]!.revokedAt = NOW;
+      });
+      await query(`UPDATE ${table('outbox')} SET next_at = 0 WHERE scope = $1`, [storedKey(scope)]);
+      expect(await channelStore.claimDelivery(scope, 'd1', () => later, TIMES)).toEqual({ kind: 'moved' });
+      expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'rejected', code: 'push_route_revoked' });
+    });
+
+    it('takes a delivery claim lease from the clock read after the scope lock, not before the wait', async () => {
+      const { channelStore, scope, turnId } = await received();
+      await claimed(channelStore, scope, turnId);
+      await channelStore.seed(scope, state => { Object.assign(state.channel!.deliveries.d1!, { state: 'pending', attempts: 0 }); });
+      await query(`UPDATE ${table('outbox')} SET next_at = 0 WHERE scope = $1`, [storedKey(scope)]);
+      clock = NOW;
+      expect(await underLock(scope, 5_000, () => channelStore.claimDelivery(scope, 'd1', () => clock, TIMES))).toMatchObject({ kind: 'send', attempt: 1 });
+      expect(await row(scope, 'd1')).toMatchObject({ next_at: String(NOW + 5_000 + TIMES.leaseMs) });
+    });
+
+    it('takes the readback wait of a delivery step from the clock read after the scope lock', async () => {
+      const { channelStore, scope, turnId } = await received();
+      clock = await unknownAt(channelStore, scope, turnId);
+      const at = clock;
+      await underLock(scope, 5_000, () => channelStore.readDelivery(scope, 'd1', 1, undefined, () => clock, TIMES.readbackMs));
+      expect(await row(scope, 'd1')).toMatchObject({ next_at: String(at + 5_000 + TIMES.readbackMs) });
+    });
+
+    it('holds an unknown delivery for one readback at a time: the readback claim takes a lease', async () => {
+      const { channelStore, scope, turnId } = await received();
+      const at = await unknownAt(channelStore, scope, turnId), times = { ...TIMES, readback: true };
+      expect(await channelStore.claimDelivery(scope, 'd1', () => at, times)).toEqual({ kind: 'readback', attempt: 1 });
+      expect(await row(scope, 'd1')).toMatchObject({ next_at: String(at + TIMES.leaseMs) });
+      // A sender whose scan saw the row due before that claim gets nothing until the lease passes.
+      expect(await channelStore.claimDelivery(scope, 'd1', () => at + TIMES.leaseMs - 1, times)).toEqual({ kind: 'none' });
+      expect(await channelStore.claimDelivery(scope, 'd1', () => at + TIMES.leaseMs, times)).toEqual({ kind: 'readback', attempt: 1 });
+    });
+
+    it('fences a failed readback by its attempt: it leaves the lease of a later attempt alone', async () => {
+      const { channelStore, scope, turnId } = await received();
+      clock = await unknownAt(channelStore, scope, turnId);
+      let begin!: () => void, fail!: () => void;
+      const started = new Promise<void>(resolve => { begin = resolve; }), gate = new Promise<void>(resolve => { fail = resolve; });
+      const broken: ChannelPort = { send: async () => { throw new Error('Unused send'); },
+        readback: async () => { begin(); await gate; throw new Error('readback down'); } };
+      const pass = sender({ projections: receiver().port, channel: broken }).run();
+      await started;
+      // Another sender reads attempt 1 back as absent, and sends attempt 2 once its retry wait passed.
+      const at = clock;
+      await channelStore.readDelivery(scope, 'd1', 1, 'absent', () => at, TIMES.readbackMs);
+      expect(await channelStore.claimDelivery(scope, 'd1', () => at + 1_000, TIMES)).toMatchObject({ kind: 'send', attempt: 2 });
+      fail();
+      expect(await pass).toEqual({ steps: 1, failed: [{ scope, id: 'd1', error: new Error('readback down') }] });
+      expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'sending', attempts: 2 });
+      expect(await row(scope, 'd1')).toMatchObject({ next_at: String(at + 1_000 + TIMES.leaseMs) });
+    });
+
+    it('never moves next_at earlier with a wait after a step that threw', async () => {
+      const { channelStore, scope, turnId } = await received();
+      await claimed(channelStore, scope, turnId);
+      await channelStore.deferOutbox(scope, 'd1', () => NOW, TIMES.leaseMs - 1);
+      expect(await row(scope, 'd1')).toMatchObject({ next_at: String(NOW + TIMES.leaseMs) });
+      await channelStore.deferOutbox(scope, 'd1', () => NOW, TIMES.leaseMs + 1);
+      expect(await row(scope, 'd1')).toMatchObject({ next_at: String(NOW + TIMES.leaseMs + 1) });
+    });
+
+    it('ends the pass when the wait after a failed step cannot be written', async () => {
+      const scope = `tenant:${randomUUID()}`;
+      await store().seed(scope, state => seedCollaboration(state));
+      await indexRow(scope, 'ghost', null);
+      class Broken extends HostedCollaborationStore {
+        override deferOutbox(): Promise<void> { return Promise.reject(new Error('store down')); }
+      }
+      const broken = new Broken(opened!.pool, store().schema);
+      await expect(new HostedOutboxSender(opened!.pool, broken, { projections: receiver().port, channel: channel(), now: () => clock,
+        leaseMs: 20_000, sendTimeoutMs: 10_000 }).run()).rejects.toThrow('store down');
+    });
+
     it('drops a reply token at a delivery settle once the intent of its root concluded, before a sync ends the Turn', async () => {
       const { channelStore, scope, turnId } = await received();
       await claimed(channelStore, scope, turnId);
       // The owner cancels the Turn: its untried intent concludes in the commit, and the Turn ends at the next sync.
       await channelStore.commit(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_turn', turnId } }, ports());
       expect((await channelStore.read(scope)).channel!.inbounds[inboundKey(MESSAGE)]!.reply).toMatchObject({ token: 'secret' });
-      await channelStore.finishDelivery(scope, 'd1', 1, { result: { result: 'accepted', platformMessageId: 'p1' } }, NOW + 1, TIMES);
+      await channelStore.finishDelivery(scope, 'd1', 1, { result: { result: 'accepted', platformMessageId: 'p1' } }, () => NOW + 1, TIMES);
       const state = await channelStore.read(scope);
       expect(state.turns[turnId]).toMatchObject({ status: 'processing' });
       expect(state.turns[turnId]!.conclusion).toBeUndefined();

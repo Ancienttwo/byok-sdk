@@ -22,12 +22,12 @@ export interface SenderOptions {
   sendTimeoutMs?: number;
   /** The wait between two readbacks of an `unknown` delivery. Default 30 s. */
   readbackMs?: number;
-  /** The wait after a failed projection send, or after a step that threw. Default 60 s. */
+  /** The wait after a failed projection send, or after a step that threw. It does not grow with `tries`. Default 60 s. */
   backoffMs?: number;
-  /** The most rows that one pass takes. */
+  /** The most rows that one pass takes. Default 100. */
   batch?: number;
 }
-/** A row whose step threw, or a projection send that failed. The pass went on with the next row. */
+/** A row whose step threw, or a projection send or delivery readback that failed. The pass went on with the next row. */
 export interface SendFailure { scope: string; id: string; error: unknown }
 /** `steps`: the rows on which this pass changed something, a send among them. */
 export interface SendPass { steps: number; failed: SendFailure[] }
@@ -46,13 +46,20 @@ export class HostedOutboxSender {
   private readonly now: () => number;
   private readonly times: DeliveryTimes;
   private readonly sendTimeoutMs: number;
+  private readonly backoffMs: number;
+  private readonly batch: number;
 
   constructor(private readonly pool: Pool, private readonly store: HostedCollaborationStore, private readonly options: SenderOptions) {
     this.now = options.now ?? Date.now;
     this.sendTimeoutMs = options.sendTimeoutMs ?? 15_000;
+    this.backoffMs = options.backoffMs ?? 60_000;
+    this.batch = options.batch ?? 100;
     this.times = { leaseMs: options.leaseMs ?? 60_000, readback: options.channel?.readback !== undefined, readbackMs: options.readbackMs ?? 30_000 };
     if (!Number.isSafeInteger(this.sendTimeoutMs) || this.sendTimeoutMs < 1 || !Number.isSafeInteger(this.times.leaseMs)
       || this.times.leaseMs <= this.sendTimeoutMs) throw new Error('The outbox lease must be longer than the send timeout');
+    if (![this.backoffMs, this.times.readbackMs, this.batch].every(value => Number.isSafeInteger(value) && value >= 1)) {
+      throw new Error('The outbox backoff, readback wait and batch must be positive integers');
+    }
   }
 
   async run(): Promise<SendPass> {
@@ -60,7 +67,7 @@ export class HostedOutboxSender {
     const due = await inSchema(this.pool, this.store.schema, client => client.query<DueRow>(
       `SELECT o.scope, o.key, o.kind FROM outbox o JOIN scope s ON s.scope = o.scope
         WHERE s.state_version = ANY($1::integer[]) AND o.settled_at IS NULL AND o.next_at <= $2
-        ORDER BY o.next_at, o.scope, o.ordinal LIMIT $3`, [[...SUPPORTED_STORE_VERSIONS], this.now(), this.options.batch ?? 100]), true);
+        ORDER BY o.next_at, o.scope, o.ordinal LIMIT $3`, [[...SUPPORTED_STORE_VERSIONS], this.now(), this.batch]), true);
     const pass: SendPass = { steps: 0, failed: [] };
     for (const row of due.rows) {
       const scope = JSON.parse(row.scope) as string, id = JSON.parse(row.key) as string;
@@ -71,7 +78,8 @@ export class HostedOutboxSender {
         if (step !== true) pass.failed.push({ scope, id, error: step.error });
       } catch (error) {
         pass.failed.push({ scope, id, error });
-        await this.store.deferOutbox(scope, id, this.now() + (this.options.backoffMs ?? 60_000)).catch(() => undefined);
+        // A failure to write the wait is a store failure, not a row failure, so it ends the pass.
+        await this.store.deferOutbox(scope, id, this.now, this.backoffMs);
       }
     }
     return pass;
@@ -100,7 +108,7 @@ export class HostedOutboxSender {
           AND settled_at IS NULL`, [scopeKey, key, claim.tries, now]);
       } else {
         await client.query(`UPDATE outbox SET last_error = $4, next_at = $5 WHERE scope = $1 AND key = $2 AND tries = $3
-          AND settled_at IS NULL`, [scopeKey, key, claim.tries, message(error), now + (this.options.backoffMs ?? 60_000)]);
+          AND settled_at IS NULL`, [scopeKey, key, claim.tries, message(error), now + this.backoffMs]);
       }
     });
     return error === undefined ? true : { error };
@@ -110,19 +118,17 @@ export class HostedOutboxSender {
   private async deliver(scope: string, id: string): Promise<boolean | { error: unknown }> {
     const port = this.options.channel;
     if (!port) throw new Error('The Host has no channel for a delivery');
-    const claim = await this.store.claimDelivery(scope, id, this.now(), this.times);
-    if (claim.kind === 'none') return true;
+    const claim = await this.store.claimDelivery(scope, id, this.now, this.times);
+    if (claim.kind === 'none') return false;
+    if (claim.kind === 'moved') return true;
     if (claim.kind === 'readback') {
-      let result: Awaited<ReturnType<NonNullable<ChannelPort['readback']>>>;
       // Missing readback evidence leaves the row unknown, as in L. A readback that outlasts the send deadline is missing
-      // evidence too, so one hung readback cannot stop the rest of the pass.
+      // evidence too, so one hung readback cannot stop the rest of the pass. Its wait is fenced by the attempt it read back.
+      let result: Awaited<ReturnType<NonNullable<ChannelPort['readback']>>> | undefined, failure: { error: unknown } | undefined;
       try { result = await this.deadline(() => port.readback!(id)); }
-      catch (error) {
-        await this.store.deferOutbox(scope, id, this.now() + this.times.readbackMs);
-        return { error };
-      }
-      await this.store.readDelivery(scope, id, claim.attempt, result, this.now(), this.times.readbackMs);
-      return true;
+      catch (error) { failure = { error }; }
+      await this.store.readDelivery(scope, id, claim.attempt, result, this.now, this.times.readbackMs);
+      return failure ?? true;
     }
     let outcome: Parameters<HostedCollaborationStore['finishDelivery']>[3];
     try { outcome = { result: await this.deadline(signal => port.send({ deliveryId: id, route: claim.route, body: claim.body }, signal)) }; }
@@ -130,7 +136,7 @@ export class HostedOutboxSender {
       // The send has started: neither an exception nor the deadline proves absence.
       outcome = { code: error instanceof SendDeadline ? 'send_timeout' : 'send_failed' };
     }
-    await this.store.finishDelivery(scope, id, claim.attempt, outcome, this.now(), this.times);
+    await this.store.finishDelivery(scope, id, claim.attempt, outcome, this.now, this.times);
     return true;
   }
 
