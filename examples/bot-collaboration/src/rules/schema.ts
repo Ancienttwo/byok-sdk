@@ -33,6 +33,14 @@ export type MainAction = typeof MAIN_ACTIONS[number];
 export const DEFAULT_TIME_ZONES = ['UTC', 'America/New_York'] as const;
 /** Eight time zones keep the eight-routine schema inside the budget (`outcome-options.test.ts`). */
 export const TIME_ZONES_MAX = 8;
+/**
+ * The most `confirmable_action` branches of an offer. At the eight-routine limit with eight long time zones, the schema
+ * without `confirmable_action` is 5 208 bytes of the 16 384-byte cap. A branch with the `send_message` draft and a 64-byte
+ * action name adds 392 bytes, so 16 such branches measure 11 564 bytes in the checked shape (`outcome-options.test.ts`).
+ * The other 4 820 bytes give each of the 16 branches about 300 more bytes of draft on average. A count cannot bound the size
+ * of one branch: a heavier list fails at construction, or blocks each Turn whose schema it puts over budget.
+ */
+export const CONFIRMABLE_MAX = 16;
 /** One `confirmable_action` branch. The Host connector receives `action` and the confirmed draft. */
 export interface ConfirmableSpec { readonly action: string; readonly draft: ResultSchema }
 export const DEFAULT_CONFIRMABLE: readonly [ConfirmableSpec] = [{ action: 'send_message', draft: {
@@ -47,7 +55,7 @@ export interface OutcomeOffer {
   readonly actions?: { readonly turn?: readonly TurnAction[]; readonly main?: readonly MainAction[] };
   /** IANA zones of `create_routine` and `update_routine`, 1 to TIME_ZONES_MAX. */
   readonly timeZones?: readonly string[];
-  /** The `confirmable_action` branches, at least one. */
+  /** The `confirmable_action` branches, 1 to CONFIRMABLE_MAX. */
   readonly confirmable?: readonly ConfirmableSpec[];
 }
 declare const checked: unique symbol;
@@ -74,6 +82,7 @@ export function outcomeOffer(offer: OutcomeOffer): CheckedOffer {
   }
   if (confirmable !== undefined) {
     if (!Array.isArray(confirmable) || !confirmable.length) throw new Error('An offer has at least one confirmable action');
+    if (confirmable.length > CONFIRMABLE_MAX) throw new Error(`An offer has at most ${CONFIRMABLE_MAX} confirmable actions`);
     distinct(confirmable.map(spec => spec.action), 'confirmable action');
     // The protocol checks each draft: the K7 subset and a finite bound.
     composeBotTurnOutcomeSchema({ confirmable_action: f.confirmableAction({ actions: confirmable as [ConfirmableSpec, ...ConfirmableSpec[]] }) });

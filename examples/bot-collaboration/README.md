@@ -109,9 +109,12 @@ extra actions of an owner Main Bot Turn, from the Bot and room management
 actions, `team_note` and `cancel_delegation`. A list only removes actions, and
 an empty list removes all of that kind. `timeZones` holds 1 to 8 IANA zones for
 `create_routine` and `update_routine`, checked by the `@byok-sdk/core` routine
-calendar. The default is `UTC` and `America/New_York`. `confirmable` holds the
-`confirmable_action` branches, each an action name and its draft schema. The
+calendar. The default is `UTC` and `America/New_York`. `confirmable` holds 1 to
+16 `confirmable_action` branches, each an action name and its draft schema. The
 default is `send_message`, and the connector receives only the offered names.
+Sixteen branches with the `send_message` draft and 64-byte names fit both
+bounds with eight long time zones at the eight-routine limit, with room for
+heavier drafts (`CONFIRMABLE_MAX`).
 The constructor checks the offer and composes one schema with it. Turns that
 froze before keep their schema. A room seat always gets `speech`. A schema
 that is over budget even in the flat shape blocks its Turn, as before. The H

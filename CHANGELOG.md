@@ -255,6 +255,13 @@
   `ask_user`, `confirmable_action` or routine, and a narrowed prompt names no
   `speech` or `room_call`. Local team mode, and an offer without
   `actions.turn`, keep `SYSTEM_PROMPT`, which is the same text as before.
+- **Fixed (examples)** — K8 `outcomeOffer` refuses more than 16
+  `confirmable` actions (#881). Before, the list had no count limit, and a
+  list that put the schema over budget blocked every Turn. Sixteen branches
+  with the `send_message` draft and 64-byte action names measure 11 564 of the
+  16 384 schema bytes with eight long time zones at the eight-routine limit.
+  A count does not bound a heavy draft, which still fails at construction or
+  blocks the Turns it puts over budget.
 
 ## 0.30.0 — 2026-10-24 (published)
 
