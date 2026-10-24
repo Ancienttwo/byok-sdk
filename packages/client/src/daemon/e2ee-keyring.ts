@@ -116,14 +116,24 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
    * Catch up, then the key of one scope epoch: cached, or fetched and
    * opened. A transport failure throws; every other end is a result.
    */
-  async fetch(scopeId: string, epoch: number): Promise<ScopeKeyFetchResult> {
+  fetch(scopeId: string, epoch: number): Promise<ScopeKeyFetchResult> {
+    return this.#fetch(scopeId, epoch, false);
+  }
+
+  /**
+   * {@link fetch}; with `copy`, the result holds a copy of the key bytes,
+   * taken where the key is read, so a catch-up before the caller resumes
+   * cannot zero them.
+   */
+  async #fetch(scopeId: string, epoch: number, copy: boolean): Promise<ScopeKeyFetchResult> {
+    const own = (key: ScopeKey): ScopeKey => (copy ? { ...key, scopeKey: key.scopeKey.slice() } : key);
     await this.catchUp();
     const session = this.#session;
     if (session === undefined) return { ok: false, reason: 'member_lost' };
     const failure = this.#scopeFailure(session, scopeId);
     if (failure !== undefined) return { ok: false, reason: failure };
     const known = this.cached(scopeId, epoch);
-    if (known !== undefined) return { ok: true, key: known };
+    if (known !== undefined) return { ok: true, key: own(known) };
     const self = session.member.memberId;
     const packages = await this.options.client.readKeyPackages(scopeId, epoch);
     // The Host keeps one package per (scope, epoch, recipient).
@@ -146,11 +156,11 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     const lost = current === undefined ? 'member_lost' : this.#scopeFailure(current, scopeId, sender.memberId);
     if (raced !== undefined || lost !== undefined) {
       opened.scopeKey.fill(0);
-      return raced !== undefined ? { ok: true, key: raced } : { ok: false, reason: lost! };
+      return raced !== undefined ? { ok: true, key: own(raced) } : { ok: false, reason: lost! };
     }
     const key = { scopeKey: opened.scopeKey, keyId: opened.keyId, sender: sender.memberId };
     this.#keys.set(keyOf(scopeId, epoch), key);
-    return { ok: true, key };
+    return { ok: true, key: own(key) };
   }
 
   /** The latest policy categories of a usable scope, after a catch-up; `undefined` when it is not usable. */
@@ -169,8 +179,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   async openingKey(scope: { readonly id: string; readonly epoch: number }): Promise<Uint8Array | undefined> {
     const known = this.cached(scope.id, scope.epoch);
     if (known !== undefined) return known.scopeKey.slice();
-    const result = await this.fetch(scope.id, scope.epoch);
-    if (result.ok) return result.key.scopeKey.slice();
+    const result = await this.#fetch(scope.id, scope.epoch, true);
+    if (result.ok) return result.key.scopeKey;
     this.options.log(`no scope key for epoch ${scope.epoch} of scope ${JSON.stringify(scope.id)} (${result.reason})`);
     return undefined;
   }
