@@ -76,6 +76,16 @@ describe.skipIf(POSTGRES_URL === undefined)('H room step (#793 S6)', () => {
     expect(await intent(first)).toEqual({ tries: 1, cancel_reason: 'cancelled', conclusion: null });
   });
 
+  it('runs the room step again when a Turn step releases a seat, so the next seat gets its Turn in the same sync', async () => {
+    const { subject, first, second } = await room();
+    // A room request over the current-request limit blocks each seat Turn in its Turn step, which releases the seat.
+    await subject.change(state => { state.team.rooms.r!.messages[0]!.text = 'x'.repeat(70_000); });
+    await subject.sync(VECTOR_NOW);
+    const state = await subject.state();
+    expect([state.team.seats[first], state.team.seats[second]]).toMatchObject([{ status: 'blocked', released: true }, { status: 'blocked', released: true }]);
+    expect(Object.values(state.team.rounds)[0]).toMatchObject({ closed: true });
+  });
+
   it('writes nothing when the room step throws', async () => {
     const { subject } = await room();
     // Seats whose round is gone: the seat facts load, then the rule throws.

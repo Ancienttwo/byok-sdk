@@ -106,6 +106,7 @@ type SendResult = Awaited<ReturnType<ChannelPort['send']>>;
 type ReadbackResult = Awaited<ReturnType<NonNullable<ChannelPort['readback']>>>;
 
 const SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
+const releasedSeats = (state: CollaborationState) => Object.values(state.team.seats).filter(seat => seat.released).length;
 const EMPTY_FRAME = split(stateOf({})).frame;
 
 /**
@@ -301,6 +302,7 @@ export class HostedCollaborationStore {
         for (const seatId of advanceRoomSeats(state, seats, options.now, (id, botId, request) => addTurn(state, seatTurn(id, botId, request)))) {
           await cancelIntent(client, scope, seatId, options.now);
         }
+        const released = releasedSeats(state);
         const facts = await syncFacts(client, scope, Object.keys(state.turns));
         const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
         for (const turn of Object.values(state.turns)) {
@@ -311,7 +313,8 @@ export class HostedCollaborationStore {
         for (const [turn, step] of steps) more = await writeSyncStep(client, scope, turn, step, slice, options.now) || more;
         const turns = Object.keys(state.turns).length;
         settleDelegations(state, await settleFacts(client, scope, Object.keys(state.turns)), options.now, emit, this.timers);
-        more = await deliverCancels(client, scope, state, options.now) || Object.keys(state.turns).length > turns || more;
+        // A Turn step can release a seat (a blocked seat Turn): the room step then runs again, so the next seat gets its Turn.
+        more = await deliverCancels(client, scope, state, options.now) || Object.keys(state.turns).length > turns || releasedSeats(state) > released || more;
       }
       await writeSlice(client, key, slice);
       await switchDueVersions(client, key, options.now);
