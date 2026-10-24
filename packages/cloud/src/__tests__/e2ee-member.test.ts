@@ -134,7 +134,7 @@ describe('E2EE member control plane', () => {
     const rotate = { memberId: member, kemPublicJwk: client.bundle.kemPublicJwk, kemEpoch: 2, kemSig: client.bundle.kemSig };
     const entries = await signedChain(TENANT_A, client, [
       { op: 'add', subject: { member: client.bundle as unknown as JsonValue } },
-      { op: 'rotate', subject: rotate as unknown as JsonValue },
+      { op: 'rotate', subject: rotate as never },
     ]);
     const appends: Parameters<typeof store.appendChainEntries>[1][] = [];
     const append = store.appendChainEntries.bind(store);
@@ -143,7 +143,7 @@ describe('E2EE member control plane', () => {
       return append(tenant, input);
     };
     for (const subject of [{ ...rotate, extra: true }, { ...rotate, kemEpoch: 0 }, { memberId: member, kemEpoch: 2 }]) {
-      const refused = await signedChain(TENANT_A, client, [entries[0]!, { op: 'rotate', subject: subject as unknown as JsonValue }]);
+      const refused = await signedChain(TENANT_A, client, [entries[0]!, { op: 'rotate', subject: subject as never }]);
       expect(await code(cloud.appendMemberChainEntries(TENANT_A, { entries: refused }))).toBe('coordination_input_invalid');
     }
     expect(await cloud.appendMemberChainEntries(TENANT_A, { entries })).toEqual({ appended: 2, replayed: 0 });

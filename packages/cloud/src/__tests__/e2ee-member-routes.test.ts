@@ -363,7 +363,7 @@ describe('E2EE member device routes', () => {
 
     const entries = await signedChain(TENANT_A, client, [
       { op: 'add', subject: { member: client.bundle as unknown as JsonValue } },
-      { op: 'rotate', subject: { memberId: client.bundle.memberId, kemPublicJwk: client.bundle.kemPublicJwk, kemEpoch: 2, kemSig: client.bundle.kemSig } as unknown as JsonValue },
+      { op: 'rotate', subject: { memberId: client.bundle.memberId, kemPublicJwk: client.bundle.kemPublicJwk, kemEpoch: 2, kemSig: client.bundle.kemSig } as never },
     ]);
     expect((await env.write(device, '/byok/e2ee/chain', E2EE_MEMBER_CHAIN_APPEND_OPERATION, { entries })).status).toBe(200);
     expect(await answer(await put([sealed]))).toEqual({ status: 409, body: { error: 'e2ee_scope_key_package_stale' } });

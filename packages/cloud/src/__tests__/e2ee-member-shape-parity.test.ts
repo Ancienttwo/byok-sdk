@@ -176,7 +176,7 @@ describe('protocol E2EE member shapes match core', () => {
       recipient: { memberId: recipient.memberId, kemPublicJwk: kem.publicJwk, kemEpoch: 1 },
       sender: { signingPublicJwk: sender.publicJwk, signingPrivateKey: sender.privateKey as never },
     }) as unknown as Json;
-    const { recipientKemEpoch: _, ...v1 } = { ...pkg, v: 1 };
+    const { recipientKemEpoch: _, ...v1 }: Json = { ...pkg, v: 1 };
     const cases = [
       { label: 'original', value: pkg },
       { label: 'other keyId', value: { ...pkg, keyId: 'A'.repeat(22) } },
