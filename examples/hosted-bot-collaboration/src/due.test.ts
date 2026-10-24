@@ -205,6 +205,29 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
       expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [] });
     });
 
+    it('seals a due input batch in one scheduled sync, which clears the time (#793 S1)', async () => {
+      const policy = { windowMs: 1000, maxItems: 2, maxBytes: 8192 };
+      const coalescing = new VectorStore(opened!.pool, opened!.store.schema, { timers: TIMERS, coalesce: policy });
+      const scope = `tenant:${randomUUID()}`;
+      await coalescing.seed(scope, state => {
+        team(state);
+        state.turns.q1 = { id: 'q1', root: 'q1', botId: 'main', source: 'user', request: 'First', hop: 0, status: 'queued', authority: 'owner' };
+      });
+      await coalescing.bindDevice(scope, 'device');
+      await coalescing.sync(scope, { ...SYNC_OPTIONS, history: undefined });
+      const result = await coalescing.commit(scope, { scope, commandId: 'k1', command: { kind: 'input', botId: 'main', key: 'k1', request: 'Say k1', sender: 'owner' } }, vectorPorts);
+      expect(result.disposition.outcome).toBe('accepted');
+      expect(await dueAt(scope)).toBe(String(VECTOR_NOW + 1000));
+      clock = VECTOR_NOW + 1000;
+      const pass = new HostedDueScheduler(opened!.pool, coalescing, { now: () => clock, backoffMs: 10_000,
+        sync: (at, now) => coalescing.sync(at, { ...SYNC_OPTIONS, now, history: undefined }) });
+      expect(await pass.run()).toEqual({ synced: 1, stalled: [], failed: [] });
+      const batch = Object.values((await coalescing.read(scope)).inputBatches ?? {})[0];
+      expect(batch).toMatchObject({ state: 'sealed' });
+      expect(await dueAt(scope)).toBe(String(LATER));
+      expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [] });
+    });
+
     it('advances a room at a seat deadline in one scheduled sync, and the time moves to the next seat (#793 S6)', async () => {
       const scope = `tenant:${randomUUID()}`, deadline = VECTOR_NOW + ROOM_GRACE_MS;
       await store().seed(scope, state => { seedCollaboration(state); seedRoom(state); });

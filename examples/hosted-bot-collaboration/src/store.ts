@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from 'pg';
 import { canonical, hash, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
 import { botRoutines, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
 import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
+import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { addTurn, stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
@@ -46,10 +47,10 @@ export interface SyncResult { dueAt: number | null }
 export type PortsFactory = (state: CollaborationState, publish: Publish) => Omit<CommandPorts, 'intents' | 'deliver'>;
 /**
  * The ports of `commit()`. It refuses the callback commands, so it takes no callback ports (#793 D2f-6). The store owns the
- * inbound `remember` port, which only `receive()` gives (#793 D2b-out-3).
+ * inbound `remember` port, which only `receive()` gives (#793 D2b-out-3), and the input admission, with its coalesce policy.
  */
-export type CommitPorts = Omit<CommandPorts, 'intents' | 'deliver' | 'outcome' | 'occurrence' | 'remember'>
-  & { outcome?: never; occurrence?: never; remember?: never };
+export type CommitPorts = Omit<CommandPorts, 'intents' | 'deliver' | 'outcome' | 'occurrence' | 'remember' | 'admitInput'>
+  & { outcome?: never; occurrence?: never; remember?: never; admitInput?: never };
 export type CommitPortsFactory = (state: CollaborationState, publish: Publish) => CommitPorts;
 /**
  * The ports of `finish()`: the commit ports and the team management port of an outcome. The store builds the committed
@@ -85,6 +86,11 @@ export interface HostedStoreOptions {
    * defaults apply.
    */
   timers?: DelegationTimers;
+  /**
+   * Input coalescing, as L's `coalesce` option: the policy that K8 `coalescePolicy` returns for the ContextPack budget that
+   * the Host gives each sync in `limits`. Each sync checks it against that budget. Without it, each input keeps its own Turn.
+   */
+  coalesce?: CoalescePolicy;
 }
 /**
  * The sender's view of one delivery step (#793 D2b-out-2). `none`: the claim changed nothing. `moved`: it changed the entity
@@ -116,9 +122,12 @@ const EMPTY_FRAME = split(stateOf({})).frame;
  */
 export class HostedCollaborationStore {
   private readonly channel: boolean;
+  private readonly coalesce?: CoalescePolicy;
   private readonly timers: DelegationTimers | undefined;
   constructor(private readonly pool: Pool, readonly schema: string, options: HostedStoreOptions = {}) {
     this.channel = options.channel === true;
+    // The ContextPack budget comes with each sync, so the construction checks every bound except that one.
+    if (options.coalesce) this.coalesce = coalescePolicy(options.coalesce, Number.MAX_SAFE_INTEGER);
     if (!SCHEMA.test(schema)) throw new Error('Invalid hosted collaboration schema name');
     // As L checks its timers (K8 host.ts constructor).
     const timers = options.timers;
@@ -214,7 +223,10 @@ export class HostedCollaborationStore {
   protected commitIn(scope: string, request: CommitRequest<Command>, ports: PortsFactory): Promise<CommitResult> {
     const key = storedKey(scope);
     return this.change(scope, request.commandId, async (state, publish, client) => {
-      const head = revisionOf(state), base = ports(state, publish);
+      // The store admits each input with its own policy, as L does (K8 host.ts `commitOwner`), so the admission and the sync's
+      // seal use one policy. The key is always set, so a caller's port never reaches the command.
+      const own = ports(state, publish), head = revisionOf(state);
+      const base = { ...own, admitInput: (fields: InputFields) => admitUserInput(state, fields, this.coalesce, own.now()) };
       const result = await commitStored(client, scope, state, request, base, this.channel);
       // A new commit moves the head by 1. A replay returns its first result and writes nothing.
       if (result.revision !== head + 1) return { value: result, outbox: [] };
@@ -289,6 +301,8 @@ export class HostedCollaborationStore {
    * fact or join, so the rounds end.
    */
   async sync(scope: string, options: HostedSyncOptions): Promise<SyncResult> {
+    // As L checks its coalesce policy against its ContextPack budget (K8 host.ts constructor).
+    if (this.coalesce) coalescePolicy(this.coalesce, options.limits.contextMaxBytes);
     const key = storedKey(scope);
     return this.change(scope, undefined, async (state, publish, client) => {
       const published = new Set<string>();
@@ -296,6 +310,8 @@ export class HostedCollaborationStore {
       const emit: Publish = (id, body) => { publish(id, body); published.add(id); };
       let more = true;
       while (more) {
+        // As L's sync, a batch sealed here gets its Turn's step in this round, before later Turns of its Bot.
+        sealDueBatches(state, this.coalesce, options.now);
         // As L's sync, the room step runs before the Turn steps, so a seat Turn that it adds freezes in this round. The K4
         // cancel of a seat's admitted work is H's `cancelIntent`, as for a delegation cancel.
         const seats = await seatFacts(client, scope, Object.keys(state.team.seats));
@@ -321,6 +337,8 @@ export class HostedCollaborationStore {
       // As L's sync (K8 host.ts `sync`), H's sync drops expired and unreserved reply tokens. L's call in each flush pass is a
       // call in each delivery settle here (`finishDelivery`).
       if (state.channel) cleanReplyTokens(await intentConclusions(client, scope), state, options.now);
+      // Last, as in L's sync: it sees every seal of this sync and of earlier transactions.
+      projectInputBatches(state, emit);
       return { value: { dueAt: this.dueAt(state) }, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now: options.now };
     });
   }
