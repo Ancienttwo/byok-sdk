@@ -305,7 +305,10 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
         scopeKey, tenantId: this.options.tenantId, scopeId, epoch,
         recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk }, sender,
       })));
-      await this.options.client.putKeyPackages(packages);
+      // The Host takes at most this many per put; the epoch is fresh only after every put.
+      for (let at = 0; at < packages.length; at += E2EE_SCOPE_KEY_PACKAGE_PUT_MAX) {
+        await this.options.client.putKeyPackages(packages.slice(at, at + E2EE_SCOPE_KEY_PACKAGE_PUT_MAX));
+      }
       const current = this.#session;
       if (current === undefined || this.#scopeFailure(current, scopeId) !== undefined) {
         scopeKey.fill(0);

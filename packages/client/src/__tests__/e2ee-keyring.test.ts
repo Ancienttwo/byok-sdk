@@ -10,6 +10,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createMemberKeyBundle, generateMemberKeyRecord, openMemberKeyRecord, type SealedContentHeaderV1 } from '@byok-sdk/core/sealed-payload';
+import { E2EE_SCOPE_KEY_PACKAGE_PUT_MAX } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AuthManager } from '../daemon/auth-manager';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
@@ -335,6 +336,16 @@ describe('device member keyring rotation (E2d-4)', () => {
     expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(4);
     expect((await keyring.sealingKey('scope-a', 5))?.epoch).toBe(6);
     expect(server.e2ee.devicePuts.map((put) => put[0]!.epoch)).toEqual([4, 6]);
+  });
+
+  it('puts the packages of a scope with more members than one put takes in bounded puts', async () => {
+    const { server, web, device, keyring } = await member();
+    const clients = await Promise.all(Array.from({ length: E2EE_SCOPE_KEY_PACKAGE_PUT_MAX }, () => stranger()));
+    for (const client of clients) await web.append('add', { member: client.member });
+    await web.putScope('scope-a', [device, ...clients.map((client) => client.member)]);
+    await keyring.catchUp();
+    expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(2);
+    expect(server.e2ee.devicePuts.map((put) => put.length)).toEqual([E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, 2]);
   });
 
   it('rotates once for concurrent seals of one scope', async () => {
