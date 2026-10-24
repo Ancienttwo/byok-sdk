@@ -93,6 +93,8 @@ async function start(options: {
   failureClass?: boolean;
   /** `false` runs the daemon without a hosted journal. */
   journal?: false;
+  /** `DaemonConfig.shutdownGraceMs`. */
+  shutdownGraceMs?: number;
   /** The categories of the device scope's policy. */
   policy?: readonly SealedCategory[];
   /** `false`: the Host does not declare `e2ee.member`, and start waits for the first hello only. */
@@ -112,6 +114,7 @@ async function start(options: {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed daemon test', productId: 'sealed-daemon-test',
     serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
     ...(options.journal === false ? {} : { hostedJournal: { mode: 'sqlite' as const } }),
+    ...(options.shutdownGraceMs === undefined ? {} : { shutdownGraceMs: options.shutdownGraceMs }),
   };
   server.setCapabilityDeclaration(options.e2ee === false ? NO_E2EE_DECLARATION : E2EE_DECLARATION);
   daemon = createDaemonWithAdapters(config, [adapter]);
@@ -1080,6 +1083,34 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     expect(sent.map((envelope) => envelope.type)).not.toEqual(expect.arrayContaining(['task.fail']));
     expect(JSON.stringify(sent)).not.toContain('sealed_key_unavailable');
     expect(JSON.stringify(sent)).not.toContain('large summary');
+  }, 15_000);
+
+  it('settles a terminal that a failed shutdown left queued in the closed form when the next run has another member', async () => {
+    const { server, adapter, deviceId, member, device } = await start({ ciphertextRef: true });
+    server.send(await sealedOffer(member, 'restart-other-member', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    server.setFailBlobUploads(true);
+    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
+    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(server.blobUploadsFailed).toBeGreaterThan(0), BUDGET_MS);
+    const stopErrors = await daemon!.stop().then(() => [], (error: unknown) => (error instanceof AggregateError ? error.errors : [error]).map(String));
+    expect(stopErrors).toContainEqual(expect.stringContaining('ciphertext upload failed'));
+
+    // The chain removes the device's member between the runs, so the next run
+    // is not the owner run's (tenant, device, member).
+    await member.web.append('remove', { memberId: device.memberId });
+    server.setFailBlobUploads(false);
+    await daemon!.start();
+
+    const terminal = await server.waitFor((envelope) => envelope.task_id === 'restart-other-member'
+      && ['task.complete_sealed', 'task.fail_sealed', 'task.fail', 'task.complete'].includes(envelope.type), BUDGET_MS);
+    expect(terminal.type).toBe('task.fail');
+    expect(terminal.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
+    expect(isSealedTaskPlainOutput(terminal.type, terminal.payload)).toBe(true);
+    await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0), BUDGET_MS);
+    expect(JSON.stringify(taskEnvelopes('restart-other-member'))).not.toContain('large summary');
+    expect(taskEnvelopes('restart-other-member').map((envelope) => envelope.type)).not.toContain('task.complete_sealed');
   }, 15_000);
 
   it('uploads an artifact over the inline frame as an octet-stream ciphertext blob', async () => {

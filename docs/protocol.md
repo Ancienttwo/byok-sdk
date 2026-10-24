@@ -1230,7 +1230,10 @@ refreshed hello adds it, and removes it again when the member is lost.
   still holds for commit after a failed stop seals with the next run's
   member, once that run's start and member resume are over, and only when
   that run has the same tenant, device and member as the run that owned the
-  task; otherwise it is in the closed form.
+  task; otherwise it is in the closed form, and a terminal that already is a
+  closed plaintext form keeps its fields. The owning run's member is the one it
+  bound when the member became ready, so a terminal made after that member
+  retired at shutdown still seals with the next run's same member.
 - A key is fetched on its first miss, so a notice that came before the
   advertisement needs no redelivery.
 

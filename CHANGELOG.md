@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Fixed (client)** — the #866 review of a sealed terminal that the commit
+  queue holds past a failed stop (#654). When the next run has another
+  tenant, device or member, a terminal that already is a closed plaintext
+  form keeps its fields, such as `recovery` on a `daemon_interrupted`
+  `task.fail` or the code of a sealed decline. Before, it was rewritten to
+  `sealed_key_unavailable`. The owning run is now the one whose member was
+  bound when it became ready, so a terminal made after that member retired
+  at shutdown seals with a next run of the same member instead of taking the
+  closed form.
+
 ## 0.30.1 — source candidate
 
 0.30.1 is a PATCH release under a one-release exception to the pre-1.0
