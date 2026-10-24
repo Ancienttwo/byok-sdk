@@ -32,9 +32,10 @@
  *
  * KEM rotation (E2d-5, §7.5): the member stores a next KEM key beside the
  * current one, appends its `rotate` entry after a local walk (§7.9
- * requirement 2), re-wraps each of its own packages to the next key, reads
- * them back, and only then drops the old private key. Until then a package
- * opens with either key, and a resumed rotation picks up where it stopped.
+ * requirement 2), re-wraps each of its own packages that it may use now to
+ * the next key, reads them back, and only then drops the old private key.
+ * Until then a package opens with either key, and a resumed rotation picks
+ * up where it stopped.
  */
 import {
   applyMemberChainEntries,
@@ -340,19 +341,24 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     if (this.#session === undefined) return { ok: false, reason: 'member_lost' };
     const keys = await records.keys.beginKemRotation({ tenantId, deviceId });
     const next = keys.nextKem!;
-    this.#useKeys(keys);
+    await this.#useKeys(keys);
     const failure = await this.#registerKem(next) ?? await this.#rewrap(next);
     if (failure !== undefined) {
       log(`the KEM rotation to epoch ${next.epoch} stopped (${failure}); the old key stays`);
       return { ok: false, reason: failure };
     }
-    this.#useKeys(await records.keys.finishKemRotation({ tenantId, deviceId }, next.epoch));
+    await this.#useKeys(await records.keys.finishKemRotation({ tenantId, deviceId }, next.epoch));
     log(`rotated the member KEM key to epoch ${next.epoch}`);
     return { ok: true, epoch: next.epoch };
   }
 
-  #useKeys(keys: MemberKeys): void {
-    if (this.#session !== undefined) this.#session = { ...this.#session, keys };
+  /** Swap the session's keys in the catch-up queue, so a catch-up in flight does not put the old ones back. */
+  #useKeys(keys: MemberKeys): Promise<void> {
+    const run = this.#tail.then(() => {
+      if (this.#session !== undefined) this.#session = { ...this.#session, keys };
+    });
+    this.#tail = run.catch(() => undefined);
+    return run;
   }
 
   /** Append the `rotate` entry of `next`, unless the verified chain has it. One seq conflict is retried after a catch-up. */
@@ -386,9 +392,11 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   }
 
   /**
-   * Re-wrap each own package to `next`, in every scope whose policy ever
-   * held this member, then read them back. A package that opens with
-   * neither key is left as it is.
+   * Re-wrap to `next` each own package that `fetch` accepts now: of a usable
+   * scope, from a current member of its policy. The re-wrap names this
+   * member as the sender, so a package from any other sender, such as a
+   * removed member, is left as it is and never gains this member's
+   * signature. Then read them back.
    */
   async #rewrap(next: MemberKemKey): Promise<KemRotationFailure | undefined> {
     // An epoch rotation that read the scope members before the `rotate` may still wrap to the old key: let it land first.
@@ -398,16 +406,12 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     const self = session.member.memberId;
     const old = session.keys.kem;
     const { signing } = session.keys;
-    const signers = signersOf(session.entries);
-    for (const [scopeId, versions] of this.#policies) {
-      if (!versions.some((version) => version.members.includes(self))) continue;
-      // Only a sender this scope's policy once held may have its scope key re-signed by this member.
-      const senders = new Set(versions.flatMap((version) => version.members));
+    for (const scopeId of session.state.scopes.keys()) {
+      if (this.#scopeFailure(session, scopeId) !== undefined) continue;
       const opened = async (pkg: unknown, kem: MemberKemKey) => {
         const { epoch, sender } = fieldsOf(pkg);
-        const signer = sender !== undefined && senders.has(sender) ? signers.get(sender) : undefined;
-        if (epoch === undefined || signer === undefined) return undefined;
-        const result = await this.#openOwn(session, scopeId, epoch, pkg, signer, [kem]);
+        if (epoch === undefined || sender === undefined || this.#scopeFailure(session, scopeId, sender) !== undefined) return undefined;
+        const result = await this.#openOwn(session, scopeId, epoch, pkg, session.state.members.get(sender)!.signingPublicJwk, [kem]);
         return result.ok ? { epoch, scopeKey: result.scopeKey } : undefined;
       };
       const rewrapped: ScopeKeyPackageV1[] = [];
@@ -419,7 +423,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
         }
         const held = await opened(pkg, old);
         if (held === undefined) {
-          this.options.log(`a key package of scope ${JSON.stringify(scopeId)} is not re-wrapped: its sender was never in the scope policy, or no member KEM key opens it`);
+          this.options.log(`a key package of scope ${JSON.stringify(scopeId)} is not re-wrapped: its sender is not a current member of the scope policy, or no member KEM key opens it`);
           continue;
         }
         rewrapped.push(await sealScopeKeyPackage({
@@ -550,17 +554,6 @@ function kemKeys(keys: MemberKeys): readonly MemberKemKey[] {
 
 function sameJwk(left: P256PublicJwk, right: P256PublicJwk): boolean {
   return left.x === right.x && left.y === right.y;
-}
-
-/** The signing key of every member a verified chain ever added, removed ones included. */
-function signersOf(entries: readonly MemberChainEntryV1[]): ReadonlyMap<string, P256PublicJwk> {
-  const signers = new Map<string, P256PublicJwk>();
-  for (const entry of entries) {
-    if (entry.op !== 'add') continue;
-    const { member } = entry.subject as unknown as { readonly member: MemberKeyBundleV1 };
-    signers.set(member.memberId, member.signingPublicJwk);
-  }
-  return signers;
 }
 
 function fieldsOf(pkg: unknown): { readonly epoch?: number; readonly sender?: string } {

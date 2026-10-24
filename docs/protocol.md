@@ -1413,12 +1413,14 @@ rotation yet. The steps:
    on its verified chain first, and appends it. A seq conflict is caught up
    and tried once more. If the verified chain already names the next key,
    it appends nothing.
-3. For each scope whose policy ever held the device, it reads its own
+3. For each scope it may use now (device rules, §2.5), it reads its own
    packages (`GET /byok/e2ee/key-packages?scopeId=`). It re-wraps to the next
-   key each package that opens with the old key and whose sender was in a
-   policy of that scope, with the device as the sender, and puts them. A
-   package from any other sender, or one that opens with neither key, stays
-   as it is.
+   key each package that opens with the old key and whose sender is a
+   current member of the scope policy, the rule a fetch applies, with the
+   device as the sender, and puts them. A package from a removed member or
+   another sender, or one that opens with neither key, stays as it is, so it
+   never gains the device's signature. After step 5 the device no longer
+   opens it.
 4. It reads the packages back. If one still opens only with the old key, the
    rotation stops and keeps the old key.
 5. Only then does it drop the old private key from the record.

@@ -444,22 +444,60 @@ describe('device member KEM rotation (E2d-5)', () => {
     expect(await next.fetch('scope-b', 2)).toMatchObject({ ok: true, key: { scopeKey: other } });
   });
 
-  it('re-wraps a package from a removed member of the scope policy, and leaves one from a sender the scope never held', async () => {
+  it('re-wraps only packages it accepts now, and never re-signs one from a removed member or an outsider', async () => {
     const { server, web, device, logs, keyring, restart } = await member();
     const helper = await stranger();
     await web.append('add', { member: helper.member });
-    await web.putScope('scope-a', [device, helper.member]);
-    const helperKey = new Uint8Array(32).fill(6);
-    server.e2ee.clientPutPackages(await helper.sealPackage('scope-a', device, helperKey, 2));
+    const scopeKey = await web.putScope('scope-a', [device, helper.member]);
+    const removed = await helper.sealPackage('scope-a', device, new Uint8Array(32).fill(6), 2);
+    server.e2ee.clientPutPackages(removed);
     await web.append('remove', { memberId: helper.member.memberId });
     const outsider = await (await stranger()).sealPackage('scope-a', device, new Uint8Array(32).fill(8), 3);
     server.e2ee.clientPutPackages(outsider);
+    expect(await keyring.fetch('scope-a', 2)).toEqual({ ok: false, reason: 'key_package_sender_invalid' });
 
     expect(await keyring.rotateKem()).toEqual({ ok: true, epoch: 2 });
-    expect(server.e2ee.packages.find((pkg) => pkg.recipient === device.memberId && pkg.epoch === 2)?.sender).toBe(device.memberId);
+    expect(server.e2ee.packages).toContainEqual(removed);
     expect(server.e2ee.packages).toContainEqual(outsider);
-    expect(logs.join('\n')).toContain('is not re-wrapped: its sender was never in the scope policy');
-    expect(await (await restart()).fetch('scope-a', 2)).toMatchObject({ ok: true, key: { scopeKey: helperKey, sender: device.memberId } });
+    expect(logs.join('\n')).toContain('is not re-wrapped: its sender is not a current member of the scope policy');
+    const next = await restart();
+    expect(await next.fetch('scope-a', 1)).toMatchObject({ ok: true, key: { scopeKey, sender: device.memberId } });
+    expect(await next.fetch('scope-a', 2)).toEqual({ ok: false, reason: 'key_package_sender_invalid' });
+  });
+
+  it('keeps the next key when a catch-up was saving its head while the rotation stored it', async () => {
+    const { server, web, device, custody, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    server.e2ee.dropPackagePuts = true;
+    /** Hold the first write of one entry until released. */
+    const gate = (entry: string) => {
+      let hit!: () => void;
+      let release!: () => void;
+      return { entry, used: false, reached: new Promise<void>((resolve) => { hit = resolve; }), hit: () => hit(), wait: new Promise<void>((resolve) => { release = resolve; }), release: () => release() };
+    };
+    const gates = [gate('member-keys'), gate('member-state')];
+    const replace = custody.replace.bind(custody);
+    custody.replace = async (entry: string, value: string) => {
+      const held = gates.find((candidate) => candidate.entry === entry && !candidate.used);
+      if (held !== undefined) {
+        held.used = true;
+        held.hit();
+        await held.wait;
+      }
+      await replace(entry, value);
+    };
+    const rotating = keyring.rotateKem();
+    await gates[0]!.reached;
+    await web.append('scope-policy', { scopeId: 'scope-a', categories: ['task-input', 'task-output'], members: [web.member.memberId, device.memberId].sort() });
+    const catching = keyring.catchUp();
+    await gates[1]!.reached;
+    gates[0]!.release();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    gates[1]!.release();
+    await catching;
+    expect(await rotating).toEqual({ ok: false, reason: 'rewrap_unverified' });
+    expect(keyring.session!.keys.nextKem?.epoch).toBe(2);
   });
 
   it('resumes after a failed put without a second rotate entry, and opens new-key packages meanwhile', async () => {
