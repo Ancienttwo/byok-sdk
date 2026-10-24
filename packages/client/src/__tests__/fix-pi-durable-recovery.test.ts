@@ -13,6 +13,7 @@ interface WorkerPlan {
   complete?: boolean;
   crash?: boolean;
   exitBeforeReceipt?: boolean;
+  exitOnToolAck?: boolean;
   refuseStart?: boolean;
   retiredResultFrame?: boolean;
   projectionDigest?: string;
@@ -154,6 +155,15 @@ describe.skipIf(process.platform === 'win32')('F16-1 durable completion across w
     expect(f.events.map(event => event.type)).toEqual(['error']);
     expect(f.children).toHaveLength(2);
   });
+  it('fails as runtime_exited when the worker ends on its own while a tool acknowledgement awaits its reply', async () => {
+    const f = await fixture([{ exitOnToolAck: true }]);
+    await f.collect();
+    assertFailed(f);
+    expect(f.failure()).toMatchObject({ failure: { class: 'runtime_exited' } });
+    expect(f.journal).toEqual(['tool-intent:0']);
+    expect(f.children).toHaveLength(1);
+  });
+
   it('fails as runtime_exited when a respawned worker ends on its own before its start receipt', async () => {
     const f = await fixture([{ crash: true }, { exitBeforeReceipt: true }]);
     await f.collect();
