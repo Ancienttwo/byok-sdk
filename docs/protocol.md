@@ -1160,9 +1160,11 @@ refreshed hello adds it, and removes it again when the member is lost.
   (`POST /byok/e2ee/key-packages`). After the put, the verified head it chose
   the recipients at is the new epoch's freshness point, so a `remove` that
   landed during the put makes it stale. A Host that holds that epoch under
-  another `keyId` refuses the put with `e2ee_scope_key_conflict`; then, and
-  on any other failed rotation, the offer is declined with
-  `sealed_key_unavailable`. Concurrent seals of one scope share one rotation.
+  another `keyId` refuses the put with `e2ee_scope_key_conflict`. A policy
+  that leaves no current member but the device is not rotated, because no
+  client could open the output. Then, and on any other failed rotation, the
+  offer is declined with `sealed_key_unavailable`. Concurrent seals of one
+  scope share one rotation.
   So an output-only task (`categories: ['task-output']`), which carries no
   sealed input, seals at the new epoch. The Host notifies the device of its
   own new package as of any other.
