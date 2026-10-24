@@ -101,33 +101,24 @@ export function validateActivityEvents(
   }
 }
 
-export function validateActivityBatch(
-  input: Omit<ActivityAppendInput, 'ttlMs' | 'capacity'>,
-  bounds: ActivityBounds,
-): void {
-  validateActivityEvents(input.events, input.dropped, bounds);
+type ActivityBatch = ActivityAppendInput extends infer Input
+  ? Input extends ActivityAppendInput ? Omit<Input, 'ttlMs' | 'capacity'> : never
+  : never;
+
+/**
+ * A plaintext batch is checked against the event and byte bounds. A sealed
+ * batch hides its events; the inbound gate admits it inline only.
+ */
+export function validateActivityBatch(input: ActivityBatch, bounds: ActivityBounds): void {
+  if ('events' in input) validateActivityEvents(input.events, input.dropped, bounds);
   validateActivityAppend({ ...input, ttlMs: bounds.ttlMs, capacity: bounds.capacity });
 }
 
 export async function appendActivityEvents(
   activity: TenantBoundActivity,
-  input: {
-    readonly taskId: string;
-    readonly sourceEnvelopeId: string;
-    readonly batchSeq: number;
-    readonly events: readonly AgentEventOrUnknown[];
-    readonly dropped: number;
-  },
+  input: ActivityBatch,
   bounds: ActivityBounds,
 ): Promise<ActivityTail> {
   validateActivityBatch(input, bounds);
-  return activity.append({
-    taskId: input.taskId,
-    sourceEnvelopeId: input.sourceEnvelopeId,
-    batchSeq: input.batchSeq,
-    events: input.events,
-    dropped: input.dropped,
-    ttlMs: bounds.ttlMs,
-    capacity: bounds.capacity,
-  });
+  return activity.append({ ...input, ttlMs: bounds.ttlMs, capacity: bounds.capacity });
 }

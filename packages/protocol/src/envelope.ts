@@ -132,6 +132,9 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
   envelopeShape('task.progress_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('task.artifact_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('task.await_approval_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
+
+  // E2EE key package notice (#654 E2c-3), appended for the same reason.
+  envelopeShape('e2ee.key_package.available', FORBIDDEN_TASK_ID, REQUIRED_SEQ),
 ]);
 
 export type Envelope = z.infer<typeof EnvelopeSchema>;
