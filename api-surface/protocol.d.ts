@@ -1648,6 +1648,8 @@ export declare const AGENT_MEMORY_PROJECTION_CAPABILITY: 'agent.memory.projectio
 export declare const AGENT_MEMORY_SELECTION_CAPABILITY: 'agent-memory-selection';
 /** Device capability required before an ordinary Agent offer may carry `agentMemory: 'read-if-admitted'`. */
 export declare const AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY: 'agent-memory-read-if-admitted';
+/** Device capability required before an ordinary Agent offer may carry `agentMemory: 'read-write-if-admitted'`. */
+export declare const AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY: 'agent-memory-read-write-if-admitted';
 /** Exact capability of the single input-preparation wire authority. */
 export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v9";
 /**
@@ -4083,15 +4085,19 @@ export declare const AgentHomeAccessSchema: z.ZodLiteral<"memory-reader">;
 export type AgentHomeAccess = z.infer<typeof AgentHomeAccessSchema>;
 /**
  * The `agentMemory` of an ordinary Agent offer: the prepared modes plus
- * `read-if-admitted`. That value runs as `read` when the daemon admits the
- * memory MCP and as `none` when it does not. A host sends it only to a device
- * that advertises `agent-memory-read-if-admitted`. Prepared offers refuse it.
+ * `read-if-admitted` and `read-write-if-admitted`. When the daemon admits the
+ * memory MCP they run as `read` and `read-write`; when it does not, both run as
+ * `none`. A host sends each only to a device that advertises
+ * `agent-memory-read-if-admitted` or `agent-memory-read-write-if-admitted`. A
+ * `memory-reader` Attempt cannot select `read-write-if-admitted`. Prepared
+ * offers refuse both.
  */
 export declare const AgentMemorySelectionSchema: z.ZodEnum<{
     none: "none";
     read: "read";
     "read-if-admitted": "read-if-admitted";
     "read-write": "read-write";
+    "read-write-if-admitted": "read-write-if-admitted";
 }>;
 export type AgentMemorySelection = z.infer<typeof AgentMemorySelectionSchema>;
 /**
@@ -4126,6 +4132,7 @@ export declare const TaskOfferForAgentPayloadSchema: z.ZodObject<{
         read: "read";
         "read-if-admitted": "read-if-admitted";
         "read-write": "read-write";
+        "read-write-if-admitted": "read-write-if-admitted";
     }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -4201,6 +4208,7 @@ export declare const TaskOfferForAgentWithEgressPayloadSchema: z.ZodObject<{
         read: "read";
         "read-if-admitted": "read-if-admitted";
         "read-write": "read-write";
+        "read-write-if-admitted": "read-write-if-admitted";
     }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -4313,6 +4321,7 @@ export declare const TaskOfferForAgentWithEgressFreshPayloadSchema: z.ZodObject<
         read: "read";
         "read-if-admitted": "read-if-admitted";
         "read-write": "read-write";
+        "read-write-if-admitted": "read-write-if-admitted";
     }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -5813,6 +5822,7 @@ export declare const TaskOfferForAgentSealedPayloadSchema: z.ZodObject<{
         read: "read";
         "read-if-admitted": "read-if-admitted";
         "read-write": "read-write";
+        "read-write-if-admitted": "read-write-if-admitted";
     }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -5916,6 +5926,7 @@ export declare const TaskOfferForAgentWithEgressSealedPayloadSchema: z.ZodObject
         read: "read";
         "read-if-admitted": "read-if-admitted";
         "read-write": "read-write";
+        "read-write-if-admitted": "read-write-if-admitted";
     }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -6058,6 +6069,7 @@ export declare const TaskOfferForAgentWithEgressFreshSealedPayloadSchema: z.ZodO
         read: "read";
         "read-if-admitted": "read-if-admitted";
         "read-write": "read-write";
+        "read-write-if-admitted": "read-write-if-admitted";
     }>>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
@@ -7766,7 +7778,7 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", 'agent-message-draft', "sealed-payload-v1"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", 'agent-message-draft', "sealed-payload-v1"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 /**
