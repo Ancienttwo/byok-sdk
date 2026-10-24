@@ -61,6 +61,7 @@ it('waits for the new revision, and an older report does not ready it', async ()
   await bot.personaReady('main', '5');
   expect(frozen(turnId)).toBeUndefined();
   await expect(bot.personaReady('main', '7')).rejects.toThrow('Profile revision 7 is newer than the Bot revision 6');
+  await expect(bot.personaReady('main', '0')).rejects.toThrow('Invalid profile revision');
   await bot.personaReady('main', '6');
   expect(frozen(turnId)).toEqual({ agentId: 'main', profileRevision: '6' });
   expect(calls).toEqual([]);
@@ -71,6 +72,7 @@ it.each<[string, TeamSnapshotBot[], string]>([
   ['a revision that goes back', [MAIN('4')], 'Profile revision 4 of main is older than 5'],
   ['a profile change at the same revision', [MAIN('5', 'Changed')], 'A profile change of main needs a newer profile revision'],
   ['a revision that is not canonical', [MAIN('05')], 'Invalid profile revision'],
+  ['a zero revision, which no Agent home projection can apply', [MAIN('0')], 'Invalid profile revision'],
 ])('refuses a snapshot with %s, and changes nothing', async (_name, bots, message) => {
   bot = open();
   await bot.applyTeam({ revision: 1, bots: [MAIN('5')] });

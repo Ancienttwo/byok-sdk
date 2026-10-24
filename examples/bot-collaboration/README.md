@@ -467,7 +467,8 @@ With `persona: 'external'` as well, the Host owns the persona projection of
 each Bot (#879). The Host projects the Agent home with its own daemon hook, so
 there is one projection writer and one revision for each agentRef.
 
-- Each snapshot Bot carries the Host's `profileRevision`, a decimal string.
+- Each snapshot Bot carries the Host's `profileRevision`, in the protocol's
+  Agent home revision format: a canonical positive decimal string.
   K8 uses it as the Bot revision and as the agentRef `profileRevision` of its
   execution. K8 queues no projection and counts no revision of its own.
 - The revision never goes back. A changed name, role, persona or model needs a
