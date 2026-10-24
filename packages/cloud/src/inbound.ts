@@ -895,13 +895,18 @@ async function applyLifecycle(
     case 'task.artifact_sealed': {
       const ref = sealedCiphertextRef(envelope.payload);
       if (ref === undefined) return;
+      // One reference per (blob, task): a replay cannot tell its reference
+      // from the one an earlier delivery added. So an artifact on a terminal
+      // task changes no reference. A new one holds no blob, and a replay keeps
+      // the earlier hold until redaction releases it.
+      const before = await stores.tasks.get(taskId);
+      if (before === undefined || TERMINAL_TASK_STATUSES.includes(before.status)) return;
       await retainSealedCiphertext(stores.objects, taskId, ref);
-      // No row names an artifact blob, so redaction cannot find this reference
-      // later. Redaction runs only on a terminal task, and it may have released
-      // the task's references before this one was added. So an artifact that
-      // arrives once its task is terminal holds no blob.
-      const after = await stores.tasks.get(taskId);
-      if (after === undefined || TERMINAL_TASK_STATUSES.includes(after.status)) await releaseSealedCiphertext(stores.objects, taskId, ref);
+      // Redaction releases the task's references again after it commits, so
+      // only a redaction that has already finished can miss this one.
+      if (await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined) {
+        await releaseSealedCiphertext(stores.objects, taskId, ref);
+      }
       return;
     }
     default:

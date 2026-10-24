@@ -1184,10 +1184,14 @@ orphan GC keeps the ciphertext while the task lives. `redactTasks` releases
 the reference. It deletes the object when a stored row of the task still
 names it. Retention can prune the mailbox row of a delivered steer, and the
 cloud stores no artifact. Then no row names the object, and orphan GC deletes
-it later. Tenant erasure also releases the reference. A terminal that loses
-to the first terminal releases its own reference. An artifact that arrives
-once its task is terminal holds no reference. A terminal replayed after
-redaction is complete as received, so the Host does not check its blob.
+it later. `redactTasks` releases the references again after it replaces the
+bodies, so a report that adds a reference while redaction runs holds nothing
+afterwards, and orphan GC deletes its object. Tenant erasure also releases the
+reference. A terminal that loses to the first terminal releases its own
+reference. An artifact that arrives once its task is terminal changes no
+reference: a new one holds nothing, and a replay keeps the reference of its
+earlier delivery. A terminal replayed after redaction is complete as received,
+so the Host does not check its blob.
 
 **Host comparison of a sealed retry.** The Host compares two sealed
 submissions of one identity by their comparison projection: the plaintext
