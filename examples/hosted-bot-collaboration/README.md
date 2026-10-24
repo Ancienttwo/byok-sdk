@@ -422,9 +422,11 @@ three and runs these suites.
 - The reconciliation tests run a real daemon for the completed outcome, a replayed terminal and a busy decline. The
   busy decline runs on L too (K4 with the sync rule's wait), and both conclude `declined` at generation 0. An SDK
   tenant in memory covers the cancel, expiry, lease and identity cases, and the scopes that a pass reports.
+- The K8 settlement vectors (`settlementVectors`) run on the store, as on L.
 - The settlement tests build each delegation through the product path (an outcome `delegate`, then a sync), and cover
   each verdict, the units, `target_archived`, the timers, the late terminal audit, the Main Bot cancel in the terminal
-  transaction, a rollback, the settlement facts, and a verdict at the sync of a reported scope.
+  transaction, a rollback, the settlement facts, a verdict at the sync of a reported scope, and the refusal of invalid
+  delegation timers.
 - The sync test freezes the same Turns in an L ledger with K4 `enqueue`. Each H input is byte-equal to the K4
   execution input, and the H state bytes equal the L state bytes.
 - The submitter tests use the hosted SDK composition (`createByokCloud` over `createPostgresCloudStores`, with
