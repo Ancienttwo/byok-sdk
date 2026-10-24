@@ -77,9 +77,9 @@ import { assertCodexSandboxSetting, CodexAdapter, type CodexSandboxSetting } fro
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { BlobClient } from './blob-client';
-import { SealedTasks, type SealedScopeKeyring } from './sealed-task';
+import { SealedTasks } from './sealed-task';
 import { resolveMachineId } from './machine-id';
-import { declares, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from './capabilities-client';
+import { declares, E2EE_MEMBER_CAPABILITY, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from './capabilities-client';
 import type { CapabilityDeclaration } from '@byok-sdk/core';
 import {
   assertPresenceHeartbeatCadence,
@@ -1304,16 +1304,6 @@ export function createDaemonWithAdapters(
 }
 
 /**
- * #654 E3c: an injected scope keyring. Only tests pass it. With it the daemon
- * opens and seals sealed task content and advertises `sealed-payload-v1`.
- * A release must not advertise that flag before the device can receive key
- * packages (E2c-3, E2d), so no public option reaches this.
- */
-export interface SealedPayloadTestSeam {
-  readonly keyring: SealedScopeKeyring;
-}
-
-/**
  * codex round-2 F3: the real builder. Exported from THIS module but NOT from
  * the package `index.ts`, so the optional `assertionProbe` (an
  * {@link AssertionIssueProbe} post-sign observer) is reachable only by tests
@@ -1326,7 +1316,6 @@ export function buildDaemonWithAdapters(
   adapters: RuntimeAdapter[],
   overrides: DaemonOverrides = {},
   assertionProbe?: AssertionIssueProbe,
-  sealedPayload?: SealedPayloadTestSeam,
 ): Daemon {
   if (overrides.deviceCredentials !== undefined && config.deviceCredentials !== undefined) {
     throw new TypeError('configure OS deviceCredentials or inject a credential backend, not both');
@@ -1646,6 +1635,8 @@ export function buildDaemonWithAdapters(
   /** This run's verified member, once the background resume finds one. */
   let deviceMember: DeviceMemberKeyring | undefined;
   let memberResuming = false;
+  /** Set by each start: builds that run's sealed tasks for a ready member. */
+  let activateSealedTasks: ((keyring: DeviceMemberKeyring) => void) | undefined;
   const memberStatus = (): DeviceMemberStatus => deviceMember ?? (memberResuming ? 'resuming' : 'none');
   let memberAbort: AbortController | undefined;
   let memberResume: Promise<void> | undefined;
@@ -2388,17 +2379,20 @@ export function buildDaemonWithAdapters(
     });
 
     capabilities.push('custom-harness');
-    if (sealedPayload !== undefined) {
-      capabilities.push(SEALED_PAYLOAD_CAPABILITY);
+    // #654 E2d-3: sealed task content needs this run's verified member. The
+    // object is built when the member is first ready and then stays, also
+    // after a loss: a sealed task must never fall back to plaintext output.
+    activateSealedTasks = (keyring) => {
+      if (sealedTasks !== undefined) return;
       const opened = new SealedTasks({
-        keyring: sealedPayload.keyring,
+        keyring,
         tenantId: record.tenantId,
         deviceId: record.deviceId,
         blobs: { download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }) },
       });
       sealedTasks = opened;
       sealedOutputSettled = () => opened.settled();
-    }
+    };
     // Contract §8.1 / §8.3: the device-level capability string is NOT computed
     // here. It is the one flag whose answer depends on a deployment fact this
     // daemon has not read yet at this point in `start()`, so it is added (and
@@ -2712,7 +2706,8 @@ export function buildDaemonWithAdapters(
       // capability is only known once the handshake completes, strictly
       // after this `deps` object is constructed.
       getServerCapabilities: () => connection?.getServerCapabilities() ?? [],
-      ...(sealedTasks === undefined ? {} : { sealedTasks }),
+      // Read at use time: the member is verified after the runner is built.
+      get sealedTasks() { return sealedTasks; },
       // Same late-binding closure as `getServerCapabilities`; with no
       // connection yet there is no advertisement, and that is an error.
       getIngressBudget: () => {
@@ -3218,12 +3213,20 @@ export function buildDaemonWithAdapters(
    */
   function applyCapabilityDeclaration(declaration: CapabilityDeclaration | undefined): void {
     deploymentDeclaration = declaration;
-    const wanted = taskContextCapabilityAvailable();
-    const index = helloCapabilities.indexOf(HOST_MCP_TASK_CONTEXT_CAPABILITY);
-    if (wanted === (index !== -1)) return;
-    if (wanted) helloCapabilities.push(HOST_MCP_TASK_CONTEXT_CAPABILITY);
+    const taskContext = setHelloCapability(HOST_MCP_TASK_CONTEXT_CAPABILITY, taskContextCapabilityAvailable());
+    // #654 E2d-e5: only a verified member on a Host with the E2EE member routes.
+    const sealedPayload = setHelloCapability(SEALED_PAYLOAD_CAPABILITY,
+      deviceMember?.session !== undefined && declaration !== undefined && declares(declaration, E2EE_MEMBER_CAPABILITY));
+    if (taskContext || sealedPayload) connection?.refreshHello();
+  }
+
+  /** Whether the advertisement changed. */
+  function setHelloCapability(flag: CapabilityFlag, wanted: boolean): boolean {
+    const index = helloCapabilities.indexOf(flag);
+    if (wanted === (index !== -1)) return false;
+    if (wanted) helloCapabilities.push(flag);
     else helloCapabilities.splice(index, 1);
-    connection?.refreshHello();
+    return true;
   }
 
   /** Arm before connection.start(); its first open callback starts the read. */
@@ -3388,7 +3391,15 @@ export function buildDaemonWithAdapters(
       if (abort.signal.aborted) return;
       memberResuming = false;
       if (session === undefined) return;
-      deviceMember = new DeviceMemberKeyring(session, options);
+      const member = new DeviceMemberKeyring(session, {
+        ...options,
+        onLost: () => {
+          if (deviceMember === member) applyCapabilityDeclaration(deploymentDeclaration);
+        },
+      });
+      deviceMember = member;
+      activateSealedTasks?.(member);
+      applyCapabilityDeclaration(deploymentDeclaration);
       console.info(`[byok/client] E2EE member ${session.member.memberId} verified at chain seq ${session.state.head!.seq}`);
     }, (error: unknown) => {
       if (abort.signal.aborted) return;
@@ -3420,6 +3431,7 @@ export function buildDaemonWithAdapters(
     memberAbort = undefined;
     deviceMember = undefined;
     memberResuming = false;
+    activateSealedTasks = undefined;
     await memberResume;
     memberResume = undefined;
     const errors: unknown[] = [];

@@ -31,6 +31,7 @@ import {
   parseMemberKeyBundle,
   verifyClientPairingMac,
   verifyMemberChainFromAnchor,
+  type MemberChainEntryV1,
   type MemberChainState,
   type MemberKeyBundleV1,
   type MemberKeys,
@@ -54,6 +55,8 @@ export interface DeviceMemberSession {
   /** The pinned approver key and its `add(device)` entry, as stored. */
   readonly anchor: NonNullable<DeviceMemberState['anchor']>;
   readonly state: MemberChainState;
+  /** The verified chain entries, from seq 1. */
+  readonly entries: readonly MemberChainEntryV1[];
   /** `hashes[seq - 1]` is the entry hash of chain entry `seq`. */
   readonly hashes: readonly string[];
 }
@@ -230,7 +233,7 @@ async function completePairing(options: ResumeDeviceMemberOptions, state: Device
     if (!anchored.ok) return giveUp(`the member chain does not hold the add(device) entry the client confirmed (${anchored.reason}); re-pair the device to enable E2EE`);
     await records.saveState({ tenantId, deviceId, member, anchor, head: anchored.state.head! });
     await records.deletePending();
-    return session(keys, member, anchor, anchored.state, await entryHashes(entries), log);
+    return await session(keys, member, anchor, anchored.state, entries, log);
   } catch (error) {
     return now() >= deadline ? giveUp(EXPIRED) : giveUp(`E2EE member pairing failed; re-pair the device to enable E2EE: ${describe(error)}`);
   }
@@ -287,20 +290,21 @@ async function rewalk(options: ResumeDeviceMemberOptions, state: DeviceMemberSta
   if (!samePoint(applied.state.head, head)) {
     await records.saveState({ tenantId, deviceId, member, anchor, head: applied.state.head! });
   }
-  return session(keys, member, anchor, applied.state, await entryHashes(entries), log);
+  return session(keys, member, anchor, applied.state, entries, log);
 }
 
-function session(
+async function session(
   keys: MemberKeys,
   member: MemberKeyBundleV1,
   anchor: DeviceMemberSession['anchor'],
   state: MemberChainState,
-  hashes: string[],
+  entries: readonly unknown[],
   log: DeviceMemberLog,
-): DeviceMemberSession | undefined {
+): Promise<DeviceMemberSession | undefined> {
   if (!state.members.has(member.memberId)) {
     log('this device is no longer a current member of the chain; E2EE stays off');
     return undefined;
   }
-  return { keys, member, anchor, state, hashes };
+  // The walk verified every entry, so each one parses.
+  return { keys, member, anchor, state, entries: entries as MemberChainEntryV1[], hashes: await entryHashes(entries) };
 }

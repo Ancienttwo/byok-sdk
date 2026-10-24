@@ -9,7 +9,14 @@
  * each one is sealed, or it is one of the closed plaintext forms (decision
  * 12d), or it is not sent.
  */
-import { openSealedContent, sealContent, type SealedBinding, type SealedContentOpenFailure } from '@byok-sdk/core/sealed-payload';
+import {
+  openSealedContent,
+  sealContent,
+  type SealedBinding,
+  type SealedCategory,
+  type SealedContentHeaderV1,
+  type SealedContentOpenFailure,
+} from '@byok-sdk/core/sealed-payload';
 import {
   SEALED_INLINE_MAX_PADDED_LENGTH,
   SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
@@ -38,15 +45,15 @@ export interface SealingKey {
   readonly chainHead: { readonly seq: number; readonly hash: string };
 }
 
-/**
- * The scope keys this device holds. Only tests inject one today; the key
- * package store replaces it (E2d), and until then the daemon does not
- * advertise `sealed-payload-v1`.
- */
+/** The scope keys this device holds, and its view of the member chain (E2d-3: the device member keyring). */
 export interface SealedScopeKeyring {
+  /** The latest policy categories of a scope this device may use, or `undefined`. */
+  scopeCategories(scopeId: string): Promise<readonly SealedCategory[] | undefined>;
   /** The key of one scope epoch, to open content sealed under it. */
   openingKey(scope: { readonly id: string; readonly epoch: number }): Promise<Uint8Array | undefined>;
-  /** The newest key of the scope at `minEpoch` or later, to seal output. */
+  /** Whether the authenticated header of opened content passes the sender-view check. */
+  acceptHeader(header: SealedContentHeaderV1): Promise<boolean>;
+  /** The newest fresh key of the scope at `minEpoch` or later, to seal output. */
   sealingKey(scopeId: string, minEpoch: number): Promise<SealingKey | undefined>;
 }
 
@@ -134,10 +141,12 @@ export class SealedTasks {
 
   /**
    * Opens a sealed offer and returns the plaintext offer it seals, or the
-   * closed decline code. A task that seals its output needs a sealing key
-   * before it may run, also when its instruction is plaintext. An offer with
-   * `routineRef` carries a routine template, which opens under the template
-   * binding and only up to its `notAfter`.
+   * closed decline code. The offer's categories must cover the scope
+   * policy's (design §6.2). A task that seals its output needs a sealing key
+   * before it may run, also when its instruction is plaintext; that key is
+   * asked for after the input opens, whose chain head can make the epoch
+   * fresh. An offer with `routineRef` carries a routine template, which
+   * opens under the template binding and only up to its `notAfter`.
    */
   async openOffer(envelope: Envelope): Promise<SealedOfferOpenResult> {
     if (!isSealedMessageType(envelope.type) || envelope.task_id === undefined) return { ok: false, code: 'sealing_policy_mismatch' };
@@ -146,9 +155,9 @@ export class SealedTasks {
     const { sealing, sealed, routineRef, ...plain } = envelope.payload as JsonObject & { sealing: TaskSealing; sealed?: JsonObject; routineRef?: RoutineRef };
     const agentRef = (plain.agentRef as AgentRef | undefined) ?? null;
     if (routineRef !== undefined && routineTemplateExpired(routineRef, Date.now())) return { ok: false, code: 'sealing_policy_mismatch' };
-    if (sealing.categories.includes('task-output') && await this.#sealingKey(sealing) === undefined) {
-      return { ok: false, code: 'sealed_key_unavailable' };
-    }
+    const policy = await this.#keyring(() => this.options.keyring.scopeCategories(sealing.scopeId));
+    if (policy === undefined) return { ok: false, code: 'sealed_key_unavailable' };
+    if (policy.some((category) => !(sealing.categories as readonly SealedCategory[]).includes(category))) return { ok: false, code: 'sealing_policy_mismatch' };
     let payload = plain;
     if (sealed !== undefined) {
       const binding = routineRef === undefined
@@ -164,6 +173,9 @@ export class SealedTasks {
         return { ok: false, code: 'sealing_policy_mismatch' };
       }
       payload = { ...plain, ...opened.plaintext };
+    }
+    if (sealing.categories.includes('task-output') && await this.#sealingKey(sealing) === undefined) {
+      return { ok: false, code: 'sealed_key_unavailable' };
     }
     let offer: Envelope;
     try {
@@ -380,6 +392,9 @@ export class SealedTasks {
       sealing: { scopeId: sealing.scopeId, epoch: sealing.epoch },
       maxContentLength: SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
     });
-    return opened.ok ? { ok: true, plaintext: opened.plaintext } : { ok: false, code: opened.reason };
+    if (!opened.ok) return { ok: false, code: opened.reason };
+    // A stale or foreign sender view fails closed (E2d-e4).
+    if (await this.#keyring(() => this.options.keyring.acceptHeader(opened.header)) !== true) return { ok: false, code: 'sealed_open_failed' };
+    return { ok: true, plaintext: opened.plaintext };
   }
 }

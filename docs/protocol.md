@@ -1125,6 +1125,40 @@ sealed offer type, so a device without the flag never receives it. A
 plaintext type that has a sealed sibling refuses `sealing` and `sealed`, so
 the schema never strips a sealing policy or sealed content.
 
+**Device rules (#654 E2d-3).** The daemon opens and seals with the scope keys
+of its own verified member (§2.6, §2.7). It advertises `sealed-payload-v1`
+only while it holds a verified member and the deployment declares
+`e2ee.member`. The first `conn.hello` of a run never carries the flag; a
+refreshed hello adds it, and removes it again when the member is lost.
+
+- **Usable scope.** The scope must be in the verified chain state (a shred
+  removes it), and its latest `scope-policy` must hold the device and no
+  other device (design §7.9, requirement 1). Else the offer is declined with
+  `sealed_key_unavailable`.
+- **Policy floor.** The offer's `sealing.categories` must include every
+  category of the scope policy (design §6.2). Else `sealing_policy_mismatch`.
+  This also covers a routine template; a template's old epoch or chain head
+  is only a hint.
+- **Sender view.** After each open (offer, steer, routine template), the
+  header's `chainHead` must be on the verified chain (the daemon catches up
+  when it is ahead), and its `sender` a current member in the scope policy
+  at that head. Else the offer is declined with `sealed_open_failed`, and a
+  steer is dropped.
+- **Freshness (owner §50d).** Each accepted header records its `chainHead` as
+  the freshness point of its scope epoch. The daemon seals output at the
+  newest epoch, at or after the offer's `epoch`, that has a point with no
+  `remove` of a scope member and no member-dropping `scope-policy` after it.
+  It checks this before the task runs; without such an epoch the offer is
+  declined with `sealed_key_unavailable`. Its header names the device member
+  and its verified head. The points live in memory, so after a restart they
+  come back from the next opened content.
+- **Output-only tasks.** A task with `categories: ['task-output']` carries no
+  sealed input, so it gets no freshness point of its own. It runs only after
+  sealed content at the same scope epoch made the epoch fresh in this run.
+  Device rotation (E2d-4) is not in this release.
+- A key is fetched on its first miss, so a notice that came before the
+  advertisement needs no redelivery.
+
 **Routine template.** A `task.offer_for_agent_with_egress_fresh_sealed` can
 carry a plaintext `routineRef: { routineId, definitionVersion, notAfter }`.
 Its `sealed` member is then a routine template: the member sealed it once, as

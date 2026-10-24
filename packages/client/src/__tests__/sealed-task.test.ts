@@ -27,7 +27,9 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 class GatedKeyring implements SealedScopeKeyring {
   readonly scopeKey = generateScopeKey();
   gate: Promise<void> = Promise.resolve();
+  async scopeCategories() { return []; }
   async openingKey() { return this.scopeKey; }
+  async acceptHeader() { return true; }
   async sealingKey() {
     await this.gate;
     return { scopeKey: this.scopeKey, epoch: 1, sender: 'm'.repeat(43), chainHead: { seq: 1, hash: `sha256:${'0'.repeat(64)}` } };
