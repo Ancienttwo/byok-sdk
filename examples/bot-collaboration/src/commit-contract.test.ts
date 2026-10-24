@@ -11,8 +11,8 @@ import { retainRoots, type RetentionStore } from './retention';
 import { retentionVectors, type RetentionSubject } from './retention-vectors.test-support';
 import type { CommandRecord } from './rules/commit';
 import { DatabaseSync } from 'node:sqlite';
-import { commitCommand, refuseRetired, RetiredIdentityError, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
-import { commitVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CommitSubject, type SeedTeam,
+import { commitCommand, expireCards, refuseRetired, reportCardDecisions, RetiredIdentityError, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
+import { cardVectors, commitVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CardSubject, type CommitSubject, type SeedTeam,
   type SettlementSubject, type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support';
 import { intentRows, settleDelegations } from './delegation';
 import { syncTurn } from './rules/sync';
@@ -133,6 +133,18 @@ function ledgerSubject(team?: SeedTeam): RetentionSubject & SyncSubject & { ledg
     state: () => stateOf(ledger.snapshot().application),
   };
 }
+/** The L card subject: the ledger subject, whose sync runs the card steps around the Turn steps in L's sync order. */
+function cardSubject(): CardSubject {
+  const base = ledgerSubject(), ledger = base.ledger;
+  return { ...base, sync: now => {
+    ledger.transaction((s, rows) => {
+      const state = stateOf(s.application);
+      expireCards(state, now);
+      for (const turn of Object.values(state.turns)) syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now });
+      reportCardDecisions(state, (id, value) => project(s, id, value));
+    });
+  } };
+}
 commitVectors('pure rules in memory', memorySubject);
 commitVectors('L HostLedger', ledgerSubject);
 retentionVectors('pure rules in memory', memorySubject);
@@ -232,3 +244,4 @@ function settlementSubject(): SettlementSubject {
   };
 }
 settlementVectors('L HostLedger', settlementSubject);
+cardVectors('L HostLedger', cardSubject);

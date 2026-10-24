@@ -7,6 +7,7 @@ import { sealBatchForCancel, type InputFields } from './coalesce';
 import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } from './delegation';
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome';
 import { acceptMessage, type MessageFields } from './message';
+import { expireCard } from './cards';
 import { commit, type CommandRecord, type CommitRequest, type CommitResult, type CommitState, type Disposition, type OutboxIntent } from './commit';
 
 // The collaboration commands and their decisions as pure rules (#739 D1). `commitCommand` runs one command
@@ -15,6 +16,7 @@ import { commit, type CommandRecord, type CommitRequest, type CommitResult, type
 // The sync step runs beside the commands, so it is part of this entry. A store runs it under the same scope lock as a commit.
 export { OFFER_WAIT_MS, syncTurn, type FreezeExecution, type SyncBot, type SyncFacts, type SyncOptions, type SyncState, type SyncStep } from './sync';
 export { delegationDue, settleDelegations, type DelegationTimers } from './delegation';
+export { expireCards, reportCardDecisions } from './cards';
 
 /** Commands with a caller key or a K4 key. The store records them, so a retry replays the first result. */
 export type KeyedCommand =
@@ -216,7 +218,7 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
     case 'decide': {
       const card = state.cards[command.cardId];
       if (!card) throw new Error('Card not found');
-      if (card.state === 'pending' && ports.now() >= card.expiresAt) card.state = 'expired';
+      expireCard(card, ports.now());
       // The Host throws a refused decision after its process pass, so an expiry still commits.
       if (card.state === 'expired') return { outcome: 'refused', reasonCode: 'card_expired', reason: 'Card expired' };
       if (card.state !== 'pending') {

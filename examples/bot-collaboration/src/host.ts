@@ -13,7 +13,7 @@ import { contextTurns, SYSTEM_PROMPT, type ContextTurn } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   delegationDue, intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
-import { commitCommand, type Command, type CommandPorts, type CommandStore, type KeylessCommand } from './rules/commands';
+import { commitCommand, expireCards, reportCardDecisions, type Command, type CommandPorts, type CommandStore, type KeylessCommand } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
 import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
@@ -504,9 +504,7 @@ export class BotCollaboration {
     // A batch sealed here is enqueued in this pass, before later Turns of its Bot.
     sealDueBatches(state, this.coalesce, this.now());
     // Refresh passive state before any new offer freezes its ContextPack.
-    for (const card of Object.values(state.cards)) {
-      if (card.state === 'pending' && this.now() >= card.expiresAt) card.state = 'expired';
-    }
+    expireCards(state, this.now());
     let materialized = false;
     const routines = botRoutines(Object.values(s.routines));
     // Seats never manage or delegate (§5), so no seat Turn carries owner authority.
@@ -517,20 +515,7 @@ export class BotCollaboration {
         readOnlyToolsets: this.options.readOnlyToolsets ?? [], limits, historyMode: !!this.options.history, history: injected?.get(turn.id), routines }) || materialized;
     }
     settleDelegations(s, state, this.now(), (key, value) => project(s, key, value), this.timers);
-    for (const card of Object.values(state.cards)) {
-      if (card.state !== 'pending' && (card.state !== 'confirmed' || card.result !== undefined || card.error !== undefined)) {
-        if (!card.decisionReported) {
-          project(s, `card:${card.id}:${card.state}`, json(card));
-          card.decisionReported = true;
-        }
-        // Passive expiry is visible in ContextPack. It cannot start a paid turn.
-        if (card.state === 'expired') continue;
-        const origin = state.turns[card.turnId]!;
-        addTurn(state, { id: hash(['action_result', card.id]), root: origin.root, source: 'action_result', botId: origin.botId,
-          request: JSON.stringify({ cardId: card.id, state: card.state, conclusion: card.conclusion, result: card.result, error: card.error }),
-          hop: origin.hop, authority: origin.authority ?? 'bot' });
-      }
-    }
+    reportCardDecisions(state, (key, value) => project(s, key, value));
     cleanReplyTokens(s, state, this.now());
     projectInputBatches(state, (key, value) => project(s, key, value));
     return materialized;
