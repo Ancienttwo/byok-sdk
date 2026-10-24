@@ -441,6 +441,18 @@ describe('HermesAdapter session', () => {
     expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', message: 'hermes gateway exited', failure: { class: 'runtime_exited' } });
   });
 
+  it('keeps the runtime_exited class when the ACP viewer exits before it answers initialize (#869)', async () => {
+    const { open } = await setup({ FAKE_HERMES_VIEWER_EXIT_ON_INITIALIZE: '1' });
+    const failure = await open().then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', message: 'hermes acp viewer exited', failure: { class: 'runtime_exited' } });
+  });
+
+  it('keeps an ownership start failure unknown (#869)', async () => {
+    const { open } = await setup({ FAKE_HERMES_GATEWAY_WRONG_PID: '1' });
+    await expect(open()).rejects.toMatchObject({ phase: 'start', message: 'another Hermes gateway serves the execution profile', failure: { class: 'unknown' } });
+  });
+
   it('stops startup on an abort signal and disposes the owned gateway', async () => {
     const { adapter, entries, workspaceDir, root, env } = await setup({ FAKE_HERMES_GATEWAY_READY_DELAY_MS: '10000' });
     const prepared = await adapter.prepare({ offer: task, descriptor: adapter.descriptor, requiredToolsetIds: [] });

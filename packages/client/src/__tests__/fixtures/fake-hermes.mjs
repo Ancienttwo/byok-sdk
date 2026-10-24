@@ -194,6 +194,8 @@ function runViewer() {
     const { id, method, params } = message;
     if (method === 'initialize') {
       receipt({ mode: 'acp', method, params });
+      // FAKE_HERMES_VIEWER_EXIT_ON_INITIALIZE=1: the ACP viewer ends without answering initialize.
+      if (env.FAKE_HERMES_VIEWER_EXIT_ON_INITIALIZE === '1') process.exit(1);
       const setup = { id: 'hermes-setup', name: 'Configure Hermes provider', type: 'terminal', args: ['--setup'] };
       send({ id, result: {
         protocolVersion: 1,
