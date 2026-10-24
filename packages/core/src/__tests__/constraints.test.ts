@@ -168,12 +168,14 @@ describe('public API surface', () => {
       'emptyMemberChainState',
       'encodePairingVerificationSecret',
       'formatPairingInput',
+      'generateMemberKeyRecord',
       'generatePairingVerificationSecret',
       'generateScopeKey',
       'memberApprovalCode',
       'memberChainEntryHash',
       'memberChainScopeRecipients',
       'memberFingerprint',
+      'openMemberKeyRecord',
       'openScopeKeyPackage',
       'openSealedContent',
       'parseMemberKeyBundle',
@@ -455,11 +457,17 @@ const PORT_SOURCE_FILES: Readonly<Record<string, string>> = {
   SkillPackStore: 'skill-pack.ts',
 };
 
+/**
+ * Member-side custody ports (#654 owner 10c): each member implements one for
+ * its own keys. They are not Host composition ports.
+ */
+const MEMBER_CUSTODY_PORTS: ReadonlySet<string> = new Set(['MemberKeyStore']);
+
 describe('store port inventory (I7)', () => {
   it('declares exactly the ports the composition contract names', () => {
     const declared = SHIPPED_SOURCES.flatMap((file) =>
       [...file.text.matchAll(/export interface (\w+Store) \{/g)].map((match) => match[1]!),
-    );
+    ).filter((name) => !MEMBER_CUSTODY_PORTS.has(name));
     expect(declared.sort()).toEqual(Object.values(CORE_PORT_INTERFACES).sort());
     expect(Object.keys(PORT_SOURCE_FILES).sort()).toEqual(
       Object.values(CORE_PORT_INTERFACES).sort(),
