@@ -10,7 +10,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createMemberKeyBundle, generateMemberKeyRecord, openMemberKeyRecord, type SealedContentHeaderV1 } from '@byok-sdk/core/sealed-payload';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AuthManager } from '../daemon/auth-manager';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { DeviceMemberRecords } from '../daemon/device-member-custody';
@@ -369,24 +369,26 @@ describe('device member keyring sealing rules (E2d-3)', () => {
     expect(keyring.session!.state.head).toEqual(web.head);
   });
 
-  it('keeps the key bytes an opening read returned when a concurrent catch-up drops the scope', async () => {
-    const { server, web, device, keyring } = await member();
+  it('copies the key where the opening read takes it, so a catch-up before the read resumes cannot zero it', async () => {
+    const { web, device, keyring } = await member();
     const scopeKey = await web.putScope('scope-a', [device]);
-    let releasePackages!: () => void;
-    let releaseChain!: () => void;
-    server.e2ee.holdPackageReads = new Promise<void>((resolve) => { releasePackages = resolve; });
-    const opening = keyring.openingKey({ id: 'scope-a', epoch: 1 });
-    while (server.e2ee.packageReads === 0) await new Promise((resolve) => setTimeout(resolve, 5));
-    await web.append('shred', { scopeId: 'scope-a' });
-    server.e2ee.holdChainReads = new Promise<void>((resolve) => { releaseChain = resolve; });
-    const chainReads = server.e2ee.chainReads;
-    const catching = keyring.catchUp();
-    while (server.e2ee.chainReads === chainReads) await new Promise((resolve) => setTimeout(resolve, 5));
-    releasePackages();
-    const key = await opening;
-    releaseChain();
-    await catching;
-    // The catch-up zeroed the cached key; the bytes the read returned are its own.
+    let shredded = false;
+    const shred = async (): Promise<void> => {
+      if (shredded) return;
+      shredded = true;
+      await web.append('shred', { scopeId: 'scope-a' });
+      await keyring.catchUp();
+    };
+    // A read that takes the key through the public fetch gets the cached
+    // bytes; this catch-up zeroes them before that read resumes.
+    const fetch = keyring.fetch.bind(keyring);
+    vi.spyOn(keyring, 'fetch').mockImplementation(async (...args) => {
+      const result = await fetch(...args);
+      await shred();
+      return result;
+    });
+    const key = await keyring.openingKey({ id: 'scope-a', epoch: 1 });
+    await shred();
     expect(keyring.cached('scope-a', 1)).toBeUndefined();
     expect(key).toEqual(scopeKey);
     expect(key!.some((byte) => byte !== 0)).toBe(true);
