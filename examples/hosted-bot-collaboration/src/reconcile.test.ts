@@ -186,6 +186,21 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
     expect([revisionOf(await store().read(scope)), await commands(scope)]).toEqual([0, []]);
   });
 
+  it('reports a scope where the pass recorded a first claim with no conclusion, and not a claim recorded before (#793 D2f-5)', async () => {
+    const { scope, input } = await tried(), sdk = fakePort();
+    const changed: string[] = [], pass = () => new HostedReconciler(opened!.pool, store().schema, store(),
+      { port: () => sdk.port, ports: vectorPorts, pollMs: 0, now: () => clock, changed: reported => { changed.push(reported); } }).run();
+    sdk.deliver(input);
+    expect(await pass()).toEqual({ concluded: 0, failed: [] });
+    expect(changed).toEqual([]);
+    sdk.deliver(input, { status: 'claimed', ownerDeviceId: 'device' });
+    expect(await pass()).toEqual({ concluded: 0, failed: [] });
+    expect(changed).toEqual([scope]);
+    expect(await row(scope, 'q1')).toMatchObject({ started: true, conclusion: null });
+    expect(await pass()).toEqual({ concluded: 0, failed: [] });
+    expect(changed).toEqual([scope]);
+  });
+
   it('lets a throw from the changed callback propagate, after the conclusion committed (#793 D2f-5)', async () => {
     const { scope, input } = await tried(), sdk = fakePort();
     sdk.deliver(input, { status: 'complete', ownerDeviceId: 'device', cancellation: { requestedAt: 'now' } });
