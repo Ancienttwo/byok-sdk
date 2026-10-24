@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.30.0 — source candidate
+
+0.30.0 is a MINOR release under the default pre-1.0 policy, with no
+exception. It adds public API, gated wire types and behavior, and it has
+breaking changes in protocol, server, cloud and client. The owner confirmed
+the breaking labels of #783, #784, #831 and #834. The examples changes of
+#820 and #823 are also breaking for a Host that copies the K8 example. This
+candidate is not published. A default 0.30.0 daemon does not advertise
+`sealed-payload-v1`. See the [release notes](docs/releases/v0.30.0.md) for
+scope, the release rule of `sealed-payload-v1` and the upgrade notes. All
+nine public manifests and their lock records move to 0.30.0.
+
 - **Feature (protocol, cloud)** — a sealed
   `task.offer_for_agent_with_egress_fresh_sealed` can carry a plaintext
   `routineRef: { routineId, definitionVersion, notAfter }` (#654 E3d). Its
@@ -15,6 +27,27 @@
   `coordination_input_invalid`. The Host does not check `notAfter`; the device
   does. No daemon advertises `sealed-payload-v1` yet, so no device receives
   the field.
+- **Feature (client)** — the daemon opens sealed task input and seals sealed
+  task output (#654 E3c). Only the test parameter `sealedPayload` of
+  `buildDaemonWithAdapters` gives a daemon a scope keyring and the
+  `sealed-payload-v1` advertisement. The package index does not export that
+  function. So a default 0.30.0 daemon does not advertise `sealed-payload-v1`,
+  and it declines every sealed offer. With a keyring, the daemon opens a
+  sealed offer before the plain gates. A failure gets one non-retryable
+  `task.decline` with the closed code as `reason` and `code`. A sealed steer
+  is applied once per `steerId`. A task that seals its output sends its seven
+  output types sealed, through one ordered queue per task, and the journal
+  keeps the sealed terminal bytes. Sealed output is inline only (owner batch
+  §58). A terminal that cannot be sealed inline becomes a sealed `task.fail`
+  with `terminal_result_unsealable`. A sealed approval request that cannot be
+  sent is rejected locally. A sealed artifact whose frame is above the 256 KiB
+  inline maximum gets an error event and no artifact. When the server
+  advertises the flag, an over-bound sealed offer (#826) gets
+  `sealed_open_failed` with a keyring, or `sealed_key_unavailable` without
+  one. Otherwise it keeps `inbound_envelope_too_large`. New public items:
+  `BlobClient.downloadBlob`, the protocol constant
+  `MESSAGES_SEND_MAX_BODY_BYTES` (2 MiB; the outbound drain also cuts chunks
+  at it), and the optional `SealedSplitEntry.limits`.
 - **Feature (client)** — the daemon opens the routine template of a sealed
   offer with `routineRef` (#654 E3d-3). It builds the template binding from
   `routineRef`, the offer's `agentRef` and its `sealing.categories`, with no
@@ -88,8 +121,9 @@
   way. The wire schema also refuses them: each plaintext type that has a
   sealed sibling fails to parse when it carries `sealing` or `sealed`, so a
   direct protocol caller cannot send a sealed task as plaintext.
-- **Changed (client, cloud)** — until the sealed receivers exist, the daemon
-  declines a sealed offer non-retryably and drops a sealed steer (#654 E3a).
+- **Changed (client, cloud)** — a daemon without a scope keyring declines a
+  sealed offer non-retryably and drops a sealed steer (#654 E3a). In 0.30.0
+  every default daemon has no keyring (see the #654 E3c entry above).
   To a server that advertises `sealed-payload-v1`, the decline has
   `sealed_key_unavailable` as its `reason` and `code`. To other servers, its
   `reason` starts with `sealed_payload_unsupported` and it has no `code`.
@@ -312,6 +346,15 @@
   option of `createByokCloud` and decides each Agent message with the K4
   message rules. Nothing is deployed, so the tables change in place
   with no migration.
+- **Feature (examples)** — the hosted package reconciles task results (#793
+  D2d, #842). `HostedReconciler` reads the SDK result of each tried intent and
+  concludes it with the K4 `reconcile` and `finish` rules. H never retries a
+  task, so each task stays at generation 0. A `task.complete` applies the K8
+  `outcome` command once, under the command id `taskId`. The `intent` table
+  gets the columns `started`, `attempt`, `terminal` and `reconcile_at`, and
+  the index `intent_reconcile`. A sync cancel of an intent that no submit
+  tried now concludes it as `cancelled`. `freezeIntent` throws on a K4
+  `retry` policy.
 - **Breaking (examples)** — K8 needs the K4 compaction veto (#816).
   `BotCollaboration` refuses a Host ledger that was opened without
   `{ compactVeto: botCompactVeto }`. K4 gets the option `compactVeto` and
@@ -329,6 +372,47 @@
   still in use is refused with `protected_root` or `seat_root`, and a retired
   id at admission throws `RetiredIdentityError`. The commit store gets the
   hooks `CommitOptions.archived` and `CommandStore.admitted`.
+- **Feature (examples)** — K8 `bot-collaboration` adds eight package
+  subpaths, so a second Host can use its rules and its shared vectors:
+  `./retention` and `./retention-vectors` (#847), `./routines` and
+  `./routine-vectors` (#848), and `./channel`, `./delivery`,
+  `./delivery-routing` and `./delivery-vectors` (#852). `./rules/commands`
+  also exports the sync rules `settleDelegations`, `delegationDue` and
+  `DelegationTimers` (#854), and `./test-support` gets `settlementVectors`.
+  K4 exports its routine rules, from `recordOccurrence` to `scheduleNext`,
+  with the types `RoutineValidation` and `RoutineCommandOptions` (#848). K4
+  behavior does not change. On the local Host, K8 `readbackDelivery` takes the
+  attempt that the readback saw, and a readback of an older attempt changes
+  nothing (#852). The delivery rules take the new `IntentConclusions` type,
+  and a K4 `LedgerState` fits it.
+- **Feature (examples)** — the hosted package binds devices and retains
+  settled roots (#793 D2e, D2g; #845, #847). `bindDevice` and `revokeDevice`
+  use the new table `device_binding`. A write that can create execution
+  without an active H binding fails with `DeviceBindingError`
+  (`device_not_bound`, with the reason `unbound`, `revoked`, `mode` or
+  `revision`). A revoked device id is never bound again. `retain` runs the K8
+  `retainRoots` rule in one transaction. It moves rows to `archived_row` and
+  retires ids in `retired_identity`. A retired id is refused at admission.
+- **Feature (examples)** — the hosted package runs routines and settles
+  delegations (#793 D2f; #849, #850, #851, #854). The new tables `routine`
+  and `occurrence` hold the routine state, and an intent can have the source
+  `routine`. `HostedRoutineScheduler` fires due routines. A fire that the
+  device binding fences writes nothing and stays due. H runs only
+  `bot-routine` routines. An owner `cancel_turn` runs the K4 cancel in the
+  same transaction, and the terminal transaction delivers the Main Bot
+  cancel. The store sync runs to a fixed point and runs the K8 delegation
+  settlement. The `changed` option of the reconciler and the scheduler reports
+  each scope where a pass committed.
+- **Feature (examples)** — the hosted package sends its outbox and takes
+  inbound channel messages (#793 D2b-out, D2f-6; #853, #855, #856).
+  `HostedOutboxSender` (`src/sender.ts`) sends projections and K8 deliveries.
+  The `outbox` table gets the columns `next_at`, `tries`, `last_error` and
+  `settled_at`. `store.receive` is the inbound entry: the K8 `classifyInbound`
+  rule selects the command, and other kinds write only an audit line.
+  `commit()` refuses the K4 callback commands with `CallbackCommandError` and
+  the inbound `receive` command with `InboundCommandError`. All K8 delivery
+  vectors run on H. H has no migrations while it is unreleased, and
+  `STORE_VERSION` stays 2. After these DDL changes, recreate the H schema.
 
 ## 0.29.0 — 2026-10-23 (published)
 
