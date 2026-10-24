@@ -168,13 +168,25 @@ it('refuses to fail an unknown key, an intent that can still settle, a settled i
   expect(ownerFailures()).toEqual([]);
 });
 
-it('throws the drain error when the intent has no refusal of its own', async () => {
+it('throws the error of a drain that stopped before it reached the intent', async () => {
+  paused = true;
+  bot = openBot({ research: () => {} });
+  await bot.enqueueHostIntent(input(), 'research');
+  const drain = vi.spyOn(bot.core, 'drain').mockRejectedValueOnce(new Error('scan stopped'));
+  onTestFinished(() => { drain.mockRestore(); });
+  await expect(bot.failStuckIntent(KEY)).rejects.toThrow('scan stopped');
+  expect(drain).toHaveBeenCalledTimes(1);
+  expect(bot.core.intent(KEY)?.conclusion).toBeUndefined();
+  expect(ownerFailures()).toEqual([]);
+});
+
+it('refuses to fail a Bot Turn that is only queued behind another stuck intent', async () => {
   bot = openBot({});
-  // The stuck direct intent stops the scan at the head of the Bot FIFO, so the queued Turn has no refusal.
+  // The stuck direct intent holds the head of the Bot FIFO, so the queued Turn has no refusal of its own.
   await bot.core.enqueue(input({ execution: template('device') }));
   await expect(bot.input('k1', 'hello')).rejects.toMatchObject({ code: 'unknown_intent' });
   const turnId = Object.values(ledger!.snapshot().intents).find(row => row.key !== KEY)!.key;
-  await expect(bot.failStuckIntent(turnId)).rejects.toBeInstanceOf(IntentOutcomeError);
+  await expect(bot.failStuckIntent(turnId)).rejects.toThrow(`Intent is not stuck: ${turnId} has no refused terminal`);
   expect(ownerFailures()).toEqual([]);
 });
 
