@@ -353,6 +353,15 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     active = `turn-${++turn}`;
     if (turn > 1 && process.env.FAKE_CODEX_HANG_FOLLOWUP === '1') return;
     if (process.env.FAKE_CODEX_HANG_TURN_START === '1') return;
+    // Two frames and no reply: a failed turn, then a frame a failing consumer can halt on.
+    if (process.env.FAKE_CODEX_FAIL_IN_START === '1') {
+      complete(active, 'failed');
+      notify('thread/tokenUsage/updated', {
+        threadId,
+        tokenUsage: { total: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 }, last: null },
+      });
+      return;
+    }
     send({ id, result: { turn: { id: active } } });
     const current = active;
     setTimeout(() => void runTurn(current, params.input ?? []), 5);

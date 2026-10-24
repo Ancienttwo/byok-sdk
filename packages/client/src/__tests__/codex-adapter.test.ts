@@ -516,6 +516,24 @@ describe('Codex persistent app-server adapter', () => {
     expect(pids).toHaveLength(1);
     await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
   });
+  it('keeps the class of a failure that halted the record stream during the start (#869)', async () => {
+    const consume = CodexProjection.prototype.consume;
+    let failedTurnSeen = false;
+    // The consumer fails on the first record after the failed turn, which has already classed the session.
+    vi.spyOn(CodexProjection.prototype, 'consume').mockImplementation(function (this: CodexProjection, ...args: Parameters<CodexProjection['consume']>) {
+      if (failedTurnSeen) throw new Error('projection failed');
+      const result = consume.apply(this, args);
+      const body = (args[1] as { body?: { origin?: string; type?: string } }).body;
+      if (body?.origin === 'byok-native' && body.type === 'turn/completed') failedTurnSeen = true;
+      return result;
+    });
+    const error = await open(adapter({ operationTimeoutMs: 3000 }), task, await ctx({
+      FAKE_CODEX_FAIL_IN_START: '1',
+      FAKE_CODEX_ERROR_INFO: '"usageLimitExceeded"',
+    })).catch((caught) => caught);
+    expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(error).toMatchObject({ phase: 'start', category: 'semantic', failure: { class: 'quota' } });
+  });
   it('fails the session and kills the app-server when a steer gets no reply within the deadline', async () => {
     const { pids, spawnFn } = tracked();
     const s = await open(adapter({ operationTimeoutMs: 3000, spawnFn }), task, await ctx({ FAKE_CODEX_HANG: '1', FAKE_CODEX_HANG_STEER: '1' }));

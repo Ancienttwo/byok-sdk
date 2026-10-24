@@ -25,6 +25,8 @@ describe('ClaudeFailureEvidence (#869)', () => {
     ['a rejected limit whose reset time is in milliseconds', [rateLimit({ status: 'rejected', resetsAt: 1.79e12 }), assistantError('rate_limit'), failedResult()], { class: 'quota' }],
     ['a rejected limit whose reset time is just past year 9999', [rateLimit({ status: 'rejected', resetsAt: 253_402_300_800 }), assistantError('rate_limit'), failedResult()], { class: 'quota' }],
     ['a rejected limit whose reset time is the last second of year 9999', [rateLimit({ status: 'rejected', resetsAt: 253_402_300_799 }), assistantError('rate_limit'), failedResult()], { class: 'quota', resetsAt: '9999-12-31T23:59:59.000Z' }],
+    ['a rejected limit whose reset time is the epoch', [rateLimit({ status: 'rejected', resetsAt: 0 }), assistantError('rate_limit'), failedResult()], { class: 'quota', resetsAt: '1970-01-01T00:00:00.000Z' }],
+    ['a rejected limit whose reset time is not an integer', [rateLimit({ status: 'rejected', resetsAt: 1.5 }), assistantError('rate_limit'), failedResult()], { class: 'quota' }],
     ['a rejected limit whose reset time is negative', [rateLimit({ status: 'rejected', resetsAt: -1 }), assistantError('rate_limit'), failedResult()], { class: 'quota' }],
     ['a 401', [assistantError('authentication_failed'), failedResult(401)], { class: 'auth' }],
     ['a 429 under an allowed limit', [rateLimit({ status: 'allowed', resetsAt: RESETS_AT_SECONDS }), assistantError('rate_limit'), failedResult(429)], { class: 'rate_limited' }],
