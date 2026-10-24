@@ -12,6 +12,7 @@ import {
   generateScopeKey,
   memberChainEntryHash,
   openMemberKeyRecord,
+  openScopeKeyPackage,
   parseMemberKeyBundle,
   sealScopeKeyPackage,
   signMemberChainEntry,
@@ -103,6 +104,19 @@ export class E2eeWebClient {
       recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk },
       sender: { signingPublicJwk: this.keys.signing.publicJwk, signingPrivateKey: this.keys.signing.privateKey },
     });
+  }
+
+  /** Open this client's package of one scope epoch, sealed by `sender`; it throws when there is none or it does not open. */
+  async openPackage(scopeId: string, epoch: number, sender: MemberKeyBundleV1): Promise<Uint8Array> {
+    const pkg = this.host.packages.find((stored) => stored.scopeId === scopeId && stored.epoch === epoch && stored.recipient === this.member.memberId);
+    const opened = await openScopeKeyPackage({
+      package: pkg,
+      expected: { tenantId: this.tenantId, scopeId, epoch },
+      recipient: { memberId: this.member.memberId, kemPublicJwk: this.keys.kem.publicJwk, kemPrivateKey: this.keys.kem.privateKey },
+      senderSigningPublicJwk: sender.signingPublicJwk,
+    });
+    if (!opened.ok) throw new Error(`the package of epoch ${epoch} does not open: ${opened.reason}`);
+    return opened.scopeKey;
   }
 
   /** Relay the client MAC over the current head. */

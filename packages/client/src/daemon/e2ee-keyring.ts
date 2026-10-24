@@ -23,10 +23,19 @@
  * seals at e only while no `remove` of a scope member and no member-dropping
  * `scope-policy` lies after h. The points are rebuilt from opened content
  * after a restart.
+ *
+ * Device rotation (E2d-4, §7.5): when no epoch is fresh, the device is the
+ * next sender, so it rotates. It wraps a new scope key at the epoch after the
+ * newest one it knows to every current member of the scope policy, puts the
+ * packages, and only then keeps the key, with the head it chose the
+ * recipients at as the epoch's freshness point.
  */
 import {
   applyMemberChainEntries,
+  generateScopeKey,
+  memberChainScopeRecipients,
   openScopeKeyPackage,
+  sealScopeKeyPackage,
   type MemberChainEntryV1,
   type MemberChainScope,
   type ScopeKeyPackageOpenResult,
@@ -35,7 +44,7 @@ import {
 } from '@byok-sdk/core/sealed-payload';
 import type { DeviceMemberRecords, MemberChainPoint } from './device-member-custody';
 import { entryHashes, type DeviceMemberLog, type DeviceMemberSession } from './device-member';
-import type { E2eeMemberClient } from './e2ee-member-client';
+import { E2eeMemberClientError, type E2eeMemberClient } from './e2ee-member-client';
 import type { SealedScopeKeyring, SealingKey } from './sealed-task';
 
 export interface ScopeKey {
@@ -84,6 +93,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   readonly #removals: Array<{ readonly seq: number; readonly memberId: string }> = [];
   /** The newest authenticated chain head per scope, then per epoch. */
   readonly #fresh = new Map<string, Map<number, MemberChainPoint>>();
+  /** The rotation in flight per scope, so concurrent seals rotate once. */
+  readonly #rotations = new Map<string, Promise<void>>();
   #tail: Promise<void> = Promise.resolve();
 
   constructor(session: DeviceMemberSession, private readonly options: DeviceMemberKeyringOptions) {
@@ -203,22 +214,83 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   /**
    * The newest epoch at `minEpoch` or later with a freshness point and no
    * `remove` of a scope member, or member-dropping `scope-policy`, after it
-   * (§50d). Its header names this member and the verified head.
+   * (§50d). With none, the device rotates first (E2d-4). Its header names
+   * this member and the verified head.
    */
   async sealingKey(scopeId: string, minEpoch: number): Promise<SealingKey | undefined> {
     const session = this.#session;
     if (session === undefined || this.#scope(session, scopeId) === undefined) return undefined;
-    const head = session.state.head!;
-    const epochs = [...(this.#fresh.get(scopeId) ?? new Map<number, MemberChainPoint>())]
-      .filter(([epoch, point]) => epoch >= minEpoch && !this.#stale(scopeId, point.seq, head.seq))
-      .sort(([left], [right]) => right - left);
-    if (epochs.length === 0) {
-      this.options.log(`no fresh epoch at or after ${minEpoch} for scope ${JSON.stringify(scopeId)}; output is not sealed`);
-      return undefined;
+    const fresh = this.#freshEpoch(scopeId, minEpoch, session.state.head!.seq);
+    if (fresh !== undefined) return this.#sealingAt(session, scopeId, fresh);
+    let rotation = this.#rotations.get(scopeId);
+    if (rotation === undefined) {
+      rotation = this.#rotate(scopeId, minEpoch).finally(() => this.#rotations.delete(scopeId));
+      this.#rotations.set(scopeId, rotation);
     }
-    const epoch = epochs[0]![0];
+    await rotation;
+    const current = this.#session;
+    if (current === undefined || this.#scope(current, scopeId) === undefined) return undefined;
+    const rotated = this.#freshEpoch(scopeId, minEpoch, current.state.head!.seq);
+    if (rotated !== undefined) return this.#sealingAt(current, scopeId, rotated);
+    this.options.log(`no fresh epoch at or after ${minEpoch} for scope ${JSON.stringify(scopeId)}; output is not sealed`);
+    return undefined;
+  }
+
+  #freshEpoch(scopeId: string, minEpoch: number, headSeq: number): number | undefined {
+    const epochs = [...(this.#fresh.get(scopeId) ?? new Map<number, MemberChainPoint>())]
+      .filter(([epoch, point]) => epoch >= minEpoch && !this.#stale(scopeId, point.seq, headSeq))
+      .map(([epoch]) => epoch);
+    return epochs.length === 0 ? undefined : Math.max(...epochs);
+  }
+
+  async #sealingAt(session: DeviceMemberSession, scopeId: string, epoch: number): Promise<SealingKey | undefined> {
+    const head = session.state.head!;
     const key = await this.openingKey({ id: scopeId, epoch });
     return key === undefined ? undefined : { scopeKey: key, epoch, sender: session.member.memberId, chainHead: { seq: head.seq, hash: head.hash } };
+  }
+
+  /**
+   * Catch up, then wrap a new scope key at the epoch after the newest this
+   * member knows (the offer's, a fresh one, or one the Host holds for it) to
+   * every current member of the scope policy, and put the packages. A Host
+   * that holds that epoch under another key refuses the put, and the seal
+   * fails closed. A transport failure throws.
+   */
+  async #rotate(scopeId: string, minEpoch: number): Promise<void> {
+    await this.catchUp();
+    const session = this.#session;
+    if (session === undefined || this.#scope(session, scopeId) === undefined) return;
+    const head = session.state.head!;
+    if (this.#freshEpoch(scopeId, minEpoch, head.seq) !== undefined) return;
+    const held = (await this.options.client.readKeyPackages(scopeId)).flatMap((pkg) => {
+      const epoch = typeof pkg === 'object' && pkg !== null ? (pkg as { readonly epoch?: unknown }).epoch : undefined;
+      return typeof epoch === 'number' && Number.isSafeInteger(epoch) ? [epoch] : [];
+    });
+    const epoch = Math.max(minEpoch, ...held, ...(this.#fresh.get(scopeId)?.keys() ?? [])) + 1;
+    const recipients = memberChainScopeRecipients(session.state, scopeId);
+    const sender = { signingPublicJwk: session.keys.signing.publicJwk, signingPrivateKey: session.keys.signing.privateKey };
+    const scopeKey = generateScopeKey();
+    try {
+      const packages = await Promise.all(recipients.map((recipient) => sealScopeKeyPackage({
+        scopeKey, tenantId: this.options.tenantId, scopeId, epoch,
+        recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk }, sender,
+      })));
+      await this.options.client.putKeyPackages(packages);
+      const current = this.#session;
+      if (current === undefined || this.#scopeFailure(current, scopeId) !== undefined) {
+        scopeKey.fill(0);
+        return;
+      }
+      this.#keys.set(keyOf(scopeId, epoch), { scopeKey, keyId: packages[0]!.keyId, sender: session.member.memberId });
+      const points = this.#fresh.get(scopeId) ?? new Map<number, MemberChainPoint>();
+      this.#fresh.set(scopeId, points);
+      points.set(epoch, { seq: head.seq, hash: head.hash });
+      this.options.log(`rotated scope ${JSON.stringify(scopeId)} to epoch ${epoch} for ${recipients.length} members`);
+    } catch (error) {
+      scopeKey.fill(0);
+      if (!(error instanceof E2eeMemberClientError && error.code === 'e2ee_scope_key_conflict')) throw error;
+      this.options.log(`the Host holds epoch ${epoch} of scope ${JSON.stringify(scopeId)} under another key; output is not sealed`);
+    }
   }
 
   async #advance(): Promise<void> {

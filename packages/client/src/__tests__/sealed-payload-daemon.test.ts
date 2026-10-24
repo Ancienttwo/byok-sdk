@@ -1,5 +1,5 @@
 /**
- * #654 E3c, E2d-3: a daemon that is a verified E2EE member opens a sealed
+ * #654 E3c, E2d-3, E2d-4: a daemon that is a verified E2EE member opens a sealed
  * task's input and seals its output with the keys of its member keyring.
  * The test plays the Host and the web client member: it pairs the device
  * with `pv`, creates the device scope with its key packages, seals the input
@@ -104,9 +104,12 @@ async function start(options: {
   return { server, adapter, deviceId, storeDir, member, device, cursor: () => new CursorStore(storeDir).load(server!.url, deviceId) };
 }
 
-/** A policy that drops the web client, and a notice that makes the device catch up: the epoch is stale now. */
-async function makeStale(member: ScopeMember, device: { readonly memberId: string }, cursor: () => Promise<number | undefined>): Promise<void> {
-  await member.web.append('scope-policy', { scopeId: SCOPE, categories: BOTH.categories, members: [device.memberId] });
+/**
+ * A policy that drops the device, and a notice that makes the device catch
+ * up: the scope is no longer usable, so no rotation brings a key back.
+ */
+async function dropDevice(member: ScopeMember, cursor: () => Promise<number | undefined>): Promise<void> {
+  await member.web.append('scope-policy', { scopeId: SCOPE, categories: BOTH.categories, members: [member.web.member.memberId] });
   const notice = createEnvelope('e2ee.key_package.available', { scopeId: SCOPE, epoch: EPOCH }, { seq: server!.nextSeq() });
   server!.send(notice);
   await vi.waitFor(async () => expect(await cursor()).toBe(notice.seq), BUDGET_MS);
@@ -137,8 +140,8 @@ async function sealedOffer(
   return createEnvelope('task.offer_sealed', { ...plain, sealing, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId, seq });
 }
 
-/** Opens a sealed output as a member would, with the binding the receiver builds. */
-async function openOutput(member: ScopeMember, envelope: Envelope, deviceId: string, sealing = BOTH) {
+/** Opens a sealed output as a member would, with the binding the receiver builds, under `scopeKey` (the scope key by default). */
+async function openOutput(member: ScopeMember, envelope: Envelope, deviceId: string, sealing = BOTH, scopeKey = member.scopeKey) {
   const entry = SEALED_SPLIT_TABLE[envelope.type as SealedMessageType];
   const { sealed, ...kept } = envelope.payload as Record<string, unknown> & { sealed: Record<string, unknown> & { ciphertext: string } };
   const { ciphertext, ...header } = sealed;
@@ -146,7 +149,7 @@ async function openOutput(member: ScopeMember, envelope: Envelope, deviceId: str
   const opened = await openSealedContent({
     header,
     ciphertext: Buffer.from(ciphertext, 'base64url'),
-    scopeKey: member.scopeKey,
+    scopeKey,
     binding: binding(entry.plainType, 'daemon-to-server', identity, deviceId, sealing),
     sealing: { scopeId: SCOPE, epoch: EPOCH },
     maxContentLength: SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
@@ -233,12 +236,20 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     } finally { db.close(); }
   });
 
-  it('declines a first output-only task, which has no freshness point (§50d)', async () => {
-    const { server, adapter, deviceId, member } = await start({ policy: ['task-output'] });
+  it('seals a first output-only task at a new epoch it rotates to, for every scope member (E2d-4)', async () => {
+    const { server, adapter, deviceId, member, device } = await start({ policy: ['task-output'] });
     server.send(await sealedOffer(member, 'output-only', server.nextSeq(), deviceId, 'plain instruction', OUTPUT_ONLY));
-    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'output-only', BUDGET_MS);
-    expect(decline.payload).toEqual({ reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false });
-    expect(adapter.startCalls).toHaveLength(0);
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    expect(server.e2ee.devicePuts.map((put) => put.map((pkg) => pkg.recipient).sort())).toEqual([[device.memberId, member.web.member.memberId].sort()]);
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'rotated answer' });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+
+    const complete = await server.waitFor((envelope) => envelope.type === 'task.complete_sealed' && envelope.task_id === 'output-only', BUDGET_MS);
+    expect((complete.payload as { sealed: { scope: { epoch: number } } }).sealed.scope.epoch).toBe(EPOCH + 1);
+    const rotated = await member.web.openPackage(SCOPE, EPOCH + 1, device);
+    expect(await openOutput(member, complete, deviceId, OUTPUT_ONLY, rotated)).toMatchObject({ summary: 'rotated answer' });
+    expect(JSON.stringify(taskEnvelopes('output-only'))).not.toContain('rotated answer');
+    expect(server.e2ee.devicePuts).toHaveLength(1);
   });
 
   it('seals the output of a task whose instruction is plaintext, once sealed input made the epoch fresh', async () => {
@@ -484,10 +495,10 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   }, 30_000);
 
   it('reports sealed_key_unavailable in plaintext when the sealing key is gone at the terminal', async () => {
-    const { server, adapter, deviceId, member, device, cursor } = await start();
+    const { server, adapter, deviceId, member, cursor } = await start();
     server.send(await sealedOffer(member, 'key-lost', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    await makeStale(member, device, cursor);
+    await dropDevice(member, cursor);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       adapter.sessions[0]!.emit({ type: 'progress', text: 'lost output' });
@@ -522,10 +533,10 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('denies locally an approval request it has no sealing key for', async () => {
-    const { server, adapter, deviceId, member, device, cursor } = await start();
+    const { server, adapter, deviceId, member, cursor } = await start();
     server.send(await sealedOffer(member, 'keyless-approval', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    await makeStale(member, device, cursor);
+    await dropDevice(member, cursor);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       adapter.sessions[0]!.emit({ type: 'needs_approval', summary: 'secret approval summary' });

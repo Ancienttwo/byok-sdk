@@ -1,18 +1,18 @@
 /**
  * The device side of the Host's E2EE member routes (#654 E2c-2, E2d-1).
  *
- * The registration is a device-proof write: the device signs the exact body
- * with its enrollment key, for the one operation `e2ee-member-key.register`,
- * and sends no bearer token. The reads use the bearer token. The device
- * appends no chain entry and puts no key package in E2d, so it signs no
- * other E2EE operation.
+ * The registration and the key package put are device-proof writes: the
+ * device signs the exact body with its enrollment key, for the route's one
+ * operation, and sends no bearer token. The reads use the bearer token. The
+ * device puts key packages only when it rotates a scope epoch (E2d-4), and
+ * appends no chain entry.
  *
  * The Host checks shapes only. Every value read here is untrusted: core
  * verifies the pairing MAC, the chain walk and each key package.
  */
 import { randomUUID } from 'node:crypto';
 import { DEVICE_PROOF_HEADER } from '@byok-sdk/core';
-import type { MemberKeyBundleV1 } from '@byok-sdk/core/sealed-payload';
+import type { MemberKeyBundleV1, ScopeKeyPackageV1 } from '@byok-sdk/core/sealed-payload';
 import {
   BYOK_E2EE_CHAIN_PATH,
   BYOK_E2EE_KEY_PACKAGES_PATH,
@@ -20,6 +20,7 @@ import {
   BYOK_E2EE_PAIRING_MAC_PATH,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
   E2EE_MEMBER_KEY_REGISTER_OPERATION,
+  E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
 } from '@byok-sdk/protocol';
 import type { AuthManager } from './auth-manager';
 import type { DeviceProofSigner } from './device-proof-signer';
@@ -79,20 +80,16 @@ export class E2eeMemberClient {
    * same bundle replaces only the MAC and its expiry.
    */
   async register(member: MemberKeyBundleV1, mac: string): Promise<void> {
-    const path = BYOK_E2EE_MEMBER_KEY_PATH;
-    const body = new TextEncoder().encode(JSON.stringify({ member, mac }));
-    const proof = await this.options.signer.sign({
-      method: 'POST', path, operation: E2EE_MEMBER_KEY_REGISTER_OPERATION, resource: path, requestId: randomUUID(), body,
-    });
-    const response = await fetch(new URL(path, this.#base), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', [DEVICE_PROOF_HEADER]: Buffer.from(JSON.stringify(proof), 'utf8').toString('base64url') },
-      body,
-      ...(this.options.signal === undefined ? {} : { signal: this.options.signal }),
-    });
-    if (!response.ok) throw await errorOf(response, 'member key registration');
-    const result = await jsonOf(response, 'member key registration');
+    const result = await this.#proofPost(BYOK_E2EE_MEMBER_KEY_PATH, E2EE_MEMBER_KEY_REGISTER_OPERATION, { member, mac }, 'member key registration');
     if (result.memberId !== member.memberId) throw new E2eeMemberClientError('member key registration named another member');
+  }
+
+  /**
+   * Put the key packages of one new scope epoch (E2d-4). A Host that holds
+   * the epoch under another `keyId` answers 409 `e2ee_scope_key_conflict`.
+   */
+  async putKeyPackages(packages: readonly ScopeKeyPackageV1[]): Promise<void> {
+    await this.#proofPost(BYOK_E2EE_KEY_PACKAGES_PATH, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, { packages }, 'key package put');
   }
 
   /** One page of the member chain after `afterSeq`. */
@@ -132,16 +129,29 @@ export class E2eeMemberClient {
     return jsonOf(response, 'pairing MAC read');
   }
 
-  /** The key packages of one scope epoch addressed to this device's member. */
-  async readKeyPackages(scopeId: string, epoch: number): Promise<readonly unknown[]> {
+  /** The key packages of one scope addressed to this device's member: of one epoch, or of every epoch. */
+  async readKeyPackages(scopeId: string, epoch?: number): Promise<readonly unknown[]> {
     const url = new URL(BYOK_E2EE_KEY_PACKAGES_PATH, this.#base);
     url.searchParams.set('scopeId', scopeId);
-    url.searchParams.set('epoch', String(epoch));
+    if (epoch !== undefined) url.searchParams.set('epoch', String(epoch));
     const response = await this.#get(url);
     if (!response.ok) throw await errorOf(response, 'key package read');
     const { packages } = await jsonOf(response, 'key package read');
     if (!Array.isArray(packages)) throw new E2eeMemberClientError('key package read returned no package list');
     return packages;
+  }
+
+  async #proofPost(path: string, operation: string, payload: object, what: string): Promise<Record<string, unknown>> {
+    const body = new TextEncoder().encode(JSON.stringify(payload));
+    const proof = await this.options.signer.sign({ method: 'POST', path, operation, resource: path, requestId: randomUUID(), body });
+    const response = await fetch(new URL(path, this.#base), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', [DEVICE_PROOF_HEADER]: Buffer.from(JSON.stringify(proof), 'utf8').toString('base64url') },
+      body,
+      ...(this.options.signal === undefined ? {} : { signal: this.options.signal }),
+    });
+    if (!response.ok) throw await errorOf(response, what);
+    return jsonOf(response, what);
   }
 
   #get(url: URL): Promise<Response> {

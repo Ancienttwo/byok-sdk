@@ -412,4 +412,3 @@ This document states current behavior. It does not promise a design or a release
 | Held message | No SDK route releases it. The task has no terminal until a cancel (section 4). | Return `held` only with a product release action. |
 | Idle cost | 62 to 194 HTTP calls and about 3,650 reads for each idle device per hour (section 5). | Choose presence, hold and fallback against the budget. |
 | Retention | No receipt TTL and no scoped deletion. Unacked offers stay as dead letters (section 6). | Tenant erasure from Node is the only delete path for task receipts and admission rows. |
-| Output-only sealed task (#654) | The device declines a `sealing.categories: ['task-output']` task until sealed content at that scope epoch made the epoch fresh in its current run ([protocol §2.5](./protocol.md), device rules). Device rotation (E2d-4) is not shipped. | Seal tasks with `['task-input', 'task-output']`. |

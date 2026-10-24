@@ -1125,7 +1125,7 @@ sealed offer type, so a device without the flag never receives it. A
 plaintext type that has a sealed sibling refuses `sealing` and `sealed`, so
 the schema never strips a sealing policy or sealed content.
 
-**Device rules (#654 E2d-3).** The daemon opens and seals with the scope keys
+**Device rules (#654 E2d-3, E2d-4).** The daemon opens and seals with the scope keys
 of its own verified member (§2.6, §2.7). It advertises `sealed-payload-v1`
 only while it holds a verified member and the deployment declares
 `e2ee.member`. The first `conn.hello` of a run never carries the flag; a
@@ -1148,14 +1148,24 @@ refreshed hello adds it, and removes it again when the member is lost.
   the freshness point of its scope epoch. The daemon seals output at the
   newest epoch, at or after the offer's `epoch`, that has a point with no
   `remove` of a scope member and no member-dropping `scope-policy` after it.
-  It checks this before the task runs; without such an epoch the offer is
-  declined with `sealed_key_unavailable`. Its header names the device member
-  and its verified head. The points live in memory, so after a restart they
-  come back from the next opened content.
-- **Output-only tasks.** A task with `categories: ['task-output']` carries no
-  sealed input, so it gets no freshness point of its own. It runs only after
-  sealed content at the same scope epoch made the epoch fresh in this run.
-  Device rotation (E2d-4) is not in this release.
+  It checks this before the task runs; without such an epoch it rotates
+  first (below). Its header names the device member and its verified head.
+  The points live in memory, so after a restart they come back from the next
+  opened content.
+- **Device rotation (#654 E2d-4, design §7.5).** With no fresh epoch, the
+  device is the next sender. It catches the chain up, takes the epoch after
+  the newest one it knows (the offer's, a fresh one, or one the Host holds
+  for it at `GET /byok/e2ee/key-packages?scopeId=`), wraps a new scope key to
+  every current member of the scope policy, and puts the packages
+  (`POST /byok/e2ee/key-packages`). After the put, the verified head it chose
+  the recipients at is the new epoch's freshness point, so a `remove` that
+  landed during the put makes it stale. A Host that holds that epoch under
+  another `keyId` refuses the put with `e2ee_scope_key_conflict`; then, and
+  on any other failed rotation, the offer is declined with
+  `sealed_key_unavailable`. Concurrent seals of one scope share one rotation.
+  So an output-only task (`categories: ['task-output']`), which carries no
+  sealed input, seals at the new epoch. The Host notifies the device of its
+  own new package as of any other.
 - A key is fetched on its first miss, so a notice that came before the
   advertisement needs no redelivery.
 
