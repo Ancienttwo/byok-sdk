@@ -6,6 +6,7 @@ import {
   SEALED_DECLINE_CODES,
   SealedTaskInputSchema,
   SealedTaskOutputSchema,
+  RoutineRefSchema,
   TaskSealingSchema,
   sealedOfferRule,
 } from './sealed-payload';
@@ -1409,8 +1410,12 @@ export const TaskOfferForAgentWithEgressSealedPayloadSchema = TaskOfferForAgentW
   .superRefine(sealedOfferRule);
 export type TaskOfferForAgentWithEgressSealedPayload = z.infer<typeof TaskOfferForAgentWithEgressSealedPayloadSchema>;
 
-/** server -> daemon: `task.offer_for_agent_with_egress_fresh` of a sealed task. */
-export const TaskOfferForAgentWithEgressFreshSealedPayloadSchema = TaskOfferForAgentWithEgressFreshPayloadSchema.extend(SEALED_OFFER_FIELDS)
+/**
+ * server -> daemon: `task.offer_for_agent_with_egress_fresh` of a sealed task.
+ * Only this type takes `routineRef`: a routine occurrence is an execution.
+ */
+export const TaskOfferForAgentWithEgressFreshSealedPayloadSchema = TaskOfferForAgentWithEgressFreshPayloadSchema
+  .extend({ ...SEALED_OFFER_FIELDS, routineRef: RoutineRefSchema.optional() })
   .strict()
   .superRefine(sealedOfferRule);
 export type TaskOfferForAgentWithEgressFreshSealedPayload = z.infer<typeof TaskOfferForAgentWithEgressFreshSealedPayloadSchema>;

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Feature (protocol, cloud)** — a sealed
+  `task.offer_for_agent_with_egress_fresh_sealed` can carry a plaintext
+  `routineRef: { routineId, definitionVersion, notAfter }` (#654 E3d). Its
+  `sealed` member is then a routine template that the member sealed once, as
+  family `routine.template`, for every occurrence of one routine version. The
+  offer must seal `task-input`. `definitionVersion` is an integer and
+  `notAfter` is a canonical UTC instant, the forms core binds in the AAD. The
+  hosted sealed execution lane accepts the field and compares it on a
+  duplicate offer. The Host does not check `notAfter`; the device does. No
+  daemon advertises `sealed-payload-v1` yet, so no device receives the field.
+
 - **Changed (core)** — the member chain walk limits who may sign a scope
   change (#654, owner batch §50f A). A `scope-policy` or `shred` of an
   existing scope must be signed by a member in that scope's current policy,
