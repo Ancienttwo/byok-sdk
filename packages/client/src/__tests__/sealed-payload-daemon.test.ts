@@ -31,6 +31,7 @@ import { journalHash } from '../daemon/journal/journal';
 import { DEFAULT_JOURNAL_BUSY_TIMEOUT_MS, JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { openJournalDatabase } from '../daemon/journal/sqlite-support';
 import type { SealedScopeKeyring } from '../daemon/sealed-task';
+import { RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
@@ -82,6 +83,8 @@ async function start(options: {
   serverFlag?: boolean;
   /** The server also holds sealed output blobs (`sealed-output-ciphertext-ref`). */
   ciphertextRef?: boolean;
+  /** The server also takes a failed task's runtime failure class (`runtime-failure-class`). */
+  failureClass?: boolean;
   /** `false` runs the daemon without a hosted journal. */
   journal?: false;
   beforeStart?: (storeDir: string, deviceId: string) => Promise<void>;
@@ -90,7 +93,7 @@ async function start(options: {
   dirs.push(root);
   server ??= await TestServer.start();
   if (options.serverFlag !== false) {
-    server.setAckCapabilities(['sealed-payload-v1', ...(options.ciphertextRef === true ? ['sealed-output-ciphertext-ref'] : [])]);
+    server.setAckCapabilities(['sealed-payload-v1', ...(options.ciphertextRef === true ? ['sealed-output-ciphertext-ref'] : []), ...(options.failureClass === true ? ['runtime-failure-class'] : [])]);
   }
   const adapter = new StubRuntimeAdapter('pi');
   const storeDir = path.join(root, 'store');
@@ -403,6 +406,26 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       expect(await openOutput(keyring, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
       // The local observer sees the failure that was sent, not the completion it replaced.
       await vi.waitFor(() => expect(daemon!.tasks().find((task) => task.taskId === 'huge')).toMatchObject({ state: 'Failed', summary: 'terminal_result_unsealable' }), BUDGET_MS);
+    } finally {
+      diagnostic.mockRestore();
+    }
+  }, 30_000);
+
+  it('replaces the runtime failure class of an unsealable failure with unknown (#869)', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring, failureClass: true });
+    server.send(await sealedOffer(keyring, 'huge-classed', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
+        phase: 'run', category: 'semantic', retry: 'non-retryable', failure: { class: 'auth' },
+        reason: 'r'.repeat(SEALED_PAYLOAD_MAX_CONTENT_LENGTH + 1024),
+      }));
+      const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'huge-classed', 15_000);
+      expect(await openOutput(keyring, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
+      // The replacement is the daemon's own failure: it names no runtime class.
+      expect(failed.payload).toMatchObject({ failure: { class: 'unknown' } });
     } finally {
       diagnostic.mockRestore();
     }
