@@ -1,10 +1,16 @@
 /**
  * Host storage for member keys, the member chain and scope key packages
- * (#654 design §7.2–§7.4, E2c).
+ * (#654 design §7.2–§7.4, E2c), and the Host part of crypto-shredding
+ * (§11.2, E5b-1).
  *
  * The Host holds no key. It checks shapes, keeps the chain contiguous and
  * first-writer-wins per seq, fixes one `keyId` per scope epoch, and relays
  * the pairing MACs. Members verify everything else (§7.3).
+ *
+ * A `shred` entry deletes its scope's key packages and epochs in the append
+ * that stores it, and later package puts for that scope are refused. The
+ * Host verifies no signature, so any paired device of the tenant can append
+ * a well-shaped `shred` (owner batch §50g A, `docs/security.md`).
  *
  * Every input is read once into canonical JSON text. The store keeps that
  * text, so a replay compares by bytes and a later read returns the same
@@ -40,6 +46,29 @@ export interface E2eeMemberChainRow {
   readonly entry: string;
 }
 
+/** The audit receipt key prefix of a scope shred. It is an identity receipt and never expires. */
+export const E2EE_SCOPE_SHRED_RECEIPT_PREFIX = 'e2ee-scope-shred:';
+
+/** A `shred` entry of an append, read by cloud from the entry's strict subject. */
+export interface E2eeScopeShred {
+  /** The seq of the `shred` entry. It is one of the appended rows. */
+  readonly seq: number;
+  readonly scopeId: string;
+  /** The audit receipt cloud built. The store writes it in the receipt store, first writer wins. */
+  readonly receipt: { readonly key: string; readonly body: string };
+}
+
+export interface E2eeMemberChainAppendInput {
+  readonly rows: readonly E2eeMemberChainRow[];
+  /** The `shred` entries among `rows`, in seq order. */
+  readonly shreds: readonly E2eeScopeShred[];
+}
+
+/** Who appended: the Host control plane, or a device through its proof route. Recorded in the shred receipt. */
+export type E2eeMemberChainWriter =
+  | { readonly kind: 'host' }
+  | { readonly kind: 'device'; readonly deviceId: string };
+
 export type E2eeMemberChainAppendResult =
   | {
       readonly outcome: 'appended';
@@ -64,10 +93,17 @@ export interface E2eeScopeKeyPackageRow {
   readonly package: string;
 }
 
+export interface E2eeScopeKeyPackagePutInput {
+  /** Sorted by `(scopeId, epoch, recipient)` in code point order, one row per scope epoch and recipient. */
+  readonly rows: readonly E2eeScopeKeyPackageRow[];
+}
+
 export type E2eeScopeKeyPackagePutResult =
   | { readonly outcome: 'stored'; readonly stored: number }
   /** The first package of this scope epoch fixed another `keyId`. Nothing was written. */
-  | { readonly outcome: 'key_id_conflict'; readonly scopeId: string; readonly epoch: number; readonly keyId: string };
+  | { readonly outcome: 'key_id_conflict'; readonly scopeId: string; readonly epoch: number; readonly keyId: string }
+  /** The member chain shredded this scope. Nothing was written. */
+  | { readonly outcome: 'scope_shredded'; readonly scopeId: string };
 
 export interface E2eeMemberRegistrationInput {
   readonly deviceId: string;
@@ -103,19 +139,28 @@ export interface E2eeMemberStore {
   /**
    * Rows have contiguous ascending seqs. A row at a stored seq must hold the
    * same bytes (a replay). The first new row must be the stored head plus one.
+   *
+   * For each shred whose row this call newly stores, in the same atomic
+   * write: delete the scope's key packages, then its epochs, record the scope
+   * as shredded with the seq of its first shred, and record the shred's
+   * receipt in the deployment's request receipt store unless that key is
+   * already there. A replayed row shreds nothing again. A refused append
+   * deletes nothing. A store that has concurrent writers serializes each
+   * shred with every package put of the same scope.
    */
-  appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult>;
+  appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult>;
   /** Entries with `seq > afterSeq`, ascending, at most `limit`. */
   readChainEntries(
     tenant: TenantId,
     input: { readonly afterSeq: number; readonly limit: number },
   ): Promise<readonly E2eeMemberChainRow[]>;
   /**
-   * The first package of a `(scopeId, epoch)` fixes its `keyId`, also within
-   * this call: a second `keyId` for that scope epoch refuses the whole put. A
-   * package with that `keyId` inserts or replaces the row of its recipient.
+   * A row of a shredded scope refuses the whole put. The first package of a
+   * `(scopeId, epoch)` fixes its `keyId`, also within this call: a second
+   * `keyId` for that scope epoch refuses the whole put. A package with that
+   * `keyId` inserts or replaces the row of its recipient.
    */
-  putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult>;
+  putScopeKeyPackages(tenant: TenantId, input: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult>;
   /** Ordered by epoch, then recipient. */
   readScopeKeyPackages(
     tenant: TenantId,
@@ -207,20 +252,35 @@ export interface E2eeMemberContext {
 export async function appendMemberChainEntries(
   ctx: E2eeMemberContext,
   input: { readonly entries: readonly E2eeMemberChainEntry[] },
+  writer: E2eeMemberChainWriter,
 ): Promise<{ readonly appended: number; readonly replayed: number }> {
   const list = boundedList(() => input.entries, E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, 'Member chain entries');
+  const shreds: E2eeScopeShred[] = [];
+  const shreddedAt = ctx.now().toISOString();
   const rows = list.map((input, index) => {
     const { text, value } = canonicalParse(E2eeMemberChainEntrySchema, input, `Member chain entry ${index}`);
     if (new TextEncoder().encode(text).byteLength > E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES) {
       throw invalid(`Member chain entry ${index} exceeds ${E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES} bytes`);
     }
     if (value.tenantId !== ctx.tenant) throw invalid(`Member chain entry ${index} names another tenant`);
+    if (value.op === 'shred') {
+      // The entry schema has checked that a shred subject is exactly { scopeId }.
+      const { scopeId } = value.subject as { readonly scopeId: string };
+      shreds.push({
+        seq: value.seq,
+        scopeId,
+        receipt: {
+          key: `${E2EE_SCOPE_SHRED_RECEIPT_PREFIX}${scopeId}`,
+          body: canonicalizeJson({ chainSeq: value.seq, shreddedAt, writer } as unknown as JsonValue),
+        },
+      });
+    }
     return { seq: value.seq, entry: text };
   });
   if (rows.some((row, index) => row.seq !== rows[0]!.seq + index)) {
     throw invalid('Member chain entries must have contiguous ascending seqs');
   }
-  const result = await ctx.store.appendChainEntries(ctx.tenant, rows);
+  const result = await ctx.store.appendChainEntries(ctx.tenant, { rows, shreds });
   if (result.outcome === 'conflict') {
     throw new ByokCloudError('e2ee_member_chain_conflict', `A different member chain entry is stored at seq ${result.seq}.`);
   }
@@ -276,7 +336,10 @@ export async function putScopeKeyPackages(
     if (previous.keyId !== row.keyId) throw invalid(`Scope key packages name two keyIds for scope ${row.scopeId} epoch ${row.epoch}`);
     if (previous.recipient === row.recipient) throw invalid(`Scope key packages repeat a recipient of scope ${row.scopeId} epoch ${row.epoch}`);
   }
-  const result = await ctx.store.putScopeKeyPackages(ctx.tenant, rows);
+  const result = await ctx.store.putScopeKeyPackages(ctx.tenant, { rows });
+  if (result.outcome === 'scope_shredded') {
+    throw new ByokCloudError('e2ee_scope_shredded', `Scope ${result.scopeId} was shredded on the member chain.`);
+  }
   if (result.outcome === 'key_id_conflict') {
     throw new ByokCloudError(
       'e2ee_scope_key_conflict',

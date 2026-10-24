@@ -1966,6 +1966,7 @@ export declare const E2EE_MEMBER_CHAIN_OPS: readonly ['add', 'remove', 'rotate',
 /**
  * One signed member chain entry. `subject` must be a JSON object; the Host
  * stores the entry as canonical JSON, which refuses any value outside JSON.
+ * A `shred` subject must also be exactly `{ scopeId }`.
  */
 export declare const E2eeMemberChainEntrySchema: z.ZodObject<{
     v: z.ZodLiteral<1>;

@@ -1,14 +1,17 @@
 import type { TenantId } from '@byok-sdk/core';
 import type {
+  E2eeMemberChainAppendInput,
   E2eeMemberChainAppendResult,
   E2eeMemberChainRow,
   E2eeMemberRegisterResult,
   E2eeMemberRegistrationInput,
   E2eeMemberRegistrationRow,
   E2eeMemberStore,
+  E2eeScopeKeyPackagePutInput,
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
 } from '../../e2ee-member';
+import type { RequestReceiptStore } from '../ports';
 
 interface Expiring {
   readonly body: string;
@@ -25,14 +28,22 @@ interface TenantState {
   readonly registrations: Map<string, { readonly memberId: string; readonly bundle: string }>;
   readonly deviceMacs: Map<string, Expiring>;
   readonly clientMacs: Map<string, Expiring>;
+  /** scopeId -> seq of its first shred. */
+  readonly shredded: Map<string, number>;
 }
 
 /**
  * Reference E2EE member store. Each method checks and writes in one
- * synchronous step, so no other call interleaves with it.
+ * synchronous step, so no other call interleaves with it. A shred receipt
+ * goes to `receipts`, the composition's request receipt store, after that step.
  */
 export class InMemoryE2eeMemberStore implements E2eeMemberStore {
   readonly #tenants = new Map<TenantId, TenantState>();
+  readonly #receipts: Pick<RequestReceiptStore, 'record'>;
+
+  constructor(receipts: Pick<RequestReceiptStore, 'record'>) {
+    this.#receipts = receipts;
+  }
 
   #state(tenant: TenantId): TenantState {
     let state = this.#tenants.get(tenant);
@@ -44,14 +55,17 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
         registrations: new Map(),
         deviceMacs: new Map(),
         clientMacs: new Map(),
+        shredded: new Map(),
       };
       this.#tenants.set(tenant, state);
     }
     return state;
   }
 
-  async appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult> {
-    const { chain } = this.#state(tenant);
+  async appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult> {
+    const state = this.#state(tenant);
+    const { chain } = state;
+    const { rows } = input;
     const headSeq = chain.size;
     let replayed = 0;
     for (const row of rows) {
@@ -62,6 +76,13 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
     const fresh = rows.slice(replayed);
     if (fresh.length > 0 && fresh[0]!.seq !== headSeq + 1) return { outcome: 'gap', seq: fresh[0]!.seq, headSeq };
     for (const row of fresh) chain.set(row.seq, row.entry);
+    const shreds = input.shreds.filter(shred => shred.seq > headSeq);
+    for (const { seq, scopeId } of shreds) {
+      for (const [key, row] of state.packages) if (row.scopeId === scopeId) state.packages.delete(key);
+      for (const key of state.epochKeyIds.keys()) if ((JSON.parse(key) as [string, number])[0] === scopeId) state.epochKeyIds.delete(key);
+      if (!state.shredded.has(scopeId)) state.shredded.set(scopeId, seq);
+    }
+    for (const { receipt } of shreds) await this.#receipts.record(tenant, receipt);
     return { outcome: 'appended', appended: fresh.length, replayed };
   }
 
@@ -74,8 +95,10 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
     return rows;
   }
 
-  async putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult> {
+  async putScopeKeyPackages(tenant: TenantId, { rows }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult> {
     const state = this.#state(tenant);
+    const shredded = rows.find(row => state.shredded.has(row.scopeId));
+    if (shredded !== undefined) return { outcome: 'scope_shredded', scopeId: shredded.scopeId };
     // The first row of a new scope epoch fixes its keyId for the rest of the call.
     const fixed = new Map<string, string>();
     for (const row of rows) {

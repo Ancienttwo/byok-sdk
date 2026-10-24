@@ -5,13 +5,17 @@
  * verdict: every mutation either breaks the shape or keeps the signed bytes.
  */
 import {
+  applyMemberChainEntries,
   createMemberKeyBundle,
+  emptyMemberChainState,
+  memberChainEntryHash,
   generateScopeKey,
   openScopeKeyPackage,
   parseMemberKeyBundle,
   sealScopeKeyPackage,
   signMemberChainEntry,
   verifyMemberChainEntry,
+  type MemberChainEntryV1,
   type MemberKeyBundleV1,
 } from '@byok-sdk/core/sealed-payload';
 import {
@@ -114,7 +118,8 @@ describe('protocol E2EE member shapes match core', () => {
       { label: 'other sig', value: { ...entry, sig: otherSig } },
       { label: 'empty subject', value: { ...entry, subject: {} } },
       { label: 'seq 2 with prev', value: { ...entry, seq: 2, prev: `sha256:${'0'.repeat(64)}` } },
-      { label: 'op shred', value: { ...entry, op: 'shred' } },
+      // A shred carries a { scopeId } subject: the Host reads it (owner batch §50g A). The next test pins that subject against core's walk.
+      { label: 'op shred', value: { ...entry, op: 'shred', subject: { scopeId: 'scope-1' } } },
       ...variants(entry, {
         v: [2],
         tenantId: [],
@@ -130,6 +135,26 @@ describe('protocol E2EE member shapes match core', () => {
       const verdict = await verifyMemberChainEntry(json(value), signing.publicJwk);
       const core = verdict.ok || verdict.reason !== 'member_chain_entry_invalid';
       expect(E2eeMemberChainEntrySchema.safeParse(json(value)).success, label).toBe(core);
+    }
+  });
+
+  it('shred subject: protocol accepts exactly the subjects core walks for a scope with a policy', async () => {
+    const signing = await keyPair('sign');
+    const bundle = await createMemberKeyBundle({ signingPublicJwk: signing.publicJwk, signingPrivateKey: signing.privateKey as never, kemPublicJwk: (await keyPair('kem')).publicJwk, kemEpoch: 1 });
+    const signer = { publicJwk: signing.publicJwk, privateKey: signing.privateKey as never };
+    const unsigned = (seq: number, prev: string | null, op: MemberChainEntryV1['op'], subject: Json) =>
+      ({ v: 1 as const, tenantId: 'tenant-1', seq, prev, op, subject: subject as never, signer: bundle.memberId });
+    const add = unsigned(1, null, 'add', { member: bundle });
+    const policy = unsigned(2, await memberChainEntryHash(add), 'scope-policy', { scopeId: 'scope-1', categories: ['task-input'], members: [bundle.memberId] });
+    const prefix = [await signMemberChainEntry(add, signer), await signMemberChainEntry(policy, signer)];
+    const subjects: Json[] = [
+      { scopeId: 'scope-1' }, {}, { scopeId: '' }, { scopeId: 1 }, { scopeId: null }, { scopeId: ['scope-1'] },
+      { scopeId: 'scope-1', extra: true }, { member: bundle }, { scopeId: 'scope-1', categories: ['task-input'], members: [bundle.memberId] },
+    ];
+    for (const subject of subjects) {
+      const shred = await signMemberChainEntry(unsigned(3, await memberChainEntryHash(policy), 'shred', subject), signer);
+      const core = (await applyMemberChainEntries(emptyMemberChainState('tenant-1'), [...prefix, shred])).ok;
+      expect(E2eeMemberChainEntrySchema.safeParse(json(shred as unknown as Json)).success, JSON.stringify(subject)).toBe(core);
     }
   });
 

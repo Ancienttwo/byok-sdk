@@ -1302,6 +1302,18 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   top-level field gets 400. The chain append and the package put run the
   same checks as the Host control plane calls `appendMemberChainEntries` and
   `putScopeKeyPackages`.
+- **Shred.** A chain entry with `op: 'shred'` must have exactly the subject
+  `{ scopeId }` (a nonempty string); any other subject gets 400. When the
+  append newly stores a `shred` entry, the Host, in the same transaction,
+  deletes the scope's key packages and epochs, records the scope as
+  shredded, and writes the receipt `e2ee-scope-shred:<scopeId>` (an identity
+  receipt) with the entry's seq, the time and who appended it. A replayed
+  `shred` entry deletes nothing again, and a later `shred` of the same scope
+  keeps the first receipt. After a shred, a package put that names the scope
+  gets 409 `e2ee_scope_shredded` and stores nothing, for any epoch. The Host
+  verifies no signature, so any paired device of the tenant can shred a
+  scope on the Host ([security](security.md#deletion-paths)). The Host
+  control plane `appendMemberChainEntries` does the same.
 - **Proof replay.** A device proof is not single-use on the three writes.
   Anyone who captures a proof and its body can send them again while the
   proof's `issuedAt` is within the Host clock skew (60 s by default). A
@@ -1324,7 +1336,7 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   | 400 | `coordination_input_invalid`, or an unreadable body |
   | 401 | `unauthorized` |
   | 404 | `e2ee_pairing_mac_not_found` |
-  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_member_key_conflict`, `e2ee_member_not_registered` |
+  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_scope_shredded`, `e2ee_member_key_conflict`, `e2ee_member_not_registered` |
   | 413 | the body is over `maxE2eeRequestBytes` |
   | 500 | `e2ee_member_state_unreadable` |
 

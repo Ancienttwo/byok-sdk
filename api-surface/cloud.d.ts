@@ -1855,6 +1855,10 @@ export interface ByokCloud {
      * replay, and a different one throws `e2ee_member_chain_conflict`. The
      * first new entry must follow the stored head. The Host checks shapes and
      * the tenant only; members verify signatures and links.
+     *
+     * A newly stored `shred` entry, whose subject must be exactly `{ scopeId }`,
+     * deletes that scope's key packages and epochs in the same write, marks the
+     * scope shredded, and records an `e2ee-scope-shred:<scopeId>` receipt.
      */
     appendMemberChainEntries(tenant: TenantId, input: {
         readonly entries: readonly E2eeMemberChainEntry[];
@@ -1872,7 +1876,8 @@ export interface ByokCloud {
     /**
      * Host control plane: store scope key packages. The first package of a
      * scope epoch fixes its `keyId`; a package with another `keyId` throws
-     * `e2ee_scope_key_conflict`, and the call stores nothing.
+     * `e2ee_scope_key_conflict`, and the call stores nothing. A package of a
+     * shredded scope throws `e2ee_scope_shredded`, and the call stores nothing.
      *
      * After the commit, each recipient that is a registered device gets one
      * `e2ee.key_package.available` notice per scope epoch, also on a replay.
@@ -2317,11 +2322,17 @@ export declare function createWebCrypto(): CloudCrypto;
 // ==== @byok-sdk/cloud dist/e2ee-member.d.ts ====
 /**
  * Host storage for member keys, the member chain and scope key packages
- * (#654 design §7.2–§7.4, E2c).
+ * (#654 design §7.2–§7.4, E2c), and the Host part of crypto-shredding
+ * (§11.2, E5b-1).
  *
  * The Host holds no key. It checks shapes, keeps the chain contiguous and
  * first-writer-wins per seq, fixes one `keyId` per scope epoch, and relays
  * the pairing MACs. Members verify everything else (§7.3).
+ *
+ * A `shred` entry deletes its scope's key packages and epochs in the append
+ * that stores it, and later package puts for that scope are refused. The
+ * Host verifies no signature, so any paired device of the tenant can append
+ * a well-shaped `shred` (owner batch §50g A, `docs/security.md`).
  *
  * Every input is read once into canonical JSON text. The store keeps that
  * text, so a replay compares by bytes and a later read returns the same
@@ -2335,6 +2346,31 @@ export interface E2eeMemberChainRow {
     readonly seq: number;
     readonly entry: string;
 }
+/** The audit receipt key prefix of a scope shred. It is an identity receipt and never expires. */
+export declare const E2EE_SCOPE_SHRED_RECEIPT_PREFIX = "e2ee-scope-shred:";
+/** A `shred` entry of an append, read by cloud from the entry's strict subject. */
+export interface E2eeScopeShred {
+    /** The seq of the `shred` entry. It is one of the appended rows. */
+    readonly seq: number;
+    readonly scopeId: string;
+    /** The audit receipt cloud built. The store writes it in the receipt store, first writer wins. */
+    readonly receipt: {
+        readonly key: string;
+        readonly body: string;
+    };
+}
+export interface E2eeMemberChainAppendInput {
+    readonly rows: readonly E2eeMemberChainRow[];
+    /** The `shred` entries among `rows`, in seq order. */
+    readonly shreds: readonly E2eeScopeShred[];
+}
+/** Who appended: the Host control plane, or a device through its proof route. Recorded in the shred receipt. */
+export type E2eeMemberChainWriter = {
+    readonly kind: 'host';
+} | {
+    readonly kind: 'device';
+    readonly deviceId: string;
+};
 export type E2eeMemberChainAppendResult = {
     readonly outcome: 'appended';
     /** New rows written. */
@@ -2363,6 +2399,10 @@ export interface E2eeScopeKeyPackageRow {
     /** Canonical JSON of the package. */
     readonly package: string;
 }
+export interface E2eeScopeKeyPackagePutInput {
+    /** Sorted by `(scopeId, epoch, recipient)` in code point order, one row per scope epoch and recipient. */
+    readonly rows: readonly E2eeScopeKeyPackageRow[];
+}
 export type E2eeScopeKeyPackagePutResult = {
     readonly outcome: 'stored';
     readonly stored: number;
@@ -2373,6 +2413,11 @@ export type E2eeScopeKeyPackagePutResult = {
     readonly scopeId: string;
     readonly epoch: number;
     readonly keyId: string;
+}
+/** The member chain shredded this scope. Nothing was written. */
+ | {
+    readonly outcome: 'scope_shredded';
+    readonly scopeId: string;
 };
 export interface E2eeMemberRegistrationInput {
     readonly deviceId: string;
@@ -2405,19 +2450,28 @@ export interface E2eeMemberStore {
     /**
      * Rows have contiguous ascending seqs. A row at a stored seq must hold the
      * same bytes (a replay). The first new row must be the stored head plus one.
+     *
+     * For each shred whose row this call newly stores, in the same atomic
+     * write: delete the scope's key packages, then its epochs, record the scope
+     * as shredded with the seq of its first shred, and record the shred's
+     * receipt in the deployment's request receipt store unless that key is
+     * already there. A replayed row shreds nothing again. A refused append
+     * deletes nothing. A store that has concurrent writers serializes each
+     * shred with every package put of the same scope.
      */
-    appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult>;
+    appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult>;
     /** Entries with `seq > afterSeq`, ascending, at most `limit`. */
     readChainEntries(tenant: TenantId, input: {
         readonly afterSeq: number;
         readonly limit: number;
     }): Promise<readonly E2eeMemberChainRow[]>;
     /**
-     * The first package of a `(scopeId, epoch)` fixes its `keyId`, also within
-     * this call: a second `keyId` for that scope epoch refuses the whole put. A
-     * package with that `keyId` inserts or replaces the row of its recipient.
+     * A row of a shredded scope refuses the whole put. The first package of a
+     * `(scopeId, epoch)` fixes its `keyId`, also within this call: a second
+     * `keyId` for that scope epoch refuses the whole put. A package with that
+     * `keyId` inserts or replaces the row of its recipient.
      */
-    putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult>;
+    putScopeKeyPackages(tenant: TenantId, input: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult>;
     /** Ordered by epoch, then recipient. */
     readScopeKeyPackages(tenant: TenantId, input: {
         readonly scopeId: string;
@@ -2452,7 +2506,7 @@ export interface E2eeMemberContext {
 }
 export declare function appendMemberChainEntries(ctx: E2eeMemberContext, input: {
     readonly entries: readonly E2eeMemberChainEntry[];
-}): Promise<{
+}, writer: E2eeMemberChainWriter): Promise<{
     readonly appended: number;
     readonly replayed: number;
 }>;
@@ -2561,6 +2615,8 @@ export declare const CLOUD_ERROR_CODES: {
     readonly e2ee_member_chain_conflict: 'e2ee_member_chain_conflict';
     /** The first package of that scope epoch fixed another `keyId`. */
     readonly e2ee_scope_key_conflict: 'e2ee_scope_key_conflict';
+    /** The member chain shredded that scope (design §11.2), so the Host stores no more key packages for it. */
+    readonly e2ee_scope_shredded: 'e2ee_scope_shredded';
     /** The device has not registered a member key bundle. */
     readonly e2ee_member_not_registered: 'e2ee_member_not_registered';
     /** The device registered another member key bundle, or another device registered this member id. */
@@ -2960,7 +3016,7 @@ export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionS
 export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionStore, } from './agent-memory-projection';
 export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
 export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction';
-export type { E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow, } from './e2ee-member';
+export type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow, E2eeScopeShred, } from './e2ee-member';
 export { CLOUD_CAPABILITIES, CapabilitiesResponseSchema, declares, fullCapabilityDeclaration, } from './capabilities';
 export type { CapabilitiesResponse, CloudCapability, FullCapabilityDeclarationOptions, } from './capabilities';
 export { CloudRouteRegistry, ROUTE_CLASSES, ROUTE_METHODS, routeKey } from './router/registry';
@@ -3520,19 +3576,22 @@ export declare class InMemoryDeviceDirectory implements DeviceDirectory {
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/e2ee-member.d.ts ====
 import type { TenantId } from '@byok-sdk/core';
-import type { E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow } from '../../e2ee-member';
+import type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow } from '../../e2ee-member';
+import type { RequestReceiptStore } from '../ports';
 /**
  * Reference E2EE member store. Each method checks and writes in one
- * synchronous step, so no other call interleaves with it.
+ * synchronous step, so no other call interleaves with it. A shred receipt
+ * goes to `receipts`, the composition's request receipt store, after that step.
  */
 export declare class InMemoryE2eeMemberStore implements E2eeMemberStore {
     #private;
-    appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult>;
+    constructor(receipts: Pick<RequestReceiptStore, 'record'>);
+    appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult>;
     readChainEntries(tenant: TenantId, input: {
         readonly afterSeq: number;
         readonly limit: number;
     }): Promise<readonly E2eeMemberChainRow[]>;
-    putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult>;
+    putScopeKeyPackages(tenant: TenantId, { rows }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult>;
     readScopeKeyPackages(tenant: TenantId, input: {
         readonly scopeId: string;
         readonly epoch?: number;

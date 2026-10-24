@@ -1,11 +1,13 @@
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type {
+  E2eeMemberChainAppendInput,
   E2eeMemberChainAppendResult,
   E2eeMemberChainRow,
   E2eeMemberRegisterResult,
   E2eeMemberRegistrationInput,
   E2eeMemberRegistrationRow,
   E2eeMemberStore,
+  E2eeScopeKeyPackagePutInput,
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
 } from '@byok-sdk/cloud';
@@ -24,9 +26,24 @@ async function rollback(client: PoolClient): Promise<void> {
 }
 
 /**
- * Postgres E2EE member store (`deploy/sql/0027_e2ee_member.sql`). Device
- * revocation and machine supersession delete a device's rows in the device
- * transaction (`DEVICE_STATE_DELETES` in `devices.ts`).
+ * Take the transaction lock of each `(tenant, scope)` before any other
+ * statement of the transaction, in one sorted order so two lockers cannot
+ * deadlock. A shred and a package put of one scope then run one after the
+ * other, also for a new scope or a new epoch, which has no row to lock yet
+ * (owner batch §50h A).
+ */
+async function lockScopes(client: PoolClient, tenant: TenantId, scopeIds: Iterable<string>): Promise<void> {
+  for (const scopeId of [...new Set(scopeIds)].sort()) {
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify(['e2ee-scope', tenant, scopeId])]);
+  }
+}
+
+/**
+ * Postgres E2EE member store (`deploy/sql/0027_e2ee_member.sql`,
+ * `0028_e2ee_scope_shred.sql`). Device revocation and machine supersession
+ * delete a device's rows in the device transaction (`DEVICE_STATE_DELETES`
+ * in `devices.ts`). A shred receipt goes to `device_request_receipts`, the
+ * request receipt store, in the append transaction.
  */
 export class PostgresE2eeMemberStore implements E2eeMemberStore {
   constructor(private readonly pool: Pool, private readonly clock: Clock) {}
@@ -47,9 +64,11 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
     }
   }
 
-  async appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult> {
+  async appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult> {
+    const { rows } = input;
     let refusal: E2eeMemberChainAppendResult | undefined;
     const result = await this.#transaction<E2eeMemberChainAppendResult>(async client => {
+      await lockScopes(client, tenant, input.shreds.map(shred => shred.scopeId));
       // READ COMMITTED is enough: the head read sees only committed rows, and
       // the primary key decides between two writers of one seq.
       const head = await client.query<{ head: string }>(
@@ -80,6 +99,27 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
         }
         replayed += 1;
       }
+      const now = this.clock.now();
+      for (const shred of input.shreds) {
+        if (shred.seq <= headSeq) continue;
+        // Packages before their epochs, which they reference. The package rows
+        // are locked in the order a put and device cleanup lock them.
+        await client.query(
+          `DELETE FROM e2ee_scope_key_package p USING (
+             SELECT scope_id, epoch, recipient FROM e2ee_scope_key_package
+              WHERE tenant_id = $1 AND scope_id = $2
+              ORDER BY epoch, recipient COLLATE "C"
+              FOR UPDATE) locked
+            WHERE p.tenant_id = $1 AND p.scope_id = locked.scope_id AND p.epoch = locked.epoch AND p.recipient = locked.recipient`,
+          [tenant, shred.scopeId]);
+        await client.query('DELETE FROM e2ee_scope_epoch WHERE tenant_id = $1 AND scope_id = $2', [tenant, shred.scopeId]);
+        await client.query(
+          `INSERT INTO e2ee_scope_shred (tenant_id, scope_id, chain_seq) VALUES ($1, $2, $3)
+           ON CONFLICT (tenant_id, scope_id) DO NOTHING`, [tenant, shred.scopeId, shred.seq]);
+        await client.query(
+          `INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (tenant_id, key) DO NOTHING`, [tenant, shred.receipt.key, shred.receipt.body, now]);
+      }
       return { outcome: 'appended', appended, replayed };
     });
     return refusal ?? result;
@@ -92,10 +132,19 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
     return result.rows.map(row => ({ seq: Number(row.seq), entry: row.entry }));
   }
 
-  async putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult> {
+  async putScopeKeyPackages(tenant: TenantId, { rows }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult> {
     let refusal: E2eeScopeKeyPackagePutResult | undefined;
     const updatedAt = this.clock.now();
     const result = await this.#transaction<E2eeScopeKeyPackagePutResult>(async client => {
+      const scopeIds = [...new Set(rows.map(row => row.scopeId))];
+      await lockScopes(client, tenant, scopeIds);
+      const shredded = await client.query<{ scope_id: string }>(
+        'SELECT scope_id FROM e2ee_scope_shred WHERE tenant_id = $1 AND scope_id = ANY($2::text[]) ORDER BY scope_id COLLATE "C" LIMIT 1',
+        [tenant, scopeIds]);
+      if (shredded.rows[0] !== undefined) {
+        refusal = { outcome: 'scope_shredded', scopeId: shredded.rows[0].scope_id };
+        return undefined;
+      }
       for (const row of rows) {
         await client.query(
           `INSERT INTO e2ee_scope_epoch (tenant_id, scope_id, epoch, key_id) VALUES ($1, $2, $3, $4)
