@@ -67,6 +67,7 @@ src/rules/schema.ts
 src/rules/sync.ts
 src/rules/team.ts
 src/rules/turn.ts
+@byok-sdk/core
 @byok-sdk/protocol
 @byok-sdk/example-host-execution-core: canonical hash
 ```

@@ -170,6 +170,7 @@ describe('tenant isolation across every device-class resource', () => {
         'agent-content-transcript-read',
         'agent-content-artifact-read',
         'sealed-payload-v1',
+        'sealed-output-ciphertext-ref',
       ],
     });
     expect(JSON.stringify(events.body)).not.toContain('secret work');

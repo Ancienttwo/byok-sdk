@@ -5,6 +5,7 @@
 export class TerminalCommitQueue {
   private readonly pending = new Map<string, {
     commit: () => Promise<void>;
+    prepare: (() => Promise<void>) | undefined;
     receipt: Promise<void>;
     running: boolean;
   }>();
@@ -18,8 +19,13 @@ export class TerminalCommitQueue {
 
   hasPending(taskId: string): boolean { return this.pending.has(taskId); }
 
-  enqueue(taskId: string, commit: () => Promise<void>): void {
-    if (!this.pending.has(taskId)) this.pending.set(taskId, { commit, receipt: Promise.resolve(), running: false });
+  /**
+   * `prepare` runs before the commit joins the scheduling tail, so a slow
+   * step of one task (a ciphertext upload) holds no other task's commit. A
+   * failed `prepare` is retried like a failed commit.
+   */
+  enqueue(taskId: string, commit: () => Promise<void>, prepare?: () => Promise<void>): void {
+    if (!this.pending.has(taskId)) this.pending.set(taskId, { commit, prepare, receipt: Promise.resolve(), running: false });
     void this.attempt(taskId).catch(() => undefined);
   }
 
@@ -46,16 +52,20 @@ export class TerminalCommitQueue {
     if (!entry) return Promise.resolve();
     if (entry.running) return entry.receipt;
     entry.running = true;
-    const receipt = this.tail.catch(() => undefined).then(entry.commit);
-    entry.receipt = receipt.then(() => {
-      if (this.pending.get(taskId) === entry) this.pending.delete(taskId);
-      this.committed(taskId);
-    }, error => {
+    const failed = (error: unknown): never => {
       entry.running = false;
       this.armRetry();
       throw error;
-    });
-    this.tail = entry.receipt;
+    };
+    const join = (): Promise<void> => {
+      const receipt = this.tail.catch(() => undefined).then(entry.commit).then(() => {
+        if (this.pending.get(taskId) === entry) this.pending.delete(taskId);
+        this.committed(taskId);
+      }, failed);
+      this.tail = receipt;
+      return receipt;
+    };
+    entry.receipt = entry.prepare === undefined ? join() : entry.prepare().then(join, failed);
     // Observe background rejection without converting the caller's receipt.
     void entry.receipt.catch(() => undefined);
     return entry.receipt;

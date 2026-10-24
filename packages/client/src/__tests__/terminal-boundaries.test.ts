@@ -76,6 +76,41 @@ describe('terminal durability and actual harness boundaries', () => {
     expect(adapter.startCalls).toHaveLength(0);
   });
 
+  it('R1: sends a terminal whose commit failed during stop after the next start in the same process', async () => {
+    const server = await TestServer.start(); cleanup.push(() => server.close());
+    const cfg = await config(server.url);
+    const adapter = new StubRuntimeAdapter();
+    let fail = false;
+    const journal = new SqliteLocalTaskJournal({ storeDir: cfg.storeDir!, faults: { onStep(step) {
+      if (step === 'terminal:before-commit' && fail) throw new Error('injected EIO before commit');
+    } } });
+    const candidates: LocalTerminalRecord[] = [];
+    const write = journal.recordTerminal.bind(journal);
+    vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => { candidates.push(record); return write(record); });
+    const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter], { hostedJournal: { journal }, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
+    cleanup.push(async () => { fail = false; await daemon.stop().catch(() => undefined); await journal.close(); });
+    await daemon.pair('pairing-code');
+    await daemon.start();
+    const taskId = 'queued-past-stop';
+    server.send(createEnvelope('task.offer', { instruction: 'run once' }, { taskId, seq: server.nextSeq() }));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    fail = true;
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'the real result' });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(candidates.some(record => record.taskId === taskId)).toBe(true));
+    const stopError = await daemon.stop().then(() => undefined, (error: unknown) => error);
+    expect(stopError).toBeDefined();
+    expect(daemon.status().pendingTerminalCommits).toBe(1);
+
+    fail = false;
+    await daemon.start();
+    await vi.waitFor(() => expect(daemon.status().pendingTerminalCommits).toBe(0), { timeout: 4000 });
+    const isTerminal = (e: Envelope) => e.task_id === taskId && ['task.complete', 'task.fail', 'task.decline', 'task.cancelled'].includes(e.type);
+    const terminal = await server.waitFor(isTerminal, 4000);
+    expect(terminal.payload).toMatchObject({ summary: 'the real result' });
+    expect(server.received.filter(isTerminal).map(e => e.type)).toEqual(['task.complete']);
+  });
+
   for (const explicit of [false, true]) {
     for (const claimed of [false, true]) {
       it(`R2: SQLite recovery custom explicit=${explicit} cloudClaimed=${claimed}`, async () => {

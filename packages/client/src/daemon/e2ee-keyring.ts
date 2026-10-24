@@ -21,8 +21,10 @@
  * authenticated chain head h shows that an honest sender rotated past every
  * `remove` up to h. The device keeps the newest such h per (scope, e), and
  * seals at e only while no `remove` of a scope member and no member-dropping
- * `scope-policy` lies after h. The points are rebuilt from opened content
- * after a restart.
+ * `scope-policy` lies after h. A retired keyring hands its points to the
+ * next run's keyring in the same process, which keeps each point that is on
+ * its own verified chain and judges staleness at its own head. After a
+ * process restart the points are rebuilt from opened content.
  *
  * Device rotation (E2d-4, §7.5): when no epoch is fresh, the device is the
  * next sender, so it rotates. It wraps a new scope key at the epoch after the
@@ -81,6 +83,14 @@ export type ScopeKeyFetchResult =
   | { readonly ok: true; readonly key: ScopeKey }
   | { readonly ok: false; readonly reason: ScopeKeyFetchFailure };
 
+/** The freshness points of a retired keyring, for the next run of the same process. Memory only. */
+export interface MemberFreshness {
+  readonly tenantId: string;
+  readonly deviceId: string;
+  readonly memberId: string;
+  readonly points: ReadonlyMap<string, ReadonlyMap<number, MemberChainPoint>>;
+}
+
 export interface DeviceMemberKeyringOptions {
   readonly records: DeviceMemberRecords;
   readonly client: E2eeMemberClient;
@@ -93,6 +103,8 @@ export interface DeviceMemberKeyringOptions {
   readonly requestTimeoutMs?: number;
   /** Called once when this run loses the member. */
   readonly onLost?: () => void;
+  /** The points the previous run of this process left; only the same member's points on this chain are kept. */
+  readonly carried?: MemberFreshness;
 }
 
 /** One `scope-policy` of a scope, at its chain seq. */
@@ -129,6 +141,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   constructor(session: DeviceMemberSession, private readonly options: DeviceMemberKeyringOptions) {
     this.#session = session;
     this.#record(session.entries);
+    this.#carry(session, options.carried);
   }
 
   /** The verified member, or `undefined` once this run lost it. */
@@ -289,12 +302,12 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   }
 
   async #sealingAt(scopeId: string, epoch: number): Promise<SealingKey | undefined> {
-    const point = this.#fresh.get(scopeId)!.get(epoch)!;
     const key = await this.openingKey({ id: scopeId, epoch });
     if (key === undefined) return undefined;
     // The key read can catch up: the scope and the epoch must still hold at the head it left.
     const current = this.#session;
-    if (current === undefined || this.#scope(current, scopeId) === undefined || this.#stale(scopeId, epoch, point.seq, current.state.head!.seq)) {
+    const point = this.#fresh.get(scopeId)?.get(epoch);
+    if (current === undefined || point === undefined || this.#scope(current, scopeId) === undefined || this.#stale(scopeId, epoch, point.seq, current.state.head!.seq)) {
       key.fill(0);
       return undefined;
     }
@@ -390,6 +403,37 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     this.#taken.set(scopeId, Math.max(this.#taken.get(scopeId) ?? 0, epoch));
   }
 
+  /**
+   * Ends this keyring with its daemon run, without `onLost`: the cached keys
+   * are zeroed and the chain view and freshness points are dropped, so a
+   * seal or open that still holds this keyring finds no key. Returns the
+   * points for the next run's keyring; a lost member leaves none.
+   */
+  retire(): MemberFreshness | undefined {
+    const session = this.#session;
+    const points = new Map([...this.#fresh].map(([scopeId, epochs]) => [scopeId, new Map(epochs)] as const));
+    this.#session = undefined;
+    for (const key of this.#keys.values()) key.scopeKey.fill(0);
+    this.#keys.clear();
+    this.#fresh.clear();
+    if (session === undefined) return undefined;
+    return { tenantId: this.options.tenantId, deviceId: this.options.deviceId, memberId: session.member.memberId, points };
+  }
+
+  /** Keep each carried point of this member whose chain head is on this run's verified chain. */
+  #carry(session: DeviceMemberSession, carried: MemberFreshness | undefined): void {
+    if (carried === undefined || carried.tenantId !== this.options.tenantId || carried.deviceId !== this.options.deviceId
+      || carried.memberId !== session.member.memberId) return;
+    for (const [scopeId, epochs] of carried.points) {
+      for (const [epoch, point] of epochs) {
+        if (session.hashes[point.seq - 1] !== point.hash) continue;
+        const points = this.#fresh.get(scopeId) ?? new Map<number, MemberChainPoint>();
+        this.#fresh.set(scopeId, points);
+        points.set(epoch, point);
+      }
+    }
+  }
+
   async #advance(): Promise<void> {
     const current = this.#session;
     if (current === undefined) return;
@@ -397,6 +441,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     const entries = await this.options.client.readChainFrom(head.seq, this.#requestSignal());
     if (entries.length === 0 || this.#session !== current) return;
     const applied = await applyMemberChainEntries(current.state, entries);
+    // A retire while the entries were checked ends the catch-up.
+    if (this.#session !== current) return;
     if (!applied.ok) return this.#lose(`a member chain entry after seq ${head.seq} is invalid (${applied.reason}); E2EE stays off`);
     if (!applied.state.members.has(current.member.memberId)) return this.#lose('this device is no longer a current member of the chain; E2EE stays off');
     const { records, tenantId, deviceId } = this.options;
@@ -405,6 +451,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     const session = {
       ...current, state: applied.state, entries: [...current.entries, ...verified], hashes: [...current.hashes, ...await entryHashes(entries)],
     };
+    if (this.#session !== current) return;
     this.#session = session;
     this.#record(verified);
     // A shred drops the scope, and a policy can drop this device or the sender, or add another device: their keys go.

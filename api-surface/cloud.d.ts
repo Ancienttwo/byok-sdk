@@ -2539,6 +2539,18 @@ export interface E2eeMemberStore {
         readonly now: string;
     }): Promise<string | undefined>;
 }
+/**
+ * The result a store recorded with a device write, read back for a replay.
+ * A store records only a successful result, so any other stored text breaks
+ * the store contract and fails closed.
+ */
+export declare function parseRecordedWriteResult(write: 'chainAppend', text: string): Extract<E2eeMemberChainAppendResult, {
+    readonly outcome: 'appended';
+}>;
+export declare function parseRecordedWriteResult(write: 'keyPackagePut', text: string): Extract<E2eeScopeKeyPackagePutResult, {
+    readonly outcome: 'stored';
+}>;
+export declare function parseRecordedWriteResult(write: 'memberKeyRegister', text: string): Extract<E2eeMemberRegisterResult, 'registered' | 'replayed'>;
 export interface E2eeMemberContext {
     readonly store: E2eeMemberStore;
     readonly tenant: TenantId;
@@ -2944,7 +2956,7 @@ export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limit
  * and may be refined without a protocol revision. `rate_limited` is a separate outcome,
  * not a refusal reason.
  */
-export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'sealed_output_required', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_harnesses_without_capability', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid'];
+export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'sealed_output_required', 'sealed_ciphertext_invalid', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_harnesses_without_capability', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid'];
 export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 /** The only way to build a rejection: the reason is required and closed. */
 interface Refused {
@@ -3061,6 +3073,7 @@ export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionS
 export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionStore, } from './agent-memory-projection';
 export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
 export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction';
+export { parseRecordedWriteResult } from './e2ee-member';
 export type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeProofRequest, E2eeProvenWrite, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow, E2eeScopeShred, } from './e2ee-member';
 export { CLOUD_CAPABILITIES, CapabilitiesResponseSchema, declares, fullCapabilityDeclaration, } from './capabilities';
 export type { CapabilitiesResponse, CloudCapability, FullCapabilityDeclarationOptions, } from './capabilities';
@@ -3084,7 +3097,7 @@ export type { ByokCloudObserver, InboundCommitted, InboundOutcome, InboundRefusa
 export { projectTerminalResult } from './terminal-result';
 export type { TerminalResult } from './terminal-result';
 export { tenantStoresFor } from './tenant-stores';
-export type { TenantBoundActivity, TenantBoundApprovalTimeline, TenantBoundBoard, CloudRootStores, TenantBoundBlobs, TenantBoundDedup, TenantBoundDevices, TenantBoundMailbox, TenantBoundPresence, TenantBoundQuota, TenantBoundRateLimiter, TenantBoundReceipts, TenantBoundTaskAttempts, TenantStores, } from './tenant-stores';
+export type { TenantBoundActivity, TenantBoundApprovalTimeline, TenantBoundBoard, CloudRootStores, TenantBoundBlobs, TenantBoundDedup, TenantBoundDevices, TenantBoundMailbox, TenantBoundObjects, TenantBoundPresence, TenantBoundQuota, TenantBoundRateLimiter, TenantBoundReceipts, TenantBoundTaskAttempts, TenantStores, } from './tenant-stores';
 export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, approvalTimelineCursor, parseApprovalObservations, sameApprovalTimelineEvent, validateApprovalTimelineAppend, validateApprovalTimelineResolve, } from './approval-timeline';
 export type { ApprovalObservation, ApprovalTimelineAppendInput, ApprovalTimelineEvent, ApprovalTimelineResolvePendingInput, ApprovalTimelineResolvePendingResult, ApprovalTimelineStore, ApprovalTimelineTail, } from './approval-timeline';
 export { StaleApprovalError, pendingApproval } from './approval-control';
@@ -4732,7 +4745,7 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * presigned blob calls) are deliberately absent from this surface: a
  * device-facing handler must not be able to reach them.
  */
-import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardUnclaimInput, type CoreStores, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type Principal, type PresenceHint, type PresenceHintInput, type TenantReadiness, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type TenantId } from '@byok-sdk/core';
+import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardUnclaimInput, type ContentHash, type CoreStores, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type ObjectManifestEntry, type ObjectReferenceInput, type Principal, type PresenceHint, type PresenceHintInput, type TenantReadiness, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type TenantId } from '@byok-sdk/core';
 import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
 import type { ActivityAppendInput, ActivityTail } from './activity';
@@ -4869,6 +4882,12 @@ export interface TenantBoundBlobs {
     observeUpload(blobId: string, reservation: StorageReservation): Promise<BlobObservation | undefined>;
     getDownloadUrl(blobId: string): Promise<string | undefined>;
 }
+/** The object manifest reads and references a task needs for the blobs it names (#654). */
+export interface TenantBoundObjects {
+    get(hash: ContentHash): Promise<ObjectManifestEntry | undefined>;
+    addReference(input: ObjectReferenceInput): Promise<ObjectManifestEntry>;
+    removeReference(input: ObjectReferenceInput): Promise<ObjectManifestEntry>;
+}
 export interface TenantBoundQuota {
     readReservation(reservationId: string): Promise<StorageReservation | undefined>;
     reserve(input: StorageReservationInput): Promise<StorageReservation>;
@@ -4898,6 +4917,7 @@ export interface TenantStores {
     readonly receipts: TenantBoundReceipts;
     readonly egress: TenantBoundAgentEgress;
     readonly blobs: TenantBoundBlobs;
+    readonly objects: TenantBoundObjects;
     readonly quota: TenantBoundQuota;
     readonly rateLimiter: TenantBoundRateLimiter;
 }

@@ -35,7 +35,7 @@ describe('claudeAgentUserContextSettings', () => {
   it('follows CLAUDE_CONFIG_DIR and falls back to the injected home directory when HOME is unset', () => {
     const settings = claudeAgentUserContextSettings({ lease: lease('/srv/agents/a1'), cwd: '/srv/agents/a1' }, { CLAUDE_CONFIG_DIR: '/etc/claude (cfg)/' }, 'linux', () => '/home/x', same);
     expect(settings.claudeMdExcludes).toEqual([
-      '/etc/claude (cfg)/CLAUDE.md', '/etc/claude ?cfg?/rules/**',
+      '/etc/claude ?cfg?/CLAUDE.md', '/etc/claude ?cfg?/rules/**',
       ...parent('/srv/agents'),
       ...parent('/srv'),
     ]);
@@ -54,17 +54,49 @@ describe('claudeAgentUserContextSettings', () => {
     expect(settings.claudeMdExcludes).toEqual([...parent('/srv/agents'), ...parent('/srv')]);
   });
 
-  it('replaces glob syntax with ? in the directory part of a rules pattern only', () => {
+  it('excludes a config directory inside the Agent home whose real path lies outside it', () => {
+    const realpath = (dir: string) => dir === '/srv/agents/a1/.cfg' ? '/home/x/.claude' : dir;
+    const settings = claudeAgentUserContextSettings({ lease: lease('/srv/agents/a1'), cwd: '/srv/agents/a1' }, { CLAUDE_CONFIG_DIR: '/srv/agents/a1/.cfg' }, 'linux', unusedHomedir, realpath);
+    expect(settings.claudeMdExcludes).toEqual([
+      '/srv/agents/a1/.cfg/CLAUDE.md', '/srv/agents/a1/.cfg/rules/**',
+      ...parent('/srv/agents'),
+      ...parent('/srv'),
+    ]);
+  });
+
+  it('replaces glob syntax with ? in the directory part of every pattern', () => {
     const settings = claudeAgentUserContextSettings({ lease: lease('/srv/brk [1]/brace {a,b}/star*q?!@+|^$/a1'), cwd: '/srv/brk [1]/brace {a,b}/star*q?!@+|^$/a1' }, { HOME: '/home/x' }, 'linux', unusedHomedir, same);
     expect(settings.claudeMdExcludes).toEqual([
       '/home/x/.claude/CLAUDE.md', '/home/x/.claude/rules/**',
-      '/srv/brk [1]/brace {a,b}/star*q?!@+|^$/CLAUDE.md', '/srv/brk [1]/brace {a,b}/star*q?!@+|^$/CLAUDE.local.md',
-      '/srv/brk [1]/brace {a,b}/star*q?!@+|^$/.claude/CLAUDE.md', '/srv/brk ?1?/brace ?a,b?/star?q???????/.claude/rules/**',
-      '/srv/brk [1]/brace {a,b}/CLAUDE.md', '/srv/brk [1]/brace {a,b}/CLAUDE.local.md',
-      '/srv/brk [1]/brace {a,b}/.claude/CLAUDE.md', '/srv/brk ?1?/brace ?a,b?/.claude/rules/**',
-      '/srv/brk [1]/CLAUDE.md', '/srv/brk [1]/CLAUDE.local.md', '/srv/brk [1]/.claude/CLAUDE.md', '/srv/brk ?1?/.claude/rules/**',
+      '/srv/brk ?1?/brace ?a,b?/star?q???????/CLAUDE.md', '/srv/brk ?1?/brace ?a,b?/star?q???????/CLAUDE.local.md',
+      '/srv/brk ?1?/brace ?a,b?/star?q???????/.claude/CLAUDE.md', '/srv/brk ?1?/brace ?a,b?/star?q???????/.claude/rules/**',
+      '/srv/brk ?1?/brace ?a,b?/CLAUDE.md', '/srv/brk ?1?/brace ?a,b?/CLAUDE.local.md',
+      '/srv/brk ?1?/brace ?a,b?/.claude/CLAUDE.md', '/srv/brk ?1?/brace ?a,b?/.claude/rules/**',
+      '/srv/brk ?1?/CLAUDE.md', '/srv/brk ?1?/CLAUDE.local.md', '/srv/brk ?1?/.claude/CLAUDE.md', '/srv/brk ?1?/.claude/rules/**',
       ...parent('/srv'),
     ]);
+  });
+
+  it('does not let an ancestor directory named ** exclude the Agent home\'s own CLAUDE.md', () => {
+    const agentHome = '/srv/**/a1';
+    const settings = claudeAgentUserContextSettings({ lease: lease(agentHome), cwd: agentHome }, { HOME: '/home/x' }, 'linux', unusedHomedir, same);
+    expect(settings.claudeMdExcludes).toEqual([
+      '/home/x/.claude/CLAUDE.md', '/home/x/.claude/rules/**',
+      '/srv/??/CLAUDE.md', '/srv/??/CLAUDE.local.md', '/srv/??/.claude/CLAUDE.md', '/srv/??/.claude/rules/**',
+      ...parent('/srv'),
+    ]);
+    expect(settings.claudeMdExcludes.some(pattern => pattern.includes('/a1'))).toBe(false);
+  });
+
+  it.each([['(x86)', '?x86?'], ['[1]', '?1?']])('escapes the directory part for an ancestor named %s', (name, escaped) => {
+    const agentHome = `/srv/${name}/a1`;
+    const settings = claudeAgentUserContextSettings({ lease: lease(agentHome), cwd: agentHome }, { HOME: '/home/x' }, 'linux', unusedHomedir, same);
+    expect(settings.claudeMdExcludes).toEqual([
+      '/home/x/.claude/CLAUDE.md', '/home/x/.claude/rules/**',
+      `/srv/${escaped}/CLAUDE.md`, `/srv/${escaped}/CLAUDE.local.md`, `/srv/${escaped}/.claude/CLAUDE.md`, `/srv/${escaped}/.claude/rules/**`,
+      ...parent('/srv'),
+    ]);
+    expect(settings.claudeMdExcludes.some(pattern => pattern.includes(name) || pattern.includes('/a1'))).toBe(false);
   });
 
   it('uses USERPROFILE and forward slashes for a win32 home, and stops before the drive root', () => {
@@ -73,10 +105,10 @@ describe('claudeAgentUserContextSettings', () => {
     expect(settings).toEqual({
       claudeMdExcludes: [
         'C:/Users/u/.claude/CLAUDE.md', 'C:/Users/u/.claude/rules/**',
-        'C:/Users/u/AppData/Roaming/App (x86)/agents/CLAUDE.md', 'C:/Users/u/AppData/Roaming/App (x86)/agents/CLAUDE.local.md',
-        'C:/Users/u/AppData/Roaming/App (x86)/agents/.claude/CLAUDE.md', 'C:/Users/u/AppData/Roaming/App ?x86?/agents/.claude/rules/**',
-        'C:/Users/u/AppData/Roaming/App (x86)/CLAUDE.md', 'C:/Users/u/AppData/Roaming/App (x86)/CLAUDE.local.md',
-        'C:/Users/u/AppData/Roaming/App (x86)/.claude/CLAUDE.md', 'C:/Users/u/AppData/Roaming/App ?x86?/.claude/rules/**',
+        'C:/Users/u/AppData/Roaming/App ?x86?/agents/CLAUDE.md', 'C:/Users/u/AppData/Roaming/App ?x86?/agents/CLAUDE.local.md',
+        'C:/Users/u/AppData/Roaming/App ?x86?/agents/.claude/CLAUDE.md', 'C:/Users/u/AppData/Roaming/App ?x86?/agents/.claude/rules/**',
+        'C:/Users/u/AppData/Roaming/App ?x86?/CLAUDE.md', 'C:/Users/u/AppData/Roaming/App ?x86?/CLAUDE.local.md',
+        'C:/Users/u/AppData/Roaming/App ?x86?/.claude/CLAUDE.md', 'C:/Users/u/AppData/Roaming/App ?x86?/.claude/rules/**',
         ...parent('C:/Users/u/AppData/Roaming'),
         ...parent('C:/Users/u/AppData'),
         'C:/Users/u/CLAUDE.md', 'C:/Users/u/CLAUDE.local.md',

@@ -96,7 +96,15 @@ export class PostgresTaskRedactionStore implements TaskRedactionStore {
     for (const hash of hashes) {
       if (await this.#deleteObject(tenant, hash, input.receiptKeys)) objectsDeleted += 1;
     }
-    return this.#redactRows(input, objectsDeleted);
+    const result = await this.#redactRows(input, objectsDeleted);
+    // A device report can add a reference after the release above and before
+    // the row step commits, for example a terminal replay whose receipt still
+    // read the original body. Nothing names that blob once the bodies are
+    // tombstones, so release again and leave the blob to orphan GC. A report
+    // that lands later reads the tombstone or the audit receipt and releases
+    // its own reference. Only a redacted result has `counts`.
+    if ('counts' in result) await this.#releaseReferences(tenant, input.releaseObjectReferences);
+    return result;
   }
 
   async #redactRows(input: TaskRedactionStoreInput, objectsDeleted: number): Promise<TaskRedactionTaskResult> {
