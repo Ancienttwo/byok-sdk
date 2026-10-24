@@ -148,7 +148,8 @@ the verdict comes at the next sync of the scope.
 H does not yet run these L sync and pass steps: `sealDueBatches`, card expiry, `advanceRooms`, the card decision
 projections and their `action_result` Turns, `projectInputBatches`, the reply checks (`reconcileReply`, `retryReply`),
 the device observation (`observeDevices`), and the card and Agent home flushes. Some of them (the batch seal, card
-expiry and the reply checks) need a due time per scope, which H does not store; their placement is owner item O-4.
+expiry and the reply checks) need a due time per scope, which H does not store. These steps come after 0.30.0, in a
+later #793 slice, with a per-scope due index.
 
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
 record and keeps the revision. A throw writes nothing. The rule's `executionStarted` fact is the intent's `started`
