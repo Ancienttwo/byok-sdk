@@ -247,22 +247,31 @@ function storedValue<S extends z.ZodType>(schema: S, text: string, what: string)
   return parsed.data;
 }
 
-const RECORDED_WRITE_RESULTS = {
-  chainAppend: z.strictObject({ outcome: z.literal('appended'), appended: z.number().int().nonnegative(), replayed: z.number().int().nonnegative() }),
-  keyPackagePut: z.strictObject({ outcome: z.literal('stored'), stored: z.number().int().nonnegative() }),
-  memberKeyRegister: z.enum(['registered', 'replayed']),
-};
+const CHAIN_APPEND_RESULT = z.strictObject({
+  outcome: z.literal('appended'),
+  appended: z.number().int().nonnegative(),
+  replayed: z.number().int().nonnegative(),
+});
+const KEY_PACKAGE_PUT_RESULT = z.strictObject({ outcome: z.literal('stored'), stored: z.number().int().nonnegative() });
+const MEMBER_KEY_REGISTER_RESULT = z.enum(['registered', 'replayed']);
 
 /**
  * The result a store recorded with a device write, read back for a replay.
  * A store records only a successful result, so any other stored text breaks
  * the store contract and fails closed.
  */
-export function parseRecordedWriteResult<K extends keyof typeof RECORDED_WRITE_RESULTS>(
-  write: K,
-  text: string,
-): z.infer<(typeof RECORDED_WRITE_RESULTS)[K]> {
-  return storedValue<(typeof RECORDED_WRITE_RESULTS)[K]>(RECORDED_WRITE_RESULTS[write], text, 'recorded request result');
+export function parseRecordedWriteResult(write: 'chainAppend', text: string): Extract<E2eeMemberChainAppendResult, { readonly outcome: 'appended' }>;
+export function parseRecordedWriteResult(write: 'keyPackagePut', text: string): Extract<E2eeScopeKeyPackagePutResult, { readonly outcome: 'stored' }>;
+export function parseRecordedWriteResult(write: 'memberKeyRegister', text: string): Extract<E2eeMemberRegisterResult, 'registered' | 'replayed'>;
+export function parseRecordedWriteResult(write: 'chainAppend' | 'keyPackagePut' | 'memberKeyRegister', text: string) {
+  switch (write) {
+    case 'chainAppend':
+      return storedValue(CHAIN_APPEND_RESULT, text, 'recorded request result');
+    case 'keyPackagePut':
+      return storedValue(KEY_PACKAGE_PUT_RESULT, text, 'recorded request result');
+    case 'memberKeyRegister':
+      return storedValue(MEMBER_KEY_REGISTER_RESULT, text, 'recorded request result');
+  }
 }
 
 function scopeIdValid(scopeId: unknown): scopeId is string {
