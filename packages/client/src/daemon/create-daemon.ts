@@ -251,6 +251,14 @@ const SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS = 10_000;
 /** Finding F5(b): default bound on how long `performControlShutdown` waits for the outbox to actually drain before closing the connection — see `ConnectionManager.stop`'s own doc comment. Overridable via `DaemonOverrides.shutdown.outboxDrainTimeoutMs`. */
 const DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS = 5_000;
 
+/** The pairing is saved, but a member step after it failed: the device is paired without E2EE. */
+class PairedWithoutMemberError extends Error {
+  constructor(deviceId: string, what: string, cause: unknown) {
+    super(`device ${deviceId} is paired, but ${what}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = 'PairedWithoutMemberError';
+  }
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -2001,8 +2009,13 @@ export function buildDaemonWithAdapters(
       if (previous && previous.deviceId !== record.deviceId) {
         await cursorStore.clear(config.serverUrl, previous.deviceId);
       }
+      observer.notePaired(record.deviceId);
       // A new enrollment is a new member (§7.5); the previous one's entries are void (10b).
-      await memberRecords?.clear();
+      try {
+        await memberRecords?.clear();
+      } catch (error) {
+        throw new PairedWithoutMemberError(record.deviceId, 'the previous E2EE member entries could not be deleted', error);
+      }
       if (verificationSecret !== undefined) {
         try {
           await enrollDeviceMember({
@@ -2010,10 +2023,9 @@ export function buildDaemonWithAdapters(
             verificationSecret, log: logMember,
           });
         } catch (error) {
-          throw new Error(`device ${record.deviceId} is paired, but its E2EE member enrollment failed; re-pair to enable E2EE: ${error instanceof Error ? error.message : String(error)}`);
+          throw new PairedWithoutMemberError(record.deviceId, 'its E2EE member enrollment failed; re-pair to enable E2EE', error);
         }
       }
-      observer.notePaired(record.deviceId);
       if (acquiredHere) {
         await daemonOwnerLease?.release();
         daemonOwnerLease = undefined;
@@ -3688,7 +3700,7 @@ export function buildDaemonWithAdapters(
         if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
       }
       // The member entries go first: if their deletion fails, the device
-      // stays paired and E2EE-enrolled, and the unpair reports the failure.
+      // stays paired, and the unpair reports the failure.
       await memberRecords?.clear();
       try {
         await store.credentials.clear();
@@ -3897,27 +3909,31 @@ export function buildDaemonWithAdapters(
           throw new ControlError('pairing_in_progress', 'service enrollment is already in progress');
         }
         serviceEnrollmentTransitioning = true;
-        let record: DeviceRecord;
-        try {
-          record = await runLifecycleMutation(() => pairUnderLease(parsed.pairingCode, verificationSecret));
-        } catch (err) {
-          serviceEnrollmentTransitioning = false;
-          throw err;
-        }
-
         // `control-server.ts` writes this handler's result in the current
         // microtask. Starting on the next macrotask lets that persisted-id
         // receipt leave before normal startup replaces the enrollment-only
         // listener. A crash in this narrow window is safe: WinSW restarts,
         // loadExisting() sees the already-persisted credential, and takes the
         // same normal startup path.
-        setImmediate(() => {
-          void runLifecycleMutation(startUnderLease).catch(() => {
-            // Do not project provider/server exception text into service logs;
-            // the stopped/non-ready daemon is the fail-closed observable fact.
-            console.error('[byok/client] service enrollment persisted but normal daemon startup failed');
+        const startAfterEnrollment = (): void => {
+          setImmediate(() => {
+            void runLifecycleMutation(startUnderLease).catch(() => {
+              // Do not project provider/server exception text into service logs;
+              // the stopped/non-ready daemon is the fail-closed observable fact.
+              console.error('[byok/client] service enrollment persisted but normal daemon startup failed');
+            });
           });
-        });
+        };
+        let record: DeviceRecord;
+        try {
+          record = await runLifecycleMutation(() => pairUnderLease(parsed.pairingCode, verificationSecret));
+        } catch (err) {
+          // The pairing is saved, so the service starts as a device without E2EE.
+          if (err instanceof PairedWithoutMemberError) startAfterEnrollment();
+          else serviceEnrollmentTransitioning = false;
+          throw err;
+        }
+        startAfterEnrollment();
         return { deviceId: record.deviceId };
       },
       /**

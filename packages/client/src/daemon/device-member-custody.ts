@@ -29,7 +29,7 @@ import {
   type MemberKeyStore,
   type MemberKeys,
 } from '@byok-sdk/core/sealed-payload';
-import { DeviceCredentialStoreError, OsCredentialEntry, type OsCredentialEntryOptions } from './device-credential-store';
+import { DeviceCredentialStoreError, OS_CREDENTIAL_ENTRY_MAX_BYTES, OsCredentialEntry, type OsCredentialEntryOptions } from './device-credential-store';
 
 export type DeviceMemberEntry = 'member-keys' | 'pairing-verification' | 'member-state';
 
@@ -53,9 +53,6 @@ const ENTRIES: Readonly<Record<DeviceMemberEntry, { readonly account: string; re
   'pairing-verification': { account: 'device-member-pairing-v1', label: 'BYOK device pairing verification', prefix: 'byok-device-member-pairing-v1:' },
   'member-state': { account: 'device-member-state-v1', label: 'BYOK device member state', prefix: 'byok-device-member-state-v1:' },
 };
-
-/** The Windows generic-credential blob bound the device enrollment entry also keeps. */
-const ENTRY_MAX_BYTES = 2_400;
 
 /** The OS backend: one {@link OsCredentialEntry} per member entry, each value prefixed and base64 encoded. */
 export class OsDeviceMemberCustody implements DeviceMemberCustodyBackend {
@@ -82,7 +79,7 @@ export class OsDeviceMemberCustody implements DeviceMemberCustodyBackend {
 
   async replace(name: DeviceMemberEntry, value: string): Promise<void> {
     const encoded = `${ENTRIES[name].prefix}${Buffer.from(value, 'utf8').toString('base64')}`;
-    if (Buffer.byteLength(encoded, 'utf8') > ENTRY_MAX_BYTES) {
+    if (Buffer.byteLength(encoded, 'utf8') > OS_CREDENTIAL_ENTRY_MAX_BYTES) {
       throw new DeviceCredentialStoreError(`${ENTRIES[name].label} exceed the OS credential entry bound`);
     }
     await this.#entries[name].replace(encoded);
@@ -261,13 +258,21 @@ export class DeviceMemberRecords {
   }
 
   async deletePending(): Promise<void> {
-    await this.custody.delete('pairing-verification');
+    await this.#delete('pairing-verification');
   }
 
   /** Forget the member: a new enrollment or an unpair. */
   async clear(): Promise<void> {
-    await this.custody.delete('pairing-verification');
-    await this.custody.delete('member-state');
-    await this.custody.delete('member-keys');
+    await this.#delete('pairing-verification');
+    await this.#delete('member-state');
+    await this.#delete('member-keys');
+  }
+
+  /** Delete and read back, as the enrollment clear does: a provider that reports a deletion it did not make throws. */
+  async #delete(name: DeviceMemberEntry): Promise<void> {
+    await this.custody.delete(name);
+    if ((await this.custody.read(name)) !== undefined) {
+      throw new DeviceMemberCustodyError(`the OS credential provider reported deleting the member entry ${name}, but it remains`);
+    }
   }
 }
