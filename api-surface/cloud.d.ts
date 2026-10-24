@@ -3581,7 +3581,9 @@ import type { RequestReceiptStore } from '../ports';
 /**
  * Reference E2EE member store. Each method checks and writes in one
  * synchronous step, so no other call interleaves with it. A shred receipt
- * goes to `receipts`, the composition's request receipt store, after that step.
+ * goes to `receipts`, the composition's request receipt store, after that
+ * step. Appends run one at a time through their receipt writes, so a later
+ * shred of a scope cannot record its receipt before the first one.
  */
 export declare class InMemoryE2eeMemberStore implements E2eeMemberStore {
     #private;
