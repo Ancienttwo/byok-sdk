@@ -149,7 +149,6 @@ export class HostedReconciler {
     });
   }
 
-  /** Saves the last attempt, and K4 `started` once the attempt has a claim. */
   /** Stores the attempt, and the first claim. Returns true when this write committed the first claim. */
   private record(scopeKey: string, key: string, attempt: TaskAttempt): Promise<boolean> {
     const claimed = !!(attempt.claimedRuntime || attempt.ownerDeviceId);
