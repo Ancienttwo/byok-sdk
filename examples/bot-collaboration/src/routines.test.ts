@@ -7,7 +7,7 @@ import { hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, WAKE_HORIZON_MS, type Hos
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { json, stateOf } from './model';
-import { botRoutines, createDefinition, owned, routineOccurrence, updateDefinition } from './routines';
+import { botRoutines, createDefinition, endable, owned, routineOccurrence, updateDefinition } from './routines';
 import { DAILY, deliverRoutine, routineOf, routineRow, seedRoutine } from './routines.test-support';
 import { outcomeSchema } from './schema';
 import { botCompactVeto } from './compaction';
@@ -99,6 +99,14 @@ it('rejects empty updates, builds on pending, keeps owner and authority, and sto
   }
   row.lifecycle = 'completed';
   expect(() => updateDefinition([row], 'main', { routineId: id, prompt: 'late' })).toThrow('Routine is unavailable to this Bot');
+});
+
+it('ends any open Bot routine whatever its owner, and refuses a Host job routine, a completed one and a missing id (§55c)', () => {
+  const row = routineRow(createDefinition([], 'other', 'task-1', 0, action('r'), 'bot')), job = routineRow(hostJob('nightly'));
+  expect(endable([row, job], row.definition.id)).toBe(row);
+  for (const target of ['nightly', 'missing']) expect(() => endable([row, job], target)).toThrow('No open Bot routine has this id');
+  row.lifecycle = 'completed';
+  expect(() => endable([row], row.definition.id)).toThrow('No open Bot routine has this id');
 });
 
 it('shows only Bot routines, with the current definition, the pending version and the last calendar error', () => {

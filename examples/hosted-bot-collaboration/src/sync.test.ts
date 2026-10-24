@@ -7,7 +7,7 @@ import { DEFAULT_RETRY, enqueue, hash, HostLedger, project, taskId, type FrozenI
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { syncTurn, type Command } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { seedCollaboration, SYNC_OPTIONS, syncVectors, type SyncIntentRecord, type SyncSubject } from '@byok-sdk/example-bot-collaboration/test-support';
+import { cardVectors, seedCollaboration, SYNC_OPTIONS, syncVectors, type CardSubject, type SyncIntentRecord, type SyncSubject } from '@byok-sdk/example-bot-collaboration/test-support';
 import { freezeIntent, type IntentFreeze } from './intents';
 import { storedKey } from './layout';
 import { callbackPorts, vectorPorts } from './memory-subject.test-support';
@@ -46,9 +46,15 @@ async function hosted(): Promise<SyncSubject> {
       [storedKey(scope), storedKey(id)])).rows.map(row => row.body),
   };
 }
-/** A concluded Turn `t1`, a queued user Turn `q1` and a queued continuation `q2`. */
+/** The H card subject (#793 S5): the H sync subject, whose sync runs at a given time. */
+async function hostedCards(): Promise<CardSubject> {
+  const subject = await hosted();
+  return { ...subject, sync: async now => { await store().sync(subject.scope, { ...SYNC_OPTIONS, now, history: undefined }); } };
+}
+/** A concluded Turn `t1`, a queued user Turn `q1` and a queued continuation `q2`. Card `c1` stays pending in the H sync. */
 function queueTurns(state: CollaborationState): void {
   Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+  state.cards.c1!.expiresAt = Number.MAX_SAFE_INTEGER;
   state.turns.q1 = { id: 'q1', root: 'q1', botId: 'main', source: 'user', request: 'First', hop: 0, status: 'queued', authority: 'owner' };
   state.turns.q2 = { id: 'q2', root: 'q1', botId: 'main', source: 'continuation', request: 'Next', hop: 0, status: 'queued', authority: 'owner' };
 }
@@ -61,6 +67,19 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
   afterAll(async () => { await opened?.close(); });
 
   syncVectors('H HostedCollaborationStore on Postgres', hosted);
+  cardVectors('H HostedCollaborationStore on Postgres', hostedCards);
+
+  it('freezes a decided card\'s action_result Turn in the same sync that adds it: the new Turn starts another round', async () => {
+    const h = await hostedCards(), result = hash(['action_result', 'c1']);
+    await h.change(state => {
+      Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+      state.cards.c1!.expiresAt = Number.MAX_SAFE_INTEGER;
+    });
+    await h.commit({ scope: h.scope, commandId: 'decide', command: { kind: 'decide', cardId: 'c1', decision: 'rejected' } });
+    await h.sync(SYNC_OPTIONS.now);
+    expect((await h.state()).turns[result]).toMatchObject({ source: 'action_result' });
+    expect(await h.intent(result)).toMatchObject({ key: result });
+  });
 
   it('freezes the same input bytes as K4 enqueue in an L ledger, from the same rule step, with the same state', async () => {
     const h = await hosted();

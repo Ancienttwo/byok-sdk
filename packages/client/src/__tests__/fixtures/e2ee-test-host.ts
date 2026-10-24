@@ -8,8 +8,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash, createPublicKey, verify as edVerify } from 'node:crypto';
 import { DEVICE_PROOF_HEADER, deviceProofSigningInput, type DeviceProofProtectedClaims } from '@byok-sdk/core';
+import type { ScopeKeyPackageV1 } from '@byok-sdk/core/sealed-payload';
 import {
   BYOK_E2EE_CHAIN_PATH,
+  BYOK_E2EE_KEY_PACKAGES_PATH,
   BYOK_E2EE_MEMBER_KEY_PATH,
   BYOK_E2EE_PAIRING_MAC_PATH,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
@@ -55,6 +57,15 @@ export class E2eeTestHost {
   /** Chain reads answered, for poll and re-walk assertions. */
   chainReads = 0;
   pairingMacReads = 0;
+  /** Every key package put, as stored. */
+  readonly packages: ScopeKeyPackageV1[] = [];
+  /** Answer this many key package reads with 503 first. */
+  failPackageReads = 0;
+  packageReads = 0;
+  /** When set, every key package read answers with this list as it is. */
+  packageResponse: unknown[] | undefined;
+  /** When set, each key package read waits for it before it answers. */
+  holdPackageReads: Promise<void> | undefined;
 
   constructor(private readonly deps: E2eeTestHostDeps) {}
 
@@ -66,6 +77,11 @@ export class E2eeTestHost {
   /** Host control plane: append signed entries at the end of the chain. */
   clientAppend(...entries: unknown[]): void {
     this.chain.push(...entries);
+  }
+
+  /** Host control plane: store key packages, one per (scope, epoch, recipient). */
+  clientPutPackages(...packages: ScopeKeyPackageV1[]): void {
+    this.packages.push(...packages);
   }
 
   /** The registered bundle and the latest device MAC of a device. */
@@ -91,6 +107,26 @@ export class E2eeTestHost {
       const afterSeq = Number(url.searchParams.get('afterSeq') ?? '0');
       const limit = Math.min(Number(url.searchParams.get('limit') ?? E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES), E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES);
       respond(res, 200, { entries: this.chain.slice(afterSeq, afterSeq + limit) });
+      return true;
+    }
+    if (method === 'GET' && url.pathname === BYOK_E2EE_KEY_PACKAGES_PATH) {
+      const device = this.#bearer(req, res);
+      if (device === undefined) return true;
+      if (this.failPackageReads > 0) {
+        this.failPackageReads -= 1;
+        respond(res, 503, { error: 'unavailable' });
+        return true;
+      }
+      this.packageReads += 1;
+      await this.holdPackageReads;
+      if (this.packageResponse !== undefined) {
+        respond(res, 200, { packages: this.packageResponse });
+        return true;
+      }
+      const recipient = this.registration(device.deviceId)?.member.memberId;
+      const scopeId = url.searchParams.get('scopeId');
+      const epoch = Number(url.searchParams.get('epoch'));
+      respond(res, 200, { packages: this.packages.filter((pkg) => pkg.recipient === recipient && pkg.scopeId === scopeId && pkg.epoch === epoch) });
       return true;
     }
     if (method === 'GET' && url.pathname === BYOK_E2EE_PAIRING_MAC_PATH) {
