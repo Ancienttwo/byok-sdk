@@ -383,6 +383,14 @@ Deletion paths:
   Known limit: a late progress or approval report can add a row after a call. A second call deletes it, and the row TTL bounds it.
   The limits are in [security.md](security.md) (Deletion paths).
   It needs the `taskRedactionStore` option. `createPostgresTaskRedactionStore` ships from `./runtime`, so it runs on Workers.
+- A `shred` member chain entry deletes the key packages and scope epochs of one sealed scope, in the append that stores it
+  (`packages/cloud/src/e2ee-member.ts`, `packages/cloud-dataplane/src/stores/e2ee-member.ts`).
+  It records the scope in `e2ee_scope_shred` (`deploy/sql/0028_e2ee_scope_shred.sql`)
+  and writes an `e2ee-scope-shred:<scopeId>` receipt with the chain seq, the time and the writer.
+  Later key package puts for the scope get 409 `e2ee_scope_shredded`.
+  The Host deletes without verifying the signer, and the ciphertext rows stay.
+  Backups keep the packages until each member rotates its KEM key.
+  The limits are in [security.md](security.md) (Scope shred).
 - `createPostgresTenantErasure` is the only path that deletes task receipt rows
   (`task-offer:`, `task-offer-delivered:`, `task:` and `agent-message-offer:`), `task` rows and `agent_message_admission` rows.
   It deletes the whole tenant (`packages/cloud-dataplane/src/tenant-erasure.ts:25-59`).
@@ -400,6 +408,9 @@ Deletion paths:
 `redactTasks` does not cover reliable egress rows (they have no task key), truth records, or receipts without a task key
 (`agent-input-preparation-*`, `agent-home-projection-*`, `agent-content-*`).
 It cannot reach backups, replicas or logs.
+A scope shred removes key packages only. There is no `redactScope`: the Host calls `redactTasks` with the scope's taskIds.
+The shred is complete only on the live store until each member of the scope rotates its KEM key and purges its scope keys,
+and the SDK does not run that rotation or purge yet.
 This document states current behavior. It does not promise a design or a release.
 
 ## 7. Gaps
@@ -411,4 +422,5 @@ This document states current behavior. It does not promise a design or a release
 | Wake across invocations | The SDK has no wake across Worker invocations. Each wait ends at the fallback (section 3). | Accept the fallback reads, or build a Durable Object wake. |
 | Held message | No SDK route releases it. The task has no terminal until a cancel (section 4). | Return `held` only with a product release action. |
 | Idle cost | 62 to 194 HTTP calls and about 3,650 reads for each idle device per hour (section 5). | Choose presence, hold and fallback against the budget. |
-| Retention | No receipt TTL and no scoped deletion. Unacked offers stay as dead letters (section 6). | Tenant erasure from Node is the only delete path for task receipts and admission rows. |
+| Retention | No receipt TTL. `redactTasks` removes content by task only. Unacked offers stay as dead letters (section 6). | Tenant erasure from Node is the only delete path for task receipt rows and admission rows. |
+| Scope shred | The Host deletes a scope's key packages on any well-shaped `shred`, without verifying the signer. Backups keep the packages, and members keep their scope keys, until each member rotates its KEM key (section 6). | Treat a shred as complete only on the live store. Remove the scope's plaintext rows with `redactTasks`. |

@@ -16,6 +16,12 @@
   `InMemoryE2eeMemberStore` takes the composition's `RequestReceiptStore`.
   Postgres needs migration `0028_e2ee_scope_shred.sql`; SQLite adds the table
   on open.
+- **Docs and vectors** — `docs/security.md` gains a Scope shred section: what
+  a Host shred removes, the unverified delete, and the backup gap until each
+  member rotates its KEM key (#654 E5b-3). The hosted Host contract lists the
+  shred in §6 and §7. `member-rules-v1.json` gains a `shred` section: after a
+  shred, a `scope-policy` or a second `shred` of that scope is invalid, and
+  another scope stays live.
 
 ## 0.30.0 — source candidate
 
