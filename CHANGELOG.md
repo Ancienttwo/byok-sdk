@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
+  select `agentMemory: 'read-write-if-admitted'` (#833). It runs exactly as
+  `read-write` when the daemon admits the memory MCP, and exactly as `none`
+  when it does not. It never gets `agent_memory_unavailable`. A task that is
+  useless without memory selects `read-write` instead, which declines. A
+  `memory-reader` Attempt cannot select the value: the reference server
+  refuses it before the task exists, and the daemon declines it with
+  `agent_memory_selection_invalid`. Prepared offers do not accept the value.
+  The other values and an absent field do not change. The value is a gated
+  wire addition on the three ordinary Agent offers and their sealed forms:
+  every daemon with an Agent home advertises the new device capability
+  `agent-memory-read-write-if-admitted`
+  (`AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY`), and server and hosted
+  cloud refuse the value to a device without it, before the task exists. The
+  terminal does not report which mode ran.
 - **Docs (examples)** — K8 has a vendor contract, `src/VENDOR.md` (#886). It
   lists the files to copy in three layers: `rules/`, the L Host and the shared
   vectors. It says how to resolve K4, which SDK packages the copy needs, and
