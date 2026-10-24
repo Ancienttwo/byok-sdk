@@ -15,7 +15,7 @@
  */
 import { applyMemberChainEntries, openScopeKeyPackage, type ScopeKeyPackageOpenResult } from '@byok-sdk/core/sealed-payload';
 import type { DeviceMemberRecords } from './device-member-custody';
-import { entryHashes, type DeviceMemberLog, type DeviceMemberSession } from './device-member';
+import { MEMBER_REQUEST_TIMEOUT_MS, entryHashes, type DeviceMemberLog, type DeviceMemberSession } from './device-member';
 import type { E2eeMemberClient } from './e2ee-member-client';
 
 export interface ScopeKey {
@@ -43,6 +43,10 @@ export interface DeviceMemberKeyringOptions {
   readonly tenantId: string;
   readonly deviceId: string;
   readonly log: DeviceMemberLog;
+  /** Aborted at shutdown and at a new enrollment. */
+  readonly signal: AbortSignal;
+  /** Each Host read is cut off after this; defaults to {@link MEMBER_REQUEST_TIMEOUT_MS}. */
+  readonly requestTimeoutMs?: number;
 }
 
 function keyOf(scopeId: string, epoch: number): string {
@@ -81,7 +85,8 @@ export class DeviceMemberKeyring {
 
   /**
    * Catch up, then fetch and open the key package of one scope epoch. A
-   * transport failure throws; every other end is a result.
+   * failed or timed-out Host read throws, as does a final Host answer
+   * (`E2eeMemberClientError.final`); every other end is a result.
    */
   async fetch(scopeId: string, epoch: number): Promise<ScopeKeyFetchResult> {
     await this.catchUp();
@@ -92,9 +97,8 @@ export class DeviceMemberKeyring {
     const known = this.cached(scopeId, epoch);
     if (known !== undefined) return { ok: true, key: known };
     const self = session.member.memberId;
-    const packages = await this.options.client.readKeyPackages(scopeId, epoch);
-    // The Host keeps one package per (scope, epoch, recipient).
-    if (packages.length !== 1) return { ok: false, reason: packages.length === 0 ? 'key_package_missing' : 'key_package_invalid' };
+    const packages = await this.options.client.readKeyPackages(scopeId, epoch, this.#requestSignal());
+    if (packages.length === 0) return { ok: false, reason: 'key_package_missing' };
     const pkg: unknown = packages[0];
     if (typeof pkg !== 'object' || pkg === null) return { ok: false, reason: 'key_package_invalid' };
     const senderId = (pkg as { readonly sender?: unknown }).sender;
@@ -124,7 +128,7 @@ export class DeviceMemberKeyring {
     const current = this.#session;
     if (current === undefined) return;
     const head = current.state.head!;
-    const entries = await this.options.client.readChainFrom(head.seq);
+    const entries = await this.options.client.readChainFrom(head.seq, this.#requestSignal());
     if (entries.length === 0 || this.#session !== current) return;
     const applied = await applyMemberChainEntries(current.state, entries);
     if (!applied.ok) return this.#lose(`a member chain entry after seq ${head.seq} is invalid (${applied.reason}); E2EE stays off`);
@@ -140,6 +144,11 @@ export class DeviceMemberKeyring {
         this.#keys.delete(at);
       }
     }
+  }
+
+  /** A signal for one Host read, made when the read starts so a queued catch-up does not spend its time waiting. */
+  #requestSignal(): AbortSignal {
+    return AbortSignal.any([this.options.signal, AbortSignal.timeout(this.options.requestTimeoutMs ?? MEMBER_REQUEST_TIMEOUT_MS)]);
   }
 
   /** Why a key of this scope, from this sender, is not usable in the verified state; `undefined` when it is. */

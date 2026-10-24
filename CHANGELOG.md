@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is
+  burned: start a new registration at the Host, do not retry it (#654 E2d).
 - **Breaking (cloud)** — the device-proof `requestId` is single-use on the
   three E2EE member writes, as on the truth put (#654, owner batch §41a A).
   The store records the `requestId`, its binding and the result with the
@@ -123,6 +125,13 @@
   how to record the source commit. A test checks each list against the import
   graph. The shared vectors need the L files and the K4 root entry, not
   `rules/` alone. No code changes.
+- **Fix (examples)** — in external team mode, the K8 `create_room` and
+  `update_room` schemas offer only current Bots as members and admin (#881).
+  Before, they also offered `new_bot_1` to `new_bot_3`, which only
+  `create_bot` can create, and external mode offers no `create_bot`. A room
+  action that named one was always refused. Local mode is unchanged. A Host
+  that copies K8 in external mode freezes a different schema for new owner
+  Main Bot Turns.
 - **Feature (examples)** — K8 `BotOptions.outcome` narrows the outcome offer
   of new Turns (#881). `actions.turn` and `actions.main` are allowlists for a
   Bot Turn and for the extra actions of an owner Main Bot Turn. `timeZones`
