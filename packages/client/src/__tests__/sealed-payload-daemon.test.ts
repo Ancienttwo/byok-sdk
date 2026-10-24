@@ -189,14 +189,14 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
   it('withdraws sealed-payload-v1 when the chain removes the device', async () => {
     const { server, member, device, cursor } = await start();
-    const advertisedHellos = server.received.filter(advertised).length;
+    const hellosBefore = server.received.filter((envelope) => envelope.type === 'conn.hello').length;
     await member.web.append('remove', { memberId: device.memberId });
     const notice = createEnvelope('e2ee.key_package.available', { scopeId: SCOPE, epoch: EPOCH }, { seq: server.nextSeq() });
     server.send(notice);
     await vi.waitFor(async () => expect(await cursor()).toBe(notice.seq), BUDGET_MS);
     const last = await vi.waitFor(() => {
       const hellos = server.received.filter((envelope) => envelope.type === 'conn.hello');
-      expect(hellos.length).toBeGreaterThan(advertisedHellos);
+      expect(hellos.length).toBeGreaterThan(hellosBefore);
       return hellos.at(-1)!;
     }, BUDGET_MS);
     expect(advertised(last)).toBe(false);
