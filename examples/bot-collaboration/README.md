@@ -4,6 +4,8 @@ This copy-and-own example implements K8a and K8b in the Bot PRD.
 It uses the K4 Host execution core and K8-S public schema and calendar APIs.
 It has no paid runtime call. Tests use a synthetic adapter with the real SDK,
 daemon, HTTP transport, SQLite stores, and `submit_result` helper.
+To copy K8 into a Host repository, see [src/VENDOR.md](src/VENDOR.md): what
+to copy in each layer, how to resolve K4, and how to record the source.
 
 ## Run
 
@@ -340,7 +342,7 @@ the state change, the command record and the outbox rows.
 The keyed commands are owner input, received IM input, room input, answers,
 card decisions, team snapshots, and three K4 callbacks: a terminal outcome, an Agent message
 and a Bot routine occurrence. The keyless commands are `setMainBot`,
-`updateRoom`, `retryPersona`, `enablePushRoute`, `revokePushRoute`,
+`updateRoom`, `retryPersona`, `personaReady`, `enablePushRoute`, `revokePushRoute`,
 `resendDelivery`, `cancelDelegation`, `abandonDelegation`, `cancelTurn` and `endRoutine`.
 `src/rules/commands.ts` decides all of them. The Host checks the principal
 and the channel before the commit, and it calls K4 cancel and delivers cancel
@@ -446,6 +448,27 @@ transaction freezes only a Turn that still has no offer.
 - A read that throws or returns another shape leaves the Turn queued. The
   timer reads again after about one second.
 
+With the `roomHistory` option, the room messages of a seat ContextPack come
+from an external authority too (#883). Before a seat Turn freezes its offer,
+the Host calls `roomHistory({ roomId, botId, turnId })` outside the ledger
+transaction, in the same phase as `history`.
+
+- The authority returns the messages that this seat's Bot can see, oldest
+  first, as `{ id, from, text, late }` rows. The authority selects them for
+  that Bot, so K8 applies no `visibleFrom` of its own. Rows in another shape
+  are refused.
+- The rows replace `room.messages` in that ContextPack, in the same message
+  window. The state does not store them. The seat Turn keeps their hash in
+  `historyDigest`.
+- K8 still writes `room.messages`. Round counts, mention seats and the seat
+  request text read it.
+- A read that throws or returns another shape leaves the seat queued, and the
+  timer reads again. A read still open at the seat deadline counts as failed.
+  The seat deadline still applies, so a seat whose read never succeeds is
+  released as `busy` and its Turn expires.
+- No projection carries an accepted room post yet. The Host reads posts from
+  `snapshot().team.rooms` to write them to its authority.
+
 The team comes from this ledger, unless the `team: 'external'` option is set.
 
 ## External team authority
@@ -478,6 +501,25 @@ template.
   local.
 - The ledger stores the mode. A ledger with a local team cannot open in
   external mode, and an external ledger cannot open without the option.
+
+With `persona: 'external'` as well, the Host owns the persona projection of
+each Bot (#879). The Host projects the Agent home with its own daemon hook, so
+there is one projection writer and one revision for each agentRef.
+
+- Each snapshot Bot carries the Host's `profileRevision`, a decimal string.
+  K8 uses it as the Bot revision and as the agentRef `profileRevision` of its
+  execution. K8 queues no projection and counts no revision of its own.
+- The revision never goes back. A changed name, role, persona or model needs a
+  newer revision. A snapshot that breaks either rule is refused, and nothing
+  changes. Without the option, a snapshot with `profileRevision` is refused.
+- `personaReady(botId, revision)` reports that the Host applied this revision.
+  The current revision readies the Bot, an older one changes nothing, and a
+  newer one refuses. A Bot's Turns freeze their offers only when it is ready,
+  as before. After a newer revision, the Bot keeps its last ready revision, so
+  it stays a delegate target while its Turns wait.
+- `retryPersona` refuses with `external_persona`.
+- The ledger stores this mode too, so a restart cannot change it. The option
+  needs `team: 'external'`.
 
 With `history` and `team: 'external'` together, the device ledger holds
 neither the history nor the team authority.

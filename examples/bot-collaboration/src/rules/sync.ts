@@ -5,7 +5,7 @@ import { CurrentRequestTooLargeError } from './history';
 import { outcomeSchema, type ContextBot, type ContextRoutine, type ContextState, type CheckedOffer } from './schema';
 import { botTurnInstruction, type BotHistoryState, type ContextTurn, type InstructionLimits } from './context';
 import { admitBotToolsets } from './team';
-import type { Seat } from './rooms';
+import type { RoomMessage, Seat } from './rooms';
 
 /**
  * The per-Turn step of a Host sync as a pure rule (#793 D2b Q2). L and H run the same step, so a frozen offer is the same in both.
@@ -56,6 +56,10 @@ export interface SyncOptions<R extends ContextRoutine> {
   historyMode: boolean;
   /** The history row of this Turn, in history mode. */
   history?: { readonly rows: readonly ContextTurn[]; readonly digest: string };
+  /** Room history mode (#883): a seat Turn freezes only with its room messages from the external authority, read before this transaction. */
+  roomHistoryMode?: boolean;
+  /** The room messages of this seat Turn, in room history mode. */
+  roomHistory?: { readonly rows: readonly RoomMessage[]; readonly digest: string };
   routines: readonly R[];
   /** The Host's outcome offer (#881), checked by `outcomeOffer`. Absent: every action, the default time zones and `send_message`. */
   offer?: CheckedOffer;
@@ -132,10 +136,12 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   // Phase 2 of a history-mode sync: a Bot Turn freezes only with the history read before this transaction.
   const history = options.historyMode && turn.source !== 'room_slot' ? options.history : undefined;
   if (options.historyMode && turn.source !== 'room_slot' && !history) return undefined;
+  const room = options.roomHistoryMode && turn.source === 'room_slot' ? options.roomHistory : undefined;
+  if (options.roomHistoryMode && turn.source === 'room_slot' && !room) return undefined;
   let schema: ResultSchema, frozen: ReturnType<typeof botTurnInstruction>;
   try {
     schema = outcomeSchema(turn.botId, state, turn, options.models, options.routines, options.offer);
-    frozen = botTurnInstruction(state, turn, options.limits, options.routines, history?.rows);
+    frozen = botTurnInstruction(state, turn, options.limits, options.routines, history?.rows, room?.rows);
   } catch (error) {
     if (error instanceof BotTurnOutcomeSchemaError && error.code === 'schema-over-budget') {
       blockTurn(state, turn, `Outcome schema over budget after flat fallback: ${error.message}`, publish);
@@ -157,7 +163,8 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   const offer = { ...execution, payload: { ...execution.payload, instruction: frozen.instruction,
     terminalProjection: { mode: 'result-document' as const, contract: BOT_TURN_OUTCOME_CONTRACT, schema } } } as unknown as E;
   for (const rejection of frozen.context.rejectedActions) rejection.consumedBy = turn.id;
-  if (history) turn.historyDigest = history.digest;
+  const read = history ?? room;
+  if (read) turn.historyDigest = read.digest;
   delete turn.blockedReason;
   turn.status = 'processing';
   if (turn.source === 'routine') return { kind: 'routine', execution: offer };

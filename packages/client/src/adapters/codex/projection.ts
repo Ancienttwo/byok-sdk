@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
+import type { MessageDraftDelta } from '../../types';
 
 /** Structural SPI: complete kernel records enter here; only the explicit BYOK native origin is interpreted. */
 export interface CodexRecord {
@@ -10,8 +11,9 @@ export interface CodexRecord {
   readonly kind: string;
   readonly body: unknown;
 }
+type CodexEvent = AgentEvent | MessageDraftDelta;
 interface StreamState {
-  readonly seen: Map<number, readonly AgentEvent[]>;
+  readonly seen: Map<number, readonly CodexEvent[]>;
   readonly active: Map<string, { tool: string; toolCallId: string; mcp?: { server: string; tool: string } }>;
   readonly delivered: Set<string>;
   lastUsage?: Extract<AgentEvent, { type: 'usage' }>;
@@ -19,6 +21,8 @@ interface StreamState {
   baseline: Record<string, unknown> | null;
   zeroBaseline: boolean;
   latestTotals?: Record<string, unknown>;
+  /** The agentMessage item whose non-blank delta last started a draft. */
+  draftItem?: unknown;
 }
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -64,7 +68,7 @@ export class CodexProjection {
   consume(
     stream: object,
     input: CodexRecord,
-    emit: (event: AgentEvent) => void,
+    emit: (event: CodexEvent) => void,
   ): void {
     let state = this.streams.get(stream);
     if (!state) {
@@ -101,7 +105,7 @@ export class CodexProjection {
   private project(
     state: StreamState,
     input: CodexRecord,
-  ): readonly AgentEvent[] {
+  ): readonly CodexEvent[] {
     const body = record(input.body);
     if (input.kind !== 'frame' || body?.origin !== 'byok-native') return [];
     const params = record(body.native) ?? {};
@@ -130,6 +134,12 @@ export class CodexProjection {
       params.turnId !== state.activeTurnId
     )
       return [];
+    if (method === 'item/agentMessage/delta') {
+      if (typeof params.delta !== 'string') return [];
+      const startsMessage = params.itemId !== state.draftItem && params.delta.trim() !== '';
+      if (startsMessage) state.draftItem = params.itemId;
+      return [{ type: 'message_draft_delta', text: params.delta, startsMessage }];
+    }
     if (method === 'thread/tokenUsage/updated') {
       // total is thread-cumulative; a boundary delta includes every model call in this turn.
       // Fresh threads have a known zero baseline; resume needs an observed baseline, never a fabricated zero.
