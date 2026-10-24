@@ -739,8 +739,8 @@ describe('device member keyring rotation (E2d-4)', () => {
     }
   });
 
-  it('seals nothing at a carried point once a scope member is removed between the runs', async () => {
-    const { web, device, options, session } = await member();
+  it('rotates past a carried point once a scope member is removed between the runs', async () => {
+    const { server, web, device, options, session } = await member();
     const helper = await stranger();
     await web.append('add', { member: helper.member });
     await web.putScope('scope-a', [device, helper.member]);
@@ -754,19 +754,32 @@ describe('device member keyring rotation (E2d-4)', () => {
     const resumed = new DeviceMemberKeyring(session, options);
     await resumed.catchUp();
     const next = new DeviceMemberKeyring(resumed.session!, { ...options, carried });
-    expect(await next.sealingKey('scope-a', 1)).toBeUndefined();
+    // The carried epoch 1 is stale, so the device rotates past it instead of sealing at it.
+    expect(await next.sealingKey('scope-a', 1)).toMatchObject({ epoch: 2, sender: device.memberId });
+    expect(server.e2ee.devicePuts).toHaveLength(1);
+    // The removed member is no recipient of the new epoch, so it cannot open new content.
+    const recipients = server.e2ee.devicePuts[0]!.map((pkg) => pkg.recipient);
+    expect(recipients.sort()).toEqual([device.memberId, web.member.memberId].sort());
+    expect(recipients).not.toContain(helper.member.memberId);
   });
 
-  it.each(['tenantId', 'deviceId'] as const)('keeps no carried point of another %s', async (field) => {
-    const { web, device, options, session } = await member();
+  it.each(['tenantId', 'deviceId'] as const)('rotates past a carried point of another %s', async (field) => {
+    const { server, web, device, options, session } = await member();
     await web.putScope('scope-a', [device]);
     const first = new DeviceMemberKeyring(session, options);
     await first.catchUp();
     expect(await first.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
-    const carried = { ...first.retire()!, [field]: 'other' };
+    const carried = first.retire()!;
     const resumed = new DeviceMemberKeyring(session, options);
     await resumed.catchUp();
-    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried }).sealingKey('scope-a', 1)).toBeUndefined();
+
+    // Control: the unmodified carry keeps the epoch-1 point, so the next run seals at epoch 1 and puts nothing.
+    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried }).sealingKey('scope-a', 1)).toMatchObject({ epoch: 1 });
+    expect(server.e2ee.devicePuts).toHaveLength(0);
+
+    // A carry of another tenant or device is not kept: no fresh epoch, so the device rotates past epoch 1.
+    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: { ...carried, [field]: 'other' } }).sealingKey('scope-a', 1)).toMatchObject({ epoch: 2 });
+    expect(server.e2ee.devicePuts).toHaveLength(1);
   });
 });
 
