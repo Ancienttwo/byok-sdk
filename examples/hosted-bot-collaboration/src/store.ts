@@ -16,7 +16,7 @@ import { decideFinish, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
 import { dueRoutine, hostedRoutineCommands, loadSlice, planSlice, recordDue, switchDueVersions, writeSlice } from './routines';
 import type { RetentionInput, RetentionLimits, RetentionResult } from '@byok-sdk/example-bot-collaboration/retention';
-import { classifyInbound, inboundKey, type ChannelPort, type Delivery, type InboundClass, type InboundMessage, type PushRoute,
+import { classifyInbound, inboundKey, verified, type ChannelPort, type Delivery, type InboundClass, type InboundMessage, type PushRoute,
   type ReplyRoute } from '@byok-sdk/example-bot-collaboration/channel';
 import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from '@byok-sdk/example-bot-collaboration/delivery';
 import { cleanReplyTokens, deliveryRoute, echoCandidates, refuseRoute, rememberInbound } from '@byok-sdk/example-bot-collaboration/delivery-routing';
@@ -72,7 +72,20 @@ export class InboundCommandError extends Error {
     this.name = 'InboundCommandError';
   }
 }
-/** Who the Host is on its channels, as L's options give it: the owner principal, and the Host's own bot ids by channel. */
+/**
+ * `receive()` takes no room message from a bot in this slice (#793 D2b-out-3). L runs it as room background; H refuses it
+ * before it reads or writes.
+ */
+export class InboundBackgroundError extends Error {
+  constructor() {
+    super('receive() does not take a bot room message (bot_background) yet');
+    this.name = 'InboundBackgroundError';
+  }
+}
+/**
+ * Who the Host is on its channels, as L's options give it: the owner principal, and the Host's own bot ids by channel.
+ * It is Host configuration from verified identity, never a field of the message.
+ */
 export interface InboundIdentity { owner: string; self?: Record<string, readonly string[]> }
 export interface HostedStoreOptions {
   /** The Host has a channel: a K4 callback queues its channel deliveries, as L does with `channel` set. */
@@ -148,9 +161,10 @@ export class HostedCollaborationStore {
    * - `owner_input` and `room_input`: the K8 `receive` command, under the command id `hash(['receive', inboundKey])`, so a
    *   redelivered event replays. With a channel, the store's `remember` port (K8 `rememberInbound`) keeps the inbound and its
    *   reply route.
-   * - `bot_background`: the K8 `room_input` command of a bot, with no mention, as L `roomInput`.
-   * - every other kind: an audit line only.
-   * Returns the kind, and the Turn id of an input. The authenticated command entry calls it with the scope of its owner.
+   * - `bot_background`: refused with `InboundBackgroundError`, before any read or write. It is not in this slice.
+   * - every other kind: an audit line only, one for each delivery, as L.
+   * Returns the kind, and the Turn id of an input. The authenticated command entry calls it with the scope of its owner,
+   * and with `identity` from the Host's configuration, never from the message.
    */
   async receive(scope: string, message: InboundMessage, identity: InboundIdentity, ports: CommitPortsFactory): Promise<{ kind: InboundClass; id?: string }> {
     const kind = classifyInbound(message, identity.owner, identity.self), { channel, conversation, platformMessageId, sender } = message;
@@ -176,14 +190,8 @@ export class HostedCollaborationStore {
         ({ ...ports(state, publish), ...(this.channel ? { remember: (root: string) => rememberInbound(state, message, root) } : {}) }));
       return { kind, id: turnOf(result) };
     }
-    if (kind === 'bot_background') {
-      // R5: a bot message is room background. Its mention entities select no seat.
-      const key = inboundKey(message);
-      const result = await this.commitIn(scope, { scope, commandId: hash(['room_input', conversation.id, key]),
-        command: { kind: 'room_input', key, roomId: conversation.id, text: message.text, mentions: [], from: sender!.id } }, ports);
-      return { kind, id: turnOf(result) };
-    }
-    const who = sender ? ` ${sender.kind}:${sender.id}` : '';
+    if (kind === 'bot_background') throw new InboundBackgroundError();
+    const who = verified(sender) ? ` ${sender.kind}:${sender.id}` : '';
     await this.change(scope, undefined, async (state, publish) => {
       state.audit.push(`Inbound ${kind}: ${channel} ${conversation.kind}:${conversation.id} ${platformMessageId}${who}`.slice(0, 1024));
       return { value: undefined, outbox: [], now: ports(state, publish).now() };

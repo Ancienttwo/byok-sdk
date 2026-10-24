@@ -350,15 +350,17 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
   L's call in each flush pass is a call in each delivery settle here. H drops an expired token at the next sync or settle
   of its scope.
 - **Inbound** (`receive(scope, message, identity, ports)`, #793 D2b-out-3) is L `receive()`. K8 `classifyInbound` sorts
-  the message by the Host's channel identity (`owner`, and the Host's own bot ids by channel in `self`):
+  the message by the Host's channel identity (`owner`, and the Host's own bot ids by channel in `self`). The identity is
+  Host configuration from verified identity, never a field of the message:
   - an `echo` settles the one delivery it names, by `deliveryId` or by platform message id (K8 `echoCandidates` and
     `acceptDeliveryEcho`), under the scope lock, or writes an `unmatched_echo` audit line; the reply tokens are cleaned in
     the same transaction. An echo never creates input;
   - `owner_input` and `room_input` run the K8 `receive` command under the command id `hash(['receive', inboundKey])`, so
     a redelivered event replays. With `{ channel: true }`, the store keeps the inbound and its reply route (K8
     `rememberInbound`);
-  - `bot_background` runs the K8 `room_input` command with no mention, as L `roomInput` does for a bot;
-  - any other kind writes only an audit line.
+  - `bot_background` (a bot's room message) is not in this slice: it throws `InboundBackgroundError` before it reads or
+    writes. Room input from a bot comes later;
+  - any other kind writes only an audit line, one for each delivery, as L.
   The store owns the `remember` port: `commit()` refuses the `receive` command with `InboundCommandError`, and its ports
   carry no `remember` port.
 - An unsettled delivery row whose entity is not in the state fails as drift (`Delivery outbox row unsettled for an

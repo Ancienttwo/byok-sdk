@@ -7,7 +7,7 @@ import { seedCollaboration, VECTOR_NOW } from '@byok-sdk/example-bot-collaborati
 import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { HostedCollaborationStore, InboundCommandError, type CommitPortsFactory, type InboundIdentity } from './store';
+import { HostedCollaborationStore, InboundBackgroundError, InboundCommandError, type CommitPortsFactory, type InboundIdentity } from './store';
 
 // #793 D2b-out-3: the H inbound channel entry, as L `receive()`.
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
@@ -52,22 +52,40 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
     expect((await on.read(scope)).channel?.inbounds ?? {}).toEqual({});
   });
 
-  it('takes a human message in a room as room input, and a bot message there as background with no mention', async () => {
+  it('takes a human message in a room as room input, and replays a redelivery', async () => {
     const { on, scope } = await scoped(true, room);
     const human = message({ conversation: GROUP, sender: { id: 'alice', kind: 'human' }, mentions: ['main'] });
-    expect(await on.receive(scope, human, IDENTITY, vectorPorts)).toEqual({ kind: 'room_input', id: hash(['room-input', 'r1', inboundKey(human)]) });
-    const bot = message({ conversation: GROUP, platformMessageId: 'in2', sender: { id: 'other-bot', kind: 'bot' }, mentions: ['main'], text: 'Hi' });
-    expect(await on.receive(scope, bot, IDENTITY, vectorPorts)).toEqual({ kind: 'bot_background', id: hash(['room-input', 'r1', inboundKey(bot)]) });
+    const first = await on.receive(scope, human, IDENTITY, vectorPorts);
+    expect(first).toEqual({ kind: 'room_input', id: hash(['room-input', 'r1', inboundKey(human)]) });
     const state = await on.read(scope);
-    expect(state.team.rooms.r1!.messages).toEqual([expect.objectContaining({ from: 'alice', text: 'Do it' }), expect.objectContaining({ from: 'other-bot', text: 'Hi' })]);
-    expect(JSON.parse(state.team.rounds[hash(['room-input', 'r1', inboundKey(bot)])]!.input)).toMatchObject({ mentions: [] });
-    expect(state.channel!.inbounds[inboundKey(human)]).toMatchObject({ root: hash(['room-input', 'r1', inboundKey(human)]) });
+    expect(state.team.rooms.r1!.messages).toEqual([expect.objectContaining({ from: 'alice', text: 'Do it' })]);
+    expect(state.channel!.inbounds[inboundKey(human)]).toMatchObject({ root: first.id });
+    const before = await on.dump(scope);
+    expect(await on.receive(scope, human, IDENTITY, vectorPorts)).toEqual(first);
+    expect(await on.dump(scope)).toBe(before);
+  });
+
+  it('refuses a bot message in a room, the background kind, before it reads or writes', async () => {
+    const { on, scope } = await scoped(true, room), before = await on.dump(scope);
+    const bot = message({ conversation: GROUP, sender: { id: 'other-bot', kind: 'bot' }, mentions: ['main'], text: 'Hi' });
+    await expect(on.receive(scope, bot, IDENTITY, vectorPorts)).rejects.toBeInstanceOf(InboundBackgroundError);
+    expect(await on.dump(scope)).toBe(before);
+  });
+
+  it('checks the inbound identity and reply route in the commit, as L, and a refusal writes nothing', async () => {
+    const { on, scope } = await scoped(true), before = await on.dump(scope);
+    await expect(on.receive(scope, message({ replyRoute: { ...REPLY, inboundId: 'other' } }), IDENTITY, vectorPorts)).rejects.toThrow('Invalid reply route binding');
+    await expect(on.receive(scope, message({ platformMessageId: '' }), IDENTITY, vectorPorts)).rejects.toThrow('Invalid inbound identity');
+    await expect(on.receive(scope, { ...message(), conversation: undefined } as unknown as InboundMessage, IDENTITY, vectorPorts)).rejects.toThrow(TypeError);
+    expect(await on.dump(scope)).toBe(before);
   });
 
   it('writes only an audit line for a message that is not input', async () => {
     const { on, scope } = await scoped(true);
     const cases: Array<[InboundMessage, string, string]> = [
       [message({ sender: undefined, platformMessageId: 'u1' }), 'unverified_sender', 'Inbound unverified_sender: fake direct:main u1'],
+      // A sender with no id is unverified, and its line names no principal, as L's.
+      [message({ sender: { id: '', kind: 'human' }, platformMessageId: 'u2' }), 'unverified_sender', 'Inbound unverified_sender: fake direct:main u2'],
       [message({ sender: { id: 'mallory', kind: 'human' }, platformMessageId: 'n1' }), 'not_owner', 'Inbound not_owner: fake direct:main n1 human:mallory'],
       [message({ sender: { id: 'other-bot', kind: 'bot' }, platformMessageId: 'b1' }), 'bot_audit', 'Inbound bot_audit: fake direct:main b1 bot:other-bot'],
     ];
@@ -77,6 +95,9 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
       const after = await on.read(scope);
       expect(after.audit).toEqual([...before.audit, line]);
       expect(Object.keys(after.turns)).toEqual(Object.keys(before.turns));
+      // L writes an audit line for each delivery, so a redelivery adds the same line again.
+      expect(await on.receive(scope, inbound, IDENTITY, vectorPorts)).toEqual({ kind });
+      expect((await on.read(scope)).audit).toEqual([...before.audit, line, line]);
     }
   });
 
@@ -103,7 +124,16 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
     expect(state.channel!.inbounds.i1!.reply!.token).toBeUndefined();
     expect(await on.receive(scope, echo({ platformMessageId: 'shared' }), IDENTITY, vectorPorts)).toEqual({ kind: 'echo' });
     expect((await on.read(scope)).audit.at(-1)).toBe('Delivery unmatched_echo: fake shared');
-    expect(await on.receive(scope, echo({ platformMessageId: 'echoed', deliveryId: 'd1' }), IDENTITY, vectorPorts)).toEqual({ kind: 'echo' });
+    // An unmatched echo that is delivered again gets its audit line again, as L.
+    const audit = (await on.read(scope)).audit;
+    expect(await on.receive(scope, echo({ platformMessageId: 'shared' }), IDENTITY, vectorPorts)).toEqual({ kind: 'echo' });
+    expect((await on.read(scope)).audit).toEqual([...audit, 'Delivery unmatched_echo: fake shared']);
+    const accepted = echo({ platformMessageId: 'echoed', deliveryId: 'd1' });
+    expect(await on.receive(scope, accepted, IDENTITY, vectorPorts)).toEqual({ kind: 'echo' });
+    const settled = await on.dump(scope);
+    // The same echo again changes no row.
+    expect(await on.receive(scope, accepted, IDENTITY, vectorPorts)).toEqual({ kind: 'echo' });
+    expect(await on.dump(scope)).toBe(settled);
     state = await on.read(scope);
     expect(state.channel!.deliveries.d1).toMatchObject({ state: 'accepted', platformMessageId: 'echoed' });
     expect(state.channel!.deliveries.d1!.code).toBeUndefined();
