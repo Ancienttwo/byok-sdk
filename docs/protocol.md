@@ -1167,7 +1167,9 @@ refreshed hello adds it, and removes it again when the member is lost.
   newest epoch, at or after the offer's `epoch`, that has a point with no
   `remove` of a scope member and no member-dropping `scope-policy` after it.
   It checks this before the task runs; without such an epoch it rotates
-  first (below). Its header names the device member and its verified head.
+  first (below). An epoch that the recheck after the key read finds stale
+  declines that seal, and the next seal rotates. Its header names the device
+  member and its verified head.
   The points live in memory. A start after a stop in the same process keeps
   each point that is on the new run's verified chain; after a process
   restart they come back from the next opened content.
@@ -1183,14 +1185,19 @@ refreshed hello adds it, and removes it again when the member is lost.
   (`POST /byok/e2ee/key-packages`). After the put, the verified head it chose
   the recipients at is the new epoch's freshness point, so a `remove` that
   landed during the put makes it stale. So does a member added to the scope
-  policy or a member `rotate` of its KEM key after that point, because the
-  packages name the members and KEM keys at the point. A Host that holds
+  policy or a member `rotate` of its KEM key after the seq the packages were
+  wrapped at, because the packages name the members and KEM keys at that seq.
+  The count starts at the wrap seq even after opened content moves the
+  freshness point forward. The wrap seq is kept within one process only (a
+  start after a stop carries it); after a process restart, only the `remove`
+  and member-dropping policy rules apply to that epoch. A Host that holds
   that epoch under another `keyId` refuses the put with
   `e2ee_scope_key_conflict`; the next rotation starts above that epoch. A
   policy that leaves no current member but the device is not rotated,
   because no client could open the output. Then, and on any other failed
   rotation, the offer is declined with `sealed_key_unavailable`. Concurrent
-  seals of one scope share one rotation.
+  seals of one scope share one rotation; a seal that joined another seal's
+  rotation checks the result and may rotate again.
   So an output-only task (`categories: ['task-output']`), which carries no
   sealed input, seals at the new epoch. The Host notifies the device of its
   own new package as of any other.
