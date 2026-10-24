@@ -8,7 +8,8 @@
   re-wraps its own packages to the next key, and drops the old key only
   after every re-wrap reads back. It reads its packages one epoch at a time,
   four at a time, from epoch 1 to 256 in every scope it may use: up to 64
-  batches of 4 reads per scope per pass, three passes per rotation. A
+  batches of 4 reads per scope per pass, three passes per rotation, and up
+  to five when a scope starts again after the chain moved. A
   package at epoch 256, a known epoch past it, or an epoch whose key it
   holds or that has a freshness point but reads no package stops the
   rotation and keeps the old key. Just before the old key goes, it catches
@@ -19,7 +20,11 @@
   cut off after the member request timeout. That final read-back is an
   interim measure: a late put of a package wrapped to the old key can still
   land after it; the recipient `kemEpoch` in the signed package and the Host
-  row closes it and must land before a production trigger (E5b-2). Core
+  row closes it and must land before a production trigger (E5b-2). The
+  device does not see packages above epoch 256: when all its packages of a
+  scope are above 256 and none is at 256, it loses those epochs. A scope it
+  may not use during the rotation is not re-wrapped, and its packages
+  wrapped to the old key do not open if it becomes usable again. Core
   adds `beginMemberKemRotation` and `finishMemberKemRotation`.
 - **Fixed (client)** — a terminal whose journal commit failed during a
   `stop()` is sent after the next `start()` in the same process. Startup

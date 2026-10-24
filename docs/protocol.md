@@ -1568,7 +1568,9 @@ rotation yet. The steps:
 6. Only then does it drop the old private key from the record.
 
 A rotation reads every usable scope three times (steps 3 to 5), each up to
-256 reads in batches of 4. Every Host request of the rotation, the reads,
+256 reads in batches of 4. A scope that starts step 3 again after the chain
+moved is read once more each time, so the worst case is five passes (1,280
+reads) for that scope. Every Host request of the rotation, the reads,
 the `rotate` append and the puts, is cut off after
 `MEMBER_REQUEST_TIMEOUT_MS`; a cut-off request throws and leaves the
 rotation to resume.
@@ -1582,7 +1584,19 @@ read of that scope, but such a put can still land between that read and
 step 6, and the device then loses that epoch. The complete fix carries the
 recipient `kemEpoch` in the signed package fields and in the Host row, and
 the Host refuses a put older than the stored one. It is a prerequisite
-before a production path starts a rotation (E5b-2).
+before a production path starts a rotation (E5b-2). Step 5 also does not
+read a scope that is created after its catch-up; that scope is in the same
+window.
+
+Known limitation: the device reads no epoch above 256. When all its
+packages of a scope are above epoch 256 and none is at 256 (for example a
+device added to the scope after epoch 256), steps 3 to 5 find nothing and
+the device loses those epochs at step 6. The recipient `kemEpoch` does not
+close this; it needs a Host read of the scope's newest epoch, which is
+deferred. A scope that the device may not use during the rotation (for
+example one shared with another device at that time) is not read or
+re-wrapped, so its packages wrapped to the old key do not open if the scope
+becomes usable again.
 
 Until step 6, a package opens with either key, so a client that already
 wraps to the new key loses nothing. Each start checks that the record holds
