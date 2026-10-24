@@ -1296,6 +1296,11 @@ expire, so the cloud refuses either one with `ciphertextRef`
 (`sealed_payload_unsupported`). The device uploads a ciphertext blob first.
 If the device sends the terminal more than one day after the upload, orphan
 GC may have deleted the blob, and the Host then refuses the terminal.
+When the Host refuses a terminal sent by reference for good, because it no
+longer declares `sealed-output-ciphertext-ref` or orphan GC has deleted the
+blob, the daemon settles that terminal once and sends no other terminal, so
+the Host receives none for the task. This is a known limit of this version; a
+later version is to replace the queued terminal with a closed form.
 
 The cloud advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`,
 because it accepts all seven sealed output types. It also advertises
