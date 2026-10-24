@@ -2,9 +2,9 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@botiverse/oar",
-  "packageVersion": "0.70.0",
+  "packageVersion": "0.71.0",
   "repository": "https://github.com/botiverse/oar",
-  "commit": "44d7d61c558eef8ac3e61ecc54a8d4962eacadbd",
+  "commit": "c88a514458b3d80f18d32f29863f2b8fea5b1c96",
   "license": "Apache-2.0",
   "files": [
     {
@@ -47,7 +47,7 @@
       "path": "contracts/failure.ts",
       "sourcePath": "packages/oar/src/contracts/failure.ts",
       "upstreamSha256": "9422fcb7460b25443c2c2f13cdc6f8de2653369a130eb4cbb1b7994f888302bd",
-      "vendoredSha256": "4547aa15d0762548c63c3c431489ac3a3034bb131af0140918537b6a7212c4f1",
+      "vendoredSha256": "4690c8acf08b12e4fd74ef5388c4fb107f819930e971b7920ced325727c1b334",
       "delta": "Text-rule mark: every FailedTurn variant takes an optional fromText: true, set when a text rule over the runtime's words chose the class rather than a structured field."
     },
     {
@@ -180,14 +180,14 @@
       "path": "runtimes/codex/app-server-client.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/app-server-client.ts",
       "upstreamSha256": "6cfb2582a9beb597e5621e299a0463cdb234c808fab03f6874a509852dd62956",
-      "vendoredSha256": "3c5cc6e2f16df900abafe50fa6eb8d76126a88dfb5c516f87b12d0727746781f",
+      "vendoredSha256": "e3a44d1b3f6b9a00a896c77f3b4d028277e3033c07cc0a24c2d5ec7e38fbd1e8",
       "delta": "Caller-owned process: the injected LineProcess spawn receives exactly the explicit filtered env, cwd and launch arguments; no ambient env merge, home-initialization queue, executable manager, resources reader or killTree option. Server requests: numeric and string ids preserved; result and error replies go through the acknowledged stdin write. Terminal state: an exit or a kill sets one sticky terminal error, with the bounded, redacted exitError of the BYOK transport on exit; it settles every pending request as exited at once, rejects later requests and writes, and ignores later lines. No per-request deadline and no count budget: operation deadlines live in the SDK Codex adapter, and the BYOK transport bounds line bytes."
     },
     {
       "path": "runtimes/codex/failure.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/failure.ts",
       "upstreamSha256": "96ed35871e6aafc9bda3372d6ae2500d8c1f387a3824488366474439e806fa00",
-      "vendoredSha256": "9b1d9aa8f2c38aa59fa338c9951a39c9e7d1c075e9c7f993dadd51821e2b0ea5",
+      "vendoredSha256": "4610882d82e2fdac34c9d6a25cc3cbc87bec737c1091c72d4cfdcc1a2d314177",
       "delta": "Text-rule mark: codexErrorInfo other returns the provider body's Classified, so a class from Anthropic's 400 wording keeps its fromText mark on the failed turn."
     },
     {
@@ -206,7 +206,7 @@
       "path": "runtimes/codex/open.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/open.ts",
       "upstreamSha256": "353974f7722640a45a5f790b8a78cc2a630b3342e198c301a64eba5443023ac9",
-      "vendoredSha256": "8c51036b7d942aea97e239f23a8723de787320ce6a744f6fa531a909bcf0caac",
+      "vendoredSha256": "a020557652d8e6420e6cfc8b602ac6d586f8762f0b7a3782d1305990cbdae2e5",
       "delta": "Caller-owned interaction opt-in: codexThreadOpen accepts approvalPolicy \"never\" | \"on-request\" and sends it on thread/start and thread/resume; the default stays \"never\"."
     },
     {
@@ -231,7 +231,7 @@
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
       "upstreamSha256": "b07c31ed744abe598c6121c3ad471f830014a7a08471a14941da7c327ff875a0",
-      "vendoredSha256": "790e14584d63fc1e4cb9f2b8107adb8cfab0a58ec073121c4e1dda5cba03d310",
+      "vendoredSha256": "bb6012e081391d116dae12798ccd0bf858332dceadee8d1809feb98fbadea7b1",
       "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. The upstream kernel is created with that redactor, and the onRecord hook is registered as a kernel observer before any record is appended. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write, failed initialization kills. Codex steer is a required member."
     },
     {
@@ -293,7 +293,7 @@
       "path": "shared/acp/client-app.ts",
       "sourcePath": "packages/oar/src/shared/acp/client-app.ts",
       "upstreamSha256": "4a821105abe5278e6405ca55aeeababab61e760a32fae3792350a472844e3a31",
-      "vendoredSha256": "ed3c639959bf49c1e5abd8d2715487aff10202b672120a7a86969e4f7701b3fa",
+      "vendoredSha256": "871c82dde9469b2ed349b7d0582671bae536dc9c196c7db6a0c8a19db4ccf64c",
       "delta": "No permissive fallback: every session/request_permission is answered cancelled (cancelPermission) instead of the broadest allow on offer. The request and the answer stay recorded."
     },
     {
@@ -312,7 +312,7 @@
       "path": "shared/acp/failure.ts",
       "sourcePath": "packages/oar/src/shared/acp/failure.ts",
       "upstreamSha256": "f3b375e0620a2133aeed185a28e2b7837b1bcc4fa20ddc38ca4bb07f8adf59fb",
-      "vendoredSha256": "123222ae1b6ddabd23941f1660cc1da7d3b9bbd931a2fa449342e3c5a9d99675",
+      "vendoredSha256": "637e13d481c2b571bb4f4d2b0b665dc1180c177c7a254a4fe740edaabf4df2d9",
       "delta": "Text-rule mark: when the profile's reader names no class, acpFailureOutcome marks the classifyFailure fallback fromText. The process-exit and auth-required branches are unchanged."
     },
     {
@@ -343,7 +343,7 @@
       "path": "shared/acp/process.ts",
       "sourcePath": "packages/oar/src/shared/acp/process.ts",
       "upstreamSha256": "1e3dbe88a17395ecdd9c7c80a256a980c49da34ef0834ea6343c96ae62c21b8d",
-      "vendoredSha256": "3c7128bdef3471947dffbbcbd09e435fd371d1eb4588565cae9374a2bff6a04c",
+      "vendoredSha256": "8bfbfe8d493dc730f6e9d0fa004f325814d791199dd17917f5ab1a14d3cb426a",
       "delta": "Caller-owned process: startAcpProcess takes an injected SpawnAcpLineProcess and passes exactly the explicit filtered env and cwd; no executable manager, killTree option or resources reader. The owned process splits stdout into bounded lines; each line goes back to the official ndJsonStream with its newline, and each written message goes through the acknowledged stdin write, so the SDK keeps its own framing, parse-error answers and write order."
     },
     {
@@ -374,14 +374,14 @@
       "path": "shared/acp/session.ts",
       "sourcePath": "packages/oar/src/shared/acp/session.ts",
       "upstreamSha256": "46ed3c3e73c29df0273672ab09d907d128ace09f0824c4fc46e93590d7d04921",
-      "vendoredSha256": "60c47a0fb2c369931857f69fc6a4d6ccf63178c4ccc798a2d35bd41976bae6a0",
+      "vendoredSha256": "cefc50319bff679eeb651abf76decdefd690018490bed89b8f4fbb3f398b38e3",
       "delta": "Raw adapter for the SDK: acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer's terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader."
     },
     {
       "path": "shared/acp/terminal.ts",
       "sourcePath": "packages/oar/src/shared/acp/terminal.ts",
       "upstreamSha256": "cd943c545a0b00eb90107434416e9a9c78bc6af2fb3fb11b410244288740faac",
-      "vendoredSha256": "b17f25c9469a4210a11e2a5f1b228b917835e1bc8dafff37ae85cb2b7eca5022",
+      "vendoredSha256": "0206a0359cd9e15a89ad061ca238b966835fbaf56f3afe4b6a7b5eae9297b3a9",
       "delta": "Caller-owned terminal processes: createAcpTerminalHost takes an injected SpawnAcpTerminal that spawns, adopts and reaps each hosted command in the SDK process-tree authority with the session's explicit env plus the request's env entries. terminal/kill asks that tree to stop; release and dispose end the tree and wait for it. A released or disposed terminal stays tracked until its tree is gone. One disposal serves concurrent callers; a failed reap rejects and a later dispose retries every tree still alive. A terminal/create after disposal began is refused. No cross-spawn and no executable manager."
     },
     {
@@ -394,7 +394,7 @@
       "path": "shared/acp/turns.ts",
       "sourcePath": "packages/oar/src/shared/acp/turns.ts",
       "upstreamSha256": "a10a8ead6b16be8609c3a0fffb23f31c9e4a1ed970f5d97226eaa13f280eda5b",
-      "vendoredSha256": "bfff9ad6c1348730b855c49c4555cd6b9864bcf483bdeae6f16d9345fe6fcfe6",
+      "vendoredSha256": "d019a8a261a4d57de2579a2877cd949a965d5354af659f26755cf0b3507c9125",
       "delta": "Failed-prompt settle: a rejected session/prompt yields one event-loop turn before it reads its turn frames, so a notification from the same pipe read (grok's retry_state) is recorded first and the failure reader sees it. The success path already yields in promptAcp."
     },
     {
@@ -437,7 +437,7 @@
       "path": "shared/failure-class.ts",
       "sourcePath": "packages/oar/src/shared/failure-class.ts",
       "upstreamSha256": "b499c00723b79fbbd8bea072cc1d6a1e9221d711c388a9f3ddd5956c741a7f2a",
-      "vendoredSha256": "0ddc6c93d03e07a06c105392f717f5ed7d052dd317374dd313ab655bf3df701b",
+      "vendoredSha256": "da5f9a6e419c221345bf293b408cc34c18b7d090d15b50543552da444ff61440",
       "delta": "Text-rule mark: Classified takes an optional fromText: true, and failureFromErrorBody returns a Classified, marking a class from Anthropic's 400 wording (anthropicLimitText) fromText. classifyFailure and failureFromStatus are unchanged."
     },
     {

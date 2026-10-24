@@ -1,6 +1,6 @@
-# OAR 44d7d61 private runtime fork
+# OAR c88a514 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.70.0, fixed commit `44d7d61c558eef8ac3e61ecc54a8d4962eacadbd`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.71.0, fixed commit `c88a514458b3d80f18d32f29863f2b8fea5b1c96`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
 `source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 81 source files plus LICENSE. Sixty-eight source files keep upstream bytes. Thirteen source files contain BYOK changes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) and the Grok Build session (`runtimes/grok/session.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok install, update, inventory, model-list and account-usage modules are not included.
 
@@ -440,3 +440,20 @@ unchanged, so OAR's own consumers and the SDK's Grok retry rule
 send `unknown` for a marked outcome. `classifyFailure`, `anthropicLimitText`
 and `failureFromStatus` keep upstream logic. When upstream marks or drops its
 text rules, a re-vendor returns these files to upstream bytes.
+
+### 0.70.0 → 0.71.0 re-vendor
+
+The base is tag v0.71.0, commit `c88a514458b3d80f18d32f29863f2b8fea5b1c96`.
+No selected file changed upstream: all 81 source files and LICENSE have the
+same upstream bytes at both commits, so the import closure does not change.
+The thirteen maintained deltas are unchanged; only the twelve change notices
+that name the base now name c88a514.
+
+The only upstream source change is `runtimes/pi-durable/index.ts`, outside
+this fork: `PiDurableRuntimeOptions.models` also accepts a supplier that is
+resolved at each listing and session open. Upstream 0.71.0 otherwise moves
+its own Pi dependencies to 1.4.0, and the Codex service-tier and runtime
+version checks touch only docs, tests and experiments. `@agentclientprotocol/sdk`
+stays at 1.4.0 in OAR's lockfile. The source inventory and npm dependencies
+stay the same. Build assets copy this source provenance to
+`dist/assets/provenance/oar/c88a514/`.

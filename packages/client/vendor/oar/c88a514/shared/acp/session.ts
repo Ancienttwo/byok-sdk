@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 44d7d61 for injected processes, an explicit environment, a record consumer and session credential redaction without sealSession (Apache-2.0).
+// BYOK change: Modified from OAR c88a514 for injected processes, an explicit environment, a record consumer and session credential redaction without sealSession (Apache-2.0).
 /* oxlint-disable import/max-dependencies -- Session assembly wires the environment, process, terminal host, recorder and control machinery. */
 /* oxlint-disable typescript/promise-function-async -- SDK callbacks deliberately return the SDK's native promises. */
 import type { AvailableInstallation } from "../../contracts/installation.js";

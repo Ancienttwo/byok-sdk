@@ -6,7 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { createModels, createProvider } from '@earendil-works/pi-ai/models';
 import { createAssistantMessageEventStream, type AssistantMessage, type Model } from '@earendil-works/pi-ai';
-import { openDurableEngine } from '../adapters/pi-durable/engine';
+import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
+import { DURABLE_HARNESS_IDENTITY, DURABLE_HARNESS_SETTINGS, openDurableEngine } from '../adapters/pi-durable/engine';
 import { admitReplica } from '../adapters/pi-durable/replica';
 import { projectDurableEvent } from '../adapters/pi-durable/events';
 const roots: string[] = [];
@@ -46,6 +47,28 @@ describe('real Pi 1.0 durable engine', () => {
       expect(input.calls()).toBe(1); expect(await readFile(receipt, 'utf8')).toBe('old-model-call\n');
       await expect(readFile(path.join(path.dirname(input.file), 'old-effect'))).rejects.toThrow();
     } finally { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await once(child,'close'); } }
+  });
+  it('sends no provider attribution headers, as with Pi 1.3', async () => {
+    const input = await fixture();
+    const model: Model<'openai-completions'> = { id: 'probe/model', name: 'probe', api: 'openai-completions', provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 4096, maxTokens: 64 };
+    const sent: Headers[] = [];
+    const chunk = (body: object) => `data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 0, model: model.id, ...body })}\n\n`;
+    const sse = chunk({ choices: [{ index: 0, delta: { role: 'assistant', content: 'finished' }, finish_reason: null }] })
+      + chunk({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }) + 'data: [DONE]\n\n';
+    const capture: typeof fetch = async (resource, init) => {
+      sent.push(new Headers(resource instanceof Request ? resource.headers : init?.headers));
+      return new Response(sse, { headers: { 'content-type': 'text/event-stream' } });
+    };
+    const stream: typeof streamSimple = (m, context, options) => streamSimple(m, context, { ...options, fetch: capture });
+    const models = createModels(); models.setProvider(createProvider({ id: 'openrouter', auth: { apiKey: { name: 'synthetic', resolve: async () => ({ auth: { apiKey: 'synthetic' } }) } }, models: [model], api: { stream, streamSimple: stream } }));
+    const engine = await openDurableEngine({ ...input, models, model: { provider: 'openrouter', modelId: model.id }, resume: false, beforeTool: async () => {}, events: async () => {}, completed: async () => {} });
+    try { await engine.run(); } finally { await engine.close(); }
+    expect(sent).toHaveLength(1);
+    for (const name of ['http-referer', 'x-openrouter-title', 'x-openrouter-categories']) expect(sent[0]!.has(name), name).toBe(false);
+  });
+  it('never parks a task that restarts cut off, as with Pi 1.3', () => {
+    expect(DURABLE_HARNESS_SETTINGS.restartLimit).toBe(Infinity);
+    expect(DURABLE_HARNESS_IDENTITY).toEqual({ attribution: null });
   });
   it('reacquires a settled execution after reopen without adding Host input or calling the model', async () => {
     const input = await fixture(); let completed = 0;

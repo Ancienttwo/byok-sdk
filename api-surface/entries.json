@@ -606,6 +606,7 @@
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable",
         "@earendil-works/pi-mcp",
+        "@earendil-works/pi-telemetry",
         "@earendil-works/pi-tui",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/core",
@@ -637,6 +638,7 @@
         "linkedom",
         "lru-cache",
         "marked",
+        "marked-cjk-friendly",
         "minimatch",
         "nth-check",
         "openai",
@@ -806,17 +808,17 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 18049,
+          "line": 18249,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 88116,
+          "line": 88316,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96333,
+          "line": 96522,
           "rule": "opaque import()"
         },
         {
@@ -938,6 +940,7 @@
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable",
         "@earendil-works/pi-mcp",
+        "@earendil-works/pi-telemetry",
         "@earendil-works/pi-tui",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/core",
@@ -969,6 +972,7 @@
         "linkedom",
         "lru-cache",
         "marked",
+        "marked-cjk-friendly",
         "minimatch",
         "nth-check",
         "openai",
@@ -1138,12 +1142,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 88041,
+          "line": 88241,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 95572,
+          "line": 95761,
           "rule": "opaque import()"
         },
         {
@@ -1518,6 +1522,7 @@
         "@earendil-works/chord",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-durable",
+        "@earendil-works/pi-telemetry",
         "typebox"
       ],
       "unavailableOptional": [],

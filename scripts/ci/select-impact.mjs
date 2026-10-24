@@ -403,7 +403,7 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     // #652 trims these reviewed files in the pinned OAR snapshot.
-    if (/^packages\/client\/vendor\/oar\/44d7d61\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
+    if (/^packages\/client\/vendor\/oar\/c88a514\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {
@@ -411,7 +411,7 @@ export function selectImpact(paths, context = {}) {
     }
     if (oarSnapshotListed(path, context)) { dirs.add('packages/client'); continue; }
     // The client build copies vendor notices and OAR provenance into dist.
-    if (path === 'packages/client/scripts/build-todo-assets.mjs' || path === 'packages/client/vendor/THIRD-PARTY.md') {
+    if (path === 'packages/client/scripts/build-todo-assets.mjs' || path === 'packages/client/vendor/THIRD-PARTY.md' || path === 'packages/client/vendor/third-party-manifest.json') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
     // The OAR bridge contract: run-targeted runs check-oar-bridge.test.mjs

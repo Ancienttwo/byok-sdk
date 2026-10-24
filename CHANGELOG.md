@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **Changed (client, cloud-do, keys)** — pin the nine official Pi packages to
+  exactly 1.4.0 (closureDigest `79c414be`). A preparation compiled for 1.3.0
+  declines with `preparation_runtime_identity_mismatch`; prepare it again.
+  `copyPiRuntimeAssets` copies the new `vendor/marked-cjk-friendly.min.js`
+  export asset. The pinned pi-ai catalog table follows the 1.4.0 catalog, and
+  `PI_MODEL_CATALOG_PI_AI_VERSION` is `"1.4.0"`. `piModelConfigFromPinnedCatalog`
+  now returns `not_in_catalog` for 11 entries it admitted before: together
+  `Qwen/Qwen2.5-7B-Instruct-Turbo` and `meta-llama/Llama-3.3-70B-Instruct-Turbo`;
+  xiaomi `mimo-v2.5`, `mimo-v2.5-pro` and `mimo-v2.5-pro-ultraspeed`; and
+  `mimo-v2.5` and `mimo-v2.5-pro` on each of `xiaomi-token-plan-ams`,
+  `xiaomi-token-plan-cn` and `xiaomi-token-plan-sgp`. Together
+  `Qwen/Qwen3.7-Max` now returns `unrepresentable` (`thinkingLevelMap`).
+  Saved profiles keep their own `pi_model` config. pi-durable 1.4.0 migrates
+  SQLite stores to schema version 2 (see the breaking entry below). The client
+  durable lane passes `identity: { attribution: null }`, and both Harness lanes
+  set `restartLimit: Infinity` (the exported `CLOUD_HARNESS_SETTINGS` gains
+  the field), so provider headers and restart handling stay as on 1.3.0. See
+  `docs/notes/2026-10-24-pi-1.4.0-oar-0.71.0-upgrade.md`.
+- **Breaking (client, cloud-do)** — pi-durable 1.4.0 migrates a SQLite store
+  to schema version 2 when it opens. A migrated store cannot be opened by a
+  build on Pi 1.3.0, so there is no rollback to 1.3.0 past this release.
+- **Changed (client)** — update the private OAR source to 0.71.0 (`c88a514`).
+  No selected upstream file changed; the thirteen BYOK-maintained files keep
+  their deltas.
 - **Feature (client, protocol, server, cloud)** — a failed task now carries
   `failure.class`, a closed runtime failure class (the vendored OAR
   `FailureClass` values, `unknown` included), and `failure.resetsAt` when the

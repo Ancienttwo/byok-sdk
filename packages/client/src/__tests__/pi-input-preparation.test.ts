@@ -152,7 +152,7 @@ describe('B-P2 native composition: runtime identity', () => {
     expect(identity.packageVersion).toBe(pinned.version);
     expect(identity.packageName).toBe('@earendil-works/pi-coding-agent');
     expect(identity.tarballIntegrity).toMatch(/^sha512-/);
-    expect(identity.upstreamCommit).toBe('71023aec1546d6d677a65669c5665c0927ce0dd0');
+    expect(identity.upstreamCommit).toBe('4a080252f06caf63a525d7873c5d94d3c23887e0');
     expect(identity.closureDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(identity.envelopeFormat).toBe('byok.pi.prepared-input');
     expect(identity.requestFormat).toBe('byok.pi.openai-completions.request');
@@ -303,8 +303,10 @@ describe('B-P2 native composition: pure compile', () => {
     // coding-agent package, its skill/config modules, `yaml`, `ignore` and
     // `cross-spawn` are gone. The one builtin is `node:fs`, reached through a
     // `require("node:fs")` in `utils/provider-env.js` that runs only under a
-    // Bun compiled binary with an empty `process.env`.
-    expect([...walked.thirdParty].sort()).toEqual(['openai', 'partial-json', 'typebox']);
+    // Bun compiled binary with an empty `process.env`. Pi 1.4.0 adds
+    // `@earendil-works/pi-telemetry` through pi-ai's request span schema; the
+    // compile passes no telemetry context, so pi-ai uses its no-op context.
+    expect([...walked.thirdParty].sort()).toEqual(['@earendil-works/pi-telemetry', 'openai', 'partial-json', 'typebox']);
     expect([...walked.builtins].sort()).toEqual(['node:fs']);
 
     // The exact file set the two entries reach, so a new one is a reviewable
@@ -330,6 +332,7 @@ describe('B-P2 native composition: pure compile', () => {
       'dist/models.js',
       'dist/providers/faux.js',
       'dist/session-resources.js',
+      'dist/telemetry.js',
       'dist/types.js',
       'dist/utils/abort.js',
       'dist/utils/diagnostics.js',
@@ -338,11 +341,11 @@ describe('B-P2 native composition: pure compile', () => {
       'dist/utils/event-stream.js',
       'dist/utils/hash.js',
       'dist/utils/headers.js',
+      'dist/utils/identity.js',
       'dist/utils/json-parse.js',
       'dist/utils/model-operations.js',
       'dist/utils/models-error.js',
       'dist/utils/overflow.js',
-      'dist/utils/pi-user-agent.js',
       'dist/utils/provider-env.js',
       'dist/utils/provider-retry.js',
       'dist/utils/retry.js',
@@ -352,6 +355,7 @@ describe('B-P2 native composition: pure compile', () => {
       'dist/utils/typebox-helpers.js',
       'dist/utils/uuid.js',
       'dist/utils/validation.js',
+      'dist/utils/version.js',
     ]);
     // The file that OWNS the serialization still carries the stricter rule:
     // the official `openai-completions.js` names no I/O builtin and reads no
