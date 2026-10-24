@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hash } from '@byok-sdk/example-host-execution-core';
+import { hash, taskId } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from './model';
 import { outcomeSchema } from './schema';
@@ -8,7 +8,7 @@ import type { Command } from './rules/commands';
 import { TeamModeError, type TeamSnapshotBot } from './rules/team';
 import { BOT_TURN_OUTCOME_CONTRACT } from '@byok-sdk/protocol';
 import { OFFER_WAIT_MS, syncTurn, type SyncFacts, type SyncOptions, type SyncStep } from './rules/sync';
-import type { Conclusion } from './rules/delegation';
+import type { Conclusion, DelegationTimers } from './rules/delegation';
 import type { Json } from './rules/turn';
 
 /**
@@ -300,5 +300,182 @@ export function syncVectors(name: string, open: () => SyncSubject | Promise<Sync
       expect(await subject.stored()).toBe(before);
       expect(await subject.intent('q1')).toBeUndefined();
     });
+  });
+}
+
+/**
+ * #793 D2f-5: the delegation settlement of the Host sync. `settle` is one Host sync: the per-Turn steps of the sync contract,
+ * then K8 `settleDelegations` on the store's own intent facts, as L's sync runs it after the Turn steps. A store may run more
+ * rounds in one sync, and it may deliver a cancel fact to K4 in it; these vectors sync until nothing changes, and they end a
+ * cancelled target with `conclude`, as the K4 drain or the reconciliation would. The fact edits are outside the contract:
+ * each one writes the K4 evidence in the store's own shape, and the store's adapter reads the facts from it.
+ */
+export interface SettlementSubject extends SyncSubject {
+  settle(now: number, timers?: DelegationTimers): void | Promise<void>;
+  /** A test edit: the first attempt of the Turn's intent was submitted, with no claim. */
+  submit(turnId: string): void | Promise<void>;
+  /** A test edit: a device claimed the first attempt (K4 `Execution.started`). */
+  claim(turnId: string): void | Promise<void>;
+  /** A test edit: the device terminal of the first attempt. */
+  terminal(turnId: string, type: string, payload: Json): void | Promise<void>;
+  /** A test edit: the intent concludes, with the K4 cancel reason when one is given. */
+  conclude(turnId: string, conclusion: Conclusion, cancelReason?: 'cancelled' | 'expired'): void | Promise<void>;
+}
+export function settlementVectors(name: string, open: () => SettlementSubject | Promise<SettlementSubject>): void {
+  describe(`settlement contract: ${name}`, () => {
+    const TIMERS: DelegationTimers = { cancelGraceMs: 1_000, uncertainAfterMs: 5_000 };
+    /** Syncs until a sync writes nothing. */
+    const settled = async (subject: SettlementSubject, now = VECTOR_NOW, timers?: DelegationTimers) => {
+      for (let round = 0; round < 5; round++) {
+        const before = await subject.stored();
+        await subject.settle(now, timers);
+        if (await subject.stored() === before) return;
+      }
+      throw new Error('The sync does not settle');
+    };
+    let commands = 0;
+    const commit = async (subject: SettlementSubject, command: Command) => {
+      const result = await subject.commit({ scope: subject.scope, commandId: `settle-${++commands}`, command });
+      if (result.disposition.outcome !== 'accepted') throw new Error(`Refused ${command.kind}: ${JSON.stringify(result.disposition)}`);
+      return (result.disposition as { value?: unknown }).value;
+    };
+    /** An owner Turn of the Main Bot that ends with `document` as its outcome. */
+    const owner = async (subject: SettlementSubject, key: string, document: Json) => {
+      const turnId = await commit(subject, { kind: 'input', botId: 'main', key, request: key, sender: 'owner' }) as string;
+      await settled(subject);
+      await commit(subject, { kind: 'outcome', turnId, taskId: taskId(turnId, 0), document });
+      await subject.terminal(turnId, 'task.complete', { document });
+      await subject.conclude(turnId, 'succeeded');
+      await settled(subject);
+      return turnId;
+    };
+    /** The Main Bot delegated to Bot `b`, and B's request Turn froze. Returns the delegation id, which is also that Turn's id. */
+    const delegated = async () => {
+      const subject = await open();
+      await subject.change(state => {
+        Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+        state.team.bots.b = { ...state.team.bots.main!, id: 'b', name: 'B', role: 'Reviewer', mainBot: false, execution: template('device', 'b') };
+      });
+      const root = await owner(subject, 'r1', { delegate: [{ to: 'b', request: 'Check' }] });
+      const id = hash([taskId(root, 0), 'delegate', 0]);
+      expect(await subject.intent(id)).toMatchObject({ key: id });
+      return { subject, root, id, delegation: async () => (await subject.state()).delegations[id]! };
+    };
+    const unit = (state: CollaborationState, id: string) => state.units[hash([id, 'B'])]!.state;
+
+    const ends: Array<[string, (subject: SettlementSubject, id: string) => Promise<void>, { verdict: string; reason?: string }, 'spent' | 'released']> = [
+      ['a failed terminal', async (subject, id) => { await subject.terminal(id, 'task.fail', {}); await subject.conclude(id, 'failed'); }, { verdict: 'failed' }, 'spent'],
+      ['a busy decline', async (subject, id) => { await subject.terminal(id, 'task.decline', { code: 'agent_home_writer_busy' }); await subject.conclude(id, 'declined'); },
+        { verdict: 'failed', reason: 'busy' }, 'released'],
+      ['a decline with no code', async (subject, id) => { await subject.terminal(id, 'task.decline', {}); await subject.conclude(id, 'declined'); },
+        { verdict: 'failed', reason: 'busy' }, 'released'],
+      ['another decline', async (subject, id) => { await subject.terminal(id, 'task.decline', { code: 'model_unavailable' }); await subject.conclude(id, 'declined'); },
+        { verdict: 'failed', reason: 'model_unavailable' }, 'released'],
+      ['an expiry', async (subject, id) => { await subject.conclude(id, 'expired'); }, { verdict: 'expired' }, 'released'],
+      ['a cancel that raced the wait deadline', async (subject, id) => { await subject.conclude(id, 'cancelled', 'expired'); },
+        { verdict: 'expired', reason: 'claim_raced_deadline' }, 'released'],
+      ['a cancel', async (subject, id) => { await subject.conclude(id, 'cancelled', 'cancelled'); }, { verdict: 'cancelled', reason: 'user_cancelled' }, 'released'],
+    ];
+    for (const [end, conclude, verdict, units] of ends) {
+      it(`gives ${end} of the chain end its verdict, and spends or releases the unit`, async () => {
+        const { subject, id, delegation } = await delegated();
+        await conclude(subject, id);
+        await settled(subject);
+        const state = await subject.state(), d = await delegation();
+        expect(d).toMatchObject({ ...verdict, status: 'resolved', replyTurnId: hash(['bot_reply', id]) });
+        if (!verdict.reason) expect(d.reason).toBeUndefined();
+        expect(unit(state, id)).toBe(units);
+        expect(state.turns[d.replyTurnId!]).toMatchObject({ source: 'bot_reply', botId: 'main', replies: [expect.objectContaining(verdict)] });
+      });
+    }
+
+    it('spends the unit at the first claim, and the delegation runs', async () => {
+      const { subject, id, delegation } = await delegated();
+      const root = (await delegation()).root, before = (await subject.state()).budgets[root]!;
+      await subject.claim(id);
+      await settled(subject);
+      const state = await subject.state();
+      expect(unit(state, id)).toBe('spent');
+      expect(state.budgets[root]).toMatchObject({ reserved: before.reserved! - 1, delegation: before.delegation + 1 });
+      expect(await delegation()).toMatchObject({ status: 'running', claimed: { turnId: id, at: VECTOR_NOW } });
+      expect(await subject.projection(`delegation:${id}:2`)).toEqual([expect.objectContaining({ status: 'running' })]);
+    });
+
+    it('takes a decline terminal as no start, and any other terminal as a start', async () => {
+      const declined = await delegated();
+      await declined.subject.terminal(declined.id, 'task.decline', { code: 'model_unavailable' });
+      await settled(declined.subject);
+      expect(unit(await declined.subject.state(), declined.id)).toBe('reserved');
+      expect((await declined.delegation()).status).not.toBe('running');
+      const failed = await delegated();
+      await failed.subject.terminal(failed.id, 'task.fail', {});
+      await settled(failed.subject);
+      expect(unit(await failed.subject.state(), failed.id)).toBe('spent');
+      expect(await failed.delegation()).toMatchObject({ status: 'running' });
+    });
+
+    it('refuses a delegation whose target Bot was archived (target_archived), once its target concluded', async () => {
+      const { subject, id, delegation } = await delegated();
+      await subject.change(state => { state.team.bots.b!.archived = true; });
+      await settled(subject);
+      expect(await delegation()).toMatchObject({ cancel: { reason: 'target_archived', targetTurnId: id } });
+      await subject.conclude(id, 'cancelled', 'cancelled');
+      await settled(subject);
+      expect(await delegation()).toMatchObject({ verdict: 'refused', reason: 'target_archived', status: 'resolved' });
+    });
+
+    it('shows a cancel with no conclusion as uncertain once the cancel grace passed', async () => {
+      const { subject, id, delegation } = await delegated();
+      await subject.submit(id);
+      await subject.change(state => { state.team.bots.b!.archived = true; });
+      await settled(subject, VECTOR_NOW, TIMERS);
+      await settled(subject, VECTOR_NOW + TIMERS.cancelGraceMs - 1, TIMERS);
+      expect((await delegation()).status).not.toBe('uncertain');
+      await settled(subject, VECTOR_NOW + TIMERS.cancelGraceMs, TIMERS);
+      expect(await delegation()).toMatchObject({ status: 'uncertain', uncertainSince: VECTOR_NOW + TIMERS.cancelGraceMs });
+      expect(await delegation()).not.toHaveProperty('verdict');
+    });
+
+    /** A claimed chain end with no conclusion, `uncertain` once `uncertainAfterMs` passed. */
+    const uncertainClaim = async () => {
+      const h = await delegated();
+      await h.subject.claim(h.id);
+      await settled(h.subject, VECTOR_NOW, TIMERS);
+      await settled(h.subject, VECTOR_NOW + TIMERS.uncertainAfterMs - 1, TIMERS);
+      expect((await h.delegation()).status).toBe('running');
+      await settled(h.subject, VECTOR_NOW + TIMERS.uncertainAfterMs, TIMERS);
+      expect(await h.delegation()).toMatchObject({ status: 'uncertain', uncertainSince: VECTOR_NOW + TIMERS.uncertainAfterMs });
+      return h;
+    };
+    it('shows a claimed chain end with no conclusion as uncertain once uncertainAfterMs passed', async () => { await uncertainClaim(); });
+
+    it('writes a terminal that comes after the verdict to the audit list only, once', async () => {
+      const { subject, id, delegation } = await uncertainClaim();
+      await commit(subject, { kind: 'abandon_delegation', delegationId: id });
+      expect(await delegation()).toMatchObject({ verdict: 'abandoned', lateTurnId: id });
+      await subject.conclude(id, 'cancelled', 'cancelled');
+      await settled(subject, VECTOR_NOW + TIMERS.uncertainAfterMs, TIMERS);
+      const state = await subject.state();
+      expect(state.audit.filter(line => line.includes(id))).toEqual([`Delegation terminal after verdict: ${id} ${taskId(id, 0)}`]);
+      expect(state.delegations[id]).not.toHaveProperty('lateTurnId');
+      expect(state.delegations[id]).toMatchObject({ verdict: 'abandoned' });
+    });
+
+    for (const tried of [false, true]) {
+      it(`resolves a Main Bot cancel of ${tried ? 'a tried' : 'an untried'} target from a later owner Turn's outcome once the target concluded`, async () => {
+        const { subject, id, delegation } = await delegated();
+        if (tried) await subject.submit(id);
+        await owner(subject, 'r2', { cancel_delegation: [{ delegationId: id }] });
+        expect(await delegation()).toMatchObject({ cancel: { reason: 'main_bot_cancelled', targetTurnId: id } });
+        if (tried) {
+          const open = await delegation();
+          expect(open).not.toHaveProperty('verdict');
+          expect(open.status).not.toBe('uncertain');
+        }
+        await subject.conclude(id, 'cancelled', 'cancelled');
+        await settled(subject);
+        expect(await delegation()).toMatchObject({ verdict: 'cancelled', reason: 'main_bot_cancelled', status: 'resolved' });
+      });
+    }
   });
 }

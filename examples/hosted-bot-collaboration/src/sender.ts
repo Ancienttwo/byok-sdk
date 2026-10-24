@@ -78,8 +78,9 @@ export class HostedOutboxSender {
         if (step !== true) pass.failed.push({ scope, id, error: step.error });
       } catch (error) {
         pass.failed.push({ scope, id, error });
-        // A failure to write the wait is a store failure, not a row failure, so it ends the pass.
-        await this.store.deferOutbox(scope, id, this.now, this.backoffMs);
+        // A failure to write the wait is a store failure, not a row failure, so it ends the pass. It keeps the step error.
+        try { await this.store.deferOutbox(scope, id, this.now, this.backoffMs); }
+        catch (deferError) { throw new AggregateError([deferError, error], message(deferError)); }
       }
     }
     return pass;
@@ -96,22 +97,23 @@ export class HostedOutboxSender {
       return found.rows[0];
     });
     if (!claim) return false;
-    let error: unknown;
+    // A tagged failure: a receiver may reject with `undefined`, and that is a failure too.
+    let failure: { error: unknown } | undefined;
     try { await this.deadline(signal => this.options.projections.deliver(scope, id, claim.body, signal)); }
-    catch (cause) { error = cause; }
+    catch (error) { failure = { error }; }
     await inSchema(this.pool, this.store.schema, async client => {
       await lockScope(client, scopeKey);
       const now = this.now();
       // A settle after another claim took the row matches nothing.
-      if (error === undefined) {
+      if (!failure) {
         await client.query(`UPDATE outbox SET settled_at = $4, last_error = NULL WHERE scope = $1 AND key = $2 AND tries = $3
           AND settled_at IS NULL`, [scopeKey, key, claim.tries, now]);
       } else {
         await client.query(`UPDATE outbox SET last_error = $4, next_at = $5 WHERE scope = $1 AND key = $2 AND tries = $3
-          AND settled_at IS NULL`, [scopeKey, key, claim.tries, message(error), now + this.backoffMs]);
+          AND settled_at IS NULL`, [scopeKey, key, claim.tries, message(failure.error), now + this.backoffMs]);
       }
     });
-    return error === undefined ? true : { error };
+    return failure ?? true;
   }
 
   /** D1-D5 of one delivery row. Returns false when the row needed no step. */

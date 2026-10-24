@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
-import { canonical, occurrenceRun, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
+import { canonical, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
 import { botRoutines, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
 import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
 /** A K8 `update_routine` action. */
@@ -65,10 +65,10 @@ export interface HostedStoreOptions {
   channel?: boolean;
 }
 /**
- * The sender's view of one delivery step (#793 D2b-out-2). `send`: the claim committed; send `body` on `route` now.
- * `readback`: read back the row's `unknown` attempt `attempt`, and give its result with that attempt.
+ * The sender's view of one delivery step (#793 D2b-out-2). `none`: the claim changed nothing. `moved`: it changed the entity
+ * or its wait, and there is nothing to call. `send`: the claim committed; send `body` on `route` now. `readback`: read back
+ * the row's `unknown` attempt `attempt`, and give its result with that attempt.
  */
-/** `none`: the claim changed nothing. `moved`: it changed the entity or its wait, and there is nothing to call. */
 export type DeliveryClaim = { kind: 'none' } | { kind: 'moved' } | { kind: 'readback'; attempt: number }
   | { kind: 'send'; attempt: number; route: ReplyRoute | PushRoute; body: string };
 /** The outbox index times of a delivery that the sender owns: its lease, and the wait of an `unknown` row. */
@@ -206,7 +206,9 @@ export class HostedCollaborationStore {
    * batch join), it reads the facts again and runs the Turns again. Each such step happens once per intent, occurrence,
    * fact or join, so the rounds end.
    */
-  sync(scope: string, options: HostedSyncOptions): Promise<void> {
+  async sync(scope: string, options: HostedSyncOptions): Promise<void> {
+    // As L checks its timers (K8 host.ts constructor).
+    if (options.timers && (time(options.timers.cancelGraceMs) < 1 || time(options.timers.uncertainAfterMs) < 1)) throw new Error('Invalid delegation timers');
     const key = storedKey(scope);
     return this.change(scope, undefined, async (state, publish, client) => {
       const published = new Set<string>();
@@ -405,9 +407,9 @@ export class HostedCollaborationStore {
           return done({ kind: 'moved' });
         }
         if (row.state === 'unknown') {
+          // Another sender's readback holds the row until its lease passes, and a row that waits is not due yet.
+          if (Number(index.next_at) > now) return done({ kind: 'none' });
           if (times.readback) {
-            // Another sender's readback holds the row until its lease passes.
-            if (Number(index.next_at) > now) return done({ kind: 'none' });
             nextAt = now + times.leaseMs;
             return done({ kind: 'readback', attempt: row.attempts });
           }

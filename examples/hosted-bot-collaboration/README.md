@@ -150,8 +150,8 @@ the verdict comes at the next sync of the scope.
 
 H does not yet run these L sync and pass steps: `sealDueBatches`, card expiry, `advanceRooms`, the card decision
 projections and their `action_result` Turns, `projectInputBatches`, the reply checks (`reconcileReply`, `retryReply`),
-the device observation (`observeDevices`), and the card and Agent home flushes. They need a due time per scope, which
-H does not store.
+the device observation (`observeDevices`), and the card and Agent home flushes. Some of them (the batch seal, card
+expiry and the reply checks) need a due time per scope, which H does not store; their placement is owner item O-4.
 
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
 record and keeps the revision. A throw writes nothing. The rule's `executionStarted` fact is the intent's `started`
@@ -379,8 +379,8 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
 - **Retention.** The Host calls `retain(scope, input, limits)` with the acknowledged roots. `retentionMs` must be at
   least seven days (see Retention). The SDK side has its own `retentionPolicyId` in the tenant's entitlement.
 - **Workers.** The Host runs, each on its own interval: `HostedSubmitter.run()`, `HostedReconciler.run()`,
-  `store.sync(scope, …)` for each scope that changed (the `changed` option of `HostedReconciler` and
-  `HostedRoutineScheduler`, and the scope of each commit, consume and fire), and for every scope on its own interval as
+  `store.sync(scope, …)` for each scope that changed (the `changed` option of `HostedReconciler`, for a conclusion or
+  a first claim, and of `HostedRoutineScheduler`, for a fire, and the scope of each commit and consume), and for every scope on its own interval as
   the fallback for timers (there is no due index), `HostedOutboxSender.run()` with the projection receiver and the channel,
   and `HostedRoutineScheduler.run()` every `intervalMs` after one `start()`. A Host with a channel opens its store with
   `{ channel: true }`.

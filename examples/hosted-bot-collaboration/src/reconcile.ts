@@ -31,9 +31,10 @@ export interface ReconcilerOptions {
   /** The most rows that one pass takes. */
   batch?: number;
   /**
-   * Called once for each scope where this pass committed a conclusion, in the order of its first one, at the end of the pass
-   * before it returns (#793 D2f-5). The Host syncs those scopes, so the steps that follow, such as a delegation verdict or a freeze, run at once. Work that threw or rolled back
-   * reports nothing. A throw from the callback propagates.
+   * Called once for each scope where this pass committed a conclusion or a first claim (`started`), in the order of its first
+   * one, at the end of the pass before it returns (#793 D2f-5). The Host syncs those scopes, so the steps that follow, such as
+   * a delegation verdict, a unit spend or a freeze, run at once, as L syncs after the drain that saw them. Work that threw or
+   * rolled back reports nothing. A throw from the callback propagates.
    */
   changed?: (scope: string) => void;
 }
@@ -65,7 +66,7 @@ export class HostedReconciler {
     const pass: ReconcilePass = { concluded: 0, failed: [] }, changed = new Set<string>();
     for (const row of due.rows) {
       try {
-        if (await this.reconcile(row.scope, row.key)) {
+        if (await this.reconcile(row.scope, row.key, () => changed.add(JSON.parse(row.scope) as string))) {
           pass.concluded++;
           changed.add(JSON.parse(row.scope) as string);
         }
@@ -80,7 +81,7 @@ export class HostedReconciler {
   }
 
   /** K4 `reconcile` for one tried row. Returns true when the row concluded. */
-  private async reconcile(scopeKey: string, key: string): Promise<boolean> {
+  private async reconcile(scopeKey: string, key: string, started: () => void): Promise<boolean> {
     const row = await this.read(scopeKey, key);
     if (!row || row.concluded) return false;
     const port = this.options.port(JSON.parse(scopeKey) as string), task = row.input.taskId;
@@ -107,7 +108,7 @@ export class HostedReconciler {
       if (!attempt) throw new Error('Attempt disappeared after cancellation');
       terminal = await port.deviceTerminal(task);
     }
-    if (attempt) await this.record(scopeKey, key, attempt);
+    if (attempt && await this.record(scopeKey, key, attempt)) started();
     if (attempt?.status === 'cancelled' && !attempt.claimedRuntime && !attempt.ownerDeviceId && !terminal) {
       return this.conclude(scopeKey, key, cancelReason === 'expired' ? 'expired' : 'cancelled');
     }
@@ -149,10 +150,15 @@ export class HostedReconciler {
   }
 
   /** Saves the last attempt, and K4 `started` once the attempt has a claim. */
-  private record(scopeKey: string, key: string, attempt: TaskAttempt): Promise<void> {
+  /** Stores the attempt, and the first claim. Returns true when this write committed the first claim. */
+  private record(scopeKey: string, key: string, attempt: TaskAttempt): Promise<boolean> {
+    const claimed = !!(attempt.claimedRuntime || attempt.ownerDeviceId);
     return this.locked(scopeKey, async client => {
+      const before = (await client.query<{ started: boolean }>('SELECT started FROM intent WHERE scope = $1 AND key = $2 AND conclusion IS NULL',
+        [scopeKey, key])).rows[0];
       await client.query(`UPDATE intent SET attempt = $3::json, started = started OR $4 WHERE scope = $1 AND key = $2 AND conclusion IS NULL`,
-        [scopeKey, key, JSON.stringify(attempt), !!(attempt.claimedRuntime || attempt.ownerDeviceId)]);
+        [scopeKey, key, JSON.stringify(attempt), claimed]);
+      return !!before && !before.started && claimed;
     });
   }
 

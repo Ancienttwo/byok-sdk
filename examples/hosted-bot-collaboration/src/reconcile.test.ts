@@ -186,6 +186,31 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
     expect([revisionOf(await store().read(scope)), await commands(scope)]).toEqual([0, []]);
   });
 
+  it('reports a scope where the pass recorded a first claim with no conclusion, and not a claim recorded before (#793 D2f-5)', async () => {
+    const { scope, input } = await tried(), sdk = fakePort();
+    const changed: string[] = [], pass = () => new HostedReconciler(opened!.pool, store().schema, store(),
+      { port: () => sdk.port, ports: vectorPorts, pollMs: 0, now: () => clock, changed: reported => { changed.push(reported); } }).run();
+    sdk.deliver(input);
+    expect(await pass()).toEqual({ concluded: 0, failed: [] });
+    expect(changed).toEqual([]);
+    sdk.deliver(input, { status: 'claimed', ownerDeviceId: 'device' });
+    expect(await pass()).toEqual({ concluded: 0, failed: [] });
+    expect(changed).toEqual([scope]);
+    expect(await row(scope, 'q1')).toMatchObject({ started: true, conclusion: null });
+    expect(await pass()).toEqual({ concluded: 0, failed: [] });
+    expect(changed).toEqual([scope]);
+  });
+
+  it('lets a throw from the changed callback propagate, after the conclusion committed (#793 D2f-5)', async () => {
+    const { scope, input } = await tried(), sdk = fakePort();
+    sdk.deliver(input, { status: 'complete', ownerDeviceId: 'device', cancellation: { requestedAt: 'now' } });
+    sdk.complete(input, DOCUMENT);
+    const throwing = new HostedReconciler(opened!.pool, store().schema, store(), { port: () => sdk.port, ports: vectorPorts, pollMs: 0, now: () => clock,
+      changed: () => { throw new Error('Host sync refused'); } });
+    await expect(throwing.run()).rejects.toThrow('Host sync refused');
+    expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled' });
+  });
+
   it('cancels the SDK task of a sync-cancelled tried row, and concludes cancelled once the attempt is cancelled unclaimed', async () => {
     const { scope, input } = await tried(), sdk = fakePort();
     sdk.deliver(input);
@@ -304,7 +329,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
       { port: () => sdk.port, ports: vectorPorts, pollMs: 0, now: () => clock, changed: scope => { changed.push(scope); } }).run();
     expect([pass.concluded, pass.failed.map(failure => [failure.turnId, (failure.error as Error).message])])
       .toEqual([3, [['b1', 'Attempt identity conflict'], ['c1', 'Projection identity conflict']]]);
-    expect(changed).toEqual([a.scope, e.scope]);
+    // c committed its first claim before its terminal transaction rolled back, so the Host syncs it too.
+    expect(changed).toEqual([a.scope, c.scope, e.scope]);
     expect(await row(c.scope, 'c1')).toMatchObject({ conclusion: null, terminal: null });
     expect(await row(d.scope, 'd1')).toMatchObject({ conclusion: null });
   });

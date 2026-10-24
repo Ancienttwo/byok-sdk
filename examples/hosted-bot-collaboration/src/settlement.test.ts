@@ -5,7 +5,9 @@ import { hash, taskId, type Json } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import type { Command, DelegationTimers } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
+import { seedCollaboration, settlementVectors, SYNC_OPTIONS, VECTOR_NOW, type SettlementSubject,
+  type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
+import type { FrozenInput } from '@byok-sdk/example-host-execution-core';
 import { frozenIntent, settleFacts } from './intents';
 import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
@@ -55,9 +57,48 @@ async function delegated() {
     stored: () => store().dump(scope) };
 }
 
+/**
+ * The shared K8 settlement vectors on H, in a new scope of the test schema: `settle` is `store.sync`, and the fact edits write
+ * the intent row columns that `settleFacts` reads, as the L subject writes the K4 ledger that K8 `intentFacts` reads.
+ */
+async function settlementSubject(): Promise<SettlementSubject> {
+  const scope = `tenant:${randomUUID()}`, pool = opened!.pool;
+  await store().seed(scope, state => seedCollaboration(state));
+  await store().bindDevice(scope, 'device');
+  const set = (turnId: string, columns: string, values: unknown[] = []) =>
+    pool.query(`UPDATE ${table('intent')} SET ${columns} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turnId), ...values]);
+  return {
+    scope,
+    commit: request => store().commit(scope, request, vectorPorts),
+    stored: () => store().dump(scope),
+    state: () => store().read(scope),
+    change: edit => store().seed(scope, edit),
+    sync: () => store().sync(scope, { ...SYNC_OPTIONS, history: undefined }),
+    settle: (now, timers) => store().sync(scope, { ...SYNC_OPTIONS, now, history: undefined, ...(timers ? { timers } : {}) }),
+    intent: async turnId => {
+      const row = (await pool.query<{ key: string; source: SyncIntentRecord['source']; input: FrozenInput; wait_until: string }>(
+        `SELECT key, source, input, wait_until::text FROM ${table('intent')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turnId)])).rows[0];
+      if (!row) return undefined;
+      const { taskId: _, ...execution } = row.input;
+      return { key: JSON.parse(row.key) as string, source: row.source, waitUntil: Number(row.wait_until), execution };
+    },
+    concludeIntent: async (turnId, conclusion) => { await set(turnId, 'conclusion = $3', [conclusion]); },
+    projection: async id => (await pool.query<{ body: never }>(`SELECT body FROM ${table('outbox')} WHERE scope = $1 AND key = $2 AND kind = 'projection'`,
+      [storedKey(scope), storedKey(id)])).rows.map(row => row.body),
+    submit: async turnId => { await set(turnId, `submission = 'uncertain', tries = 1`); },
+    claim: async turnId => { await set(turnId, `submission = 'delivered', tries = 1, started = true`); },
+    terminal: async (turnId, type, payload) => { await set(turnId, 'terminal = $3::json', [JSON.stringify({ envelope: { task_id: taskId(turnId, 0), type, payload } })]); },
+    conclude: async (turnId, conclusion, cancelReason) => {
+      await set(turnId, 'conclusion = $3, cancel_reason = coalesce($4, cancel_reason)', [conclusion, cancelReason ?? null]);
+    },
+  };
+}
+
 describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5)', () => {
   beforeAll(async () => { opened = await openStore(); });
   afterAll(async () => { await opened?.close(); });
+
+  settlementVectors('H HostedCollaborationStore on Postgres', settlementSubject);
 
   const TIMERS: DelegationTimers = { cancelGraceMs: 1_000, uncertainAfterMs: 5_000 };
   const unit = (state: CollaborationState, id: string) => state.units[hash([id, 'B'])]!.state;
@@ -70,7 +111,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
 
   it('gives each chain end that did not succeed its K8 verdict at the next sync, and the same sync freezes the report to A', async () => {
     const cases: Array<[string, (h: Awaited<ReturnType<typeof delegated>>) => Promise<unknown>, { verdict: string; reason?: string }, 'spent' | 'released']> = [
-      ['a failed terminal', h => h.finish(h.id, 'task.failed'), { verdict: 'failed' }, 'spent'],
+      ['a failed terminal', h => h.finish(h.id, 'task.fail'), { verdict: 'failed' }, 'spent'],
       ['a busy decline', h => h.finish(h.id, 'task.decline', { code: 'agent_home_writer_busy' }), { verdict: 'failed', reason: 'busy' }, 'released'],
       ['a decline with no code', h => h.finish(h.id, 'task.decline'), { verdict: 'failed', reason: 'busy' }, 'released'],
       ['another decline', h => h.finish(h.id, 'task.decline', { code: 'model_unavailable' }), { verdict: 'failed', reason: 'model_unavailable' }, 'released'],
@@ -227,6 +268,17 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
     });
   });
 
+  it('refuses delegation timers that L refuses, before it reads or writes', async () => {
+    const h = await delegated(), before = await h.stored();
+    for (const [timers, message] of [[{ cancelGraceMs: 0, uncertainAfterMs: 5_000 }, 'Invalid delegation timers'],
+      [{ cancelGraceMs: 1_000, uncertainAfterMs: 0 }, 'Invalid delegation timers'], [{ cancelGraceMs: -1, uncertainAfterMs: 5_000 }, 'Time must be'],
+      [{ cancelGraceMs: 1_000, uncertainAfterMs: Number.NaN }, 'Time must be'], [{ cancelGraceMs: 1.5, uncertainAfterMs: 5_000 }, 'Time must be']] as const) {
+      await expect(h.sync(VECTOR_NOW, timers), JSON.stringify(timers)).rejects.toThrow(message);
+    }
+    expect(await h.stored()).toBe(before);
+    await expect(h.sync(VECTOR_NOW, { cancelGraceMs: 1, uncertainAfterMs: 1 })).resolves.toBeUndefined();
+  });
+
   it('writes nothing when the settlement throws', async () => {
     const h = await delegated();
     await h.set(h.id, `submission = 'delivered', tries = 1, started = true`);
@@ -286,7 +338,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
     expect(await facts()).toMatchObject({ started: [false, true, false], decline: 'model_unavailable' });
     await terminal('task.decline', {});
     expect(await facts()).toMatchObject({ started: [false, true, false], decline: undefined });
-    await terminal('task.failed', { code: 'model_unavailable' });
+    await terminal('task.fail', { code: 'model_unavailable' });
     expect(await facts()).toMatchObject({ started: [true, true, false], decline: undefined });
     await h.set(h.id, `terminal = NULL, started = true`);
     expect(await facts()).toMatchObject({ started: [true, true, false], decline: undefined });
