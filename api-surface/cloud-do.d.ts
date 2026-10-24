@@ -556,6 +556,10 @@ import { CloudState, type RunRow } from './cloud-state';
 import { InvocationLedger, type InvocationRow, type InvocationTerminalState } from './invocation-ledger';
 import { type PlatformProfileId } from './platform-credentials';
 import { type CloudToolDispatcher } from './tools';
+/**
+ * `restartLimit: Infinity` keeps the Pi 1.3 behavior: a task that an eviction,
+ * crash or reset cut off is run again on the next open, never parked.
+ */
 export declare const CLOUD_HARNESS_SETTINGS: {
     readonly compaction: {
         readonly enabled: false;
@@ -567,6 +571,7 @@ export declare const CLOUD_HARNESS_SETTINGS: {
     readonly stream: {
         readonly maxRetries: 0;
     };
+    readonly restartLimit: number;
 };
 export interface ExecutionLease {
     conversationId?: number;

@@ -13,8 +13,12 @@ import { CLOUD_BUDGET, CLOUD_LIMITS, admitSessionConfig, type CloudSessionConfig
 import { openDurableObjectStorage } from './storage';
 import { admitCloudDispatcher, dispatcherDigest, CLOUD_DOMAIN_ERROR_CODES, argsDigest, canonicalArgs, invocationId, replayForTool, type CloudToolDispatcher } from './tools';
 
+/**
+ * `restartLimit: Infinity` keeps the Pi 1.3 behavior: a task that an eviction,
+ * crash or reset cut off is run again on the next open, never parked.
+ */
 export const CLOUD_HARNESS_SETTINGS = {
-  compaction: { enabled: false }, retry: { enabled: false, maxRetries: 0 }, stream: { maxRetries: 0 },
+  compaction: { enabled: false }, retry: { enabled: false, maxRetries: 0 }, stream: { maxRetries: 0 }, restartLimit: Infinity,
 } as const;
 
 class StaleInvocationAttempt extends CloudDoError {

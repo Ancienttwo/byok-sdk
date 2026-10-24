@@ -19,6 +19,15 @@ export interface DurableEngineInput {
   /** Called once the durable run settled successfully. The structured outcome, if any, went through `submit_result`. */
   completed(): Promise<void>;
 }
+/**
+ * `restartLimit: Infinity` keeps the Pi 1.3 behavior: a task cut off by a crash
+ * is run again on the next open, never parked as `restart_limit`.
+ */
+export const DURABLE_HARNESS_SETTINGS = {
+  retry: { enabled: false, maxRetries: 0 }, compaction: { enabled: false }, stream: { maxRetries: 0 }, restartLimit: Infinity,
+} as const;
+/** No provider attribution headers, as with Pi 1.3; the Harness default attributes requests to pi. */
+export const DURABLE_HARNESS_IDENTITY = { attribution: null } as const;
 /** The worker owns the lock until Harness, tools and storage have quiesced. */
 export async function openDurableEngine(input: DurableEngineInput) {
   const ctx = BACKGROUND_CONTEXT;
@@ -47,8 +56,7 @@ export async function openDurableEngine(input: DurableEngineInput) {
     })] });
     const registry = createRegistry(); registry.install(extension);
     harness = await Harness.open(await (input.storageFactory ?? openLocalDurableStorage)(input.file), {
-      models: input.models, registry, env: () => env,
-      settings: { retry: { enabled: false, maxRetries: 0 }, compaction: { enabled: false }, stream: { maxRetries: 0 } },
+      models: input.models, identity: DURABLE_HARNESS_IDENTITY, registry, env: () => env, settings: DURABLE_HARNESS_SETTINGS,
     }, ctx);
     // inspect is read-only and never enables scheduling. Unknown replica work cannot grant authority.
     const inspection = await harness.inspect(ctx);

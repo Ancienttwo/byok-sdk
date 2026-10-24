@@ -8,11 +8,13 @@
   `copyPiRuntimeAssets` copies the new `vendor/marked-cjk-friendly.min.js`
   export asset. The pinned pi-ai catalog table follows the 1.4.0 catalog, and
   `PI_MODEL_CATALOG_PI_AI_VERSION` is `"1.4.0"`. pi-durable 1.4.0 migrates
-  SQLite stores to schema version 2, which 1.3.0 cannot open, so a deployment
-  cannot roll back past this release. Its Harness attributes provider requests
-  to pi on the client durable lane, and parks a task after five restarts
-  without a commit (`restartLimit`, Durable Object evictions included). See
-  `docs/notes/2026-10-24-pi-1.4.0-oar-0.71.0-upgrade.md`.
+  SQLite stores to schema version 2 (see the breaking entry below). The client
+  durable lane passes `identity: { attribution: null }`, and both Harness lanes
+  set `restartLimit: Infinity` (the exported `CLOUD_HARNESS_SETTINGS` gains
+  the field), so provider headers and restart handling stay as on 1.3.0. See `docs/notes/2026-10-24-pi-1.4.0-oar-0.71.0-upgrade.md`.
+- **Breaking (client, cloud-do)** — pi-durable 1.4.0 migrates a SQLite store
+  to schema version 2 when it opens. A migrated store cannot be opened by a
+  build on Pi 1.3.0, so there is no rollback to 1.3.0 past this release.
 - **Changed (client)** — update the private OAR source to 0.71.0 (`c88a514`).
   No selected upstream file changed; the nine BYOK-maintained files keep their
   deltas.
