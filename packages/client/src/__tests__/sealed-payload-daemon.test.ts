@@ -533,6 +533,26 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     }
   }, 30_000);
 
+  it.each([
+    [true, { failure: { class: 'unknown' } }],
+    [false, undefined],
+  ])('gives a task.complete over the sealed plaintext limit its replacement failure class by the live flag (#869, flag %s)', async (failureClass, expected) => {
+    const { server, adapter, deviceId, member } = await start({ failureClass });
+    server.send(await sealedOffer(member, 'huge-complete', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      adapter.sessions[0]!.emit({ type: 'progress', text: 'p'.repeat(SEALED_PAYLOAD_MAX_CONTENT_LENGTH + 1024) });
+      adapter.sessions[0]!.emit({ type: 'turn_end' });
+      const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'huge-complete', 15_000);
+      expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
+      if (expected === undefined) expect(failed.payload).not.toHaveProperty('failure');
+      else expect(failed.payload).toMatchObject(expected);
+    } finally {
+      diagnostic.mockRestore();
+    }
+  }, 30_000);
+
   it('reports sealed_key_unavailable in plaintext when the sealing key is gone at the terminal', async () => {
     const { server, adapter, deviceId, member, device, cursor } = await start();
     server.send(await sealedOffer(member, 'key-lost', server.nextSeq(), deviceId, 'run'));

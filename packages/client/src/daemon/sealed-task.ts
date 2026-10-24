@@ -31,11 +31,12 @@ import {
   type MessageType,
   type SealedMessageType,
   type SealedSplitEntry,
+  type TaskFailure,
   type TaskSealing,
 } from '@byok-sdk/protocol';
 import { BlobHttpError } from './blob-http-error';
 import { routineTemplateBinding, routineTemplateExpired, type RoutineRef } from './sealed-routine-template';
-import { DAEMON_TASK_FAILURE } from './task-failure';
+import { DAEMON_TASK_FAILURE, taskFailureField } from './task-failure';
 
 type JsonObject = { [key: string]: unknown };
 
@@ -115,14 +116,6 @@ const UNSEALABLE_FAIL_FIELDS = ['harnessId', 'usage', 'agentRef', 'agentHomeProj
 
 function pick(payload: JsonObject, fields: readonly string[]): JsonObject {
   return Object.fromEntries(fields.filter((field) => payload[field] !== undefined).map((field) => [field, payload[field]]));
-}
-
-/**
- * A replacement failure is the daemon's own, so it never keeps the runtime's
- * class. It carries `unknown` when the replaced terminal shows the gate open.
- */
-function daemonFailure(payload: JsonObject): JsonObject {
-  return payload.failure === undefined ? {} : { failure: DAEMON_TASK_FAILURE };
 }
 
 function omit(payload: JsonObject, fields: readonly string[]): JsonObject {
@@ -310,7 +303,7 @@ export class SealedTasks {
       // forever. Settle it with a small sealed failure instead, and show the
       // local observer that failure, not the terminal it replaced.
       console.error(`[byok/client] ${envelope.type} for sealed task ${taskId} replaced by a sealed failure: ${error instanceof Error ? error.message : String(error)}`);
-      const failure = { reason: 'terminal_result_unsealable', retryable: false, ...daemonFailure(payload), ...pick(payload, UNSEALABLE_FAIL_FIELDS) };
+      const failure = { reason: 'terminal_result_unsealable', retryable: false, ...this.#daemonFailure(), ...pick(payload, UNSEALABLE_FAIL_FIELDS) };
       sealed = await this.#seal(taskId, task, 'task.fail', failure);
       plain = createEnvelope('task.fail', failure as never, { taskId });
     }
@@ -396,6 +389,15 @@ export class SealedTasks {
     }
   }
 
+  /**
+   * A replacement failure is the daemon's own, so it never keeps the runtime's
+   * class. It carries `unknown` when the current server advertises
+   * runtime-failure-class; between sessions no flag is known, so it carries none.
+   */
+  #daemonFailure(): { failure?: TaskFailure } {
+    return taskFailureField(DAEMON_TASK_FAILURE, this.options.serverCapabilities() ?? []);
+  }
+
   /** The closed plaintext form of a terminal that has no sealing key (decision 12d). */
   unsealable(envelope: Envelope): Envelope | undefined {
     const taskId = envelope.task_id!;
@@ -404,7 +406,7 @@ export class SealedTasks {
     switch (envelope.type) {
       case 'task.complete':
       case 'task.fail':
-        return createEnvelope('task.fail', { reason: code, retryable: false, ...daemonFailure(payload), ...pick(payload, UNSEALABLE_FAIL_FIELDS) } as never, { taskId });
+        return createEnvelope('task.fail', { reason: code, retryable: false, ...this.#daemonFailure(), ...pick(payload, UNSEALABLE_FAIL_FIELDS) } as never, { taskId });
       case 'task.cancelled':
         return createEnvelope('task.cancelled', omit(payload, ['reason']) as never, { taskId });
       case 'task.decline':
