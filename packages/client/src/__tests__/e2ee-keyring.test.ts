@@ -876,16 +876,16 @@ describe('device member KEM rotation (E2d-5)', () => {
   it('keeps the old key when a client that has not seen the rotate puts an old-key package after the scan', async () => {
     const { server, web, device, custody, keyring } = await member();
     await web.putScope('scope-a', [device]);
+    // `device` is the bundle from before the rotation, so this package is wrapped to the old key.
+    const late = await web.sealPackage('scope-a', device, new Uint8Array(32).fill(9), 2);
     const handle = server.e2ee.handle.bind(server.e2ee);
     let landed = false;
     server.e2ee.handle = async (req, res, url) => {
-      const handled = await handle(req, res, url);
       if (!landed && req.method === 'POST' && url.pathname.endsWith('/key-packages')) {
         landed = true;
-        // `device` is the bundle from before the rotation, so this package is wrapped to the old key.
-        server.e2ee.clientPutPackages(await web.sealPackage('scope-a', device, new Uint8Array(32).fill(9), 2));
+        server.e2ee.clientPutPackages(late);
       }
-      return handled;
+      return handle(req, res, url);
     };
     expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'rewrap_unverified' });
     expect(landed).toBe(true);
