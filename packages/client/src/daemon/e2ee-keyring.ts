@@ -230,12 +230,13 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       this.options.log(`no fresh epoch at or after ${minEpoch} for scope ${JSON.stringify(scopeId)}; output is not sealed`);
       return undefined;
     }
-    const [epoch, point] = epochs[0]!;
+    const [epoch] = epochs[0]!;
     const key = await this.openingKey({ id: scopeId, epoch });
     if (key === undefined) return undefined;
     // The key read can catch up: the scope and the epoch must still hold at the head it left.
     const current = this.#session;
-    if (current === undefined || this.#scope(current, scopeId) === undefined || this.#stale(scopeId, point.seq, current.state.head!.seq)) {
+    const point = this.#fresh.get(scopeId)?.get(epoch);
+    if (current === undefined || point === undefined || this.#scope(current, scopeId) === undefined || this.#stale(scopeId, point.seq, current.state.head!.seq)) {
       key.fill(0);
       return undefined;
     }
