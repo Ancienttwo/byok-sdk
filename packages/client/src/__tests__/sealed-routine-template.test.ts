@@ -53,6 +53,15 @@ class GoldenKeyring implements SealedScopeKeyring {
   }
 }
 
+/** The golden opening key and no sealing key. Counts each sealing key lookup. */
+class NoSealingKeyring extends GoldenKeyring {
+  sealingKeyCalls = 0;
+  override async sealingKey() {
+    this.sealingKeyCalls += 1;
+    return undefined;
+  }
+}
+
 const runners: TaskRunner[] = [];
 const roots: string[] = [];
 
@@ -68,7 +77,7 @@ function clockAt(instant: string): void {
   vi.setSystemTime(Date.parse(instant));
 }
 
-async function device() {
+async function device(keyring: SealedScopeKeyring = new GoldenKeyring()) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-routine-template-'));
   roots.push(root);
   const storeDir = path.join(root, 'store');
@@ -86,7 +95,7 @@ async function device() {
     agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
     agentMessageMcpPreflight: async () => {},
     sealedTasks: new SealedTasks({
-      keyring: new GoldenKeyring(), tenantId: GOLDEN_TENANT, deviceId: 'device-golden-1',
+      keyring, tenantId: GOLDEN_TENANT, deviceId: 'device-golden-1',
       blobs: { download: async () => { throw new Error('unused'); } },
     }),
   });
@@ -119,6 +128,7 @@ describe('a sealed routine template on the device (#654 E3d-3)', () => {
     ['another routine', (payload) => ({ ...payload, routineRef: { ...payload.routineRef, routineId: 'routine-other' } })],
     ['another definitionVersion', (payload) => ({ ...payload, routineRef: { ...payload.routineRef, definitionVersion: payload.routineRef.definitionVersion + 1 } })],
     ['another Agent', (payload) => ({ ...payload, agentRef: { ...payload.agentRef, profileRevision: 'profile-other' } })],
+    ['another agentId', (payload) => ({ ...payload, agentRef: { ...payload.agentRef, agentId: 'agent-other' } })],
     ['a sealing that drops task-output (C3)', (payload) => ({ ...payload, sealing: { ...payload.sealing, categories: ['task-input'] } })],
   ];
 
@@ -139,6 +149,25 @@ describe('a sealed routine template on the device (#654 E3d-3)', () => {
     const { adapter, offer, declines } = await device();
     await offer('expired', expired.payload);
     expect(declines('expired')).toEqual([{ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, agentRef: expired.payload.agentRef }]);
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('refuses an expired template whose notAfter the Host moved later, with sealed_open_failed', async () => {
+    clockAt(expired.ts);
+    const { adapter, offer, declines } = await device();
+    const moved = { ...expired.payload, routineRef: { ...expired.payload.routineRef, notAfter: '2099-12-31T00:00:00.000Z' } };
+    await offer('moved', moved);
+    expect(declines('moved')).toEqual([{ reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false, agentRef: moved.agentRef }]);
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('checks notAfter before it looks up a sealing key', async () => {
+    clockAt(expired.ts);
+    const keyring = new NoSealingKeyring();
+    const { adapter, offer, declines } = await device(keyring);
+    await offer('expired-no-key', expired.payload);
+    expect(declines('expired-no-key')).toEqual([{ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, agentRef: expired.payload.agentRef }]);
+    expect(keyring.sealingKeyCalls).toBe(0);
     expect(adapter.startCalls).toHaveLength(0);
   });
 
