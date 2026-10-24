@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Feature (client)** — an opt-in Claude option for Agent tasks (#871,
+  #873). `ClaudeAdapterOptions.agentUserContext: 'excluded'` starts a
+  `task.offer_for_agent` task with `--strict-mcp-config`, so only the task's
+  and the SDK's MCP servers load, also when the task has none. A 0600
+  `--settings` file in the execution's scratch directory excludes the
+  `CLAUDE.md`, `CLAUDE.local.md` and rules of the Claude config directory and
+  of every directory above the sealed `lease.canonicalHome`, and sets
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in the flag-layer `env`, which outranks
+  a user `settings.json` `env` block. `--setting-sources` is untouched, so the
+  user's settings, deny rules, hooks, model and env still apply. An Agent
+  task without a sealed absolute canonical home, with a cwd outside it, or
+  with a relative `CLAUDE_CONFIG_DIR` fails to start as a non-retryable
+  authority failure. The switch affects new sessions only: a resumed session
+  keeps its history. Other tasks and the default, `'inherit'`, are unchanged.
+  `createDaemon` does not pass the option; a Host sets it through
+  `createDaemonWithAdapters`. On Windows only fixture tests cover the
+  patterns. `docs/adapter-capabilities.md` now lists, for every adapter,
+  whether the user's MCP servers reach a task and what runtime memory loads.
+  The evidence is in
+  `docs/notes/2026-10-24-871-873-claude-agent-user-context.md`.
+
 ## 0.30.0 — 2026-10-24 (published)
 
 0.30.0 is a MINOR release under the default pre-1.0 policy, with no exception.
