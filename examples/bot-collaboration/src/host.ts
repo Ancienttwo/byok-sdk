@@ -9,7 +9,7 @@ import type { HostJobHandler, Routine } from '@byok-sdk/example-host-execution-c
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
 import { canonical, hash, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { addTurn, json, stateOf, type CollaborationState, type Turn } from './model';
-import { contextTurns, SYSTEM_PROMPT, type ContextTurn } from './schema';
+import { contextTurns, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
@@ -80,6 +80,11 @@ export interface BotOptions {
    * in the ledger, so a ledger cannot change its mode at a restart.
    */
   team?: 'external';
+  /**
+   * Outcome offer (#881): allowlists of actions by Turn kind, the IANA time zones of routine actions, and the
+   * `confirmable_action` branches. Each field only narrows the default. It applies to Turns frozen after construction.
+   */
+  outcome?: OutcomeOffer;
 }
 /** Phase 1 of a history-mode sync: the injected rows of each Turn that can freeze its offer next. */
 type InjectedHistory = ReadonlyMap<string, { rows: ContextTurn[]; digest: string }>;
@@ -116,6 +121,7 @@ export class BotCollaboration {
   private readonly instructionMaxBytes: number;
   private readonly timers: DelegationTimers;
   private readonly coalesce?: CoalescePolicy;
+  private readonly offer: CheckedOffer;
   /** The default principal of the owner APIs: the caller that the Host authenticated as the owner. */
   private readonly owner: Principal;
   /** History mode: Turns whose history read failed in this pass. The timer reads them again. */
@@ -155,6 +161,9 @@ export class BotCollaboration {
     this.contextTurnLimit = time(options.contextTurnLimit ?? HISTORY_MAX_ITEMS);
     if (this.contextMaxBytes < 1 || this.contextTurnLimit < 1) throw new Error('Invalid ContextPack limits');
     if (options.coalesce) this.coalesce = coalescePolicy(options.coalesce, this.contextMaxBytes);
+    this.offer = outcomeOffer(options.outcome ?? {});
+    // Compose once, so a Host draft outside the protocol limits fails here and not at each Turn.
+    outcomeSchema(options.botId, stateOf({}), undefined, Object.keys(this.models()), [], this.offer);
     this.instructionMaxBytes = time(options.instructionMaxBytes ?? DEFAULT_INSTRUCTION_MAX_BYTES);
     const minimum = minimumInstructionBytes(SYSTEM_PROMPT);
     if (this.instructionMaxBytes < minimum) throw new Error(`instructionMaxBytes must be at least ${minimum}`);
@@ -521,7 +530,8 @@ export class BotCollaboration {
     const limits = { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes, instructionMaxBytes: this.instructionMaxBytes };
     for (const turn of Object.values(state.turns)) {
       materialized = syncTurnInLedger(this.ledger, s, rows, turn, { now: this.now(), models: Object.keys(this.models()),
-        readOnlyToolsets: this.options.readOnlyToolsets ?? [], limits, historyMode: !!this.options.history, history: injected?.get(turn.id), routines }) || materialized;
+        readOnlyToolsets: this.options.readOnlyToolsets ?? [], limits, historyMode: !!this.options.history, history: injected?.get(turn.id), routines,
+        offer: this.offer }) || materialized;
     }
     settleDelegations(s, state, this.now(), (key, value) => project(s, key, value), this.timers);
     reportCardDecisions(state, (key, value) => project(s, key, value));

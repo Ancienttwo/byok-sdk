@@ -1,4 +1,6 @@
-import { botTurnOutcomeFragments as f, composeBotTurnOutcomeSchema, type NonEmptyIds, type BotTurnOutcomeFragments, BotTurnOutcomeSchemaError, type RoutineScheduleShape } from '@byok-sdk/protocol';
+import { botTurnOutcomeFragments as f, composeBotTurnOutcomeSchema, type NonEmptyIds, type BotTurnOutcomeFragments, BotTurnOutcomeSchemaError, type RoutineScheduleShape,
+  type ResultSchema } from '@byok-sdk/protocol';
+import { checkRoutineSchedule } from '@byok-sdk/core';
 import type { Turn } from './turn';
 import type { RoomsState } from './rooms';
 import { openDelegations, type DelegationView } from './delegation';
@@ -22,6 +24,72 @@ export interface ContextState extends DelegationView {
     /** External team mode: the team authority owns the Bots (#739 Q4c). */
     readonly external?: { readonly revision: number };
   };
+}
+/** The actions of an ordinary Bot Turn, and the extra actions of an owner Main Bot Turn. A room seat always has speech. */
+export const TURN_ACTIONS = ['delegate', 'ask_user', 'confirmable_action', 'create_routine', 'update_routine', 'cancel_routine'] as const;
+export const MAIN_ACTIONS = ['create_bot', 'update_bot', 'delete_bot', 'create_room', 'update_room', 'team_note', 'cancel_delegation'] as const;
+export type TurnAction = typeof TURN_ACTIONS[number];
+export type MainAction = typeof MAIN_ACTIONS[number];
+export const DEFAULT_TIME_ZONES = ['UTC', 'America/New_York'] as const;
+/** Eight time zones keep the eight-routine schema inside the budget (`outcome-options.test.ts`). */
+export const TIME_ZONES_MAX = 8;
+/** One `confirmable_action` branch. The Host connector receives `action` and the confirmed draft. */
+export interface ConfirmableSpec { readonly action: string; readonly draft: ResultSchema }
+export const DEFAULT_CONFIRMABLE: readonly [ConfirmableSpec] = [{ action: 'send_message', draft: {
+  type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', minLength: 1, maxLength: 1000 } },
+} }];
+/**
+ * The Host's outcome offer (#881). Each field only narrows the default: absent, a Turn offers every action of its kind,
+ * the default time zones and `send_message`. A frozen schema never changes, so an offer applies to Turns frozen after it.
+ */
+export interface OutcomeOffer {
+  /** Allowlists by Turn kind: `turn` for every Bot Turn outside a room, `main` for the extra actions of an owner Main Bot Turn. */
+  readonly actions?: { readonly turn?: readonly TurnAction[]; readonly main?: readonly MainAction[] };
+  /** IANA zones of `create_routine` and `update_routine`, 1 to TIME_ZONES_MAX. */
+  readonly timeZones?: readonly string[];
+  /** The `confirmable_action` branches, at least one. */
+  readonly confirmable?: readonly ConfirmableSpec[];
+}
+declare const checked: unique symbol;
+/** An offer that passed `outcomeOffer`. The sync takes only this type, so H and L check an offer the same way. */
+export type CheckedOffer = OutcomeOffer & { readonly [checked]: true };
+function distinct<T extends string>(values: readonly T[], what: string, allowed?: readonly string[]): readonly T[] {
+  if (!Array.isArray(values)) throw new Error(`Each ${what} list must be an array`);
+  if (new Set(values).size !== values.length) throw new Error(`Each ${what} must be distinct`);
+  for (const value of values) {
+    if (typeof value !== 'string' || !value || allowed && !allowed.includes(value)) throw new Error(`Unknown ${what}: ${String(value)}`);
+  }
+  return [...values];
+}
+/** Checks an offer and returns a copy. The routine calendar of `@byok-sdk/core` decides which time zones are valid. */
+export function outcomeOffer(offer: OutcomeOffer): CheckedOffer {
+  const { actions, timeZones, confirmable } = offer;
+  if (timeZones !== undefined) {
+    distinct(timeZones, 'time zone');
+    if (!timeZones.length || timeZones.length > TIME_ZONES_MAX) throw new Error(`An offer has 1 to ${TIME_ZONES_MAX} time zones`);
+    for (const tz of timeZones) {
+      const check = checkRoutineSchedule({ minute: 0, hour: 0, tz });
+      if (!check.ok) throw new Error(`Invalid time zone ${tz}: ${check.message}`);
+    }
+  }
+  if (confirmable !== undefined) {
+    if (!Array.isArray(confirmable) || !confirmable.length) throw new Error('An offer has at least one confirmable action');
+    distinct(confirmable.map(spec => spec.action), 'confirmable action');
+    // The protocol checks each draft: the K7 subset and a finite bound.
+    composeBotTurnOutcomeSchema({ confirmable_action: f.confirmableAction({ actions: confirmable as [ConfirmableSpec, ...ConfirmableSpec[]] }) });
+  }
+  return structuredClone({
+    ...(actions === undefined ? {} : { actions: {
+      ...(actions.turn === undefined ? {} : { turn: distinct(actions.turn, 'Turn action', TURN_ACTIONS) }),
+      ...(actions.main === undefined ? {} : { main: distinct(actions.main, 'Main Bot action', MAIN_ACTIONS) }),
+    } }),
+    ...(timeZones === undefined ? {} : { timeZones: [...timeZones] }),
+    ...(confirmable === undefined ? {} : { confirmable: [...confirmable] }),
+  }) as CheckedOffer;
+}
+/** Keeps the fragments that an allowlist names. Absent: keeps all. */
+function allow(fragments: BotTurnOutcomeFragments, names: readonly string[] | undefined): BotTurnOutcomeFragments {
+  return names ? Object.fromEntries(Object.entries(fragments).filter(([name]) => names.includes(name))) : fragments;
 }
 /** The routine fields that the schema reads. The ContextPack copies the whole view. */
 export interface ContextRoutine { readonly id: string; readonly owner: string; readonly lifecycle: string }
@@ -57,33 +125,33 @@ export function ownerMainTurn(state: ContextState, botId: string, turn?: Turn): 
   return turn?.source !== 'room_slot' && turn?.authority === 'owner' && !!bot?.mainBot && !bot.archived;
 }
 /** `routines` are the Bot routine views of the K4 routine rows. */
-export function outcomeSchema(botId: string, state: ContextState, turn?: Turn, models: readonly string[] = ['default'], routines: readonly ContextRoutine[] = []) {
+export function outcomeSchema(botId: string, state: ContextState, turn?: Turn, models: readonly string[] = ['default'], routines: readonly ContextRoutine[] = [],
+  offer?: CheckedOffer) {
   const ids = routines.filter(r => r.owner === botId && r.lifecycle !== 'completed').map(r => r.id);
+  const timeZones = (offer?.timeZones ?? DEFAULT_TIME_ZONES) as unknown as NonEmptyIds;
   const compose = (scheduleShape: RoutineScheduleShape) => {
     const fragments: BotTurnOutcomeFragments = turn?.source === 'room_slot' ? (() => {
       const seat = state.team.seats[turn.id]!, room = state.team.rooms[state.team.rounds[seat.roundId]!.roomId]!;
       const members = room.members.filter(id => !state.team.bots[id]?.archived);
       return { speech: f.speech(), ...(members.length ? { room_call: f.roomCall({ members: members as unknown as NonEmptyIds }) } : {}) };
-    })() : {
+    })() : allow({
       // A refusal report has no delegate fragment, so it cannot cause another report (§8.2).
       // A target stays offered while a newer profile is pending; its Turn waits for readback (§2.2).
       ...(turn?.refusalReport ? {} : { delegate: f.delegate({ to: [botId, ...Object.values(state.team.bots)
         .filter(b => b.id !== botId && !b.archived && personaApplied(state, b)).map(b => b.id)] }) }),
       ask_user: f.askUser(),
-      confirmable_action: f.confirmableAction({ actions: [{ action: 'send_message', draft: {
-        type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', minLength: 1, maxLength: 1000 } },
-      } }] }),
-      create_routine: f.createRoutine({ localIds: ['new_routine_1'], timeZones: ['UTC', 'America/New_York'], scheduleShape }),
+      confirmable_action: f.confirmableAction({ actions: (offer?.confirmable ?? DEFAULT_CONFIRMABLE) as [ConfirmableSpec, ...ConfirmableSpec[]] }),
+      create_routine: f.createRoutine({ localIds: ['new_routine_1'], timeZones, scheduleShape }),
       ...(ids.length ? {
-        update_routine: f.updateRoutine({ routineIds: ids as unknown as NonEmptyIds, timeZones: ['UTC', 'America/New_York'], scheduleShape }),
+        update_routine: f.updateRoutine({ routineIds: ids as unknown as NonEmptyIds, timeZones, scheduleShape }),
         cancel_routine: f.cancelRoutine({ routineIds: ids as unknown as NonEmptyIds }),
       } : {}),
-    };
+    }, offer?.actions?.turn);
     if (ownerMainTurn(state, botId, turn)) {
       const open = openDelegations(state).items.map(d => d.id);
       const botIds = Object.values(state.team.bots).filter(b => !b.archived).map(b => b.id) as unknown as NonEmptyIds;
       const memberIds = [...botIds, ...NEW_BOTS] as unknown as NonEmptyIds;
-      Object.assign(fragments, {
+      Object.assign(fragments, allow({
         // T3: in external team mode, the authority owns the Bots, so these three actions are not offered.
         ...(state.team.external ? {} : {
           create_bot: f.createBot({ localIds: NEW_BOTS, models: models as unknown as NonEmptyIds }),
@@ -92,7 +160,7 @@ export function outcomeSchema(botId: string, state: ContextState, turn?: Turn, m
         create_room: f.createRoom({ localIds: NEW_ROOMS, members: memberIds }), team_note: f.teamNote(),
         ...(Object.keys(state.team.rooms).length ? { update_room: f.updateRoom({ roomIds: Object.keys(state.team.rooms) as unknown as NonEmptyIds, members: memberIds }) } : {}),
         ...(open.length ? { cancel_delegation: f.cancelDelegation({ delegationIds: open as unknown as NonEmptyIds }) } : {}),
-      });
+      }, offer?.actions?.main));
     }
     return composeBotTurnOutcomeSchema(fragments, turn?.source === 'room_slot' ? ['speech'] : []);
   };

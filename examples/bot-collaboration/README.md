@@ -74,6 +74,22 @@ continuation keeps the hop, authority, and open delegation of its parent.
 It does not consume the Bot budget. A refused action
 enters only its originating Bot's `ContextPack.rejectedActions`. Other accepted actions still apply.
 
+`BotOptions.outcome` narrows that offer (#881). `actions.turn` lists the
+actions of a Bot Turn outside a room, from `delegate`, `ask_user`,
+`confirmable_action` and the three routine actions. `actions.main` lists the
+extra actions of an owner Main Bot Turn, from the Bot and room management
+actions, `team_note` and `cancel_delegation`. A list only removes actions, and
+an empty list removes all of that kind. `timeZones` holds 1 to 8 IANA zones for
+`create_routine` and `update_routine`, checked by the `@byok-sdk/core` routine
+calendar. The default is `UTC` and `America/New_York`. `confirmable` holds the
+`confirmable_action` branches, each an action name and its draft schema. The
+default is `send_message`, and the connector receives only the offered names.
+The constructor checks the offer and composes one schema with it. Turns that
+froze before keep their schema. A room seat always gets `speech`. A schema
+that is over budget even in the flat shape blocks its Turn, as before. The H
+sync takes the same offer as `SyncOptions.offer`, a value from `outcomeOffer`.
+The system prompt does not change with the offer.
+
 Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same
 answer does not reset that budget. Empty updates and duplicate targets or

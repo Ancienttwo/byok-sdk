@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Feature (examples)** — K8 `BotOptions.outcome` narrows the outcome offer
+  of new Turns (#881). `actions.turn` and `actions.main` are allowlists for a
+  Bot Turn and for the extra actions of an owner Main Bot Turn. `timeZones`
+  sets 1 to 8 IANA zones for the routine actions. `confirmable` sets the
+  `confirmable_action` branches. Without the option, every schema is the same
+  as before. `outcomeOffer` checks an offer, and `SyncOptions.offer` takes its
+  result, so the H sync uses the same rule. Turns frozen before keep their
+  schema.
+
 ## 0.30.0 — 2026-10-24 (published)
 
 0.30.0 is a MINOR release under the default pre-1.0 policy, with no exception.
