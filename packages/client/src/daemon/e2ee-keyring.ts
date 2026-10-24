@@ -51,6 +51,15 @@ import type { SealedScopeKeyring, SealingKey } from './sealed-task';
 /** How many rotations one seal waits for or starts before it fails closed. */
 const MAX_ROTATION_ROUNDS = 3;
 
+/**
+ * The per-epoch key package reads of one rotation decision: the epochs just
+ * above the newest one this run knows for the scope. Four covers the drift a
+ * run can have, a missed notice or a partly put epoch, and lets a gap below a
+ * held epoch pass. A package at the top epoch means the scope is further
+ * ahead than the device can see, so the seal fails closed.
+ */
+const ROTATION_EPOCH_READS = 4;
+
 export interface ScopeKey {
   readonly scopeKey: Uint8Array;
   readonly keyId: string;
@@ -282,12 +291,12 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   }
 
   /**
-   * Catch up, then wrap a new scope key at the epoch after the newest this
-   * member knows (the offer's, a fresh one, or one the Host holds for it) to
+   * Catch up, then wrap a new scope key at the next epoch (`#nextEpoch`) to
    * every current member of the scope policy, and put the packages. A Host
    * that holds that epoch under another key refuses the put, and the seal
-   * fails closed. So does a policy that leaves no current member but this
-   * one, whose output no client could open. A transport failure throws.
+   * fails closed. So does a scope further ahead than the device checks, and
+   * a policy that leaves no current member but this one, whose output no
+   * client could open. A failed or timed-out Host request throws.
    */
   async #rotate(scopeId: string, minEpoch: number): Promise<void> {
     await this.catchUp();
@@ -295,11 +304,6 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     if (session === undefined || this.#scope(session, scopeId) === undefined) return;
     const head = session.state.head!;
     if (this.#freshEpoch(scopeId, minEpoch, head.seq) !== undefined) return;
-    const held = (await this.options.client.readKeyPackages(scopeId)).flatMap((pkg) => {
-      const epoch = typeof pkg === 'object' && pkg !== null ? (pkg as { readonly epoch?: unknown }).epoch : undefined;
-      return typeof epoch === 'number' && Number.isSafeInteger(epoch) ? [epoch] : [];
-    });
-    const epoch = Math.max(minEpoch, ...held, ...(this.#fresh.get(scopeId)?.keys() ?? [])) + 1;
     const self = session.member.memberId;
     // This member's own package goes in the first put: after any put that landed, the next rotation sees the epoch and moves past it.
     const recipients = [...memberChainScopeRecipients(session.state, scopeId)].sort((left, right) => Number(right.memberId === self) - Number(left.memberId === self));
@@ -307,6 +311,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       this.options.log(`scope ${JSON.stringify(scopeId)} has no current member but this device; it is not rotated`);
       return;
     }
+    const epoch = await this.#nextEpoch(scopeId, minEpoch);
+    if (epoch === undefined) return;
     const sender = { signingPublicJwk: session.keys.signing.publicJwk, signingPrivateKey: session.keys.signing.privateKey };
     const scopeKey = generateScopeKey();
     try {
@@ -316,7 +322,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       })));
       // The Host takes at most this many per put; the epoch is fresh only after every put.
       for (let at = 0; at < packages.length; at += E2EE_SCOPE_KEY_PACKAGE_PUT_MAX) {
-        await this.options.client.putKeyPackages(packages.slice(at, at + E2EE_SCOPE_KEY_PACKAGE_PUT_MAX));
+        await this.options.client.putKeyPackages(packages.slice(at, at + E2EE_SCOPE_KEY_PACKAGE_PUT_MAX), this.#requestSignal());
       }
       const current = this.#session;
       if (current === undefined || this.#scopeFailure(current, scopeId) !== undefined) {
@@ -333,6 +339,35 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       if (!(error instanceof E2eeMemberClientError && error.code === 'e2ee_scope_key_conflict')) throw error;
       this.options.log(`the Host holds epoch ${epoch} of scope ${JSON.stringify(scopeId)} under another key; output is not sealed`);
     }
+  }
+
+  /**
+   * The epoch to rotate to: above the newest epoch this run knows for the
+   * scope and above every epoch the Host holds for this member in the next
+   * {@link ROTATION_EPOCH_READS}. An empty read means only that the Host
+   * holds no package of that epoch for this member; the put decides whether
+   * the epoch is free. `undefined` when the scope is further ahead.
+   */
+  async #nextEpoch(scopeId: string, minEpoch: number): Promise<number | undefined> {
+    const known = Math.max(minEpoch, ...this.#knownEpochs(scopeId));
+    const epochs = Array.from({ length: ROTATION_EPOCH_READS }, (_, index) => known + 1 + index);
+    if (!Number.isSafeInteger(epochs.at(-1))) {
+      this.options.log(`scope ${JSON.stringify(scopeId)} has no epoch left to rotate to; output is not sealed`);
+      return undefined;
+    }
+    const held = await Promise.all(epochs.map(async (epoch) => (await this.options.client.readKeyPackages(scopeId, epoch, this.#requestSignal())).length > 0));
+    const top = held.lastIndexOf(true);
+    if (top === epochs.length - 1) {
+      this.options.log(`the Host holds epoch ${epochs[top]} of scope ${JSON.stringify(scopeId)}, beyond the epochs this device checks; output is not sealed`);
+      return undefined;
+    }
+    return epochs[top + 1];
+  }
+
+  /** The epochs of a scope this run holds a key of or a freshness point for. */
+  #knownEpochs(scopeId: string): number[] {
+    const opened = [...this.#keys.keys()].filter((at) => at.slice(at.indexOf('\0') + 1) === scopeId).map((at) => Number(at.slice(0, at.indexOf('\0'))));
+    return [...opened, ...(this.#fresh.get(scopeId)?.keys() ?? [])];
   }
 
   async #advance(): Promise<void> {

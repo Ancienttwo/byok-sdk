@@ -144,8 +144,8 @@ export class E2eeMemberClient {
    * Put the key packages of one new scope epoch (E2d-4). A Host that holds
    * the epoch under another `keyId` answers 409 `e2ee_scope_key_conflict`.
    */
-  async putKeyPackages(packages: readonly ScopeKeyPackageV1[]): Promise<void> {
-    const response = await this.#proofPost(BYOK_E2EE_KEY_PACKAGES_PATH, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, { packages }, 'key package put');
+  async putKeyPackages(packages: readonly ScopeKeyPackageV1[], signal?: AbortSignal): Promise<void> {
+    const response = await this.#proofPost(BYOK_E2EE_KEY_PACKAGES_PATH, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, { packages }, 'key package put', signal);
     // The device does not use the result; a 2xx is the Host's acknowledgement, so the body is not read.
     await response.body?.cancel();
   }
