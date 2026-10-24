@@ -88,6 +88,8 @@ describe('RuntimeExecutionFailure', () => {
       { class: 'rate_limited', resetsAt: '2026-10-24T05:00:00.000Z' },
       { class: 'quota', resetsAt: '2026-10-24T05:00:00Z' },
       { class: 'quota', resetsAt: 'tomorrow' },
+      { class: 'quota', resetsAt: '+055840-11-08T22:13:20.000Z' },
+      { class: 'quota', resetsAt: '-000001-01-01T00:00:00.000Z' },
       { class: 'unknown', status: 401 },
     ]) {
       expect(() => new RuntimeExecutionFailure({ ...base, failure: failure as never }), JSON.stringify(failure)).toThrow(/invalid RuntimeExecutionFailure input/);

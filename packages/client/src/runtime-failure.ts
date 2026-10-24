@@ -116,6 +116,8 @@ export function runtimeFailureClassOf(value: unknown): RuntimeFailureClass {
   return (RUNTIME_FAILURE_CLASSES as readonly unknown[]).includes(value) ? value as RuntimeFailureClass : 'unknown';
 }
 
+const WIRE_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
 /** The wire's strict `TaskFailureSchema`, without zod: adapter bundles carry none. */
 function isTaskFailure(value: unknown): value is TaskFailure {
   if (typeof value !== 'object' || value === null) return false;
@@ -123,7 +125,7 @@ function isTaskFailure(value: unknown): value is TaskFailure {
   return Object.keys(rest).length === 0
     && runtimeFailureClassOf(failureClass) === failureClass
     && (resetsAt === undefined || (failureClass === 'quota' && typeof resetsAt === 'string'
-      && !Number.isNaN(Date.parse(resetsAt)) && new Date(resetsAt).toISOString() === resetsAt));
+      && WIRE_DATETIME.test(resetsAt) && !Number.isNaN(Date.parse(resetsAt)) && new Date(resetsAt).toISOString() === resetsAt));
 }
 
 function isRuntimeFailurePhase(value: unknown): value is RuntimeFailurePhase {

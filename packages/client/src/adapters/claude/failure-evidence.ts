@@ -20,8 +20,8 @@ const ASSISTANT_ERROR_CLASSES: Readonly<Record<string, RuntimeFailureClass>> = {
   server_error: 'provider',
 };
 
-/** `Date`'s range, in milliseconds. */
-const MAX_DATE_MS = 8.64e15;
+/** 9999-12-31T23:59:59Z: the last second the wire's four-digit-year timestamp can carry. */
+const MAX_RESETS_AT_SECONDS = 253_402_300_799;
 
 /**
  * The failure class of one Claude session's failed turns, from structured
@@ -65,7 +65,7 @@ export class ClaudeFailureEvidence {
       // A rejected limit is the subscription limit (OAR); otherwise it is throttling.
       if (this.#rateLimit?.status !== 'rejected') return { class: 'rate_limited' };
       const resetsAt = this.#rateLimit.resetsAt;
-      return typeof resetsAt === 'number' && Number.isInteger(resetsAt) && Math.abs(resetsAt * 1000) <= MAX_DATE_MS
+      return typeof resetsAt === 'number' && Number.isInteger(resetsAt) && resetsAt >= 0 && resetsAt <= MAX_RESETS_AT_SECONDS
         ? { class: 'quota', resetsAt: new Date(resetsAt * 1000).toISOString() }
         : { class: 'quota' };
     }
