@@ -48,6 +48,9 @@ import { E2EE_SCOPE_KEY_PACKAGE_PUT_MAX } from '@byok-sdk/protocol';
 import { E2eeMemberClientError, type E2eeMemberClient } from './e2ee-member-client';
 import type { SealedScopeKeyring, SealingKey } from './sealed-task';
 
+/** How many rotations one seal waits for or starts before it fails closed. */
+const MAX_ROTATION_ROUNDS = 3;
+
 export interface ScopeKey {
   readonly scopeKey: Uint8Array;
   readonly keyId: string;
@@ -223,16 +226,22 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     if (session === undefined || this.#scope(session, scopeId) === undefined) return undefined;
     const fresh = this.#freshEpoch(scopeId, minEpoch, session.state.head!.seq);
     if (fresh !== undefined) return this.#sealingAt(session, scopeId, fresh);
-    let rotation = this.#rotations.get(scopeId);
-    if (rotation === undefined) {
-      rotation = this.#rotate(scopeId, minEpoch).finally(() => this.#rotations.delete(scopeId));
-      this.#rotations.set(scopeId, rotation);
+    // A shared rotation may target an epoch below this call's `minEpoch`, so
+    // a call that only joined one checks again and may rotate itself.
+    for (let round = 0; round < MAX_ROTATION_ROUNDS; round += 1) {
+      let rotation = this.#rotations.get(scopeId);
+      const joined = rotation !== undefined;
+      if (rotation === undefined) {
+        rotation = this.#rotate(scopeId, minEpoch).finally(() => this.#rotations.delete(scopeId));
+        this.#rotations.set(scopeId, rotation);
+      }
+      await rotation;
+      const current = this.#session;
+      if (current === undefined || this.#scope(current, scopeId) === undefined) return undefined;
+      const rotated = this.#freshEpoch(scopeId, minEpoch, current.state.head!.seq);
+      if (rotated !== undefined) return this.#sealingAt(current, scopeId, rotated);
+      if (!joined) break;
     }
-    await rotation;
-    const current = this.#session;
-    if (current === undefined || this.#scope(current, scopeId) === undefined) return undefined;
-    const rotated = this.#freshEpoch(scopeId, minEpoch, current.state.head!.seq);
-    if (rotated !== undefined) return this.#sealingAt(current, scopeId, rotated);
     this.options.log(`no fresh epoch at or after ${minEpoch} for scope ${JSON.stringify(scopeId)}; output is not sealed`);
     return undefined;
   }

@@ -379,6 +379,16 @@ describe('device member keyring rotation (E2d-4)', () => {
     expect(left!.scopeKey).not.toBe(right!.scopeKey);
   });
 
+  it('rotates again for a concurrent seal that needs a later epoch than the shared rotation', async () => {
+    const { server, web, device, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    const [low, high] = await Promise.all([keyring.sealingKey('scope-a', 1), keyring.sealingKey('scope-a', 5)]);
+    expect(low?.epoch).toBe(2);
+    expect(high?.epoch).toBe(6);
+    expect(server.e2ee.devicePuts.map((put) => put[0]!.epoch)).toEqual([2, 6]);
+  });
+
   it('fails closed when the Host holds the new epoch under another key, and throws on a failed put', async () => {
     const { server, web, device, logs, keyring } = await member();
     await web.putScope('scope-a', [device]);
