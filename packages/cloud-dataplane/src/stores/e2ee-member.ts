@@ -7,6 +7,7 @@ import type {
   E2eeMemberRegistrationInput,
   E2eeMemberRegistrationRow,
   E2eeMemberStore,
+  E2eeProvenWrite,
   E2eeScopeKeyPackagePutInput,
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
@@ -23,6 +24,37 @@ async function rollback(client: PoolClient): Promise<void> {
   try {
     await client.query('ROLLBACK');
   } catch {}
+}
+
+/**
+ * Single-use device requests (owner batch §41a A) use `proof_request_receipt`
+ * (0004), the authority the truth put uses for the same device `requestId`s.
+ * The transaction lock has the truth committer's key, so a truth commit and
+ * an E2EE write of one `requestId` also run one after the other. It is taken
+ * first, before the scope locks.
+ */
+async function recordedRequest<T>(client: PoolClient, tenant: TenantId, proof: E2eeProvenWrite | undefined): Promise<T | 'request_conflict' | undefined> {
+  if (proof === undefined) return undefined;
+  const { deviceId, request } = proof;
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify(['truth-receipt', tenant, deviceId, request.requestId])]);
+  const stored = await client.query<{ operation: string; resource: string; body_sha256: string; body_size: string; response_body: string }>(
+    `SELECT operation, resource, body_sha256, body_size::text AS body_size, response_body FROM proof_request_receipt
+      WHERE tenant_id = $1 AND device_id = $2 AND request_id = $3`, [tenant, deviceId, request.requestId]);
+  const row = stored.rows[0];
+  if (row === undefined) return undefined;
+  const same = row.operation === request.operation && row.resource === request.resource
+    && row.body_sha256 === request.bodySha256 && row.body_size === String(request.bodySize);
+  return same ? JSON.parse(row.response_body) as T : 'request_conflict';
+}
+
+async function recordRequest<T>(client: PoolClient, tenant: TenantId, proof: E2eeProvenWrite | undefined, result: T, now: Date): Promise<T> {
+  if (proof === undefined) return result;
+  const { deviceId, request } = proof;
+  await client.query(
+    `INSERT INTO proof_request_receipt (tenant_id, device_id, request_id, operation, resource, body_sha256, body_size, response_status, response_body, recorded_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 200, $8, $9)`,
+    [tenant, deviceId, request.requestId, request.operation, request.resource, request.bodySha256, request.bodySize, JSON.stringify(result), now]);
+  return result;
 }
 
 /**
@@ -68,6 +100,12 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
     const { rows } = input;
     let refusal: E2eeMemberChainAppendResult | undefined;
     const result = await this.#transaction<E2eeMemberChainAppendResult>(async client => {
+      const replay = await recordedRequest<E2eeMemberChainAppendResult>(client, tenant, input.proof);
+      if (replay === 'request_conflict') {
+        refusal = { outcome: 'request_conflict' };
+        return undefined;
+      }
+      if (replay !== undefined) return replay;
       await lockScopes(client, tenant, input.shreds.map(shred => shred.scopeId));
       // READ COMMITTED is enough: the head read sees only committed rows, and
       // the primary key decides between two writers of one seq.
@@ -125,7 +163,7 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
           `INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at) VALUES ($1, $2, $3, $4)
            ON CONFLICT (tenant_id, key) DO NOTHING`, [tenant, shred.receipt.key, shred.receipt.body, now]);
       }
-      return { outcome: 'appended', appended, replayed };
+      return recordRequest<E2eeMemberChainAppendResult>(client, tenant, input.proof, { outcome: 'appended', appended, replayed }, now);
     });
     return refusal ?? result;
   }
@@ -137,10 +175,16 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
     return result.rows.map(row => ({ seq: Number(row.seq), entry: row.entry }));
   }
 
-  async putScopeKeyPackages(tenant: TenantId, { rows }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult> {
+  async putScopeKeyPackages(tenant: TenantId, { rows, proof }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult> {
     let refusal: E2eeScopeKeyPackagePutResult | undefined;
     const updatedAt = this.clock.now();
     const result = await this.#transaction<E2eeScopeKeyPackagePutResult>(async client => {
+      const replay = await recordedRequest<E2eeScopeKeyPackagePutResult>(client, tenant, proof);
+      if (replay === 'request_conflict') {
+        refusal = { outcome: 'request_conflict' };
+        return undefined;
+      }
+      if (replay !== undefined) return replay;
       const scopeIds = [...new Set(rows.map(row => row.scopeId))];
       await lockScopes(client, tenant, scopeIds);
       const shredded = await client.query<{ scope_id: string }>(
@@ -171,7 +215,7 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
              sender = EXCLUDED.sender, package = EXCLUDED.package, updated_at = EXCLUDED.updated_at`,
           [tenant, row.scopeId, row.epoch, row.recipient, row.keyId, row.sender, row.package, updatedAt]);
       }
-      return { outcome: 'stored', stored: rows.length };
+      return recordRequest<E2eeScopeKeyPackagePutResult>(client, tenant, proof, { outcome: 'stored', stored: rows.length }, updatedAt);
     });
     return refusal ?? result;
   }
@@ -190,7 +234,14 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
 
   async registerMember(tenant: TenantId, input: E2eeMemberRegistrationInput): Promise<E2eeMemberRegisterResult> {
     let refusal: E2eeMemberRegisterResult | undefined;
+    const proof = { deviceId: input.deviceId, request: input.request };
     const result = await this.#transaction<E2eeMemberRegisterResult>(async client => {
+      const replay = await recordedRequest<E2eeMemberRegisterResult>(client, tenant, proof);
+      if (replay === 'request_conflict') {
+        refusal = replay;
+        return undefined;
+      }
+      if (replay !== undefined) return replay;
       const inserted = await client.query(
         `INSERT INTO e2ee_member_key (tenant_id, device_id, member_id, bundle) VALUES ($1, $2, $3, $4)
          ON CONFLICT DO NOTHING`, [tenant, input.deviceId, input.memberId, input.bundle]);
@@ -207,7 +258,7 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
         `INSERT INTO e2ee_pairing_mac (tenant_id, device_id, kind, body, expires_at) VALUES ($1, $2, 'device', $3, $4)
          ON CONFLICT (tenant_id, device_id, kind) DO UPDATE SET body = EXCLUDED.body, expires_at = EXCLUDED.expires_at`,
         [tenant, input.deviceId, input.deviceMac, input.macExpiresAt]);
-      return inserted.rowCount ? 'registered' : 'replayed';
+      return recordRequest<E2eeMemberRegisterResult>(client, tenant, proof, inserted.rowCount ? 'registered' : 'replayed', this.clock.now());
     });
     return refusal ?? result;
   }

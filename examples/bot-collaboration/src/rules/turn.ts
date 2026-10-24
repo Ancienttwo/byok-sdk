@@ -25,7 +25,7 @@ export interface Turn {
   unit?: string;
   /** Input batch Turns: the user inputs that this one reply answers, in arrival order. */
   inputIds?: string[];
-  /** History mode: the hash of the injected history that this Turn's offer froze (#739 Q4b). */
+  /** History mode: the hash of the injected history that this Turn's offer froze (#739 Q4b), or of a seat's injected room messages (#883). */
   historyDigest?: string;
   blockedReason?: string; profileFailure?: { sequence: number; revision: string; reason: string }; outcome?: Json; conclusion?: string; reported?: boolean;
 }

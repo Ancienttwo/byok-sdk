@@ -12,10 +12,12 @@ export const ROOM_GRACE_MS = 240_000;
 export const ROOM_CONTEXT_BYTES = HISTORY_MAX_BYTES;
 export const ROOM_CONTEXT_MESSAGES = HISTORY_MAX_ITEMS;
 export type Mentions = readonly string[] | 'all';
+/** One room message, as stored and as an external room history authority gives it (#883). */
+export interface RoomMessage { id: string; from: string; text: string; late: boolean }
 export interface Room {
   id: string; name: string; members: string[]; admin?: string; mode: 'mention'; announcement: string;
   visibleFrom: Record<string, number>;
-  messages: Array<{ id: string; from: string; text: string; late: boolean }>;
+  messages: RoomMessage[];
 }
 export interface Round {
   id: string; root: string; roomId: string; input: string; seats: string[];
@@ -221,12 +223,27 @@ export function advanceRoomSeats(state: { team: RoomsState } & Pick<TurnsState, 
   for (const turn of turns) add(turn.id, turn.botId, turn.request);
   return admitted;
 }
-/** The room view of a seat Turn's ContextPack: the messages that the seat Bot can see, newest last. */
-export function roomContext(team: Pick<RoomsState, 'rooms' | 'rounds' | 'seats'>, turn: { id: string }, turnLimit = ROOM_CONTEXT_MESSAGES) {
+/** Checks rows from an external room history authority. A row in another shape refuses the whole read. */
+export function roomMessages(value: unknown): RoomMessage[] {
+  const fail = (): never => { throw new Error('Invalid injected room messages'); };
+  if (!Array.isArray(value)) fail();
+  return (value as unknown[]).map(row => {
+    const r = (row ?? fail()) as Record<string, unknown>;
+    const text = (key: string) => typeof r[key] === 'string' ? r[key] as string : fail();
+    if (typeof r.late !== 'boolean') fail();
+    return { id: text('id'), from: text('from'), text: text('text'), late: r.late as boolean };
+  });
+}
+/**
+ * The room view of a seat Turn's ContextPack: the messages that the seat Bot can see, newest last.
+ * `injected` are the messages from an external room history authority, which already selected them for this seat's Bot (#883).
+ */
+export function roomContext(team: Pick<RoomsState, 'rooms' | 'rounds' | 'seats'>, turn: { id: string }, turnLimit = ROOM_CONTEXT_MESSAGES,
+  injected?: readonly RoomMessage[]) {
   const seat = team.seats[turn.id];
   if (!seat) throw new Error('Room seat not found');
   const round = team.rounds[seat.roundId]!, room = team.rooms[round.roomId]!;
-  const visible = room.messages.slice(room.visibleFrom?.[seat.botId] ?? room.messages.length);
+  const visible = injected ? [...injected] : room.messages.slice(room.visibleFrom?.[seat.botId] ?? room.messages.length);
   const messages = visible.slice(-turnLimit);
   return { historyWindow: historyWindow('messages', visible.length - messages.length, turnLimit),
     room: { id: room.id, name: room.name, members: room.members, announcement: room.announcement,

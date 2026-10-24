@@ -1,7 +1,8 @@
 /**
  * The E2EE member device routes (#654 E2c-2). The three writes are `proof`
  * routes: the device signs the exact body, and the tenant and device come
- * from the proven device row. The three reads are `device` routes, so the
+ * from the proven device row. The proof's `requestId` is single-use per
+ * device (owner batch §41a A): the store records it with the write. The three reads are `device` routes, so the
  * bearer check refuses a removed or revoked device before any read.
  *
  * Every handler calls the same functions as the Host control plane, so a
@@ -41,12 +42,13 @@ const ERROR_STATUS: Partial<Record<CloudErrorCode, 400 | 409 | 500>> = {
   e2ee_member_chain_conflict: 409,
   e2ee_scope_key_conflict: 409,
   e2ee_scope_shredded: 409,
+  proof_request_conflict: 409,
   e2ee_member_key_conflict: 409,
   e2ee_member_not_registered: 409,
   e2ee_member_state_unreadable: 500,
 };
 
-type ProofWrite = (context: e2eeMember.E2eeMemberContext, deviceId: string, body: unknown) => Promise<object>;
+type ProofWrite = (context: e2eeMember.E2eeMemberContext, proof: e2eeMember.E2eeProvenWrite, body: unknown) => Promise<object>;
 
 function proofWriteHandler(deps: E2eeMemberRouteDeps, operation: string, resource: string, write: ProofWrite) {
   return async (c: Context): Promise<Response> => {
@@ -61,7 +63,17 @@ function proofWriteHandler(deps: E2eeMemberRouteDeps, operation: string, resourc
     } catch {
       return c.json({ error: 'invalid request body' }, 400);
     }
-    return respond(c, () => write(deps.context(proven.device), proven.device.deviceId, json));
+    const proof: e2eeMember.E2eeProvenWrite = {
+      deviceId: proven.device.deviceId,
+      request: {
+        requestId: proven.requestId,
+        operation: proven.operation,
+        resource: proven.resource,
+        bodySha256: proven.bodySha256,
+        bodySize: Number(proven.bodySize),
+      },
+    };
+    return respond(c, () => write(deps.context(proven.device), proof, json));
   };
 }
 
@@ -80,14 +92,14 @@ function onlyField(body: unknown, field: string): never {
 
 /** `POST /byok/e2ee/chain`: the device appends member chain entries, `{ entries }`. */
 export function e2eeMemberChainAppendHandler(deps: E2eeMemberRouteDeps) {
-  return proofWriteHandler(deps, E2EE_MEMBER_CHAIN_APPEND_OPERATION, BYOK_E2EE_CHAIN_PATH, (context, deviceId, body) =>
-    e2eeMember.appendMemberChainEntries(context, onlyField(body, 'entries'), { kind: 'device', deviceId }));
+  return proofWriteHandler(deps, E2EE_MEMBER_CHAIN_APPEND_OPERATION, BYOK_E2EE_CHAIN_PATH, (context, proof, body) =>
+    e2eeMember.appendMemberChainEntries(context, onlyField(body, 'entries'), { kind: 'device', proof }));
 }
 
 /** `POST /byok/e2ee/key-packages`: the device puts scope key packages, `{ packages }`. */
 export function e2eeScopeKeyPackagePutHandler(deps: E2eeMemberRouteDeps) {
-  return proofWriteHandler(deps, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, BYOK_E2EE_KEY_PACKAGES_PATH, (context, _deviceId, body) =>
-    e2eeMember.putScopeKeyPackages(context, onlyField(body, 'packages')));
+  return proofWriteHandler(deps, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, BYOK_E2EE_KEY_PACKAGES_PATH, (context, proof, body) =>
+    e2eeMember.putScopeKeyPackages(context, onlyField(body, 'packages'), { kind: 'device', proof }));
 }
 
 type DeviceRead = (context: e2eeMember.E2eeMemberContext, deviceId: string, query: Readonly<Record<string, number | string>>) => Promise<object | undefined>;

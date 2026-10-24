@@ -25,7 +25,15 @@ import { hashOfferBytes, taskOfferMessageId } from '../offer-identity';
 import { taskRedactionReceiptKey } from '../task-redaction';
 import { tenantStoresFor } from '../tenant-stores';
 import { PRODUCT_ID, TENANT_A, createHarness, type CloudHarness, type PairedDevice } from './support/harness';
-import { SEALING, inlineMember, sealInput, uploadCiphertext, type CiphertextRef } from './support/sealed';
+import {
+  BY_REFERENCE_TEXT_LENGTH,
+  SEALING,
+  inlineMember,
+  referenceMember,
+  sealInput,
+  uploadCiphertext,
+  type CiphertextRef,
+} from './support/sealed';
 
 const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
@@ -59,28 +67,43 @@ interface Task {
   readonly harness: CloudHarness;
   readonly device: PairedDevice;
   readonly taskId: string;
+  /** The offer's ciphertext blob, when the offer names one. */
+  readonly offerRef?: CiphertextRef;
   send(type: MessageType, payload: object): ReturnType<typeof handleInboundEnvelope>;
 }
 
 let taskCount = 0;
 
-/** A task offered to a sealed-capable device, with `sealing` (or none), claimed unless told not to. */
-async function offeredTask(sealing: typeof OUTPUT_SEALING | typeof INPUT_SEALING | undefined, claim = true): Promise<Task> {
+/**
+ * A task offered to a sealed-capable device, with `sealing` (or none), claimed
+ * unless told not to. A sealed offer names its ciphertext blob when told to.
+ */
+async function offeredTask(
+  sealing: typeof OUTPUT_SEALING | typeof INPUT_SEALING | undefined,
+  claim = true,
+  offerByReference = false,
+): Promise<Task> {
   const harness = createHarness();
   const device = await harness.pairDevice(TENANT_A);
   const capabilities = requiredReceiverCapabilities('task.offer_sealed', { sealing: OUTPUT_SEALING, sealed: {} });
   await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities });
   taskCount += 1;
   const taskId = `sealed-output-${taskCount}`;
+  let offerRef: CiphertextRef | undefined;
   if (sealing === undefined) {
     await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { taskId, payload: { instruction: 'plain', runtime: 'pi' } });
   } else {
     const content = await sealInput({
-      tenant: TENANT_A, deviceId: device.deviceId, type: 'task.offer_sealed', identity: { taskId }, plaintext: { instruction: 'sealed' },
+      tenant: TENANT_A,
+      deviceId: device.deviceId,
+      type: 'task.offer_sealed',
+      identity: { taskId },
+      plaintext: { instruction: offerByReference ? 'x'.repeat(BY_REFERENCE_TEXT_LENGTH) : 'sealed' },
     });
+    if (offerByReference) offerRef = await uploadCiphertext(harness, device, content.ciphertext);
     await harness.cloud.enqueueSealedOffer(TENANT_A, device.deviceId, {
       taskId,
-      payload: { runtime: 'pi', sealing, sealed: inlineMember(content) } as never,
+      payload: { runtime: 'pi', sealing, sealed: offerRef === undefined ? inlineMember(content) : referenceMember(content, offerRef) } as never,
     });
   }
   const stores = tenantStoresFor(
@@ -93,7 +116,7 @@ async function offeredTask(sealing: typeof OUTPUT_SEALING | typeof INPUT_SEALING
     expect(await send('task.claim', { deviceId: device.deviceId, runtime: 'pi' })).toEqual({ outcome: 'accepted' });
     expect(await send('task.started', {})).toEqual({ outcome: 'accepted' });
   }
-  return { harness, device, taskId, send };
+  return { harness, device, taskId, ...(offerRef === undefined ? {} : { offerRef }), send };
 }
 
 /** An output-only sealed Agent offer from the corpus. */
@@ -311,12 +334,59 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
     expect(await refCount(task, later.ref)).toBe(0);
   });
 
+  /** A losing terminal that names `ref`, with the padded length its size fixes. */
+  function terminalNaming(ref: CiphertextRef): object {
+    return { ...SEALED_OUTPUTS['task.fail_sealed'], sealed: { ...BY_REFERENCE_MEMBER, ciphertextRef: ref, paddedLength: ref.size - 16 } };
+  }
+
+  it('a losing terminal that names the offer blob leaves the offer reference in place', async () => {
+    const task = await offeredTask(OUTPUT_SEALING, true, true);
+    const offerRef = task.offerRef!;
+    expect(await refCount(task, offerRef)).toBe(1);
+    expect(await task.send('task.complete_sealed', SEALED_OUTPUTS['task.complete_sealed'])).toEqual({ outcome: 'accepted' });
+
+    expect(await task.send('task.fail_sealed', terminalNaming(offerRef))).toEqual({ outcome: 'accepted' });
+    expect((await task.harness.cloud.readDeviceTerminal(TENANT_A, task.taskId))?.envelope.type).toBe('task.complete_sealed');
+    expect(await refCount(task, offerRef)).toBe(1);
+  });
+
+  it('a losing terminal that names a steer blob leaves the steer reference in place', async () => {
+    const task = await offeredTask(OUTPUT_SEALING, false);
+    expect(await task.send('task.claim', { deviceId: task.device.deviceId, runtime: 'pi', capabilities: { steer: true } }))
+      .toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.started', {})).toEqual({ outcome: 'accepted' });
+    const steerId = '00000000-0000-4000-8000-000000000601';
+    const content = await sealInput({
+      tenant: TENANT_A,
+      deviceId: task.device.deviceId,
+      type: 'task.steer_sealed',
+      identity: { taskId: task.taskId, steerId },
+      plaintext: { text: 'x'.repeat(BY_REFERENCE_TEXT_LENGTH) },
+    });
+    const steerRef = await uploadCiphertext(task.harness, task.device, content.ciphertext);
+    await task.harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId, sealed: referenceMember(content, steerRef) });
+    expect(await refCount(task, steerRef)).toBe(1);
+    expect(await task.send('task.complete_sealed', SEALED_OUTPUTS['task.complete_sealed'])).toEqual({ outcome: 'accepted' });
+
+    expect(await task.send('task.fail_sealed', terminalNaming(steerRef))).toEqual({ outcome: 'accepted' });
+    expect(await refCount(task, steerRef)).toBe(1);
+  });
+
   it('a terminal after redaction holds no reference to its blob', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
     await task.harness.stores.receipts.record(TENANT_A, { key: terminalReceiptKey(task.taskId), body: JSON.stringify({ byokRedacted: 1, absent: true }) });
     const { member, ref } = await uploaded(task);
     expect(await task.send('task.complete_sealed', { ...SEALED_OUTPUTS['task.complete_sealed'], sealed: member })).toEqual({ outcome: 'accepted' });
     expect(await refCount(task, ref)).toBe(0);
+  });
+
+  it('a terminal after redaction releases its reference to a blob that another holder keeps', async () => {
+    const task = await offeredTask(OUTPUT_SEALING);
+    const { member, ref } = await uploaded(task);
+    await task.harness.core.objects.addReference(TENANT_A, { hash: ref.contentHash as ContentHash, refKind: 'test', refId: 'other' });
+    await task.harness.stores.receipts.record(TENANT_A, { key: terminalReceiptKey(task.taskId), body: JSON.stringify({ byokRedacted: 1, absent: true }) });
+    expect(await task.send('task.complete_sealed', { ...SEALED_OUTPUTS['task.complete_sealed'], sealed: member })).toEqual({ outcome: 'accepted' });
+    expect(await refCount(task, ref)).toBe(1);
   });
 
   it('settles a replayed terminal on a redacted task after redaction deleted its blob', async () => {

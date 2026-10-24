@@ -81,7 +81,13 @@ import { projectTerminalToReview } from './board-projection';
 import { agentReliabilityKey } from './agent-reliability';
 import type { TenantStores } from './tenant-stores';
 import { isTaskRedactionTombstone, taskRedactionReceiptKey } from './task-redaction';
-import { releaseSealedCiphertext, retainSealedCiphertext, sealedCiphertextCommitted, sealedCiphertextRef } from './sealed-ciphertext';
+import {
+  releaseSealedCiphertext,
+  retainSealedCiphertext,
+  sealedCiphertextCommitted,
+  sealedCiphertextHeld,
+  sealedCiphertextRef,
+} from './sealed-ciphertext';
 
 export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limited';
 
@@ -986,11 +992,17 @@ async function recordTerminal(
   const body = encodeEnvelope(envelope);
   // The task holds a sealed terminal's blob before any receipt names it.
   const ciphertextRef = sealedCiphertextRef(envelope.payload);
+  const heldBefore = ciphertextRef !== undefined && await sealedCiphertextHeld(stores.objects, ciphertextRef);
   if (ciphertextRef !== undefined) await retainSealedCiphertext(stores.objects, taskId, ciphertextRef);
   const receipt = await stores.receipts.record({ key: terminalReceiptKey(taskId), body });
   // A terminal that lost, or one that arrived after redaction, keeps nothing.
+  // A redacted task holds nothing, so after redaction it always releases. A
+  // terminal that lost releases only a blob that nothing held before: one
+  // reference per (blob, task) cannot tell whose hold it is, and one that
+  // names the task's offer or steer blob leaves that hold in place.
   if (ciphertextRef !== undefined && receipt.receipt.body !== body
-    && storedCiphertextHash(receipt.receipt.body) !== ciphertextRef.contentHash) {
+    && storedCiphertextHash(receipt.receipt.body) !== ciphertextRef.contentHash
+    && (isTaskRedactionTombstone(receipt.receipt.body) || !heldBefore)) {
     await releaseSealedCiphertext(stores.objects, taskId, ciphertextRef);
   }
   // Redaction runs only on a terminal task, so its status and projections are
