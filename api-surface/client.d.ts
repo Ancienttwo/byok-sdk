@@ -4166,7 +4166,6 @@ import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agen
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
 import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
-import { type SealedScopeKeyring } from './sealed-task';
 import { type DaemonLifecycle } from './daemon-lifecycle';
 import { type ControlStorageStatus } from './control-protocol';
 import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation';
@@ -4886,15 +4885,6 @@ export interface AssertionIssueProbe {
 }
 export declare function createDaemonWithAdapters(config: DaemonConfig, adapters: RuntimeAdapter[], overrides?: DaemonOverrides): Daemon;
 /**
- * #654 E3c: an injected scope keyring. Only tests pass it. With it the daemon
- * opens and seals sealed task content and advertises `sealed-payload-v1`.
- * A release must not advertise that flag before the device can receive key
- * packages (E2c-3, E2d), so no public option reaches this.
- */
-export interface SealedPayloadTestSeam {
-    readonly keyring: SealedScopeKeyring;
-}
-/**
  * codex round-2 F3: the real builder. Exported from THIS module but NOT from
  * the package `index.ts`, so the optional `assertionProbe` (an
  * {@link AssertionIssueProbe} post-sign observer) is reachable only by tests
@@ -4902,7 +4892,7 @@ export interface SealedPayloadTestSeam {
  * `createDaemonWithAdapters` above forwards without it, so production has no
  * observer and no signer-injection surface at all.
  */
-export declare function buildDaemonWithAdapters(config: DaemonConfig, adapters: RuntimeAdapter[], overrides?: DaemonOverrides, assertionProbe?: AssertionIssueProbe, sealedPayload?: SealedPayloadTestSeam): Daemon;
+export declare function buildDaemonWithAdapters(config: DaemonConfig, adapters: RuntimeAdapter[], overrides?: DaemonOverrides, assertionProbe?: AssertionIssueProbe): Daemon;
 /**
  * Public white-label entry point (M0-M3): the "5-line launcher" — a product
  * only needs a `DaemonConfig`, no hand-built adapter list. The bundled
@@ -8191,7 +8181,7 @@ export declare class RetentionSweeper {
  * each one is sealed, or it is one of the closed plaintext forms (decision
  * 12d), or it is not sent.
  */
-import { type SealedContentOpenFailure } from '@byok-sdk/core/sealed-payload';
+import { type SealedCategory, type SealedContentHeaderV1, type SealedContentOpenFailure } from '@byok-sdk/core/sealed-payload';
 import { type BlobRef, type Envelope } from '@byok-sdk/protocol';
 /** The scope key this device seals a task's output with, and its view of the member chain. */
 export interface SealingKey {
@@ -8205,18 +8195,18 @@ export interface SealingKey {
         readonly hash: string;
     };
 }
-/**
- * The scope keys this device holds. Only tests inject one today; the key
- * package store replaces it (E2d), and until then the daemon does not
- * advertise `sealed-payload-v1`.
- */
+/** The scope keys this device holds, and its view of the member chain (E2d-3: the device member keyring). */
 export interface SealedScopeKeyring {
+    /** The latest policy categories of a scope this device may use, or `undefined`. */
+    scopeCategories(scopeId: string): Promise<readonly SealedCategory[] | undefined>;
     /** The key of one scope epoch, to open content sealed under it. */
     openingKey(scope: {
         readonly id: string;
         readonly epoch: number;
     }): Promise<Uint8Array | undefined>;
-    /** The newest key of the scope at `minEpoch` or later, to seal output. */
+    /** Whether the authenticated header of opened content passes the sender-view check. */
+    acceptHeader(header: SealedContentHeaderV1): Promise<boolean>;
+    /** The newest fresh key of the scope at `minEpoch` or later, to seal output. */
     sealingKey(scopeId: string, minEpoch: number): Promise<SealingKey | undefined>;
 }
 /**
@@ -8260,10 +8250,12 @@ export declare class SealedTasks {
     sealsOutbound(envelope: Envelope): boolean;
     /**
      * Opens a sealed offer and returns the plaintext offer it seals, or the
-     * closed decline code. A task that seals its output needs a sealing key
-     * before it may run, also when its instruction is plaintext. An offer with
-     * `routineRef` carries a routine template, which opens under the template
-     * binding and only up to its `notAfter`.
+     * closed decline code. The offer's categories must cover the scope
+     * policy's (design §6.2). A task that seals its output needs a sealing key
+     * before it may run, also when its instruction is plaintext; that key is
+     * asked for after the input opens, whose chain head can make the epoch
+     * fresh. An offer with `routineRef` carries a routine template, which
+     * opens under the template binding and only up to its `notAfter`.
      */
     openOffer(envelope: Envelope): Promise<SealedOfferOpenResult>;
     /**
