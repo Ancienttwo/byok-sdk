@@ -1798,8 +1798,10 @@ export function buildDaemonWithAdapters(
   let connection: ConnectionManager | undefined;
   let blobLifecycleAbort: AbortController | undefined;
   // #654: sealed output uploads its ciphertext through its own blob client,
-  // which shutdown aborts only after the terminal commit barrier.
+  // which shutdown aborts only after the terminal commit barrier. A queued
+  // terminal can outlive its run, so its upload reads the current client.
   let sealedUploadAbort: AbortController | undefined;
+  let sealedUploads: BlobClient | undefined;
   let sealedOutputSettled: (() => Promise<void>) | undefined;
   let inputPreparationStatusAbort: AbortController | undefined;
   let lifecycle: DaemonLifecycle = { phase: 'stopped' };
@@ -2398,14 +2400,14 @@ export function buildDaemonWithAdapters(
     if (sealedPayload !== undefined) {
       capabilities.push(SEALED_PAYLOAD_CAPABILITY);
       sealedUploadAbort = new AbortController();
-      const sealedUploads = new BlobClient(config.serverUrl, auth, { signal: sealedUploadAbort.signal });
+      sealedUploads = new BlobClient(config.serverUrl, auth, { signal: sealedUploadAbort.signal });
       const opened = new SealedTasks({
         keyring: sealedPayload.keyring,
         tenantId: record.tenantId,
         deviceId: record.deviceId,
         blobs: {
           download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }),
-          upload: (ciphertext) => sealedUploads.uploadArtifact(ciphertext, 'application/octet-stream'),
+          upload: (ciphertext) => sealedUploads!.uploadArtifact(ciphertext, 'application/octet-stream'),
         },
         // Between sessions the next session's flags are unknown. Once the
         // daemon stopped, halted or crashed, no session will advertise any.
