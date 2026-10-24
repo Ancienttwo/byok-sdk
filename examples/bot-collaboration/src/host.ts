@@ -12,10 +12,9 @@ import { canonical, hash, project, setLifecycle, time, type ApplicationRows, typ
 import { addTurn, json, stateOf, type CollaborationState, type Turn } from './model';
 import { contextTurns, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
-  intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
-  settleDelegations, type DelegationTimers } from './delegation';
-import { collaborationDue, commitCommand, expireCards, reportCardDecisions, seatTurn, type Command, type CommandPorts, type CommandStore,
-  type KeylessCommand } from './rules/commands';
+  intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
+import { checkReply, collaborationDue, commitCommand, expireCards, replyCheckDue, reportCardDecisions, seatTurn, type Command, type CommandPorts,
+  type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
 import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
@@ -633,20 +632,18 @@ export class BotCollaboration {
   /** Example reconcile loop (§3.10). K4 arms no scan after a settled intent, so the Host checks replies itself. */
   private async flushReplies(): Promise<void> {
     for (const d of Object.values(this.snapshot().delegations)) {
-      if (d.verdict || d.nextCheckAt === undefined || d.nextCheckAt > this.now()) continue;
+      if (!replyCheckDue(d, this.now())) continue;
       // A compacted chain intent has no readback evidence. It takes the failed readback path and cannot stop the pass.
       const intent = this.core.intent(d.chainTurnIds.at(-1)!);
-      let readback: Awaited<ReturnType<NonNullable<MessageServer['tasks']['agentMessage']>>> | undefined, failed = !intent;
+      let check: ReplyCheck = { failed: true };
       if (intent) try {
         if (!this.server.tasks.agentMessage) throw new Error('Agent message readback API required');
-        readback = await this.server.tasks.agentMessage(intent.taskId, intent.execution.deviceId, intent.execution.payload.agentRef);
-      } catch { failed = true; }
+        check = { taskId: intent.taskId, failed: false,
+          readback: await this.server.tasks.agentMessage(intent.taskId, intent.execution.deviceId, intent.execution.payload.agentRef) };
+      } catch { check = { taskId: intent.taskId, failed: true }; }
       this.ledger.transaction(s => {
-        const state = stateOf(s.application), row = state.delegations[d.id]!;
-        const emit = (key: string, value: Json) => project(s, key, value);
-        if (intent && state.replies[intent.taskId]?.body !== undefined) resolveDelegation(state, row, 'answered', this.now(), emit, undefined, intent.taskId);
-        else if (failed) retryReply(state, row, this.now(), emit, this.timers.uncertainAfterMs);
-        else reconcileReply(state, row, readback, this.now(), emit, this.timers.uncertainAfterMs);
+        const state = stateOf(s.application);
+        checkReply(state, state.delegations[d.id]!, check, this.now(), (key: string, value: Json) => project(s, key, value), this.timers.uncertainAfterMs);
       });
     }
   }
