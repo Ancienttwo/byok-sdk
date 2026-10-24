@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 44d7d61 so a failed prompt reads its turn frames only after earlier notifications are recorded (Apache-2.0).
+// BYOK change: Modified from OAR c88a514 so a failed prompt reads its turn frames only after earlier notifications are recorded (Apache-2.0).
 import type {
   InputImage,
   InputOptions,

@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 44d7d61 for explicit native interaction approval policy (Apache-2.0).
+// BYOK change: Modified from OAR c88a514 for explicit native interaction approval policy (Apache-2.0).
 import { sessionCredentialRedactor } from "../../shared/credential-redactor.js";
 import path from "node:path";
 import { resolvedAdditionalDirectories } from "../../shared/additional-directories.js";

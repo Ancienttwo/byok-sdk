@@ -65,7 +65,7 @@ guarantee.
 | Claude (2.1.302) | `~/.claude/CLAUDE.md`, `~/.claude/rules/`, `~/.claude/settings.json`, user skills, commands and subagents; `CLAUDE.md`, `CLAUDE.local.md`, `.claude/CLAUDE.md` and `.claude/rules/` in every parent of the cwd; also managed policy and `~/.claude.json` | Yes, beside the task's `--mcp-config`: user and project servers; claude.ai connectors and plugin servers (inferred) | Auto memory, on by default | `--strict-mcp-config`; `claudeMdExcludes` and `env` through `--settings`; `--setting-sources` also drops guardrails | `agentUserContext`, Agent tasks only |
 | Codex (0.160.0) | `$CODEX_HOME/AGENTS.override.md` or `AGENTS.md`, `$CODEX_HOME/config.toml` | Yes: `config.toml` `[mcp_servers]`, merged with the task servers; plugins and apps (connectors) are on by default | `memories` feature, off by default | None | None |
 | Grok (1.0.52) | `$GROK_HOME/AGENTS.md` and `rules/`, `~/.claude/` and `~/.cursor/` instruction files and rules, `[paths] extra_rule_dirs`; also Claude and Cursor skills and hooks through compatibility cells | Yes (from the guide): `~/.grok/config.toml`, project `.grok/config.toml` and `.mcp.json`, plugins, and `~/.claude.json` and `~/.cursor/mcp.json` through compatibility cells | Experimental, off by default (`GROK_MEMORY`) | Four variables for the Claude and Cursor instruction files and rules; `GROK_CLAUDE_MCPS_ENABLED` and `GROK_CURSOR_MCPS_ENABLED` for those MCP cells only (from the guide) | `compatInstructions` |
-| Pi (1.3.0) | Agent-directory `AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions, skills and prompts; `~/.agents/skills`; context files in every parent of the cwd | Pi's built-in MCP and `mcp.json` do not load in SDK sessions; user extensions from the agent directory load and can register tools | None found (inferred) | `--no-context-files` drops the persona too | None |
+| Pi (1.4.0) | Agent-directory `AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions, skills and prompts; `~/.agents/skills`; context files in every parent of the cwd | Pi's built-in MCP and `mcp.json` do not load in SDK sessions; user extensions from the agent directory load and can register tools | None found (inferred) | `--no-context-files` drops the persona too | None |
 | Hermes (0.22.2+2364.g0b10b9f) | None: each execution has a fresh `HERMES_HOME` | No: the fresh `HERMES_HOME` configuration has no `mcp_servers` | Off in the SDK profile | Not needed | None |
 
 ### Claude: user-level configuration
@@ -190,7 +190,7 @@ for user instructions.
 
 ### Grok: user-level configuration
 
-The [vendored launch profile](../packages/client/vendor/oar/44d7d61/runtimes/grok/session.ts)
+The [vendored launch profile](../packages/client/vendor/oar/c88a514/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
 environment. `grok agent` 1.0.52 has no flag for rule loading or folder trust.
 Grok's [Project rules guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md)
@@ -240,7 +240,7 @@ file does not disable the normal resource loader or all ambient context sources.
 Credential custody and environment filtering also do not establish prompt
 isolation: the allowlisted environment retains home/config discovery paths.
 
-Pi 1.3.0 reads its agent directory, `$PI_CODING_AGENT_DIR` or else
+Pi 1.4.0 reads its agent directory, `$PI_CODING_AGENT_DIR` or else
 `~/.pi/agent`. From it, Pi loads a context file (`AGENTS.override.md`,
 `AGENTS.md` or `CLAUDE.md`), `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions,
 prompts, themes and skills. It also loads skills from `~/.agents/skills`. The
@@ -315,7 +315,7 @@ tracks that remaining work; adding persona text alone does not establish isolati
 
 `GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
 --no-leader stdio`, through the vendored OAR Grok profile
-(`packages/client/vendor/oar/44d7d61`). The ACP stack is a private entry that
+(`packages/client/vendor/oar/c88a514`). The ACP stack is a private entry that
 loads at session start, so `@byok-sdk/client/adapters` carries no ACP
 dependency.
 

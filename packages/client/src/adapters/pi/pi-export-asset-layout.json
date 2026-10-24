@@ -10,6 +10,7 @@
     "template.css",
     "template.js",
     "vendor/marked.min.js",
+    "vendor/marked-cjk-friendly.min.js",
     "vendor/highlight.min.js"
   ]
 }

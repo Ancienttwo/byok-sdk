@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Changed (client, cloud-do, keys)** — pin the nine official Pi packages to
+  exactly 1.4.0 (closureDigest `79c414be`). A preparation compiled for 1.3.0
+  declines with `preparation_runtime_identity_mismatch`; prepare it again.
+  `copyPiRuntimeAssets` copies the new `vendor/marked-cjk-friendly.min.js`
+  export asset. The pinned pi-ai catalog table follows the 1.4.0 catalog, and
+  `PI_MODEL_CATALOG_PI_AI_VERSION` is `"1.4.0"`. pi-durable 1.4.0 migrates
+  SQLite stores to schema version 2, which 1.3.0 cannot open, so a deployment
+  cannot roll back past this release. Its Harness attributes provider requests
+  to pi on the client durable lane, and parks a task after five restarts
+  without a commit (`restartLimit`, Durable Object evictions included). See
+  `docs/notes/2026-10-24-pi-1.4.0-oar-0.71.0-upgrade.md`.
+- **Changed (client)** — update the private OAR source to 0.71.0 (`c88a514`).
+  No selected upstream file changed; the nine BYOK-maintained files keep their
+  deltas.
+
 - **Fixed (client)** — a terminal whose journal commit failed during a
   `stop()` is sent after the next `start()` in the same process. Startup
   recovery no longer replaces it with `task.fail` `daemon_interrupted`.

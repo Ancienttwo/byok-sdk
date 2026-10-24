@@ -50,7 +50,7 @@ describe('copyPiRuntimeAssets', () => {
     expect(written.filter(entry => entry.isFile()).map(entry => path.relative(outDir, path.join(entry.parentPath, entry.name)).split(path.sep).join('/')).sort())
       .toEqual(files);
     const pinned = JSON.parse(await fs.readFile(path.join(outDir, 'package.json'), 'utf8'));
-    expect([pinned.name, pinned.version]).toEqual([sdk.PI_PACKAGE_NAME, '1.3.0']);
+    expect([pinned.name, pinned.version]).toEqual([sdk.PI_PACKAGE_NAME, '1.4.0']);
   });
 
   it('refuses a non-empty asset root and leaves it unchanged', async () => {
@@ -261,7 +261,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       expect(report.lookup).toMatch(/Cannot find (package|module)/u);
       expect(report.defaultDetect).toEqual({ kind: 'probe-failed' });
       // The default provider's models.json apiKey is pi's login (#345).
-      expect(report.detect).toEqual({ kind: 'available', version: '1.3.0', authPresent: true });
+      expect(report.detect).toEqual({ kind: 'available', version: '1.4.0', authPresent: true });
       expect(report.launch).toEqual({ command: host.command, ...(host.entry === undefined ? {} : { entry: host.entry }),
         fixedArgs: ['__byok_sdk_helper', 'pi-rpc'] });
       const events = report.events!;
@@ -271,7 +271,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       expect(bodies).toHaveLength(1);
       expect(bodies[0]).toContain('Reply with the host payload marker.');
       // The user's extension loaded against the Pi runtime in the bundle.
-      expect(JSON.parse(await fs.readFile(extensionMarker, 'utf8'))).toEqual({ version: '1.3.0', schema: 'object', api: 'function' });
+      expect(JSON.parse(await fs.readFile(extensionMarker, 'utf8'))).toEqual({ version: '1.4.0', schema: 'object', api: 'function' });
     } finally {
       provider.closeAllConnections();
       await new Promise<void>(resolve => provider.close(() => resolve()));
