@@ -3,6 +3,9 @@
  * core (#654 E2c). For a real core value and many mutations of it, protocol
  * accepts the shape exactly when core does. Core's verdict here is its shape
  * verdict: every mutation either breaks the shape or keeps the signed bytes.
+ * One exception: a `shred` entry must have the subject `{ scopeId }`. The
+ * protocol refuses other shred subjects at the entry; core refuses them only
+ * in its walk (owner decision §50g A).
  */
 import {
   applyMemberChainEntries,

@@ -316,6 +316,15 @@ capability flag `agent-memory-read-if-admitted`; server and hosted cloud refuse
 it otherwise before task creation or mailbox append. The other values do not
 change.
 
+**Landed additive minor: `agentMemory: 'read-write-if-admitted'`.** The same
+three ordinary Agent offers, and their sealed forms, accept a fifth
+`agentMemory` value, `read-write-if-admitted` (§2.2). `task.offer_prepared`
+does not accept it. A host sends the value only to a device that durably
+advertises both `agent-memory-selection` and the new capability flag
+`agent-memory-read-write-if-admitted`; server and hosted cloud refuse it
+otherwise before task creation or mailbox append. The other values do not
+change.
+
 **Agent message drafts (additive v3).** `agent.message.draft` is gated on the
 server's `agent-message-draft` flag. Its payload is strict. It has no reliable
 ack or spool entry. `RuntimeCapabilities.messageDraft` is optional strip-safe
@@ -439,7 +448,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Historical handshake acknowledgement; current long-poll uses response metadata |
 | `task.offer` | S→D | **required** | **required** | `instruction`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
-| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `homeAccess?` (additive — §2.2), `agentMemory?` (additive — §2.2; `read-if-admitted` needs `agent-memory-read-if-admitted`), `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
+| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `homeAccess?` (additive — §2.2), `agentMemory?` (additive — §2.2; `read-if-admitted` needs `agent-memory-read-if-admitted`, `read-write-if-admitted` needs `agent-memory-read-write-if-admitted`), `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
 | `task.offer_for_agent_with_egress` | S→D | **required** | **required** | All strict Agent fields plus required `sessionRef` and exact `egressPolicy` | An Agent dispatch targets a daemon that consumed the revisioned egress contract |
 | `task.offer_for_agent_with_egress_fresh` | S→D | **required** | **required** | All strict Agent fields plus exact `egressPolicy`, with no `sessionRef` | A fresh Agent dispatch targets a daemon advertising `agent-egress-fresh-session` |
 | `task.offer_prepared` | S→D | **required** | **required** | `agentRef`, `homeAccess?`, `agentMemory`, `egressPolicy`, `messageEgress?`, `preparation` (`reference`, `requestDigest`, `artifactDigest?`), `runtime?`, `dispatchSelection?`, `requiredToolsets?`, `terminalProjection?`, `limits?` — and deliberately NO `instruction` and NO `sessionRef` | An already-counted preparation is dispatched to the device that counted it |
@@ -770,11 +779,16 @@ the reference server refuses that dispatch before the task exists. `read` or
 non-retryable decline (`agent_memory_unavailable`); the daemon never changes
 the selection to `none`. `read-if-admitted` runs as `read` when the daemon
 admits the memory MCP and as `none` when it does not, for a writer and a
-reader; it never gets `agent_memory_unavailable`. The daemon reads its
-admission once per offer and binds the memory MCP from that one answer. The
-terminal does not report which mode ran. A daemon advertises
-`agent-memory-selection` and `agent-memory-read-if-admitted` whenever it has an
-Agent home, whatever its memory admission.
+reader; it never gets `agent_memory_unavailable`. `read-write-if-admitted`
+runs as `read-write` when the daemon admits the memory MCP and as `none` when
+it does not; it never gets `agent_memory_unavailable`. A `memory-reader` offer
+that selects it gets `agent_memory_selection_invalid` whatever the admission,
+and the reference server refuses that dispatch before the task exists. The
+daemon reads its admission once per offer and binds the memory MCP from that
+one answer. The terminal does not report which mode ran. A daemon advertises
+`agent-memory-selection`, `agent-memory-read-if-admitted` and
+`agent-memory-read-write-if-admitted` whenever it has an Agent home, whatever
+its memory admission.
 
 ### 2.3 Task-free sealed provider provisioning notice
 
@@ -1406,6 +1420,22 @@ fetches the packages addressed to its member from
   `sealed-payload-v1` unless that release's protocol has this type and the
   daemon handles it. Otherwise a daemon that advertised the flag gets a type
   it cannot decode.
+
+**Device handling (#654 E2d-2).** The daemon consumes the notice before its
+journal, like `provider.provisioning.available`, and never journals it.
+
+- It first catches the member chain up from its verified head, and stores
+  the new head. An invalid entry, or a chain that no longer holds the device
+  as a current member, ends the member for that run.
+- It then reads the packages for `(scopeId, epoch)`. It opens one only when
+  the scope is in its verified chain state and the scope's latest
+  `scope-policy` holds both the device and the sender. The sender's signing
+  key comes from the verified chain. The opened key stays in memory.
+- It keeps the row (does not acknowledge) only while the member is still
+  resuming at start, or when a Host read fails. It acknowledges every other
+  end with a log line: no member, an unknown scope, a missing package, or a
+  package that does not open. The first open or seal at that epoch fetches
+  again on its cache miss (E2d-3).
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 

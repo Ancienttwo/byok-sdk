@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
+  select `agentMemory: 'read-write-if-admitted'` (#833). It runs exactly as
+  `read-write` when the daemon admits the memory MCP, and exactly as `none`
+  when it does not. It never gets `agent_memory_unavailable`. A task that is
+  useless without memory selects `read-write` instead, which declines. A
+  `memory-reader` Attempt cannot select the value: the reference server
+  refuses it before the task exists, and the daemon declines it with
+  `agent_memory_selection_invalid`. Prepared offers do not accept the value.
+  The other values and an absent field do not change. The value is a gated
+  wire addition on the three ordinary Agent offers and their sealed forms:
+  every daemon with an Agent home advertises the new device capability
+  `agent-memory-read-write-if-admitted`
+  (`AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY`), and server and hosted
+  cloud refuse the value to a device without it, before the task exists. The
+  terminal does not report which mode ran.
 - **Breaking (cloud)** — the Host shreds a sealed scope when the member chain
   appends a `shred` (#654 E5b-1, design §11.2). A `shred` subject must now be
   exactly `{ scopeId }`; another subject gets `coordination_input_invalid`.
@@ -16,6 +31,10 @@
   `InMemoryE2eeMemberStore` takes the composition's `RequestReceiptStore`.
   Postgres needs migration `0028_e2ee_scope_shred.sql`; SQLite adds the table
   on open.
+  Upgrade note: a `shred` entry that a 0.30.0 Host already stored is not
+  applied, so that scope keeps its packages and accepts new puts. A stored
+  `shred` entry whose subject is not `{ scopeId }` makes every chain read that
+  includes it fail with `e2ee_member_state_unreadable`.
 - **Docs and vectors** — `docs/security.md` gains a Scope shred section: what
   a Host shred removes, the unverified delete, and the backup gap until each
   member rotates its KEM key (#654 E5b-3). The hosted Host contract lists the
