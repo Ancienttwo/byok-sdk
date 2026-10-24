@@ -1395,8 +1395,9 @@ Host's own pairing code may hold a `.`. `pv` never reaches the Host.
 - Without `pv`, or with an expired one, the device is no member. Missing or
   malformed member keys are never replaced: the Host keeps the first bundle
   per device, so the recovery is a re-pair, which mints a new device id.
-- The device signs only `e2ee-member-key.register`. It appends no chain entry
-  and puts no package.
+- The device signs `e2ee-member-key.register`, and
+  `e2ee-scope-key-package.put` when it rotates a scope epoch (§2.5, device
+  rules). It appends no chain entry.
 
 ### 2.7 E2EE key package notice (#654 E2c-3)
 
