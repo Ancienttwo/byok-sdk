@@ -32,7 +32,7 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { SEALED_INLINE_MAX_PADDED_LENGTH } from '@byok-sdk/protocol';
+import { SEALED_INLINE_MAX_PADDED_LENGTH, isSealedMessageType } from '@byok-sdk/protocol';
 import {
   journalHash,
   type JournalIdentity,
@@ -92,9 +92,20 @@ const SEALED_ENVELOPE_MARGIN_BYTES = 64 * 1024;
  * member carries up to `SEALED_INLINE_MAX_PADDED_LENGTH` + 16 bytes of
  * ciphertext as unpadded base64url. That is above the default record bound,
  * and the daemon must journal such an envelope before it can decline it.
- * Terminal and transition records keep `maxRecordBytes`.
+ * A sealed terminal record has the same floor; plaintext terminal and
+ * transition records keep `maxRecordBytes`.
  */
 const ENVELOPE_RECORD_FLOOR_BYTES = Math.ceil(((SEALED_INLINE_MAX_PADDED_LENGTH + SEALED_AEAD_TAG_BYTES) * 4) / 3) + SEALED_ENVELOPE_MARGIN_BYTES;
+
+/** Whether canonical envelope bytes are a sealed message type (#654); read only for a record above `maxRecordBytes`. */
+function isSealedEnvelope(bytes: string): boolean {
+  try {
+    const { type } = JSON.parse(bytes) as { type?: unknown };
+    return typeof type === 'string' && isSealedMessageType(type);
+  } catch {
+    return false;
+  }
+}
 
 /** Default bound on how long a write waits for the write lock before failing. */
 export const DEFAULT_JOURNAL_BUSY_TIMEOUT_MS = 5_000;
@@ -744,9 +755,10 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     if (typeof bytes !== 'string' || journalHash(bytes) !== payloadHash) {
       throw new Error('terminal bytes do not match their canonical hash');
     }
-    if (byteLength(bytes) > this.#maxRecordBytes) {
-      throw new JournalRecordTooLargeError('terminal bytes', byteLength(bytes), this.#maxRecordBytes);
-    }
+    const length = byteLength(bytes);
+    if (length <= this.#maxRecordBytes) return;
+    const bound = isSealedEnvelope(bytes) ? Math.max(this.#maxRecordBytes, ENVELOPE_RECORD_FLOOR_BYTES) : this.#maxRecordBytes;
+    if (length > bound) throw new JournalRecordTooLargeError('terminal bytes', length, bound);
   }
 
   #insertTerminal(record: LocalTerminalRecord): void {

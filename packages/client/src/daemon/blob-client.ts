@@ -59,6 +59,11 @@ export class BlobClient implements BlobResolver {
 
   /** `blobRef` -> `GET /byok/blobs/:id/url` -> fetch the presigned download URL -> text content. Always resolves fresh rather than trusting any inlined `BlobRef.url`, per docs/protocol.md §7. */
   async resolveInstruction(blobRef: BlobRef, options: BlobRequestOptions = {}): Promise<string> {
+    return new TextDecoder().decode(await this.downloadBlob(blobRef, options));
+  }
+
+  /** The blob's bytes, after the declared SHA-256 and size check. */
+  async downloadBlob(blobRef: BlobRef, options: BlobRequestOptions = {}): Promise<Uint8Array> {
     const base = toHttpBase(this.serverUrl);
     const urlRes = await this.#request(
       (signal) => authedFetch(new URL(byokBlobUrlPath(blobRef.blobId), base), { method: 'GET', signal }, this.auth),
@@ -87,7 +92,7 @@ export class BlobClient implements BlobResolver {
         `downloaded blob failed declared integrity: expected ${blobRef.contentHash}/${blobRef.size} bytes, observed ${observedHash}/${bytes.length} bytes`,
       );
     }
-    return new TextDecoder().decode(bytes);
+    return bytes;
   }
 
   /** `POST /byok/blobs` -> PUT the bytes to the presigned URL -> finalize into a `BlobRef`. */

@@ -3,6 +3,7 @@ import {
   type OutboundRefusalReason,
   type ActivityIngress,
   MAX_MESSAGES_PER_BATCH,
+  MESSAGES_SEND_MAX_BODY_BYTES,
   createEnvelope,
   isServerToDaemonType,
   PROTOCOL_VERSION,
@@ -401,7 +402,10 @@ export class ConnectionManager {
 
   /**
    * POSTs the outbox through long-poll in chunks of at most
-   * `MAX_MESSAGES_PER_BATCH` (finding P1) — the server hard-caps a single
+   * `MAX_MESSAGES_PER_BATCH` envelopes and `MESSAGES_SEND_MAX_BODY_BYTES` of
+   * encoded body (one envelope always goes; the cloud answers 413 above the
+   * byte cap, and sealed envelopes reach about 350 KB each). Finding P1:
+   * the server hard-caps a single
    * `/byok/messages` batch there (`MessagesSendRequestSchema`, protocol
    * §8.2) and 400s the WHOLE request if it's exceeded, which — before this
    * fix — meant more than that queued during an outage produced an oversize
@@ -455,7 +459,14 @@ export class ConnectionManager {
         if (this.state !== 'open' || this.isEnded()) return;
 
         const generation = this.sessionGeneration;
-        let batch = this.outbox.splice(0, MAX_MESSAGES_PER_BATCH);
+        // Cut at the count cap or before the encoded body would pass the byte cap
+        // (`{"messages":[` + `]}` is 15 bytes, one comma between envelopes); one envelope always goes.
+        let count = 0;
+        for (let bytes = 14; count < Math.min(this.outbox.length, MAX_MESSAGES_PER_BATCH); count++) {
+          bytes += Buffer.byteLength(JSON.stringify(this.outbox[count])) + 1;
+          if (count > 0 && bytes > MESSAGES_SEND_MAX_BODY_BYTES) break;
+        }
+        let batch = this.outbox.splice(0, count);
         // serveSession applies handshake capabilities before opening this drain.
         // Re-gate queued drafts after reconnect; dropped drafts have no receipt.
         if (!this.serverCapabilities.includes('agent-message-draft')) {
