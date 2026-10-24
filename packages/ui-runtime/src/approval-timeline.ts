@@ -108,7 +108,7 @@ function accumulatedItem(accumulator: ApprovalAccumulator): ApprovalProjectionIt
     firstRevision: observations[0]!.revision,
     sourceRevisions: observations.map(({ revision }) => revision),
     sourceEnvelopeIds: observations.map(({ sourceEnvelopeId }) => sourceEnvelopeId),
-    ...(accumulator.request !== undefined ? { summary: accumulator.request.summary } : {}),
+    ...(accumulator.request !== undefined && 'summary' in accumulator.request ? { summary: accumulator.request.summary } : {}),
     ...(resolution !== undefined ? {
       decision: resolution.decision,
       resolvedBy: resolution.resolvedBy,
@@ -130,7 +130,7 @@ function unpairedRequest(observation: ApprovalObservation): ApprovalProjectionIt
     firstRevision: observation.revision,
     sourceRevisions: [observation.revision],
     sourceEnvelopeIds: [observation.sourceEnvelopeId],
-    summary: event.summary,
+    ...('summary' in event ? { summary: event.summary } : {}),
   });
 }
 

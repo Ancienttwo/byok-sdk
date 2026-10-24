@@ -12,6 +12,21 @@ import {
 
 const receivedAt = '2026-08-16T12:00:00.000Z';
 
+/** A schema-valid inline `task-output` sealed member (#654). Only its outer fields are read. */
+const SEALED_MEMBER = {
+  v: 1 as const,
+  suite: 'byok-sealed-v1.hkdf-sha256.aes-256-gcm' as const,
+  category: 'task-output' as const,
+  scope: { id: 'scope-1', epoch: 1, keyId: 'K'.repeat(22) },
+  chainHead: { seq: 1, hash: `sha256:${'b'.repeat(64)}` },
+  sender: 'S'.repeat(43),
+  salt: Buffer.alloc(32, 1).toString('base64url'),
+  nonce: Buffer.alloc(12, 1).toString('base64url'),
+  paddedLength: 256,
+  contentMac: `hmac-sha256:${'a'.repeat(64)}`,
+  ciphertext: Buffer.alloc(256 + 16, 1).toString('base64url'),
+};
+
 function timelineEvent(
   batchSeq: number,
   eventIndex: number,
@@ -45,6 +60,11 @@ function expectCode(run: () => unknown, code: TimelineFoldError['code']): void {
 }
 
 describe('Live Activity Timeline fold', () => {
+  it('refuses a sealed activity batch, which a reader must open before replay (#654 12e)', () => {
+    const sealedBatch = { taskId: 'task-1', sourceEnvelopeId: 'env-sealed', batchSeq: 1, eventIndex: 0 as const, receivedAt, sealed: SEALED_MEMBER };
+    expectCode(() => replayTimeline({ ...tail([]), entries: [sealedBatch] }), 'timeline_input_invalid');
+  });
+
   it('makes replay and out-of-order incremental folding identical and overlap idempotent', () => {
     const events = [
       timelineEvent(0, 0, { type: 'progress', text: 'A' }),

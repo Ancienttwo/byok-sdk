@@ -155,8 +155,6 @@ export type {
 } from './custody';
 
 export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
-export { DEVICE_MEMBER_SECRET_NAME, DeviceMemberKeyStore } from './device-member-key';
-export type { DeviceMemberKemKey, DeviceMemberKeys, DeviceMemberSecretName } from './device-member-key';
 export type {
   DeviceSealingEnrollment,
   DeviceSealingKey,

@@ -5,6 +5,7 @@ import {
   ApprovalObservationSchema,
   approvalTimelineCursor,
   approvalTimelineKey,
+  sameApprovalTimelineEvent,
   validateApprovalTimelineAppend,
   validateApprovalTimelineResolve,
   type ApprovalTimelineAppendInput,
@@ -35,7 +36,7 @@ export class InMemoryApprovalTimelineStore implements ApprovalTimelineStore {
         (entry) => entry.sourceEnvelopeId === input.sourceEnvelopeId,
       );
       if (duplicate !== undefined) {
-        if (JSON.stringify(duplicate.event) !== JSON.stringify(event)) {
+        if (!sameApprovalTimelineEvent(duplicate.event, event)) {
           throw new ByokCloudError(
             'coordination_input_invalid',
             'Approval source envelope identity already belongs to another lifecycle event.',
@@ -83,7 +84,7 @@ export class InMemoryApprovalTimelineStore implements ApprovalTimelineStore {
 
     const duplicate = live.entries.find((entry) => entry.sourceEnvelopeId === input.sourceEnvelopeId);
     if (duplicate !== undefined) {
-      if (JSON.stringify(duplicate.event) !== JSON.stringify(event)) return { status: 'conflict', tail: live };
+      if (!sameApprovalTimelineEvent(duplicate.event, event)) return { status: 'conflict', tail: live };
       return { status: 'replayed', tail: live };
     }
 
