@@ -24,6 +24,7 @@ import {
   type SealedMessageType,
   type TaskSealing,
 } from '@byok-sdk/protocol';
+import { routineTemplateBinding, routineTemplateExpired, type RoutineRef } from './sealed-routine-template';
 
 type JsonObject = { [key: string]: unknown };
 
@@ -134,20 +135,26 @@ export class SealedTasks {
   /**
    * Opens a sealed offer and returns the plaintext offer it seals, or the
    * closed decline code. A task that seals its output needs a sealing key
-   * before it may run, also when its instruction is plaintext.
+   * before it may run, also when its instruction is plaintext. An offer with
+   * `routineRef` carries a routine template, which opens under the template
+   * binding and only up to its `notAfter`.
    */
   async openOffer(envelope: Envelope): Promise<SealedOfferOpenResult> {
     if (!isSealedMessageType(envelope.type) || envelope.task_id === undefined) return { ok: false, code: 'sealing_policy_mismatch' };
     const taskId = envelope.task_id;
     const entry = SEALED_SPLIT_TABLE[envelope.type];
-    const { sealing, sealed, ...plain } = envelope.payload as JsonObject & { sealing: TaskSealing; sealed?: JsonObject };
+    const { sealing, sealed, routineRef, ...plain } = envelope.payload as JsonObject & { sealing: TaskSealing; sealed?: JsonObject; routineRef?: RoutineRef };
     const agentRef = (plain.agentRef as AgentRef | undefined) ?? null;
+    if (routineRef !== undefined && routineTemplateExpired(routineRef, Date.now())) return { ok: false, code: 'sealing_policy_mismatch' };
     if (sealing.categories.includes('task-output') && await this.#sealingKey(sealing) === undefined) {
       return { ok: false, code: 'sealed_key_unavailable' };
     }
     let payload = plain;
     if (sealed !== undefined) {
-      const opened = await this.#open(sealed, this.#binding(entry.plainType, 'server-to-daemon', { taskId }, sealing, agentRef), sealing);
+      const binding = routineRef === undefined
+        ? this.#binding(entry.plainType, 'server-to-daemon', { taskId }, sealing, agentRef)
+        : routineTemplateBinding(this.options.tenantId, routineRef, agentRef, sealing);
+      const opened = await this.#open(sealed, binding, sealing);
       if (!opened.ok) return { ok: false, code: opened.code };
       if (Object.keys(opened.plaintext).some((field) => !(entry.moved as readonly string[]).includes(field))) {
         return { ok: false, code: 'sealed_open_failed' };
