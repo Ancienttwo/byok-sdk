@@ -221,9 +221,8 @@ async function completePairing(options: ResumeDeviceMemberOptions, state: Device
       return true;
     });
     const relayed = registered && await poll(options, deadline, async () => checkRelay(await client.readPairingMac(), pv, log));
-    if (!relayed) return signal.aborted ? undefined : giveUp(EXPIRED);
-    const entries = await poll(options, Number.POSITIVE_INFINITY, () => client.readChainFrom(0));
-    if (entries === undefined) return undefined;
+    const entries = relayed && await poll(options, deadline, () => client.readChainFrom(0));
+    if (!relayed || !entries) return signal.aborted ? undefined : giveUp(EXPIRED);
     const anchor = { approverSigningPublicJwk: relayed.client.signingPublicJwk, entry: relayed.chainHead };
     const anchored = await verifyMemberChainFromAnchor({
       tenantId, entries, self: member, approverSigningPublicJwk: relayed.client.signingPublicJwk, authenticatedHead: relayed.chainHead,
