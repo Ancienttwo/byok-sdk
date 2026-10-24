@@ -30,6 +30,18 @@
   Postgres needs migration `0028_e2ee_scope_shred.sql`; SQLite adds the table
   on open.
 
+## 0.30.0 — source candidate
+
+0.30.0 is a MINOR release under the default pre-1.0 policy, with no exception.
+It adds public API, gated wire types and behavior, and it has breaking changes
+in protocol, server, cloud and client. The owner confirmed the breaking labels
+of #783, #784, #831 and #834. The examples changes of #820, #823 and #852 are
+also breaking for a Host that copies the K8 example. This candidate is not
+published. A default 0.30.0 daemon does not advertise `sealed-payload-v1`. See
+the [release notes](docs/releases/v0.30.0.md) for scope, the release rule of
+`sealed-payload-v1` and the upgrade notes. All nine public manifests and their
+lock records move to 0.30.0.
+
 - **Feature (protocol, cloud)** — a sealed
   `task.offer_for_agent_with_egress_fresh_sealed` can carry a plaintext
   `routineRef: { routineId, definitionVersion, notAfter }` (#654 E3d). Its
@@ -37,10 +49,33 @@
   family `routine.template`, for every occurrence of one routine version. The
   offer must seal `task-input`. `definitionVersion` is an integer and
   `notAfter` is a canonical UTC instant, the forms core binds in the AAD. The
-  hosted sealed execution lane accepts the field and compares it on a
-  duplicate offer. The Host does not check `notAfter`; the device does. No
-  daemon advertises `sealed-payload-v1` yet, so no device receives the field.
-
+  hosted sealed execution lane accepts the field. Its comparison projection
+  keeps `routineRef` and the template `contentMac`, so a duplicate offer with
+  another `routineRef` or template under the same task id fails with
+  `coordination_input_invalid`. The Host does not check `notAfter`; the device
+  does. No daemon advertises `sealed-payload-v1` yet, so no device receives
+  the field.
+- **Feature (protocol, client)** — the daemon opens sealed task input and
+  seals sealed task output (#654 E3c). Only the test parameter `sealedPayload`
+  of `buildDaemonWithAdapters` gives a daemon a scope keyring and the
+  `sealed-payload-v1` advertisement. The package index does not export that
+  function. So a default 0.30.0 daemon does not advertise `sealed-payload-v1`,
+  and it declines every sealed offer. With a keyring, the daemon opens a
+  sealed offer before the plain gates. A failure gets one non-retryable
+  `task.decline` with the closed code as `reason` and `code`. A sealed steer
+  is applied once per `steerId`. A task that seals its output sends its seven
+  output types sealed, through one ordered queue per task, and the journal
+  keeps the sealed terminal bytes. Sealed output is inline only (owner batch
+  §58). A terminal that cannot be sealed inline becomes a sealed `task.fail`
+  with `terminal_result_unsealable`. A sealed approval request that cannot be
+  sent is rejected locally. A sealed artifact whose frame is above the 256 KiB
+  inline maximum gets an error event and no artifact. When the server
+  advertises the flag, an over-bound sealed offer (#826) gets
+  `sealed_open_failed` with a keyring, or `sealed_key_unavailable` without
+  one. Otherwise it keeps `inbound_envelope_too_large`. New public items:
+  `BlobClient.downloadBlob`, the protocol constant
+  `MESSAGES_SEND_MAX_BODY_BYTES` (2 MiB; the outbound drain also cuts chunks
+  at it), and the optional `SealedSplitEntry.limits`.
 - **Feature (client)** — the daemon opens the routine template of a sealed
   offer with `routineRef` (#654 E3d-3). It builds the template binding from
   `routineRef`, the offer's `agentRef` and its `sealing.categories`, with no
@@ -51,21 +86,19 @@
   gets `sealed_content_mac_mismatch`. The decline reason is the code. Only the
   test seam of `buildDaemonWithAdapters` gives a daemon a keyring, so a
   default daemon still declines every sealed offer.
-
 - **Changed (core)** — the member chain walk limits who may sign a scope
   change (#654, owner batch §50f A). A `scope-policy` or `shred` of an
   existing scope must be signed by a member in that scope's current policy,
   and the first `scope-policy` of a new scope must be signed by a member it
-  lists. Any other signer fails with `member_chain_signer_invalid`. Before, any
-  current member could sign both, so one device member could add itself to
+  lists. Any other signer fails with `member_chain_signer_invalid`. Before,
+  any current member could sign both, so one device member could add itself to
   another device's scope or shred it. Now a member cannot change or shred, on
   the chain, a scope it is not in. The Host still deletes a scope's key
   packages on any well-shaped `shred` (owner batch §50g), and the first member
-  that creates a scope id takes it. A subject that breaks an op rule still fails with
-  `member_chain_subject_invalid`. `golden/member-rules-v1.json` gains a
-  `scopeSigners` section; no existing vector changes. The walk is not yet in a
-  published release.
-
+  that creates a scope id takes it. A subject that breaks an op rule still
+  fails with `member_chain_subject_invalid`. `golden/member-rules-v1.json`
+  gains a `scopeSigners` section; no existing vector changes. The walk is not
+  yet in a published release.
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select `agentMemory: 'read-if-admitted'` (#815). It runs exactly as `read`
   when the daemon admits the memory MCP, and exactly as `none` when it does
@@ -82,7 +115,7 @@
   and binds the memory MCP from that answer. The terminal does not report
   which mode ran.
 
-- **Changed (client)** — on macOS the Agent memory helper refuses a directory
+- **Breaking (client)** — on macOS the Agent memory helper refuses a directory
   or a file below the Agent home that is on another device than its parent
   directory (#781). Before, the local-volume rule (#765) checked only the home
   itself, so a network volume mounted over `notes` was admitted. The helper
@@ -106,9 +139,9 @@
   `task.steer_sealed` has a `steerId`, and `task.artifact_sealed` has an
   `artifactId`. A sealed message has no plaintext blob reference yet.
   `task.decline` accepts four sealed decline codes. Cloud gets six sealed
-  hosted entries, from `enqueueSealedOffer` to `steerSealedTask`. Cloud does
-  not advertise the flag yet.
-- **Changed (protocol, cloud, server)** — the plaintext hosted entries now
+  hosted entries, from `enqueueSealedOffer` to `steerSealedTask`. The #654
+  E3b-2 entry below makes cloud advertise the flag.
+- **Breaking (protocol, cloud, server)** — the plaintext hosted entries now
   refuse `sealing` and `sealed` with `coordination_input_invalid` (#654 E3a).
   Before, the plain payload schema dropped these keys, and the task ran in
   plaintext. `steerTask` also refuses `steerId`. The reference server
@@ -116,12 +149,16 @@
   way. The wire schema also refuses them: each plaintext type that has a
   sealed sibling fails to parse when it carries `sealing` or `sealed`, so a
   direct protocol caller cannot send a sealed task as plaintext.
-- **Changed (client, cloud)** — until the sealed receivers exist, the daemon
-  declines a sealed offer non-retryably (`sealed_payload_unsupported`) and
-  drops a sealed steer (#654 E3a). Cloud inbound refuses a sealed daemon
-  message with `sealed_payload_unsupported`. The sealed hosted entries refuse
-  a `ciphertextRef` with `coordination_input_invalid`, because the Host does
-  not yet check and retain the referenced blob. Inline ciphertext works.
+- **Changed (client, cloud)** — a daemon without a scope keyring declines a
+  sealed offer non-retryably and drops a sealed steer (#654 E3a). In 0.30.0
+  every default daemon has no keyring (see the #654 E3c entry above).
+  To a server that advertises `sealed-payload-v1`, the decline has
+  `sealed_key_unavailable` as its `reason` and `code`. To other servers, its
+  `reason` starts with `sealed_payload_unsupported` and it has no `code`.
+  Cloud inbound refuses a sealed daemon message with
+  `sealed_payload_unsupported` when the offer did not seal `task-output` (see
+  the #654 E3b-2 entry below). The `ciphertextRef` lane of the sealed hosted
+  entries is in the #654 E3b entry below.
 - **Changed (client)** — the hosted journal admits an inbound envelope record
   up to the larger of `hostedJournal.maxRecordBytes` and 415083 bytes (#654
   E3a). The journal derives this floor from the largest inline sealed member:
@@ -147,41 +184,265 @@
   redacted task. Only task redaction and tenant erasure release the
   reference, so the ciphertext of a sealed task stays stored as long as its
   offer receipt does.
-- **Feature (protocol, cloud, cloud-dataplane, ui-runtime)** — the Host accepts the sealed task
-  output, and the cloud advertises `sealed-payload-v1` (#654 E3b-2). A task whose offer sealed
+- **Breaking (cloud)** — the Host accepts the sealed task output, and the
+  cloud advertises `sealed-payload-v1` (#654 E3b-2). A task whose offer sealed
   `task-output` must report its output sealed. Its plaintext terminal may
   carry only a closed code from the new `SEALED_TASK_PLAIN_CODES`: a
   `task.fail` with `daemon_interrupted` or `sealed_key_unavailable`, a
   `task.decline` whose `reason` is its sealed decline `code`, or a
   `task.cancelled` with no reason. `task.complete`, `task.progress`,
   `task.artifact` and `task.await_approval` have no plaintext form.
-  `isSealedTaskPlainOutput` checks that rule by exact match. A task without output sealing reports no sealed output. A
-  sealed terminal takes every gate of its plaintext type, and
-  `task.fail_sealed` with `recovery` is refused. `task.terminal_cause` keeps
-  only a closed code for a sealed terminal. `readDeviceTerminal` returns the
-  sealed terminal with its sealed member, and `readTaskResult` projects only
-  its plaintext fields. A sealed artifact is accepted and not stored. A sealed progress batch
-  is one activity tail entry with `sealed` in place of `event`, so the tail
-  capacity counts batches. A sealed approval request has `approvalId` and
-  `sealed`, and the Host resolves it by `approvalId`. A replay with the same
-  comparison projection is the same entry. A sealed output by `ciphertextRef`
-  is refused. The Postgres activity store accepts a stored sealed entry.
-  `replayTimeline` refuses a sealed batch, and the approval projection gives
-  no `summary` for a sealed request. Compatibility: `INBOUND_REFUSAL_REASONS`
-  gets `sealed_output_required`. `DeviceTerminal.envelope` can be one of the
-  four sealed terminal types. `ActivityTail.entries` is now
-  `ActivityTailEntry[]` (`TimelineEvent | SealedActivityBatch`), and
-  `ApprovalTimelineEvent` gets the sealed request member, so a reader that
-  reads `entry.event` or `summary` must narrow first. `projectTimelineEvents`
-  and `parseTimelineEvents` return `ActivityTailEntry[]`.
-  `activitySourceBatchState` and `activityCursor` take `ActivityTailEntry[]`.
-  `ApprovalTimelineEventSchema` and `ApprovalObservationSchema` accept the
-  sealed request member.
+  `isSealedTaskPlainOutput` checks that rule by exact match. A task without
+  output sealing reports no sealed output. A sealed terminal takes every gate
+  of its plaintext type, and `task.fail_sealed` with `recovery` is refused.
+  `task.terminal_cause` keeps only a closed code for a sealed terminal.
+  `readDeviceTerminal` returns the sealed terminal with its sealed member, and
+  `readTaskResult` projects only its plaintext fields. A sealed artifact is
+  accepted and not stored. A sealed progress batch is one activity tail entry
+  with `sealed` in place of `event`, so the tail capacity counts batches. A
+  sealed approval request has `approvalId` and `sealed`, and the Host resolves
+  it by `approvalId`. A replay with the same comparison projection is the same
+  entry. A sealed output by `ciphertextRef` is refused. The Postgres activity
+  store accepts a stored sealed entry. `replayTimeline` refuses a sealed
+  batch, and the approval projection gives no `summary` for a sealed request.
+  Compatibility: `INBOUND_REFUSAL_REASONS` gets `sealed_output_required`.
+  `DeviceTerminal.envelope` can be one of the four sealed terminal types.
+  `ActivityTail.entries` is now `ActivityTailEntry[]` (`TimelineEvent |
+  SealedActivityBatch`), and `ApprovalTimelineEvent` gets the sealed request
+  member, so a reader that reads `entry.event` or `summary` must narrow first.
+  `projectTimelineEvents` and `parseTimelineEvents` return
+  `ActivityTailEntry[]`. `activitySourceBatchState` and `activityCursor` take
+  `ActivityTailEntry[]`. `ApprovalTimelineEventSchema` and
+  `ApprovalObservationSchema` accept the sealed request member. Upgrade: code
+  that reads `ActivityTail.entries[].event`, or the `summary` of an
+  `ApprovalTimelineEvent`, must narrow the type first.
 - **Feature (cloud)** — the Host refuses `agent.message.draft` for a task
   whose offer has any `sealing`, with `agent_message_draft_invalid`, because
   a draft is plaintext (#654 E4a). The docs state that a sealed task must not
   go to `@byok-sdk/cloud-do`, which reads its content in plaintext. No public
   type changes.
+- **Feature (protocol, cloud)** — devices can register their E2EE member key
+  and read and write the member state over HTTP (#654 E2c-2). Three writes
+  need a device proof: `POST /byok/e2ee/member-key`, `POST /byok/e2ee/chain`
+  and `POST /byok/e2ee/key-packages`. Three reads need the device bearer:
+  `GET /byok/e2ee/chain`, `GET /byok/e2ee/key-packages` (only the packages
+  for the device's own member) and `GET /byok/e2ee/pairing-mac`. Each write
+  runs the same checks as the Host control plane. The routes mount only when
+  the hosted capability declaration has the new `e2ee.member` and the
+  composition supplies an `e2eeMemberStore`. A declaration of `e2ee.member`
+  without a store fails at construction with `capability_over_declared`.
+  `fullCapabilityDeclaration()` includes it only with `includeE2eeMember`.
+  The option `maxE2eeRequestBytes` caps a request body (default 4 MiB + 64
+  KiB). The new error code `e2ee_member_key_conflict` reports a second bundle
+  for a device or a member id that another device registered. protocol
+  exports the three proof operations and `E2eeMemberKeyRegisterRequestSchema`.
+  The reference server does not declare `e2ee.member`. A device proof on
+  these writes is not single use: a captured proof and body can be sent
+  again within the clock skew window.
+- **Feature (protocol, cloud)** — the Host tells a device that it has a new
+  scope key package (#654 E2c-3). The new server-to-daemon envelope
+  `e2ee.key_package.available` carries `{ scopeId, epoch }` and is gated on
+  `sealed-payload-v1`, which the device advertises. `putScopeKeyPackages` and
+  the device put route now return `{ stored, skippedDeviceIds }`: a recipient
+  device without the flag gets no notice, its packages are stored, and it is
+  listed in `skippedDeviceIds`. The new control-plane method
+  `enqueueScopeKeyPackageNotice` sends one notice. protocol exports
+  `E2eeKeyPackageAvailablePayloadSchema` and `E2EE_SCOPE_ID_MAX_LENGTH` (512).
+  `EnvelopeSchema` gets one more member.
+- **Feature (cloud, cloud-dataplane)** — the new `ByokCloud.redactTasks`
+  replaces the stored content of terminal tasks with body-free tombstones
+  (#654 E5a). One call takes 1 to `TASK_REDACTION_MAX_TASKS` (100)
+  task ids. Each task gets one result: `redacted`, `already_redacted`,
+  `not_found`, or `refused` with `task_not_terminal` or `pending_delivery`. A
+  refused task can be retried. Status, digests and identity fences stay, so a
+  replay is still a duplicate. The store also deletes the stored objects that
+  a redacted body names. After a redaction, the content reads of the task,
+  from `readTaskOffer` to `readAgentMessageDisposition`, throw
+  `task_content_redacted`. The store comes from the new option
+  `taskRedactionStore`. cloud-dataplane exports `PostgresTaskRedactionStore`
+  and `createPostgresTaskRedactionStore`. Without a store, the call throws
+  `task_redaction_unavailable`. There is no SQL migration.
+- **Feature (protocol, server, cloud, cloud-dataplane)** — the Host stores
+  E2EE member state (#654 E2c-1): the member chain, the scope key packages
+  and the pairing MACs. `ByokCloud` gets `appendMemberChainEntries`,
+  `readMemberChain`, `putScopeKeyPackages`, `readScopeKeyPackages`,
+  `readMemberKeyRegistration` and `relayClientPairingMac`. The Host checks
+  shapes only. It does not compute hashes or verify signatures. The store
+  comes from the new option `e2eeMemberStore` (the `E2eeMemberStore` port).
+  cloud exports `InMemoryE2eeMemberStore`, and cloud-dataplane exports
+  `PostgresE2eeMemberStore`. The reference server keeps the state in memory or
+  in SQLite. New error codes: `e2ee_member_store_unavailable`,
+  `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`,
+  `e2ee_member_not_registered` and `e2ee_member_state_unreadable`. protocol
+  gets the member bundle, chain entry and key package schemas. Postgres
+  migration `0027_e2ee_member.sql` adds five tables. A device removal deletes
+  the device rows from three of them, and tenant erasure covers all five.
+  Upgrade: a Postgres Host applies migration 0027 before it runs 0.30.0. With
+  `redactTasks` (#654 E5a) and the six sealed hosted entries (#654 E3a),
+  `ByokCloud` has 13 new methods. Code that implements or mocks `ByokCloud`
+  must add them. This is not a breaking change for code that only calls
+  `ByokCloud`.
+- **Feature (core)** — `@byok-sdk/core/sealed-payload` exports the E2
+  member key and member chain modules (#654 E2a, E2b, E2). The new exports
+  are the member key bundle (`createMemberKeyBundle`,
+  `parseMemberKeyBundle`), the KEM self-signature check (`verifyMemberKem`),
+  the member fingerprint and approval code, the pairing verification secret
+  and the pairing MACs, and the member chain walk
+  (`applyMemberChainEntries`, `verifyMemberChainFromAnchor`,
+  `memberChainScopeRecipients`). The chain refuses a remove of its last
+  member. A hostile JavaScript object gets a typed failure. There is no wire
+  or SQL change. keys does not export a device member key store in this
+  release (#841).
+- **Changed (core)** — sealed content seals plaintext numbers with the RFC
+  8785 number rule (#786). A decimal or a large double in the plaintext is now
+  accepted. Number text that is not canonical, such as `1.0`, `1E3` or `-0`, is
+  still refused on open. The sealed bytes of a plaintext with only safe
+  integers do not change. `canonicalizeJson`, the AAD, chain entries and key
+  packages keep the safe-integer rule. A 0.29.0 opener may refuse a decimal
+  plaintext that 0.30.0 seals.
+- **Fixed (keys)** — `DeviceSealingKeyStore` refuses a stored record whose key
+  coordinates are not canonical base64url, with `DEVICE_SEALING_KEY_INVALID`.
+  Each coordinate must be 43 characters that decode to 32 bytes and encode
+  back to the same text. The SDK writes only canonical records, so only a
+  hand-edited or damaged record is refused.
+- **Fixed (core)** — the sealed entry points and the provider-secret entry
+  point return their typed error for a hostile in-process object: a getter
+  that throws, a proxy trap or a revoked proxy. Before, some of these cases
+  threw a raw `TypeError`. Wire input cannot reach these paths.
+- **Fixed (client)** — on Windows, Hermes gateway identification names the
+  control pipe as CPython `os.path.normcase` does (#712). Before, an Agent home
+  whose path has U+0130 or a final U+03A3 got another pipe name, and the SDK
+  did not find the gateway. Other homes keep the same pipe name. No action is
+  needed at upgrade.
+- **Breaking (client)** — the daemon declines an inbound offer that is above
+  the journal record bound, and it drops other over-bound envelopes (#826).
+  Before, `JournalRecordTooLargeError` stopped the handler, and the cursor
+  stalled. The mailbox then sent the row again at each reconnect. Now an
+  over-bound offer (any of the 11 offer types, sealed ones too) gets one
+  `task.decline` with `reason: 'inbound_envelope_too_large'` and
+  `retryable: false`. The journal stores the digest and the length, not the
+  bytes. A later offer for the same task gets the stored decline. An
+  over-bound `task.steer`, `task.steer_sealed`, `task.cancel`, `task.approve`
+  or `task.reject` is dropped with a local warning. The cursor moves in both
+  cases. The local journal gets the column `withheld_bytes`, which it adds
+  when it opens. Compatibility: `LocalTaskJournal` gets the required method
+  `appendWithheldOffer`, and `readTask` can return a `WithheldOfferTask`. A
+  Host that injects its own journal must implement the method. On a journal
+  with a withheld offer, an older daemon stalls its cursor when the same task
+  is offered again.
+- **Feature (examples)** — the K8 example has a runner for the
+  `submit_result` measurement method (#610). One run measures one runtime,
+  model and platform cell. It does a dry run by default. A real run needs
+  `--execute`, an authorization, a deadline, a spend limit and an output
+  path. A declined trial marks the result `incomplete`. `sdkBuild` records
+  every runtime SDK package and a hash of each dist tree.
+- **Feature (examples)** — K8 has a collaboration commit contract (#739 D1).
+  `commitInLedger` runs an owner command or a K4 callback in one commit with
+  a revision. A replay with the same evidence returns the first result.
+  `CommitConflict` reports `identity_conflict`, `stale_revision` or
+  `scope_mismatch`. The keyless owner commands, from `setMainBot` to
+  `cancelTurn`, also commit and increase the revision, but they store no
+  command record. A keyless retry with its old expected revision gets
+  `stale_revision`. `CollaborationState` gets the optional `revision` and
+  `commands`.
+- **Feature (examples)** — K8 can read ContextPack history from an external
+  authority (#739 D1). The new `BotOptions.history` reads the rows of one Bot
+  and Turn. A read that throws leaves the Turn queued, and the timer tries
+  again. Without the option, nothing changes.
+- **Feature (examples)** — K8 has an external team mode (#739 D1). With
+  `team: 'external'`, there is no Main Bot, and `applyTeam({ revision, bots })`
+  applies a team snapshot. `setMainBot`, `create_bot`, `update_bot` and
+  `delete_bot` refuse with `external_team`. A ledger keeps its mode, so a
+  local ledger cannot open as external, or the reverse. An archived Bot id
+  cannot come back. Each snapshot Bot id must be a valid AgentRef, and its
+  projection must be at most 64 KiB. Otherwise the snapshot is refused before
+  the commit.
+- **Feature (examples)** — K4 exports the parts that a second store needs
+  (#793 D2b, #798 S1). `ledger.transaction` gives a second argument,
+  `ApplicationRows`, with typed rows in the new SQLite table
+  `host_application_row`. The frozen submit and FIFO rules are exported:
+  `submitFrozen`, `sameFrozenOffer`, `fifoHeads`, `queuedExpiry` and
+  `agentKey`. K4 behavior does not change.
+- **Feature (examples)** — the new private package
+  `examples/hosted-bot-collaboration` runs the K8 commit contract on Postgres
+  (#793 D2a, D2b, D2c). `HostedCollaborationStore` keeps the scope, entities,
+  entries, commands and outbox in the tables of `DDL` (`src/ddl.ts`), in a
+  separate schema. It refuses an unknown store version. `HostedSubmitter`
+  and the `intent` table submit the frozen intents with the K4 rules. The
+  store sync runs the K8 sync rule and freezes the intent of a ready Turn in
+  the same transaction. `hostedMessageConsumer` gives the `agentMessage`
+  option of `createByokCloud` and decides each Agent message with the K4
+  message rules. Nothing is deployed, so the tables change in place
+  with no migration.
+- **Feature (examples)** — the hosted package reconciles task results (#793
+  D2d, #842). `HostedReconciler` reads the SDK result of each tried intent and
+  concludes it with the K4 `reconcile` and `finish` rules. H never retries a
+  task, so each task stays at generation 0. A `task.complete` applies the K8
+  `outcome` command once, under the command id `taskId`. The `intent` table
+  gets the columns `started`, `attempt`, `terminal` and `reconcile_at`, and
+  the index `intent_reconcile`. A sync cancel of an intent that no submit
+  tried now concludes it as `cancelled`. `freezeIntent` throws on a K4
+  `retry` policy.
+- **Breaking (examples)** — K8 needs the K4 compaction veto (#816).
+  `BotCollaboration` refuses a Host ledger that was opened without
+  `{ compactVeto: botCompactVeto }`. K4 gets the option `compactVeto` and
+  `CompactVetoError` (`compact_vetoed`), and a veto rolls back the whole
+  `compact` batch. Sync no longer throws when a Turn's result was retired. It
+  marks the Turn `failed`, writes an audit line and reports
+  `result_retired` once.
+- **Breaking (examples)** — K8 `CollaborationState` is version 3 (#798 S2).
+  The Host refuses a version 2 ledger with a clear error and writes no
+  migration. Earlier K8 code refuses a version 3 ledger. Back up the ledger
+  before you upgrade. To roll back, restore that backup or start a new
+  ledger. The new `bot.retain({ acknowledgedRoots, now, retentionMs })` moves
+  settled roots that the Host acknowledged out of the state into K4
+  application rows. `retentionMs` must be at least 7 days. A root that is
+  still in use is refused with `protected_root` or `seat_root`, and a retired
+  id at admission throws `RetiredIdentityError`. The commit store gets the
+  hooks `CommitOptions.archived` and `CommandStore.admitted`.
+- **Feature (examples)** — K8 `bot-collaboration` adds eight package
+  subpaths, so a second Host can use its rules and its shared vectors:
+  `./retention` and `./retention-vectors` (#847), `./routines` and
+  `./routine-vectors` (#848), and `./channel`, `./delivery`,
+  `./delivery-routing` and `./delivery-vectors` (#852). `./rules/commands`
+  also exports the sync rules `settleDelegations`, `delegationDue` and
+  `DelegationTimers` (#854), and `./test-support` gets `settlementVectors`.
+  K4 exports its routine rules, from `recordOccurrence` to `scheduleNext`,
+  with the types `RoutineValidation` and `RoutineCommandOptions` (#848). K4
+  behavior does not change. The delivery rules take the new
+  `IntentConclusions` type, and a K4 `LedgerState` fits it (#852).
+- **Breaking (examples)** — K8 `readbackDelivery(row, attempt, result, now)`
+  takes the attempt that the readback saw (#852). A readback of an older
+  attempt changes nothing. The local Host passes the attempt of the row.
+  Upgrade: add the `attempt` argument to your own `readbackDelivery` calls.
+- **Feature (examples)** — the hosted package binds devices and retains
+  settled roots (#793 D2e, D2g; #845, #847). `bindDevice` and `revokeDevice`
+  use the new table `device_binding`. A write that can create execution
+  without an active H binding fails with `DeviceBindingError`
+  (`device_not_bound`, with the reason `unbound`, `revoked`, `mode` or
+  `revision`). A revoked device id is never bound again. `retain` runs the K8
+  `retainRoots` rule in one transaction. It moves rows to `archived_row` and
+  retires ids in `retired_identity`. A retired id is refused at admission.
+- **Feature (examples)** — the hosted package runs routines and settles
+  delegations (#793 D2f; #849, #850, #851, #854). The new tables `routine`
+  and `occurrence` hold the routine state, and an intent can have the source
+  `routine`. `HostedRoutineScheduler` fires due routines. A fire that the
+  device binding fences writes nothing and stays due. H runs only
+  `bot-routine` routines. An owner `cancel_turn` runs the K4 cancel in the
+  same transaction, and the terminal transaction delivers the Main Bot
+  cancel. The store sync runs to a fixed point and runs the K8 delegation
+  settlement. The `changed` option of the reconciler and the scheduler reports
+  each scope where a pass committed.
+- **Feature (examples)** — the hosted package sends its outbox and takes
+  inbound channel messages (#793 D2b-out, D2f-6; #853, #855, #856).
+  `HostedOutboxSender` (`src/sender.ts`) sends projections and K8 deliveries.
+  The `outbox` table gets the columns `next_at`, `tries`, `last_error` and
+  `settled_at`. `store.receive` is the inbound entry: the K8 `classifyInbound`
+  rule selects the command, and other kinds write only an audit line.
+  `commit()` refuses the K4 callback commands with `CallbackCommandError` and
+  the inbound `receive` command with `InboundCommandError`. All K8 delivery
+  vectors run on H. H has no migrations while it is unreleased, and
+  `STORE_VERSION` stays 2. After these DDL changes, recreate the H schema.
 
 ## 0.29.0 — 2026-10-23 (published)
 
