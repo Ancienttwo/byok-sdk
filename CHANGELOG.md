@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example observes devices
+  (#793 S11), as L's `refreshDevices`. `HostedDeviceObserver.observe(scope)`
+  reads the SDK readiness of the scope's tenant (1 s timeout) when a
+  delegation can change, then `store.observeDevices` runs the K8
+  `observeDevices` rule under the scope lock: a delegation whose delivered,
+  unclaimed offer is on a disconnected device shows `waiting_device`, and
+  `queued` again once it connects. The deployment's composed `sync` runs it
+  before `store.sync`. K8 re-exports `observeDevices` from `rules/commands`,
+  and its shared `deviceVectors` run on L and H.
 - **Feature (examples)** — the hosted collaboration example has its
   authenticated product command entry (#793 S10). `HostedCommandEntry` is L's
   owner API for requests: it takes the product's session check

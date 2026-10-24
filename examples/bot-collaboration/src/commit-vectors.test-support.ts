@@ -863,3 +863,89 @@ export function roomVectors(name: string, open: () => RoomSubject | Promise<Room
     });
   });
 }
+
+/**
+ * #793 S11 device observation. `observeDevices(devices)` is the Host's device step, as L's `refreshDevices` runs it after its
+ * discovery read: K8 `observeDevices` on the store's intent facts, in one transaction. `devices` maps a device id to its
+ * `connected` fact; a device that the map lacks gives no fact. Presence is display only: the step changes a delegation's
+ * status between `queued` and `waiting_device`, and nothing else.
+ */
+export interface DeviceSubject extends SettlementSubject {
+  observeDevices(devices: ReadonlyMap<string, boolean>): void | Promise<void>;
+  /**
+   * A test edit: the first attempt of the Turn's intent was delivered, and the SDK attempt of that delivery has `status`
+   * (`offered` until a device claims it). With no `status`, the Host has read no attempt yet.
+   */
+  deliver(turnId: string, status?: 'offered' | 'running'): void | Promise<void>;
+}
+export function deviceVectors(name: string, open: () => DeviceSubject | Promise<DeviceSubject>): void {
+  describe(`device observation contract: ${name}`, () => {
+    const { settled, commit, delegated } = settlementSteps(open);
+    const offline = new Map([['device', false]]), online = new Map([['device', true]]);
+    /** A delegation to `b`, whose chain end froze on device `device`, with the subject's device step. */
+    const opened = async () => {
+      const h = await delegated();
+      const subject = h.subject as DeviceSubject;
+      const projected = async () => subject.projection(`delegation:${h.id}:${(await h.delegation()).revision}`);
+      /** Observes `devices` and expects that the step wrote nothing. */
+      const unchanged = async (devices: ReadonlyMap<string, boolean>) => {
+        const before = await subject.stored();
+        await subject.observeDevices(devices);
+        expect(await subject.stored()).toBe(before);
+      };
+      return { ...h, subject, projected, unchanged };
+    };
+
+    it('shows a delivered offer that no device claimed as waiting_device while its device is offline, and queued again once it connects', async () => {
+      const h = await opened();
+      expect((await h.delegation()).status).toBe('queued');
+      await h.subject.deliver(h.id, 'offered');
+      await h.subject.observeDevices(offline);
+      expect((await h.delegation()).status).toBe('waiting_device');
+      expect(await h.projected()).toEqual([expect.objectContaining({ status: 'waiting_device' })]);
+      // The same observation again is no new fact, and a device that the read lacks gives no fact.
+      await h.unchanged(offline);
+      await h.unchanged(new Map());
+      await h.unchanged(new Map([['other', true]]));
+      await h.subject.observeDevices(online);
+      expect((await h.delegation()).status).toBe('queued');
+      expect(await h.projected()).toEqual([expect.objectContaining({ status: 'queued' })]);
+    });
+
+    it('changes nothing before the offer is delivered: no submit, an uncertain submit, or a delivery with no attempt read', async () => {
+      const h = await opened();
+      await h.unchanged(offline);
+      await h.subject.submit(h.id);
+      await h.unchanged(offline);
+      await h.subject.deliver(h.id);
+      await h.unchanged(offline);
+    });
+
+    it('changes nothing once a device claimed the offer, by its attempt or by the claim fact', async () => {
+      const h = await opened();
+      await h.subject.deliver(h.id, 'running');
+      await h.unchanged(offline);
+      await h.subject.deliver(h.id, 'offered');
+      await h.subject.claim(h.id);
+      await settled(h.subject);
+      expect((await h.delegation()).status).toBe('running');
+      await h.unchanged(offline);
+    });
+
+    it('changes nothing for a delegation with a cancel or a verdict', async () => {
+      const cancelled = await opened();
+      await cancelled.subject.deliver(cancelled.id, 'offered');
+      await commit(cancelled.subject, { kind: 'cancel_delegation', delegationId: cancelled.id });
+      expect((await cancelled.delegation()).cancel).toBeDefined();
+      await cancelled.unchanged(offline);
+
+      const failed = await opened();
+      await failed.subject.deliver(failed.id, 'offered');
+      await failed.subject.observeDevices(offline);
+      await failed.subject.conclude(failed.id, 'failed');
+      await settled(failed.subject);
+      expect(await failed.delegation()).toMatchObject({ verdict: 'failed' });
+      await failed.unchanged(online);
+    });
+  });
+}
