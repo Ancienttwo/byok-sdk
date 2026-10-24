@@ -27,6 +27,18 @@ coverage/
 
 # External references
 _ref/
+.archcontext/*
+!.archcontext/manifest.yaml
+!.archcontext/product.yaml
+!.archcontext/model/
+.archcontext/model/*
+!.archcontext/model/nodes/
+!.archcontext/model/relations/
+!.archcontext/model/flows/
+!.archcontext/decisions/
+!.archcontext/policies/
+!.archcontext/practices/
+!.archcontext/projections/
 .codegraph/
 
 # Local operations state
@@ -43,28 +55,25 @@ _ops/
 # Runtime evidence and local agent state
 .claude/settings.local.json
 .claude/.atomic_pending
-.claude/.session-id
-.claude/.trace.jsonl
 .claude/.session-handoff.md
 .claude/.task-state.json
 .claude/.task-handoff.md
-.claude/.codegraph-state/
 .claude/*.tmp
 .claude/*.bak
 .claude/*.bak.*
 .claude/*.backup-*
 tasks/.current.md.tmp.*
 tasks/current.md
-.ai/harness/checks/latest.json
+.ai/harness/checks/
 .ai/harness/checks/*.latest.json
 .ai/harness/checks/*.latest.md
-.ai/harness/checks/post-bash-latest.json
 .ai/harness/events.jsonl
 .ai/harness/archive/
 .ai/harness/backups/
 .ai/harness/failures/latest.jsonl
 .ai/harness/handoff/current.md
 .ai/harness/handoff/resume.md
+.ai/harness/standing-orders.md
 .ai/harness/capability-context/
 .ai/harness/journal/
 .ai/harness/architecture-projection/
@@ -81,14 +90,15 @@ tasks/current.md
 .ai/harness/evidence/
 .ai/harness/runs/
 .ai/harness/state/
-.ai/harness/chatgpt/browser-lock.json
-.ai/harness/chatgpt/tmp/
-.ai/harness/chatgpt/sessions/
+.ai/harness/chatgpt/
+.ai/harness/handoff/gptpro/
+.ai/harness/mcp/
 .ai/harness/triage/*
 !.ai/harness/triage/.gitkeep
 .repo-harness/
 .codex/*
 .claude/.active-plan
+.claude/worktrees/
 .claude/.plan-state/
 # END: repo-harness generated-runtime
 
