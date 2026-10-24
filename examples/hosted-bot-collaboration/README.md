@@ -4,8 +4,8 @@ Private reference example for #793 (#606 D2). It is the hosted (H) adapter of th
 commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
 Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c), result
-reconciliation (D2d), the device binding (D2e), retention (D2g), routines (D2f-2), their scheduler (D2f-3) and the outbox
-sender (D2b-out-2). The command entry and the inbound echo path come in later slices of #793.
+reconciliation (D2d), the device binding (D2e), retention (D2g), routines (D2f-2), their scheduler (D2f-3), the outbox
+sender (D2b-out-2) and delegation settlement (D2f-5). The command entry and the inbound echo path come in later slices of #793.
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -127,6 +127,29 @@ untried intent it cancelled. Each of those steps happens once per intent or occu
 
 In history mode, `options.history` maps each Turn id to that Turn's history rows, as L reads them. A Turn without
 an entry does not freeze.
+
+### Delegation settlement
+
+Each sync round runs K8 `settleDelegations` after its Turn steps, as L's `sync()` does (#793 D2f-5). It reads its K4
+facts from the intent rows again after the steps wrote: `intent`, `started` (the reconciliation's claim, or a terminal
+that is not a decline; H has generation 0 only) and `declineCode`. `offeredTo` throws: settlement never reads it.
+Settlement spends or releases units, moves a claimed delegation to `running`, writes the `lateTurnId` audit line,
+freezes the `target_archived` cancel, resolves a cancel once its target concluded, shows `uncertain` after the delegation
+timers, and gives a chain end that did not succeed its verdict. A verdict can add the `bot_reply` Turn of a batch join.
+
+The same round then delivers each new delegation cancel fact (`deliverCancels`), as the L pass does after its sync. A
+round that delivered a fact or added a Turn runs again, so one sync freezes the report to A. `options.timers` are the K8
+`DelegationTimers`; without them the rule's defaults apply.
+
+The terminal transaction delivers the Main Bot cancel that its outcome froze, after the row's conclusion and before the
+version switch, as L runs `core.cancel` after its terminal transaction. An untried target concludes `cancelled` there;
+the verdict comes at the next sync of the scope.
+
+H does not yet run these L sync and pass steps: `sealDueBatches`, card expiry, `advanceRooms`, the card decision
+projections and their `action_result` Turns, `projectInputBatches`, the reply checks (`reconcileReply`, `retryReply`),
+the device observation (`observeDevices`), and the card and Agent home flushes. Some of them (the batch seal, card
+expiry and the reply checks) need a due time per scope, which H does not store. These steps come after 0.30.0, in a
+later #793 slice, with a per-scope due index.
 
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
 record and keeps the revision. A throw writes nothing. The rule's `executionStarted` fact is the intent's `started`
@@ -353,7 +376,9 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
 - **Retention.** The Host calls `retain(scope, input, limits)` with the acknowledged roots. `retentionMs` must be at
   least seven days (see Retention). The SDK side has its own `retentionPolicyId` in the tenant's entitlement.
 - **Workers.** The Host runs, each on its own interval: `HostedSubmitter.run()`, `HostedReconciler.run()`,
-  `store.sync(scope, …)` for scopes with work, `HostedOutboxSender.run()` with the projection receiver and the channel,
+  `store.sync(scope, …)` for each scope that changed (the `changed` option of `HostedReconciler`, for a conclusion or
+  a first claim, and of `HostedRoutineScheduler`, for a fire, and the scope of each commit and consume), and for every scope on its own interval as
+  the fallback for timers (there is no due index), `HostedOutboxSender.run()` with the projection receiver and the channel,
   and `HostedRoutineScheduler.run()` every `intervalMs` after one `start()`. A Host with a channel opens its store with
   `{ channel: true }`.
   `hostedMessageConsumer(store, …)` is the `agentMessage` option of `createByokCloud`.
@@ -391,7 +416,12 @@ three and runs these suites.
   racing fires, a fire that throws and its backoff, the interval guard, and the start and pass upkeep.
 - The reconciliation tests run a real daemon for the completed outcome, a replayed terminal and a busy decline. The
   busy decline runs on L too (K4 with the sync rule's wait), and both conclude `declined` at generation 0. An SDK
-  tenant in memory covers the cancel, expiry, lease and identity cases.
+  tenant in memory covers the cancel, expiry, lease and identity cases, and the scopes that a pass reports.
+- The K8 settlement vectors (`settlementVectors`) run on the store, as on L.
+- The settlement tests build each delegation through the product path (an outcome `delegate`, then a sync), and cover
+  each verdict, the units, `target_archived`, the timers, the late terminal audit, the Main Bot cancel in the terminal
+  transaction, a rollback, the settlement facts, a verdict at the sync of a reported scope, and the refusal of invalid
+  delegation timers.
 - The sync test freezes the same Turns in an L ledger with K4 `enqueue`. Each H input is byte-equal to the K4
   execution input, and the H state bytes equal the L state bytes.
 - The submitter tests use the hosted SDK composition (`createByokCloud` over `createPostgresCloudStores`, with

@@ -231,6 +231,31 @@ describe.skipIf(POSTGRES_URL === undefined)('H routine scheduler on real Postgre
     expect(await runner.run()).toMatchObject({ fired: 0, failed: [{ scope, routineId: id }] });
   });
 
+  it('reports each scope where the pass committed a fire, in fire order, and no fenced or failed routine (#793 D2f-5)', async () => {
+    const [failing, fenced, first, second] = [await scoped('a'), await scoped('b'), await scoped('c'), await scoped('d')];
+    const failingId = await created(failing);
+    for (const scope of [fenced, first, second]) await created(scope);
+    await query(`INSERT INTO ${table('occurrence')} (scope, key, ordinal, routine_id, definition_version, trigger_kind, planned_at, recorded_at, next_at)
+      VALUES ($1, $2, 0, $3, 1, 'scheduled', $4, $4, $5)`, [storedKey(failing), storedKey('other'), storedKey(failingId), FIRST, SECOND]);
+    await store().revokeDevice(fenced, 'device', NOW);
+    const changed: string[] = [], runner = scheduler({ changed: scope => { changed.push(scope); } });
+    clock = FIRST;
+    expect(await runner.run()).toMatchObject({ fired: 2, failed: [{ scope: failing }], fenced: [{ scope: fenced }] });
+    expect(changed).toEqual([first, second]);
+    // A pass with no fire reports nothing.
+    clock = FIRST + 1;
+    changed.length = 0;
+    expect(await runner.run()).toEqual({ fired: 0, fenced: [], failed: [] });
+    expect(changed).toEqual([]);
+  });
+
+  it('lets a throw from the changed callback propagate, after the fire committed (#793 D2f-5)', async () => {
+    const scope = await scoped(), id = await created(scope);
+    clock = FIRST;
+    await expect(scheduler({ changed: () => { throw new Error('Host sync refused'); } }).run()).rejects.toThrow('Host sync refused');
+    expect(await occurrences(scope)).toMatchObject([{ key: storedKey(occurrenceKey(id, 'scheduled', FIRST)) }]);
+  });
+
   it('refuses a pass interval at or above the K8 late bound, and defaults to 5 s', () => {
     expect(() => scheduler({ intervalMs: ROUTINE_LATE_AFTER_MS })).toThrow('The routine pass interval must be at least 1 ms');
     expect(() => scheduler({ intervalMs: 0 })).toThrow('The routine pass interval must be at least 1 ms');

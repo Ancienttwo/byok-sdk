@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
-import { taskId, type FrozenInput } from '@byok-sdk/example-host-execution-core';
+import { hash, taskId, type FrozenInput } from '@byok-sdk/example-host-execution-core';
 import { openHost, template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { OFFER_WAIT_MS } from '@byok-sdk/example-bot-collaboration/rules/commands';
@@ -186,6 +186,31 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
     expect([revisionOf(await store().read(scope)), await commands(scope)]).toEqual([0, []]);
   });
 
+  it('reports a scope where the pass recorded a first claim with no conclusion, and not a claim recorded before (#793 D2f-5)', async () => {
+    const { scope, input } = await tried(), sdk = fakePort();
+    const changed: string[] = [], pass = () => new HostedReconciler(opened!.pool, store().schema, store(),
+      { port: () => sdk.port, ports: vectorPorts, pollMs: 0, now: () => clock, changed: reported => { changed.push(reported); } }).run();
+    sdk.deliver(input);
+    expect(await pass()).toEqual({ concluded: 0, failed: [] });
+    expect(changed).toEqual([]);
+    sdk.deliver(input, { status: 'claimed', ownerDeviceId: 'device' });
+    expect(await pass()).toEqual({ concluded: 0, failed: [] });
+    expect(changed).toEqual([scope]);
+    expect(await row(scope, 'q1')).toMatchObject({ started: true, conclusion: null });
+    expect(await pass()).toEqual({ concluded: 0, failed: [] });
+    expect(changed).toEqual([scope]);
+  });
+
+  it('lets a throw from the changed callback propagate, after the conclusion committed (#793 D2f-5)', async () => {
+    const { scope, input } = await tried(), sdk = fakePort();
+    sdk.deliver(input, { status: 'complete', ownerDeviceId: 'device', cancellation: { requestedAt: 'now' } });
+    sdk.complete(input, DOCUMENT);
+    const throwing = new HostedReconciler(opened!.pool, store().schema, store(), { port: () => sdk.port, ports: vectorPorts, pollMs: 0, now: () => clock,
+      changed: () => { throw new Error('Host sync refused'); } });
+    await expect(throwing.run()).rejects.toThrow('Host sync refused');
+    expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled' });
+  });
+
   it('cancels the SDK task of a sync-cancelled tried row, and concludes cancelled once the attempt is cancelled unclaimed', async () => {
     const { scope, input } = await tried(), sdk = fakePort();
     sdk.deliver(input);
@@ -265,5 +290,48 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
       .toEqual([0, [field === 'attempt' ? 'Attempt identity conflict' : 'Offer differs from the frozen input']]);
     expect(await row(scope, 'q1')).toMatchObject({ conclusion: null, attempt: null, terminal: null });
     expect([revisionOf(await store().read(scope)), await commands(scope)]).toEqual([0, []]);
+  });
+
+  it('reports each scope where the pass committed a conclusion, once, in the order of its first one (#793 D2f-5)', async () => {
+    /** A scope with tried rows `keys`, seeded and frozen as `tried` does, each with its own task id. */
+    async function scope(prefix: string, ...keys: string[]) {
+      const scope = `tenant:${prefix}-${randomUUID()}`;
+      await store().seed(scope, state => {
+        seedCollaboration(state);
+        for (const key of keys) {
+          state.turns[key] = { id: key, root: key, botId: 'main', source: 'user', request: 'First', hop: 0, status: 'processing', authority: 'owner' };
+          state.schemas[key] = state.schemas.t1!;
+        }
+      });
+      await store().bindDevice(scope, 'device');
+      const inputs = [];
+      for (const key of keys) inputs.push(await inSchema(opened!.pool, store().schema, async client => {
+        await lockScope(client, storedKey(scope));
+        return freezeIntent(client, scope, { key, source: 'user', execution: template('device'), waitUntil: clock + 60_000 });
+      }));
+      await opened!.pool.query(`UPDATE ${table('intent')} SET submission = 'delivered', tries = 1, next_at = $2 WHERE scope = $1`, [storedKey(scope), clock]);
+      return { scope, inputs };
+    }
+    const cancel = (scope: string) => opened!.pool.query(`UPDATE ${table('intent')} SET cancel_reason = 'cancelled' WHERE scope = $1`, [storedKey(scope)]);
+    const sdk = fakePort();
+    // a: two rows conclude. b: an attempt of another device throws before any write. c: the terminal transaction throws and
+    // rolls back. d: a delivered row with no terminal stays open. e: one row concludes.
+    const a = await scope('a', 'a1', 'a2'), b = await scope('b', 'b1'), c = await scope('c', 'c1'), d = await scope('d', 'd1'), e = await scope('e', 'e1');
+    await cancel(a.scope); await cancel(e.scope);
+    sdk.deliver(b.inputs[0]!, { deviceId: 'other' });
+    sdk.deliver(c.inputs[0]!, { status: 'complete', ownerDeviceId: 'device' });
+    sdk.complete(c.inputs[0]!, DOCUMENT);
+    await opened!.pool.query(`INSERT INTO ${table('outbox')} (scope, key, ordinal, kind, body) VALUES ($1, $2, 0, 'projection', '{"other":true}'::json)`,
+      [storedKey(c.scope), storedKey(`card:${hash([taskId('c1', 0), 'confirmable_action', 0])}`)]);
+    sdk.deliver(d.inputs[0]!);
+    const changed: string[] = [];
+    const pass = await new HostedReconciler(opened!.pool, store().schema, store(),
+      { port: () => sdk.port, ports: vectorPorts, pollMs: 0, now: () => clock, changed: scope => { changed.push(scope); } }).run();
+    expect([pass.concluded, pass.failed.map(failure => [failure.turnId, (failure.error as Error).message])])
+      .toEqual([3, [['b1', 'Attempt identity conflict'], ['c1', 'Projection identity conflict']]]);
+    // c committed its first claim before its terminal transaction rolled back, so the Host syncs it too.
+    expect(changed).toEqual([a.scope, c.scope, e.scope]);
+    expect(await row(c.scope, 'c1')).toMatchObject({ conclusion: null, terminal: null });
+    expect(await row(d.scope, 'd1')).toMatchObject({ conclusion: null });
   });
 });

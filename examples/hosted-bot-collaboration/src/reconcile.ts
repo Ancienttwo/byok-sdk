@@ -5,6 +5,7 @@ import { canonical, FrozenOfferMismatchError, sameFrozenOffer, type Conclusion, 
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { revisionOf, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
+import { deliverCancels } from './intents';
 import { commitStored } from './retention';
 import { storedKey } from './layout';
 import { loadSlice, outcomeRoutinePorts, switchDueVersions, writeSlice } from './routines';
@@ -29,6 +30,13 @@ export interface ReconcilerOptions {
   pollMs?: number;
   /** The most rows that one pass takes. */
   batch?: number;
+  /**
+   * Called once for each scope where this pass committed a conclusion or a first claim (`started`), in the order of its first
+   * one, at the end of the pass before it returns (#793 D2f-5). The Host syncs those scopes, so the steps that follow, such as
+   * a delegation verdict, a unit spend or a freeze, run at once, as L syncs after the drain that saw them. Work that threw or
+   * rolled back reports nothing. A throw from the callback propagates.
+   */
+  changed?: (scope: string) => void;
 }
 /** A row whose reconciliation threw. The pass went on with the next row. */
 export interface ReconcileFailure { scope: string; turnId: string; error: unknown }
@@ -55,19 +63,25 @@ export class HostedReconciler {
       `SELECT i.scope, i.key FROM intent i JOIN scope s ON s.scope = i.scope
         WHERE s.state_version = ANY($3::integer[]) AND i.conclusion IS NULL AND i.submission <> 'reserved' AND i.reconcile_at <= $1
         ORDER BY i.reconcile_at, i.scope, i.key LIMIT $2`, [this.now(), this.options.batch ?? 100, [...SUPPORTED_STORE_VERSIONS]]), true);
-    const pass: ReconcilePass = { concluded: 0, failed: [] };
+    const pass: ReconcilePass = { concluded: 0, failed: [] }, changed = new Set<string>();
     for (const row of due.rows) {
-      try { if (await this.reconcile(row.scope, row.key)) pass.concluded++; }
+      try {
+        if (await this.reconcile(row.scope, row.key, () => changed.add(JSON.parse(row.scope) as string))) {
+          pass.concluded++;
+          changed.add(JSON.parse(row.scope) as string);
+        }
+      }
       catch (error) {
         pass.failed.push({ scope: JSON.parse(row.scope) as string, turnId: JSON.parse(row.key) as string, error });
         await this.later(row.scope, row.key).catch(() => undefined);
       }
     }
+    for (const scope of changed) this.options.changed?.(scope);
     return pass;
   }
 
   /** K4 `reconcile` for one tried row. Returns true when the row concluded. */
-  private async reconcile(scopeKey: string, key: string): Promise<boolean> {
+  private async reconcile(scopeKey: string, key: string, started: () => void): Promise<boolean> {
     const row = await this.read(scopeKey, key);
     if (!row || row.concluded) return false;
     const port = this.options.port(JSON.parse(scopeKey) as string), task = row.input.taskId;
@@ -94,7 +108,7 @@ export class HostedReconciler {
       if (!attempt) throw new Error('Attempt disappeared after cancellation');
       terminal = await port.deviceTerminal(task);
     }
-    if (attempt) await this.record(scopeKey, key, attempt);
+    if (attempt && await this.record(scopeKey, key, attempt)) started();
     if (attempt?.status === 'cancelled' && !attempt.claimedRuntime && !attempt.ownerDeviceId && !terminal) {
       return this.conclude(scopeKey, key, cancelReason === 'expired' ? 'expired' : 'cancelled');
     }
@@ -135,11 +149,15 @@ export class HostedReconciler {
     });
   }
 
-  /** Saves the last attempt, and K4 `started` once the attempt has a claim. */
-  private record(scopeKey: string, key: string, attempt: TaskAttempt): Promise<void> {
+  /** Stores the attempt, and the first claim. Returns true when this write committed the first claim. */
+  private record(scopeKey: string, key: string, attempt: TaskAttempt): Promise<boolean> {
+    const claimed = !!(attempt.claimedRuntime || attempt.ownerDeviceId);
     return this.locked(scopeKey, async client => {
+      const before = (await client.query<{ started: boolean }>('SELECT started FROM intent WHERE scope = $1 AND key = $2 AND conclusion IS NULL',
+        [scopeKey, key])).rows[0];
       await client.query(`UPDATE intent SET attempt = $3::json, started = started OR $4 WHERE scope = $1 AND key = $2 AND conclusion IS NULL`,
-        [scopeKey, key, JSON.stringify(attempt), !!(attempt.claimedRuntime || attempt.ownerDeviceId)]);
+        [scopeKey, key, JSON.stringify(attempt), claimed]);
+      return !!before && !before.started && claimed;
     });
   }
 
@@ -214,6 +232,9 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
   } else conclusion = envelope.type === 'task.decline' ? 'declined' : 'failed';
   await client.query('UPDATE intent SET terminal = $3::json, attempt = $4::json, conclusion = $5 WHERE scope = $1 AND key = $2',
     [scopeKey, key, JSON.stringify(terminal), JSON.stringify(attempt), conclusion]);
+  // The Main Bot cancel that the outcome froze, delivered after this row concluded, as L runs core.cancel after its terminal
+  // transaction (K8 host.ts pass). The version switch then sees a target that the delivery concluded (#793 D2f-5).
+  await deliverCancels(client, scope, state, now);
   await switchDueVersions(client, scopeKey, now);
   return { value: conclusion, outbox, now };
 }

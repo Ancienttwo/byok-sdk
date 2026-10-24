@@ -1,15 +1,16 @@
 import type { Pool, PoolClient } from 'pg';
-import { canonical, occurrenceRun, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
+import { canonical, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
 import { botRoutines, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
 import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { commitCommand, syncTurn, type Command, type CommandPorts, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { commitCommand, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type SyncOptions,
+  type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, bindDevice, revokeDevice } from './binding';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
-import { cancelIntent, deliverCancels, intentConclusions, syncFacts, writeSyncStep } from './intents';
+import { cancelIntent, deliverCancels, intentConclusions, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
 import { decideFinish, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
@@ -31,9 +32,11 @@ type Decide<T> = (state: CollaborationState, publish: Publish, client: PoolClien
 type TurnHistory = NonNullable<SyncOptions<never>['history']>;
 /**
  * The sync options of a scope. In history mode, `history` holds the rows of each Turn that may freeze, by Turn id.
- * The store reads the routines itself (#793 D2f).
+ * The store reads the routines itself (#793 D2f). `timers` are the delegation timers of the K8 settlement; without them
+ * the rule's defaults apply (#793 D2f-5).
  */
-export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines'> & { history?: ReadonlyMap<string, TurnHistory> };
+export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines'> & { history?: ReadonlyMap<string, TurnHistory>;
+  timers?: DelegationTimers };
 /**
  * Builds the command ports on the state of the open commit. `publish` writes a projection in the same commit. The store
  * reads the intent facts itself, under the scope lock (#793 D2f-4), and owns the channel outbox port (#793 D2b-out-2).
@@ -163,26 +166,36 @@ export class HostedCollaborationStore {
    * as its occurrence intent, and a routine Turn that ends before that concludes its occurrence (#793 D2f). It writes no
    * command record and keeps the revision. A throw writes nothing.
    *
+   * Each round then runs the K8 delegation settlement at L's position, after the Turn steps (K8 host.ts sync), on the intent
+   * facts read again after those steps wrote. Then it delivers each new delegation cancel fact in the same transaction, as
+   * the L pass does after its sync (#793 D2f-5).
+   *
    * It runs to a fixed point, as the L pass drains again after a step that changed K4 (K8 host.ts pass): while a round
-   * froze, promoted or concluded an intent or an occurrence, it reads the facts again and runs the Turns again. Each such
-   * step happens once per intent or occurrence, so the rounds end.
+   * froze, promoted or concluded an intent or an occurrence, delivered a cancel fact, or added a Turn (the `bot_reply` of a
+   * batch join), it reads the facts again and runs the Turns again. Each such step happens once per intent, occurrence,
+   * fact or join, so the rounds end.
    */
-  sync(scope: string, options: HostedSyncOptions): Promise<void> {
+  async sync(scope: string, options: HostedSyncOptions): Promise<void> {
+    // As L checks its timers (K8 host.ts constructor).
+    if (options.timers && (time(options.timers.cancelGraceMs) < 1 || time(options.timers.uncertainAfterMs) < 1)) throw new Error('Invalid delegation timers');
     const key = storedKey(scope);
     return this.change(scope, undefined, async (state, publish, client) => {
       const published = new Set<string>();
       const slice = await loadSlice(client, key), routines = botRoutines(Object.values(slice.state.routines));
+      const emit: Publish = (id, body) => { publish(id, body); published.add(id); };
       let more = true;
       while (more) {
         const facts = await syncFacts(client, scope, Object.keys(state.turns));
         const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
         for (const turn of Object.values(state.turns)) {
-          const step = syncTurn(state, turn, facts, { ...options, routines, history: options.history?.get(turn.id) },
-            (id, body) => { publish(id, body); published.add(id); });
+          const step = syncTurn(state, turn, facts, { ...options, routines, history: options.history?.get(turn.id) }, emit);
           if (step) steps.push([turn, step]);
         }
         more = false;
         for (const [turn, step] of steps) more = await writeSyncStep(client, scope, turn, step, slice, options.now) || more;
+        const turns = Object.keys(state.turns).length;
+        settleDelegations(state, await settleFacts(client, scope, Object.keys(state.turns)), options.now, emit, options.timers);
+        more = await deliverCancels(client, scope, state, options.now) || Object.keys(state.turns).length > turns || more;
       }
       await writeSlice(client, key, slice);
       await switchDueVersions(client, key, options.now);
