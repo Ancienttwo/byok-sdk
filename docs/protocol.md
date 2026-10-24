@@ -1143,7 +1143,7 @@ sealed offer type, so a device without the flag never receives it. A
 plaintext type that has a sealed sibling refuses `sealing` and `sealed`, so
 the schema never strips a sealing policy or sealed content.
 
-**Device rules (#654 E2d-3).** The daemon opens and seals with the scope keys
+**Device rules (#654 E2d-3, E2d-4).** The daemon opens and seals with the scope keys
 of its own verified member (§2.6, §2.7). It advertises `sealed-payload-v1`
 only while it holds a verified member and the deployment declares
 `e2ee.member`. The first `conn.hello` of a run never carries the flag; a
@@ -1166,16 +1166,41 @@ refreshed hello adds it, and removes it again when the member is lost.
   the freshness point of its scope epoch. The daemon seals output at the
   newest epoch, at or after the offer's `epoch`, that has a point with no
   `remove` of a scope member and no member-dropping `scope-policy` after it.
-  It checks this before the task runs; without such an epoch the offer is
-  declined with `sealed_key_unavailable`. Its header names the device member
-  and its verified head. The points live in memory. A start after a stop in
-  the same process keeps each point that is on the new run's verified chain;
-  after a process restart they come back from the next opened content.
-- **Output-only tasks.** A task with `categories: ['task-output']` carries no
-  sealed input, so it gets no freshness point of its own. It runs only after
-  sealed content at the same scope epoch made the epoch fresh, in this run or
-  in the previous run of the same process (its carried freshness point).
-  Device rotation (E2d-4) is not in this release.
+  It checks this before the task runs; without such an epoch it rotates
+  first (below). The sealed header names the device member and its verified
+  head. An epoch that the recheck after the key read finds stale declines
+  that seal; the next seal chooses again and may rotate.
+  The points live in memory. A start after a stop in the same process keeps
+  each point that is on the new run's verified chain; after a process
+  restart they come back from the next opened content.
+- **Device rotation (#654 E2d-4, design §7.5).** With no fresh epoch, the
+  device is the next sender. It catches the chain up and starts from the
+  newest epoch it knows: the offer's, one it holds a key or a freshness
+  point for, or one the Host showed taken in this run. It reads its package
+  of each of the next four epochs (`GET /byok/e2ee/key-packages?scopeId=&epoch=`)
+  and takes the epoch after the newest one that holds a package. When the
+  fourth holds one, the scope is further ahead than the device checks, and
+  the rotation fails. The device wraps a new scope key to every current
+  member of the scope policy and puts the packages
+  (`POST /byok/e2ee/key-packages`). After the put, the verified head it chose
+  the recipients at is the new epoch's freshness point, so a `remove` that
+  landed during the put makes it stale. So does a member added to the scope
+  policy or a member `rotate` of its KEM key after the seq the packages were
+  wrapped at, because the packages name the members and KEM keys at that seq.
+  The count starts at the wrap seq even after opened content moves the
+  freshness point forward. The wrap seq is kept within one process only (a
+  start after a stop carries it); after a process restart, only the `remove`
+  and member-dropping policy rules apply to that epoch. A Host that holds
+  that epoch under another `keyId` refuses the put with
+  `e2ee_scope_key_conflict`; the next rotation starts above that epoch. A
+  policy that leaves no current member but the device is not rotated,
+  because no client could open the output. Then, and on any other failed
+  rotation, the offer is declined with `sealed_key_unavailable`. Concurrent
+  seals of one scope share one rotation; a seal that joined another seal's
+  rotation checks the result and may rotate again.
+  So an output-only task (`categories: ['task-output']`), which carries no
+  sealed input, seals at the new epoch. The Host notifies the device of its
+  own new package as of any other.
 - **Recovered terminals.** A terminal that the startup replay builds from the
   journal for a task that seals output is always in a closed plaintext form:
   `daemon_interrupted` stays as it is, and a result-reply failure becomes
@@ -1490,8 +1515,9 @@ command and not only the string.
 - Without `pv`, or with an expired one, the device is no member. Missing or
   malformed member keys are never replaced: the Host keeps the first bundle
   per device, so the recovery is a re-pair, which mints a new device id.
-- The device signs only `e2ee-member-key.register`. It appends no chain entry
-  and puts no package.
+- The device signs `e2ee-member-key.register`, and
+  `e2ee-scope-key-package.put` when it rotates a scope epoch (§2.5, device
+  rules). It appends no chain entry.
 
 ### 2.7 E2EE key package notice (#654 E2c-3)
 

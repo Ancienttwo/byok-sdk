@@ -55,15 +55,29 @@
   on the verified chain and its `sender` a member of the scope policy at that
   head, or the offer gets `sealed_open_failed` and a steer is dropped. Output
   is sealed at the newest epoch with no scope member `remove` and no
-  member-dropping `scope-policy` after its freshness point. An output-only
-  task with no freshness point from this run, or carried from the previous run
-  of the same process, gets `sealed_key_unavailable`. A
+  member-dropping `scope-policy` after its freshness point. A
   terminal that a failed `stop()` left queued is sealed by the next run in the
   same process when that run has the same tenant, device and member, and is
   otherwise in the closed form; the next run keeps the freshness points that
   are on its verified chain. A terminal that the startup replay builds from the journal is in the
   closed form. The internal `sealedPayload` test parameter of
   `buildDaemonWithAdapters` is removed.
+- **Feature (client)** — a daemon paired as an E2EE member rotates a scope
+  epoch when no epoch is fresh (#654 E2d-4). It wraps a new scope key to every
+  current member of the scope policy, signed by the device member, and puts
+  the packages through the device-proof `POST /byok/e2ee/key-packages` write
+  (operation `e2ee-scope-key-package.put`), in batches of at most 256. This
+  replaces the E2d-3 decline: an output-only task with no freshness point now
+  gets a rotated epoch instead of `sealed_key_unavailable`. Host operators
+  see the device send this signed write. The device reads its package of the
+  4 epochs above the newest one it knows and rotates above the newest held;
+  when the fourth is held, the seal fails with `sealed_key_unavailable`. A
+  Host that holds the epoch under another key answers 409, and the next
+  rotation starts above it. A Host request that hangs is cut off at its
+  timeout. A scope whose only current member is the device is not rotated.
+  A rotated epoch goes stale after a `remove` or a member-dropping policy
+  after its freshness point, or after a member add or KEM rotation after the
+  chain seq it was wrapped at (within one process).
 - **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is
   burned: start a new registration at the Host, do not retry it (#654 E2d).
 - **Breaking (cloud)** — the device-proof `requestId` is single-use on the

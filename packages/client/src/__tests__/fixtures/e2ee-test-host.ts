@@ -3,7 +3,8 @@
  * shape-light, with the device proof checked by its Ed25519 signature. A test
  * plays the web client through the `client*` methods, which stand for the
  * Host control plane (relay the client MAC, append chain entries, put key
- * packages).
+ * packages). A device puts key packages through the proof route, with the
+ * Host's one `keyId` per scope epoch rule.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash, createPublicKey, verify as edVerify } from 'node:crypto';
@@ -16,6 +17,7 @@ import {
   BYOK_E2EE_PAIRING_MAC_PATH,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
   E2EE_MEMBER_KEY_REGISTER_OPERATION,
+  E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
 } from '@byok-sdk/protocol';
 
 export interface E2eeTestDevice {
@@ -80,6 +82,10 @@ export class E2eeTestHost {
   packageResponse: unknown[] | undefined;
   /** When set, each key package read waits for it before it answers. */
   holdPackageReads: Promise<void> | undefined;
+  /** Every device key package put body, in order. */
+  readonly devicePuts: ScopeKeyPackageV1[][] = [];
+  /** When set, each device key package put waits for it before it stores. */
+  holdPackagePuts: Promise<void> | undefined;
 
   constructor(private readonly deps: E2eeTestHostDeps) {}
 
@@ -148,8 +154,14 @@ export class E2eeTestHost {
       }
       const recipient = this.registration(device.deviceId)?.member.memberId;
       const scopeId = url.searchParams.get('scopeId');
-      const epoch = Number(url.searchParams.get('epoch'));
-      respond(res, 200, { packages: this.packages.filter((pkg) => pkg.recipient === recipient && pkg.scopeId === scopeId && pkg.epoch === epoch) });
+      const epoch = url.searchParams.get('epoch');
+      respond(res, 200, {
+        packages: this.packages.filter((pkg) => pkg.recipient === recipient && pkg.scopeId === scopeId && (epoch === null || pkg.epoch === Number(epoch))),
+      });
+      return true;
+    }
+    if (method === 'POST' && url.pathname === BYOK_E2EE_KEY_PACKAGES_PATH) {
+      await this.#put(req, res);
       return true;
     }
     if (method === 'GET' && url.pathname === BYOK_E2EE_PAIRING_MAC_PATH) {
@@ -195,6 +207,25 @@ export class E2eeTestHost {
     }
     const key = createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: device.publicKeyBase64Url }, format: 'jwk' });
     return edVerify(null, deviceProofSigningInput(claims), key, Buffer.from(proof.signature, 'base64url')) ? device : undefined;
+  }
+
+  /** The device put: one `keyId` per scope epoch, and a repeat recipient replaces its package. */
+  async #put(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await rawBody(req);
+    if (this.#proven(req, body, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, BYOK_E2EE_KEY_PACKAGES_PATH) === undefined) {
+      return respond(res, 401, { error: 'unauthorized' });
+    }
+    const { packages } = JSON.parse(body.toString('utf8')) as { packages: ScopeKeyPackageV1[] };
+    this.devicePuts.push(packages);
+    await this.holdPackagePuts;
+    const conflict = packages.some((put) => this.packages.some((stored) => stored.scopeId === put.scopeId && stored.epoch === put.epoch && stored.keyId !== put.keyId));
+    if (conflict) return respond(res, 409, { error: 'e2ee_scope_key_conflict' });
+    for (const put of packages) {
+      const at = this.packages.findIndex((stored) => stored.scopeId === put.scopeId && stored.epoch === put.epoch && stored.recipient === put.recipient);
+      if (at >= 0) this.packages.splice(at, 1);
+      this.packages.push(put);
+    }
+    respond(res, 200, { stored: packages.length, skippedDeviceIds: [] });
   }
 
   async #register(req: IncomingMessage, res: ServerResponse): Promise<void> {
