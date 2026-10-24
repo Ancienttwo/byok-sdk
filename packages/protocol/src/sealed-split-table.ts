@@ -50,6 +50,12 @@ export interface SealedSplitEntry {
    * complete.
    */
   readonly digests: { readonly [path: string]: SealedDigestRule };
+  /**
+   * UTF-8 byte limits of moved fields that replace the plaintext type's limit
+   * of that field after the merge (decision 12b). The category limit still
+   * bounds the whole opened content.
+   */
+  readonly limits?: { readonly [field: string]: number };
 }
 
 const OFFER_DIGESTS = {
@@ -81,7 +87,8 @@ const sealedOffer = (plainType: MessageType, digests: SealedSplitEntry['digests'
  *
  * Blob bytes have no sealing rule yet, so a sealed type carries no plaintext
  * blob reference: `artifactRefs` and the artifact `blobRef` are dropped until
- * that rule exists. A sealed artifact is inline content.
+ * that rule exists. A sealed artifact is inline content, so its `inline`
+ * takes up to 2 MiB instead of the plaintext 64 KB (decision 12b).
  */
 export const SEALED_SPLIT_TABLE = Object.freeze({
   'task.offer_sealed': sealedOffer('task.offer', OFFER_DIGESTS),
@@ -121,6 +128,7 @@ export const SEALED_SPLIT_TABLE = Object.freeze({
   },
   'task.artifact_sealed': {
     plainType: 'task.artifact', category: 'task-output', identity: ['artifactId'], moved: ['inline'], forbidden: ['blobRef'], digests: { 'blobRef.contentHash': 'forbidden' },
+    limits: { inline: 2 * 1024 * 1024 },
   },
   'task.await_approval_sealed': {
     plainType: 'task.await_approval', category: 'task-output', identity: ['approvalId'], moved: ['summary'], forbidden: [], digests: {},
