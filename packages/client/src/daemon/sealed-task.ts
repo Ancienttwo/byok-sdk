@@ -155,9 +155,8 @@ export class SealedTasks {
     const { sealing, sealed, routineRef, ...plain } = envelope.payload as JsonObject & { sealing: TaskSealing; sealed?: JsonObject; routineRef?: RoutineRef };
     const agentRef = (plain.agentRef as AgentRef | undefined) ?? null;
     if (routineRef !== undefined && routineTemplateExpired(routineRef, Date.now())) return { ok: false, code: 'sealing_policy_mismatch' };
-    const policy = await this.#keyring(() => this.options.keyring.scopeCategories(sealing.scopeId));
-    if (policy === undefined) return { ok: false, code: 'sealed_key_unavailable' };
-    if (policy.some((category) => !(sealing.categories as readonly SealedCategory[]).includes(category))) return { ok: false, code: 'sealing_policy_mismatch' };
+    const below = await this.#belowPolicy(sealing);
+    if (below !== undefined) return { ok: false, code: below };
     let payload = plain;
     if (sealed !== undefined) {
       const binding = routineRef === undefined
@@ -173,6 +172,9 @@ export class SealedTasks {
         return { ok: false, code: 'sealing_policy_mismatch' };
       }
       payload = { ...plain, ...opened.plaintext };
+      // The open can move the chain view forward; the floor holds against the view the task runs under.
+      const moved = await this.#belowPolicy(sealing);
+      if (moved !== undefined) return { ok: false, code: moved };
     }
     if (sealing.categories.includes('task-output') && await this.#sealingKey(sealing) === undefined) {
       return { ok: false, code: 'sealed_key_unavailable' };
@@ -318,6 +320,13 @@ export class SealedTasks {
     }
     const sealed = { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') };
     return createEnvelope(type, { ...kept, sealed } as never, { taskId });
+  }
+
+  /** The decline code when the scope is not usable, or the offer's categories do not cover its policy (design §6.2). */
+  async #belowPolicy(sealing: TaskSealing): Promise<'sealed_key_unavailable' | 'sealing_policy_mismatch' | undefined> {
+    const policy = await this.#keyring(() => this.options.keyring.scopeCategories(sealing.scopeId));
+    if (policy === undefined) return 'sealed_key_unavailable';
+    return policy.some((category) => !(sealing.categories as readonly SealedCategory[]).includes(category)) ? 'sealing_policy_mismatch' : undefined;
   }
 
   #sealingKey(sealing: TaskSealing): Promise<SealingKey | undefined> {

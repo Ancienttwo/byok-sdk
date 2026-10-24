@@ -265,6 +265,20 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(adapter.startCalls).toHaveLength(0);
   });
 
+  it('checks the policy floor again after the open moved the chain view', async () => {
+    const { server, adapter, deviceId, member } = await start();
+    // The view before the open still had an input-only policy; the open caught up to the policy with task-output.
+    const scopeCategories = DeviceMemberKeyring.prototype.scopeCategories;
+    vi.spyOn(DeviceMemberKeyring.prototype, 'scopeCategories')
+      .mockImplementationOnce(async () => ['task-input'])
+      .mockImplementation(function (this: DeviceMemberKeyring, scopeId: string) { return scopeCategories.call(this, scopeId); });
+    const inputOnly: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input'] };
+    server.send(await sealedOffer(member, 'policy-moved', server.nextSeq(), deviceId, 'never runs', inputOnly));
+    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'policy-moved', BUDGET_MS);
+    expect(decline.payload).toEqual({ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
   it('declines content whose sender view is not on the verified chain with sealed_open_failed', async () => {
     const { server, adapter, deviceId, member } = await start();
     const bound = binding('task.offer', 'server-to-daemon', { taskId: 'foreign-head' }, deviceId, BOTH);
