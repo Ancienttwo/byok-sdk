@@ -17,11 +17,13 @@ import {
   createEnvelope,
   isSealedMessageType,
   isSealedTaskPlainOutput,
+  requiredReceiverCapabilities,
   type AgentRef,
   type BlobRef,
   type Envelope,
   type MessageType,
   type SealedMessageType,
+  type SealedSplitEntry,
   type TaskSealing,
 } from '@byok-sdk/protocol';
 import { routineTemplateBinding, routineTemplateExpired, type RoutineRef } from './sealed-routine-template';
@@ -50,14 +52,11 @@ export interface SealedScopeKeyring {
   sealingKey(scopeId: string, minEpoch: number): Promise<SealingKey | undefined>;
 }
 
-/**
- * Ciphertext blobs of sealed input: a padded frame above the inline maximum
- * travels as a blob (§8.6). Sealed output is inline only (§2.5), so the
- * device never uploads one.
- */
+/** Ciphertext blobs: a padded frame above the inline maximum travels as a blob (§8.6). */
 export interface SealedCiphertextBlobs {
   /** The blob's bytes after the SHA-256 and size check. */
   download(ref: BlobRef): Promise<Uint8Array>;
+  upload(ciphertext: Uint8Array): Promise<BlobRef>;
 }
 
 export interface SealedTasksOptions {
@@ -65,6 +64,8 @@ export interface SealedTasksOptions {
   readonly tenantId: string;
   readonly deviceId: string;
   readonly blobs: SealedCiphertextBlobs;
+  /** The flags the server advertised last, which decide whether an output may name its ciphertext blob. */
+  readonly serverCapabilities: () => readonly string[];
 }
 
 export type SealedOfferOpenResult =
@@ -88,6 +89,8 @@ const SEALED_OUTPUT_TYPE: Partial<Record<MessageType, SealedMessageType>> = Obje
 /** The terminal types; each must reach the wire in some form, or the task never settles. */
 const TERMINAL_TYPES: ReadonlySet<MessageType> = new Set(['task.complete', 'task.fail', 'task.cancelled', 'task.decline']);
 
+/** A ciphertext upload failed. Transient: the caller may seal again later. */
+class SealedUploadError extends Error {}
 
 /** Fields a `task.fail` keeps when a task that cannot seal reports `sealed_key_unavailable`. */
 const UNSEALABLE_FAIL_FIELDS = ['harnessId', 'usage', 'agentRef', 'agentHomeProjection', 'agentHomeMemoryChange'] as const;
@@ -265,9 +268,9 @@ export class SealedTasks {
     try {
       sealed = await this.#seal(taskId, task, envelope.type, payload);
     } catch (error) {
-      if (!TERMINAL_TYPES.has(envelope.type)) throw error;
+      if (error instanceof SealedUploadError || !TERMINAL_TYPES.has(envelope.type)) throw error;
       // A terminal that cannot be sealed as it is (over the plaintext limit,
-      // over the inline frame, or not a valid sealed message) would hold the task's terminal commit
+      // over an inline-only frame, or not a valid sealed message) would hold the task's terminal commit
       // forever. Settle it with a small sealed failure instead, and show the
       // local observer that failure, not the terminal it replaced.
       console.error(`[byok/client] ${envelope.type} for sealed task ${taskId} replaced by a sealed failure: ${error instanceof Error ? error.message : String(error)}`);
@@ -300,12 +303,27 @@ export class SealedTasks {
       plaintext: pick(payload, entry.moved) as never,
       maxContentLength: SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
     });
-    // The Host takes sealed output inline only (§2.5).
-    if (header.paddedLength > SEALED_INLINE_MAX_PADDED_LENGTH) {
+    if (header.paddedLength <= SEALED_INLINE_MAX_PADDED_LENGTH) {
+      return createEnvelope(type, { ...kept, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId });
+    }
+    // Above the inline frame, the output names its ciphertext blob, but only
+    // when the server holds such a blob (§2.5): never for an inline-only type,
+    // and only after the server advertised every flag the member needs.
+    const advertised = this.options.serverCapabilities();
+    if ((entry as SealedSplitEntry).inlineOnly === true
+      || !requiredReceiverCapabilities(type, { ...kept, sealed: { ciphertextRef: {} } }).every((flag) => advertised.includes(flag))) {
       throw new Error(`${plainType} of sealed task ${taskId} seals to ${header.paddedLength} bytes, over the inline maximum`);
     }
-    const sealed = { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') };
-    return createEnvelope(type, { ...kept, sealed } as never, { taskId });
+    const ciphertextRef = omit(await this.#upload(ciphertext) as unknown as JsonObject, ['url']);
+    return createEnvelope(type, { ...kept, sealed: { ...header, ciphertextRef } } as never, { taskId });
+  }
+
+  async #upload(ciphertext: Uint8Array): Promise<BlobRef> {
+    try {
+      return await this.options.blobs.upload(ciphertext);
+    } catch (error) {
+      throw new SealedUploadError(`ciphertext upload failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   #sealingKey(sealing: TaskSealing): Promise<SealingKey | undefined> {

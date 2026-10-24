@@ -80,6 +80,8 @@ afterEach(async () => {
 async function start(options: {
   keyring?: TestKeyring;
   serverFlag?: boolean;
+  /** The server also holds sealed output blobs (`sealed-output-ciphertext-ref`). */
+  ciphertextRef?: boolean;
   /** `false` runs the daemon without a hosted journal. */
   journal?: false;
   beforeStart?: (storeDir: string, deviceId: string) => Promise<void>;
@@ -87,7 +89,9 @@ async function start(options: {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
   dirs.push(root);
   server ??= await TestServer.start();
-  if (options.serverFlag !== false) server.setAckCapabilities(['sealed-payload-v1']);
+  if (options.serverFlag !== false) {
+    server.setAckCapabilities(['sealed-payload-v1', ...(options.ciphertextRef === true ? ['sealed-output-ciphertext-ref'] : [])]);
+  }
   const adapter = new StubRuntimeAdapter('pi');
   const storeDir = path.join(root, 'store');
   const config = {
@@ -133,12 +137,12 @@ async function sealedOffer(
 /** Opens a sealed output as a member would, with the binding the receiver builds. */
 async function openOutput(keyring: TestKeyring, envelope: Envelope, deviceId: string, sealing = BOTH) {
   const entry = SEALED_SPLIT_TABLE[envelope.type as SealedMessageType];
-  const { sealed, ...kept } = envelope.payload as Record<string, unknown> & { sealed: Record<string, unknown> & { ciphertext: string } };
-  const { ciphertext, ...header } = sealed;
+  const { sealed, ...kept } = envelope.payload as Record<string, unknown> & { sealed: Record<string, unknown> & { ciphertext?: string; ciphertextRef?: { blobId: string } } };
+  const { ciphertext, ciphertextRef, ...header } = sealed;
   const identity = { taskId: envelope.task_id!, ...Object.fromEntries(entry.identity.map((field) => [field, kept[field] as string | number])) };
   const opened = await openSealedContent({
     header,
-    ciphertext: Buffer.from(ciphertext, 'base64url'),
+    ciphertext: ciphertext !== undefined ? Buffer.from(ciphertext, 'base64url') : server!.blobContent(ciphertextRef!.blobId)!,
     scopeKey: keyring.scopeKey,
     binding: binding(entry.plainType, 'daemon-to-server', identity, deviceId, sealing),
     sealing: { scopeId: SCOPE, epoch: EPOCH },
@@ -626,5 +630,89 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'big-sealed', BUDGET_MS);
     expect(decline.payload).toEqual({ reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
     await vi.waitFor(async () => expect(await cursor()).toBe(big.seq), BUDGET_MS);
+  });
+});
+
+describe('sealed output by ciphertextRef on a server that holds the blob (#654 §58a)', () => {
+  it('uploads a terminal over the inline frame as an octet-stream blob, and keeps the upload alive through the shutdown commit barrier', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
+    server.send(await sealedOffer(keyring, 'upload-at-stop', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    const release = server.holdBlobUploads();
+    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
+    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(server.blobUploadsHeld).toBeGreaterThan(0), BUDGET_MS);
+
+    // Shutdown starts while the upload is held, and the upload ends after that.
+    const stopped = daemon!.stop();
+    daemon = undefined;
+    setTimeout(release, 100);
+    await stopped;
+    const complete = taskEnvelopes('upload-at-stop').find((envelope) => envelope.type === 'task.complete_sealed');
+    const sealed = (complete?.payload as { sealed: { paddedLength: number; ciphertextRef?: { contentType: string } } } | undefined)?.sealed;
+    expect(sealed?.paddedLength).toBeGreaterThan(SEALED_INLINE_MAX_PADDED_LENGTH);
+    expect(sealed?.ciphertextRef?.contentType).toBe('application/octet-stream');
+    expect(await openOutput(keyring, complete!, deviceId)).toMatchObject({ summary });
+  });
+
+  it('uploads an artifact over the inline frame as an octet-stream ciphertext blob', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
+    server.send(await sealedOffer(keyring, 'large', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    const content = randomBytes(220 * 1024);
+    await fs.writeFile(path.join(adapter.startCalls[0]!.ctx.workspaceDir, 'large.bin'), content);
+    adapter.sessions[0]!.emit({ type: 'artifact', name: 'large.bin', contentType: 'application/octet-stream' });
+
+    const artifact = await server.waitFor((envelope) => envelope.type === 'task.artifact_sealed', BUDGET_MS);
+    const ref = (artifact.payload as { sealed: { paddedLength: number; ciphertextRef?: { blobId: string; contentType: string } } }).sealed;
+    expect(ref.paddedLength).toBeGreaterThan(SEALED_INLINE_MAX_PADDED_LENGTH);
+    expect(ref.ciphertextRef?.contentType).toBe('application/octet-stream');
+    expect(await openOutput(keyring, artifact, deviceId)).toEqual({ inline: content.toString('base64') });
+  });
+
+  it('commits another task\'s terminal while one terminal upload is held', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
+    server.send(await sealedOffer(keyring, 'held-upload', server.nextSeq(), deviceId, 'run the large task'));
+    server.send(await sealedOffer(keyring, 'small-terminal', server.nextSeq(), deviceId, 'run the small task'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
+    const session = (instruction: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === instruction)]!;
+    const held = session('run the large task');
+    const small = session('run the small task');
+    const release = server.holdBlobUploads();
+    try {
+      held.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
+      held.emit({ type: 'turn_end' });
+      await vi.waitFor(() => expect(server.blobUploadsHeld).toBeGreaterThan(0), BUDGET_MS);
+
+      small.emit({ type: 'progress', text: 'small summary' });
+      small.emit({ type: 'turn_end' });
+      await server.waitFor((envelope) => envelope.type === 'task.complete_sealed' && envelope.task_id === 'small-terminal', BUDGET_MS);
+      expect(taskEnvelopes('held-upload').map((envelope) => envelope.type)).not.toContain('task.complete_sealed');
+    } finally {
+      release();
+    }
+    await server.waitFor((envelope) => envelope.type === 'task.complete_sealed' && envelope.task_id === 'held-upload', BUDGET_MS);
+  });
+
+  it('keeps an approval request inline only, and denies it locally over the inline frame without an upload', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
+    server.send(await sealedOffer(keyring, 'inline-only-approval', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    const release = server.holdBlobUploads();
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      adapter.sessions[0]!.emit({ type: 'needs_approval', summary: `approve ${'a'.repeat(300 * 1024)}` });
+      await vi.waitFor(() => expect(adapter.sessions[0]!.resolveApprovalCalls).toEqual([{ approved: false, reason: expect.any(String) }]), BUDGET_MS);
+    } finally {
+      diagnostic.mockRestore();
+      release();
+    }
+    expect(server.blobUploadsHeld).toBe(0);
+    expect(taskEnvelopes('inline-only-approval').map((envelope) => envelope.type)).not.toContain('task.await_approval_sealed');
   });
 });
