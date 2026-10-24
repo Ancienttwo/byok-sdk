@@ -2806,8 +2806,7 @@ export function buildDaemonWithAdapters(
       // capability is only known once the handshake completes, strictly
       // after this `deps` object is constructed.
       getServerCapabilities: () => connection?.getServerCapabilities() ?? [],
-      // Read at use time: the member is verified after the runner is built.
-      get sealedTasks() { return sealedTasks; },
+      sealedTasks: opened,
       // Same late-binding closure as `getServerCapabilities`; with no
       // connection yet there is no advertisement, and that is an error.
       getIngressBudget: () => {
@@ -3136,12 +3135,12 @@ export function buildDaemonWithAdapters(
                 const taskId = envelope.task_id;
                 const binding = resultReplyRecoveryTasks.get(taskId)!;
                 await runner!.cancelRecoveredAgentMessage(taskId, async () => {
+                  // Without its offer the cancel cannot tell a sealed task: it is never sent.
                   const task = await activeJournal.readTask(taskId, journalIdentity);
+                  if (!task || !('envelopeBytes' in task)) throw new Error(`missing durable offer of recovered task ${taskId}`);
                   const cancelled = createEnvelope('task.cancelled', { reason: envelope.payload.reason,
-                    ...terminalIdentity(task?.claimedRuntime, binding.agentRef) }, { taskId });
-                  sendEnvelope(sealedTasks !== undefined && task !== undefined && 'envelopeBytes' in task
-                    ? await sealedTasks.sealRecovered(decodeEnvelope(task.envelopeBytes), cancelled)
-                    : cancelled);
+                    ...terminalIdentity(task.claimedRuntime, binding.agentRef) }, { taskId });
+                  sendEnvelope(await opened.sealRecovered(decodeEnvelope(task.envelopeBytes), cancelled));
                   await terminalCommits.receipt(taskId);
                 });
                 resultReplyRecoveryTasks.delete(taskId);
