@@ -1,19 +1,19 @@
 import type { Pool, PoolClient } from 'pg';
-import { canonical, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
-import { botRoutines, owned, updateDefinition } from '@byok-sdk/example-bot-collaboration/routines';
+import { canonical, occurrenceRun, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
+import { botRoutines, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
 import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { syncTurn, type Command, type CommandPorts, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { commitCommand, syncTurn, type Command, type CommandPorts, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { bindDevice, revokeDevice } from './binding';
+import { activeBinding, bindDevice, revokeDevice } from './binding';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
 import { decideFinish, type TaskEvidence } from './reconcile';
 import { commitStored, decideRetention } from './retention';
-import { hostedRoutineCommands, loadSlice, switchDueVersions, writeSlice } from './routines';
+import { dueRoutine, hostedRoutineCommands, loadSlice, planSlice, recordDue, switchDueVersions, writeSlice } from './routines';
 import type { RetentionInput, RetentionLimits, RetentionResult } from '@byok-sdk/example-bot-collaboration/retention';
 import { assemble, entryGroup, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
 
@@ -114,19 +114,28 @@ export class HostedCollaborationStore {
    * projections. Every frozen instruction lists the scope's Bot routines, in insertion order. A routine Turn joins the FIFO
    * as its occurrence intent, and a routine Turn that ends before that concludes its occurrence (#793 D2f). It writes no
    * command record and keeps the revision. A throw writes nothing.
+   *
+   * It runs to a fixed point, as the L pass drains again after a step that changed K4 (K8 host.ts pass): while a round
+   * froze, promoted or concluded an intent or an occurrence, it reads the facts again and runs the Turns again. Each such
+   * step happens once per intent or occurrence, so the rounds end.
    */
   sync(scope: string, options: HostedSyncOptions): Promise<void> {
     const key = storedKey(scope);
     return this.change(scope, undefined, async (state, publish, client) => {
-      const facts = await syncFacts(client, scope, Object.keys(state.turns)), published = new Set<string>();
+      const published = new Set<string>();
       const slice = await loadSlice(client, key), routines = botRoutines(Object.values(slice.state.routines));
-      const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
-      for (const turn of Object.values(state.turns)) {
-        const step = syncTurn(state, turn, facts, { ...options, routines, history: options.history?.get(turn.id) },
-          (id, body) => { publish(id, body); published.add(id); });
-        if (step) steps.push([turn, step]);
+      let more = true;
+      while (more) {
+        const facts = await syncFacts(client, scope, Object.keys(state.turns));
+        const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
+        for (const turn of Object.values(state.turns)) {
+          const step = syncTurn(state, turn, facts, { ...options, routines, history: options.history?.get(turn.id) },
+            (id, body) => { publish(id, body); published.add(id); });
+          if (step) steps.push([turn, step]);
+        }
+        more = false;
+        for (const [turn, step] of steps) more = await writeSyncStep(client, scope, turn, step, slice) || more;
       }
-      for (const [turn, step] of steps) await writeSyncStep(client, scope, turn, step, slice);
       await writeSlice(client, key, slice);
       await switchDueVersions(client, key, options.now);
       return { value: undefined, outbox: [...published].map(id => ({ kind: 'projection' as const, id })) };
@@ -155,6 +164,55 @@ export class HostedCollaborationStore {
       await switchDueVersions(client, key, now);
       return { value: undefined, outbox: [] };
     });
+  }
+
+  /**
+   * Fires the due slot of routine `id` (#793 D2f-3, scheduler note §2.2), as K4 `consume` records an occurrence and runs its
+   * hook in one transaction: the occurrence row, the routine's next slot, the supersede of its earlier untried intents and
+   * the K8 routine Turn commit together, under the scope lock. The K8 `occurrence` command gets no record, as in L: the slot
+   * is the replay guard. A routine that is not active, or whose slot is not due, is `skipped` with nothing written: another
+   * pass fired it, or a command changed it.
+   *
+   * The fire can create execution, so the owner Bot's device must have an active H binding (#793 D2e), read from the state of
+   * this transaction, as the sync builds the routine offer from it. Otherwise it throws `DeviceBindingError` and writes
+   * nothing, and the slot stays due. The promotion checks the binding again. An archived owner Bot skips the fence: its
+   * routine Turn creates no execution, because the sync ends it before any freeze, as L does. A revoke and an archive are both
+   * final, so with the fence that slot could never fire.
+   *
+   * It runs no version switch: a fire leaves its new occurrence open, so K4 `versionSwitchDue` stays false for the routine.
+   */
+  fire(scope: string, id: string, now: number): Promise<'fired' | 'skipped'> {
+    const key = storedKey(scope);
+    return this.transaction(client => this.decideIn(client, key, undefined, async (state, publish) => {
+      const slice = await loadSlice(client, key), routine = dueRoutine(slice, id, now);
+      if (!routine) return { value: 'skipped' as const, outbox: [] };
+      const owner = (routine.definition.hostOccurrence?.input as BotRoutineInput | undefined)?.owner;
+      const bot = owner === undefined ? undefined : state.team.bots[owner];
+      if (!bot) throw new Error('Routine owner Bot not found');
+      if (!bot.archived) await activeBinding(client, key, bot.execution.deviceId);
+      const occurrence = recordDue(slice, scope, routine, now);
+      const run = occurrenceRun(routine, occurrence);
+      const result = commitCommand(state, { scope, commandId: occurrence.key, command: { kind: 'occurrence', key: occurrence.key } },
+        { scope, recordCallbacks: false }, { now: () => now, publish, occurrence: () => routineTurn(state, run) });
+      await writeSlice(client, key, slice, occurrence.key);
+      return { value: 'fired' as const, outbox: result.outbox };
+    }), false);
+  }
+
+  /**
+   * The schedule upkeep of the scope's routines (#793 D2f-3, scheduler note §2.6), under the scope lock. `start` re-plans an
+   * active routine with no slot within the horizon, as K4 `recover`. Both phases set `ok` on a `schedule_retrying` routine
+   * whose slot is within the horizon, as K4 `scheduleNext`. Then a staged version switches when it is due.
+   */
+  planRoutines(scope: string, now: number, phase: 'start' | 'pass'): Promise<void> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      await lockScope(client, key);
+      const slice = await loadSlice(client, key);
+      planSlice(slice, now, phase);
+      await writeSlice(client, key, slice);
+      await switchDueVersions(client, key, now);
+    }, false);
   }
 
   /**

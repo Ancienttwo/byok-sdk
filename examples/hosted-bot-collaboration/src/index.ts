@@ -4,3 +4,4 @@ export { hostedMessageConsumer, type AgentMessageConsumer, type AgentMessageInpu
 export { freezeIntent, HostedSubmitter, type IntentFreeze, type SubmitFailure, type SubmitPass, type SubmitterOptions } from './intents';
 export { HostedReconciler, type HostedTaskPort, type ReconcileFailure, type ReconcilePass, type ReconcilerOptions, type TaskEvidence } from './reconcile';
 export { DeviceBindingError } from './binding';
+export { HostedRoutineScheduler, type RoutineFailure, type SchedulerOptions, type SchedulerPass } from './scheduler';

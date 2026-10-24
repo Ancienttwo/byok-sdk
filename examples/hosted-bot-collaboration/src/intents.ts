@@ -73,23 +73,32 @@ export async function syncFacts(client: PoolClient, scope: string, turnIds: read
 /**
  * Writes the intent side of one sync step, as L writes it to K4 (K8 commit.ts). A routine step and a routine Turn's `ended`
  * step run the K4 rules on `slice`, which the caller writes back after the last step. The caller holds the scope lock.
+ * Returns true when the step changed an intent fact or an occurrence, so the sync runs its Turns again, as L drains again.
  */
-export async function writeSyncStep(client: PoolClient, scope: string, turn: Turn, step: SyncStep<ExecutionTemplate>, slice: RoutineSlice): Promise<void> {
-  if (step.kind === 'freeze') await freezeIntent(client, scope, step.input);
-  else if (step.kind === 'routine') {
+export async function writeSyncStep(client: PoolClient, scope: string, turn: Turn, step: SyncStep<ExecutionTemplate>, slice: RoutineSlice): Promise<boolean> {
+  if (step.kind === 'freeze') {
+    await freezeIntent(client, scope, step.input);
+    return true;
+  }
+  if (step.kind === 'routine') {
     // K4 times the intent from the occurrence record. The row takes the step's execution and those times, not the K4
     // retry policy, because H never retries (#793 D2d option A). The freeze checks the device binding (#793 D2e).
     const intent = promoteOccurrence(slice.state, scope, routineOccurrence(turn), step.execution);
     await freezeIntent(client, scope, { key: turn.id, source: 'routine', waitUntil: intent.waitUntil, execution: step.execution },
       { ...(intent.retryUntil === undefined ? {} : { retryUntil: intent.retryUntil }), ...(intent.conclusion ? { conclusion: intent.conclusion } : {}) });
-  } else if (step.kind === 'ended') {
-    if (turn.source === 'routine') concludeRoutineTurn(slice.state, turn);
-  } else if (step.kind === 'cancel') {
-    // A row that was never tried has no SDK call, because the claim runs under this lock. It concludes now, as K4
-    // queuedExpiry concludes a cancelled queued intent. A tried row waits for the reconciliation to check its attempt.
-    await client.query(`UPDATE intent SET cancel_reason = 'cancelled', conclusion = CASE WHEN tries = 0 THEN 'cancelled' ELSE conclusion END
-      WHERE scope = $1 AND key = $2 AND conclusion IS NULL`, [storedKey(scope), storedKey(turn.id)]);
+    return true;
   }
+  // A concluded occurrence can make a staged version due (K8 commit.ts:54).
+  if (step.kind === 'ended') return turn.source === 'routine' && concludeRoutineTurn(slice.state, turn);
+  if (step.kind === 'cancel') {
+    // A row that was never tried has no SDK call, because the claim runs under this lock. It concludes now, as K4
+    // queuedExpiry concludes a cancelled queued intent, and L drains again for it. A tried row waits for the reconciliation
+    // to check its attempt.
+    const concluded = await client.query(`UPDATE intent SET cancel_reason = 'cancelled', conclusion = CASE WHEN tries = 0 THEN 'cancelled' ELSE conclusion END
+      WHERE scope = $1 AND key = $2 AND conclusion IS NULL RETURNING conclusion`, [storedKey(scope), storedKey(turn.id)]);
+    return concluded.rows[0]?.conclusion != null;
+  }
+  return false;
 }
 
 export interface SubmitterOptions {
