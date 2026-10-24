@@ -366,11 +366,16 @@ export type AgentHomeAccess = z.infer<typeof AgentHomeAccessSchema>;
 
 /**
  * The `agentMemory` of an ordinary Agent offer: the prepared modes plus
- * `read-if-admitted`. That value runs as `read` when the daemon admits the
- * memory MCP and as `none` when it does not. A host sends it only to a device
- * that advertises `agent-memory-read-if-admitted`. Prepared offers refuse it.
+ * `read-if-admitted` and `read-write-if-admitted`. When the daemon admits the
+ * memory MCP they run as `read` and `read-write`; when it does not, both run as
+ * `none`. A host sends each only to a device that advertises
+ * `agent-memory-read-if-admitted` or `agent-memory-read-write-if-admitted`. A
+ * `memory-reader` Attempt cannot select `read-write-if-admitted`. Prepared
+ * offers refuse both.
  */
-export const AgentMemorySelectionSchema = z.enum([...PreparedAgentMemoryModeSchema.options, 'read-if-admitted']);
+export const AgentMemorySelectionSchema = z.enum([
+  ...PreparedAgentMemoryModeSchema.options, 'read-if-admitted', 'read-write-if-admitted',
+]);
 export type AgentMemorySelection = z.infer<typeof AgentMemorySelectionSchema>;
 
 /**

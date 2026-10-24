@@ -444,10 +444,10 @@ of one task (see the next section).
 ### Per-task memory selection
 
 An ordinary Agent offer can carry
-`agentMemory: 'none' | 'read' | 'read-write' | 'read-if-admitted'` for its one
-task. The first three are the values of the prepared offer. Prepared offers do
-not accept `'read-if-admitted'`. Without the field, the daemon admission
-decides, as above.
+`agentMemory: 'none' | 'read' | 'read-write' | 'read-if-admitted' | 'read-write-if-admitted'`
+for its one task. The first three are the values of the prepared offer.
+Prepared offers do not accept the two `*-if-admitted` values. Without the
+field, the daemon admission decides, as above.
 
 | `agentMemory` | SDK memory MCP | Memory guidance in the instruction |
 |---|---|---|
@@ -456,10 +456,12 @@ decides, as above.
 | `'read'` | sealed `read`: only `memory_recall` | read-only guidance; a `memory-reader` keeps its reader guidance |
 | `'read-write'` | sealed `read-write`: `memory_recall` and `memory_save` | the writer guidance |
 | `'read-if-admitted'` | as `'read'` when `admitted`, else as `'none'` | as `'read'` when `admitted`, else as `'none'` |
+| `'read-write-if-admitted'` | as `'read-write'` when `admitted`, else as `'none'` | as `'read-write'` when `admitted`, else as `'none'` |
 
-- A `memory-reader` Attempt with `'read-write'` is declined with
-  `agent_memory_selection_invalid`. `ByokServer.dispatch` and
-  `executions.submit` refuse it before the task exists.
+- A `memory-reader` Attempt with `'read-write'` or `'read-write-if-admitted'`
+  is declined with `agent_memory_selection_invalid`, whatever the admission.
+  `ByokServer.dispatch` and `executions.submit` refuse it before the task
+  exists.
 - `'read'` or `'read-write'` when `status().agentMemoryMcp` is not `admitted`
   is declined with `agent_memory_unavailable`. The daemon does not change the
   selection to `'none'`.
@@ -469,14 +471,20 @@ A Host that wants memory only when the daemon admits it sends no
 `agentMemory`. A Host that wants read-only memory only when the daemon admits
 it sends `'read-if-admitted'`. That value never gets `agent_memory_unavailable`,
 also for a `memory-reader`, so a remote Host does not need to know the
-admission. The terminal does not report which mode ran.
+admission. A writer that wants read-write memory only when the daemon admits
+it sends `'read-write-if-admitted'`. It never gets `agent_memory_unavailable`
+either; when memory is not admitted the task runs with no memory, so a task
+that is useless without memory sends `'read-write'` instead. Unlike an absent
+field, it runs as `'none'` whenever memory is not `admitted`, also when the
+admission is `unavailable`. The terminal does not report which mode ran.
 
 The offers are strict, so the field is a gated wire addition. A daemon with an
-Agent home advertises `agent-memory-selection` and
-`agent-memory-read-if-admitted`, whatever its memory admission. The server and
-hosted cloud refuse an offer with the field to a device without
-`agent-memory-selection`, and `'read-if-admitted'` to a device without
-`agent-memory-read-if-admitted`, before the task exists. `ByokServer.dispatch` accepts
+Agent home advertises `agent-memory-selection`, `agent-memory-read-if-admitted`
+and `agent-memory-read-write-if-admitted`, whatever its memory admission. The
+server and hosted cloud refuse an offer with the field to a device without
+`agent-memory-selection`, `'read-if-admitted'` to a device without
+`agent-memory-read-if-admitted`, and `'read-write-if-admitted'` to a device
+without `agent-memory-read-write-if-admitted`, before the task exists. `ByokServer.dispatch` accepts
 `agentMemory` only with an explicit `agentRef`.
 
 `AGENT_MEMORY_MCP_SERVER_NAME` is the reserved name of the SDK memory MCP
