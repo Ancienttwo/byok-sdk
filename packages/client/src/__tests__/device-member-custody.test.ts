@@ -6,8 +6,9 @@
  */
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { deriveMemberId, encodePairingVerificationSecret, generatePairingVerificationSecret } from '@byok-sdk/core/sealed-payload';
-import { describe, expect, it } from 'vitest';
-import type { DeviceCommandRunner } from '../daemon/device-credential-store';
+import path from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DeviceCredentialStore, type DeviceCommandRunner } from '../daemon/device-credential-store';
 import {
   DeviceMemberCustodyError,
   DeviceMemberRecords,
@@ -17,6 +18,10 @@ import {
 import { InMemoryDeviceMemberCustody } from './fixtures/credential-backend';
 
 const DEVICE = { tenantId: 'tenant-a', deviceId: 'device-1' };
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 /** A Linux Secret Service stand-in keyed by the account attribute. */
 function linuxProvider() {
@@ -49,6 +54,30 @@ describe('OsDeviceMemberCustody', () => {
     for (const name of names) expect(await custody.read(name)).toBe(`value of ${name}`);
     await custody.delete('member-state');
     expect(await custody.read('member-state')).toBeUndefined();
+  });
+
+  it('deletes an absent Linux entry, and still reports a provider failure', async () => {
+    const run = (stderr: string): DeviceCommandRunner => async () => ({ exitCode: 1, stdout: '', stderr });
+    const custody = (stderr: string) => new OsDeviceMemberCustody({ storeDir: testScratchRoot(), productId: 'member-custody-test', platform: 'linux', commandRunner: run(stderr) });
+    await expect(custody('').delete('member-state')).resolves.toBeUndefined();
+    await expect(custody('Cannot autolaunch D-Bus').delete('member-state')).rejects.toThrow(/could not clear/u);
+  });
+
+  it('gives each Windows entry its own target, apart from the enrollment target', async () => {
+    vi.stubEnv('SystemRoot', 'C:\\Windows');
+    const targets: string[] = [];
+    const run: DeviceCommandRunner = async (executable, _args, stdin) => {
+      if (path.win32.basename(executable).toLowerCase() === 'powershell.exe') return { exitCode: 0, stdout: '', stderr: '' };
+      targets.push(Buffer.from((stdin ?? '').split('\n')[1]!, 'base64').toString('utf8'));
+      return { exitCode: 44, stdout: '', stderr: '' };
+    };
+    const options = { storeDir: testScratchRoot(), productId: 'member-custody-test', platform: 'win32' as const, commandRunner: run };
+    await new DeviceCredentialStore(options).read();
+    const custody = new OsDeviceMemberCustody(options);
+    for (const name of ['member-keys', 'pairing-verification', 'member-state'] as const) await custody.delete(name);
+    const [enrollment, ...members] = targets;
+    expect(enrollment).toMatch(/^com\.byok\.client\.device\.[0-9a-f]{64}$/u);
+    expect(members).toEqual([`${enrollment}/device-member-p256-v1`, `${enrollment}/device-member-pairing-v1`, `${enrollment}/device-member-state-v1`]);
   });
 
   it('refuses an entry this client did not write', async () => {

@@ -246,6 +246,7 @@ export class OsCredentialEntry {
   readonly #storeDir: string;
   readonly #service: string;
   readonly #account: string;
+  readonly #windowsTarget: string;
   readonly #label: string;
   /** What the entry holds, for error messages. */
   readonly #subject: string;
@@ -257,6 +258,10 @@ export class OsCredentialEntry {
     this.#storeDir = options.storeDir;
     this.#service = serviceFor(options.productId);
     this.#account = options.account;
+    // Windows keys a generic credential by its target name alone. The
+    // enrollment keeps the service as its target; every other entry gets
+    // its own target, or it would replace and delete the enrollment.
+    this.#windowsTarget = options.account === ENTRY_ACCOUNT ? this.#service : `${this.#service}/${options.account}`;
     this.#label = options.label;
     this.#subject = options.subject;
     this.#platform = options.platform ?? process.platform;
@@ -275,10 +280,7 @@ export class OsCredentialEntry {
   async read(): Promise<string | undefined> {
     const result = await this.#invoke('read');
     this.#checkInteraction(result);
-    if (
-      result.exitCode === NOT_FOUND ||
-      (this.#platform === 'linux' && result.exitCode === 1 && result.stderr.trim().length === 0)
-    ) return undefined;
+    if (this.#absent(result)) return undefined;
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0) {
       throw new DeviceCredentialStoreError(
@@ -304,7 +306,7 @@ export class OsCredentialEntry {
     const result = await this.#invoke('clear');
     this.#checkInteraction(result);
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
-    if (result.exitCode !== 0 && result.exitCode !== NOT_FOUND) {
+    if (result.exitCode !== 0 && !this.#absent(result)) {
       throw new DeviceCredentialStoreError(
         `operating-system credential provider could not clear ${this.#subject}${providerDiagnostic(result.stderr)}`,
       );
@@ -322,6 +324,11 @@ export class OsCredentialEntry {
       default:
         throw new DeviceCredentialStoreUnavailableError(`no operating-system credential provider is supported on ${this.#platform}`);
     }
+  }
+
+  /** `secret-tool` exits 1 with no message when nothing matched, on lookup and on clear. */
+  #absent(result: DeviceCommandResult): boolean {
+    return result.exitCode === NOT_FOUND || (this.#platform === 'linux' && result.exitCode === 1 && result.stderr.trim().length === 0);
   }
 
   #checkInteraction(result: DeviceCommandResult): void {
@@ -353,7 +360,7 @@ export class OsCredentialEntry {
     const executable = path.join(directory, 'credential-bridge.exe');
     const request = [
       operation,
-      Buffer.from(this.#service, 'utf8').toString('base64'),
+      Buffer.from(this.#windowsTarget, 'utf8').toString('base64'),
       Buffer.from(this.#account, 'utf8').toString('base64'),
       encoded === undefined ? '' : Buffer.from(encoded, 'utf8').toString('base64'),
     ].join('\n');

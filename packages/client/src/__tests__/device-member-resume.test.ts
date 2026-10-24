@@ -88,6 +88,19 @@ describe('device member resume (E2d-1)', () => {
     expect(logs.join('\n')).toContain('expired before the client confirmed it');
   });
 
+  it('stops failing chain reads after the MAC at the pv deadline, and deletes pv', async () => {
+    const { server, deviceId, web, clock, resume, custody, logs } = await device();
+    await web.approve(deviceId);
+    server.e2ee.failChainReads = Number.MAX_SAFE_INTEGER;
+    const resumed = resume();
+    while (!logs.join('\n').includes('HTTP 503')) await new Promise((resolve) => setTimeout(resolve, 5));
+    clock.now += PAIRING_VERIFICATION_TTL_MS;
+    expect(await resumed).toBeUndefined();
+    expect(custody.entries.has('pairing-verification')).toBe(false);
+    expect(custody.entries.has('member-state') && JSON.parse(custody.entries.get('member-state')!).anchor).toBeUndefined();
+    expect(logs.join('\n')).toContain('expired before the client confirmed it');
+  });
+
   it('deletes an expired pv without a request', async () => {
     const { server, clock, resume, custody } = await device();
     clock.now += PAIRING_VERIFICATION_TTL_MS;
