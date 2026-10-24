@@ -227,6 +227,18 @@ describe('Codex persistent app-server adapter', () => {
       ),
     ).rejects.toBeInstanceOf(RuntimeExecutionFailure);
   });
+  it('marks an app-server exit during the open runtime_exited, and an open it did not end unknown (#869)', async () => {
+    await expect(open(adapter(), task, await ctx({ FAKE_CODEX_CRASH_WITH_STDERR: 'crash' }))).rejects.toMatchObject({
+      phase: 'start', message: expect.stringMatching(/crash/), failure: { class: 'runtime_exited' },
+    });
+    // The kernel kills the app-server itself when the open reply has no thread id.
+    await expect(open(adapter(), task, await ctx({ FAKE_CODEX_NO_THREAD_STARTED: '1' }))).rejects.toMatchObject({
+      phase: 'start', message: expect.stringMatching(/no thread id/), failure: { class: 'unknown' },
+    });
+    await expect(open(adapter({ operationTimeoutMs: 300 }), task, await ctx({ FAKE_CODEX_HANG_BEFORE_THREAD: '1' }))).rejects.toMatchObject({
+      phase: 'start', message: expect.stringMatching(/timed out/), failure: { class: 'unknown' },
+    });
+  });
   it('plain and prepared Git workspaces use the same sealed cwd, with no exec skip-git arguments', async () => {
     for (const git of [false, true]) {
       const captures: string[][] = [];

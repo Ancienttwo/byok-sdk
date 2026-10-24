@@ -296,7 +296,7 @@ export class CodexAdapter implements RuntimeAdapter {
         reason: error instanceof Error ? error.message : 'codex open failed',
         failure: isRuntimeExecutionFailure(error)
           ? error.failure
-          : { class: 'unknown' },
+          : { class: session.exitedOnItsOwn ? 'runtime_exited' : 'unknown' },
       });
     }
   }
@@ -328,6 +328,7 @@ class CodexSession implements Session {
   sessionRef = '';
   private raw?: RawCodexSession;
   private child?: { dispose(): Promise<void>; kill(): void };
+  private exit?: { readonly exitedOnItsOwn: boolean };
   private projection?: CodexProjection;
   private readonly stream = {};
   private readonly queue = new AsyncQueue<AgentEvent | MessageDraftDelta>();
@@ -360,8 +361,12 @@ class CodexSession implements Session {
   serverRequest(id: string | number, method: string, params: Record<string, unknown>, reply: import('./native-interactions').CodexNativeReply): void {
     this.native!.receive(id, method, params, reply);
   }
-  own(child: { dispose(): Promise<void>; kill(): void }): void {
+  own(child: { dispose(): Promise<void>; kill(): void; readonly exitedOnItsOwn: boolean }): void {
     this.child = child;
+    this.exit = child;
+  }
+  get exitedOnItsOwn(): boolean {
+    return this.exit?.exitedOnItsOwn === true;
   }
   /** The app-server's lines stop at the transport once the record stream halted. */
   gate<T extends { onLine(handler: (line: string) => void): void }>(child: T): T {
