@@ -283,6 +283,25 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'unknown', attempts: 1, code: 'interrupted' });
     });
 
+    it('bounds a readback by the send deadline: a hung readback leaves the row unknown, waits readbackMs, and the pass goes on', async () => {
+      const { channelStore, scope, turnId } = await received();
+      await claimed(channelStore, scope, turnId);
+      // The claim's lease has passed: it becomes unknown, due for a readback at once.
+      clock = NOW + TIMES.leaseMs;
+      expect(await channelStore.claimDelivery(scope, 'd1', clock, { ...TIMES, readback: true })).toEqual({ kind: 'none' });
+      // A projection of another scope is due after it in the same pass.
+      const other = await scoped('b');
+      await project(other, 'bot-turn:t9', { status: 'done' });
+      await query(`UPDATE ${table('outbox')} SET next_at = $2 WHERE scope = $1`, [storedKey(other), clock + 1]);
+      clock += 1;
+      const to = receiver(), hung: ChannelPort = { send: async () => { throw new Error('Unused send'); }, readback: () => new Promise(() => {}) };
+      const pass = await sender({ projections: to.port, channel: hung, sendTimeoutMs: 50 }).run();
+      expect(pass.failed).toEqual([{ scope, id: 'd1', error: expect.objectContaining({ message: 'send_timeout' }) }]);
+      expect(to.calls.map(call => call.id)).toContain('bot-turn:t9');
+      expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'unknown', attempts: 1, code: 'interrupted' });
+      expect(await row(scope, 'd1')).toMatchObject({ next_at: String(clock + 30_000), settled_at: null });
+    });
+
     it('drops a reply token at a delivery settle once the intent of its root concluded, before a sync ends the Turn', async () => {
       const { channelStore, scope, turnId } = await received();
       await claimed(channelStore, scope, turnId);

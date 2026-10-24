@@ -43,8 +43,11 @@ export interface HostedStoreOptions {
   /** The Host has a channel: a K4 callback queues its channel deliveries, as L does with `channel` set. */
   channel?: boolean;
 }
-/** The sender's view of one delivery step (#793 D2b-out-2). `send`: the claim committed; send `body` on `route` now. */
-export type DeliveryClaim = { kind: 'none' } | { kind: 'readback' }
+/**
+ * The sender's view of one delivery step (#793 D2b-out-2). `send`: the claim committed; send `body` on `route` now.
+ * `readback`: read back the row's `unknown` attempt `attempt`, and give its result with that attempt.
+ */
+export type DeliveryClaim = { kind: 'none' } | { kind: 'readback'; attempt: number }
   | { kind: 'send'; attempt: number; route: ReplyRoute | PushRoute; body: string };
 /** The outbox index times of a delivery that the sender owns: its lease, and the wait of an `unknown` row. */
 export interface DeliveryTimes {
@@ -356,7 +359,7 @@ export class HostedCollaborationStore {
           return done({ kind: 'none' });
         }
         if (row.state === 'unknown') {
-          if (times.readback) return done({ kind: 'readback' });
+          if (times.readback) return done({ kind: 'readback', attempt: row.attempts });
           nextAt = now + UNKNOWN_WAIT_MS;
           return done({ kind: 'none' });
         }
@@ -389,11 +392,14 @@ export class HostedCollaborationStore {
     });
   }
 
-  /** D2 of one delivery (#793 D2b-out-2): the K8 readback rule. A row that stays `unknown` is read back again after `readbackMs`. */
-  readDelivery(scope: string, id: string, result: ReadbackResult, now: number, readbackMs: number): Promise<void> {
+  /**
+   * D2 of one delivery (#793 D2b-out-2): the K8 readback rule, fenced by the attempt that the readback observed. A row that
+   * stays `unknown` at that attempt is read back again after `readbackMs`. A result for an earlier attempt changes nothing.
+   */
+  readDelivery(scope: string, id: string, attempt: number, result: ReadbackResult, now: number, readbackMs: number): Promise<void> {
     return this.deliveryStep(scope, id, now, async row => {
-      readbackDelivery(row, result, now);
-      return row.state === 'unknown' ? now + readbackMs : undefined;
+      readbackDelivery(row, attempt, result, now);
+      return row.state === 'unknown' && row.attempts === attempt ? now + readbackMs : undefined;
     });
   }
 

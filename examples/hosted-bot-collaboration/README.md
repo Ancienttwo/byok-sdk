@@ -298,6 +298,9 @@ before the limit. The outbox DDL is the D2b-out plan text, pending owner §54a.
   several senders can run at once. **The lease must be longer than `sendTimeoutMs`** (the constructor refuses it
   otherwise). An `unknown` row is read back at the next pass when the channel has a readback, and `readbackMs` after
   each readback that leaves it `unknown`. With no readback it waits an hour: only an echo or a manual resend changes it.
+  A readback result counts only for the attempt that it read back (K8 `readbackDelivery` takes that attempt). A readback
+  that outlasts `sendTimeoutMs` is missing evidence: the row stays `unknown` and waits `readbackMs`. L awaits a readback
+  with no deadline.
 - **The K8 delivery entity is the authority.** The outbox delivery row is a scan index that one hook in each store
   transaction writes from the entity diff: a row for each new delivery, `settled_at` once it is `accepted` or
   `rejected`, and `next_at` for a `pending` one. So the push fallback that `refuseRoute` inserts with no outbox intent
@@ -364,10 +367,11 @@ three and runs these suites.
   `bot-routine` refusal.
 - The D2f-1 routine vectors (`routineVectors`) run on the store, with the scheduler fire and a submitter pass on an SDK
   tenant in memory.
-- The K8 delivery vectors (`deliveryVectors`) run on the store and the outbox sender, except the echo vector, which waits
-  for the H inbound echo path (D2b-out-3). After each Host step, the delivery outbox index matches the K8 entities. The
+- The K8 delivery vectors (`deliveryVectors`) run on the store and the outbox sender, except the echo vectors 10 and 14,
+  which wait for the H inbound echo path (D2b-out-3). After each Host step, the delivery outbox index matches the K8 entities. The
   sender tests cover the projection claim, lease, fence, backoff, race, order and version filter, the archived and
-  missing delivery entity, the retention refusal of an unsettled delivery row, and a terminal delivery on the reply route.
+  missing delivery entity, the retention refusal of an unsettled delivery row, a terminal delivery on the reply route,
+  and a hung readback.
 - The scheduler tests cover on-time and late fires, the supersede in the fire, the device fence and its paging, two
   racing fires, a fire that throws and its backoff, the interval guard, and the start and pass upkeep.
 - The reconciliation tests run a real daemon for the completed outcome, a replayed terminal and a busy decline. The
