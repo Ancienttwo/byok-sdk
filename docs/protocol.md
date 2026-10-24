@@ -1179,7 +1179,9 @@ refreshed hello adds it, and removes it again when the member is lost.
   header's `chainHead` must be on the verified chain (the daemon catches up
   when it is ahead), and its `sender` a current member in the scope policy
   at that head. Else the offer is declined with `sealed_open_failed`, and a
-  steer is dropped.
+  steer is dropped. The usable-scope and policy-floor checks then run again
+  against the caught-up view, with the same codes; a steer that fails them
+  is dropped.
 - **Freshness (owner §50d).** Each accepted header records its `chainHead` as
   the freshness point of its scope epoch. The daemon seals output at the
   newest epoch, at or after the offer's `epoch`, that has a point with no
@@ -1387,9 +1389,11 @@ If the device sends the terminal more than one day after the upload, orphan
 GC may have deleted the blob, and the Host then refuses the terminal.
 When the Host refuses a terminal sent by reference for good, because it no
 longer declares `sealed-output-ciphertext-ref` or orphan GC has deleted the
-blob, the daemon settles that terminal once and sends no other terminal, so
-the Host receives none for the task. This is a known limit of this version; a
-later version is to replace the queued terminal with a closed form.
+blob (the device was offline for more than 24 hours), the daemon settles that
+terminal once and sends no other terminal, so the Host receives none for the
+task. This is a known limitation of 0.30.1. Replacing the queued terminal with
+a closed form needs a journal replace operation, which is deferred to the next
+release.
 
 The cloud advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`,
 because it accepts all seven sealed output types. It also advertises

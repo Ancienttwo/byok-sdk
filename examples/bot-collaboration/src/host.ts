@@ -4,7 +4,7 @@ import { admitBotToolsets } from './rules/team';
 import { promoteReplyReceipts } from './reply-receipts';
 import type { UpdateRoutineAction } from '@byok-sdk/protocol';
 import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
-import { enqueue, HostExecutionCore, type ExecutionServer, type HostOptions, type Intent, type IntentInput, type OutcomeTransaction,
+import { enqueue, HostExecutionCore, settle, type ExecutionServer, type HostOptions, type Intent, type IntentInput, type OutcomeTransaction,
   type MessageTransaction } from '@byok-sdk/example-host-execution-core';
 import type { HostJobHandler, Routine } from '@byok-sdk/example-host-execution-core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
@@ -116,13 +116,21 @@ export interface BotOptions {
 export type HostIntentHandler = (document: unknown, transaction: OutcomeTransaction) => void;
 /**
  * A K4 terminal that K8 cannot apply (#882 Q6f): its key is neither a Bot Turn nor a Host intent, or its Host handler
- * failed. The intent stays open at the head of its FIFO, and each pass rejects with this error.
+ * failed. The intent stays open at the head of its FIFO, and each pass rejects with this error, until the outcome applies
+ * or the owner calls `failStuckIntent`.
  */
 export class IntentOutcomeError extends Error {
   constructor(readonly key: string, readonly code: 'unknown_intent' | 'handler_failed', message: string) { super(message); this.name = 'IntentOutcomeError'; }
 }
 function hostIntent(state: CollaborationState, key: string): { handler: string } | undefined {
   return state.hostIntents && Object.hasOwn(state.hostIntents, key) ? state.hostIntents[key] : undefined;
+}
+/** The open K4 intent of `key`. Refuses an unknown or settled key. */
+function openIntent(intents: LedgerState['intents'], key: string): Intent {
+  const intent = intents[hash(key)];
+  if (!intent) throw new Error(`Unknown intent: ${key}`);
+  if (intent.conclusion) throw new Error(`Intent already settled: ${key}`);
+  return intent;
 }
 /** Phase 1 of a history-mode sync: the injected rows of each Turn that can freeze its offer next, by Turn id. */
 interface InjectedHistory {
@@ -231,6 +239,7 @@ export class BotCollaboration {
     // Compose once, so a Host draft outside the protocol limits fails here and not at each Turn.
     outcomeSchema(options.botId, stateOf({}), undefined, Object.keys(this.models()), [], this.offer);
     this.instructionMaxBytes = time(options.instructionMaxBytes ?? DEFAULT_INSTRUCTION_MAX_BYTES);
+    // A narrowed prompt (#881) keeps a subset of the SYSTEM_PROMPT sentences, so this minimum bounds it too.
     const minimum = minimumInstructionBytes(SYSTEM_PROMPT);
     if (this.instructionMaxBytes < minimum) throw new Error(`instructionMaxBytes must be at least ${minimum}`);
     this.timers = { cancelGraceMs: time(options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS), uncertainAfterMs: time(options.uncertainAfterMs ?? REPLY_UNCERTAIN_AFTER_MS) };
@@ -421,6 +430,34 @@ export class BotCollaboration {
       });
       await this.process();
       return this.core.intent(input.key)!;
+    });
+  }
+  /**
+   * Owner API (#882): settles as `failed` an open intent whose K4 terminal K8 refuses with `IntentOutcomeError`, so its FIFO
+   * moves on. A fresh K4 drain decides that the intent is stuck, so the call also works right after a restart. One transaction
+   * settles it and writes the audit row. The settle runs no handler, and the intent records no terminal; the server task
+   * keeps it. The drain before the settle applies the terminal once more, so a `handler_failed` handler runs once inside
+   * the call. If that drain applies the outcome, the call refuses with `Intent already settled`.
+   * A Host intent keeps its `hostIntents` record until K4 compacts it, so an exact replay of `enqueueHostIntent` returns
+   * the failed intent. Refuses an unknown key, a settled intent, and an intent whose terminal K8 did not refuse.
+   */
+  failStuckIntent(key: string, ...by: PrincipalArg): Promise<void> {
+    return this.exclusive(async () => {
+      this.ownerOnly(by, 'failStuckIntent', key);
+      openIntent(this.ledger.snapshot().intents, key);
+      this.intentFailures.clear();
+      // A scan that stopped early may not have reached this key, so its error is the cause when the key has no refusal.
+      const drained = await this.core.drain().then(() => undefined, (error: unknown) => ({ error }));
+      const refused = this.intentFailures.get(key);
+      this.ledger.transaction(s => {
+        const intent = openIntent(s.intents, key);
+        if (!refused) throw drained ? drained.error : new Error(`Intent is not stuck: ${key} has no refused terminal`);
+        settle(s, intent, 'failed');
+        stateOf(s.application).audit.push(`Intent failed by owner ${refused.code}: ${key} ${refused.message}`.slice(0, 1024));
+      });
+      this.intentFailures.delete(key);
+      this.auditedFailures.delete(key);
+      await this.process();
     });
   }
   /** The channel outbox port of a K4 callback. Delivery code reads the committed ledger. */

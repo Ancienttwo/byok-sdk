@@ -6,7 +6,7 @@ import * as protocol from '@byok-sdk/protocol';
 import { canonical, HostLedger, type ExecutionServer } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { addTurn, stateOf, type CollaborationState } from './model';
-import { outcomeOffer, outcomeSchema, TIME_ZONES_MAX, type OutcomeOffer } from './schema';
+import { CONFIRMABLE_MAX, DEFAULT_CONFIRMABLE, outcomeOffer, outcomeSchema, TIME_ZONES_MAX, type OutcomeOffer } from './schema';
 import { BotCollaboration } from './host';
 import { botCompactVeto } from './compaction';
 import { routineViews } from './routines.test-support';
@@ -83,21 +83,37 @@ it.each<[string, OutcomeOffer, string]>([
     `An offer has 1 to ${TIME_ZONES_MAX} time zones`],
   ['a duplicate time zone', { timeZones: ['UTC', 'UTC'] }, 'Each time zone must be distinct'],
   ['no confirmable action', { confirmable: [] }, 'An offer has at least one confirmable action'],
+  ['too many confirmable actions', { confirmable: Array.from({ length: CONFIRMABLE_MAX + 1 }, (_, n) => ({ action: `a${n}`, draft: DRAFT })) },
+    `An offer has at most ${CONFIRMABLE_MAX} confirmable actions`],
   ['a duplicate confirmable action', { confirmable: [{ action: 'a', draft: DRAFT }, { action: 'a', draft: DRAFT }] }, 'Each confirmable action must be distinct'],
   ['an unbounded draft', { confirmable: [{ action: 'a', draft: { type: 'string' } }] }, 'draft for a is unbounded'],
 ])('refuses %s', (_name, offer, message) => {
   expect(() => outcomeOffer(offer)).toThrow(message);
 });
 
+const LONG_ZONES = ['America/Argentina/ComodRivadavia', 'America/North_Dakota/New_Salem', 'America/Argentina/Buenos_Aires',
+  'America/Argentina/Rio_Gallegos', 'America/Indiana/Indianapolis', 'America/Kentucky/Louisville', 'America/North_Dakota/Beulah',
+  'America/Argentina/Catamarca'];
+
 it('keeps both bounds with eight long time zones at the eight-routine limit', () => {
-  const offer = outcomeOffer({ timeZones: ['America/Argentina/ComodRivadavia', 'America/North_Dakota/New_Salem', 'America/Argentina/Buenos_Aires',
-    'America/Argentina/Rio_Gallegos', 'America/Indiana/Indianapolis', 'America/Kentucky/Louisville', 'America/North_Dakota/Beulah',
-    'America/Argentina/Catamarca'] });
+  const offer = outcomeOffer({ timeZones: LONG_ZONES });
   const schema = outcomeSchema('main', stateOf({}), undefined, ['default'], routineViews('main', 8, 'report'), offer);
   expect(Buffer.byteLength(JSON.stringify(schema))).toBeLessThanOrEqual(protocol.RESULT_SCHEMA_MAX_BYTES);
   expect(protocol.resultOutcomeMaxBytes(schema)).toBeLessThanOrEqual(protocol.RESULT_OUTCOME_MAX_BYTES);
   expect(zones(schema, 'update_routine')).toEqual(offer.timeZones);
   // The checked schedule shape still fits; the flat fallback is not needed.
+  expect(schedule(schema, 'update_routine').oneOf).toBeDefined();
+});
+
+it('keeps both bounds with the most confirmable actions, eight long time zones and the eight-routine limit', () => {
+  // `send_message` drafts with 64-byte action names, the frame of the CONFIRMABLE_MAX comment.
+  const confirmable = Array.from({ length: CONFIRMABLE_MAX }, (_, n) => ({ action: `confirm_${n}`.padEnd(64, '_'), draft: DEFAULT_CONFIRMABLE[0].draft }));
+  const schema = outcomeSchema('main', stateOf({}), undefined, ['default'], routineViews('main', 8, 'report'), outcomeOffer({ timeZones: LONG_ZONES, confirmable }));
+  expect(Buffer.byteLength(JSON.stringify(schema))).toBeLessThanOrEqual(protocol.RESULT_SCHEMA_MAX_BYTES);
+  // The figure of the CONFIRMABLE_MAX comment.
+  expect(Buffer.byteLength(JSON.stringify(schema))).toBe(11_564);
+  expect(protocol.resultOutcomeMaxBytes(schema)).toBeLessThanOrEqual(protocol.RESULT_OUTCOME_MAX_BYTES);
+  expect(schema.properties!.confirmable_action!.items!.oneOf).toHaveLength(CONFIRMABLE_MAX);
   expect(schedule(schema, 'update_routine').oneOf).toBeDefined();
 });
 

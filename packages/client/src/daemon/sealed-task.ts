@@ -187,9 +187,6 @@ export class SealedTasks {
         return { ok: false, code: 'sealing_policy_mismatch' };
       }
       payload = { ...plain, ...opened.plaintext };
-      // The open can move the chain view forward; the floor holds against the view the task runs under.
-      const moved = await this.#belowPolicy(sealing);
-      if (moved !== undefined) return { ok: false, code: moved };
     }
     if (sealing.categories.includes('task-output') && await this.#sealingKey(sealing) === undefined) {
       return { ok: false, code: 'sealed_key_unavailable' };
@@ -459,6 +456,9 @@ export class SealedTasks {
     if (!opened.ok) return { ok: false, code: opened.reason };
     // A stale or foreign sender view fails closed (E2d-e4).
     if (await this.#keyring(() => this.options.keyring.acceptHeader(opened.header)) !== true) return { ok: false, code: 'sealed_open_failed' };
+    // The sender-view check can move the chain view forward; the floor holds against the view the task runs under.
+    const moved = await this.#belowPolicy(sealing);
+    if (moved !== undefined) return { ok: false, code: moved };
     return { ok: true, plaintext: opened.plaintext };
   }
 }
