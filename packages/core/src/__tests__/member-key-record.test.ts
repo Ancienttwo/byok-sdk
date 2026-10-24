@@ -73,13 +73,13 @@ describe('member key record', () => {
     const scopeKey = generateScopeKey();
     const pkg = await sealScopeKeyPackage({
       scopeKey, tenantId: DEVICE.tenantId, scopeId: 'scope-a', epoch: 1,
-      recipient: { memberId: member.memberId, kemPublicJwk: keys.kem.publicJwk },
+      recipient: { memberId: member.memberId, kemPublicJwk: keys.kem.publicJwk, kemEpoch: keys.kem.epoch },
       sender: { signingPublicJwk: keys.signing.publicJwk, signingPrivateKey: keys.signing.privateKey },
     });
     const opened = await openScopeKeyPackage({
       package: pkg,
       expected: { tenantId: DEVICE.tenantId, scopeId: 'scope-a', epoch: 1 },
-      recipient: { memberId: member.memberId, kemPublicJwk: keys.kem.publicJwk, kemPrivateKey: keys.kem.privateKey },
+      recipient: { memberId: member.memberId, kemPublicJwk: keys.kem.publicJwk, kemPrivateKey: keys.kem.privateKey, kemEpoch: keys.kem.epoch },
       senderSigningPublicJwk: keys.signing.publicJwk,
     });
     expect(opened.ok && Buffer.from(opened.scopeKey).equals(Buffer.from(scopeKey))).toBe(true);
@@ -109,7 +109,7 @@ describe('member key record', () => {
 async function selfPackage(keys: MemberKeys, kem: MemberKemKey, scopeKey: Uint8Array) {
   return sealScopeKeyPackage({
     scopeKey, tenantId: DEVICE.tenantId, scopeId: 'scope-a', epoch: 1,
-    recipient: { memberId: await deriveMemberId(keys.signing.publicJwk), kemPublicJwk: kem.publicJwk },
+    recipient: { memberId: await deriveMemberId(keys.signing.publicJwk), kemPublicJwk: kem.publicJwk, kemEpoch: kem.epoch },
     sender: { signingPublicJwk: keys.signing.publicJwk, signingPrivateKey: keys.signing.privateKey },
   });
 }
@@ -117,7 +117,7 @@ async function selfPackage(keys: MemberKeys, kem: MemberKemKey, scopeKey: Uint8A
 async function openSelf(keys: MemberKeys, kem: MemberKemKey, pkg: unknown) {
   return openScopeKeyPackage({
     package: pkg, expected: { tenantId: DEVICE.tenantId, scopeId: 'scope-a', epoch: 1 },
-    recipient: { memberId: await deriveMemberId(keys.signing.publicJwk), kemPublicJwk: kem.publicJwk, kemPrivateKey: kem.privateKey },
+    recipient: { memberId: await deriveMemberId(keys.signing.publicJwk), kemPublicJwk: kem.publicJwk, kemPrivateKey: kem.privateKey, kemEpoch: kem.epoch },
     senderSigningPublicJwk: keys.signing.publicJwk,
   });
 }

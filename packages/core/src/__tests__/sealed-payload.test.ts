@@ -282,20 +282,20 @@ describe('scope key packages', () => {
       tenantId: 'tenant-1',
       scopeId: 'scope-1',
       epoch: 1,
-      recipient: { memberId: recipientId, kemPublicJwk: recipientKem.publicJwk },
+      recipient: { memberId: recipientId, kemPublicJwk: recipientKem.publicJwk, kemEpoch: 1 },
       sender: { signingPublicJwk: senderSigning.publicJwk, signingPrivateKey: senderSigning.privateKey },
     });
     const opened = await openScopeKeyPackage({
       package: pkg,
       expected: { tenantId: 'tenant-1', scopeId: 'scope-1', epoch: 1 },
-      recipient: { memberId: recipientId, kemPublicJwk: recipientKem.publicJwk, kemPrivateKey: recipientKem.privateKey },
+      recipient: { memberId: recipientId, kemPublicJwk: recipientKem.publicJwk, kemPrivateKey: recipientKem.privateKey, kemEpoch: 1 },
       senderSigningPublicJwk: senderSigning.publicJwk,
     });
     expect(opened.ok && Array.from(opened.scopeKey)).toEqual(Array.from(scopeKey));
     expect(await openScopeKeyPackage({
       package: { ...pkg, extra: 1 },
       expected: { tenantId: 'tenant-1', scopeId: 'scope-1', epoch: 1 },
-      recipient: { memberId: recipientId, kemPublicJwk: recipientKem.publicJwk, kemPrivateKey: recipientKem.privateKey },
+      recipient: { memberId: recipientId, kemPublicJwk: recipientKem.publicJwk, kemPrivateKey: recipientKem.privateKey, kemEpoch: 1 },
       senderSigningPublicJwk: senderSigning.publicJwk,
     })).toEqual({ ok: false, reason: 'key_package_invalid' });
   });
@@ -308,7 +308,7 @@ describe('scope key packages', () => {
       tenantId: 'tenant-1',
       scopeId: 'scope-1',
       epoch: 1,
-      recipient: { memberId: 'M'.repeat(43), kemPublicJwk: recipientKem.publicJwk },
+      recipient: { memberId: 'M'.repeat(43), kemPublicJwk: recipientKem.publicJwk, kemEpoch: 1 },
       sender: { signingPublicJwk: senderSigning.publicJwk, signingPrivateKey: senderSigning.privateKey },
     };
     await expectInvalid(sealScopeKeyPackage({ ...base, epoch: 0 }));
@@ -326,7 +326,7 @@ describe('scope key packages', () => {
       tenantId: 'tenant-1',
       scopeId: 'scope-1',
       epoch: 1,
-      recipient: { memberId: 'M'.repeat(43), kemPublicJwk: recipientKem.publicJwk },
+      recipient: { memberId: 'M'.repeat(43), kemPublicJwk: recipientKem.publicJwk, kemEpoch: 1 },
     };
     const otherPrivateKey = (await p256Pair('sign')).privateKey;
     await expectInvalid(sealScopeKeyPackage({ ...base, sender: { signingPublicJwk: senderSigning.publicJwk, signingPrivateKey: otherPrivateKey } }));
