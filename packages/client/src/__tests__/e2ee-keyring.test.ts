@@ -16,7 +16,7 @@ import { DeviceMemberRecords } from '../daemon/device-member-custody';
 import { enrollDeviceMember, resumeDeviceMember } from '../daemon/device-member';
 import { StoredDeviceProofSigner } from '../daemon/device-proof-signer';
 import { DeviceMemberKeyring } from '../daemon/e2ee-keyring';
-import { E2eeMemberClient, MEMBER_OBJECT_MAX_BYTES } from '../daemon/e2ee-member-client';
+import { E2eeMemberClient, MEMBER_CHAIN_PAGE_MAX_BYTES, MEMBER_OBJECT_MAX_BYTES } from '../daemon/e2ee-member-client';
 import { enrollmentIdentityOf } from '../daemon/store';
 import { InMemoryDeviceMemberCustody, testDeviceCredentials } from './fixtures/credential-backend';
 import type { E2eeTestHost } from './fixtures/e2ee-test-host';
@@ -227,6 +227,24 @@ describe('device member keyring (E2d-2)', () => {
       name: 'E2eeMemberClientError', final: true, message: 'key package read returned more than one package',
     });
     expect(keyring.cached('scope-a', 1)).toBeUndefined();
+  });
+
+  it('refuses a chain page body over its byte cap as final', async () => {
+    const { server, keyring } = await member();
+    server.e2ee.chainResponse = [{ pad: 'x'.repeat(MEMBER_CHAIN_PAGE_MAX_BYTES) }];
+    await expect(keyring.catchUp()).rejects.toMatchObject({
+      name: 'E2eeMemberClientError', final: true, message: `member chain read returned a body larger than ${MEMBER_CHAIN_PAGE_MAX_BYTES} bytes`,
+    });
+  });
+
+  it('lets the status decide an error whose body is over the 1 KiB cap', async () => {
+    const { server, web, device, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    server.e2ee.rejectPackageReads = 403;
+    server.e2ee.rejectPackageBody = { error: 'forbidden', pad: 'x'.repeat(2048) };
+    await expect(keyring.fetch('scope-a', 1)).rejects.toMatchObject({
+      name: 'E2eeMemberClientError', final: true, status: 403, code: undefined, message: 'key package read failed with HTTP 403',
+    });
   });
 
   it('ends the member when the chain removes this device', async () => {

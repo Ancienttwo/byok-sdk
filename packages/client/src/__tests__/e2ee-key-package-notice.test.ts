@@ -156,6 +156,9 @@ describe('e2ee.key_package.available (E2d-2)', () => {
     server.pushLongPollEvent(envelope);
     await vi.waitFor(async () => expect(await cursor(deviceId)).toBe(envelope.seq), { timeout: 5_000 });
     expect(logged(warn, "the Host's answer is final (key package read failed with HTTP 403 (forbidden))")).toBe(true);
+    const final = warn.mock.calls.map((args) => args.map(String).join(' ')).find((line) => line.includes("the Host's answer is final"));
+    expect(final).toBeDefined();
+    expect(final).not.toContain('scope-a');
   });
 
   it('acknowledges a notice whose catch-up meets a chain over the cap (#863 M2)', async () => {

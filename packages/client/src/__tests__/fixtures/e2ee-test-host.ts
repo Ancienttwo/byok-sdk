@@ -73,6 +73,8 @@ export class E2eeTestHost {
   failPackageReads = 0;
   /** When set, every key package read answers with this status. */
   rejectPackageReads: number | undefined;
+  /** When set, a rejected key package read carries this body instead of its error code. */
+  rejectPackageBody: unknown;
   packageReads = 0;
   /** When set, every key package read answers with this list as it is. */
   packageResponse: unknown[] | undefined;
@@ -135,7 +137,7 @@ export class E2eeTestHost {
         return true;
       }
       if (this.rejectPackageReads !== undefined) {
-        respond(res, this.rejectPackageReads, { error: 'forbidden' });
+        respond(res, this.rejectPackageReads, this.rejectPackageBody ?? { error: 'forbidden' });
         return true;
       }
       this.packageReads += 1;
