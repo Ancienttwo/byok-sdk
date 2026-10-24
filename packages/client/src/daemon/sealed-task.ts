@@ -68,7 +68,8 @@ export interface SealedTasksOptions {
   /**
    * The flags the current session's server advertised, which decide whether
    * an output may name its ciphertext blob. `undefined` while the connection
-   * is between sessions: the next session's flags are not known yet.
+   * is between sessions or a start is under way: the next session's flags
+   * are not known yet.
    */
   readonly serverCapabilities: () => readonly string[] | undefined;
 }

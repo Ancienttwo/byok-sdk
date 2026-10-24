@@ -1810,6 +1810,8 @@ export function buildDaemonWithAdapters(
   // terminal can outlive its run, so its upload reads the current client.
   let sealedUploadAbort: AbortController | undefined;
   let sealedUploads: BlobClient | undefined;
+  // A start under way opens a session, so a sealed output waits for its flags.
+  let startInProgress = false;
   let sealedOutputSettled: (() => Promise<void>) | undefined;
   let inputPreparationStatusAbort: AbortController | undefined;
   let lifecycle: DaemonLifecycle = { phase: 'stopped' };
@@ -2122,6 +2124,15 @@ export function buildDaemonWithAdapters(
   }
 
   async function startUnderLease(): Promise<void> {
+    startInProgress = true;
+    try {
+      await runStartUnderLease();
+    } finally {
+      startInProgress = false;
+    }
+  }
+
+  async function runStartUnderLease(): Promise<void> {
     terminalCommits.resume();
     // A new run begins; a previous run's halt or crash no longer describes it.
     if (lifecycle.phase === 'halted' || lifecycle.phase === 'crashed') setLifecycle({ phase: 'stopped' });
@@ -2421,11 +2432,12 @@ export function buildDaemonWithAdapters(
           download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }),
           upload: (ciphertext) => sealedUploads!.uploadArtifact(ciphertext, 'application/octet-stream'),
         },
-        // Between sessions the next session's flags are unknown. Once the
-        // daemon stopped, halted or crashed, no session will advertise any.
+        // Between sessions, and while a start is under way, the next
+        // session's flags are unknown. Once the daemon stopped, halted or
+        // crashed with no start under way, no session will advertise any.
         serverCapabilities: () => {
-          if (lifecycle.phase !== 'running') return [];
-          return connection?.isOpen() === true ? connection.getServerCapabilities() : undefined;
+          if (lifecycle.phase === 'running') return connection?.isOpen() === true ? connection.getServerCapabilities() : undefined;
+          return startInProgress && lifecycle.phase === 'stopped' ? undefined : [];
         },
       });
       sealedTasks = opened;
@@ -3198,6 +3210,9 @@ export function buildDaemonWithAdapters(
     await connection.start();
     daemonStarted = true;
     } catch (err) {
+      // A failed start opens no session: its teardown settles a queued
+      // terminal as a stop does.
+      startInProgress = false;
       const haltReason = startupHaltReason(err);
       if (haltReason === undefined) {
         // #394: a crash, the one start failure a restart may fix. Recorded so
