@@ -239,6 +239,7 @@ export class BotCollaboration {
     // Compose once, so a Host draft outside the protocol limits fails here and not at each Turn.
     outcomeSchema(options.botId, stateOf({}), undefined, Object.keys(this.models()), [], this.offer);
     this.instructionMaxBytes = time(options.instructionMaxBytes ?? DEFAULT_INSTRUCTION_MAX_BYTES);
+    // A narrowed prompt (#881) keeps a subset of the SYSTEM_PROMPT sentences, so this minimum bounds it too.
     const minimum = minimumInstructionBytes(SYSTEM_PROMPT);
     if (this.instructionMaxBytes < minimum) throw new Error(`instructionMaxBytes must be at least ${minimum}`);
     this.timers = { cancelGraceMs: time(options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS), uncertainAfterMs: time(options.uncertainAfterMs ?? REPLY_UNCERTAIN_AFTER_MS) };
