@@ -1,0 +1,34 @@
+import { hash } from '@byok-sdk/example-host-execution-core';
+import { addTurn, json, type Card, type TurnsState } from './turn';
+import type { Publish } from './delegation';
+
+// The confirmation card steps of a Host sync (#793 S5). L runs them in its sync; H runs them in each sync round.
+
+/** Passive expiry: a pending card expires at its `expiresAt`. */
+export function expireCard(card: Card, now: number): void {
+  if (card.state === 'pending' && now >= card.expiresAt) card.state = 'expired';
+}
+/** Runs before the Turn steps, so a ContextPack frozen in the same sync shows each expiry. */
+export function expireCards(state: { readonly cards: Readonly<Record<string, Card>> }, now: number): void {
+  for (const card of Object.values(state.cards)) expireCard(card, now);
+}
+/**
+ * Runs after the Turn steps. A decided card is projected once as `card:<id>:<state>`; a confirmed card waits for its
+ * result or error. A confirmed or rejected card then gets its `action_result` Turn under the root of the Turn that made it.
+ */
+export function reportCardDecisions(state: TurnsState & { readonly cards: Readonly<Record<string, Card>> }, publish: Publish): void {
+  for (const card of Object.values(state.cards)) {
+    if (card.state !== 'pending' && (card.state !== 'confirmed' || card.result !== undefined || card.error !== undefined)) {
+      if (!card.decisionReported) {
+        publish(`card:${card.id}:${card.state}`, json(card));
+        card.decisionReported = true;
+      }
+      // Passive expiry is visible in ContextPack. It cannot start a paid turn.
+      if (card.state === 'expired') continue;
+      const origin = state.turns[card.turnId]!;
+      addTurn(state, { id: hash(['action_result', card.id]), root: origin.root, source: 'action_result', botId: origin.botId,
+        request: JSON.stringify({ cardId: card.id, state: card.state, conclusion: card.conclusion, result: card.result, error: card.error }),
+        hop: origin.hop, authority: origin.authority ?? 'bot' });
+    }
+  }
+}

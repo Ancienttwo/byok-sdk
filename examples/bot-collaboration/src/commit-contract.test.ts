@@ -11,9 +11,11 @@ import { retainRoots, type RetentionStore } from './retention';
 import { retentionVectors, type RetentionSubject } from './retention-vectors.test-support';
 import type { CommandRecord } from './rules/commit';
 import { DatabaseSync } from 'node:sqlite';
-import { commitCommand, refuseRetired, RetiredIdentityError, seatTurn, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
-import { coalesceVectors, commitVectors, roomVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CoalesceSubject,
-  type CommitSubject, type RoomSubject, type SeedTeam, type SettlementSubject, type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support';
+import { commitCommand, expireCards, refuseRetired, reportCardDecisions, RetiredIdentityError, seatTurn, type AdmittedIds, type Command,
+  type CommandPorts } from './rules/commands';
+import { cardVectors, coalesceVectors, commitVectors, roomVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW,
+  type CardSubject, type CoalesceSubject, type CommitSubject, type RoomSubject, type SeedTeam, type SettlementSubject, type SyncIntentRecord,
+  type SyncSubject } from './commit-vectors.test-support';
 import { advanceRooms } from './rooms';
 import { intentRows, settleDelegations } from './delegation';
 import { syncTurn } from './rules/sync';
@@ -133,6 +135,18 @@ function ledgerSubject(team?: SeedTeam): RetentionSubject & SyncSubject & { ledg
     stored: () => tables(file, ledger.tenant),
     state: () => stateOf(ledger.snapshot().application),
   };
+}
+/** The L card subject: the ledger subject, whose sync runs the card steps around the Turn steps in L's sync order. */
+function cardSubject(): CardSubject {
+  const base = ledgerSubject(), ledger = base.ledger;
+  return { ...base, sync: now => {
+    ledger.transaction((s, rows) => {
+      const state = stateOf(s.application);
+      expireCards(state, now);
+      for (const turn of Object.values(state.turns)) syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now });
+      reportCardDecisions(state, (id, value) => project(s, id, value));
+    });
+  } };
 }
 commitVectors('pure rules in memory', memorySubject);
 commitVectors('L HostLedger', ledgerSubject);
@@ -257,6 +271,7 @@ function coalesceSubject(policy?: CoalescePolicy): CoalesceSubject {
   };
 }
 coalesceVectors('L HostLedger', coalesceSubject);
+cardVectors('L HostLedger', cardSubject);
 
 /** The L ledger with L's room step (K8 host.ts `sync`): the room step on the K4 intents, then the Turn steps. */
 function roomSubject(): RoomSubject {

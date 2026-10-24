@@ -1,12 +1,13 @@
 import type { RoomFields } from '@byok-sdk/protocol';
 import { hash } from '@byok-sdk/example-host-execution-core';
 import { addBatchTurns, addTurn, json, type Json, type Turn } from './turn';
-import { activeBot, archiveBot, refuseExternalTeam, teamSnapshot, type ExternalTeam, type TeamSnapshot, type TeamSnapshotBot } from './team';
+import { activeBot, archiveBot, refuseExternalTeam, requireMain, teamSnapshot, type ExternalTeam, type TeamSnapshot, type TeamSnapshotBot } from './team';
 import { roomInput, updateRoom, type Mentions } from './rooms';
 import { sealBatchForCancel, type InputFields } from './coalesce';
 import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } from './delegation';
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome';
 import { acceptMessage, type MessageFields } from './message';
+import { expireCard } from './cards';
 import { commit, type CommandRecord, type CommitRequest, type CommitResult, type CommitState, type Disposition, type OutboxIntent } from './commit';
 
 // The collaboration commands and their decisions as pure rules (#739 D1). `commitCommand` runs one command
@@ -17,6 +18,7 @@ export { OFFER_WAIT_MS, syncTurn, type FreezeExecution, type SyncBot, type SyncF
 export { delegationDue, settleDelegations, type DelegationTimers } from './delegation';
 export { advanceRoomSeats, seatTurn, type SeatFacts } from './rooms';
 export { collaborationDue } from './due';
+export { expireCards, reportCardDecisions } from './cards';
 
 /** Commands with a caller key or a K4 key. The store records them, so a retry replays the first result. */
 export type KeyedCommand =
@@ -52,7 +54,9 @@ export type KeylessCommand =
   | { kind: 'cancel_delegation'; delegationId: string }
   | { kind: 'abandon_delegation'; delegationId: string }
   /** A Turn of an open delegation chain cancels the whole delegation (§8.8). */
-  | { kind: 'cancel_turn'; turnId: string };
+  | { kind: 'cancel_turn'; turnId: string }
+  /** Main Bot `botId` completes any open Bot routine, an archived owner's too (§55c). */
+  | { kind: 'end_routine'; botId: string; routineId: string };
 export type Command = KeyedCommand | KeylessCommand;
 /** The Bot and home rows that the team commands read and change. */
 interface TeamRows {
@@ -89,6 +93,8 @@ export interface CommandPorts {
     revoke(routeId: string): void;
     resend(deliveryId: string): string;
   };
+  /** The K4 routine rows. `end` completes one open Bot routine, as K4 `setLifecycle('completed')`. */
+  routines?: { end(routineId: string): void };
 }
 /**
  * `recordCallbacks` is false when the caller deduplicates the K4 callbacks durably, as K4 does in L.
@@ -133,7 +139,7 @@ export interface CommandStore {
 
 const CALLBACKS = new Set<Command['kind']>(['outcome', 'message', 'occurrence']);
 const KEYLESS = new Set<Command['kind']>(['set_main_bot', 'update_room', 'retry_persona', 'enable_push_route', 'revoke_push_route',
-  'resend_delivery', 'cancel_delegation', 'abandon_delegation', 'cancel_turn']);
+  'resend_delivery', 'cancel_delegation', 'abandon_delegation', 'cancel_turn', 'end_routine']);
 export function isKeyless(command: Command): command is KeylessCommand { return KEYLESS.has(command.kind); }
 /** The fields that decide each command's effect: the fields that the existing identity checks compare. */
 export function commandEvidence(command: KeyedCommand): Json {
@@ -218,7 +224,7 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
     case 'decide': {
       const card = state.cards[command.cardId];
       if (!card) throw new Error('Card not found');
-      if (card.state === 'pending' && ports.now() >= card.expiresAt) card.state = 'expired';
+      expireCard(card, ports.now());
       // The Host throws a refused decision after its process pass, so an expiry still commits.
       if (card.state === 'expired') return { outcome: 'refused', reasonCode: 'card_expired', reason: 'Card expired' };
       if (card.state !== 'pending') {
@@ -281,6 +287,10 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
       return accepted({ deliver: settle(state, need(ports.intents, command.kind), d, ports.now(), publish) });
     }
     case 'cancel_turn': return cancelTurn(state, command.turnId, ports, publish);
+    case 'end_routine':
+      requireMain(state.team, command.botId);
+      need(ports.routines, command.kind).end(command.routineId);
+      return accepted();
   }
 }
 /**
