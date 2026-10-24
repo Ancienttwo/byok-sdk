@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
-import { canonical, occurrenceRun, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
+import { canonical, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
 import { botRoutines, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
 import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
 /** A K8 `update_routine` action. */
@@ -175,7 +175,9 @@ export class HostedCollaborationStore {
    * batch join), it reads the facts again and runs the Turns again. Each such step happens once per intent, occurrence,
    * fact or join, so the rounds end.
    */
-  sync(scope: string, options: HostedSyncOptions): Promise<void> {
+  async sync(scope: string, options: HostedSyncOptions): Promise<void> {
+    // As L checks its timers (K8 host.ts constructor).
+    if (options.timers && (time(options.timers.cancelGraceMs) < 1 || time(options.timers.uncertainAfterMs) < 1)) throw new Error('Invalid delegation timers');
     const key = storedKey(scope);
     return this.change(scope, undefined, async (state, publish, client) => {
       const published = new Set<string>();

@@ -186,6 +186,16 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
     expect([revisionOf(await store().read(scope)), await commands(scope)]).toEqual([0, []]);
   });
 
+  it('lets a throw from the changed callback propagate, after the conclusion committed (#793 D2f-5)', async () => {
+    const { scope, input } = await tried(), sdk = fakePort();
+    sdk.deliver(input, { status: 'complete', ownerDeviceId: 'device', cancellation: { requestedAt: 'now' } });
+    sdk.complete(input, DOCUMENT);
+    const throwing = new HostedReconciler(opened!.pool, store().schema, store(), { port: () => sdk.port, ports: vectorPorts, pollMs: 0, now: () => clock,
+      changed: () => { throw new Error('Host sync refused'); } });
+    await expect(throwing.run()).rejects.toThrow('Host sync refused');
+    expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled' });
+  });
+
   it('cancels the SDK task of a sync-cancelled tried row, and concludes cancelled once the attempt is cancelled unclaimed', async () => {
     const { scope, input } = await tried(), sdk = fakePort();
     sdk.deliver(input);
