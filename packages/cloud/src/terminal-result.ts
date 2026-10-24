@@ -14,21 +14,33 @@ import { ByokCloudError } from './errors';
 import { assertTaskContentPresent } from './task-redaction';
 import type { RequestReceipt } from './stores/ports';
 
-/** Canonical device evidence, independent of the Host cancellation projection. */
+const DEVICE_TERMINAL_TYPES = [
+  'task.complete',
+  'task.fail',
+  'task.decline',
+  'task.cancelled',
+  'task.complete_sealed',
+  'task.fail_sealed',
+  'task.decline_sealed',
+  'task.cancelled_sealed',
+] as const;
+
+/**
+ * Canonical device evidence, independent of the Host cancellation projection.
+ * A sealed terminal keeps its sealed member, which a member opens (#654 12e).
+ */
 export interface DeviceTerminal {
-  readonly envelope: Extract<Envelope, { type: 'task.complete' | 'task.fail' | 'task.decline' | 'task.cancelled' }>;
+  readonly envelope: Extract<Envelope, { type: (typeof DEVICE_TERMINAL_TYPES)[number] }>;
   readonly recordedAt: string;
 }
 
 export function readDeviceTerminalReceipt(taskId: string, receipt: RequestReceipt): DeviceTerminal {
   assertTaskContentPresent(taskId, receipt.body);
   const envelope = decodeEnvelope(receipt.body);
-  if (envelope.task_id !== taskId ||
-      (envelope.type !== 'task.complete' && envelope.type !== 'task.fail' &&
-       envelope.type !== 'task.decline' && envelope.type !== 'task.cancelled')) {
+  if (envelope.task_id !== taskId || !(DEVICE_TERMINAL_TYPES as readonly string[]).includes(envelope.type)) {
     throw new ByokCloudError('terminal_receipt_unreadable', 'Device terminal receipt identity or type is invalid.');
   }
-  return { envelope, recordedAt: receipt.recordedAt };
+  return { envelope: envelope as DeviceTerminal['envelope'], recordedAt: receipt.recordedAt };
 }
 
 /**
@@ -101,7 +113,9 @@ export interface TerminalResult {
 }
 
 /**
- * Pure projection of a terminal receipt onto {@link TerminalResult}. `taskId`
+ * Pure projection of a terminal receipt onto {@link TerminalResult}. A sealed
+ * terminal projects only its plaintext fields; its moved fields stay in the
+ * sealed member, which {@link DeviceTerminal} carries. `taskId`
  * names the task the receipt was read for (the receipt's key carries it, its
  * body does not); `recordedAt` is the receipt store's write time.
  *
@@ -180,6 +194,50 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.retryable !== undefined
           ? { retryable: envelope.payload.retryable }
           : {}),
+        recordedAt: receipt.recordedAt,
+      };
+    case 'task.complete_sealed':
+      return {
+        taskId,
+        state: 'complete',
+        ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
+        ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
+        ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
+        sessionRef: envelope.payload.sessionRef,
+        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+        ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
+        recordedAt: receipt.recordedAt,
+      };
+    case 'task.fail_sealed':
+      return {
+        taskId,
+        state: 'failed',
+        ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
+        ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
+        ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
+        ...(envelope.payload.retryable !== undefined ? { retryable: envelope.payload.retryable } : {}),
+        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+        ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
+        recordedAt: receipt.recordedAt,
+      };
+    case 'task.decline_sealed':
+      return {
+        taskId,
+        state: 'failed',
+        ...(envelope.payload.code === undefined ? {} : { code: envelope.payload.code, terminalCause: envelope.payload.code }),
+        ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
+        ...(envelope.payload.retryable !== undefined ? { retryable: envelope.payload.retryable } : {}),
+        recordedAt: receipt.recordedAt,
+      };
+    case 'task.cancelled_sealed':
+      return {
+        taskId,
+        state: 'cancelled',
+        ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
+        ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
+        ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
+        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+        ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         recordedAt: receipt.recordedAt,
       };
     case 'task.cancelled':

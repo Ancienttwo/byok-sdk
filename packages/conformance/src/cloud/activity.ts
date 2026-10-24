@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActivityStore } from '@byok-sdk/cloud';
-import { TENANT_A } from './fixtures';
+import { TENANT_A, sealedOutputMember } from './fixtures';
 
 export interface ActivityCompositionHandle {
   readonly store: ActivityStore;
@@ -54,7 +54,7 @@ export function runActivityConformance(
           capacity: 4,
         });
 
-        expect(tail.entries.map((entry) => [entry.batchSeq, entry.eventIndex, entry.event])).toEqual([
+        expect(tail.entries.map((entry) => [entry.batchSeq, entry.eventIndex, 'event' in entry ? entry.event : entry.sealed])).toEqual([
           [1, 0, progress('one')],
           [2, 0, progress('two-a')],
           [2, 1, progress('two-b')],
@@ -81,7 +81,7 @@ export function runActivityConformance(
           ttlMs: 300_000,
           capacity: 2,
         });
-        expect(tail.entries.map((entry) => entry.event)).toEqual([progress('two'), progress('three')]);
+        expect(tail.entries.map((entry) => ('event' in entry ? entry.event : entry.sealed))).toEqual([progress('two'), progress('three')]);
         expect(tail.dropped).toBe(5);
         expect(tail.capacity).toBe(2);
         expect(tail.cursor).toEqual({ batchSeq: 7, eventIndex: 2 });
@@ -147,6 +147,74 @@ export function runActivityConformance(
         await expect(
           store.append(TENANT_A, { ...input, dropped: 3 }),
         ).rejects.toThrow();
+      });
+    });
+
+    it('keeps a sealed batch as one entry, which capacity counts once (#654 12e)', async () => {
+      await withActivityComposition(factory, async ({ store }) => {
+        const sealedBatch = (batchSeq: number) => ({
+          taskId: 'task-sealed',
+          sourceEnvelopeId: `envelope-sealed-${batchSeq}`,
+          batchSeq,
+          sealed: sealedOutputMember(batchSeq),
+          dropped: 0,
+          ttlMs: 300_000,
+          capacity: 2,
+        });
+        await store.append(TENANT_A, sealedBatch(1));
+        await store.append(TENANT_A, sealedBatch(2));
+        const tail = await store.append(TENANT_A, {
+          taskId: 'task-sealed',
+          sourceEnvelopeId: 'envelope-plain-3',
+          batchSeq: 3,
+          events: [progress('three')],
+          dropped: 0,
+          ttlMs: 300_000,
+          capacity: 2,
+        });
+        expect(tail.entries).toEqual([
+          {
+            taskId: 'task-sealed',
+            sourceEnvelopeId: 'envelope-sealed-2',
+            batchSeq: 2,
+            eventIndex: 0,
+            sourceDropped: 0,
+            receivedAt: expect.any(String),
+            sealed: sealedOutputMember(2),
+          },
+          {
+            taskId: 'task-sealed',
+            sourceEnvelopeId: 'envelope-plain-3',
+            batchSeq: 3,
+            eventIndex: 0,
+            sourceDropped: 0,
+            receivedAt: expect.any(String),
+            event: progress('three'),
+          },
+        ]);
+        expect(tail.dropped).toBe(1);
+        expect(tail.cursor).toEqual({ batchSeq: 3, eventIndex: 0 });
+        expect(await store.read(TENANT_A, 'task-sealed')).toEqual(tail);
+      });
+    });
+
+    it('returns the existing tail for a resealed replay and rejects other content under the same source', async () => {
+      await withActivityComposition(factory, async ({ store }) => {
+        const input = {
+          taskId: 'task-sealed-replay',
+          sourceEnvelopeId: 'envelope-sealed-replay',
+          batchSeq: 5,
+          sealed: sealedOutputMember(1),
+          dropped: 0,
+          ttlMs: 300_000,
+        };
+        const first = await store.append(TENANT_A, input);
+        await expect(store.append(TENANT_A, { ...input, sealed: sealedOutputMember(2) })).resolves.toEqual(first);
+        await expect(store.append(TENANT_A, { ...input, sealed: sealedOutputMember(1, 'c') })).rejects.toThrow();
+        await expect(store.append(TENANT_A, { ...input, dropped: 1 })).rejects.toThrow();
+        const { sealed: _sealed, ...source } = input;
+        await expect(store.append(TENANT_A, { ...source, events: [progress('plain')] })).rejects.toThrow();
+        expect((await store.read(TENANT_A, 'task-sealed-replay'))?.entries).toEqual(first.entries);
       });
     });
 

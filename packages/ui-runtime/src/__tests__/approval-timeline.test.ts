@@ -11,6 +11,21 @@ import {
 
 const receivedAt = '2026-08-16T12:00:00.000Z';
 
+/** A schema-valid inline `task-output` sealed member (#654). Only its outer fields are read. */
+const SEALED_MEMBER = {
+  v: 1 as const,
+  suite: 'byok-sealed-v1.hkdf-sha256.aes-256-gcm' as const,
+  category: 'task-output' as const,
+  scope: { id: 'scope-1', epoch: 1, keyId: 'K'.repeat(22) },
+  chainHead: { seq: 1, hash: `sha256:${'b'.repeat(64)}` },
+  sender: 'S'.repeat(43),
+  salt: Buffer.alloc(32, 1).toString('base64url'),
+  nonce: Buffer.alloc(12, 1).toString('base64url'),
+  paddedLength: 256,
+  contentMac: `hmac-sha256:${'a'.repeat(64)}`,
+  ciphertext: Buffer.alloc(256 + 16, 1).toString('base64url'),
+};
+
 function observation(
   revision: number,
   event: ApprovalObservation['event'],
@@ -43,6 +58,20 @@ function expectCode(run: () => unknown, code: ApprovalProjectionError['code']): 
 }
 
 describe('approval timeline projection', () => {
+  it('pairs a sealed request by its native identity and projects no summary for it (#654 12e)', () => {
+    const snapshot = replayApprovalTimeline(tail([
+      observation(1, { type: 'approval_requested', approvalId: 'approval-sealed', sealed: SEALED_MEMBER }),
+      observation(2, {
+        type: 'approval_resolved', approvalId: 'approval-sealed', decision: 'approve',
+        resolvedBy: 'local', at: '2026-08-16T12:01:00.000Z',
+      }),
+    ]));
+    expect(snapshot.items).toMatchObject([{
+      approvalId: 'approval-sealed', status: 'approved', correlation: 'paired', sourceRevisions: [1, 2],
+    }]);
+    expect(Object.hasOwn(snapshot.items[0]!, 'summary')).toBe(false);
+  });
+
   it('projects native request and resolution authority with the declared vocabulary', () => {
     const snapshot = replayApprovalTimeline(tail([
       observation(1, { type: 'approval_requested', approvalId: 'approval-1', summary: 'Deploy?' }),

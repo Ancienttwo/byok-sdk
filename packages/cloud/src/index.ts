@@ -215,6 +215,7 @@ export {
   DEFAULT_APPROVAL_TIMELINE_TTL_MS,
   approvalTimelineCursor,
   parseApprovalObservations,
+  sameApprovalTimelineEvent,
   validateApprovalTimelineAppend,
   validateApprovalTimelineResolve,
 } from './approval-timeline';
@@ -255,6 +256,7 @@ export {
 export type { ActivityBounds } from './coordination';
 export {
   TimelineEventSchema,
+  SealedActivityBatchSchema,
   ActivityAppendRequestSchema,
   activityCursor,
   activitySourceBatchState,
@@ -267,6 +269,8 @@ export type {
   ActivityCursor,
   ActivityStore,
   ActivityTail,
+  ActivityTailEntry,
+  SealedActivityBatch,
   TimelineEvent,
 } from './activity';
 export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client';

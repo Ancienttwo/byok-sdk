@@ -1,7 +1,7 @@
 // ==== @byok-sdk/cloud dist/activity.d.ts ====
 import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
 import { type TenantId } from '@byok-sdk/core';
-import { type AgentEventOrUnknown } from '@byok-sdk/protocol';
+import { type AgentEventOrUnknown, type SealedPayload } from '@byok-sdk/protocol';
 import { z } from 'zod';
 export declare const DEFAULT_ACTIVITY_CAPACITY = 50;
 export declare const ActivityAppendRequestSchema: z.ZodObject<{
@@ -187,6 +187,49 @@ export declare const TimelineEventSchema: z.ZodObject<{
     }, z.core.$loose>]>;
 }, z.core.$strip>;
 export type TimelineEvent = Readonly<z.infer<typeof TimelineEventSchema>>;
+/**
+ * One sealed batch in the tail (#654 12e). A sealed member covers the whole
+ * batch, so the tail keeps one entry for it, and the tail capacity counts
+ * batches. `eventIndex` is always 0, so the order key of a batch is the same
+ * as for its first plaintext event. A member opens `sealed`.
+ */
+export declare const SealedActivityBatchSchema: z.ZodObject<{
+    taskId: z.ZodString;
+    sourceEnvelopeId: z.ZodString;
+    batchSeq: z.ZodNumber;
+    eventIndex: z.ZodLiteral<0>;
+    sourceDropped: z.ZodOptional<z.ZodNumber>;
+    receivedAt: z.ZodISODateTime;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-output">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strip>;
+export type SealedActivityBatch = Readonly<z.infer<typeof SealedActivityBatchSchema>>;
+/** One tail entry: a plaintext event, or a sealed batch. */
+export type ActivityTailEntry = TimelineEvent | SealedActivityBatch;
 export interface ActivityCursor {
     readonly batchSeq: number;
     readonly eventIndex: number;
@@ -194,21 +237,26 @@ export interface ActivityCursor {
 export interface ActivityTail {
     readonly tenantId: TenantId;
     readonly taskId: string;
-    readonly entries: readonly TimelineEvent[];
+    readonly entries: readonly ActivityTailEntry[];
     readonly cursor?: ActivityCursor;
     readonly dropped: number;
     readonly capacity: number;
     readonly expiresAt: string;
 }
-export interface ActivityAppendInput {
+interface ActivityAppendFields {
     readonly taskId: string;
     readonly sourceEnvelopeId: string;
     readonly batchSeq: number;
-    readonly events: readonly AgentEventOrUnknown[];
     readonly dropped: number;
     readonly ttlMs: number;
     readonly capacity?: number;
 }
+/** One batch to append: plaintext events, or one sealed member that covers the batch. */
+export type ActivityAppendInput = (ActivityAppendFields & {
+    readonly events: readonly AgentEventOrUnknown[];
+}) | (ActivityAppendFields & {
+    readonly sealed: SealedPayload;
+});
 export interface ActivityStore {
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     /**
@@ -221,17 +269,18 @@ export interface ActivityStore {
     read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
 }
 export declare function validateActivityAppend(input: ActivityAppendInput): number;
-export declare function projectTimelineEvents(input: ActivityAppendInput, receivedAt: string): readonly TimelineEvent[];
+export declare function projectTimelineEvents(input: ActivityAppendInput, receivedAt: string): readonly ActivityTailEntry[];
 /**
  * Whether one live tail already contains this source envelope's canonical
  * batch. `conflict` includes a partially retained source: its missing events
  * are not evidence that a different batch may reuse the same source identity.
  */
-export declare function activitySourceBatchState(entries: readonly TimelineEvent[], input: ActivityAppendInput): 'absent' | 'same' | 'conflict';
-export declare function parseTimelineEvents(value: unknown): readonly TimelineEvent[];
-export declare function compareTimelineEvents(left: TimelineEvent, right: TimelineEvent): number;
-export declare function activityCursor(entries: readonly TimelineEvent[]): ActivityCursor | undefined;
+export declare function activitySourceBatchState(entries: readonly ActivityTailEntry[], input: ActivityAppendInput): 'absent' | 'same' | 'conflict';
+export declare function parseTimelineEvents(value: unknown): readonly ActivityTailEntry[];
+export declare function compareTimelineEvents(left: ActivityTailEntry, right: ActivityTailEntry): number;
+export declare function activityCursor(entries: readonly ActivityTailEntry[]): ActivityCursor | undefined;
 export declare function activityTailKey(tenant: TenantId, taskId: string): string;
+export {};
 // ==== @byok-sdk/cloud dist/agent-execution.d.ts ====
 import { z } from 'zod';
 /**
@@ -498,6 +547,11 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                 contentType: z.ZodString;
             }, z.core.$strict>>;
         }, z.core.$strict>>;
+        routineRef: z.ZodOptional<z.ZodObject<{
+            routineId: z.ZodString;
+            definitionVersion: z.ZodNumber;
+            notAfter: z.ZodString;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
     agentMessageContext: z.ZodOptional<z.ZodObject<{
         destinationBinding: z.ZodString;
@@ -736,6 +790,35 @@ export declare const ApprovalTimelineEventSchema: z.ZodUnion<readonly [z.ZodObje
     summary: z.ZodString;
     approvalId: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>, z.ZodObject<{
+    type: z.ZodLiteral<"approval_requested">;
+    approvalId: z.ZodString;
+    sealed: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+        category: z.ZodLiteral<"task-output">;
+        scope: z.ZodObject<{
+            id: z.ZodString;
+            epoch: z.ZodNumber;
+            keyId: z.ZodString;
+        }, z.core.$strict>;
+        chainHead: z.ZodObject<{
+            seq: z.ZodNumber;
+            hash: z.ZodString;
+        }, z.core.$strict>;
+        sender: z.ZodString;
+        salt: z.ZodString;
+        nonce: z.ZodString;
+        paddedLength: z.ZodNumber;
+        contentMac: z.ZodString;
+        ciphertext: z.ZodOptional<z.ZodString>;
+        ciphertextRef: z.ZodOptional<z.ZodObject<{
+            blobId: z.ZodString;
+            contentHash: z.ZodString;
+            size: z.ZodNumber;
+            contentType: z.ZodString;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
     type: z.ZodLiteral<"approval_resolved">;
     approvalId: z.ZodOptional<z.ZodString>;
     decision: z.ZodEnum<{
@@ -759,6 +842,12 @@ export declare const ApprovalTimelineEventSchema: z.ZodUnion<readonly [z.ZodObje
     at: z.ZodISODateTime;
 }, z.core.$strict>]>;
 export type ApprovalTimelineEvent = Readonly<z.infer<typeof ApprovalTimelineEventSchema>>;
+/**
+ * True when two observations of one source envelope are the same event. A
+ * sealed request compares by its comparison projection, so a retry that
+ * sealed the same summary again is the same request (§9.2).
+ */
+export declare function sameApprovalTimelineEvent(left: ApprovalTimelineEvent, right: ApprovalTimelineEvent): boolean;
 export declare const ApprovalObservationSchema: z.ZodObject<{
     taskId: z.ZodString;
     sourceEnvelopeId: z.ZodString;
@@ -768,6 +857,35 @@ export declare const ApprovalObservationSchema: z.ZodObject<{
         type: z.ZodLiteral<"approval_requested">;
         summary: z.ZodString;
         approvalId: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        type: z.ZodLiteral<"approval_requested">;
+        approvalId: z.ZodString;
+        sealed: z.ZodObject<{
+            v: z.ZodLiteral<1>;
+            suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
+            category: z.ZodLiteral<"task-output">;
+            scope: z.ZodObject<{
+                id: z.ZodString;
+                epoch: z.ZodNumber;
+                keyId: z.ZodString;
+            }, z.core.$strict>;
+            chainHead: z.ZodObject<{
+                seq: z.ZodNumber;
+                hash: z.ZodString;
+            }, z.core.$strict>;
+            sender: z.ZodString;
+            salt: z.ZodString;
+            nonce: z.ZodString;
+            paddedLength: z.ZodNumber;
+            contentMac: z.ZodString;
+            ciphertext: z.ZodOptional<z.ZodString>;
+            ciphertextRef: z.ZodOptional<z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+            }, z.core.$strict>>;
+        }, z.core.$strict>;
     }, z.core.$strict>, z.ZodObject<{
         type: z.ZodLiteral<"approval_resolved">;
         approvalId: z.ZodOptional<z.ZodString>;
@@ -1201,6 +1319,14 @@ export declare const CLOUD_CAPABILITIES: {
      * the capability is declared only once it is completely implemented.
      */
     readonly hostMcpTaskContext: 'host-mcp-task-context';
+    /**
+     * The E2EE member device routes (#654): register a member key bundle,
+     * append and read the member chain, put and read scope key packages, and
+     * read the relayed client pairing MAC. Composition-bound like
+     * `truth.records`: declaring it without an `e2eeMemberStore` is refused at
+     * construction.
+     */
+    readonly e2eeMember: 'e2ee.member';
 };
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];
 /** The wire DTO for `GET /byok/capabilities` — core's shape, bound to a cloud-owned route. */
@@ -1236,6 +1362,8 @@ export interface FullCapabilityDeclarationOptions {
      * deployment does not hold — so it is off unless a composition says otherwise.
      */
     readonly includeHostMcpTaskContext?: boolean;
+    /** `e2ee.member` is default-off: the composition must supply an `e2eeMemberStore`. */
+    readonly includeE2eeMember?: boolean;
 }
 /** Every capability the standard composition can serve, plus explicitly wired composition-bound ones. */
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
@@ -1265,7 +1393,7 @@ import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agen
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskOfferSealedPayload, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type TaskOfferWithToolsetsPayload, type TaskOfferWithToolsetsSealedPayload, type E2eeClientPairingMac, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskOfferSealedPayload, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type TaskOfferWithToolsetsPayload, type TaskOfferWithToolsetsSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1397,6 +1525,8 @@ export interface ByokCloudOptions {
     readonly activityCapacity?: number;
     readonly activityTtlMs?: number;
     readonly maxTruthRequestBytes?: number;
+    /** Byte cap of one E2EE member device write. The default fits one full chain append (64 entries of 64 KiB). */
+    readonly maxE2eeRequestBytes?: number;
     readonly skillPackPageLimit?: number;
 }
 /** The unauthenticated routes {@link ByokCloudOptions.publicRouteLimiter} guards. */
@@ -1690,6 +1820,16 @@ export interface ByokCloud {
      * routes; this plane records no intent receipt of its own.
      */
     enqueueAgentMemoryIntentNotice(tenant: TenantId, deviceId: string, input: AgentMemoryIntentNoticeInput): Promise<EnqueuedAgentControl>;
+    /**
+     * Durable, task-free `e2ee.key_package.available` notice (#654 E2c-3) for
+     * one device that durably advertised `sealed-payload-v1`; otherwise it
+     * throws `agent_capability_missing` before the mailbox append. The payload
+     * is exactly `{ scopeId, epoch }`; the device fetches the package from its
+     * device route. Idempotent per (tenant, device, scopeId, epoch) while the
+     * mailbox row is retained. `putScopeKeyPackages` calls it for every
+     * recipient device that has the capability.
+     */
+    enqueueScopeKeyPackageNotice(tenant: TenantId, deviceId: string, input: E2eeKeyPackageAvailablePayload): Promise<EnqueuedAgentControl>;
     /** Tenant/device/request-bound durable desired-state and terminal-outcome readback. */
     getInputPreparationStatus(tenant: TenantId, deviceId: string, input: InputPreparationStatusInput): Promise<InputPreparationReadback | undefined>;
     /** Direct device completion endpoint authority; first exact terminal receipt wins. */
@@ -1733,11 +1873,17 @@ export interface ByokCloud {
      * Host control plane: store scope key packages. The first package of a
      * scope epoch fixes its `keyId`; a package with another `keyId` throws
      * `e2ee_scope_key_conflict`, and the call stores nothing.
+     *
+     * After the commit, each recipient that is a registered device gets one
+     * `e2ee.key_package.available` notice per scope epoch, also on a replay.
+     * A recipient device without `sealed-payload-v1` gets no notice and is
+     * listed in `skippedDeviceIds`; its packages are stored all the same.
      */
     putScopeKeyPackages(tenant: TenantId, input: {
         readonly packages: readonly E2eeScopeKeyPackage[];
     }): Promise<{
         readonly stored: number;
+        readonly skippedDeviceIds: readonly string[];
     }>;
     /** Host control plane: the stored packages of one scope, optionally for one epoch or one recipient. */
     readScopeKeyPackages(tenant: TenantId, input: {
@@ -2087,14 +2233,13 @@ export declare function assertBoardLabels(channel: string, title: string, limits
  */
 export declare function assertTaskAttemptListLimit(limit: number, active?: true): void;
 export declare function validateActivityEvents(events: readonly AgentEventOrUnknown[], dropped: number, bounds: ActivityBounds): void;
-export declare function validateActivityBatch(input: Omit<ActivityAppendInput, 'ttlMs' | 'capacity'>, bounds: ActivityBounds): void;
-export declare function appendActivityEvents(activity: TenantBoundActivity, input: {
-    readonly taskId: string;
-    readonly sourceEnvelopeId: string;
-    readonly batchSeq: number;
-    readonly events: readonly AgentEventOrUnknown[];
-    readonly dropped: number;
-}, bounds: ActivityBounds): Promise<ActivityTail>;
+type ActivityBatch = ActivityAppendInput extends infer Input ? Input extends ActivityAppendInput ? Omit<Input, 'ttlMs' | 'capacity'> : never : never;
+/**
+ * A plaintext batch is checked against the event and byte bounds. A sealed
+ * batch hides its events; the inbound gate admits it inline only.
+ */
+export declare function validateActivityBatch(input: ActivityBatch, bounds: ActivityBounds): void;
+export declare function appendActivityEvents(activity: TenantBoundActivity, input: ActivityBatch, bounds: ActivityBounds): Promise<ActivityTail>;
 // ==== @byok-sdk/cloud dist/crypto/port.d.ts ====
 /**
  * The crypto seam.
@@ -2183,7 +2328,7 @@ export declare function createWebCrypto(): CloudCrypto;
  * bytes the writer sent.
  */
 import { type TenantId } from '@byok-sdk/core';
-import { type E2eeClientPairingMac, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
 import type { DeviceDirectory } from './stores/ports';
 /** One stored chain entry: its seq and its canonical JSON. */
 export interface E2eeMemberChainRow {
@@ -2302,6 +2447,8 @@ export interface E2eeMemberContext {
     readonly tenant: TenantId;
     readonly devices: DeviceDirectory;
     readonly now: () => Date;
+    /** Enqueue `e2ee.key_package.available` for one device; it refuses a device without the gate capability. */
+    readonly enqueueKeyPackageNotice: (deviceId: string, payload: E2eeKeyPackageAvailablePayload) => Promise<unknown>;
 }
 export declare function appendMemberChainEntries(ctx: E2eeMemberContext, input: {
     readonly entries: readonly E2eeMemberChainEntry[];
@@ -2319,6 +2466,7 @@ export declare function putScopeKeyPackages(ctx: E2eeMemberContext, input: {
     readonly packages: readonly E2eeScopeKeyPackage[];
 }): Promise<{
     readonly stored: number;
+    readonly skippedDeviceIds: readonly string[];
 }>;
 export declare function readScopeKeyPackages(ctx: E2eeMemberContext, input: {
     readonly scopeId: string;
@@ -2338,6 +2486,23 @@ export declare function readMemberKeyRegistration(ctx: E2eeMemberContext, device
 } | undefined>;
 /** Relay the client pairing MAC to a registered device for one pairing window. */
 export declare function relayClientPairingMac(ctx: E2eeMemberContext, deviceId: string, input: E2eeClientPairingMac): Promise<void>;
+/**
+ * A device registers its own member key bundle with the device pairing MAC
+ * (§7.2 step 3). The bundle must name the proven device. The MAC is kept for
+ * one pairing window; a retry with the same bundle replaces the MAC and its expiry.
+ */
+export declare function registerDeviceMemberKey(ctx: E2eeMemberContext, deviceId: string, input: unknown): Promise<{
+    readonly memberId: string;
+}>;
+/** The scope key packages addressed to the device's own registered member. */
+export declare function readDeviceScopeKeyPackages(ctx: E2eeMemberContext, deviceId: string, input: {
+    readonly scopeId: string;
+    readonly epoch?: number;
+}): Promise<{
+    readonly packages: readonly E2eeScopeKeyPackage[];
+}>;
+/** The client pairing MAC relayed to the device, while its pairing window is open. */
+export declare function readDeviceClientPairingMac(ctx: E2eeMemberContext, deviceId: string): Promise<E2eeClientPairingMac | undefined>;
 // ==== @byok-sdk/cloud dist/errors.d.ts ====
 /**
  * The one error taxonomy for `@byok-sdk/cloud`.
@@ -2398,6 +2563,8 @@ export declare const CLOUD_ERROR_CODES: {
     readonly e2ee_scope_key_conflict: 'e2ee_scope_key_conflict';
     /** The device has not registered a member key bundle. */
     readonly e2ee_member_not_registered: 'e2ee_member_not_registered';
+    /** The device registered another member key bundle, or another device registered this member id. */
+    readonly e2ee_member_key_conflict: 'e2ee_member_key_conflict';
     /** A stored E2EE member row is not the value its schema requires. Whatever wrote it broke the store contract. */
     readonly e2ee_member_state_unreadable: 'e2ee_member_state_unreadable';
     /** Explicit legacy dispatch target is unknown or revoked in this tenant. */
@@ -2503,6 +2670,18 @@ export declare function boardUnclaimHandler(deps: DeviceRouteDeps): (c: Context)
 export declare function boardStatusHandler(deps: DeviceRouteDeps): (c: Context) => Promise<Response>;
 export declare function boardStreamHandler(deps: BoardStreamRouteDeps): (c: Context) => Promise<Response>;
 export type BoardPollResponse = BoardPage;
+// ==== @byok-sdk/cloud dist/handlers/device-proof-request.d.ts ====
+import type { Context } from 'hono';
+import { type AuthenticatedDeviceProof, type DeviceProofAuthDeps } from '../auth/device-proof';
+export declare const MAX_DEVICE_PROOF_HEADER_BYTES: number;
+/** The raw request body, `'too_large'` over `maximum`, or `undefined` for an unreadable body. */
+export declare function readProofRequestBody(c: Context, maximum: number): Promise<Uint8Array | 'too_large' | undefined>;
+/** `undefined` means "answer 401", for every refused proof alike. */
+export declare function authenticateProofRequest(c: Context, deps: DeviceProofAuthDeps, request: {
+    readonly body: Uint8Array;
+    readonly operation: string;
+    readonly resource: string;
+}): Promise<AuthenticatedDeviceProof | undefined>;
 // ==== @byok-sdk/cloud dist/handlers/shared.d.ts ====
 /**
  * The two things every device-facing handler starts from: a tolerant JSON body
@@ -2596,11 +2775,11 @@ export declare function skillPackFileHandler(deps: SkillPackRouteDeps): (c: Cont
 // ==== @byok-sdk/cloud dist/handlers/truth.d.ts ====
 import { DEVICE_PROOF_HEADER } from '@byok-sdk/core';
 import type { Context } from 'hono';
-import { type DeviceProofAuthDeps } from '../auth/device-proof';
+import type { DeviceProofAuthDeps } from '../auth/device-proof';
 import { type TruthCommitter, type TruthObjectDownloads } from '../truth/contract';
 export { DEVICE_PROOF_HEADER };
+export { MAX_DEVICE_PROOF_HEADER_BYTES } from './device-proof-request';
 export declare const DEFAULT_MAX_TRUTH_REQUEST_BYTES: number;
-export declare const MAX_DEVICE_PROOF_HEADER_BYTES: number;
 export interface TruthRouteDeps {
     readonly proof: DeviceProofAuthDeps;
     readonly truth: TruthCommitter;
@@ -2664,7 +2843,7 @@ export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limit
  * and may be refined without a protocol revision. `rate_limited` is a separate outcome,
  * not a refusal reason.
  */
-export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_harnesses_without_capability', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid'];
+export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'sealed_payload_unsupported', 'sealed_output_required', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_harnesses_without_capability', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_draft_invalid', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid'];
 export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 /** The only way to build a rejection: the reason is required and closed. */
 interface Refused {
@@ -2805,7 +2984,7 @@ export { projectTerminalResult } from './terminal-result';
 export type { TerminalResult } from './terminal-result';
 export { tenantStoresFor } from './tenant-stores';
 export type { TenantBoundActivity, TenantBoundApprovalTimeline, TenantBoundBoard, CloudRootStores, TenantBoundBlobs, TenantBoundDedup, TenantBoundDevices, TenantBoundMailbox, TenantBoundPresence, TenantBoundQuota, TenantBoundRateLimiter, TenantBoundReceipts, TenantBoundTaskAttempts, TenantStores, } from './tenant-stores';
-export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, approvalTimelineCursor, parseApprovalObservations, validateApprovalTimelineAppend, validateApprovalTimelineResolve, } from './approval-timeline';
+export { ApprovalObservationSchema, ApprovalTimelineEventSchema, APPROVAL_SUMMARY_MAX_BYTES, DEFAULT_APPROVAL_TIMELINE_CAPACITY, DEFAULT_APPROVAL_TIMELINE_TTL_MS, approvalTimelineCursor, parseApprovalObservations, sameApprovalTimelineEvent, validateApprovalTimelineAppend, validateApprovalTimelineResolve, } from './approval-timeline';
 export type { ApprovalObservation, ApprovalTimelineAppendInput, ApprovalTimelineEvent, ApprovalTimelineResolvePendingInput, ApprovalTimelineResolvePendingResult, ApprovalTimelineStore, ApprovalTimelineTail, } from './approval-timeline';
 export { StaleApprovalError, pendingApproval } from './approval-control';
 export type { PendingApproval } from './approval-control';
@@ -2813,8 +2992,8 @@ export { SteerRejectedError } from './steer-control';
 export type { SteerRejectionCode } from './steer-control';
 export { assertTaskAttemptListLimit, DEFAULT_ACTIVITY_BOUNDS, DEFAULT_ACTIVITY_CAPACITY, DEFAULT_ACTIVITY_TTL_MS, DEFAULT_BOARD_CHANNEL_MAX_BYTES, DEFAULT_BOARD_TITLE_MAX_BYTES, DEFAULT_PRESENCE_DETAIL_MAX_BYTES, DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS, DEFAULT_PRESENCE_TTL_MS, } from './coordination';
 export type { ActivityBounds } from './coordination';
-export { TimelineEventSchema, ActivityAppendRequestSchema, activityCursor, activitySourceBatchState, parseTimelineEvents, projectTimelineEvents, validateActivityAppend, } from './activity';
-export type { ActivityAppendInput, ActivityCursor, ActivityStore, ActivityTail, TimelineEvent, } from './activity';
+export { TimelineEventSchema, SealedActivityBatchSchema, ActivityAppendRequestSchema, activityCursor, activitySourceBatchState, parseTimelineEvents, projectTimelineEvents, validateActivityAppend, } from './activity';
+export type { ActivityAppendInput, ActivityCursor, ActivityStore, ActivityTail, ActivityTailEntry, SealedActivityBatch, TimelineEvent, } from './activity';
 export { BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError } from './coordination-client';
 export type { BoardFeedClientOptions, BoardFeedItem, BoardFeedMode, BoardFeedPage, BoardFeedRead, } from './coordination-client';
 export { TRUTH_BATCH_MAX_RECORDS, TRUTH_INLINE_CONTENT_TYPE, TRUTH_LABEL_MAX_LENGTH, TRUTH_MANIFEST_MAX_LIMIT, TRUTH_RECORD_CAPABILITY, TRUTH_RECORD_KEY_MAX_LENGTH, TRUTH_REQUEST_ID_MAX_LENGTH, TruthBodyInputSchema, TruthCommitResponseSchema, TruthRecordKeySchema, TruthRecordMetadataSchema, TruthWriteRequestSchema, truthManifestMetadata, truthRecordMetadata, } from './truth/contract';
@@ -4626,10 +4805,14 @@ export declare function tenantStoresFor(principal: Principal, root: CloudRootSto
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
 import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TaskFailPayload, type TaskDeclinePayload } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports';
-/** Canonical device evidence, independent of the Host cancellation projection. */
+declare const DEVICE_TERMINAL_TYPES: readonly ['task.complete', 'task.fail', 'task.decline', 'task.cancelled', 'task.complete_sealed', 'task.fail_sealed', 'task.decline_sealed', 'task.cancelled_sealed'];
+/**
+ * Canonical device evidence, independent of the Host cancellation projection.
+ * A sealed terminal keeps its sealed member, which a member opens (#654 12e).
+ */
 export interface DeviceTerminal {
     readonly envelope: Extract<Envelope, {
-        type: 'task.complete' | 'task.fail' | 'task.decline' | 'task.cancelled';
+        type: (typeof DEVICE_TERMINAL_TYPES)[number];
     }>;
     readonly recordedAt: string;
 }
@@ -4703,7 +4886,9 @@ export interface TerminalResult {
     readonly recordedAt: string;
 }
 /**
- * Pure projection of a terminal receipt onto {@link TerminalResult}. `taskId`
+ * Pure projection of a terminal receipt onto {@link TerminalResult}. A sealed
+ * terminal projects only its plaintext fields; its moved fields stay in the
+ * sealed member, which {@link DeviceTerminal} carries. `taskId`
  * names the task the receipt was read for (the receipt's key carries it, its
  * body does not); `recordedAt` is the receipt store's write time.
  *
@@ -4713,6 +4898,7 @@ export interface TerminalResult {
  * error, never a best-effort shape.
  */
 export declare function projectTerminalResult(taskId: string, receipt: RequestReceipt): TerminalResult;
+export {};
 // ==== @byok-sdk/cloud dist/truth/contract.d.ts ====
 import type { ContentHash, TenantId, TruthBodyRef, TruthManifestEntry, TruthManifestQuery, TruthRecord, TruthRecordKind, TruthRecordSelector } from '@byok-sdk/core';
 import { z } from 'zod';
