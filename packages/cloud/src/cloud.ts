@@ -1,3 +1,4 @@
+import type { z } from 'zod';
 import { readTaskAgentMessageDraft, type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft';
 import { runMaintenanceSteps, type MaintenanceInput, type MaintenanceReport } from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
@@ -138,6 +139,7 @@ import {
   type E2eeMemberChainEntry,
   type E2eeMemberKeyBundle,
   type E2eeScopeKeyPackage,
+  type E2eeScopeKeyPackageV2Schema,
 } from '@byok-sdk/protocol';
 import { SteerRejectedError } from './steer-control';
 import { createAuthPlane, type AuthPlane } from './auth/plane';
@@ -850,7 +852,7 @@ export interface ByokCloud {
    */
   putScopeKeyPackages(
     tenant: TenantId,
-    input: { readonly packages: readonly E2eeScopeKeyPackage[] },
+    input: { readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageV2Schema>[] },
   ): Promise<{ readonly stored: number; readonly skippedDeviceIds: readonly string[] }>;
   /** Host control plane: the stored packages of one scope, optionally for one epoch or one recipient. */
   readScopeKeyPackages(

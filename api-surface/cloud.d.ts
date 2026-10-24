@@ -1378,6 +1378,7 @@ export interface FullCapabilityDeclarationOptions {
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
 export declare function declares(declaration: CapabilityDeclaration, capability: CloudCapability): boolean;
 // ==== @byok-sdk/cloud dist/cloud.d.ts ====
+import type { z } from 'zod';
 import { type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft';
 import { type MaintenanceInput, type MaintenanceReport } from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
@@ -1402,7 +1403,7 @@ import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agen
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskOfferSealedPayload, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type TaskOfferWithToolsetsPayload, type TaskOfferWithToolsetsSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskOfferSealedPayload, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type TaskOfferWithToolsetsPayload, type TaskOfferWithToolsetsSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageV2Schema } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1898,7 +1899,7 @@ export interface ByokCloud {
      * listed in `skippedDeviceIds`; its packages are stored all the same.
      */
     putScopeKeyPackages(tenant: TenantId, input: {
-        readonly packages: readonly E2eeScopeKeyPackage[];
+        readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageV2Schema>[];
     }): Promise<{
         readonly stored: number;
         readonly skippedDeviceIds: readonly string[];
@@ -2352,7 +2353,8 @@ export declare function createWebCrypto(): CloudCrypto;
  * bytes the writer sent.
  */
 import { type TenantId } from '@byok-sdk/core';
-import { type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { E2eeScopeKeyPackageV2Schema, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { z } from 'zod';
 import type { DeviceDirectory } from './stores/ports';
 /** One stored chain entry: its seq and its canonical JSON. */
 export interface E2eeMemberChainRow {
@@ -2619,7 +2621,7 @@ export declare function readMemberChain(ctx: E2eeMemberContext, input?: {
     readonly entries: readonly E2eeMemberChainEntry[];
 }>;
 export declare function putScopeKeyPackages(ctx: E2eeMemberContext, input: {
-    readonly packages: readonly E2eeScopeKeyPackage[];
+    readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageV2Schema>[];
 }, writer: E2eeMemberWriter): Promise<{
     readonly stored: number;
     readonly skippedDeviceIds: readonly string[];

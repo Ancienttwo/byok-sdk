@@ -417,7 +417,7 @@ export async function readMemberChain(
 
 export async function putScopeKeyPackages(
   ctx: E2eeMemberContext,
-  input: { readonly packages: readonly E2eeScopeKeyPackage[] },
+  input: { readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageV2Schema>[] },
   writer: E2eeMemberWriter,
 ): Promise<{ readonly stored: number; readonly skippedDeviceIds: readonly string[] }> {
   const list = boundedList(() => input.packages, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, 'Scope key packages');
