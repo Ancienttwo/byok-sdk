@@ -267,7 +267,8 @@ occurrences (D2f-3).
   API for the Main Bot's routines, as in L. The caller names the acting Bot, and it must be the Main Bot.
 - The keyless K8 `end_routine { botId, routineId }` command, through `commit`, completes any open Bot routine, an archived
   owner's too, as L `endRoutine` does (§55c). The store loads the slice for it and owns its `routines` port, so a caller's
-  port never reaches the command. A new acceptance writes the slice back and switches a due version.
+  port never reaches the command. A new acceptance writes the slice back. Completion drops a staged version, so no
+  version switch follows.
 - H runs only `bot-routine` routines. A Host-job or execution-template routine is refused.
 - Each transaction that can conclude routine work then switches a staged version that is due: the claim expiry, the
   sync, the reconciliation conclude, the terminal transaction and the owner API. K4 does this after each drain; H has
