@@ -98,6 +98,8 @@ keeps the insertion order of each kind.
   `rejected`, `audit` and `homeOperations` lists, so their positions change; their content and order stay.
 - The `kind` CHECK lists come from the layout at the first `migrate()`. `CREATE TABLE IF NOT EXISTS`
   keeps the old CHECK, so a new kind needs an explicit `ALTER` in a later migration.
+- H has no migrations while it is unreleased. After a DDL change, recreate the H schema. `migrate()` on a schema
+  from an older revision fails in its one transaction and changes nothing.
 - One commit must not delete a map key and add it back. The store keeps the old ordinal, but a JavaScript
   object moves the key to the end. K8 never deletes a map entry today.
 
