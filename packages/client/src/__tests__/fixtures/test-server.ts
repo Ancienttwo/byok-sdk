@@ -101,6 +101,9 @@ export class TestServer {
   private blobCreateRefusal: number | undefined;
   /** Blob creates answered by {@link refuseBlobCreates}. */
   blobCreatesRefused = 0;
+  private blobUploadRefusal: number | undefined;
+  /** Blob content PUTs answered by {@link refuseBlobUploads}. */
+  blobUploadsRefused = 0;
   private dropNextBlobFinalizeResponse = false;
   /** Capabilities advertised in every subsequent long-poll response. */
   private ackCapabilities: string[] = [];
@@ -196,6 +199,11 @@ export class TestServer {
   /** Answer every blob create with this HTTP status (a quota or size refusal) until `undefined`. */
   refuseBlobCreates(status: number | undefined): void {
     this.blobCreateRefusal = status;
+  }
+
+  /** Answer every blob content PUT with this HTTP status (an expired signed URL) until `undefined`. */
+  refuseBlobUploads(status: number | undefined): void {
+    this.blobUploadRefusal = status;
   }
 
   /** Hold every blob content PUT, after its body arrived, until the returned function runs. */
@@ -579,6 +587,12 @@ export class TestServer {
       this.blobUploadsFailed += 1;
       await readRawBody(req); // drain so the client's PUT doesn't hang on a full send buffer
       res.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'simulated upload failure' }));
+      return;
+    }
+    if (this.blobUploadRefusal !== undefined) {
+      this.blobUploadsRefused += 1;
+      await readRawBody(req);
+      respondJson(res, this.blobUploadRefusal, { error: 'simulated upload refusal' });
       return;
     }
     const bytes = await readRawBody(req);

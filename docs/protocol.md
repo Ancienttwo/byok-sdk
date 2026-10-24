@@ -1343,7 +1343,10 @@ terminal or artifact. A device sends a sealed output by `ciphertextRef` only
 to a server that advertises this flag. Without it, the device keeps every
 sealed output inline: a terminal over the inline frame becomes the sealed
 `task.fail` with `reason` `terminal_result_unsealable`, and an artifact over
-it becomes an error event.
+it becomes an error event. A terminal whose ciphertext blob the server
+refuses for good also becomes that sealed `task.fail`: a 4xx other than 408
+or 429, except a 401 or 403 from the signed content URL (§7.1), which the
+device retries with a new reservation.
 
 **Drafts and `cloud-do`.** An `agent.message.draft` is plaintext. So the Host
 refuses a draft for a task whose offer has any `sealing`, with
@@ -3276,8 +3279,9 @@ The durable pre-claim admission boundary precedes runtime execution. Startup
 leaves unacknowledged/uncommitted offers for cloud mailbox redelivery, so host
 cancellation can suppress them. An acknowledged or committed unfinished task
 produces `task.fail` with `reason: daemon_interrupted`, `retryable: false`, and
-its original exact AgentRef. The interruption marker and report bytes commit
-atomically. Startup never automatically repeats runtime side effects. The
+its original exact AgentRef, unless the same process still holds that task's
+terminal for commit after a failed stop; that terminal is sent instead. The
+interruption marker and report bytes commit atomically. Startup never automatically repeats runtime side effects. The
 existing tenant/task_id remains an immutable execution identity; dispatch with
 an already delivered identity is refused even after mailbox retention.
 

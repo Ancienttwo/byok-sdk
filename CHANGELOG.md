@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Fixed (client)** — a terminal whose journal commit failed during a
+  `stop()` is sent after the next `start()` in the same process. Startup
+  recovery no longer replaces it with `task.fail` `daemon_interrupted`.
 - **Breaking (cloud)** — a sealed terminal (`task.complete_sealed`,
   `task.fail_sealed`, `task.decline_sealed`, `task.cancelled_sealed`) or
   `task.artifact_sealed` may carry `ciphertextRef` above the 256 KiB inline
@@ -21,7 +24,8 @@
   artifact by `ciphertextRef`, so the plaintext limit is 2 MiB again (#654,
   owner batch §58a A). Without the flag, the daemon keeps the output inline:
   a terminal over the frame becomes the sealed `task.fail` with
-  `terminal_result_unsealable`, and an artifact becomes a sealed error event.
+  `terminal_result_unsealable`, as it does when the server refuses the blob
+  for good, and an artifact becomes a sealed error event.
   Known limit: a terminal sent by reference and refused for good by the Host
   reaches the Host as no terminal (`docs/protocol.md` §2.5).
 - **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is
