@@ -1173,7 +1173,8 @@ refreshed hello adds it, and removes it again when the member is lost.
   after a process restart they come back from the next opened content.
 - **Output-only tasks.** A task with `categories: ['task-output']` carries no
   sealed input, so it gets no freshness point of its own. It runs only after
-  sealed content at the same scope epoch made the epoch fresh in this run.
+  sealed content at the same scope epoch made the epoch fresh, in this run or
+  in the previous run of the same process (its carried freshness point).
   Device rotation (E2d-4) is not in this release.
 - **Recovered terminals.** A terminal that the startup replay builds from the
   journal for a task that seals output is always in a closed plaintext form:
