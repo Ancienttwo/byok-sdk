@@ -210,6 +210,9 @@ A chain end that succeeded with no Host reply record leaves its delegation `repl
   the delegation is gone, is no longer due at that time (it runs `replyCheckDue` again, so a verdict or a later check time
   stops it), or no longer matches the fence. A throw writes nothing and propagates.
 
+`agentMessage` is on `HostedReplyPort`, not on `HostedTaskPort`. The submitter and the reconciler use `HostedTaskPort`. So a
+deployment wires one more scope-bound port, `port(scope)` of the reply checker, to the same SDK tenant (see Deployment config).
+
 Two checkers may both read the same delegation; only the first settle applies. The SDK read is read only: the SDK
 `readTaskAgentMessage` (`@byok-sdk/cloud` `task-agent-message.ts`) runs SELECTs on the task, its admission and its
 offer receipt, and writes nothing. K8 `delegationDue` puts each check time into `scope.due_at`, so the deployment runs
