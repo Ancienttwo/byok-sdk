@@ -81,7 +81,7 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `outbox` | projection or delivery to send: a projection's value and send state, or a delivery's scan index (owner §54a, signed) |
 | `intent` | Turn intent: the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
 | `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision and its revoke time |
-| `retired_identity` | K8 identity that retention retired for good: `hash([namespace, id])` |
+| `retired_identity` | K8 identity that retention retired for good, `hash([namespace, id])`, or a compacted intent, `hash(['intent', turnId])` |
 | `archived_row` | row that retention moved out of the state, by namespace and id; a command record has an expiry |
 | `routine` | K4 routine of a Bot: its definition, staged version, lifecycle, status and next slot |
 | `occurrence` | K4 occurrence of a routine slot; its conclusion only when it has no intent |
@@ -307,10 +307,28 @@ root ids are retired in `retired_identity`, and every moved command record answe
 - An accepted Agent message stays accepted for an exact replay after retention. The consumer checks the task's reply
   in the state or in `archived_row`, where retention keeps it with no expiry, as K4 keeps its receipt. A refused message
   replays from its moved record until the record expires, as in L.
-- H keeps every intent row, settled or not. Intent row compaction, and its permanent intent tombstones, is later work.
+- Retention keeps every intent row, settled or not. Only an operator compaction removes one (see Intent compaction).
 - The namespace and id of each archived row, and of each row read (a moved command record or a tombstone), are checked
   against the K4 limits (128 and 1024 characters), as K4 checks every row read in L.
 - A scope with no row has nothing to retain: the call returns zero counts and writes nothing, as L does on an empty ledger.
+
+### Intent compaction
+
+`HostedCollaborationStore.compactIntents(scope, { acknowledgedTurnIds })` removes settled intent rows (#793 S8), as K4
+`compact` removes settled intents in L. The operator calls it; nothing runs it automatically. One transaction under the
+scope lock does all of it, and a refusal or a throw writes nothing.
+
+- The K8 rule `compactVeto` checks each acknowledged Turn with an intent row, the rule that L's `botCompactVeto` runs:
+  the Turn is concluded and reported, no unresolved delegation references it, its room seat is released, and its reply
+  receipt is settled. A refusal throws K4's `CompactVetoError`.
+- The store refuses a row with no conclusion, and a Turn id with neither a row nor an intent tombstone.
+- Each removed row leaves a permanent `hash(['intent', turnId])` row in `retired_identity`. A later call counts that
+  Turn as already compacted. `freezeIntent` refuses the Turn with K4's `RetiredIntentIdentityError`, and the sync fails
+  a Turn that never saw its result as `result_retired`, as L does.
+- It does not cover routine intents, and refuses them. K4 gives a routine occurrence's intent tombstone the expiry of
+  its slot, and `retired_identity` rows never expire.
+- After compaction, an Agent message for the task is refused as `unknown_task`, because its frozen input left with the
+  row.
 
 ## Routines
 
@@ -493,6 +511,8 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   port (`createWebCrypto()`). The key is a deployment secret; H never reads it.
 - **Retention.** The Host calls `retain(scope, input, limits)` with the acknowledged roots. `retentionMs` must be at
   least seven days (see Retention). The SDK side has its own `retentionPolicyId` in the tenant's entitlement.
+- **Intent compaction.** The operator calls `compactIntents(scope, { acknowledgedTurnIds })` for settled Turns; routine
+  intents stay (see Intent compaction).
 - **Workers.** The Host runs, each on its own interval: `HostedSubmitter.run()`, `HostedReconciler.run()`,
   `store.sync(scope, …)` for each scope that changed (the `changed` option of `HostedReconciler`, for a conclusion or
   a first claim, and of `HostedRoutineScheduler`, for a fire, and the scope of each commit and consume),
@@ -535,6 +555,8 @@ three and runs these suites.
 - The message consumer tests port the K4 Host-side message vectors (`host-execution-core/src/message.test.ts`).
 - The device binding tests use an SDK tenant in memory for the submit checks.
 - The K8 retention vectors (`retentionVectors`) run on the store, with H tests for message replays after retention.
+- The compaction tests cover a settled intent and its tombstone, a repeated call, a refused freeze of a retired Turn, a
+  K8 veto, an unsettled row, an unknown Turn id, a routine intent, and the sync's `result_retired`.
 - The routine tests seed each occurrence as the scheduler records it. They cover the outcome actions, the owner API,
   promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, and the
   `bot-routine` refusal.

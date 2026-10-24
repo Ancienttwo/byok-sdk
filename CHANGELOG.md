@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example compacts settled
+  intent rows on an operator call (#793 S8).
+  `HostedCollaborationStore.compactIntents(scope, { acknowledgedTurnIds })`
+  runs the K8 rule `compactVeto`, the rule that L's `botCompactVeto` now
+  runs too. Each removed row leaves a permanent `hash(['intent', turnId])`
+  row in `retired_identity` in the same transaction. `freezeIntent` then
+  refuses the Turn, and a sync that has not seen the Turn's result fails it
+  as `result_retired`, as L does. Routine intents are refused. Nothing runs
+  it automatically.
 - **Breaking (cloud)** — a sealed terminal (`task.complete_sealed`,
   `task.fail_sealed`, `task.decline_sealed`, `task.cancelled_sealed`) or
   `task.artifact_sealed` may carry `ciphertextRef` above the 256 KiB inline
