@@ -810,6 +810,15 @@ Deletes that a call starts:
   - It cannot see an upload that no body names yet, such as the artifact of a running task that shares the hash. It also cannot see a task that the Host submits after the check and before the physical delete, when that task names the same BlobRef: the new task then names a deleted object. Both cases wait for `object_reference` rows (E3b).
   - Known limit: a progress or approval report that a device sends while the redaction runs can add an activity or approval row after the second step. A second `redactTasks` call deletes that row and returns `redacted`. The row TTL also bounds it: the row expires 10 minutes after its last write by default, and maintenance collects it. The full fix needs a `delete` on the exported `ActivityStore` and `ApprovalTimelineStore` ports, so it waits for a later port change.
   - `listDeadLetters` lists a redacted expired row with the tombstone as its body. `replayDeadLetter` refuses that row, and `discardDeadLetter` deletes it.
+- A `shred` member chain entry (#654 E5b-1, design §11.2) deletes the key packages of one sealed scope.
+  The Host reads the entry's strict `{ scopeId }` subject in the append that stores it.
+  In that transaction it deletes the scope's key packages, then its scope epochs, records the scope in `e2ee_scope_shred`, and writes an `e2ee-scope-shred:<scopeId>` receipt with the chain seq, the time, and who appended it (the Host control plane, or the proven device).
+  Later key package puts for the scope get 409 `e2ee_scope_shredded`. In Postgres, the shred and each put take a transaction advisory lock on `(tenant, scope)` first, so a put of a new epoch cannot land after the shred.
+  The ciphertext rows stay; without the scope keys they cannot be opened. The fences keep working, because they compare metadata and MACs only.
+  Limits of the Host shred:
+  - **The Host deletes without checking the signature.** The Host never verifies member signatures (design §7.3). So any paired device of the tenant can append a well-shaped `shred` for any scope, and the Host deletes that scope's packages for good. Members recover only by the D5 path (design §14). This is the same class of risk as a device overwriting another recipient's key package, which a device can already do. A `shred` with a bad signature, or by a signer outside the scope's policy, breaks the walk for every member, so the Host and the members disagree only on a chain the members already refuse. The receipt is the operator's evidence of who appended it.
+  - Backups and replicas keep the deleted packages. A member whose KEM private key still exists can open them, until each member rotates its KEM key and deletes the old one (design §11.2, E5b-2).
+  - There is no `redactScope`. To remove the plaintext rows of a scope's tasks, the Host calls `redactTasks` with their taskIds (owner batch §50i A).
 - No call deletes egress rows or truth records by task, or any content by device, Agent or time. The hosted Host contract lists this gap ([section 6](hosted-host-contract.md#6-data-retention)).
 
 ### Measured inventory
