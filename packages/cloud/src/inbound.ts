@@ -996,11 +996,13 @@ async function recordTerminal(
   if (ciphertextRef !== undefined) await retainSealedCiphertext(stores.objects, taskId, ciphertextRef);
   const receipt = await stores.receipts.record({ key: terminalReceiptKey(taskId), body });
   // A terminal that lost, or one that arrived after redaction, keeps nothing.
-  // One reference per (blob, task) cannot tell whose hold it is, so it
-  // releases only a blob that nothing held before: one that names the task's
-  // offer or steer blob leaves that hold in place.
-  if (ciphertextRef !== undefined && !heldBefore && receipt.receipt.body !== body
-    && storedCiphertextHash(receipt.receipt.body) !== ciphertextRef.contentHash) {
+  // A redacted task holds nothing, so after redaction it always releases. A
+  // terminal that lost releases only a blob that nothing held before: one
+  // reference per (blob, task) cannot tell whose hold it is, and one that
+  // names the task's offer or steer blob leaves that hold in place.
+  if (ciphertextRef !== undefined && receipt.receipt.body !== body
+    && storedCiphertextHash(receipt.receipt.body) !== ciphertextRef.contentHash
+    && (isTaskRedactionTombstone(receipt.receipt.body) || !heldBefore)) {
     await releaseSealedCiphertext(stores.objects, taskId, ciphertextRef);
   }
   // Redaction runs only on a terminal task, so its status and projections are

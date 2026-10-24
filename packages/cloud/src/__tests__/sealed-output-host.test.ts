@@ -380,6 +380,15 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
     expect(await refCount(task, ref)).toBe(0);
   });
 
+  it('a terminal after redaction releases its reference to a blob that another holder keeps', async () => {
+    const task = await offeredTask(OUTPUT_SEALING);
+    const { member, ref } = await uploaded(task);
+    await task.harness.core.objects.addReference(TENANT_A, { hash: ref.contentHash as ContentHash, refKind: 'test', refId: 'other' });
+    await task.harness.stores.receipts.record(TENANT_A, { key: terminalReceiptKey(task.taskId), body: JSON.stringify({ byokRedacted: 1, absent: true }) });
+    expect(await task.send('task.complete_sealed', { ...SEALED_OUTPUTS['task.complete_sealed'], sealed: member })).toEqual({ outcome: 'accepted' });
+    expect(await refCount(task, ref)).toBe(1);
+  });
+
   it('settles a replayed terminal on a redacted task after redaction deleted its blob', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
     const { member, ref } = await uploaded(task);
