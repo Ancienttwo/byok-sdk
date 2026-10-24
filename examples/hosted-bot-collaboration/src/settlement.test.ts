@@ -10,7 +10,7 @@ import { seedCollaboration, settlementVectors, SYNC_OPTIONS, VECTOR_NOW, type Se
 import type { FrozenInput } from '@byok-sdk/example-host-execution-core';
 import { frozenIntent, settleFacts } from './intents';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
+import { callbackPorts, vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedReconciler, type HostedTaskPort, type TaskEvidence } from './reconcile';
 import { inSchema, lockScope } from './store';
@@ -69,7 +69,8 @@ async function settlementSubject(): Promise<SettlementSubject> {
     pool.query(`UPDATE ${table('intent')} SET ${columns} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turnId), ...values]);
   return {
     scope,
-    commit: request => store().commit(scope, request, vectorPorts),
+    // The vectors commit an outcome, a K4 callback command, so the subject uses the internal entry (#793 D2f-6).
+    commit: request => store().commitIn(scope, request, callbackPorts),
     stored: () => store().dump(scope),
     state: () => store().read(scope),
     change: edit => store().seed(scope, edit),
