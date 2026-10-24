@@ -5,7 +5,7 @@ import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { commitCommand, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type SyncOptions,
+import { collaborationDue, commitCommand, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type SyncOptions,
   type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, bindDevice, revokeDevice } from './binding';
@@ -33,11 +33,11 @@ type Decide<T> = (state: CollaborationState, publish: Publish, client: PoolClien
 type TurnHistory = NonNullable<SyncOptions<never>['history']>;
 /**
  * The sync options of a scope. In history mode, `history` holds the rows of each Turn that may freeze, by Turn id.
- * The store reads the routines itself (#793 D2f). `timers` are the delegation timers of the K8 settlement; without them
- * the rule's defaults apply (#793 D2f-5).
+ * The store reads the routines itself (#793 D2f). The delegation timers are store options (#793 S4).
  */
-export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines'> & { history?: ReadonlyMap<string, TurnHistory>;
-  timers?: DelegationTimers };
+export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines'> & { history?: ReadonlyMap<string, TurnHistory> };
+/** `dueAt`: the scope's due time after the sync, the value that it wrote to `scope.due_at` (#793 S4). */
+export interface SyncResult { dueAt: number | null }
 /**
  * Builds the command ports on the state of the open commit. `publish` writes a projection in the same commit. The store
  * reads the intent facts itself, under the scope lock (#793 D2f-4), and owns the channel outbox port (#793 D2b-out-2).
@@ -80,6 +80,11 @@ export interface InboundIdentity { owner: string; self?: Record<string, readonly
 export interface HostedStoreOptions {
   /** The Host has a channel: a K4 callback queues its channel deliveries, as L does with `channel` set. */
   channel?: boolean;
+  /**
+   * The delegation timers of the K8 settlement and of the scope's due time, as L's (#793 D2f-5, S4). Without them the rule's
+   * defaults apply.
+   */
+  timers?: DelegationTimers;
 }
 /**
  * The sender's view of one delivery step (#793 D2b-out-2). `none`: the claim changed nothing. `moved`: it changed the entity
@@ -110,9 +115,14 @@ const EMPTY_FRAME = split(stateOf({})).frame;
  */
 export class HostedCollaborationStore {
   private readonly channel: boolean;
+  private readonly timers: DelegationTimers | undefined;
   constructor(private readonly pool: Pool, readonly schema: string, options: HostedStoreOptions = {}) {
     this.channel = options.channel === true;
     if (!SCHEMA.test(schema)) throw new Error('Invalid hosted collaboration schema name');
+    // As L checks its timers (K8 host.ts constructor).
+    const timers = options.timers;
+    if (timers && (time(timers.cancelGraceMs) < 1 || time(timers.uncertainAfterMs) < 1)) throw new Error('Invalid delegation timers');
+    this.timers = timers && { cancelGraceMs: timers.cancelGraceMs, uncertainAfterMs: timers.uncertainAfterMs };
   }
 
   /** Creates the schema and its tables when they are absent. */
@@ -242,7 +252,7 @@ export class HostedCollaborationStore {
     return this.transaction(async client => {
       const rows = [];
       for (const query of [
-        'SELECT state_version, frame::text FROM scope WHERE scope = $1',
+        'SELECT state_version, frame::text, due_at::text FROM scope WHERE scope = $1',
         'SELECT kind, key, ordinal::text, body::text FROM entity WHERE scope = $1 ORDER BY kind, key',
         'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, position',
         'SELECT key, ordinal::text, evidence, result::text, root FROM command WHERE scope = $1 ORDER BY key',
@@ -277,9 +287,7 @@ export class HostedCollaborationStore {
    * batch join), it reads the facts again and runs the Turns again. Each such step happens once per intent, occurrence,
    * fact or join, so the rounds end.
    */
-  async sync(scope: string, options: HostedSyncOptions): Promise<void> {
-    // As L checks its timers (K8 host.ts constructor).
-    if (options.timers && (time(options.timers.cancelGraceMs) < 1 || time(options.timers.uncertainAfterMs) < 1)) throw new Error('Invalid delegation timers');
+  async sync(scope: string, options: HostedSyncOptions): Promise<SyncResult> {
     const key = storedKey(scope);
     return this.change(scope, undefined, async (state, publish, client) => {
       const published = new Set<string>();
@@ -296,7 +304,7 @@ export class HostedCollaborationStore {
         more = false;
         for (const [turn, step] of steps) more = await writeSyncStep(client, scope, turn, step, slice, options.now) || more;
         const turns = Object.keys(state.turns).length;
-        settleDelegations(state, await settleFacts(client, scope, Object.keys(state.turns)), options.now, emit, options.timers);
+        settleDelegations(state, await settleFacts(client, scope, Object.keys(state.turns)), options.now, emit, this.timers);
         more = await deliverCancels(client, scope, state, options.now) || Object.keys(state.turns).length > turns || more;
       }
       await writeSlice(client, key, slice);
@@ -304,7 +312,7 @@ export class HostedCollaborationStore {
       // As L's sync (K8 host.ts `sync`), H's sync drops expired and unreserved reply tokens. L's call in each flush pass is a
       // call in each delivery settle here (`finishDelivery`).
       if (state.channel) cleanReplyTokens(await intentConclusions(client, scope), state, options.now);
-      return { value: undefined, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now: options.now };
+      return { value: { dueAt: this.dueAt(state) }, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now: options.now };
     });
   }
 
@@ -592,7 +600,15 @@ export class HostedCollaborationStore {
     await this.write(client, key, rows, before, after);
     if (indexed) await this.indexDeliveries(client, key, before, after, now);
     await this.writeOutbox(client, key, outbox, published);
+    // The scope's due time is a projection of the state that this transaction commits (#793 S4).
+    await client.query('UPDATE scope SET due_at = $2 WHERE scope = $1 AND due_at IS DISTINCT FROM $2', [key, this.dueAt(state)]);
     return value;
+  }
+
+  /** The earliest time that the K8 rule `collaborationDue` gives for `state`, or null for none. */
+  private dueAt(state: CollaborationState): number | null {
+    const due = collaborationDue(state, this.timers);
+    return due.length ? Math.min(...due) : null;
   }
 
   /** Loads the scope's entities and entries, and only the one command record that a commit can replay. `scopeKey` is the stored scope key. */
