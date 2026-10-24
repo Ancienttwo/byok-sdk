@@ -1124,7 +1124,11 @@ know a sealed type refuses it with `UnknownMessageTypeError`. A sealed type
 also takes every gate of its plaintext type, except the gates of the moved and
 dropped fields. For example, `task.offer_for_agent_sealed` also needs
 `agent-home-contract`, and `harnessId` on `task.offer_sealed` also needs
-`custom-harness`. Sealing never removes a gate.
+`custom-harness`. Sealing never removes a gate. A sealed task output that
+names its ciphertext blob (`sealed.ciphertextRef`) also needs the server flag
+`sealed-output-ciphertext-ref`. The split table marks `task.progress_sealed`
+and `task.await_approval_sealed` `inlineOnly`, so they have no such gate: they
+are always inline.
 
 `PROTOCOL_VERSION` stays 3. `task.offer_prepared`, input preparation, Agent
 messages, egress, drafts and memory projections are not sealed in v1.
@@ -1182,18 +1186,32 @@ family `routine.template`, for every occurrence of one routine version (design
 - `paddedLength` above 256 KiB: `ciphertextRef`, a `BlobRef` without `url`
   whose `size` is `paddedLength + 16`.
 
-**Host check of a `ciphertextRef`.** A sealed hosted entry accepts a
-`ciphertextRef` only when the object with its `contentHash` is `committed` in
-the same tenant, with the declared `size` and `contentType`. Otherwise it
-fails with `coordination_input_invalid` before any task, receipt or mailbox
-write. The receiver checks that the SHA-256 of the bytes it fetches by
+**Host check of a `ciphertextRef`.** A sealed hosted entry, and a sealed
+daemon output, is accepted with a `ciphertextRef` only when the object with
+its `contentHash` is `committed` in the same tenant, with the declared `size`
+and `contentType`. Otherwise a hosted entry fails with
+`coordination_input_invalid`, and a daemon output is refused with
+`payload_invalid`, before any task, receipt or mailbox write. The check binds
+a `ciphertextRef` to the tenant, not to the device that uploaded the object.
+The receiver checks that the SHA-256 of the bytes it fetches by
 `blobId` equals `contentHash`, before it opens them. The task then holds an
 object reference to the object (kind `sealed-task`, id the task id), so
 orphan GC keeps the ciphertext while the task lives. `redactTasks` releases
 the reference. It deletes the object when a stored row of the task still
-names it. Retention can prune the mailbox row of a delivered steer. Then no
-row names its object, and orphan GC deletes the object later. Tenant erasure
-also releases the reference.
+names it. Retention can prune the mailbox row of a delivered steer, and the
+cloud stores no artifact. Then no row names the object, and orphan GC deletes
+it later. `redactTasks` releases the references again after it replaces the
+bodies, so a report that adds a reference while redaction runs holds nothing
+afterwards, and orphan GC deletes its object. Tenant erasure also releases the
+reference. A terminal that loses to the first terminal releases its
+reference only when no reference held the object before it, so one that names
+the task's offer or steer blob leaves that reference in place. A terminal that loses to a redaction tombstone always releases its reference. A losing terminal that names a blob another task holds keeps its own hold until this task is redacted. An artifact that arrives once its task is terminal changes no
+reference: a new one holds nothing, and a replay keeps the reference of its
+earlier delivery. A terminal replayed after redaction is complete as received,
+so the Host does not check its blob. A terminal replay that arrives after
+redaction deleted the object but before it committed its audit receipt fails
+the object check with `payload_invalid`, and the daemon treats that terminal
+as rejected.
 
 **Host comparison of a sealed retry.** The Host compares two sealed
 submissions of one identity by their comparison projection: the plaintext
@@ -1270,10 +1288,23 @@ place of `event`, and `eventIndex` 0, so the tail capacity counts it once. A
 `approvalId` and `sealed`, and no `summary`. The Host resolves it by
 `approvalId`, the same as a plaintext request. A replay under the same source
 envelope is the same entry when its comparison projection (above) is the
-same. A sealed output is inline only: the cloud refuses a sealed output
-that carries `ciphertextRef`, because it does not retain that blob. The cloud
-advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`, because
-it accepts all seven sealed output types.
+same. A sealed terminal or `task.artifact_sealed` carries `ciphertextRef`
+above the inline limit, and the task holds its blob (above), so the
+plaintext limit of each is 2 MiB. `task.progress_sealed` and
+`task.await_approval_sealed` are inline only (`inlineOnly`): their tail rows
+expire, so the cloud refuses either one with `ciphertextRef`
+(`sealed_payload_unsupported`). The device uploads a ciphertext blob first.
+If the device sends the terminal more than one day after the upload, orphan
+GC may have deleted the blob, and the Host then refuses the terminal.
+
+The cloud advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`,
+because it accepts all seven sealed output types. It also advertises
+`sealed-output-ciphertext-ref`, because it holds the blob of a sealed
+terminal or artifact. A device sends a sealed output by `ciphertextRef` only
+to a server that advertises this flag. Without it, the device keeps every
+sealed output inline: a terminal over the inline frame becomes the sealed
+`task.fail` with `reason` `terminal_result_unsealable`, and an artifact over
+it becomes an error event.
 
 **Drafts and `cloud-do`.** An `agent.message.draft` is plaintext. So the Host
 refuses a draft for a task whose offer has any `sealing`, with
@@ -1369,6 +1400,13 @@ pairs with the pairing verification secret `pv` (design §7.2):
 <code>.<pv>`. The CLI splits on the last `.` only under `--e2ee`, because a
 Host's own pairing code may hold a `.`. `pv` never reaches the Host.
 
+A string `<code>.<pv>` that was used once without `--e2ee` is burned. Without
+`--e2ee` the CLI sends the whole string to the Host as the pairing code, so the
+Host learns `pv`. Do not retry that string with `--e2ee`: start a new
+registration from the Host, which gives a new code and a new `pv`. A Host's
+pairing page shows the complete command, with `--e2ee`, so that users copy the
+command and not only the string.
+
 - At pair time the device creates its member keys for the new enrollment,
   stores `pv` with a 10-minute deadline and its bundle in its OS credential
   store, and registers the bundle. A failed registration is retried at start
@@ -1378,10 +1416,22 @@ Host's own pairing code may hold a `.`. `pv` never reaches the Host.
   client's signing key, and walks the chain from seq 1 to the `add(device)`
   that key signed. It stores the anchor and the verified head, then deletes
   `pv`. A relay that does not verify only waits for the next one.
+- Each member request is cut off after 60 s
+  (`MEMBER_REQUEST_TIMEOUT_MS`), and a request of the pairing steps is also
+  cut off at the deadline. An answer that comes back at or after the
+  deadline is not used. The device reads at most 16384 chain entries
+  (`MEMBER_CHAIN_MAX_ENTRIES`, 64 full pages); a longer chain fails closed.
+- Each answer body has a byte cap, and a longer body is cut off unparsed: a
+  chain page at 256 times the largest entry (`MEMBER_CHAIN_PAGE_MAX_BYTES`),
+  a key package, relayed MAC or registration answer at 8 KiB
+  (`MEMBER_OBJECT_MAX_BYTES`), an error body at 1 KiB. A key package read
+  that returns more than one package is refused.
 - Each later start walks the chain from seq 1 again. The stored head must be
   on the new walk, with the same hash at the same seq. A shorter chain or
   another history keeps E2EE off for that run, so a Host cannot rewind the
-  chain to hide a `remove`.
+  chain to hide a `remove`. The start retries the chain read for 10 minutes
+  (`MEMBER_REWALK_TIMEOUT_MS`), then keeps E2EE off for that run. It also
+  deletes a `pv` left over from a pairing whose delete failed.
 - Without `pv`, or with an expired one, the device is no member. Missing or
   malformed member keys are never replaced: the Host keeps the first bundle
   per device, so the recovery is a re-pair, which mints a new device id.
@@ -1437,11 +1487,13 @@ journal, like `provider.provisioning.available`, and never journals it.
   the scope is in its verified chain state and the scope's latest
   `scope-policy` holds both the device and the sender. The sender's signing
   key comes from the verified chain. The opened key stays in memory.
+- Each Host read is cut off after 60 s (`MEMBER_REQUEST_TIMEOUT_MS`).
 - It keeps the row (does not acknowledge) only while the member is still
-  resuming at start, or when a Host read fails. It acknowledges every other
-  end with a log line: no member, an unknown scope, a missing package, or a
-  package that does not open. The first open or seal at that epoch fetches
-  again on its cache miss (E2d-3).
+  resuming at start, or when a Host read fails or times out. It acknowledges
+  every other end with a log line: no member, an unknown scope, a missing
+  package, a package that does not open, or a final Host answer (a 4xx other
+  than 429, a chain or body past its cap, more than one package). The first
+  open or seal at that epoch fetches again on its cache miss (E2d-3).
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
