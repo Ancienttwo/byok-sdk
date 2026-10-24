@@ -102,6 +102,48 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       expect(await row(scope, 'bot-turn:t1')).toEqual({ next_at: String(NOW + 40_000), tries: 2, last_error: null, settled_at: String(NOW + 20_000) });
     });
 
+    it('ignores the error of a claim that another sender took over while the new claim is still in flight', async () => {
+      const scope = await scoped();
+      await project(scope, 'bot-turn:t1', { status: 'done' });
+      let fail!: () => void, finish!: () => void;
+      const stale = receiver(() => new Promise<void>((_, reject) => { fail = () => reject(new Error('stale receiver')); }));
+      const first = sender({ projections: stale.port }).run();
+      await expect.poll(() => stale.calls.length).toBe(1);
+      clock = NOW + 20_000;
+      const live = receiver(() => new Promise<void>(resolve => { finish = resolve; }));
+      const second = sender({ projections: live.port }).run();
+      await expect.poll(() => live.calls.length).toBe(1);
+      clock = NOW + 30_000;
+      fail();
+      expect(await first).toMatchObject({ steps: 1, failed: [{ scope, id: 'bot-turn:t1' }] });
+      // The row is the live claim's: its lease and no error.
+      expect(await row(scope, 'bot-turn:t1')).toEqual({ next_at: String(NOW + 40_000), tries: 2, last_error: null, settled_at: null });
+      finish();
+      expect(await second).toEqual({ steps: 1, failed: [] });
+      expect(await row(scope, 'bot-turn:t1')).toEqual({ next_at: String(NOW + 40_000), tries: 2, last_error: null, settled_at: String(NOW + 30_000) });
+    });
+
+    it('ignores the success of a claim that another sender took over while the new claim is still in flight', async () => {
+      const scope = await scoped();
+      await project(scope, 'bot-turn:t1', { status: 'done' });
+      let finish!: () => void, fail!: () => void;
+      const stale = receiver(() => new Promise<void>(resolve => { finish = resolve; }));
+      const first = sender({ projections: stale.port }).run();
+      await expect.poll(() => stale.calls.length).toBe(1);
+      clock = NOW + 20_000;
+      const live = receiver(() => new Promise<void>((_, reject) => { fail = () => reject(new Error('live receiver')); }));
+      const second = sender({ projections: live.port }).run();
+      await expect.poll(() => live.calls.length).toBe(1);
+      clock = NOW + 30_000;
+      finish();
+      expect(await first).toEqual({ steps: 1, failed: [] });
+      expect(await row(scope, 'bot-turn:t1')).toEqual({ next_at: String(NOW + 40_000), tries: 2, last_error: null, settled_at: null });
+      // The live claim fails, so the row backs off and is sent again.
+      fail();
+      expect(await second).toMatchObject({ steps: 1, failed: [{ scope, id: 'bot-turn:t1' }] });
+      expect(await row(scope, 'bot-turn:t1')).toEqual({ next_at: String(NOW + 35_000), tries: 2, last_error: 'live receiver', settled_at: null });
+    });
+
     it('keeps a projection whose receiver throws, with its error, and sends it again after the backoff', async () => {
       const scope = await scoped();
       await project(scope, 'bot-turn:t1', { status: 'done' });
@@ -198,30 +240,70 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       expect(await row(scope, 'ghost')).toMatchObject({ settled_at: null, next_at: String(NOW + 1 + 5_000) });
     });
 
-    it('queues a terminal outcome delivery on the reply route of its inbound, with intent conclusions read before the terminal writes', async () => {
+    const ports = (extra: Partial<CommandPorts> = {}): PortsFactory => (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW, ...extra });
+    const MESSAGE: InboundMessage = { channel: 'fake', platformMessageId: 'in1', conversation: DIRECT, sender: { id: 'owner', kind: 'human' }, text: 'Do it',
+      mentions: [], replyRoute: { kind: 'reply', channel: 'fake', inboundId: 'in1', token: 'secret', expiresAt: NOW + 600_000 } };
+    /** A channel store whose owner message `MESSAGE` has a Turn with a frozen intent, as the K8 receive command and a sync leave it. */
+    async function received() {
       const channelStore = new HostedCollaborationStore(opened!.pool, store().schema, { channel: true });
       const scope = `tenant:${randomUUID()}`;
       await channelStore.seed(scope, state => seedCollaboration(state));
       await channelStore.bindDevice(scope, 'device');
-      const ports = (extra: Partial<CommandPorts> = {}): PortsFactory => (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW, ...extra });
-      // A push route exists too: a view read after the terminal's conclusion write would see the root closed and push.
+      // A push route exists too: a view that missed a concluded intent, or saw a conclusion too early, would choose the other route.
       const unused = () => { throw new Error('Unused route port'); };
       await channelStore.commit(scope, { scope, commandId: randomUUID(), command: { kind: 'enable_push_route', conversation: DIRECT, channel: 'fake', target: 't', owner: 'owner' } },
         (state, publish) => ports({ routes: { enable: (conversation, name, target, owner) => enablePush(state, conversation, name, target, owner, NOW).id,
           revoke: unused, resend: unused } })(state, publish));
-      const message: InboundMessage = { channel: 'fake', platformMessageId: 'in1', conversation: DIRECT, sender: { id: 'owner', kind: 'human' }, text: 'Do it',
-        mentions: [], replyRoute: { kind: 'reply', channel: 'fake', inboundId: 'in1', token: 'secret', expiresAt: NOW + 600_000 } };
-      const received = await channelStore.commit(scope, { scope, commandId: hash(['receive', inboundKey(message)]),
-        command: { kind: 'receive', inbound: 'owner_input', key: inboundKey(message), botId: 'main', request: message.text, sender: 'owner' } },
-      (state, publish) => ports({ remember: root => rememberInbound(state, message, root) })(state, publish));
-      const turnId = (received.disposition as { value: string }).value;
+      const commit = await channelStore.commit(scope, { scope, commandId: hash(['receive', inboundKey(MESSAGE)]),
+        command: { kind: 'receive', inbound: 'owner_input', key: inboundKey(MESSAGE), botId: 'main', request: MESSAGE.text, sender: 'owner' } },
+      (state, publish) => ports({ remember: root => rememberInbound(state, MESSAGE, root) })(state, publish));
+      const turnId = (commit.disposition as { value: string }).value;
       await channelStore.sync(scope, { ...SYNC_OPTIONS, now: NOW, history: undefined });
+      return { channelStore, scope, turnId };
+    }
+    const TIMES = { leaseMs: 20_000, readback: false, readbackMs: 30_000 };
+    /** Delivery `d1` of `turnId` on the push route, claimed with attempt 1, and its index row with the claim's lease. */
+    async function claimed(channelStore: HostedCollaborationStore, scope: string, turnId: string) {
+      await channelStore.seed(scope, state => {
+        const push = Object.keys(state.channel!.pushRoutes)[0]!;
+        state.channel!.deliveries.d1 = { id: 'd1', taskId: taskId(turnId, 0), turnId, messageId: 'm1', body: 'b', conversation: DIRECT, channel: 'fake',
+          route: { kind: 'push', pushRouteId: push }, state: 'sending', attempts: 1 };
+      });
+      await indexRow(scope, 'd1', null);
+      await query(`UPDATE ${table('outbox')} SET next_at = $3 WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey('d1'), NOW + TIMES.leaseMs]);
+    }
+
+    it('keeps a claimed delivery for a sender whose scan saw it due before the claim, until the claim lease passed (D1)', async () => {
+      const { channelStore, scope, turnId } = await received();
+      await claimed(channelStore, scope, turnId);
+      expect(await channelStore.claimDelivery(scope, 'd1', NOW + TIMES.leaseMs - 1, TIMES)).toEqual({ kind: 'none' });
+      expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'sending', attempts: 1 });
+      expect(await row(scope, 'd1')).toMatchObject({ next_at: String(NOW + TIMES.leaseMs) });
+      expect(await channelStore.claimDelivery(scope, 'd1', NOW + TIMES.leaseMs, TIMES)).toEqual({ kind: 'none' });
+      expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'unknown', attempts: 1, code: 'interrupted' });
+    });
+
+    it('drops a reply token at a delivery settle once the intent of its root concluded, before a sync ends the Turn', async () => {
+      const { channelStore, scope, turnId } = await received();
+      await claimed(channelStore, scope, turnId);
+      // The owner cancels the Turn: its untried intent concludes in the commit, and the Turn ends at the next sync.
+      await channelStore.commit(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_turn', turnId } }, ports());
+      expect((await channelStore.read(scope)).channel!.inbounds[inboundKey(MESSAGE)]!.reply).toMatchObject({ token: 'secret' });
+      await channelStore.finishDelivery(scope, 'd1', 1, { result: { result: 'accepted', platformMessageId: 'p1' } }, NOW + 1, TIMES);
+      const state = await channelStore.read(scope);
+      expect(state.turns[turnId]).toMatchObject({ status: 'processing' });
+      expect(state.turns[turnId]!.conclusion).toBeUndefined();
+      expect(state.channel!.inbounds[inboundKey(MESSAGE)]!.reply!.token).toBeUndefined();
+    });
+
+    it('queues a terminal outcome delivery on the reply route of its inbound, with intent conclusions read before the terminal writes', async () => {
+      const { channelStore, scope, turnId } = await received();
       const document: Json = { confirmable_action: [{ action: 'send_message', summary: 'Send it', draft: { text: 'hi' } }] };
       const evidence = { terminal: { envelope: { task_id: taskId(turnId, 0), type: 'task.complete', payload: { document } } } as unknown as DeviceTerminal,
         attempt: { taskId: taskId(turnId, 0) } as unknown as TaskAttempt } satisfies TaskEvidence;
       expect(await channelStore.finish(scope, turnId, evidence, ports())).toBe('succeeded');
       const deliveries = Object.values((await channelStore.read(scope)).channel!.deliveries);
-      expect(deliveries).toMatchObject([{ turnId, body: 'Send it', route: { kind: 'reply', inboundId: inboundKey(message) }, state: 'pending' }]);
+      expect(deliveries).toMatchObject([{ turnId, body: 'Send it', route: { kind: 'reply', inboundId: inboundKey(MESSAGE) }, state: 'pending' }]);
       expect(await row(scope, deliveries[0]!.id)).toEqual({ next_at: '0', tries: 0, last_error: null, settled_at: null });
     });
   });
