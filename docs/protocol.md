@@ -316,6 +316,15 @@ capability flag `agent-memory-read-if-admitted`; server and hosted cloud refuse
 it otherwise before task creation or mailbox append. The other values do not
 change.
 
+**Landed additive minor: `agentMemory: 'read-write-if-admitted'`.** The same
+three ordinary Agent offers, and their sealed forms, accept a fifth
+`agentMemory` value, `read-write-if-admitted` (§2.2). `task.offer_prepared`
+does not accept it. A host sends the value only to a device that durably
+advertises both `agent-memory-selection` and the new capability flag
+`agent-memory-read-write-if-admitted`; server and hosted cloud refuse it
+otherwise before task creation or mailbox append. The other values do not
+change.
+
 **Agent message drafts (additive v3).** `agent.message.draft` is gated on the
 server's `agent-message-draft` flag. Its payload is strict. It has no reliable
 ack or spool entry. `RuntimeCapabilities.messageDraft` is optional strip-safe
@@ -439,7 +448,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Historical handshake acknowledgement; current long-poll uses response metadata |
 | `task.offer` | S→D | **required** | **required** | `instruction`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
-| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `homeAccess?` (additive — §2.2), `agentMemory?` (additive — §2.2; `read-if-admitted` needs `agent-memory-read-if-admitted`), `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
+| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `homeAccess?` (additive — §2.2), `agentMemory?` (additive — §2.2; `read-if-admitted` needs `agent-memory-read-if-admitted`, `read-write-if-admitted` needs `agent-memory-read-write-if-admitted`), `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
 | `task.offer_for_agent_with_egress` | S→D | **required** | **required** | All strict Agent fields plus required `sessionRef` and exact `egressPolicy` | An Agent dispatch targets a daemon that consumed the revisioned egress contract |
 | `task.offer_for_agent_with_egress_fresh` | S→D | **required** | **required** | All strict Agent fields plus exact `egressPolicy`, with no `sessionRef` | A fresh Agent dispatch targets a daemon advertising `agent-egress-fresh-session` |
 | `task.offer_prepared` | S→D | **required** | **required** | `agentRef`, `homeAccess?`, `agentMemory`, `egressPolicy`, `messageEgress?`, `preparation` (`reference`, `requestDigest`, `artifactDigest?`), `runtime?`, `dispatchSelection?`, `requiredToolsets?`, `terminalProjection?`, `limits?` — and deliberately NO `instruction` and NO `sessionRef` | An already-counted preparation is dispatched to the device that counted it |
@@ -770,11 +779,16 @@ the reference server refuses that dispatch before the task exists. `read` or
 non-retryable decline (`agent_memory_unavailable`); the daemon never changes
 the selection to `none`. `read-if-admitted` runs as `read` when the daemon
 admits the memory MCP and as `none` when it does not, for a writer and a
-reader; it never gets `agent_memory_unavailable`. The daemon reads its
-admission once per offer and binds the memory MCP from that one answer. The
-terminal does not report which mode ran. A daemon advertises
-`agent-memory-selection` and `agent-memory-read-if-admitted` whenever it has an
-Agent home, whatever its memory admission.
+reader; it never gets `agent_memory_unavailable`. `read-write-if-admitted`
+runs as `read-write` when the daemon admits the memory MCP and as `none` when
+it does not; it never gets `agent_memory_unavailable`. A `memory-reader` offer
+that selects it gets `agent_memory_selection_invalid` whatever the admission,
+and the reference server refuses that dispatch before the task exists. The
+daemon reads its admission once per offer and binds the memory MCP from that
+one answer. The terminal does not report which mode ran. A daemon advertises
+`agent-memory-selection`, `agent-memory-read-if-admitted` and
+`agent-memory-read-write-if-admitted` whenever it has an Agent home, whatever
+its memory admission.
 
 ### 2.3 Task-free sealed provider provisioning notice
 
@@ -1336,15 +1350,35 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   top-level field gets 400. The chain append and the package put run the
   same checks as the Host control plane calls `appendMemberChainEntries` and
   `putScopeKeyPackages`.
-- **Proof replay.** A device proof is not single-use on the three writes.
-  Anyone who captures a proof and its body can send them again while the
-  proof's `issuedAt` is within the Host clock skew (60 s by default). A
-  replayed registration extends the pairing MAC expiry, or puts back an older
-  MAC for the same bundle. A replayed package put can overwrite a newer
-  package for the same scope epoch, `keyId` and recipient. A replayed chain
-  append changes nothing. The owner accepted this window for now (owner batch
-  §41a A). Before E2d-5, `requestId` becomes single-use on the three writes,
-  as on the truth put.
+- **Shred.** A chain entry with `op: 'shred'` must have exactly the subject
+  `{ scopeId }` (a nonempty string); any other subject gets 400. A `scopeId`
+  over 512 UTF-16 code units names no Host scope, so the Host stores that
+  entry and does nothing else for it. When the append newly stores a `shred`
+  entry for a shorter `scopeId`, the Host, in the same transaction,
+  deletes the scope's key packages and epochs, records the scope as
+  shredded, and writes the receipt `e2ee-scope-shred:<scopeId>` (an identity
+  receipt) with the entry's seq, the time and who appended it. A replayed
+  `shred` entry deletes nothing again, and a later `shred` of the same scope
+  keeps the first receipt. After a shred, a package put that names the scope
+  gets 409 `e2ee_scope_shredded` and stores nothing, for any epoch. The Host
+  verifies no signature, so any paired device of the tenant can shred a
+  scope on the Host ([security](security.md#deletion-paths)). The Host
+  control plane `appendMemberChainEntries` does the same.
+- **Proof replay.** The proof's `requestId` is single-use per device on the
+  three writes, as on the truth put (owner batch §41a A). The Host records
+  the `requestId` with its binding (`operation`, `resource`, `bodySha256`,
+  `bodySize`) and the write's result, in the same transaction as the write;
+  in Postgres this is `proof_request_receipt`, the table the truth put uses,
+  so a `requestId` is single-use across both. A request with a recorded
+  `requestId` and the same binding writes nothing and gets the recorded
+  result: a replayed registration does not touch the pairing MAC or its
+  expiry, a replayed package put does not overwrite a newer package, and a
+  replayed chain append returns the first counts. A replayed package put
+  still sends the key package notices again, as any successful put does. A
+  recorded `requestId` with another binding gets 409 `proof_request_conflict`
+  and writes nothing. A refused write (any 4xx) records nothing, so the same
+  request can succeed later. A Host control-plane write has no proof and
+  records nothing.
 - **Reads.** A device route checks the bearer against the device row, so a
   revoked or superseded device gets 401. The package read returns only the
   packages addressed to the device's registered member; a query names no
@@ -1358,7 +1392,7 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   | 400 | `coordination_input_invalid`, or an unreadable body |
   | 401 | `unauthorized` |
   | 404 | `e2ee_pairing_mac_not_found` |
-  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_member_key_conflict`, `e2ee_member_not_registered` |
+  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_scope_shredded`, `e2ee_member_key_conflict`, `e2ee_member_not_registered`, `proof_request_conflict` |
   | 413 | the body is over `maxE2eeRequestBytes` |
   | 500 | `e2ee_member_state_unreadable` |
 
@@ -1369,6 +1403,13 @@ pairs with the pairing verification secret `pv` (design §7.2):
 <code>.<pv>`. The CLI splits on the last `.` only under `--e2ee`, because a
 Host's own pairing code may hold a `.`. `pv` never reaches the Host.
 
+A string `<code>.<pv>` that was used once without `--e2ee` is burned. Without
+`--e2ee` the CLI sends the whole string to the Host as the pairing code, so the
+Host learns `pv`. Do not retry that string with `--e2ee`: start a new
+registration from the Host, which gives a new code and a new `pv`. A Host's
+pairing page shows the complete command, with `--e2ee`, so that users copy the
+command and not only the string.
+
 - At pair time the device creates its member keys for the new enrollment,
   stores `pv` with a 10-minute deadline and its bundle in its OS credential
   store, and registers the bundle. A failed registration is retried at start
@@ -1378,10 +1419,22 @@ Host's own pairing code may hold a `.`. `pv` never reaches the Host.
   client's signing key, and walks the chain from seq 1 to the `add(device)`
   that key signed. It stores the anchor and the verified head, then deletes
   `pv`. A relay that does not verify only waits for the next one.
+- Each member request is cut off after 60 s
+  (`MEMBER_REQUEST_TIMEOUT_MS`), and a request of the pairing steps is also
+  cut off at the deadline. An answer that comes back at or after the
+  deadline is not used. The device reads at most 16384 chain entries
+  (`MEMBER_CHAIN_MAX_ENTRIES`, 64 full pages); a longer chain fails closed.
+- Each answer body has a byte cap, and a longer body is cut off unparsed: a
+  chain page at 256 times the largest entry (`MEMBER_CHAIN_PAGE_MAX_BYTES`),
+  a key package, relayed MAC or registration answer at 8 KiB
+  (`MEMBER_OBJECT_MAX_BYTES`), an error body at 1 KiB. A key package read
+  that returns more than one package is refused.
 - Each later start walks the chain from seq 1 again. The stored head must be
   on the new walk, with the same hash at the same seq. A shorter chain or
   another history keeps E2EE off for that run, so a Host cannot rewind the
-  chain to hide a `remove`.
+  chain to hide a `remove`. The start retries the chain read for 10 minutes
+  (`MEMBER_REWALK_TIMEOUT_MS`), then keeps E2EE off for that run. It also
+  deletes a `pv` left over from a pairing whose delete failed.
 - Without `pv`, or with an expired one, the device is no member. Missing or
   malformed member keys are never replaced: the Host keeps the first bundle
   per device, so the recovery is a re-pair, which mints a new device id.
@@ -1437,11 +1490,13 @@ journal, like `provider.provisioning.available`, and never journals it.
   the scope is in its verified chain state and the scope's latest
   `scope-policy` holds both the device and the sender. The sender's signing
   key comes from the verified chain. The opened key stays in memory.
+- Each Host read is cut off after 60 s (`MEMBER_REQUEST_TIMEOUT_MS`).
 - It keeps the row (does not acknowledge) only while the member is still
-  resuming at start, or when a Host read fails. It acknowledges every other
-  end with a log line: no member, an unknown scope, a missing package, or a
-  package that does not open. The first open or seal at that epoch fetches
-  again on its cache miss (E2d-3).
+  resuming at start, or when a Host read fails or times out. It acknowledges
+  every other end with a log line: no member, an unknown scope, a missing
+  package, a package that does not open, or a final Host answer (a 4xx other
+  than 429, a chain or body past its cap, more than one package). The first
+  open or seal at that epoch fetches again on its cache miss (E2d-3).
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 

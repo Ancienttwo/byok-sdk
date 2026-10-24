@@ -30,7 +30,7 @@ OS boundary the Host supplies.
 | Runtime | Workspace confinement | SDK launch permission | Restrictions that apply | Real OS-level sandbox |
 |---|---|---|---|---|
 | pi | `ctx.workspaceDir` (or the Agent home) as cwd only — a convention, not a chroot/container/seccomp boundary (*Workspace confinement is a convention, not a sandbox*). | Pre-trusts the session cwd, so project `.pi/extensions` load. | The user's own Pi agentDir, extensions and skills. | None. |
-| claude | Same convention-only confinement as above. | `--dangerously-skip-permissions`. Claude refuses it as root unless the environment marks a sandbox. | The user's own `~/.claude` settings, deny rules, sandbox, MCP servers and hooks. | Only what the user's own Claude configuration sets up. |
+| claude | Same convention-only confinement as above. | `--dangerously-skip-permissions`. Claude refuses it as root unless the environment marks a sandbox. | The user's own `~/.claude` settings, deny rules, sandbox, MCP servers and hooks. Under `ClaudeAdapterOptions.agentUserContext: 'excluded'` an Agent task drops the user's MCP servers, the instruction files outside the Agent home and auto memory, and keeps the rest. | Only what the user's own Claude configuration sets up. |
 | codex | Same convention-only confinement as above. | `approvalPolicy: never`; sandbox `danger-full-access` by default. | `DaemonConfig.codexSandbox` selects `read-only` or `workspace-write`, or `inherit` so the user's `config.toml` applies. | Codex's own sandbox when selected; this SDK does not verify it. |
 
 ### Cross-cutting facts that apply to all three

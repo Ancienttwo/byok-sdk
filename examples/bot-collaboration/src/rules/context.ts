@@ -1,5 +1,5 @@
 import type { Card, Question, Rejection, Turn } from './turn';
-import { roomContext } from './rooms';
+import { roomContext, type RoomMessage } from './rooms';
 import { HISTORY_MAX_ITEMS, HISTORY_MAX_BYTES, historyWindow, fitHistory } from './history';
 import { crossBotRequest, delegationBlock, instructionOverhead, isCrossBot, openDelegationsContext } from './delegation';
 import { ownerMainTurn, ROOM_SYSTEM_PROMPT, SYSTEM_PROMPT, type ContextRoutine, type ContextState } from './schema';
@@ -11,11 +11,11 @@ import { ownerMainTurn, ROOM_SYSTEM_PROMPT, SYSTEM_PROMPT, type ContextRoutine, 
 /**
  * One Bot's history, oldest first. `turns` holds the current Turn; the Turn id selects it.
  * For a frozen Bot Turn, give only this Bot's rows: its Turns, the cards and questions of its Turns,
- * and its rejected actions that no Turn consumed.
+ * and its rejected actions that no Turn consumed. `room` holds a seat Turn's room messages from an external authority.
  */
 export interface ContextHistory {
   readonly turns: readonly (Turn | ContextTurn)[]; readonly cards: readonly Card[]; readonly questions: readonly Question[];
-  readonly rejected: readonly Rejection[];
+  readonly rejected: readonly Rejection[]; readonly room?: readonly RoomMessage[];
 }
 /** One history row of a ContextPack. An external history authority gives its rows in this shape (#739 Q4a). */
 export interface ContextTurn {
@@ -55,7 +55,7 @@ export function turnContext<R extends ContextRoutine>(state: ContextState, histo
     ...(turn.source === 'bot_request' ? { delegation: delegationBlock(state, turn) } : {}),
     ...(ownerMainTurn(state, turn.botId, turn) ? { openDelegations: openDelegationsContext(state) } : {}) };
   if (turn.source === 'room_slot') {
-    const result = { ...shared, ...roomContext(team, turn, turnLimit) };
+    const result = { ...shared, ...roomContext(team, turn, turnLimit, history.room) };
     result.historyWindow.maxBytes = maxBytes;
     result.historyWindow.omittedRejections = ownRejections.length - shared.rejectedActions.length;
     return fitHistory(result, result.room.messages, 'omittedMessages', turn.request);
@@ -83,7 +83,7 @@ export interface BotHistoryState {
  * One Bot's history in ledger order. `turn` takes its stored position, or comes last when it is not stored.
  * Select within the Bot boundary before applying any count or byte window.
  */
-export function botHistory(state: BotHistoryState, turn: Turn, injected?: readonly ContextTurn[]): ContextHistory {
+export function botHistory(state: BotHistoryState, turn: Turn, injected?: readonly ContextTurn[], room?: readonly RoomMessage[]): ContextHistory {
   const own = <T extends { turnId: string }>(rows: Readonly<Record<string, T>>) => Object.values(rows).filter(row => state.turns[row.turnId]?.botId === turn.botId);
   return {
     // Injected rows replace the stored Turns. The current Turn always comes from this ledger.
@@ -91,15 +91,17 @@ export function botHistory(state: BotHistoryState, turn: Turn, injected?: readon
       : Object.values({ ...Object.fromEntries(Object.entries(state.turns).filter(([, row]) => row.botId === turn.botId)), [turn.id]: turn }),
     cards: own(state.cards), questions: own(state.questions),
     rejected: state.rejected.filter(rejection => rejection.botId === turn.botId && !rejection.consumedBy),
+    ...(room ? { room } : {}),
   };
 }
 /**
  * The frozen instruction of a Bot Turn, from its own history. A Cross-Bot Turn fits `instructionMaxBytes` as a whole.
  * `injected` is the Bot's earlier history from an external authority. Cards, questions and rejected actions stay Host state.
+ * `room` is a seat Turn's room messages from an external authority.
  */
 export function botTurnInstruction<R extends ContextRoutine>(state: ContextState & BotHistoryState, turn: Turn, limits: InstructionLimits,
-  routines: readonly R[] = [], injected?: readonly ContextTurn[]) {
-  return turnInstruction(state, botHistory(state, turn, injected), turn, limits, routines);
+  routines: readonly R[] = [], injected?: readonly ContextTurn[], room?: readonly RoomMessage[]) {
+  return turnInstruction(state, botHistory(state, turn, injected, room), turn, limits, routines);
 }
 export const DEFAULT_CONTEXT_MAX_BYTES = HISTORY_MAX_BYTES;
 export const DEFAULT_CONTEXT_TURN_LIMIT = 12;

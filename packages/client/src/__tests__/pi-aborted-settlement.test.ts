@@ -2,7 +2,7 @@ import { inertScratch } from './fixtures/inert-scratch';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { PiRpcMessage } from '../adapters/pi/rpc-client';
-import type { Session } from '../types';
+import type { Session, MessageDraftDelta } from '../types';
 
 const sandbox = vi.hoisted(() => {
   const forbidden: string[] = [];
@@ -116,7 +116,7 @@ afterEach(async () => {
   finally { session = undefined; vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); }
 });
 
-async function events(aborted: boolean): Promise<AsyncIterator<AgentEvent>> {
+async function events(aborted: boolean): Promise<AsyncIterator<AgentEvent | MessageDraftDelta>> {
 const __executionScratch = inertScratch();
 
   sandbox.frames.push({ type: 'agent_settled', aborted });

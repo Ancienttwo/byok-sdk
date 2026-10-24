@@ -8,6 +8,7 @@ import {
   createMutableClock,
   deviceProofSigningInput,
   type DeviceProofProtectedClaims,
+  type JsonValue,
   type TenantId,
 } from '@byok-sdk/core';
 import { generateScopeKey } from '@byok-sdk/core/sealed-payload';
@@ -25,7 +26,7 @@ import { CLOUD_CAPABILITIES, fullCapabilityDeclaration } from '../capabilities';
 import { createByokCloud, type ByokCloudOptions } from '../cloud';
 import { createInMemoryByokCloud } from '../composition/in-memory';
 import { InMemoryE2eeMemberStore } from '../stores/in-memory/e2ee-member';
-import { chain, keyPackage, newMember } from './support/e2ee-members';
+import { chain, keyPackage, newMember, signedChain } from './support/e2ee-members';
 import { TENANT_A, TENANT_B } from './support/harness';
 
 const ORIGIN = 'http://cloud.test';
@@ -52,7 +53,7 @@ interface Device {
 function setup(overrides: Partial<ByokCloudOptions> = {}) {
   const clock = createMutableClock(new Date('2026-10-24T00:00:00.000Z'));
   const base = createInMemoryByokCloud({ clock });
-  const store = new InMemoryE2eeMemberStore();
+  const store = new InMemoryE2eeMemberStore(base.stores.receipts);
   const cloud = createByokCloud({
     core: base.core,
     cloud: base.stores,
@@ -86,8 +87,8 @@ function setup(overrides: Partial<ByokCloudOptions> = {}) {
     return { tenant, deviceId: body.deviceId, bearer: `Bearer ${body.accessToken}`, privateKey, keyId: row.proofKeyId, keyEpoch: row.proofKeyEpoch };
   }
 
-  /** A proof write. `signedBody` lets a test sign other bytes than it sends. */
-  async function write(device: Device, path: string, operation: string, value: unknown, signedBody?: Uint8Array) {
+  /** A proof write. `signedBody` lets a test sign other bytes than it sends; `requestId` lets it reuse one. */
+  async function write(device: Device, path: string, operation: string, value: unknown, signedBody?: Uint8Array, requestId: string = randomUUID()) {
     const body = new TextEncoder().encode(JSON.stringify(value));
     const signed = signedBody ?? body;
     const claims: DeviceProofProtectedClaims = {
@@ -97,7 +98,7 @@ function setup(overrides: Partial<ByokCloudOptions> = {}) {
       deviceId: device.deviceId,
       keyId: device.keyId,
       keyEpoch: device.keyEpoch,
-      requestId: randomUUID(),
+      requestId,
       operation,
       resource: path,
       method: 'POST',
@@ -187,6 +188,63 @@ describe('E2EE member device routes', () => {
     for (const query of ['?afterSeq=x', '?afterSeq=1&afterSeq=2', '?limit=0', '?limit=257', '?scopeId=s']) {
       expect(await answer(await env.read(device, `/byok/e2ee/chain${query}`))).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
     }
+  });
+
+  it('shreds a scope on a device append, records the device in the receipt, and refuses later puts with 409', async () => {
+    const env = setup();
+    const device = await env.pair(TENANT_A);
+    const client = await newMember();
+    const member = client.bundle.memberId;
+    const entries = await signedChain(TENANT_A, client, [
+      { op: 'add', subject: { member: client.bundle as unknown as JsonValue } },
+      { op: 'scope-policy', subject: { scopeId: 'scope-1', categories: ['task-input'], members: [member] } },
+      { op: 'shred', subject: { scopeId: 'scope-1' } },
+    ]);
+    const put = (packages: unknown) => env.write(device, '/byok/e2ee/key-packages', E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, { packages });
+    expect((await put([await keyPackage(TENANT_A, client, client, 1)])).status).toBe(200);
+
+    expect(await answer(await env.write(device, '/byok/e2ee/chain', E2EE_MEMBER_CHAIN_APPEND_OPERATION, { entries })))
+      .toEqual({ status: 200, body: { appended: 3, replayed: 0 } });
+    expect(await env.cloud.readScopeKeyPackages(TENANT_A, { scopeId: 'scope-1' })).toEqual({ packages: [] });
+    expect(JSON.parse((await env.base.stores.receipts.get(TENANT_A, 'e2ee-scope-shred:scope-1'))!.body))
+      .toEqual({ chainSeq: 3, shreddedAt: env.clock.now().toISOString(), writer: { kind: 'device', deviceId: device.deviceId } });
+    expect(await answer(await put([await keyPackage(TENANT_A, client, client, 2)]))).toEqual({ status: 409, body: { error: 'e2ee_scope_shredded' } });
+  });
+
+  it('makes the proof requestId single-use on the three writes', async () => {
+    const env = setup();
+    const device = await env.pair(TENANT_A);
+    const member = await newMember(device.deviceId);
+    const sender = await newMember();
+    const once = (path: string, operation: string, value: unknown, requestId: string) => env.write(device, path, operation, value, undefined, requestId);
+
+    // Registration: a replay returns the first result and keeps the newer MAC.
+    const register = (mac: string, requestId: string) => once('/byok/e2ee/member-key', E2EE_MEMBER_KEY_REGISTER_OPERATION, { member: member.bundle, mac }, requestId);
+    const otherMac = 'B'.repeat(42) + 'E';
+    expect(await answer(await register(MAC, 'register-1'))).toEqual({ status: 200, body: { memberId: member.bundle.memberId } });
+    expect((await register(otherMac, 'register-2')).status).toBe(200);
+    expect(await answer(await register(MAC, 'register-1'))).toEqual({ status: 200, body: { memberId: member.bundle.memberId } });
+    expect(await env.cloud.readMemberKeyRegistration(TENANT_A, device.deviceId)).toEqual({ member: member.bundle, deviceMac: otherMac });
+    expect(await answer(await register(otherMac, 'register-1'))).toEqual({ status: 409, body: { error: 'proof_request_conflict' } });
+
+    // Package put: a replay of an older wrap does not overwrite the newer one.
+    const key = generateScopeKey();
+    const older = await keyPackage(TENANT_A, sender, member, 1, key);
+    const newer = await keyPackage(TENANT_A, sender, member, 1, key);
+    const put = (packages: unknown, requestId: string) => once('/byok/e2ee/key-packages', E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, { packages }, requestId);
+    expect(await answer(await put([older], 'put-1'))).toEqual({ status: 200, body: { stored: 1, skippedDeviceIds: [device.deviceId] } });
+    expect((await put([newer], 'put-2')).status).toBe(200);
+    expect(await answer(await put([older], 'put-1'))).toEqual({ status: 200, body: { stored: 1, skippedDeviceIds: [device.deviceId] } });
+    expect(await env.cloud.readScopeKeyPackages(TENANT_A, { scopeId: 'scope-1' })).toEqual({ packages: [newer] });
+    expect(await answer(await put([newer], 'put-1'))).toEqual({ status: 409, body: { error: 'proof_request_conflict' } });
+
+    // Chain append: a replay returns the first counts.
+    const entries = await chain(TENANT_A, sender, 2);
+    const append = (value: unknown, requestId: string) => once('/byok/e2ee/chain', E2EE_MEMBER_CHAIN_APPEND_OPERATION, value, requestId);
+    expect(await answer(await append({ entries: entries.slice(0, 1) }, 'append-1'))).toEqual({ status: 200, body: { appended: 1, replayed: 0 } });
+    expect(await answer(await append({ entries: entries.slice(0, 1) }, 'append-1'))).toEqual({ status: 200, body: { appended: 1, replayed: 0 } });
+    expect(await answer(await append({ entries }, 'append-1'))).toEqual({ status: 409, body: { error: 'proof_request_conflict' } });
+    expect((await env.cloud.readMemberChain(TENANT_A)).entries).toEqual(entries.slice(0, 1));
   });
 
   it('puts packages under device proof and returns only the packages addressed to the reading device', async () => {

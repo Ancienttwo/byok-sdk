@@ -3,6 +3,7 @@ import { parseClaudeContextWindow } from './control-channel';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
+import type { MessageDraftDelta } from '../../types';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 
 /**
@@ -50,7 +51,7 @@ export interface MapClaudeMessageOptions {
 }
 
 export interface MapClaudeMessageResult {
-  events: AgentEvent[];
+  events: Array<AgentEvent | MessageDraftDelta>;
   /** Present only when this frame is authoritative terminal failure evidence. */
   terminalFailure?: RuntimeExecutionFailure;
   /**
@@ -483,15 +484,29 @@ function toNonNegativeInt(value: unknown): number | undefined {
  * own `progress` event. This records which of those events continue a
  * message whose non-blank text already started, for
  * `Session.progressStartsMessage`. Text blocks in one frame always share a
- * message. Routine `system` frames can arrive mid-message and do not end it;
- * any other frame does. A frame with no string id never continues an
- * earlier frame.
+ * message. Routine `system` frames and `stream_event` frames can arrive
+ * mid-message and do not end it; any other frame does. A frame with no
+ * string id never continues an earlier frame.
+ *
+ * Draft deltas (`stream_event`, from `--include-partial-messages`) carry the
+ * message's `api_message_id`. The first non-blank delta of a new id starts a
+ * draft message. Claude 2.1.302 sends a block's deltas before its `assistant`
+ * frame, so the draft message starts before its `progress` does.
  */
 export class AssistantMessageTracker {
   private readonly continuations = new WeakSet<AgentEvent>();
   private open: { messageId: string | undefined } | undefined;
+  private draft: { messageId: unknown } | undefined;
 
-  observe(msg: ClaudeStreamMessage, events: readonly AgentEvent[]): void {
+  observe(msg: ClaudeStreamMessage, events: ReadonlyArray<AgentEvent | MessageDraftDelta>): void {
+    if (msg.type === 'stream_event') {
+      for (const event of events) {
+        if (event.type !== 'message_draft_delta' || event.text.trim() === '') continue;
+        event.startsMessage = this.draft === undefined || this.draft.messageId !== msg.api_message_id;
+        this.draft = { messageId: msg.api_message_id };
+      }
+      return;
+    }
     const id = msg.type === 'assistant' ? (msg.message as { id?: unknown } | undefined)?.id : undefined;
     const messageId = typeof id === 'string' ? id : undefined;
     const continues = msg.type === 'assistant' && messageId !== undefined && this.open?.messageId === messageId;
@@ -509,6 +524,13 @@ export class AssistantMessageTracker {
   }
 }
 
+/** Only text deltas feed the draft; thinking, signature and tool input deltas map to nothing. */
+function mapStreamEvent(msg: ClaudeStreamMessage): MessageDraftDelta[] {
+  const event = msg.event as { type?: unknown; delta?: { type?: unknown; text?: unknown } } | undefined;
+  const text = event?.type === 'content_block_delta' && event.delta?.type === 'text_delta' ? event.delta.text : undefined;
+  return typeof text === 'string' ? [{ type: 'message_draft_delta', text, startsMessage: false }] : [];
+}
+
 /**
  * Map one raw claude stream-json line to zero or more normalized
  * `AgentEvent`s (a single `user` frame can produce two: `tool_result` plus
@@ -521,6 +543,8 @@ export function mapClaudeMessageToAgentEvents(
   options: MapClaudeMessageOptions,
 ): MapClaudeMessageResult {
   switch (msg.type) {
+    case 'stream_event':
+      return { events: mapStreamEvent(msg) };
     case 'assistant':
       return mapAssistant(msg, correlation);
     case 'user':

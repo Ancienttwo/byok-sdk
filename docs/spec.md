@@ -2309,16 +2309,24 @@ sends no `agentMemory`. An ordinary offer can also select `read-if-admitted`:
 it runs exactly as `read` when the daemon admits the memory MCP and exactly as
 `none` when it does not, for a writer and a `memory-reader`, and it never gets
 `agent_memory_unavailable`. This is the read-only choice for a Host that cannot
-see the admission. The daemon reads its admission once per offer, and the
-runtime binding uses that answer, so the two cannot disagree. The terminal
-does not report which mode ran. Prepared offers do not accept the value. The
-offers are strict, so the field is a gated wire addition: a daemon with an
-Agent home advertises `agent-memory-selection` and
-`agent-memory-read-if-admitted` whatever its admission, and server and cloud
-refuse the field (or the `read-if-admitted` value) to a device without the
-matching flag before task creation or mailbox append. The reference server takes
-it on `executions.submit` and on `dispatch` with an explicit `agentRef`, and
-both refuse `read-write` for a `memory-reader` before the task exists.
+see the admission. `read-write-if-admitted` is its writing sibling: it runs
+exactly as `read-write` when the daemon admits the memory MCP and exactly as
+`none` when it does not, and it never gets `agent_memory_unavailable`. A task
+that needs memory to be useful selects `read-write` instead, which declines
+when memory is not admitted. A `memory-reader` Attempt that selects
+`read-write-if-admitted` is declined without retry
+(`agent_memory_selection_invalid`), whatever the admission. The daemon reads
+its admission once per offer, and the runtime binding uses that answer, so the
+two cannot disagree. The terminal does not report which mode ran. Prepared
+offers do not accept either `*-if-admitted` value. The offers are strict, so
+the field is a gated wire addition: a daemon with an Agent home advertises
+`agent-memory-selection`, `agent-memory-read-if-admitted` and
+`agent-memory-read-write-if-admitted` whatever its admission, and server and
+cloud refuse the field (or a `*-if-admitted` value) to a device without the
+matching flag before task creation or mailbox append. The reference server
+takes it on `executions.submit` and on `dispatch` with an explicit `agentRef`,
+and both refuse `read-write` and `read-write-if-admitted` for a
+`memory-reader` before the task exists.
 `AGENT_MEMORY_MCP_SERVER_NAME` from `@byok-sdk/client` is the reserved name of
 the SDK memory MCP server, so Host tests and diagnostics need no literal name.
 
@@ -2628,6 +2636,9 @@ member (#654 E2d-1, [protocol §2.6](./protocol.md)). The member keys, `pv` and
 the member state are three more entries of the same OS credential provider,
 cleared at a re-pair and at unpair. A daemon with an injected enrollment
 backend refuses an E2EE pairing.
+Copy the complete command from the Host's pairing page. A string used once
+without `--e2ee` is burned: start a new registration at the Host and do not
+retry it (protocol §2.6, device enrollment).
 
 `DaemonConfig.strictAgentOnly` is an additive local-security gate. It requires
 successful construction-time Agent-home preflight and only then advertises
@@ -3118,8 +3129,9 @@ draft frames.
 
 The daemon reconciles the draft to the published body with a final revision
 before `agent.message.publish` when the text differs.
-The draft and the closing reply share one message-boundary decision for each
-progress event.
+An adapter may also stream text for the draft only. The adapter's own message
+tracker sets those boundaries, and each later progress event is the authority
+that reconciles the draft.
 An unpaired surrogate in runtime text is projected to U+FFFD in the draft;
 the accepted body is unchanged.
 

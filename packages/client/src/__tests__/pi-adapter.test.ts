@@ -9,7 +9,7 @@ import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
-import type { Session } from '../types';
+import type { Session, MessageDraftDelta } from '../types';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { observationOf } from './fixtures/mcp-observation';
@@ -29,8 +29,8 @@ function fakePiAdapter(): PiAdapter {
   });
 }
 
-async function takeEvents(session: Session, count: number): Promise<AgentEvent[]> {
-  const results: AgentEvent[] = [];
+async function takeEvents(session: Session, count: number): Promise<Array<AgentEvent | MessageDraftDelta>> {
+  const results: Array<AgentEvent | MessageDraftDelta> = [];
   for await (const event of session.events) {
     results.push(event);
     if (results.length >= count) break;

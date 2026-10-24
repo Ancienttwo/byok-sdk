@@ -1,11 +1,14 @@
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type {
+  E2eeMemberChainAppendInput,
   E2eeMemberChainAppendResult,
   E2eeMemberChainRow,
   E2eeMemberRegisterResult,
   E2eeMemberRegistrationInput,
   E2eeMemberRegistrationRow,
   E2eeMemberStore,
+  E2eeProvenWrite,
+  E2eeScopeKeyPackagePutInput,
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
 } from '@byok-sdk/cloud';
@@ -51,6 +54,25 @@ CREATE TABLE IF NOT EXISTS e2ee_scope_key_package (
   FOREIGN KEY (tenant_id, scope_id, epoch) REFERENCES e2ee_scope_epoch (tenant_id, scope_id, epoch)
 );
 CREATE INDEX IF NOT EXISTS e2ee_scope_key_package_recipient ON e2ee_scope_key_package (tenant_id, recipient);
+CREATE TABLE IF NOT EXISTS e2ee_scope_shred (
+  tenant_id TEXT NOT NULL,
+  scope_id TEXT NOT NULL,
+  chain_seq INTEGER NOT NULL CHECK (chain_seq > 0),
+  PRIMARY KEY (tenant_id, scope_id)
+);
+CREATE TABLE IF NOT EXISTS proof_request_receipt (
+  tenant_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  resource TEXT NOT NULL,
+  body_sha256 TEXT NOT NULL,
+  body_size INTEGER NOT NULL CHECK (body_size >= 0),
+  response_status INTEGER NOT NULL CHECK (response_status >= 100 AND response_status <= 599),
+  response_body TEXT NOT NULL,
+  recorded_at TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, device_id, request_id)
+);
 `;
 
 export const E2EE_MEMBER_PROJECTIONS = [
@@ -58,6 +80,8 @@ export const E2EE_MEMBER_PROJECTIONS = [
   'tenant_id, device_id, member_id, bundle FROM e2ee_member_key',
   'tenant_id, scope_id, epoch, key_id FROM e2ee_scope_epoch',
   'tenant_id, scope_id, epoch, recipient, key_id, sender, package FROM e2ee_scope_key_package',
+  'tenant_id, scope_id, chain_seq FROM e2ee_scope_shred',
+  'tenant_id, device_id, request_id, operation, resource, body_sha256, body_size, response_status, response_body, recorded_at FROM proof_request_receipt',
 ] as const;
 
 /** The device's member state, deleted in the device directory's own transaction on revoke and supersession. */
@@ -67,6 +91,32 @@ export function deleteE2eeDeviceState(db: DatabaseSync, tenant: TenantId, device
       SELECT member_id FROM e2ee_member_key WHERE tenant_id = ? AND device_id = ?)`).run(tenant, tenant, deviceId);
     db.prepare('DELETE FROM e2ee_member_key WHERE tenant_id = ? AND device_id = ?').run(tenant, deviceId);
   }
+}
+
+/**
+ * Single-use device requests (owner batch §41a A), in the same table shape as
+ * the Postgres `proof_request_receipt`. The recorded result of this device
+ * request, `request_conflict` for another binding, or `undefined` for a new one.
+ */
+function recordedRequest<T>(db: DatabaseSync, tenant: TenantId, proof: E2eeProvenWrite | undefined): T | 'request_conflict' | undefined {
+  if (proof === undefined) return undefined;
+  const { deviceId, request } = proof;
+  const row = db.prepare(`SELECT operation, resource, body_sha256, body_size, response_body FROM proof_request_receipt
+    WHERE tenant_id = ? AND device_id = ? AND request_id = ?`).get(tenant, deviceId, request.requestId) as
+    { operation: string; resource: string; body_sha256: string; body_size: number; response_body: string } | undefined;
+  if (row === undefined) return undefined;
+  const same = row.operation === request.operation && row.resource === request.resource
+    && row.body_sha256 === request.bodySha256 && row.body_size === request.bodySize;
+  return same ? JSON.parse(row.response_body) as T : 'request_conflict';
+}
+
+function recordRequest<T>(db: DatabaseSync, tenant: TenantId, proof: E2eeProvenWrite | undefined, result: T, now: string): T {
+  if (proof === undefined) return result;
+  const { deviceId, request } = proof;
+  db.prepare(`INSERT INTO proof_request_receipt (tenant_id, device_id, request_id, operation, resource, body_sha256, body_size, response_status, response_body, recorded_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 200, ?, ?)`)
+    .run(tenant, deviceId, request.requestId, request.operation, request.resource, request.bodySha256, request.bodySize, JSON.stringify(result), now);
+  return result;
 }
 
 interface Coordinator {
@@ -87,7 +137,8 @@ type PackageRow = Record<string, unknown> & {
  * SQLite E2EE member store. The coordinator runs one call at a time, so each
  * transaction checks every row before it writes any. Pairing MACs live for
  * one pairing window and stay in memory, like pairing codes. Each MAC write
- * first drops the MACs whose window has passed.
+ * first drops the MACs whose window has passed. A shred receipt goes to
+ * `request_receipt`, the request receipt store, in the append transaction.
  */
 export class SqliteE2eeMemberStore implements E2eeMemberStore {
   /** `macs` is the pairing MAC map; a test passes its own to watch the sweep. */
@@ -105,8 +156,12 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
     this.macs.set(key, value);
   }
 
-  appendChainEntries(tenant: TenantId, rows: readonly E2eeMemberChainRow[]): Promise<E2eeMemberChainAppendResult> {
-    return this.coordinator.transaction(db => {
+  appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult> {
+    const { rows } = input;
+    return this.coordinator.transaction((db): E2eeMemberChainAppendResult => {
+      const replay = recordedRequest<E2eeMemberChainAppendResult>(db, tenant, input.proof);
+      if (replay === 'request_conflict') return { outcome: 'request_conflict' };
+      if (replay !== undefined) return replay;
       const headSeq = (db.prepare('SELECT COALESCE(MAX(seq), 0) AS head FROM e2ee_member_chain_entry WHERE tenant_id = ?')
         .get(tenant) as { head: number }).head;
       if (rows[0]!.seq > headSeq + 1) return { outcome: 'gap', seq: rows[0]!.seq, headSeq };
@@ -118,7 +173,18 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
       const fresh = rows.filter(row => row.seq > headSeq);
       const insert = db.prepare('INSERT INTO e2ee_member_chain_entry (tenant_id, seq, entry) VALUES (?, ?, ?)');
       for (const row of fresh) insert.run(tenant, row.seq, row.entry);
-      return { outcome: 'appended', appended: fresh.length, replayed: rows.length - fresh.length };
+      const recordedAt = this.clock.now().toISOString();
+      for (const shred of input.shreds) {
+        if (shred.seq <= headSeq) continue;
+        db.prepare('DELETE FROM e2ee_scope_key_package WHERE tenant_id = ? AND scope_id = ?').run(tenant, shred.scopeId);
+        db.prepare('DELETE FROM e2ee_scope_epoch WHERE tenant_id = ? AND scope_id = ?').run(tenant, shred.scopeId);
+        db.prepare('INSERT INTO e2ee_scope_shred (tenant_id, scope_id, chain_seq) VALUES (?, ?, ?) ON CONFLICT DO NOTHING')
+          .run(tenant, shred.scopeId, shred.seq);
+        db.prepare('INSERT INTO request_receipt (tenant_id, key, body, recorded_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING')
+          .run(tenant, shred.receipt.key, shred.receipt.body, recordedAt);
+      }
+      return recordRequest<E2eeMemberChainAppendResult>(db, tenant, input.proof,
+        { outcome: 'appended', appended: fresh.length, replayed: rows.length - fresh.length }, recordedAt);
     });
   }
 
@@ -129,8 +195,14 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
       .map(row => ({ seq: row.seq as number, entry: row.entry as string })));
   }
 
-  putScopeKeyPackages(tenant: TenantId, rows: readonly E2eeScopeKeyPackageRow[]): Promise<E2eeScopeKeyPackagePutResult> {
-    return this.coordinator.transaction(db => {
+  putScopeKeyPackages(tenant: TenantId, { rows, proof }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult> {
+    return this.coordinator.transaction((db): E2eeScopeKeyPackagePutResult => {
+      const replay = recordedRequest<E2eeScopeKeyPackagePutResult>(db, tenant, proof);
+      if (replay === 'request_conflict') return { outcome: 'request_conflict' };
+      if (replay !== undefined) return replay;
+      const shred = db.prepare('SELECT 1 FROM e2ee_scope_shred WHERE tenant_id = ? AND scope_id = ?');
+      const shredded = rows.find(row => shred.get(tenant, row.scopeId) !== undefined);
+      if (shredded !== undefined) return { outcome: 'scope_shredded', scopeId: shredded.scopeId };
       const stored = db.prepare('SELECT key_id FROM e2ee_scope_epoch WHERE tenant_id = ? AND scope_id = ? AND epoch = ?');
       // The first row of a new scope epoch fixes its keyId for the rest of the call.
       const fixed = new Map<string, string>();
@@ -150,7 +222,7 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
         epoch.run(tenant, row.scopeId, row.epoch, row.keyId);
         put.run(tenant, row.scopeId, row.epoch, row.recipient, row.keyId, row.sender, row.package);
       }
-      return { outcome: 'stored', stored: rows.length };
+      return recordRequest<E2eeScopeKeyPackagePutResult>(db, tenant, proof, { outcome: 'stored', stored: rows.length }, this.clock.now().toISOString());
     });
   }
 
@@ -166,21 +238,24 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
   }
 
   async registerMember(tenant: TenantId, input: E2eeMemberRegistrationInput): Promise<E2eeMemberRegisterResult> {
-    const result = await this.coordinator.transaction((db): E2eeMemberRegisterResult => {
+    const proof = { deviceId: input.deviceId, request: input.request };
+    // `written` is false for a refusal and for a recorded request, so neither sets the MAC.
+    const { result, written } = await this.coordinator.transaction((db): { result: E2eeMemberRegisterResult; written: boolean } => {
+      const replay = recordedRequest<E2eeMemberRegisterResult>(db, tenant, proof);
+      if (replay !== undefined) return { result: replay, written: false };
       const existing = db.prepare('SELECT bundle FROM e2ee_member_key WHERE tenant_id = ? AND device_id = ?')
         .get(tenant, input.deviceId) as { bundle: string } | undefined;
-      if (existing !== undefined && existing.bundle !== input.bundle) return 'device_conflict';
+      if (existing !== undefined && existing.bundle !== input.bundle) return { result: 'device_conflict', written: false };
       if (existing === undefined) {
         const taken = db.prepare('SELECT 1 FROM e2ee_member_key WHERE tenant_id = ? AND member_id = ?').get(tenant, input.memberId);
-        if (taken !== undefined) return 'member_conflict';
+        if (taken !== undefined) return { result: 'member_conflict', written: false };
         db.prepare('INSERT INTO e2ee_member_key (tenant_id, device_id, member_id, bundle) VALUES (?, ?, ?, ?)')
           .run(tenant, input.deviceId, input.memberId, input.bundle);
       }
-      return existing === undefined ? 'registered' : 'replayed';
+      const outcome = existing === undefined ? 'registered' : 'replayed';
+      return { result: recordRequest(db, tenant, proof, outcome, this.clock.now().toISOString()), written: true };
     });
-    if (result === 'registered' || result === 'replayed') {
-      this.#setMac(macKey(tenant, input.deviceId, 'device'), { body: input.deviceMac, expiresAt: input.macExpiresAt });
-    }
+    if (written) this.#setMac(macKey(tenant, input.deviceId, 'device'), { body: input.deviceMac, expiresAt: input.macExpiresAt });
     return result;
   }
 

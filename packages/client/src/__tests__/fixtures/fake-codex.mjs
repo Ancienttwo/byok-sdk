@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Qualified app-server JSON-RPC fixture. No exec parser or exec event compatibility lane.
 import { spawn } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { spawnProcessTreeDescendant } from './process-tree-receipt.mjs';
@@ -233,15 +233,27 @@ async function runTurn(id, input) {
       },
     });
   }
+  const messageText = input.map((p) => p.text ?? '').join('')
+    ? 'hello from fake codex'
+    : 'empty prompt';
+  // FAKE_CODEX_MESSAGE_DELTAS=1: stream the message as two deltas, plus one
+  // delta of a stale turn. FAKE_CODEX_REPLY_GATE=<dir> then waits for
+  // `<dir>/release` before the completed item.
+  if (process.env.FAKE_CODEX_MESSAGE_DELTAS === '1') {
+    notify('item/agentMessage/delta', { threadId, turnId: 'stale-turn', itemId: 'stale-item', delta: 'STALE' });
+    const half = Math.ceil(messageText.length / 2);
+    for (const delta of [messageText.slice(0, half), messageText.slice(half)])
+      notify('item/agentMessage/delta', { threadId, turnId: id, itemId: 'message-1', delta });
+    const gate = process.env.FAKE_CODEX_REPLY_GATE;
+    while (gate && !existsSync(path.join(gate, 'release'))) await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   notify('item/completed', {
     threadId,
     turnId: id,
     item: {
       id: 'message-1',
       type: 'agentMessage',
-      text: input.map((p) => p.text ?? '').join('')
-        ? 'hello from fake codex'
-        : 'empty prompt',
+      text: messageText,
     },
   });
   notify('thread/tokenUsage/updated', {

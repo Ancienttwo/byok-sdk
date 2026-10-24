@@ -18,11 +18,14 @@ import { keyPackage, newMember, type Member } from './support/e2ee-members';
 import { TENANT_A, TENANT_B } from './support/harness';
 
 const MAC = 'A'.repeat(42) + 'E';
+let requests = 0;
+/** A device-proof binding with a requestId no other write has used. */
+const freshRequest = () => ({ requestId: `request-${++requests}`, operation: 'e2ee-member-key.register', resource: '/byok/e2ee/member-key', bodySha256: 'sha256', bodySize: 1 });
 
 function setup() {
   const clock = createMutableClock();
   const base = createInMemoryByokCloud({ clock });
-  const store = new InMemoryE2eeMemberStore();
+  const store = new InMemoryE2eeMemberStore(base.stores.receipts);
   const cloud: ByokCloud = createByokCloud({
     core: base.core,
     cloud: base.stores,
@@ -52,7 +55,7 @@ function setup() {
       memberId: member.bundle.memberId,
       bundle: canonicalizeJson(member.bundle as unknown as JsonValue),
       deviceMac: MAC,
-      macExpiresAt: new Date(clock.now().getTime() + 60_000).toISOString(),
+      macExpiresAt: new Date(clock.now().getTime() + 60_000).toISOString(), request: freshRequest(),
     })).toBe('registered');
     return member;
   }

@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
+import { code, imports } from './import-scan.test-support';
 
 /**
  * #606 §5.5: `rules/` can be copied alone. Its files import only `@byok-sdk/protocol`, `@byok-sdk/core`,
@@ -11,21 +12,6 @@ const K4 = '@byok-sdk/example-host-execution-core';
 const K4_NAMES = new Set(['hash', 'canonical']);
 const HOST_STATE = /\b(?:LedgerState|HostLedger|stateOf|CollaborationState)\b/;
 
-/** Drops comments, so a scan sees code and not prose about code. */
-function code(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
-}
-/** Static imports and re-exports, also on several lines, with their named bindings; then side-effect imports, `import()` and `require()`. */
-function imports(source: string): Array<{ from: string; names?: string[] }> {
-  const text = code(source), found: Array<{ from: string; names?: string[] }> = [];
-  for (const [, clause, from] of text.matchAll(/\b(?:import|export)\b([^'"`;]*?)\bfrom\s*['"]([^'"]+)['"]/g)) {
-    const list = /\{([^}]*)\}/.exec(clause!)?.[1];
-    found.push({ from: from!, ...(list === undefined ? {} : {
-      names: list.split(',').map(name => name.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]!).filter(Boolean) }) });
-  }
-  for (const [, from] of text.matchAll(/\b(?:import\s*\(?|require\s*\()\s*['"]([^'"]+)['"]/g)) found.push({ from: from! });
-  return found;
-}
 function violations(file: string, source: string): string[] {
   const allowed = ({ from, names }: { from: string; names?: string[] }) => from === '@byok-sdk/protocol' || from === '@byok-sdk/core'
     || from === K4 && !!names?.length && names.every(name => K4_NAMES.has(name))
