@@ -11,7 +11,7 @@ import { imports } from './import-scan.test-support';
  */
 const K8 = fileURLToPath(new URL('..', import.meta.url));
 const K4 = join(K8, '../host-execution-core');
-const LAYERS = ['rules', 'host', 'vectors', 'k4', 'k4-test-support', 'unvendored'] as const;
+const LAYERS = ['rules', 'host', 'vectors', 'k4', 'unvendored'] as const;
 type Layer = typeof LAYERS[number];
 interface Listed { files: string[]; packages: Record<string, string[] | undefined> }
 interface Graph { files: string[]; packages: Record<string, string[]> }
@@ -23,7 +23,7 @@ function manifest(text: string): Map<string, Listed> {
     if (layers.has(layer!)) throw new Error(`Duplicate vendor layer ${layer}`);
     const listed: Listed = { files: [], packages: {} };
     for (const line of body!.split('\n').map(row => row.trim()).filter(Boolean)) {
-      if (/^(?:src\/|\.\.\/)/.test(line)) listed.files.push(line);
+      if (line.startsWith('src/')) listed.files.push(line);
       else {
         const [spec, names] = line.split(/:\s+/);
         listed.packages[spec!] = names?.split(/\s+/).filter(Boolean).sort();
@@ -86,14 +86,13 @@ function vendorLayers() {
     for (const file of found[layer].files) below.add(join(K8, file));
   }
   found.k4 = graph(K4, ['src/index.ts'], new Set());
-  found['k4-test-support'] = graph(K4, ['src/test-support.ts'], new Set(found.k4.files.map(file => join(K4, file))));
   return { listed, found, k8 };
 }
 
 it('lists each layer exactly as its import graph', () => {
   const { listed, found } = vendorLayers();
   expect([...listed.keys()], 'vendor layers in src/VENDOR.md').toEqual([...LAYERS]);
-  for (const layer of ['rules', 'host', 'vectors', 'k4', 'k4-test-support'] as const) {
+  for (const layer of ['rules', 'host', 'vectors', 'k4'] as const) {
     expect(compare(listed.get(layer)!, found[layer]!), `${layer}: update src/VENDOR.md`).toEqual(found[layer]);
   }
 });

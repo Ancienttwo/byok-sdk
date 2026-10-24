@@ -117,14 +117,17 @@ layers 1 and 2: `CollaborationState`, the outcome schema and the routine rules
 come from L files. They also import `hash` and `taskId` from the K4 root, and
 they run on vitest.
 
-The commit vectors import only `template` from K4 `test-support`. That module
-also holds `openHost`, the real server and daemon smoke helper. So loading it
-loads every file and package in the [K4 test-support](#k4-test-support) list.
-Choose one:
-- Copy K4 `src/test-support.ts` with that list.
-- Resolve `@byok-sdk/example-host-execution-core/test-support` to your own
-  module. It exports `template(deviceId: string, agentId = 'main'):
-  ExecutionTemplate`, and returns the same value as K4's `template`.
+The commit vectors import only `template` from K4 `test-support`, and the test
+holds them to that one name. Do not copy K4 `src/test-support.ts`. It is the
+SDK repository's real server and daemon smoke helper. It loads a test
+enrollment store from `scripts/testing/`, whose types come from the client
+package source, and a stub runtime adapter from the basic example. Resolve
+`@byok-sdk/example-host-execution-core/test-support` to a module of your own
+instead. Copy the `policy` constant and the `template(deviceId, agentId =
+'main')` function from K4 `src/test-support.ts` into it. They need only
+`AgentEgressPolicy` from `@byok-sdk/client` and `ExecutionTemplate` from the K4
+root entry, so the module typechecks against the published packages. Keep the
+returned value the same as K4's.
 
 ```vendor vectors
 src/commit-vectors.test-support.ts
@@ -142,7 +145,8 @@ vitest
 
 K8 imports K4 by its package name, `@byok-sdk/example-host-execution-core`. The
 root entry (`.`, `src/index.ts`) reaches every non-test file of K4 `src/`, except
-`src/test-support.ts` and `src/fixtures/`. The test checks this. The K4
+`src/test-support.ts` and `src/fixtures/`. The test checks this. The
+`./test-support` entry is not copied ([Layer 3](#layer-3-shared-vectors)). The K4
 [README](../../host-execution-core/README.md#files) describes those files.
 
 Copy them, and resolve the package name to the copy. Use a workspace package
@@ -171,28 +175,6 @@ src/transitions.ts
 node:async_hooks
 node:crypto
 node:sqlite
-```
-
-### K4 test-support
-
-Only the vectors need this entry (`./test-support`, `src/test-support.ts`). It
-reaches two files outside K4: a test enrollment store and the stub runtime
-adapter of the basic example.
-
-```vendor k4-test-support
-../../scripts/testing/device-credentials.mjs
-../basic/goal-btw.test-support.ts
-src/test-support.ts
-@byok-sdk/client
-@byok-sdk/server
-@hono/node-server
-node:child_process
-node:crypto
-node:fs/promises
-node:os
-node:path
-node:readline
-vitest
 ```
 
 ## Not vendored
