@@ -24,6 +24,7 @@ import {
   type SealedBinding,
 } from '@byok-sdk/core/sealed-payload';
 import {
+  MESSAGE_PAYLOAD_SCHEMAS,
   SEALED_PAYLOAD_CATEGORIES,
   SEALED_PAYLOAD_SUITE,
   SEALED_PAYLOAD_VERSION,
@@ -63,7 +64,7 @@ const GOLDEN_CATEGORIES = ['task-input', 'task-output'] as const;
 const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
-  .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; payload: Json });
+  .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; ts: string; payload: Json });
 
 function bindingOf(line: (typeof corpus)[number]): SealedBinding {
   if (!isSealedMessageType(line.type)) throw new Error(`${line.type} is not sealed`);
@@ -76,6 +77,8 @@ function bindingOf(line: (typeof corpus)[number]): SealedBinding {
     : corpus.find((candidate) => candidate.task_id === line.task_id && candidate.payload.sealing !== undefined);
   if (offer === undefined) throw new Error(`no sealed offer for ${line.task_id}`);
   const agentRef = offer.payload.agentRef as SealedBinding['agentRef'] | undefined;
+  const routineRef = line.payload.routineRef as RoutineRef | undefined;
+  if (routineRef !== undefined) return templateBinding(line);
   return {
     tenantId: GOLDEN_TENANT,
     family: SEALED_SPLIT_TABLE[line.type].plainType,
@@ -85,6 +88,29 @@ function bindingOf(line: (typeof corpus)[number]): SealedBinding {
     agentRef: agentRef == null ? null : { agentId: agentRef.agentId, profileRevision: agentRef.profileRevision },
     categories: [...GOLDEN_CATEGORIES],
     notAfter: null,
+  };
+}
+
+type RoutineRef = { routineId: string; definitionVersion: number; notAfter: string };
+
+/**
+ * The binding of a routine template (#654 E3d), rebuilt from the offer line's
+ * plaintext `routineRef`, `agentRef` and `sealing.categories`. It names no
+ * task and no device, so one template opens for every occurrence.
+ */
+function templateBinding(line: (typeof corpus)[number]): SealedBinding {
+  const routineRef = line.payload.routineRef as RoutineRef;
+  const agentRef = line.payload.agentRef as NonNullable<SealedBinding['agentRef']>;
+  const sealing = line.payload.sealing as { categories: SealedBinding['categories'] };
+  return {
+    tenantId: GOLDEN_TENANT,
+    family: 'routine.template',
+    direction: 'server-to-daemon',
+    identity: { routineId: routineRef.routineId, definitionVersion: routineRef.definitionVersion },
+    deviceId: null,
+    agentRef: { agentId: agentRef.agentId, profileRevision: agentRef.profileRevision },
+    categories: [...sealing.categories],
+    notAfter: routineRef.notAfter,
   };
 }
 
@@ -177,7 +203,11 @@ describe('sealed payload v1: the golden corpus lines are real ciphertext', () =>
     expect(new Set(inline.map((line) => line.type))).toEqual(new Set(Object.keys(SEALED_SPLIT_TABLE)));
   });
 
-  it.each(inline.map((line, index) => [index, line.type, line] as const))(
+  // A routine template is bound by its routineRef, not by the split table.
+  // The routine describe below opens those lines.
+  const splitTableLines = inline.filter((line) => line.payload.routineRef === undefined);
+
+  it.each(splitTableLines.map((line, index) => [index, line.type, line] as const))(
     'line %i (%s) opens under the binding the split table names',
     async (_index, _type, line) => {
       const member = line.payload.sealed as Json;
@@ -248,7 +278,92 @@ describe('sealed payload v1: the golden corpus lines are real ciphertext', () =>
   );
 });
 
-describe('sealed payload v1: a Host without sealed-payload-v1 refuses sealed input (#654)', () => {
+describe('sealed payload v1: a routine template opens under the binding its routineRef names (#654 E3d)', () => {
+  const routineLines = corpus.filter((line) => line.payload.routineRef !== undefined);
+  const open = (line: (typeof corpus)[number], binding: SealedBinding) => {
+    const member = line.payload.sealed as Json;
+    return openSealedContent({
+      header: headerOf(member),
+      ciphertext: new Uint8Array(Buffer.from(member.ciphertext as string, 'base64url')),
+      scopeKey: GOLDEN_SCOPE_KEY,
+      binding,
+      sealing: GOLDEN_SCOPE,
+      maxContentLength: 2 * 1024 * 1024,
+    });
+  };
+
+  // Protocol restates core's canonical instant for `notAfter`. The two rules
+  // must accept the same values, or a member and a device disagree on the AAD.
+  it.each([
+    ['2026-12-31T00:00:00.000Z', true],
+    ['2028-02-29T23:59:59.999Z', true],
+    ['0000-01-01T00:00:00.000Z', true],
+    ['2026-12-31T00:00:00Z', false],
+    ['2026-12-31T00:00:00.0000Z', false],
+    ['2026-12-31T00:00:00.000+00:00', false],
+    ['2026-12-31t00:00:00.000z', false],
+    ['2026-12-31 00:00:00.000Z', false],
+    ['2027-02-29T00:00:00.000Z', false],
+    ['2026-02-30T00:00:00.000Z', false],
+    ['2026-12-31T24:00:00.000Z', false],
+    ['2026-12-31T00:60:00.000Z', false],
+    ['+012026-12-31T00:00:00.000Z', false],
+    ['', false],
+  ] as const)('notAfter %j: protocol accepts it exactly when core seals with it (%s)', async (notAfter, accepted) => {
+    const line = routineLines[0]!;
+    const wire = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent_with_egress_fresh_sealed']
+      .safeParse({ ...line.payload, routineRef: { ...(line.payload.routineRef as RoutineRef), notAfter } }).success;
+    const core = await sealContent({
+      scopeKey: GOLDEN_SCOPE_KEY,
+      scope: { id: GOLDEN_SCOPE.scopeId, epoch: GOLDEN_SCOPE.epoch },
+      chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+      sender: 'A'.repeat(43),
+      category: 'task-input',
+      binding: { ...bindingOf(line), notAfter },
+      plaintext: { instruction: 'Write the daily digest.' },
+      maxContentLength: 2 * 1024 * 1024,
+    }).then(() => true, () => false);
+    expect({ wire, core }).toEqual({ wire: accepted, core: accepted });
+  });
+
+  it('has two occurrences of one template, and an expired template', () => {
+    const [first, second, expired] = routineLines;
+    expect(routineLines).toHaveLength(3);
+    expect(second!.task_id).not.toBe(first!.task_id);
+    expect(second!.payload.sealed, 'the next occurrence carries the same template bytes').toEqual(first!.payload.sealed);
+    expect(second!.payload.routineRef).toEqual(first!.payload.routineRef);
+    const { notAfter } = expired!.payload.routineRef as RoutineRef;
+    expect(Date.parse(notAfter)).toBeLessThan(Date.parse(expired!.ts));
+  });
+
+  it.each(routineLines.map((line) => [line.task_id, line] as const))('%s opens with its instruction only', async (_taskId, line) => {
+    const opened = await open(line, bindingOf(line));
+    expect(opened).toMatchObject({ ok: true, plaintext: { instruction: 'Write the daily digest.' } });
+    if (opened.ok) expect(Object.keys(opened.plaintext)).toEqual(['instruction']);
+  });
+
+  it.each(routineLines.map((line) => [line.task_id, line] as const))('%s does not open when one bound field changes', async (_taskId, line) => {
+    const binding = bindingOf(line);
+    const routineRef = line.payload.routineRef as RoutineRef;
+    const changed: Record<string, SealedBinding> = {
+      'the task binding of the offer': {
+        ...binding, family: SEALED_SPLIT_TABLE['task.offer_for_agent_with_egress_fresh_sealed'].plainType,
+        identity: { taskId: line.task_id }, deviceId: GOLDEN_DEVICE, notAfter: null,
+      },
+      'a string definitionVersion': { ...binding, identity: { ...binding.identity, definitionVersion: String(routineRef.definitionVersion) } },
+      'another definitionVersion': { ...binding, identity: { ...binding.identity, definitionVersion: routineRef.definitionVersion + 1 } },
+      'another routine': { ...binding, identity: { ...binding.identity, routineId: `${routineRef.routineId}-other` } },
+      'another notAfter': { ...binding, notAfter: new Date(Date.parse(routineRef.notAfter) + 1).toISOString() },
+      'another Agent': { ...binding, agentRef: { ...binding.agentRef!, profileRevision: 'profile-other' } },
+      'fewer categories': { ...binding, categories: ['task-input'] },
+    };
+    for (const [name, other] of Object.entries(changed)) {
+      expect(await open(line, other), name).toEqual({ ok: false, reason: 'sealed_open_failed' });
+    }
+  });
+});
+
+describe('sealed payload v1: a task without output sealing refuses sealed output (#654)', () => {
   const sealedInbound = corpus.filter((line) => !isServerToDaemonType(line.type)
     && requiredReceiverCapabilities(line.type, line.payload).includes('sealed-payload-v1'));
 
@@ -261,21 +376,46 @@ describe('sealed payload v1: a Host without sealed-payload-v1 refuses sealed inp
       .toEqual(['sealed_content_mac_mismatch', 'sealed_key_unavailable', 'sealed_open_failed', 'sealing_policy_mismatch']);
   });
 
-  it.each(sealedInbound.map((line, index) => [index, line.type, line] as const))(
-    'line %i (%s) is rejected before the envelope identity is reserved',
-    async (_index, _type, line) => {
-      const harness = createHarness();
-      const device = await harness.pairDevice(TENANT_A);
-      const stores = tenantStoresFor(
-        { kind: 'device', tenantId: TENANT_A, productId: PRODUCT_ID, deviceId: device.deviceId },
-        { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
-      );
-      const envelope = createEnvelope(line.type as Envelope['type'], line.payload as never, { taskId: line.task_id }) as Envelope;
+  /** A plaintext task offered to this device, claimed unless the line is a decline. */
+  async function plainTask(type: string) {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const stores = tenantStoresFor(
+      { kind: 'device', tenantId: TENANT_A, productId: PRODUCT_ID, deviceId: device.deviceId },
+      { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
+    );
+    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: { instruction: 'plain', runtime: 'pi' } });
+    const send = (envelopeType: string, payload: unknown) =>
+      handleInboundEnvelope(stores, device.deviceId, createEnvelope(envelopeType as Envelope['type'], payload as never, { taskId }) as Envelope);
+    if (type !== 'task.decline' && type !== 'task.decline_sealed') {
+      expect(await send('task.claim', { deviceId: device.deviceId, runtime: 'pi' })).toEqual({ outcome: 'accepted' });
+    }
+    return { harness, taskId, send };
+  }
 
+  /** The line without the Agent, harness and recovery bindings that this plain task does not have. */
+  function unbound(payload: Json): Json {
+    const { agentRef: _agentRef, harnessId: _harnessId, recovery: _recovery, ...rest } = payload;
+    return rest;
+  }
+
+  it.each(sealedInbound.filter((line) => isSealedMessageType(line.type)).map((line, index) => [index, line.type, line] as const))(
+    'line %i (%s) is rejected before the envelope identity is reserved',
+    async (_index, type, line) => {
+      const { send } = await plainTask(type);
       const refused = { outcome: 'rejected', reason: 'sealed_payload_unsupported' };
-      expect(await handleInboundEnvelope(stores, device.deviceId, envelope)).toEqual(refused);
+      expect(await send(type, unbound(line.payload))).toEqual(refused);
       // The refusal reserved no envelope identity: the same envelope is refused again, not deduplicated.
-      expect(await handleInboundEnvelope(stores, device.deviceId, envelope)).toEqual(refused);
+      expect(await send(type, unbound(line.payload))).toEqual(refused);
+    },
+  );
+
+  it.each(sealedInbound.filter((line) => line.type === 'task.decline').map((line) => [line.payload.code, line] as const))(
+    'a plaintext decline with the sealed code %s is accepted, and keeps the code as the terminal cause',
+    async (code, line) => {
+      const { harness, taskId, send } = await plainTask('task.decline');
+      expect(await send('task.decline', line.payload)).toEqual({ outcome: 'accepted' });
+      expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toMatchObject({ status: 'failed', terminalCause: code });
     },
   );
 });

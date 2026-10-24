@@ -47,6 +47,36 @@ export async function sealInput(input: SealedInput): Promise<SealedContent> {
   });
 }
 
+export interface TemplateInput {
+  readonly tenant: TenantId;
+  readonly routineRef: { readonly routineId: string; readonly definitionVersion: number; readonly notAfter: string };
+  readonly agentRef: { readonly agentId: string; readonly profileRevision: string };
+  readonly plaintext: Readonly<Record<string, string>>;
+}
+
+/** One routine template (#654 E3d), sealed now: family `routine.template`, no device. */
+export async function sealTemplate(input: TemplateInput): Promise<SealedContent> {
+  return sealContent({
+    scopeKey: SCOPE_KEY,
+    scope: { id: SEALING.scopeId, epoch: SEALING.epoch },
+    chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+    sender: 'A'.repeat(43),
+    category: 'task-input',
+    binding: {
+      tenantId: input.tenant,
+      family: 'routine.template',
+      direction: 'server-to-daemon',
+      identity: { routineId: input.routineRef.routineId, definitionVersion: input.routineRef.definitionVersion },
+      deviceId: null,
+      agentRef: input.agentRef,
+      categories: [...SEALING.categories],
+      notAfter: input.routineRef.notAfter,
+    },
+    plaintext: input.plaintext,
+    maxContentLength: 2 * 1024 * 1024,
+  });
+}
+
 /** The inline wire member of `content`, which {@link sealInput} sealed. */
 export function inlineMember(content: SealedContent) {
   return { ...content.header, category: 'task-input' as const, ciphertext: Buffer.from(content.ciphertext).toString('base64url') };

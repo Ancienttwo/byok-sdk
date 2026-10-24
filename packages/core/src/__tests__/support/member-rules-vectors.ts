@@ -6,8 +6,13 @@
  */
 import type { JsonObject } from '../../attestation';
 import { memberKemSigningInput, parseMemberKeyBundle, type MemberKeyBundleV1 } from '../../sealed-payload/member-bundle';
-import { deriveMemberId, memberChainEntryHash, type MemberChainEntryV1 } from '../../sealed-payload/member-chain';
-import { verifyMemberChainFromAnchor } from '../../sealed-payload/member-chain-walk';
+import { deriveMemberId, memberChainEntryHash, signMemberChainEntry, type MemberChainEntryV1 } from '../../sealed-payload/member-chain';
+import {
+  applyMemberChainEntries,
+  emptyMemberChainState,
+  verifyMemberChainFromAnchor,
+  type MemberChainWalkFailure,
+} from '../../sealed-payload/member-chain-walk';
 import { memberApprovalCode, memberFingerprint } from '../../sealed-payload/member-fingerprint';
 import {
   computeClientPairingMac,
@@ -51,6 +56,22 @@ export interface MemberRulesVectors {
     readonly hashes: readonly string[];
     readonly anchor: { readonly self: string; readonly approver: string; readonly anchorSeq: number };
   };
+  /** Scope signers (owner batch §50f A). Signatures are verify-only. */
+  readonly scopeSigners: ScopeSignerVectors;
+}
+
+export interface ScopeSignerVectors {
+  /** After `chain.entries`: add(stranger) by client, then scope-policy `scope-device` (client, device) by device. */
+  readonly entries: readonly MemberChainEntryV1[];
+  /** `sha256:<hex>` of each unsigned entry. */
+  readonly hashes: readonly string[];
+  /** Each case is one entry after `entries`, with the walk's outcome. */
+  readonly cases: readonly {
+    readonly name: string;
+    readonly entry: MemberChainEntryV1;
+    readonly hash: string;
+    readonly outcome: 'ok' | MemberChainWalkFailure;
+  }[];
 }
 
 export interface MemberRulesCheckCounts {
@@ -81,6 +102,72 @@ async function parsedBundle(member: MemberRulesVectorMember): Promise<MemberKeyB
   const bundle = await parseMemberKeyBundle(member.bundle);
   if (bundle === undefined) throw new Error(`${member.name}: the vector bundle does not parse`);
   return bundle;
+}
+
+async function unsignedHash(entry: MemberChainEntryV1): Promise<string> {
+  const { sig: _sig, ...unsigned } = entry;
+  return memberChainEntryHash(unsigned);
+}
+
+/**
+ * Build the scope signer vectors on top of `chain.entries`. Each case shares
+ * one seq, so each is a separate one-entry continuation of the same chain.
+ */
+export async function buildScopeSignerVectors(vectors: Pick<MemberRulesVectors, 'tenantId' | 'members' | 'chain'>): Promise<ScopeSignerVectors> {
+  const [client, device, stranger] = (['client', 'device', 'stranger'] as const).map((name) => {
+    const found = vectors.members.find((candidate) => candidate.name === name);
+    if (found === undefined) throw new Error(`no vector member ${name}`);
+    return found;
+  }) as [MemberRulesVectorMember, MemberRulesVectorMember, MemberRulesVectorMember];
+  const sign = async (signer: MemberRulesVectorMember, seq: number, prev: string, op: MemberChainEntryV1['op'], subject: JsonObject) =>
+    signMemberChainEntry(
+      { v: 1, tenantId: vectors.tenantId, seq, prev, op, subject, signer: signer.memberId },
+      {
+        publicJwk: vectorPublicJwk(signer.signing),
+        privateKey: await crypto.subtle.importKey(
+          'jwk',
+          { kty: 'EC', crv: 'P-256', ...signer.signing },
+          { name: 'ECDSA', namedCurve: 'P-256' },
+          false,
+          ['sign'],
+        ),
+      },
+    );
+  const ids = (...members: MemberRulesVectorMember[]) => members.map((member) => member.memberId).sort();
+  const policy = (scopeId: string, members: readonly string[]): JsonObject => ({ scopeId, categories: ['task-input'], members: [...members] });
+
+  const addStranger = await sign(client, 3, vectors.chain.hashes[1]!, 'add', { member: stranger.bundle });
+  const addHash = await unsignedHash(addStranger);
+  const devicePolicy = await sign(device, 4, addHash, 'scope-policy', policy('scope-device', ids(client, device)));
+  const policyHash = await unsignedHash(devicePolicy);
+
+  const cases: ScopeSignerVectors['cases'][number][] = [];
+  for (const [name, signer, op, subject, outcome] of [
+    ['outsider-adds-itself', stranger, 'scope-policy', policy('scope-device', ids(client, device, stranger)), 'member_chain_signer_invalid'],
+    ['outsider-shreds', stranger, 'shred', { scopeId: 'scope-device' }, 'member_chain_signer_invalid'],
+    ['new-scope-unlisted-signer', device, 'scope-policy', policy('scope-stranger', ids(client, stranger)), 'member_chain_signer_invalid'],
+    ['policy-member-updates', device, 'scope-policy', policy('scope-device', ids(client, device, stranger)), 'ok'],
+    ['policy-member-shreds', client, 'shred', { scopeId: 'scope-device' }, 'ok'],
+    ['new-scope-listed-signer', stranger, 'scope-policy', policy('scope-stranger', ids(client, stranger)), 'ok'],
+  ] as const) {
+    const entry = await sign(signer, 5, policyHash, op, subject);
+    cases.push({ name, entry, hash: await unsignedHash(entry), outcome });
+  }
+  return { entries: [addStranger, devicePolicy], hashes: [addHash, policyHash], cases };
+}
+
+/** Walk the vector chain, then each scope signer case after it. Returns the number of cases. */
+export async function checkScopeSignerVectors(vectors: MemberRulesVectors): Promise<number> {
+  const { entries, hashes, cases } = vectors.scopeSigners;
+  for (const [index, entry] of entries.entries()) expectEqual(`scope signer entry ${index} hash`, await unsignedHash(entry), hashes[index]);
+  const prefix = await applyMemberChainEntries(emptyMemberChainState(vectors.tenantId), [...vectors.chain.entries, ...entries]);
+  if (!prefix.ok) throw new Error(`scope signer prefix: ${prefix.reason} at ${prefix.index}`);
+  for (const vector of cases) {
+    expectEqual(`scope signer case ${vector.name} hash`, await unsignedHash(vector.entry), vector.hash);
+    const result = await applyMemberChainEntries(prefix.state, [vector.entry]);
+    expectEqual(`scope signer case ${vector.name}`, result.ok ? 'ok' : result.reason, vector.outcome);
+  }
+  return cases.length;
 }
 
 export async function checkMemberRulesVectors(vectors: MemberRulesVectors): Promise<MemberRulesCheckCounts> {
@@ -132,6 +219,7 @@ export async function checkMemberRulesVectors(vectors: MemberRulesVectors): Prom
     authenticatedHead: vectors.pairing.chainHead,
   });
   expectEqual('chain anchor', result.ok ? result.anchorSeq : result, anchor.anchorSeq);
+  await checkScopeSignerVectors(vectors);
 
   return {
     members: vectors.members.length,

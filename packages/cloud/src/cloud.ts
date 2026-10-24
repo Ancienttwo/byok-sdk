@@ -30,6 +30,7 @@ import { HarnessIdSchema, isSealedMessageType, requiredReceiverCapabilities } fr
 import {
   contentHash,
   parseCapabilityDeclaration,
+  principalTenant,
   type BoardItem,
   type BoardItemInput,
   type BoardListQuery,
@@ -39,6 +40,7 @@ import {
   type ContentHash,
   type ControlPlanePrincipal,
   type CoreStores,
+  type DevicePrincipal,
   type PresenceHint,
   type SkillPackStore,
   type TenantId,
@@ -70,6 +72,10 @@ import {
   BYOK_PRESENCE_PATH,
   BYOK_RECORD_ROUTE,
   BYOK_RECORDS_PATH,
+  BYOK_E2EE_CHAIN_PATH,
+  BYOK_E2EE_KEY_PACKAGES_PATH,
+  BYOK_E2EE_MEMBER_KEY_PATH,
+  BYOK_E2EE_PAIRING_MAC_PATH,
   BYOK_SKILL_PACK_FILE_ROUTE,
   BYOK_SKILL_PACKS_PATH,
   BYOK_TOKEN_PATH,
@@ -90,6 +96,7 @@ import {
   AgentInputPreparationPayloadSchema,
   ProviderProvisioningAvailablePayloadSchema,
   AgentMemoryIntentAvailablePayloadSchema,
+  E2eeKeyPackageAvailablePayloadSchema,
   InputPreparationCompletionRequestSchema,
   AgentMemoryProjectionCommitRequestSchema,
   AgentEgressAckPayloadSchema,
@@ -129,6 +136,7 @@ import {
   type TaskOfferWithToolsetsPayload,
   type TaskOfferWithToolsetsSealedPayload,
   type E2eeClientPairingMac,
+  type E2eeKeyPackageAvailablePayload,
   type E2eeMemberChainEntry,
   type E2eeMemberKeyBundle,
   type E2eeScopeKeyPackage,
@@ -183,6 +191,15 @@ import {
   skillPackFileHandler,
   skillPackListHandler,
 } from './handlers/skill-packs';
+import {
+  DEFAULT_MAX_E2EE_REQUEST_BYTES,
+  e2eeMemberChainAppendHandler,
+  e2eeMemberChainReadHandler,
+  e2eeMemberKeyRegisterHandler,
+  e2eePairingMacReadHandler,
+  e2eeScopeKeyPackagePutHandler,
+  e2eeScopeKeyPackageReadHandler,
+} from './handlers/e2ee-member';
 import {
   DEFAULT_MAX_TRUTH_REQUEST_BYTES,
   truthGetHandler,
@@ -386,6 +403,8 @@ export interface ByokCloudOptions {
   readonly activityCapacity?: number;
   readonly activityTtlMs?: number;
   readonly maxTruthRequestBytes?: number;
+  /** Byte cap of one E2EE member device write. The default fits one full chain append (64 entries of 64 KiB). */
+  readonly maxE2eeRequestBytes?: number;
   readonly skillPackPageLimit?: number;
 }
 
@@ -758,6 +777,20 @@ export interface ByokCloud {
     deviceId: string,
     input: AgentMemoryIntentNoticeInput,
   ): Promise<EnqueuedAgentControl>;
+  /**
+   * Durable, task-free `e2ee.key_package.available` notice (#654 E2c-3) for
+   * one device that durably advertised `sealed-payload-v1`; otherwise it
+   * throws `agent_capability_missing` before the mailbox append. The payload
+   * is exactly `{ scopeId, epoch }`; the device fetches the package from its
+   * device route. Idempotent per (tenant, device, scopeId, epoch) while the
+   * mailbox row is retained. `putScopeKeyPackages` calls it for every
+   * recipient device that has the capability.
+   */
+  enqueueScopeKeyPackageNotice(
+    tenant: TenantId,
+    deviceId: string,
+    input: E2eeKeyPackageAvailablePayload,
+  ): Promise<EnqueuedAgentControl>;
   /** Tenant/device/request-bound durable desired-state and terminal-outcome readback. */
   getInputPreparationStatus(
     tenant: TenantId,
@@ -803,11 +836,16 @@ export interface ByokCloud {
    * Host control plane: store scope key packages. The first package of a
    * scope epoch fixes its `keyId`; a package with another `keyId` throws
    * `e2ee_scope_key_conflict`, and the call stores nothing.
+   *
+   * After the commit, each recipient that is a registered device gets one
+   * `e2ee.key_package.available` notice per scope epoch, also on a replay.
+   * A recipient device without `sealed-payload-v1` gets no notice and is
+   * listed in `skippedDeviceIds`; its packages are stored all the same.
    */
   putScopeKeyPackages(
     tenant: TenantId,
     input: { readonly packages: readonly E2eeScopeKeyPackage[] },
-  ): Promise<{ readonly stored: number }>;
+  ): Promise<{ readonly stored: number; readonly skippedDeviceIds: readonly string[] }>;
   /** Host control plane: the stored packages of one scope, optionally for one epoch or one recipient. */
   readScopeKeyPackages(
     tenant: TenantId,
@@ -991,6 +1029,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     options.skillPacks,
     options.agentMemoryProjectionAuthorizer,
     options.agentMemoryProjectionStore,
+    options.e2eeMemberStore,
   );
   const root: CloudRootStores = { core: options.core, cloud: options.cloud, mailboxWake: options.mailboxWake };
   const auth: AuthPlane = createAuthPlane({
@@ -1215,6 +1254,21 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       { method: 'PUT', path: BYOK_RECORD_ROUTE, class: 'proof' },
       truthPutHandler(truthDeps),
     );
+  }
+
+  if (options.e2eeMemberStore !== undefined && declares(declaration, CLOUD_CAPABILITIES.e2eeMember)) {
+    const e2eeDeps = {
+      proof: { devices: options.cloud.devices, crypto: options.crypto, clock: options.clock },
+      device: deviceRouteDeps,
+      context: (device: DevicePrincipal) => e2eeMemberContext(principalTenant(device)),
+      maxRequestBytes: options.maxE2eeRequestBytes ?? DEFAULT_MAX_E2EE_REQUEST_BYTES,
+    };
+    registry.register({ method: 'POST', path: BYOK_E2EE_MEMBER_KEY_PATH, class: 'proof' }, e2eeMemberKeyRegisterHandler(e2eeDeps));
+    registry.register({ method: 'POST', path: BYOK_E2EE_CHAIN_PATH, class: 'proof' }, e2eeMemberChainAppendHandler(e2eeDeps));
+    registry.register({ method: 'POST', path: BYOK_E2EE_KEY_PACKAGES_PATH, class: 'proof' }, e2eeScopeKeyPackagePutHandler(e2eeDeps));
+    registry.register({ method: 'GET', path: BYOK_E2EE_CHAIN_PATH, class: 'device' }, e2eeMemberChainReadHandler(e2eeDeps));
+    registry.register({ method: 'GET', path: BYOK_E2EE_KEY_PACKAGES_PATH, class: 'device' }, e2eeScopeKeyPackageReadHandler(e2eeDeps));
+    registry.register({ method: 'GET', path: BYOK_E2EE_PAIRING_MAC_PATH, class: 'device' }, e2eePairingMacReadHandler(e2eeDeps));
   }
 
   // Skill packs: both conditions, same asymmetry as the byte proxy below.
@@ -2089,7 +2143,43 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     if (store === undefined) {
       throw new ByokCloudError('e2ee_member_store_unavailable', 'E2EE member storage is not configured for this deployment.');
     }
-    return { store, tenant, devices: options.cloud.devices, now: () => options.clock.now() };
+    return {
+      store,
+      tenant,
+      devices: options.cloud.devices,
+      now: () => options.clock.now(),
+      enqueueKeyPackageNotice: (deviceId, payload) => enqueueScopeKeyPackageNotice(tenant, deviceId, payload),
+    };
+  }
+
+  async function enqueueScopeKeyPackageNotice(
+    tenant: TenantId,
+    deviceId: string,
+    input: E2eeKeyPackageAvailablePayload,
+  ): Promise<EnqueuedAgentControl> {
+    const payload = E2eeKeyPackageAvailablePayloadSchema.parse(input);
+    await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('e2ee.key_package.available', payload));
+    const messageId = uuidFromSha256(
+      await options.crypto.sha256(
+        new TextEncoder().encode(
+          JSON.stringify({ domain: 'byok:e2ee-key-package-notice', tenant, deviceId, scopeId: payload.scopeId, epoch: payload.epoch }),
+        ),
+      ),
+    );
+    const control = await enqueueAgentControlEnvelope(tenant, deviceId, messageId, (seq) =>
+      createEnvelope('e2ee.key_package.available', payload, { id: messageId, seq }),
+    );
+    if (
+      control.envelope.type !== 'e2ee.key_package.available' ||
+      control.envelope.payload.scopeId !== payload.scopeId ||
+      control.envelope.payload.epoch !== payload.epoch
+    ) {
+      throw new ByokCloudError(
+        'mailbox_receipt_mismatch',
+        `Mailbox message ${messageId} does not carry the key package notice for scope ${payload.scopeId} epoch ${payload.epoch}.`,
+      );
+    }
+    return control;
   }
 
   async function redactTasks(tenant: TenantId, input: { readonly taskIds: readonly string[] }): Promise<TaskRedactionResult> {
@@ -2619,6 +2709,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     async putScopeKeyPackages(tenant, input) {
       return e2eeMember.putScopeKeyPackages(e2eeMemberContext(tenant), input);
     },
+    enqueueScopeKeyPackageNotice,
     async readScopeKeyPackages(tenant, input) {
       return e2eeMember.readScopeKeyPackages(e2eeMemberContext(tenant), input);
     },
@@ -2834,6 +2925,7 @@ function assertNoOverDeclaration(
   skillPacks: SkillPackStore | undefined,
   agentMemoryProjectionAuthorizer: AgentMemoryProjectionAuthorizer | undefined,
   agentMemoryProjectionStore: AgentMemoryProjectionStore | undefined,
+  e2eeMemberStore: E2eeMemberStore | undefined,
 ): void {
   if (
     declares(declaration, CLOUD_CAPABILITIES.boardSse) &&
@@ -2875,6 +2967,12 @@ function assertNoOverDeclaration(
     throw new ByokCloudError(
       'capability_over_declared',
       `This deployment declares ${CLOUD_CAPABILITIES.agentMemoryProjection} but was given no complete AgentMemoryProjectionAuthorizer/AgentMemoryProjectionStore pair.`,
+    );
+  }
+  if (e2eeMemberStore === undefined && declares(declaration, CLOUD_CAPABILITIES.e2eeMember)) {
+    throw new ByokCloudError(
+      'capability_over_declared',
+      `This deployment declares ${CLOUD_CAPABILITIES.e2eeMember} but was given no E2eeMemberStore, so the /byok/e2ee routes would be published and unserved.`,
     );
   }
 }
