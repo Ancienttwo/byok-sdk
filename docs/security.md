@@ -828,18 +828,18 @@ What the Host does (#654 E5b-1):
 - Later key package puts for the scope get 409 `e2ee_scope_shredded`.
   In Postgres, the shred and each put take a transaction advisory lock on `(tenant, scope)` first, so a put of a new epoch cannot land after the shred.
 - A replayed append stores nothing new and shreds nothing. A second shred of the scope keeps the first receipt.
-- A shred of a scope id over 512 UTF-16 code units records nothing. Every put and read refuses such an id, so the Host never holds that scope.
+- For a scope id over 512 UTF-16 code units, the Host stores the chain entry and writes no shred record or receipt. Every put and read refuses such an id, so the Host never holds that scope.
 
 What stays after a Host shred:
 
 - The ciphertext rows and R2 objects. Without a scope key they cannot be opened.
   The fences keep working, because they compare metadata and MACs only.
-- Metadata: the scope id, epochs, member ids, row keys, sizes and times.
+- Metadata: the scope id, the epoch numbers in the ciphertext rows, member ids, row keys, sizes and times.
 - The plaintext categories of the scope's tasks (section [Readers by data category](#readers-by-data-category)).
-  There is no `redactScope` (owner batch §50i A). To remove those rows, the Host calls `redactTasks` with the scope's taskIds.
-- Scope keys on members. A device keeps its scope keys in the `SealedScopeKeyring` that its Host supplies (`packages/client/src/daemon/sealed-task.ts`).
-  The SDK does not purge that keyring on a shred yet; that is E5b-2.
-  Until then a device that still holds a scope key can open the scope's ciphertext.
+  There is no `redactScope` (owner batch §50i A). `redactTasks` with the scope's taskIds removes the task-keyed rows. Egress rows, truth records and receipts without a task key stay (see [Deletion paths](#deletion-paths)).
+- Scope keys on members. Members hold scope keys locally (design §7.4).
+  Today only tests inject the device keyring (`SealedScopeKeyring` in `packages/client/src/daemon/sealed-task.ts`), and the daemon does not advertise `sealed-payload-v1`.
+  The member purge on a shred is E5b-2. A member that still holds a scope key can open the scope's ciphertext.
 - Plaintext that a member has already opened, shown, exported or logged.
 
 Who can start a shred, and the unverified delete:
@@ -849,7 +849,7 @@ Who can start a shred, and the unverified delete:
   The golden vectors in `packages/core/src/__tests__/golden/member-rules-v1.json` (`scopeSigners` and `shred`) pin these rules.
 - The Host never verifies member signatures (design §7.3).
   So any paired device of the tenant can append a well-shaped `shred` for any scope, and the Host deletes that scope's packages for good.
-  Members then recover only by the D5 path (design §14).
+  The scope id is closed on the Host for good: a later package put gets 409 `e2ee_scope_shredded`. Members recover only under a new scope id, and old content opens only with a scope key a member still holds.
 - This is the same class of risk as a device overwriting another recipient's key package, which a device can already do.
 - A `shred` with a bad signature, or by a signer outside the scope's policy, breaks the walk for every member.
   So the Host and the members disagree only on a chain that the members already refuse.
@@ -972,9 +972,11 @@ The #654 design gives the digest rules for sealed categories (§9.3).
   undelivered. The bounded completion event records that outcome rather than
   claiming delivery that did not happen.
 - **A scope shred is complete only on the live Host store.** The Host deletes
-  the key packages without verifying the signer. Backups keep them, and a
-  member's local keyring keeps its scope keys, until E5b-2 adds the member
-  purge and the KEM rotation. Stated in full above ([Scope shred](#scope-shred)).
+  the key packages without verifying the signer. Backup copies of the packages
+  stay openable until each member rotates its KEM key and deletes the old
+  private key, and members keep their scope keys until they purge them. E5b-2
+  adds the purge and the rotation. Stated in full above
+  ([Scope shred](#scope-shred)).
 - **Agents run with the daemon user's full filesystem and network access.**
   Sessions run YOLO (ADR-037). Claude and Pi have no SDK-applied sandbox;
   Codex uses `danger-full-access` unless `DaemonConfig.codexSandbox` selects

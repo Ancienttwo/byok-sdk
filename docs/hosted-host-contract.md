@@ -389,7 +389,7 @@ Deletion paths:
   and writes an `e2ee-scope-shred:<scopeId>` receipt with the chain seq, the time and the writer.
   Later key package puts for the scope get 409 `e2ee_scope_shredded`.
   The Host deletes without verifying the signer, and the ciphertext rows stay.
-  Backups keep the packages until each member rotates its KEM key.
+  Backup copies of the packages stay openable until each member rotates its KEM key and deletes the old private key.
   The limits are in [security.md](security.md) (Scope shred).
 - `createPostgresTenantErasure` is the only path that deletes task receipt rows
   (`task-offer:`, `task-offer-delivered:`, `task:` and `agent-message-offer:`), `task` rows and `agent_message_admission` rows.
@@ -408,7 +408,7 @@ Deletion paths:
 `redactTasks` does not cover reliable egress rows (they have no task key), truth records, or receipts without a task key
 (`agent-input-preparation-*`, `agent-home-projection-*`, `agent-content-*`).
 It cannot reach backups, replicas or logs.
-A scope shred removes key packages only. There is no `redactScope`: the Host calls `redactTasks` with the scope's taskIds.
+A scope shred removes key packages and scope epochs only. There is no `redactScope`: the Host calls `redactTasks` with the scope's taskIds, which leaves the rows `redactTasks` does not cover.
 The shred is complete only on the live store until each member of the scope rotates its KEM key and purges its scope keys,
 and the SDK does not run that rotation or purge yet.
 This document states current behavior. It does not promise a design or a release.
@@ -423,4 +423,4 @@ This document states current behavior. It does not promise a design or a release
 | Held message | No SDK route releases it. The task has no terminal until a cancel (section 4). | Return `held` only with a product release action. |
 | Idle cost | 62 to 194 HTTP calls and about 3,650 reads for each idle device per hour (section 5). | Choose presence, hold and fallback against the budget. |
 | Retention | No receipt TTL. `redactTasks` removes content by task only. Unacked offers stay as dead letters (section 6). | Tenant erasure from Node is the only delete path for task receipt rows and admission rows. |
-| Scope shred | The Host deletes a scope's key packages on any well-shaped `shred`, without verifying the signer. Backups keep the packages, and members keep their scope keys, until each member rotates its KEM key (section 6). | Treat a shred as complete only on the live store. Remove the scope's plaintext rows with `redactTasks`. |
+| Scope shred | The Host deletes a scope's key packages on any well-shaped `shred`, without verifying the signer. Backup copies of the packages stay openable until each member rotates its KEM key and deletes the old private key. Members keep their scope keys until they purge them (section 6). | Treat a shred as complete only on the live store. Remove the scope's task-keyed plaintext rows with `redactTasks`. |
