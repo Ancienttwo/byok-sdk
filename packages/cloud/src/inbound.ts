@@ -751,9 +751,12 @@ async function applyInboundGate(
   ) {
     return refuse('agent_identity_mismatch');
   }
-  // A redacted task keeps no new content. A late progress or approval report
-  // is complete as received, the same as one stored and then redacted.
-  if (REDACTABLE_REPORT_TYPES.includes(plainTypeOf(envelope.type)) && TERMINAL_TASK_STATUSES.includes(attempt.status)
+  // A redacted task keeps no new content. A late progress, approval or
+  // artifact report is complete as received, the same as one stored and then
+  // redacted. So is a terminal that names its ciphertext blob: redaction
+  // deleted the blob, and the terminal receipt is already a tombstone.
+  if ((REDACTABLE_REPORT_TYPES.includes(plainTypeOf(envelope.type)) || ciphertextRef !== undefined)
+    && TERMINAL_TASK_STATUSES.includes(attempt.status)
     && await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined) {
     return completeInboundEnvelope(stores, deviceId, envelope.id, attempt.agentRef);
   }
@@ -891,7 +894,14 @@ async function applyLifecycle(
       return;
     case 'task.artifact_sealed': {
       const ref = sealedCiphertextRef(envelope.payload);
-      if (ref !== undefined) await retainSealedCiphertext(stores.objects, taskId, ref);
+      if (ref === undefined) return;
+      await retainSealedCiphertext(stores.objects, taskId, ref);
+      // No row names an artifact blob, so redaction cannot find this reference
+      // later. Redaction runs only on a terminal task, and it may have released
+      // the task's references before this one was added. So an artifact that
+      // arrives once its task is terminal holds no blob.
+      const after = await stores.tasks.get(taskId);
+      if (after === undefined || TERMINAL_TASK_STATUSES.includes(after.status)) await releaseSealedCiphertext(stores.objects, taskId, ref);
       return;
     }
     default:

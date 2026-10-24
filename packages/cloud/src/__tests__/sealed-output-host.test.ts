@@ -319,6 +319,30 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
     expect(await refCount(task, ref)).toBe(0);
   });
 
+  it('settles a replayed terminal on a redacted task after redaction deleted its blob', async () => {
+    const task = await offeredTask(OUTPUT_SEALING);
+    const { member, ref } = await uploaded(task);
+    const payload = { ...SEALED_OUTPUTS['task.complete_sealed'], sealed: member };
+    expect(await task.send('task.complete_sealed', payload)).toEqual({ outcome: 'accepted' });
+    // What redaction leaves: the reference released, the blob deleted, the receipts tombstoned.
+    const hash = ref.contentHash as ContentHash;
+    await task.harness.core.objects.removeReference(TENANT_A, { hash, refKind: 'sealed-task', refId: task.taskId });
+    await task.harness.core.objects.markDeletePending(TENANT_A, hash);
+    await task.harness.core.objects.markDeleted(TENANT_A, hash);
+    await task.harness.stores.receipts.record(TENANT_A, { key: taskRedactionReceiptKey(task.taskId), body: '{}' });
+
+    expect(await task.send('task.complete_sealed', payload)).toEqual({ outcome: 'accepted' });
+    expect(await refCount(task, ref)).toBe(0);
+  });
+
+  it('an artifact that arrives once its task is terminal holds no reference to its blob', async () => {
+    const task = await offeredTask(OUTPUT_SEALING);
+    expect(await task.send('task.complete_sealed', SEALED_OUTPUTS['task.complete_sealed'])).toEqual({ outcome: 'accepted' });
+    const { member, ref } = await uploaded(task);
+    expect(await task.send('task.artifact_sealed', { ...SEALED_OUTPUTS['task.artifact_sealed'], sealed: member })).toEqual({ outcome: 'accepted' });
+    expect(await refCount(task, ref)).toBe(0);
+  });
+
   it('a late artifact on a redacted task holds no reference to its blob', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
     expect(await task.send('task.complete_sealed', SEALED_OUTPUTS['task.complete_sealed'])).toEqual({ outcome: 'accepted' });
