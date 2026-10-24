@@ -201,6 +201,7 @@ describe('Claude stdin transport failure ownership', () => {
     await flush();
     expect(events.error).toBeInstanceOf(RuntimeExecutionFailure);
     expect(events.error).toMatchObject({ phase: 'run', cause: fixture.error });
+    expect(events.error).toMatchObject({ failure: { class: 'unknown' } });
     const disposal = deferred();
     tree.dispose.mockReturnValue(disposal.promise);
     const close = observe(session.close());

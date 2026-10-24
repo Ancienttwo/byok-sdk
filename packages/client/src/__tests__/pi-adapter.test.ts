@@ -524,6 +524,21 @@ const __executionScratch = await testExecutionScratch();
     expect(failure).toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });
   });
 
+  it('marks a Pi child error during an admitted turn unknown, since the process did not exit (#869)', async () => {
+    let child: ReturnType<typeof realSpawn> | undefined;
+    const spawnFn = ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      child = realSpawn(command, args, options);
+      return child;
+    }) as never;
+    const adapter = new PiAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }), spawnFn });
+    const session = await startAdapter(adapter, baseTask, await makeCtx({ ...process.env, FAKE_PI_HANG_AFTER_TOOL: '1' }));
+    openSessions.push(session);
+    if (!child) throw new Error('pi child was not spawned');
+    child.emit('error', new Error('simulated pi child error'));
+    const failure = await (async () => { for await (const _event of session.events); })().then(() => undefined, (error: unknown) => error);
+    expect(failure).toMatchObject({ category: 'infrastructure', failure: { class: 'unknown' } });
+  });
+
   it('marks pi exiting before it answers the initial prompt runtime_exited (#869)', async () => {
     const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
     await expect(startAdapter(fakePiAdapter(), task, await makeCtx())).rejects.toMatchObject({
