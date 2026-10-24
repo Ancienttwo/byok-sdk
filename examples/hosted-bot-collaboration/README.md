@@ -433,8 +433,8 @@ three and runs these suites.
   sender tests cover the projection claim, lease, fence, backoff, race, order and version filter, the archived and
   missing delivery entity, the retention refusal of an unsettled delivery row, a terminal delivery on the reply route,
   a hung readback, the clock read after the scope lock, the readback lease, a readback wait fenced by that lease, a failed
-  readback fenced by its attempt, a
-  wait that never moves `next_at` earlier, the option checks, and a wait that cannot be written.
+  readback fenced by its attempt, a wait that never moves `next_at` earlier, the option checks, and a wait that cannot be
+  written.
 - The inbound tests cover owner input with and without a channel and its replay, room input and bot background, the
   audit kinds, an echo that names one delivery, none or two, and the refusal of `receive` in `commit()`.
 - The scheduler tests cover on-time and late fires, the supersede in the fire, the device fence and its paging, two
