@@ -44,6 +44,9 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
   const store = new HostedCollaborationStore(db.pool, db.store.schema, { channel: true });
   const scope = `tenant:${randomUUID()}`;
   let now = Date.UTC(2026, 0, 1), armed = false;
+  /** A held send: `started` resolves when it starts, `open` lets it go on, and `holder` is the sender pass that waits for it. */
+  let hold: { armed: boolean; started: Promise<void>; begin(): void; gate: Promise<void>; open(): void; holder?: Promise<void> } | undefined;
+  const roots = new Map<string, string>();
   const execution = { ...template('device', 'main'), agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'delivery' } };
   await store.seed(scope, state => { seedCollaboration(state); state.team.bots.main!.execution = execution; });
   await store.bindDevice(scope, 'device');
@@ -72,18 +75,39 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
     };
     return Reflect.get(target, name, receiver) as unknown;
   } });
-  const sender = new HostedOutboxSender(db.pool, crashing, { projections: { deliver: async () => {} }, channel: port, now: () => now,
-    leaseMs: LEASE_MS, sendTimeoutMs: 10 });
+  const channel: ChannelPort = { ...port, send: async (input, signal) => {
+    if (hold?.armed) {
+      hold.armed = false;
+      hold.begin();
+      await hold.gate;
+    }
+    return port.send(input, signal);
+  } };
+  // The send deadline outlives the steps of a case while a send is held; a hanging send (vector 5) still times out.
+  const sender = new HostedOutboxSender(db.pool, crashing, { projections: { deliver: async () => {} }, channel, now: () => now,
+    leaseMs: LEASE_MS, sendTimeoutMs: 2_000 });
+  const passOf = async () => {
+    const pass = await sender.run();
+    if (pass.failed.length) throw new AggregateError(pass.failed.map(failure => failure.error), 'A sender step failed');
+    return pass;
+  };
 
   const deliveries = async () => Object.values((await store.read(scope)).channel?.deliveries ?? {});
-  /** Runs the Host as one L pass does: the sync, then the sender, again while the sender changed a row. */
+  /**
+   * Runs the Host as one L pass does: the sync, then the sender, again while the sender changed a row. A pass that starts
+   * the held send keeps waiting for it, and this run returns. A later run is another sender pass on the same rows: the
+   * other Host.
+   */
   const run = async () => {
     for (let round = 0; ; round++) {
       if (round === 10) throw new Error('The Host does not settle');
       await store.sync(scope, { ...SYNC_OPTIONS, now, history: undefined });
-      const pass = await sender.run();
-      if (pass.failed.length) throw new AggregateError(pass.failed.map(failure => failure.error), 'A sender step failed');
-      if (!pass.steps) break;
+      const pass = passOf();
+      if (hold?.armed) {
+        const held = hold;
+        if (await Promise.race([pass.then(() => false), held.started.then(() => true)])) { held.holder = pass.then(() => undefined); return; }
+      }
+      if (!(await pass).steps) break;
     }
     expect(await indexDrift(db, scope, await deliveries())).toEqual([]);
   };
@@ -102,6 +126,7 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
       (state, publish) => ports({ remember: root => rememberInbound(state, message, root) })(state, publish));
       const turnId = received.disposition.outcome === 'accepted' ? received.disposition.value as string : undefined;
       if (!turnId) throw new Error(`Refused receive: ${JSON.stringify(received.disposition)}`);
+      roots.set(key, turnId);
       await store.sync(scope, { ...SYNC_OPTIONS, now, history: undefined });
       const frozen = await inSchema(db.pool, store.schema, client => frozenIntent(client, scope, taskId(turnId, 0)), true);
       if (!frozen) throw new Error('The Turn did not freeze');
@@ -111,6 +136,19 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
           byteCount: Buffer.byteLength(FINAL_BODY) } } as unknown as AgentMessageInput;
       expect(await consume.consume(input)).toEqual({ outcome: 'accepted' });
       await run();
+    },
+    end: async key => {
+      const root = roots.get(key)!;
+      await keyless({ kind: 'cancel_turn', turnId: root });
+      await run();
+      expect((await store.read(scope)).turns[root]).toMatchObject({ conclusion: 'cancelled' });
+    },
+    holdNextSend: () => {
+      let begin!: () => void, open!: () => void;
+      const started = new Promise<void>(resolve => { begin = resolve; }), gate = new Promise<void>(resolve => { open = resolve; });
+      const held: NonNullable<typeof hold> = { armed: true, started, begin, gate, open };
+      hold = held;
+      return { release: async () => { held.open(); await held.holder; hold = undefined; await run(); } };
     },
     enablePush: async target => {
       const id = await keyless({ kind: 'enable_push_route', conversation: DIRECT, channel: 'fake', target, owner: 'owner' }) as string;
