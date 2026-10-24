@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Feature (client)** — the Claude, Codex, Grok and Hermes adapters declare
+  `messageDraft`, so a Host that reads `tasks.messageDraft` sees their reply
+  while it is written (#870). Claude always runs with
+  `--include-partial-messages`. Its text deltas, Codex
+  `item/agentMessage/delta` and Grok's ACP text deltas feed the draft only.
+  Hermes already sends one `progress` per chunk. The accepted message stays
+  the only authority: each later `progress` event reconciles the draft, and
+  `progress`, the closing reply and the published body are unchanged. There
+  is no protocol or wire change.
+- **Type change (client)** — `Session.events` is now
+  `AsyncIterable<AgentEvent | MessageDraftDelta>`, and `MessageDraftDelta`
+  is exported from `@byok-sdk/client`. Code that iterates `Session.events`
+  and types each item as `AgentEvent` no longer compiles. It must widen the
+  type or skip items of type `message_draft_delta`. An adapter whose
+  `events` yields only `AgentEvent` still compiles.
+
 ## 0.30.0 — 2026-10-24 (published)
 
 0.30.0 is a MINOR release under the default pre-1.0 policy, with no exception.

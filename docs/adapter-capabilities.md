@@ -21,6 +21,7 @@ they are not a second runtime-selection registry.
 | Recover pending native interactions after process restart | Unsupported | Unsupported | Unsupported | No new support introduced |
 | Host browser/mobile reconnect | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned |
 | Trajectory evidence for the execution record (`trajectoryEvidence`) | Not declared; records are `unknown` | Not declared; records are `unknown` | Not declared; records are `unknown` | Declared (`event-stream`); not declared with `durablePi: true` |
+| Display-only message draft (`messageDraft`) | Declared; text deltas from `--include-partial-messages` | Declared; `item/agentMessage/delta` | Declared; ACP `text_delta` | Declared; `text_delta` progress |
 | MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`) | Set for task toolset servers from Claude's own `mcp_status` answer | Set from the native `mcpToolCall` `server` and `tool`, for every server Codex runs, SDK helpers included | Not set; ACP `tool_call` defines no MCP server field, and live Grok evidence is pending (#633) | Set by exact observed name; ordinary, prepared and durable |
 
 By default Claude and Codex run YOLO
@@ -330,7 +331,8 @@ custom-harness path (`harnessId: 'hermes'`). Its descriptor declares:
 | New instruction after an idle turn (`followUp`) | Supported, same ACP session |
 | Task MCP toolsets (`mcpToolsets`) | Supported; ACP `session/new.mcpServers` stdio entries |
 | MCP identity on tool events (`tool_use.mcp`, `tool_result.mcp`) | Not set; the ACP title is the Hermes registry name, not an authoritative identity |
-| Legacy boolean interactive approval, native interactions, message drafts | Unsupported and omitted |
+| Legacy boolean interactive approval, native interactions | Unsupported and omitted |
+| Display-only message draft | Declared; one `progress` per `agent_message_chunk` |
 | Trajectory evidence | Not declared |
 
 Hermes runs edits in ACP mode `dont_ask` and commands under `--yolo`. A

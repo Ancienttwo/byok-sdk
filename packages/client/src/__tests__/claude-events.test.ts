@@ -484,3 +484,67 @@ describe('AssistantMessageTracker', () => {
     expect(new AssistantMessageTracker().startsMessage({ type: 'progress', text: 'x' })).toBe(true);
   });
 });
+
+describe('stream_event draft deltas (--include-partial-messages)', () => {
+  /** Frame order captured from claude 2.1.302: a block's deltas, its `assistant` frame, then its stop. */
+  const stream = (id: string, event: Record<string, unknown>): ClaudeStreamMessage => ({
+    type: 'stream_event', event, session_id: 's', parent_tool_use_id: null, api_message_id: id,
+  });
+  const textDelta = (id: string, text: string) => stream(id, { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } });
+  const assistant = (id: string, content: unknown[]): ClaudeStreamMessage => ({ type: 'assistant', message: { id, content } });
+  const block = (id: string, parts: string[]) => [
+    stream(id, { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
+    ...parts.map(part => textDelta(id, part)),
+    assistant(id, [{ type: 'text', text: parts.join('') }]),
+    stream(id, { type: 'content_block_stop', index: 0 }),
+  ];
+
+  /** Per frame: the mapped events, with each progress event's boundary decision. */
+  function run(frames: ClaudeStreamMessage[]) {
+    const correlation = createToolUseCorrelation();
+    const tracker = new AssistantMessageTracker();
+    return frames.flatMap((frame) => {
+      const { events, unmappedLabel } = mapClaudeMessageToAgentEvents(frame, correlation, { workspaceDir: '/tmp/ws' });
+      expect(unmappedLabel).toBeUndefined();
+      tracker.observe(frame, events);
+      return events.map(event => event.type === 'progress' ? { ...event, startsMessage: tracker.startsMessage(event) } : event);
+    });
+  }
+
+  it('maps only text deltas, and maps every other stream frame to nothing without a warning', () => {
+    expect(run([
+      stream('msg_1', { type: 'message_start', message: { id: 'msg_1', content: [] } }),
+      stream('msg_1', { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } }),
+      stream('msg_1', { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'hmm' } }),
+      stream('msg_1', { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'c2ln' } }),
+      stream('msg_1', { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"command"' } }),
+      stream('msg_1', { type: 'content_block_stop', index: 0 }),
+      stream('msg_1', { type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+      stream('msg_1', { type: 'message_stop' }),
+      textDelta('msg_1', 'Hi'),
+    ])).toEqual([{ type: 'message_draft_delta', text: 'Hi', startsMessage: true }]);
+  });
+
+  it('keeps every block of one message in one message and starts the draft once per message id', () => {
+    expect(run([
+      stream('msg_2', { type: 'message_start', message: { id: 'msg_2', content: [] } }),
+      ...block('msg_2', ['Part ', 'one.']),
+      ...block('msg_2', [' Part ', 'two.']),
+      ...block('msg_3', ['Again.']),
+    ])).toEqual([
+      { type: 'message_draft_delta', text: 'Part ', startsMessage: true },
+      { type: 'message_draft_delta', text: 'one.', startsMessage: false },
+      { type: 'progress', text: 'Part one.', startsMessage: true },
+      { type: 'message_draft_delta', text: ' Part ', startsMessage: false },
+      { type: 'message_draft_delta', text: 'two.', startsMessage: false },
+      { type: 'progress', text: ' Part two.', startsMessage: false },
+      { type: 'message_draft_delta', text: 'Again.', startsMessage: true },
+      { type: 'progress', text: 'Again.', startsMessage: true },
+    ]);
+  });
+
+  it('starts the draft at the first non-blank delta of a message', () => {
+    expect(run([textDelta('msg_4', '\n'), textDelta('msg_4', 'Answer.')]).map(event => event.type === 'message_draft_delta' && event.startsMessage))
+      .toEqual([false, true]);
+  });
+});

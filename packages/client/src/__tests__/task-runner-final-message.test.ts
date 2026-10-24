@@ -109,6 +109,27 @@ describe('TaskRunner task.complete.finalMessage (#322)', () => {
     }
   });
 
+  it.each([
+    ['FAKE_CLAUDE_REPEAT_CLOSING_TEXT', 2],
+    ['FAKE_CLAUDE_SPLIT_CLOSING_TEXT', 1],
+  ] as const)('keeps the Claude closing reply of %s with partial messages on (#501, #870)', async (toggle, copies) => {
+    vi.stubEnv(toggle, '1');
+    vi.stubEnv('FAKE_CLAUDE_PARTIAL_MESSAGES', '1');
+    try {
+      const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }) });
+      const sent: Envelope[] = [];
+      const runner = await makeRunner(adapter, sent);
+      await startTask(runner, `claude-partial-${copies}`, 'claude');
+
+      const payload = await completion(sent, `claude-partial-${copies}`);
+      expect(payload.finalMessage).toMatch(/^reply-1:.*CONSOLIDATED$/);
+      expect(payload.summary).toBe(payload.finalMessage!.repeat(copies));
+      expect(JSON.stringify(sent)).not.toContain('message_draft_delta');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('separates the last whole message from commentary that came before it without a tool call', async () => {
     const adapter = wholeMessageAdapter();
     const sent: Envelope[] = [];
