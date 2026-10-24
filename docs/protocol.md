@@ -1184,10 +1184,14 @@ orphan GC keeps the ciphertext while the task lives. `redactTasks` releases
 the reference. It deletes the object when a stored row of the task still
 names it. Retention can prune the mailbox row of a delivered steer, and the
 cloud stores no artifact. Then no row names the object, and orphan GC deletes
-it later. Tenant erasure also releases the reference. A terminal that loses
-to the first terminal releases its own reference. An artifact that arrives
-once its task is terminal holds no reference. A terminal replayed after
-redaction is complete as received, so the Host does not check its blob.
+it later. `redactTasks` releases the references again after it replaces the
+bodies, so a report that adds a reference while redaction runs holds nothing
+afterwards, and orphan GC deletes its object. Tenant erasure also releases the
+reference. A terminal that loses to the first terminal releases its own
+reference. An artifact that arrives once its task is terminal changes no
+reference: a new one holds nothing, and a replay keeps the reference of its
+earlier delivery. A terminal replayed after redaction is complete as received,
+so the Host does not check its blob.
 
 **Host comparison of a sealed retry.** The Host compares two sealed
 submissions of one identity by their comparison projection: the plaintext
@@ -1413,6 +1417,22 @@ fetches the packages addressed to its member from
   `sealed-payload-v1` unless that release's protocol has this type and the
   daemon handles it. Otherwise a daemon that advertised the flag gets a type
   it cannot decode.
+
+**Device handling (#654 E2d-2).** The daemon consumes the notice before its
+journal, like `provider.provisioning.available`, and never journals it.
+
+- It first catches the member chain up from its verified head, and stores
+  the new head. An invalid entry, or a chain that no longer holds the device
+  as a current member, ends the member for that run.
+- It then reads the packages for `(scopeId, epoch)`. It opens one only when
+  the scope is in its verified chain state and the scope's latest
+  `scope-policy` holds both the device and the sender. The sender's signing
+  key comes from the verified chain. The opened key stays in memory.
+- It keeps the row (does not acknowledge) only while the member is still
+  resuming at start, or when a Host read fails. It acknowledges every other
+  end with a log line: no member, an unknown scope, a missing package, or a
+  package that does not open. The first open or seal at that epoch fetches
+  again on its cache miss (E2d-3).
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
