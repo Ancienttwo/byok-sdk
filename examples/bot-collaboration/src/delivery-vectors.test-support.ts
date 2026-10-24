@@ -10,8 +10,8 @@ import type { CollaborationState } from './model';
  *
  * The subject's Bot `main` takes owner messages on channel `fake` in its direct conversation, and the configured self bot of
  * that channel is `own-bot`. Its business send deadline is short, so a send that never settles times out in the case.
- * `drain`, `advance`, `publish`, `echo`, `resend`, `enablePush` and `revokePush` each end by running the Host, with one
- * sender pass: a due row is sent inside the verb.
+ * `drain`, `advance`, `publish`, `end`, `echo`, `resend`, `enablePush` and `revokePush` each end by running the Host, with
+ * one sender pass: a due row is sent inside the verb.
  */
 export interface DeliverySubject {
   /** The Host clock. */
@@ -26,6 +26,15 @@ export interface DeliverySubject {
    * accepted, which queues the delivery. Then the Host runs.
    */
   publish(key: string, options?: { replyMs?: number | null }): Promise<void>;
+  /** The owner cancels the Turn of owner message `key` (`cancel_turn`). The Host runs until the Turn has its conclusion. */
+  end(key: string): Promise<void>;
+  /**
+   * Holds the next send call: its claim commits and the send starts, but the call does not return until `release`. The verb
+   * that makes the claim returns once the send has started. While the send is held, the Host that holds it is busy, and each
+   * verb runs another Host from the stored state, which takes the claim over after `recoveryMs`. `release` lets the send
+   * return its scripted result, and waits until the holding Host has handled it.
+   */
+  holdNextSend(): { release(): Promise<void> };
   /** The owner opts the direct conversation of Bot `main` into push on channel `fake`. Returns the route id. */
   enablePush(target: string): Promise<string>;
   revokePush(routeId: string): Promise<void>;
@@ -38,7 +47,7 @@ export interface DeliverySubject {
    * state takes over. The subject applies it inside the verb that makes the claim.
    */
   crashOnNextSend(): void;
-  /** How long after `crashOnNextSend` the Host recovers the claim. L recovers at startup; H after its lease. */
+  /** How long after `crashOnNextSend` or a held send another Host recovers the claim. L recovers at startup; H after its lease. */
   readonly recoveryMs: number;
   /** The K8 delivery entities, in insertion order. */
   deliveries(): Delivery[] | Promise<Delivery[]>;
@@ -69,7 +78,7 @@ function scripted(...results: Array<SendResult | Error | 'hang'>) {
   return { calls, send };
 }
 
-/** A Host verb that a subject does not have yet. Its vector is skipped, and the Host's PR says why. */
+/** A Host verb that a subject does not have yet. Its vectors are skipped, and the Host's PR says why. */
 export type PendingVerb = 'echo';
 export function deliveryVectors(name: string, open: (port: ChannelPort) => Promise<DeliverySubject>, pending: ReadonlySet<PendingVerb> = new Set()): void {
   describe(`delivery contract: ${name}`, () => {
@@ -216,12 +225,73 @@ export function deliveryVectors(name: string, open: (port: ChannelPort) => Promi
       await subject.publish('in1');
       await subject.advance(1_000);
       expect(port.calls).toHaveLength(2);
+      // The Turn ends, so the Host publishes its projection.
+      await subject.end('in1');
       for (const call of port.calls) {
         expect(call.route).toMatchObject({ kind: 'reply', token: replyToken('in1') });
         expect(JSON.stringify({ ...call, route: undefined })).not.toContain(replyToken('in1'));
       }
       expect(JSON.stringify(read)).not.toContain(replyToken('in1'));
-      expect(JSON.stringify(await subject.projections())).not.toContain(replyToken('in1'));
+      const projections = await subject.projections();
+      expect(projections.length).toBeGreaterThan(0);
+      expect(JSON.stringify(projections)).not.toContain(replyToken('in1'));
+    }, 60_000);
+
+    it.skipIf(pending.has('echo'))('14. accepts a delivery from a verified echo that arrives while its send is held, and keeps the echo', async () => {
+      const port = scripted(accepted('sent')), subject = await open(port);
+      const held = subject.holdNextSend();
+      await subject.publish('in1');
+      const [row] = await subject.deliveries();
+      expect(row).toMatchObject({ state: 'sending', attempts: 1 });
+      await subject.echo(row!.id, 'echoed');
+      expect(await subject.deliveries()).toMatchObject([{ id: row!.id, state: 'accepted', attempts: 1, platformMessageId: 'echoed' }]);
+      // The send then completes. Its result cannot replace the echo.
+      await held.release();
+      expect(await subject.deliveries()).toMatchObject([{ id: row!.id, state: 'accepted', attempts: 1, platformMessageId: 'echoed' }]);
+      expect(port.calls).toHaveLength(1);
+    }, 60_000);
+
+    it('15. ignores a held send that completes after another Host recovered its claim', async () => {
+      const port = scripted(accepted('late')), subject = await open(port);
+      const held = subject.holdNextSend();
+      await subject.publish('in1');
+      expect(await subject.deliveries()).toMatchObject([{ state: 'sending', attempts: 1 }]);
+      await subject.advance(subject.recoveryMs);
+      expect(await subject.deliveries()).toMatchObject([{ state: 'unknown', attempts: 1, code: 'interrupted' }]);
+      await held.release();
+      const [row] = await subject.deliveries();
+      expect(row).toMatchObject({ state: 'unknown', attempts: 1, code: 'interrupted' });
+      expect(row!.platformMessageId).toBeUndefined();
+      await subject.advance(120_000);
+      expect(port.calls).toHaveLength(1);
+    }, 60_000);
+
+    it('16. drops the stored reply token once its root closes', async () => {
+      const port = scripted(accepted('p1')), subject = await open(port);
+      await subject.publish('in1');
+      expect(await subject.deliveries()).toMatchObject([{ state: 'accepted' }]);
+      expect(await subject.stored()).toContain(replyToken('in1'));
+      await subject.end('in1');
+      const inbound = Object.values((await subject.state()).channel!.inbounds)[0]!;
+      expect(inbound.reply).toMatchObject({ inboundId: 'in1' });
+      expect(inbound.reply!.token).toBeUndefined();
+      expect(await subject.stored()).not.toContain(replyToken('in1'));
+    }, 60_000);
+
+    it('17. rejects an uncertain delivery whose readback is absent after its third attempt (attempts_exhausted)', async () => {
+      const port = scripted(new Error('receipt lost'));
+      const subject = await open({ send: port.send, readback: async () => 'absent' });
+      await subject.publish('in1');
+      await subject.drain();
+      expect(await subject.deliveries()).toMatchObject([{ state: 'pending', attempts: 1, nextAttemptAt: subject.now() + 1_000 }]);
+      await subject.advance(1_000);
+      await subject.drain();
+      expect(await subject.deliveries()).toMatchObject([{ state: 'pending', attempts: 2, nextAttemptAt: subject.now() + 2_000 }]);
+      await subject.advance(2_000);
+      await subject.drain();
+      expect(await subject.deliveries()).toMatchObject([{ state: 'rejected', attempts: 3, code: 'attempts_exhausted' }]);
+      await subject.advance(60_000);
+      expect(port.calls).toHaveLength(3);
     }, 60_000);
   });
 }

@@ -313,8 +313,9 @@ before the limit. The outbox DDL is the D2b-out plan text, pending owner §54a.
 
 ## Deployment config
 
-H is not deployed yet (see Status). A deployment composes these parts. `hosted-cloud.test-support.ts` composes the
-same parts for the tests.
+H is not deployed yet (see Status). A deployment composes these parts. For the tests, `hosted-cloud.test-support.ts`
+composes the SDK side (the Postgres and object stores, the token signer and a paired daemon) and the SDK task port (submit, readbacks, cancel); the
+message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMessageConsumer` themselves.
 
 - **Database.** One Postgres database. The store takes its own `pg.Pool` and its own schema
   (`new HostedCollaborationStore(pool, schema)`), and `migrate()` creates the H tables there. The SDK tables come from
