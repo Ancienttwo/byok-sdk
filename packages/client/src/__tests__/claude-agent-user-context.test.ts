@@ -54,6 +54,16 @@ describe('claudeAgentUserContextSettings', () => {
     expect(settings.claudeMdExcludes).toEqual([...parent('/srv/agents'), ...parent('/srv')]);
   });
 
+  it('excludes a config directory inside the Agent home whose real path lies outside it', () => {
+    const realpath = (dir: string) => dir === '/srv/agents/a1/.cfg' ? '/home/x/.claude' : dir;
+    const settings = claudeAgentUserContextSettings({ lease: lease('/srv/agents/a1'), cwd: '/srv/agents/a1' }, { CLAUDE_CONFIG_DIR: '/srv/agents/a1/.cfg' }, 'linux', unusedHomedir, realpath);
+    expect(settings.claudeMdExcludes).toEqual([
+      '/srv/agents/a1/.cfg/CLAUDE.md', '/srv/agents/a1/.cfg/rules/**',
+      ...parent('/srv/agents'),
+      ...parent('/srv'),
+    ]);
+  });
+
   it('replaces glob syntax with ? in the directory part of a rules pattern only', () => {
     const settings = claudeAgentUserContextSettings({ lease: lease('/srv/brk [1]/brace {a,b}/star*q?!@+|^$/a1'), cwd: '/srv/brk [1]/brace {a,b}/star*q?!@+|^$/a1' }, { HOME: '/home/x' }, 'linux', unusedHomedir, same);
     expect(settings.claudeMdExcludes).toEqual([
