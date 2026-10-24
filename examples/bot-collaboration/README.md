@@ -4,6 +4,8 @@ This copy-and-own example implements K8a and K8b in the Bot PRD.
 It uses the K4 Host execution core and K8-S public schema and calendar APIs.
 It has no paid runtime call. Tests use a synthetic adapter with the real SDK,
 daemon, HTTP transport, SQLite stores, and `submit_result` helper.
+To copy K8 into a Host repository, see [src/VENDOR.md](src/VENDOR.md): what
+to copy in each layer, how to resolve K4, and how to record the source.
 
 ## Run
 

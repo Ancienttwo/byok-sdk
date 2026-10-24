@@ -102,6 +102,12 @@
   shred in §6 and §7. `member-rules-v1.json` gains a `shred` section: after a
   shred, a `scope-policy` or a second `shred` of that scope is invalid, and
   another scope stays live.
+- **Docs (examples)** — K8 has a vendor contract, `src/VENDOR.md` (#886). It
+  lists the files to copy in three layers: `rules/`, the L Host and the shared
+  vectors. It says how to resolve K4, which SDK packages the copy needs, and
+  how to record the source commit. A test checks each list against the import
+  graph. The shared vectors need the L files and the K4 root entry, not
+  `rules/` alone. No code changes.
 
 ## 0.30.0 — 2026-10-24 (published)
 
