@@ -3667,6 +3667,9 @@ export function buildDaemonWithAdapters(
       } catch (error) {
         if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
       }
+      // The member entries go first: if their deletion fails, the device
+      // stays paired and E2EE-enrolled, and the unpair reports the failure.
+      await memberRecords?.clear();
       try {
         await store.credentials.clear();
       } catch {
@@ -3685,7 +3688,6 @@ export function buildDaemonWithAdapters(
         throw error;
       }
       if (current) await cursorStore.clear(config.serverUrl, current.deviceId);
-      await memberRecords?.clear();
     } finally {
       await cleanupLease.release();
     }
