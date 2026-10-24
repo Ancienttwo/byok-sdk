@@ -946,15 +946,15 @@ describe('device member KEM rotation (E2d-5)', () => {
     const { web, device, custody, options, keyring, restart } = await member();
     const scopeKey = await web.putScope('scope-a', [device]);
     const read = options.client.readKeyPackages.bind(options.client);
-    let ones = 0;
-    // The reads of epoch 1 are the scan, the scope's read-back and the final read-back: the run retires once the last one answered.
+    let answered = 0;
+    // Three passes read all 256 epochs of the one scope: the scan, the scope's read-back and the final read-back. The run retires once the last read answered.
     vi.spyOn(options.client, 'readKeyPackages').mockImplementation(async (scopeId, epoch, signal) => {
       const packages = await read(scopeId, epoch, signal);
-      if (epoch === 1 && ++ones === 3) keyring.retire();
+      if (++answered === 3 * 256) keyring.retire();
       return packages;
     });
     expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'member_lost' });
-    expect(ones).toBe(3);
+    expect(answered).toBe(3 * 256);
     expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
     vi.restoreAllMocks();
     expect(await (await restart()).fetch('scope-a', 1)).toMatchObject({ ok: true, key: { scopeKey } });
@@ -1070,6 +1070,47 @@ describe('device member KEM rotation (E2d-5)', () => {
     };
     expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'rewrap_unverified' });
     expect(landed).toBe(true);
+    expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+  });
+
+  it('keeps the old key when an old-key package lands at a new epoch of a scope during a later scope\'s put', async () => {
+    const { server, web, device, custody, logs, keyring, restart } = await member();
+    await web.putScope('scope-a', [device]);
+    await web.putScope('scope-b', [device]);
+    // `device` is the bundle from before the rotation, so this package is wrapped to the old key.
+    const lateKey = new Uint8Array(32).fill(9);
+    const late = await web.sealPackage('scope-a', device, lateKey, 2);
+    const handle = server.e2ee.handle.bind(server.e2ee);
+    let puts = 0;
+    server.e2ee.handle = async (req, res, url) => {
+      // The first put is scope-a's re-wrap, after which its read-back passed; the second is scope-b's.
+      if (req.method === 'POST' && url.pathname.endsWith('/key-packages') && ++puts === 2) server.e2ee.clientPutPackages(late);
+      return handle(req, res, url);
+    };
+    expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'rewrap_unverified' });
+    expect(puts).toBe(2);
+    expect(logs.join('\n')).toContain('epoch 2 of scope "scope-a" holds a key package that opens only with the old KEM key');
+    expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+    expect(await (await restart()).fetch('scope-a', 2)).toMatchObject({ ok: true, key: { scopeKey: lateKey } });
+  });
+
+  it('keeps the old key when a scope created during the rotation holds an old-key package', async () => {
+    const { server, web, device, custody, logs, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    const handle = server.e2ee.handle.bind(server.e2ee);
+    let created = false;
+    server.e2ee.handle = async (req, res, url) => {
+      if (!created && req.method === 'POST' && url.pathname.endsWith('/key-packages')) {
+        created = true;
+        // A client that has not seen the rotate wraps the new scope's key to the old key.
+        await web.follow();
+        await web.putScope('scope-c', [device]);
+      }
+      return handle(req, res, url);
+    };
+    expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'rewrap_unverified' });
+    expect(created).toBe(true);
+    expect(logs.join('\n')).toContain('epoch 1 of scope "scope-c" holds a key package that opens only with the old KEM key');
     expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
   });
 

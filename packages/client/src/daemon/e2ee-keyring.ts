@@ -38,8 +38,8 @@
  * KEM rotation (E2d-5, §7.5): the member stores a next KEM key beside the
  * current one, appends its `rotate` entry after a local walk (§7.9
  * requirement 2), re-wraps each of its own packages that it may use now to
- * the next key, reads them back, reads them back once more across every
- * scope, and only then drops the old private key. Until then a package opens
+ * the next key, reads them back, catches up and reads every usable scope
+ * back once more, and only then drops the old private key. Until then a package opens
  * with either key, and a resumed rotation picks up where it stopped.
  */
 import {
@@ -526,8 +526,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
    * scope, from a current member of its policy. The re-wrap names this
    * member as the sender, so a package from any other sender, such as a
    * removed member, is left as it is and never gains this member's
-   * signature. Then read them back, and once every scope is done, read every
-   * one back again.
+   * signature. Then read them back, and once every scope is done, read back
+   * every scope usable at the caught-up head.
    */
   async #rewrap(next: MemberKemKey): Promise<KemRotationFailure | undefined> {
     // An epoch rotation that read the scope members before the `rotate` may still wrap to the old key: let it land first.
@@ -540,18 +540,21 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       if (typeof result === 'string') return result;
       confirmed.set(scopeId, result);
     }
-    // A package wrapped to the old key that lands late (a held-back or
-    // retried put, or one that timed out here and still landed) replaces a
-    // re-wrapped row after its read-back. This second read-back narrows that
-    // window but does not close it: a put can still land between it and the
-    // custody write. The fix is the recipient `kemEpoch` in the signed
-    // package and the Host row, with the Host refusing an older one; it must
-    // land before a production path starts a rotation (E5b-2).
-    for (const [scopeId, expected] of confirmed) {
+    // A package wrapped to the old key can land after its scope's read-back:
+    // a late or retried put, or a new epoch from a client that has not seen
+    // the `rotate`. A scope can also become usable, or be created, during the
+    // run. So every scope usable at the caught-up head is read back once
+    // more. This interim pass narrows the window but does not close it: a put
+    // can still land between it and the custody write. The fix is the
+    // recipient `kemEpoch` in the signed package and the Host row, with the
+    // Host refusing an older one; it must land before a production path
+    // starts a rotation (E5b-2).
+    await this.catchUp();
+    for (const scopeId of this.#session?.state.scopes.keys() ?? []) {
       const view = this.#session;
       if (view === undefined) return 'member_lost';
       if (this.#scopeFailure(view, scopeId) !== undefined) continue;
-      const failure = await this.#confirm(view, scopeId, expected, next);
+      const failure = await this.#readBack(view, scopeId, confirmed.get(scopeId) ?? new Map(), next, view.keys.kem);
       if (failure !== undefined) return failure;
     }
     return undefined;
@@ -625,18 +628,22 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   ): Promise<KemRotationFailure | undefined> {
     const found = await this.#readEpochs(scopeId);
     if (found === undefined) return 'scope_epochs_exceeded';
-    for (const epoch of expected.keys()) if (!found.has(epoch)) return 'rewrap_unverified';
+    const unverified = (epoch: number, why: string): KemRotationFailure => {
+      this.options.log(`epoch ${epoch} of scope ${JSON.stringify(scopeId)} ${why}`);
+      return 'rewrap_unverified';
+    };
+    for (const epoch of expected.keys()) if (!found.has(epoch)) return unverified(epoch, 'was re-wrapped but no key package reads back');
     for (const [epoch, pkg] of found) {
       const current = await this.#openAccepted(view, scopeId, epoch, pkg, next);
       current?.scopeKey.fill(0);
       if (current !== undefined) {
-        if (expected.has(epoch) && expected.get(epoch) !== current.keyId) return 'rewrap_unverified';
+        if (expected.has(epoch) && expected.get(epoch) !== current.keyId) return unverified(epoch, 'reads back under another key id');
         continue;
       }
-      if (expected.has(epoch)) return 'rewrap_unverified';
+      if (expected.has(epoch)) return unverified(epoch, 'reads back with a key package the next KEM key does not open');
       const held = await this.#openAccepted(view, scopeId, epoch, pkg, old);
       held?.scopeKey.fill(0);
-      if (held !== undefined) return 'rewrap_unverified';
+      if (held !== undefined) return unverified(epoch, 'holds a key package that opens only with the old KEM key');
     }
     return undefined;
   }
@@ -669,25 +676,6 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       return undefined;
     }
     return found;
-  }
-
-  /**
-   * Read back each epoch of `expected`, {@link ROTATION_EPOCH_READS} at a
-   * time: each must hold a package from a sender `fetch` accepts in `view`
-   * that opens with `next` under its `keyId`.
-   */
-  async #confirm(view: DeviceMemberSession, scopeId: string, expected: ReadonlyMap<number, string>, next: MemberKemKey): Promise<KemRotationFailure | undefined> {
-    const epochs = [...expected.keys()];
-    for (let at = 0; at < epochs.length; at += ROTATION_EPOCH_READS) {
-      const confirmed = await Promise.all(epochs.slice(at, at + ROTATION_EPOCH_READS).map(async (epoch) => {
-        const [pkg] = await this.options.client.readKeyPackages(scopeId, epoch, this.#requestSignal());
-        const opened = pkg === undefined ? undefined : await this.#openAccepted(view, scopeId, epoch, pkg, next);
-        opened?.scopeKey.fill(0);
-        return opened?.keyId === expected.get(epoch);
-      }));
-      if (confirmed.includes(false)) return 'rewrap_unverified';
-    }
-    return undefined;
   }
 
   /** Open an own package of `epoch` with `kem`, when `fetch` would accept its sender in `view`. */
