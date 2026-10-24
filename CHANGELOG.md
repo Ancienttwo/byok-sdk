@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is
+  burned: start a new registration at the Host, do not retry it (#654 E2d).
 - **Breaking (cloud)** — the device-proof `requestId` is single-use on the
   three E2EE member writes, as on the truth put (#654, owner batch §41a A).
   The store records the `requestId`, its binding and the result with the
@@ -22,6 +24,11 @@
   stores the mode. `TeamSnapshotBot` gets the optional `profileRevision`, and
   `ExternalTeam` the optional `persona`. Without the option nothing changes,
   except that a snapshot with `profileRevision` is refused.
+
+- **Fixed (examples)** — K8 validates `profileRevision` with the protocol
+  `AgentHomeProjectionProfileRevisionSchema` (#879). Before, its own copy of
+  the rule accepted `0`, so a snapshot with `profileRevision: '0'` and
+  `personaReady(botId, '0')` passed. Both are refused now.
 
 - **Feature (examples)** — K8 `BotOptions.roomHistory` reads the room
   messages of a seat ContextPack from an external authority (#883). The
@@ -128,6 +135,21 @@
   own CLAUDE.md files. The patterns now escape glob syntax in every directory
   part, so all of them follow one rule. The config directory exclusion is
   decided on its real path, as Claude matches it.
+- **Fix (examples)** — in external team mode, the K8 `create_room` and
+  `update_room` schemas offer only current Bots as members and admin (#881).
+  Before, they also offered `new_bot_1` to `new_bot_3`, which only
+  `create_bot` can create, and external mode offers no `create_bot`. A room
+  action that named one was always refused. Local mode is unchanged. A Host
+  that copies K8 in external mode freezes a different schema for new owner
+  Main Bot Turns.
+- **Feature (examples)** — K8 `BotOptions.outcome` narrows the outcome offer
+  of new Turns (#881). `actions.turn` and `actions.main` are allowlists for a
+  Bot Turn and for the extra actions of an owner Main Bot Turn. `timeZones`
+  sets 1 to 8 IANA zones for the routine actions. `confirmable` sets the
+  `confirmable_action` branches. Without the option, every schema is the same
+  as before. `outcomeOffer` checks an offer, and `SyncOptions.offer` takes its
+  result, so the H sync uses the same rule. Turns frozen before keep their
+  schema.
 
 ## 0.30.0 — 2026-10-24 (published)
 

@@ -71,6 +71,13 @@ export const AGENT_INPUT_PREPARATION_CAPABILITY =
  */
 export const SEALED_PAYLOAD_CAPABILITY = 'sealed-payload-v1' as const;
 
+/**
+ * A server advertises it before a device may send a sealed task output that
+ * names its ciphertext blob (`sealed.ciphertextRef`) instead of carrying it
+ * inline. The server then holds the blob for the life of the task.
+ */
+export const SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY = 'sealed-output-ciphertext-ref' as const;
+
 /** Single value authority shared by schema validation and schema-free consumers. */
 export const PREPARED_AGENT_MEMORY_MODES = ['none', 'read', 'read-write'] as const;
 

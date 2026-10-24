@@ -51,6 +51,7 @@ const WIRE_REFUSAL_REASONS = {
   claim_harness_and_runtime_conflict: 'payload_invalid',
   recovery_report_invalid: 'payload_invalid',
   activity_batch_invalid: 'payload_invalid',
+  sealed_ciphertext_invalid: 'payload_invalid',
   approval_event_invalid: 'payload_invalid',
   device_not_eligible: 'not_permitted',
   hello_device_mismatch: 'not_permitted',

@@ -7,7 +7,8 @@ export type { AgentMessageInput, BotOptions, HostIntentHandler, MessageServer } 
 export { classifyInbound, inboundKey } from './channel';
 export type { ChannelOptions, ChannelPort, Conversation, Delivery, DeliveryState, InboundClass, InboundMessage, Principal, PushRoute, ReplyRoute } from './channel';
 export { BOT_REPLY_MAX_BYTES, DEFAULT_INSTRUCTION_MAX_BYTES, minimumInstructionBytes } from './delegation';
-export { SYSTEM_PROMPT, contextPack, outcomeSchema, DEFAULT_CONTEXT_MAX_BYTES, DEFAULT_CONTEXT_TURN_LIMIT } from './schema';
+export { SYSTEM_PROMPT, contextPack, outcomeOffer, outcomeSchema, DEFAULT_CONTEXT_MAX_BYTES, DEFAULT_CONTEXT_TURN_LIMIT } from './schema';
+export type { CheckedOffer, ConfirmableSpec, MainAction, OutcomeOffer, TurnAction } from './schema';
 export type { Card, CollaborationState, Delegation, InputBatch, ReplyEntry, SealReason, Turn, UserInput } from './model';
 export { BOT_ROUTINE, botRoutines } from './routines';
 export { CommitConflict, commitInLedger, retainInLedger, revisionOf } from './commit';
