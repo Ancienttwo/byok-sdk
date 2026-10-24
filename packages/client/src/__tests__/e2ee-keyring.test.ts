@@ -20,7 +20,7 @@ import {
   type SealedContentHeaderV1,
 } from '@byok-sdk/core/sealed-payload';
 import { E2EE_SCOPE_KEY_PACKAGE_PUT_MAX } from '@byok-sdk/protocol';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AuthManager } from '../daemon/auth-manager';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { DeviceMemberRecords } from '../daemon/device-member-custody';
@@ -77,7 +77,8 @@ async function member(keyringOptions: { readonly requestTimeoutMs?: number } = {
   const resume = () => resumeDeviceMember({ ...options, signal: new AbortController().signal, minDelayMs: 5, maxDelayMs: 20 });
   /** A new run of the same member: its session from custody, and a new keyring. */
   const restart = async () => new DeviceMemberKeyring((await resume())!, { ...options, ...keyringOptions });
-  return { server: server!, web, device, custody, logs, keyring: await restart(), restart, resume };
+  const session = (await resume())!;
+  return { server: server!, web, device, custody, logs, options, session, keyring: new DeviceMemberKeyring(session, { ...options, ...keyringOptions }), restart, resume };
 }
 
 function head(custody: InMemoryDeviceMemberCustody): unknown {
@@ -626,6 +627,115 @@ describe('device member keyring rotation (E2d-4)', () => {
       expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(2);
     } finally {
       release();
+    }
+  });
+
+  it('checks freshness again after the key read caught up past a remove of a scope member', async () => {
+    const { web, device, keyring } = await member();
+    const helper = await stranger();
+    await web.append('add', { member: helper.member });
+    await web.putScope('scope-a', [device, helper.member]);
+    await keyring.catchUp();
+    expect(await keyring.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    // The key is not cached, so the key read catches up, and the remove arrives only there.
+    expect(keyring.cached('scope-a', 1)).toBeUndefined();
+    await web.append('remove', { memberId: helper.member.memberId });
+    expect(await keyring.sealingKey('scope-a', 1)).toBeUndefined();
+    expect(keyring.session!.state.head).toEqual(web.head);
+  });
+
+  it('copies the key where the opening read takes it, so a catch-up before the read resumes cannot zero it', async () => {
+    const { web, device, keyring } = await member();
+    const scopeKey = await web.putScope('scope-a', [device]);
+    let shredded = false;
+    const shred = async (): Promise<void> => {
+      if (shredded) return;
+      shredded = true;
+      await web.append('shred', { scopeId: 'scope-a' });
+      await keyring.catchUp();
+    };
+    // A read that takes the key through the public fetch gets the cached
+    // bytes; this catch-up zeroes them before that read resumes.
+    const fetch = keyring.fetch.bind(keyring);
+    vi.spyOn(keyring, 'fetch').mockImplementation(async (...args) => {
+      const result = await fetch(...args);
+      await shred();
+      return result;
+    });
+    const key = await keyring.openingKey({ id: 'scope-a', epoch: 1 });
+    await shred();
+    expect(keyring.cached('scope-a', 1)).toBeUndefined();
+    expect(key).toEqual(scopeKey);
+    expect(key!.some((byte) => byte !== 0)).toBe(true);
+  });
+
+  it('retires without onLost, zeroing its keys, and hands only on-chain points of the same member to the next run', async () => {
+    const { web, device, options, session } = await member();
+    let lost = 0;
+    const first = new DeviceMemberKeyring(session, { ...options, onLost: () => { lost += 1; } });
+    const scopeKey = await web.putScope('scope-a', [device]);
+    await first.catchUp();
+    expect(await first.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    const fetched = await first.fetch('scope-a', 1);
+    if (!fetched.ok) throw new Error(fetched.reason);
+
+    const carried = first.retire()!;
+    expect(lost).toBe(0);
+    expect(first.session).toBeUndefined();
+    expect(fetched.key.scopeKey.every((byte) => byte === 0)).toBe(true);
+    expect(await first.sealingKey('scope-a', 1)).toBeUndefined();
+    expect(carried.points.get('scope-a')?.get(1)).toEqual(web.head);
+
+    // A next run whose verified chain does not reach the point keeps nothing of it.
+    const next = new DeviceMemberKeyring(session, { ...options, carried });
+    expect(await next.sealingKey('scope-a', 1)).toBeUndefined();
+    const resumed = new DeviceMemberKeyring(next.session!, options);
+    await resumed.catchUp();
+    const current = new DeviceMemberKeyring(resumed.session!, { ...options, carried });
+    expect(await current.sealingKey('scope-a', 1)).toEqual({ scopeKey, epoch: 1, sender: device.memberId, chainHead: web.head });
+
+    // A point that is not kept leaves no fresh epoch, so the device rotates past epoch 1 (E2d-4).
+    const forged = { ...carried, points: new Map([['scope-a', new Map([[1, { ...web.head!, hash: `sha256:${'0'.repeat(64)}` }]])]]) };
+    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: forged }).sealingKey('scope-a', 1)).toMatchObject({ epoch: 2 });
+    const otherMember = { ...carried, memberId: web.member.memberId };
+    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: otherMember }).sealingKey('scope-a', 1)).toMatchObject({ epoch: 3 });
+  });
+
+  it('hands the next run the seq a rotated epoch was wrapped at, so a member KEM rotation after it still makes the epoch stale', async () => {
+    const { web, device, options, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(2);
+    const session = keyring.session!;
+    const carried = keyring.retire()!;
+    const kem = (await openMemberKeyRecord(await generateMemberKeyRecord({ tenantId: 'tenant-test' })))!.kem;
+    const kemEpoch = web.member.kemEpoch + 1;
+    const rotated = await createMemberKeyBundle({
+      signingPublicJwk: web.keys.signing.publicJwk, signingPrivateKey: web.keys.signing.privateKey, kemPublicJwk: kem.publicJwk, kemEpoch,
+    });
+    await web.append('rotate', { memberId: web.member.memberId, kemPublicJwk: rotated.kemPublicJwk, kemEpoch, kemSig: rotated.kemSig });
+    const resumed = new DeviceMemberKeyring(session, options);
+    await resumed.catchUp();
+    // The carried point of epoch 2 is on the chain, but its packages name the old KEM key.
+    expect((await new DeviceMemberKeyring(resumed.session!, { ...options, carried }).sealingKey('scope-a', 1))?.epoch).toBe(3);
+  });
+
+  it('aborts a rotation in flight at retire, so it keeps no key', async () => {
+    const { server, web, device, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    let release!: () => void;
+    server.e2ee.holdPackagePuts = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      const sealing = keyring.sealingKey('scope-a', 1);
+      while (server.e2ee.devicePuts.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+      const carried = keyring.retire()!;
+      await expect(sealing).rejects.toMatchObject({ name: 'AbortError' });
+      expect(carried.points.get('scope-a')).toBeUndefined();
+      expect(keyring.cached('scope-a', 2)).toBeUndefined();
+    } finally {
+      release();
+      server.e2ee.holdPackagePuts = undefined;
     }
   });
 });

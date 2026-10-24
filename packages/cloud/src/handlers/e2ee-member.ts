@@ -23,6 +23,7 @@ import type { Context } from 'hono';
 import type { DeviceProofAuthDeps } from '../auth/device-proof';
 import * as e2eeMember from '../e2ee-member';
 import { ByokCloudError, isCloudError, type CloudErrorCode } from '../errors';
+import { TRUTH_REQUEST_ID_MAX_LENGTH } from '../truth/contract';
 import { authenticateProofRequest, readProofRequestBody } from './device-proof-request';
 import { authenticateDevice, type DeviceRouteDeps } from './shared';
 
@@ -57,6 +58,10 @@ function proofWriteHandler(deps: E2eeMemberRouteDeps, operation: string, resourc
     if (body === undefined) return c.json({ error: 'invalid request body' }, 400);
     const proven = await authenticateProofRequest(c, deps.proof, { body, operation, resource });
     if (proven === undefined) return c.json({ error: 'unauthorized' }, 401);
+    // The truth put refuses the same ids with the same answer; the receipt table is shared.
+    if (proven.requestId.length > TRUTH_REQUEST_ID_MAX_LENGTH) {
+      return c.json({ error: 'proof_request_conflict' }, 409);
+    }
     let json: unknown;
     try {
       json = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
