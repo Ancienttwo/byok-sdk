@@ -46,6 +46,27 @@ const K8_HOSTED_EXPORTS = Object.freeze({
   './team': './src/team.ts',
   './test-support': './src/commit-vectors.test-support.ts',
 });
+// #793 D2g: the K8 retention rule and its shared vectors, added to the hosted
+// entries for H's retention slice (owner question §53d).
+const K8_RETENTION_EXPORTS = Object.freeze({
+  './retention': './src/retention.ts',
+  './retention-vectors': './src/retention-vectors.test-support.ts',
+});
+// #793 D2f-1: the K8 Bot routine policy and its shared vectors, added to the
+// hosted and retention entries. src/routines.ts does not load the K8 host.
+const K8_ROUTINE_EXPORTS = Object.freeze({
+  './routines': './src/routines.ts',
+  './routine-vectors': './src/routine-vectors.test-support.ts',
+});
+// #793 D2b-out-1: the K8 channel and delivery rules and their shared vectors, added
+// to the hosted, retention and routine entries (owner question §54b). They do not
+// load the K8 host.
+const K8_DELIVERY_EXPORTS = Object.freeze({
+  './channel': './src/channel.ts',
+  './delivery': './src/delivery.ts',
+  './delivery-routing': './src/delivery-routing.ts',
+  './delivery-vectors': './src/delivery-vectors.test-support.ts',
+});
 function otherWorkspaceManifests(cwd) {
   const manifests = [];
   for (const prefix of ['packages', 'examples']) {
@@ -175,6 +196,20 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     }
     // #793 D2a-0: the K8 entries for the hosted example.
     if (before.exports === undefined && isDeepStrictEqual(after.exports, K8_HOSTED_EXPORTS)) delete after.exports;
+    // #793 D2g: the retention entries, only on top of exactly the hosted entries.
+    if (isDeepStrictEqual(before.exports, K8_HOSTED_EXPORTS) && isDeepStrictEqual(after.exports, { ...K8_HOSTED_EXPORTS, ...K8_RETENTION_EXPORTS })) {
+      after.exports = before.exports;
+    }
+    // #793 D2f-1: the routine entries, only on top of exactly the hosted and retention entries.
+    const retained = { ...K8_HOSTED_EXPORTS, ...K8_RETENTION_EXPORTS };
+    if (isDeepStrictEqual(before.exports, retained) && isDeepStrictEqual(after.exports, { ...retained, ...K8_ROUTINE_EXPORTS })) {
+      after.exports = before.exports;
+    }
+    // #793 D2b-out-1: the delivery entries, only on top of exactly the hosted, retention and routine entries.
+    const routed = { ...retained, ...K8_ROUTINE_EXPORTS };
+    if (isDeepStrictEqual(before.exports, routed) && isDeepStrictEqual(after.exports, { ...routed, ...K8_DELIVERY_EXPORTS })) {
+      after.exports = before.exports;
+    }
   } else if (path === 'package.json') {
     const oldCommand = before.scripts?.['test:scripts'], newCommand = after.scripts?.['test:scripts'];
     const prefix = 'node --test --test-concurrency=1 ';

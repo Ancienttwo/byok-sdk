@@ -1,12 +1,25 @@
 import type { Pool, PoolClient } from 'pg';
-import { canonical, type Conclusion, type ExecutionTemplate, type Json } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
+import { botRoutines, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
+import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
+/** A K8 `update_routine` action. */
+type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { commitCommand, syncTurn, type Command, type CommandPorts, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { commitCommand, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type SyncOptions,
+  type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
+import { activeBinding, bindDevice, revokeDevice } from './binding';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
-import { syncFacts, writeSyncStep } from './intents';
+import { cancelIntent, deliverCancels, intentConclusions, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
 import { decideFinish, type TaskEvidence } from './reconcile';
+import { archivedRow, commitStored, decideRetention } from './retention';
+import { dueRoutine, hostedRoutineCommands, loadSlice, planSlice, recordDue, switchDueVersions, writeSlice } from './routines';
+import type { RetentionInput, RetentionLimits, RetentionResult } from '@byok-sdk/example-bot-collaboration/retention';
+import { classifyInbound, inboundKey, verified, type ChannelPort, type Delivery, type InboundClass, type InboundMessage, type PushRoute,
+  type ReplyRoute } from '@byok-sdk/example-bot-collaboration/channel';
+import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from '@byok-sdk/example-bot-collaboration/delivery';
+import { cleanReplyTokens, deliveryRoute, echoCandidates, refuseRoute, rememberInbound } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { assemble, entryGroup, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
 
 /** A stored scope row of a store version that this code does not support. Nothing was written. */
@@ -14,13 +27,78 @@ export class HostedStoreVersionError extends Error {
   constructor(readonly version: number) { super(`Unsupported hosted collaboration store version ${version}`); this.name = 'HostedStoreVersionError'; }
 }
 export type Publish = (id: string, value: Json) => void;
-export type Decision<T> = { value: T; outbox: OutboxIntent[] };
+/** `now` is the clock of the writer. A transaction that settles a delivery must give it, for the outbox index. */
+export type Decision<T> = { value: T; outbox: OutboxIntent[]; now?: number };
 type Decide<T> = (state: CollaborationState, publish: Publish, client: PoolClient) => Decision<T> | Promise<Decision<T>>;
 type TurnHistory = NonNullable<SyncOptions<never>['history']>;
-/** The sync options of a scope. In history mode, `history` holds the rows of each Turn that may freeze, by Turn id. */
-export type HostedSyncOptions = Omit<SyncOptions<never>, 'history'> & { history?: ReadonlyMap<string, TurnHistory> };
-/** Builds the command ports on the state of the open commit. `publish` writes a projection in the same commit. */
-export type PortsFactory = (state: CollaborationState, publish: Publish) => CommandPorts;
+/**
+ * The sync options of a scope. In history mode, `history` holds the rows of each Turn that may freeze, by Turn id.
+ * The store reads the routines itself (#793 D2f). `timers` are the delegation timers of the K8 settlement; without them
+ * the rule's defaults apply (#793 D2f-5).
+ */
+export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines'> & { history?: ReadonlyMap<string, TurnHistory>;
+  timers?: DelegationTimers };
+/**
+ * Builds the command ports on the state of the open commit. `publish` writes a projection in the same commit. The store
+ * reads the intent facts itself, under the scope lock (#793 D2f-4), and owns the channel outbox port (#793 D2b-out-2).
+ * The message consumer and the internal `commitIn` take these ports.
+ */
+export type PortsFactory = (state: CollaborationState, publish: Publish) => Omit<CommandPorts, 'intents' | 'deliver'>;
+/**
+ * The ports of `commit()`. It refuses the callback commands, so it takes no callback ports (#793 D2f-6). The store owns the
+ * inbound `remember` port, which only `receive()` gives (#793 D2b-out-3).
+ */
+export type CommitPorts = Omit<CommandPorts, 'intents' | 'deliver' | 'outcome' | 'occurrence' | 'remember'>
+  & { outcome?: never; occurrence?: never; remember?: never };
+export type CommitPortsFactory = (state: CollaborationState, publish: Publish) => CommitPorts;
+/**
+ * The ports of `finish()`: the commit ports and the team management port of an outcome. The store builds the committed
+ * intents and the routine ports of the outcome itself (#793 D2f-6).
+ */
+export type FinishPortsFactory = (state: CollaborationState, publish: Publish) => CommitPorts & { manage: NonNullable<CommandPorts['outcome']>['manage'] };
+/** The K4 callback commands. Only `finish`, `consume` and `fire` build them. */
+const CALLBACK_KINDS = new Set<Command['kind']>(['outcome', 'message', 'occurrence']);
+/** `commit()` takes no K4 callback command (#793 D2f-6). Nothing was written: no scope row and no command record. */
+export class CallbackCommandError extends Error {
+  constructor(readonly kind: Command['kind']) {
+    super(`commit() does not take the K4 callback command ${kind}`);
+    this.name = 'CallbackCommandError';
+  }
+}
+/** `commit()` takes no inbound `receive` command: `receive()` runs it, with the store's `remember` port (#793 D2b-out-3). */
+export class InboundCommandError extends Error {
+  constructor() {
+    super('commit() does not take the inbound receive command; receive() runs it');
+    this.name = 'InboundCommandError';
+  }
+}
+/**
+ * Who the Host is on its channels, as L's options give it: the owner principal, and the Host's own bot ids by channel.
+ * It is Host configuration from verified identity, never a field of the message.
+ */
+export interface InboundIdentity { owner: string; self?: Record<string, readonly string[]> }
+export interface HostedStoreOptions {
+  /** The Host has a channel: a K4 callback queues its channel deliveries, as L does with `channel` set. */
+  channel?: boolean;
+}
+/**
+ * The sender's view of one delivery step (#793 D2b-out-2). `none`: the claim changed nothing. `moved`: it changed the entity
+ * or its wait, and there is nothing to call. `send`: the claim committed; send `body` on `route` now. `readback`: read back
+ * the row's `unknown` attempt `attempt`, and give its result with that attempt.
+ */
+export type DeliveryClaim = { kind: 'none' } | { kind: 'moved' } | { kind: 'readback'; attempt: number }
+  | { kind: 'send'; attempt: number; route: ReplyRoute | PushRoute; body: string };
+/** The outbox index times of a delivery that the sender owns: its lease, and the wait of an `unknown` row. */
+export interface DeliveryTimes {
+  leaseMs: number;
+  /** The channel has a readback. An `unknown` row is read back at the next pass, and `readbackMs` after each readback. */
+  readback: boolean;
+  readbackMs: number;
+}
+/** How long an `unknown` delivery with no readback waits: only an echo or a manual resend changes it (#793 D2b-out E6). */
+export const UNKNOWN_WAIT_MS = 3_600_000;
+type SendResult = Awaited<ReturnType<ChannelPort['send']>>;
+type ReadbackResult = Awaited<ReturnType<NonNullable<ChannelPort['readback']>>>;
 
 const SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
 const EMPTY_FRAME = split(stateOf({})).frame;
@@ -31,7 +109,9 @@ const EMPTY_FRAME = split(stateOf({})).frame;
  * run one at a time. H has no K4 to deduplicate terminals and messages, so it records callbacks too.
  */
 export class HostedCollaborationStore {
-  constructor(private readonly pool: Pool, readonly schema: string) {
+  private readonly channel: boolean;
+  constructor(private readonly pool: Pool, readonly schema: string, options: HostedStoreOptions = {}) {
+    this.channel = options.channel === true;
     if (!SCHEMA.test(schema)) throw new Error('Invalid hosted collaboration schema name');
   }
 
@@ -47,19 +127,103 @@ export class HostedCollaborationStore {
   /**
    * Runs one command through the commit contract. `scope` is the scope that the authenticated caller owns;
    * a request for another scope is a `scope_mismatch` conflict. A throw leaves every row unchanged.
+   *
+   * This is the command entry's call, so it refuses the K4 callback commands (`outcome`, `message`, `occurrence`) with
+   * `CallbackCommandError` before any write (#793 D2f-6). They come only from `finish`, `consume` and `fire`, which build
+   * them from SDK evidence or a due slot.
+   *
+   * A new `cancel_turn` of a Turn with a frozen intent runs the K4 cancel in the same transaction, in L's order (K8
+   * host.ts `cancelTurn`): the commit, the cancel of the intent, then the version switch check (#793 D2f-4). A new commit
+   * that leaves a delegation cancel fact to deliver (`cancel_turn` of an open chain, `cancel_delegation`,
+   * `abandon_delegation`) delivers it in the same transaction, as L `settleChain` does after its commit.
    */
-  commit(scope: string, request: CommitRequest<Command>, ports: PortsFactory): Promise<CommitResult> {
-    return this.change(scope, request.commandId, (state, publish) => {
-      const head = revisionOf(state);
-      const result = commitCommand(state, request, { scope, recordCallbacks: true }, ports(state, publish));
+  commit(scope: string, request: CommitRequest<Command>, ports: CommitPortsFactory): Promise<CommitResult> {
+    if (CALLBACK_KINDS.has(request.command.kind)) return Promise.reject(new CallbackCommandError(request.command.kind));
+    if (request.command.kind === 'receive') return Promise.reject(new InboundCommandError());
+    return this.commitIn(scope, request, ports);
+  }
+
+  /**
+   * The inbound channel entry (#793 D2b-out-3), as L `receive()` (K8 host.ts). K8 `classifyInbound` sorts the message:
+   * - `echo`: in one transaction under the scope lock, K8 `echoCandidates` and `acceptDeliveryEcho` settle the one delivery
+   *   that the echo names, or an `unmatched_echo` audit line is written; then the reply tokens are cleaned. The delivery index
+   *   follows the entity. An echo never creates input.
+   * - `owner_input` and `room_input`: the K8 `receive` command, under the command id `hash(['receive', inboundKey])`, so a
+   *   redelivered event replays. With a channel, the store's `remember` port (K8 `rememberInbound`) keeps the inbound and its
+   *   reply route.
+   * - `bot_background`: the K8 `room_input` command of a bot, with no mention, as L `roomInput`.
+   * - every other kind: an audit line only, one for each delivery, as L.
+   * Returns the kind, and the Turn id of an input. The authenticated command entry calls it with the scope of its owner,
+   * and with `identity` from the Host's configuration, never from the message.
+   */
+  async receive(scope: string, message: InboundMessage, identity: InboundIdentity, ports: CommitPortsFactory): Promise<{ kind: InboundClass; id?: string }> {
+    const kind = classifyInbound(message, identity.owner, identity.self), { channel, conversation, platformMessageId, sender } = message;
+    const turnOf = (result: CommitResult) => {
+      if (result.disposition.outcome !== 'accepted') throw new Error(`Inbound refused: ${JSON.stringify(result.disposition)}`);
+      return result.disposition.value as string;
+    };
+    if (kind === 'echo') {
+      await this.change(scope, undefined, async (state, publish, client) => {
+        const now = ports(state, publish).now(), matches = echoCandidates(state, message);
+        if (matches.length !== 1 || !acceptDeliveryEcho(matches[0]!, platformMessageId)) state.audit.push(`Delivery unmatched_echo: ${channel} ${platformMessageId}`.slice(0, 1024));
+        cleanReplyTokens(await intentConclusions(client, scope), state, now);
+        return { value: undefined, outbox: [], now };
+      });
+      return { kind };
+    }
+    if (kind === 'owner_input' || kind === 'room_input') {
+      const key = inboundKey(message), from = sender!.id;
+      const command: Command = kind === 'owner_input'
+        ? { kind: 'receive', inbound: kind, key, botId: conversation.id, request: message.text, sender: from }
+        : { kind: 'receive', inbound: kind, key, roomId: conversation.id, text: message.text, mentions: message.mentions, from };
+      // The key is always set, so a caller's port never reaches the command, even through a cast.
+      const result = await this.commitIn(scope, { scope, commandId: hash(['receive', key]), command }, (state, publish) =>
+        ({ ...ports(state, publish), remember: this.channel ? (root: string) => rememberInbound(state, message, root) : undefined }));
+      return { kind, id: turnOf(result) };
+    }
+    if (kind === 'bot_background') {
+      // R5: a bot message is room background. Its mention entities select no seat.
+      const key = inboundKey(message);
+      const result = await this.commitIn(scope, { scope, commandId: hash(['room_input', conversation.id, key]),
+        command: { kind: 'room_input', key, roomId: conversation.id, text: message.text, mentions: [], from: sender!.id } }, ports);
+      return { kind, id: turnOf(result) };
+    }
+    const who = verified(sender) ? ` ${sender.kind}:${sender.id}` : '';
+    await this.change(scope, undefined, async (state, publish) => {
+      state.audit.push(`Inbound ${kind}: ${channel} ${conversation.kind}:${conversation.id} ${platformMessageId}${who}`.slice(0, 1024));
+      return { value: undefined, outbox: [], now: ports(state, publish).now() };
+    });
+    return { kind };
+  }
+
+  /**
+   * The commit body, which takes the callback commands too, with the caller's outcome ports. Host code only: the shared K8
+   * vectors reach it through a test subclass, as L's vector subject commits through `commitInLedger`.
+   */
+  protected commitIn(scope: string, request: CommitRequest<Command>, ports: PortsFactory): Promise<CommitResult> {
+    const key = storedKey(scope);
+    return this.change(scope, request.commandId, async (state, publish, client) => {
+      const head = revisionOf(state), base = ports(state, publish);
+      const result = await commitStored(client, scope, state, request, base, this.channel);
       // A new commit moves the head by 1. A replay returns its first result and writes nothing.
-      return { value: result, outbox: result.revision === head + 1 ? result.outbox : [] };
+      if (result.revision !== head + 1) return { value: result, outbox: [] };
+      const value = result.disposition.outcome === 'accepted'
+        ? result.disposition.value as { target?: string; admitted?: boolean; deliver?: boolean } | undefined : undefined;
+      if (request.command.kind === 'cancel_turn' && value?.admitted && value.target !== undefined) {
+        const now = base.now();
+        await cancelIntent(client, scope, value.target, now);
+        await switchDueVersions(client, key, now);
+      } else if (value?.deliver) await deliverCancels(client, scope, state, base.now());
+      return { value: result, outbox: result.outbox, now: base.now() };
     });
   }
 
-  /** Changes a scope's state outside the commit contract, in one transaction. For seeds and fixtures. */
+  /**
+   * Changes a scope's state outside the commit contract, in one transaction. For seeds and fixtures. It writes no outbox
+   * row: no projection, and no delivery index row.
+   */
   async seed(scope: string, mutate: (state: CollaborationState) => void): Promise<void> {
-    await this.change(scope, undefined, state => { mutate(state); return { value: undefined, outbox: [] }; });
+    await this.change(scope, undefined, state => { mutate(state); return { value: undefined, outbox: [] }; }, false);
   }
 
   /** The stored state of a scope, with every command record. A scope row of an unknown store version is refused. */
@@ -84,7 +248,14 @@ export class HostedCollaborationStore {
         'SELECT key, ordinal::text, evidence, result::text, root FROM command WHERE scope = $1 ORDER BY key',
         'SELECT key, ordinal::text, kind, body::text FROM outbox WHERE scope = $1 ORDER BY key',
         `SELECT key, task_id, ordinal::text, agent, source, input::text, wait_until::text, submission, tries, next_at::text, last_error,
-          cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text FROM intent WHERE scope = $1 ORDER BY key`,
+          cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text, retry_until::text FROM intent WHERE scope = $1 ORDER BY key`,
+        'SELECT device, ordinal::text, mode, mode_revision::text, revoked_at::text FROM device_binding WHERE scope = $1 ORDER BY device',
+        'SELECT identity FROM retired_identity WHERE scope = $1 ORDER BY identity',
+        'SELECT namespace, id, body::text, expires_at::text FROM archived_row WHERE scope = $1 ORDER BY namespace, id',
+        `SELECT id, ordinal::text, definition::text, pending::text, lifecycle, status, next_at::text, calendar_errors::text FROM routine
+          WHERE scope = $1 ORDER BY id`,
+        `SELECT key, ordinal::text, routine_id, definition_version, trigger_kind, planned_at::text, recorded_at::text, next_at::text,
+          execution_superseded, conclusion FROM occurrence WHERE scope = $1 ORDER BY key`,
       ]) rows.push((await client.query({ text: query, values: [storedKey(scope)], rowMode: 'array' })).rows);
       return JSON.stringify(rows);
     }, true);
@@ -93,20 +264,121 @@ export class HostedCollaborationStore {
   /**
    * One Host sync of a scope (#793 D2b-2): the sync rule for each stored Turn, in insertion order, in one transaction
    * under the scope lock. It reads the intent facts in that transaction, and writes each step with the state and the
-   * projections. It writes no command record and keeps the revision. A throw writes nothing.
+   * projections. Every frozen instruction lists the scope's Bot routines, in insertion order. A routine Turn joins the FIFO
+   * as its occurrence intent, and a routine Turn that ends before that concludes its occurrence (#793 D2f). It writes no
+   * command record and keeps the revision. A throw writes nothing.
+   *
+   * Each round then runs the K8 delegation settlement at L's position, after the Turn steps (K8 host.ts sync), on the intent
+   * facts read again after those steps wrote. Then it delivers each new delegation cancel fact in the same transaction, as
+   * the L pass does after its sync (#793 D2f-5).
+   *
+   * It runs to a fixed point, as the L pass drains again after a step that changed K4 (K8 host.ts pass): while a round
+   * froze, promoted or concluded an intent or an occurrence, delivered a cancel fact, or added a Turn (the `bot_reply` of a
+   * batch join), it reads the facts again and runs the Turns again. Each such step happens once per intent, occurrence,
+   * fact or join, so the rounds end.
    */
-  sync(scope: string, options: HostedSyncOptions): Promise<void> {
+  async sync(scope: string, options: HostedSyncOptions): Promise<void> {
+    // As L checks its timers (K8 host.ts constructor).
+    if (options.timers && (time(options.timers.cancelGraceMs) < 1 || time(options.timers.uncertainAfterMs) < 1)) throw new Error('Invalid delegation timers');
+    const key = storedKey(scope);
     return this.change(scope, undefined, async (state, publish, client) => {
-      const facts = await syncFacts(client, scope, Object.keys(state.turns)), published = new Set<string>();
-      const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
-      for (const turn of Object.values(state.turns)) {
-        const step = syncTurn(state, turn, facts, { ...options, history: options.history?.get(turn.id) },
-          (id, body) => { publish(id, body); published.add(id); });
-        if (step) steps.push([turn, step]);
+      const published = new Set<string>();
+      const slice = await loadSlice(client, key), routines = botRoutines(Object.values(slice.state.routines));
+      const emit: Publish = (id, body) => { publish(id, body); published.add(id); };
+      let more = true;
+      while (more) {
+        const facts = await syncFacts(client, scope, Object.keys(state.turns));
+        const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
+        for (const turn of Object.values(state.turns)) {
+          const step = syncTurn(state, turn, facts, { ...options, routines, history: options.history?.get(turn.id) }, emit);
+          if (step) steps.push([turn, step]);
+        }
+        more = false;
+        for (const [turn, step] of steps) more = await writeSyncStep(client, scope, turn, step, slice, options.now) || more;
+        const turns = Object.keys(state.turns).length;
+        settleDelegations(state, await settleFacts(client, scope, Object.keys(state.turns)), options.now, emit, options.timers);
+        more = await deliverCancels(client, scope, state, options.now) || Object.keys(state.turns).length > turns || more;
       }
-      for (const [turn, step] of steps) await writeSyncStep(client, scope, turn, step);
-      return { value: undefined, outbox: [...published].map(id => ({ kind: 'projection' as const, id })) };
+      await writeSlice(client, key, slice);
+      await switchDueVersions(client, key, options.now);
+      // As L's sync (K8 host.ts `sync`), H's sync drops expired and unreserved reply tokens. L's call in each flush pass is a
+      // call in each delivery settle here (`finishDelivery`).
+      if (state.channel) cleanReplyTokens(await intentConclusions(client, scope), state, options.now);
+      return { value: undefined, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now: options.now };
     });
+  }
+
+  /**
+   * Owner API for the Main Bot's own routines (#793 D2f), as L `updateRoutine` (K8 host.ts:462-467): stages the next version of
+   * routine `action.routineId` of Bot `botId`. The authenticated command entry calls it. A refusal writes nothing.
+   */
+  updateRoutine(scope: string, botId: string, action: UpdateRoutineAction, now: number): Promise<void> {
+    return this.routineCommand(scope, botId, now, commands => commands.update(updateDefinition(commands.list(), botId, action)));
+  }
+  /** Owner API, as L `setRoutineLifecycle` (K8 host.ts:456-461): pauses, resumes or completes a routine of the Main Bot `botId`. */
+  setRoutineLifecycle(scope: string, botId: string, id: string, lifecycle: Routine['lifecycle'], now: number): Promise<void> {
+    return this.routineCommand(scope, botId, now, commands => commands.lifecycle(owned(commands.list(), botId, id).definition.id, lifecycle));
+  }
+  private routineCommand(scope: string, botId: string, now: number, run: (commands: ReturnType<typeof hostedRoutineCommands>) => void): Promise<void> {
+    const key = storedKey(scope);
+    return this.change(scope, undefined, async (state, _publish, client) => {
+      // H has no Host-wide Bot id, so the caller names the acting Bot. Only the Main Bot owns this API.
+      requireMain(state.team, botId);
+      const slice = await loadSlice(client, key);
+      run(hostedRoutineCommands(slice, now));
+      await writeSlice(client, key, slice);
+      await switchDueVersions(client, key, now);
+      return { value: undefined, outbox: [] };
+    });
+  }
+
+  /**
+   * Fires the due slot of routine `id` (#793 D2f-3, scheduler note §2.2), as K4 `consume` records an occurrence and runs its
+   * hook in one transaction: the occurrence row, the routine's next slot, the supersede of its earlier untried intents and
+   * the K8 routine Turn commit together, under the scope lock. The K8 `occurrence` command gets no record, as in L: the slot
+   * is the replay guard. A routine that is not active, or whose slot is not due, is `skipped` with nothing written: another
+   * pass fired it, or a command changed it.
+   *
+   * The fire can create execution, so the owner Bot's device must have an active H binding (#793 D2e), read from the state of
+   * this transaction, as the sync builds the routine offer from it. Otherwise it throws `DeviceBindingError` and writes
+   * nothing, and the slot stays due. The promotion checks the binding again. An archived owner Bot skips the fence: its
+   * routine Turn creates no execution, because the sync ends it before any freeze, as L does. A revoke and an archive are both
+   * final, so with the fence that slot could never fire.
+   *
+   * It runs no version switch: a fire leaves its new occurrence open, so K4 `versionSwitchDue` stays false for the routine.
+   */
+  fire(scope: string, id: string, now: number): Promise<'fired' | 'skipped'> {
+    const key = storedKey(scope);
+    return this.transaction(client => this.decideIn(client, key, undefined, async (state, publish) => {
+      const slice = await loadSlice(client, key), routine = dueRoutine(slice, id, now);
+      if (!routine) return { value: 'skipped' as const, outbox: [] };
+      const owner = (routine.definition.hostOccurrence?.input as BotRoutineInput | undefined)?.owner;
+      const bot = owner === undefined ? undefined : state.team.bots[owner];
+      if (!bot) throw new Error('Routine owner Bot not found');
+      if (!bot.archived) await activeBinding(client, key, bot.execution.deviceId);
+      const occurrence = recordDue(slice, scope, routine, now);
+      const run = occurrenceRun(routine, occurrence);
+      const result = commitCommand(state, { scope, commandId: occurrence.key, command: { kind: 'occurrence', key: occurrence.key } },
+        { scope, recordCallbacks: false }, { now: () => now, publish, occurrence: () => routineTurn(state, run) });
+      await writeSlice(client, key, slice, occurrence.key);
+      return { value: 'fired' as const, outbox: result.outbox };
+    }), false);
+  }
+
+  /**
+   * The schedule upkeep of the scope's routines (#793 D2f-3, scheduler note §2.6), under the scope lock. `start` re-plans an
+   * active routine with no slot within the horizon, as K4 `recover`. Both phases set `ok` on a `schedule_retrying` routine
+   * whose slot is within the horizon, as K4 `scheduleNext`. Then a staged version switches when it is due.
+   */
+  planRoutines(scope: string, now: number, phase: 'start' | 'pass'): Promise<void> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      await lockScope(client, key);
+      const slice = await loadSlice(client, key);
+      planSlice(slice, now, phase);
+      await writeSlice(client, key, slice);
+      await switchDueVersions(client, key, now);
+    }, false);
   }
 
   /**
@@ -119,7 +391,7 @@ export class HostedCollaborationStore {
     const key = storedKey(scope);
     return this.transaction(async client => {
       if (!(await client.query('SELECT 1 FROM scope WHERE scope = $1', [key])).rows[0]) return { outcome: 'refused', reasonCode: 'unknown_task' };
-      return this.decideIn(client, key, messageCommandId(input), (state, publish) => decideMessage(client, scope, state, publish, input, ports));
+      return this.decideIn(client, key, messageCommandId(input), (state, publish) => decideMessage(client, scope, state, publish, input, ports, this.channel));
     }, false);
   }
 
@@ -128,34 +400,193 @@ export class HostedCollaborationStore {
    * projections and the intent's conclusion commit together, under the scope lock. Returns the conclusion that it wrote,
    * or nothing when the intent already had one. A throw writes nothing.
    */
-  finish(scope: string, turnId: string, evidence: TaskEvidence, ports: PortsFactory): Promise<Conclusion | undefined> {
+  finish(scope: string, turnId: string, evidence: TaskEvidence, ports: FinishPortsFactory): Promise<Conclusion | undefined> {
     return this.transaction(client => this.decideIn(client, storedKey(scope), evidence.terminal.envelope.task_id,
-      (state, publish) => decideFinish(client, scope, turnId, state, publish, evidence, ports)), false);
+      (state, publish) => decideFinish(client, scope, turnId, state, publish, evidence, ports, this.channel)), false);
   }
 
-  private change<T>(scope: string, commandId: string | undefined, decide: Decide<T>): Promise<T> {
-    // #793 O4: each table stores the scope as JSON text, so two scopes that UTF-8 would merge stay apart.
+  /**
+   * One K8 retention call on `scope` (#793 D2g, #798), in one transaction under the scope lock: the acknowledged roots move
+   * into `archived_row`, their ids are retired in `retired_identity`, and the moved command records answer replays until
+   * they expire. A refusal or a throw writes nothing. A scope with no row has no rows to retain, so the rule runs on the
+   * empty state, as L runs it on an empty ledger.
+   */
+  retain(scope: string, input: RetentionInput, limits: RetentionLimits): Promise<RetentionResult> {
     const key = storedKey(scope);
     return this.transaction(async client => {
-      // Upsert, then lock: a missing scope row would lock nothing, and two first commits would race.
-      await client.query('INSERT INTO scope (scope, state_version, frame) VALUES ($1, $2, $3::json) ON CONFLICT (scope) DO NOTHING',
-        [key, STORE_VERSION, EMPTY_FRAME]);
-      return this.decideIn(client, key, commandId, decide);
+      if (!(await client.query('SELECT 1 FROM scope WHERE scope = $1', [key])).rowCount) return decideRetention(client, key, stateOf({}), input, limits);
+      return this.decideIn(client, key, undefined, async state => ({ value: await decideRetention(client, key, state, input, limits), outbox: [] }));
     }, false);
   }
 
-  /** Locks the scope row, runs `decide` on the loaded state, and writes the changed rows and the outbox. */
-  private async decideIn<T>(client: PoolClient, key: string, commandId: string | undefined, decide: Decide<T>): Promise<T> {
+  /**
+   * Binds a device of `scope` to H (#793 D2e) and returns its mode revision. A second bind changes nothing. A revoked
+   * device id throws `DeviceBindingError` (#793 O1 option A).
+   */
+  bindDevice(scope: string, deviceId: string): Promise<number> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      await this.upsertScope(client, key);
+      await lockScope(client, key);
+      return bindDevice(client, key, deviceId);
+    }, false);
+  }
+
+  /**
+   * Revokes a device id of `scope` for good, and raises its mode revision. A second revoke changes nothing. An id that was
+   * never bound, also in a new scope, gets a revoked tombstone row.
+   */
+  revokeDevice(scope: string, deviceId: string, revokedAt: number): Promise<void> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      await this.upsertScope(client, key);
+      await lockScope(client, key);
+      await revokeDevice(client, key, deviceId, revokedAt);
+    }, false);
+  }
+
+  /**
+   * D1 and D3 of one delivery outbox row (#793 D2b-out-2), in one transaction under the scope lock, with the K8 rules:
+   * - a `sending` entity whose lease (`next_at`) has passed becomes `unknown` (`interrupted`), as L recovers a claim at startup;
+   * - an `unknown` entity asks for a readback when the channel has one;
+   * - a due `pending` entity takes its route, or is refused (`refuseRoute`, whose push fallback the index picks up), or is
+   *   claimed (`startDelivery`) with a lease. The claim commits before the send, and the route stays in memory.
+   * A readback claim takes the same lease. `clock` is read after the scope lock, so a claim that waited for the lock takes its
+   * lease from the time it holds it. An unsettled row whose entity is not in the state throws: retention archives a delivery
+   * only after its row settled, so it is drift.
+   */
+  claimDelivery(scope: string, id: string, clock: () => number, times: DeliveryTimes): Promise<DeliveryClaim> {
+    const key = storedKey(scope), rowKey = storedKey(id);
+    return this.transaction(async client => {
+      let nextAt: number | undefined;
+      const claim = await this.decideIn(client, key, undefined, async (state): Promise<Decision<DeliveryClaim>> => {
+        const now = clock();
+        const done = (value: DeliveryClaim): Decision<DeliveryClaim> => ({ value, outbox: [], now });
+        const index = (await client.query<{ next_at: string; settled_at: string | null }>(`SELECT next_at::text, settled_at::text FROM outbox
+          WHERE scope = $1 AND key = $2 AND kind = 'delivery'`, [key, rowKey])).rows[0];
+        if (!index) throw new Error('Delivery outbox row not found');
+        if (index.settled_at !== null) return done({ kind: 'none' });
+        const deliveries = state.channel?.deliveries, row = deliveries && Object.hasOwn(deliveries, id) ? deliveries[id]! : undefined;
+        if (!row) {
+          if (await archivedRow(client, key, 'deliveries', id) === undefined) throw new Error('Delivery not found');
+          throw new Error('Delivery outbox row unsettled for an archived entity');
+        }
+        if (row.state === 'sending') {
+          if (Number(index.next_at) > now) return done({ kind: 'none' });
+          recoverDelivery(row);
+          nextAt = times.readback ? now : now + UNKNOWN_WAIT_MS;
+          return done({ kind: 'moved' });
+        }
+        if (row.state === 'unknown') {
+          // Another sender's readback holds the row until its lease passes, and a row that waits is not due yet.
+          if (Number(index.next_at) > now) return done({ kind: 'none' });
+          if (times.readback) {
+            nextAt = now + times.leaseMs;
+            return done({ kind: 'readback', attempt: row.attempts });
+          }
+          nextAt = now + UNKNOWN_WAIT_MS;
+          return done({ kind: 'moved' });
+        }
+        if (row.state !== 'pending' || (row.nextAttemptAt ?? 0) > now) return done({ kind: 'none' });
+        const route = deliveryRoute(state, row, now);
+        if (!route) { refuseRoute(state, row); return done({ kind: 'moved' }); }
+        if (!startDelivery(row, now)) return done({ kind: 'none' });
+        nextAt = now + times.leaseMs;
+        return done({ kind: 'send', attempt: row.attempts, route, body: row.body });
+      });
+      if (nextAt !== undefined) await client.query('UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2', [key, rowKey, nextAt]);
+      return claim;
+    }, false);
+  }
+
+  /**
+   * D5 of one delivery (#793 D2b-out-2): the K8 settle of send attempt `attempt`, fenced by that attempt, then the K8 reply
+   * token cleanup of the scope, in one transaction under the scope lock. A move into `unknown` sets the row's readback time.
+   */
+  finishDelivery(scope: string, id: string, attempt: number, outcome: { result: SendResult } | { code: 'send_timeout' | 'send_failed' },
+    clock: () => number, times: DeliveryTimes): Promise<void> {
+    return this.deliveryStep(scope, id, clock, async (row, state, client, now) => {
+      const was = row.state;
+      if ('result' in outcome) settleDelivery(row, attempt, outcome.result, now);
+      else unknownDelivery(row, attempt, outcome.code);
+      cleanReplyTokens(await intentConclusions(client, scope), state, now);
+      return was !== 'unknown' && row.state === 'unknown' ? (times.readback ? now : now + UNKNOWN_WAIT_MS) : undefined;
+    });
+  }
+
+  /**
+   * D2 of one delivery (#793 D2b-out-2): the K8 readback rule, fenced by the attempt that the readback observed. A row that
+   * stays `unknown` at that attempt is read back again after `readbackMs`. A result for an earlier attempt changes nothing.
+   * `undefined` is missing evidence (the readback threw or passed its deadline): it changes only the wait, with the same fence.
+   */
+  readDelivery(scope: string, id: string, attempt: number, result: ReadbackResult | undefined, clock: () => number,
+    readbackMs: number): Promise<void> {
+    return this.deliveryStep(scope, id, clock, async (row, _state, _client, now) => {
+      if (result !== undefined) readbackDelivery(row, attempt, result, now);
+      return row.state === 'unknown' && row.attempts === attempt ? now + readbackMs : undefined;
+    });
+  }
+
+  /**
+   * The wait after a step that threw: moves the `next_at` of an unsettled outbox row of `scope` to `waitMs` after the clock,
+   * read under the scope lock. It never moves `next_at` earlier, so it cannot shorten the lease of a newer claim.
+   */
+  deferOutbox(scope: string, id: string, clock: () => number, waitMs: number): Promise<void> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      await lockScope(client, key);
+      await client.query('UPDATE outbox SET next_at = GREATEST(next_at, $3) WHERE scope = $1 AND key = $2 AND settled_at IS NULL',
+        [key, storedKey(id), clock() + waitMs]);
+    }, false);
+  }
+
+  /**
+   * One K8 rule on the delivery entity `id`, then the `next_at` that `step` returns, in one transaction under the scope lock.
+   * `clock` is read once, after the lock.
+   */
+  private deliveryStep(scope: string, id: string, clock: () => number,
+    step: (row: Delivery, state: CollaborationState, client: PoolClient, now: number) => Promise<number | undefined>): Promise<void> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      const nextAt = await this.decideIn(client, key, undefined, async (state, _publish, tx) => {
+        const now = clock();
+        const deliveries = state.channel?.deliveries;
+        if (!deliveries || !Object.hasOwn(deliveries, id)) throw new Error('Delivery not found');
+        return { value: await step(deliveries[id]!, state, tx, now), outbox: [], now };
+      });
+      if (nextAt !== undefined) await client.query('UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2', [key, storedKey(id), nextAt]);
+    }, false);
+  }
+
+  private change<T>(scope: string, commandId: string | undefined, decide: Decide<T>, indexed = true): Promise<T> {
+    // #793 O4: each table stores the scope as JSON text, so two scopes that UTF-8 would merge stay apart.
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      await this.upsertScope(client, key);
+      return this.decideIn(client, key, commandId, decide, indexed);
+    }, false);
+  }
+
+  /** Upsert, then lock: a missing scope row would lock nothing, and two first writes would race. */
+  private async upsertScope(client: PoolClient, key: string): Promise<void> {
+    await client.query('INSERT INTO scope (scope, state_version, frame) VALUES ($1, $2, $3::json) ON CONFLICT (scope) DO NOTHING',
+      [key, STORE_VERSION, EMPTY_FRAME]);
+  }
+
+  /** Locks the scope row, runs `decide` on the loaded state, and writes the changed rows, the delivery index and the outbox. */
+  private async decideIn<T>(client: PoolClient, key: string, commandId: string | undefined, decide: Decide<T>, indexed = true): Promise<T> {
     const frame = await lockScope(client, key);
     const rows = await this.load(client, key, frame, commandId);
     const state = stateOf({ collaboration: assemble(rows) as unknown as Json });
     const before = split(state);
     const published = new Map<string, Json>();
-    const { value, outbox } = await decide(state, (id, body) => {
+    const { value, outbox, now } = await decide(state, (id, body) => {
       if (published.has(id) && canonical(published.get(id)!) !== canonical(body)) throw new Error('Projection identity conflict');
       published.set(id, structuredClone(body));
     }, client);
-    await this.write(client, key, rows, before, split(state));
+    const after = split(state);
+    await this.write(client, key, rows, before, after);
+    if (indexed) await this.indexDeliveries(client, key, before, after, now);
     await this.writeOutbox(client, key, outbox, published);
     return value;
   }
@@ -222,6 +653,33 @@ export class HostedCollaborationStore {
   }
 
   /**
+   * The delivery outbox index (#793 D2b-out-2). It is the only writer of a delivery's outbox row: the K8 delivery entity is
+   * the authority, and this projects it. For each delivery entity that is new, or whose `state` or `nextAttemptAt` changed in
+   * this transaction, it inserts the row, sets `settled_at` once the entity is `accepted` or `rejected`, and sets `next_at`
+   * for a `pending` entity. It does not touch `next_at` of a `sending` or `unknown` entity: the sender owns that value.
+   * So every queued, refused, revoked, resent, echoed or sent delivery gets its row, also the push fallback that
+   * `refuseRoute` inserts with no outbox intent.
+   */
+  private async indexDeliveries(client: PoolClient, scopeKey: string, before: Split, after: Split, now: number | undefined): Promise<void> {
+    const old = before.entities.get('delivery'), next = after.entities.get('delivery');
+    for (const [key, body] of next ?? []) {
+      const prior = old?.get(key);
+      if (prior === body) continue;
+      const row = JSON.parse(body) as Delivery, was = prior === undefined ? undefined : JSON.parse(prior) as Delivery;
+      if (!was) {
+        await client.query(`INSERT INTO outbox (scope, key, ordinal, kind) SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'delivery'
+          FROM outbox WHERE scope = $1`, [scopeKey, key]);
+      } else if (was.state === row.state && was.nextAttemptAt === row.nextAttemptAt) continue;
+      if (row.state === 'accepted' || row.state === 'rejected') {
+        if (now === undefined) throw new Error('A settled delivery needs the clock of its writer');
+        await client.query('UPDATE outbox SET settled_at = $3 WHERE scope = $1 AND key = $2 AND settled_at IS NULL', [scopeKey, key, now]);
+      } else if (row.state === 'pending') {
+        await client.query('UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2', [scopeKey, key, row.nextAttemptAt ?? 0]);
+      }
+    }
+  }
+
+  /**
    * Saves each outbox intent of the commit. An existing projection with the same id must hold the same value;
    * otherwise the commit throws and rolls back, as the K4 projection does in L.
    */
@@ -231,6 +689,8 @@ export class HostedCollaborationStore {
       if (intent.kind === 'projection' && body === undefined) throw new Error('A projection intent has no published value');
       const key = storedKey(intent.id);
       const prior = await client.query<{ kind: string; body: string | null }>('SELECT kind, body::text FROM outbox WHERE scope = $1 AND key = $2', [scopeKey, key]);
+      // The delivery index writes every delivery row from the entity (indexDeliveries), so an intent must find its row.
+      if (intent.kind === 'delivery' && !prior.rows[0]) throw new Error('A delivery intent has no delivery entity');
       if (prior.rows[0]) {
         const row = prior.rows[0];
         if (row.kind !== intent.kind || (body !== undefined && canonical(JSON.parse(row.body!) as Json) !== canonical(body))) {

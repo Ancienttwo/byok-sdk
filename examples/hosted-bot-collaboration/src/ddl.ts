@@ -52,16 +52,28 @@ CREATE TABLE IF NOT EXISTS command (
   UNIQUE (scope, ordinal)
 );
 CREATE TABLE IF NOT EXISTS outbox (
-  scope     text   NOT NULL REFERENCES scope (scope),
-  key       text   NOT NULL,
-  ordinal   bigint NOT NULL CHECK (ordinal >= 0),
-  kind      text   NOT NULL CHECK (kind IN ('projection', 'delivery')),
+  scope       text    NOT NULL REFERENCES scope (scope),
+  key         text    NOT NULL,
+  ordinal     bigint  NOT NULL CHECK (ordinal >= 0),
+  kind        text    NOT NULL CHECK (kind IN ('projection', 'delivery')),
   -- The projection value. NULL for a delivery: its content is the delivery entity.
-  body      json,
+  body        json,
+  -- #793 D2b-out. The earliest time the sender looks at the row again: 0 when new, a lease while a send
+  -- is in flight, then a backoff. For a delivery it is an index only: the entity decides what to send.
+  next_at     bigint  NOT NULL DEFAULT 0 CHECK (next_at >= 0),
+  -- Projection send tries. Each try raises it under the scope lock before the receiver call, and the
+  -- settle write is fenced by it. Always 0 for a delivery: the entity's \`attempts\` is the authority.
+  tries       integer NOT NULL DEFAULT 0 CHECK (tries >= 0),
+  last_error  text,
+  -- Set once: the receiver confirmed the projection, or the delivery entity reached 'accepted' or 'rejected'.
+  settled_at  bigint  CHECK (settled_at >= 0),
   CHECK ((kind = 'projection') = (body IS NOT NULL)),
+  CHECK (kind = 'projection' OR (tries = 0 AND last_error IS NULL)),
   PRIMARY KEY (scope, key),
   UNIQUE (scope, ordinal)
 );
+-- The sender scan: unsettled rows by due time, across scopes.
+CREATE INDEX IF NOT EXISTS outbox_due ON outbox (next_at, scope, ordinal) WHERE settled_at IS NULL;
 -- One row per Turn intent (#793 D2b). No intent row is deleted before D2g adds tombstones:
 -- a deleted row would let the same Turn freeze again under the same task id.
 CREATE TABLE IF NOT EXISTS intent (
@@ -74,8 +86,10 @@ CREATE TABLE IF NOT EXISTS intent (
   ordinal        bigint  NOT NULL CHECK (ordinal >= 0),
   -- K4 agentKey(scope, execution): one FIFO for each scope, device and Agent.
   agent          text    NOT NULL,
-  -- K4 IntentInput.source, part of the intent identity. A routine occurrence is not an H intent before D2f.
-  source         text    NOT NULL CHECK (source IN ('user', 'bot')),
+  -- K4 IntentInput.source, part of the intent identity. A promoted routine occurrence is an H intent with source 'routine'.
+  source         text    NOT NULL CHECK (source IN ('user', 'bot', 'routine')),
+  -- K4 Intent.retryUntil: a superseded routine version stops its intent early (K4 routines.ts:162, :177, :193).
+  retry_until    bigint  CHECK (retry_until >= 0),
   -- The frozen AgentExecutionInput.
   input          json    NOT NULL,
   wait_until     bigint  NOT NULL CHECK (wait_until >= 0),
@@ -108,4 +122,76 @@ CREATE INDEX IF NOT EXISTS intent_unsettled ON intent (scope, agent, ordinal) WH
 CREATE INDEX IF NOT EXISTS intent_due ON intent (next_at) WHERE conclusion IS NULL AND submission <> 'delivered' AND cancel_reason IS NULL;
 -- The paged reconciliation scan: every tried row that has no conclusion, across scopes (#793 D2d).
 CREATE INDEX IF NOT EXISTS intent_reconcile ON intent (reconcile_at, scope, key) WHERE conclusion IS NULL AND submission <> 'reserved';
+CREATE TABLE IF NOT EXISTS device_binding (
+  scope          text    NOT NULL REFERENCES scope (scope),
+  -- JSON.stringify(device id).
+  device         text    NOT NULL,
+  ordinal        bigint  NOT NULL CHECK (ordinal >= 0),
+  -- §4.1 record shape. Until the switch slice exists, D2e writes only 'H'.
+  mode           text    NOT NULL CHECK (mode IN ('L', 'H')),
+  -- The owner revision. Every write that can create execution checks it.
+  mode_revision  bigint  NOT NULL CHECK (mode_revision >= 1),
+  -- Set once by revoke, in the same write that raises mode_revision. The row is kept as the tombstone.
+  revoked_at     bigint  CHECK (revoked_at >= 0),
+  PRIMARY KEY (scope, device),
+  UNIQUE (scope, ordinal)
+);
+CREATE TABLE IF NOT EXISTS routine (
+  scope            text    NOT NULL REFERENCES scope (scope),
+  -- JSON.stringify(routine id).
+  id               text    NOT NULL,
+  -- Insertion order. L passes the routines in this order into the frozen instruction and the schema routine ids.
+  ordinal          bigint  NOT NULL CHECK (ordinal >= 0),
+  definition       json    NOT NULL,
+  -- The staged next version (updateRoutine). It replaces \`definition\` when the switch is due.
+  pending          json,
+  lifecycle        text    NOT NULL CHECK (lifecycle IN ('active', 'paused', 'completed')),
+  -- Computed with the K4 nextWake rule (K4 routines.ts:28-37). It reaches the ContextPack.
+  status           text    NOT NULL CHECK (status IN ('ok', 'schedule_retrying', 'no_occurrence_within_horizon', 'calendar_error')),
+  -- The next planned slot time. NULL: no slot within the horizon.
+  next_at          bigint  CHECK (next_at >= 0),
+  calendar_errors  json,
+  PRIMARY KEY (scope, id),
+  UNIQUE (scope, ordinal)
+);
+CREATE INDEX IF NOT EXISTS routine_due ON routine (next_at) WHERE lifecycle = 'active' AND next_at IS NOT NULL;
+CREATE TABLE IF NOT EXISTS occurrence (
+  scope                text    NOT NULL REFERENCES scope (scope),
+  -- The JSON text of the K4 occurrence key, a SHA-256 hex digest. Its intent key is always \`occurrence:<key>\` (K4 routines.ts:174, :188).
+  key                  text    NOT NULL,
+  ordinal              bigint  NOT NULL CHECK (ordinal >= 0),
+  routine_id           text    NOT NULL,
+  definition_version   integer NOT NULL CHECK (definition_version >= 1),
+  trigger_kind         text    NOT NULL CHECK (trigger_kind IN ('scheduled', 'catch_up')),
+  planned_at           bigint  NOT NULL CHECK (planned_at >= 0),
+  recorded_at          bigint  NOT NULL CHECK (recorded_at >= 0),
+  next_at              bigint  CHECK (next_at >= 0),
+  -- K4 hook.executionSuperseded.
+  execution_superseded boolean NOT NULL DEFAULT false,
+  -- Only for an occurrence that the Host concludes with no intent. A promoted occurrence reads its intent's conclusion.
+  conclusion           text    CHECK (conclusion IN ('succeeded', 'failed', 'declined', 'cancelled', 'expired', 'superseded')),
+  PRIMARY KEY (scope, key),
+  UNIQUE (scope, ordinal),
+  -- The replay guard of one slot, in place of the K4 \`slots\` map (K4 routines.ts:125, :180).
+  UNIQUE (scope, routine_id, definition_version, planned_at),
+  FOREIGN KEY (scope, routine_id) REFERENCES routine (scope, id)
+);
+CREATE INDEX IF NOT EXISTS occurrence_open ON occurrence (scope, routine_id) WHERE conclusion IS NULL;
+-- Permanent K8 row tombstones (K4 kind 'row'). They never expire.
+CREATE TABLE IF NOT EXISTS retired_identity (
+  scope     text NOT NULL REFERENCES scope (scope),
+  -- K4 hash([namespace, id]).
+  identity  text NOT NULL,
+  PRIMARY KEY (scope, identity)
+);
+CREATE TABLE IF NOT EXISTS archived_row (
+  scope       text   NOT NULL REFERENCES scope (scope),
+  namespace   text   NOT NULL,
+  -- JSON.stringify(row id). Code checks the K4 namespace and id limits (K4 ledger.ts:52-58) on the raw values.
+  id          text   NOT NULL,
+  body        json   NOT NULL,
+  expires_at  bigint CHECK (expires_at >= 0),
+  PRIMARY KEY (scope, namespace, id)
+);
+CREATE INDEX IF NOT EXISTS archived_row_expiry ON archived_row (scope, namespace, expires_at) WHERE expires_at IS NOT NULL;
 `;

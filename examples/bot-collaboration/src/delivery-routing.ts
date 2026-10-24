@@ -1,7 +1,10 @@
-import { hash, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { hash, type Conclusion } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Turn } from './model';
 import { inboundKey, type Conversation, type Delivery, type InboundMessage, type PushRoute, type ReplyRoute } from './channel';
 import { deliveryId } from './delivery';
+
+/** The intent conclusions a delivery rule reads. A K4 `LedgerState` fits; H passes its intent rows. */
+export interface IntentConclusions { readonly intents: Readonly<Record<string, { readonly conclusion?: Conclusion }>> }
 
 interface StoredInbound {
   id: string; root: string; conversation: Conversation; channel: string; sequence: number;
@@ -24,7 +27,7 @@ function turnRoot(state: CollaborationState, turn: Turn): string {
   const seat = state.team.seats[turn.id];
   return seat ? state.team.rounds[seat.roundId]!.root : turn.root;
 }
-function rootOpen(ledger: LedgerState, state: CollaborationState, root: string, conversation: Conversation): boolean {
+function rootOpen(ledger: IntentConclusions, state: CollaborationState, root: string, conversation: Conversation): boolean {
   return Object.values(state.turns).some(turn => turnRoot(state, turn) === root && sameConversation(turnConversation(state, turn), conversation)
     && !turn.conclusion && !ledger.intents[hash(turn.id)]?.conclusion && !['blocked', 'failed', 'delivered'].includes(turn.status))
     || Object.values(state.inputBatches ?? {}).some(batch => batch.id === root && batch.state === 'open')
@@ -70,7 +73,7 @@ function insert(state: CollaborationState, input: Pick<Delivery, 'taskId' | 'tur
   return channelState(state).deliveries[id] ??= { id, ...input, state: 'pending', attempts: 0 };
 }
 /** Called in the content acceptance transaction. No external call or projection contains the token. */
-export function queueDelivery(ledger: LedgerState, state: CollaborationState, turn: Turn, taskId: string, messageId: string, body: string, now: number): Delivery | undefined {
+export function queueDelivery(ledger: IntentConclusions, state: CollaborationState, turn: Turn, taskId: string, messageId: string, body: string, now: number): Delivery | undefined {
   const conversation = turnConversation(state, turn), root = turnRoot(state, turn);
   const inbound = Object.values(state.channel?.inbounds ?? {}).filter(row => row.root === root && sameConversation(row.conversation, conversation))
     .sort((a, b) => b.sequence - a.sequence)[0];
@@ -102,7 +105,7 @@ export function refuseRoute(state: CollaborationState, row: Delivery): void {
   if (push) insert(state, { taskId: row.taskId, turnId: row.turnId, messageId: row.messageId, body: row.body, conversation: row.conversation,
     channel: push.channel, route: { kind: 'push', pushRouteId: push.id } });
 }
-export function cleanReplyTokens(ledger: LedgerState, state: CollaborationState, now: number): void {
+export function cleanReplyTokens(ledger: IntentConclusions, state: CollaborationState, now: number): void {
   for (const row of Object.values(state.channel?.inbounds ?? {})) {
     if (!row.reply?.token) continue;
     const reserved = Object.values(state.channel!.deliveries).some(delivery => delivery.route.kind === 'reply'

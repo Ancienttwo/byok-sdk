@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
-import { canonical, hash, HostLedger, project, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, HostLedger, project, taskId, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { stateOf, type CollaborationState } from './model';
 import { admitUserInput } from './coalesce';
 import { coalescePolicy } from './rules/coalesce';
@@ -12,8 +12,9 @@ import { retentionVectors, type RetentionSubject } from './retention-vectors.tes
 import type { CommandRecord } from './rules/commit';
 import { DatabaseSync } from 'node:sqlite';
 import { commitCommand, refuseRetired, RetiredIdentityError, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
-import { commitVectors, seedCollaboration, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CommitSubject, type SeedTeam, type SyncIntentRecord,
-  type SyncSubject } from './commit-vectors.test-support';
+import { commitVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CommitSubject, type SeedTeam,
+  type SettlementSubject, type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support';
+import { intentRows, settleDelegations } from './delegation';
 import { syncTurn } from './rules/sync';
 import type { Conclusion } from './rules/delegation';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
@@ -199,3 +200,35 @@ it('records the root of the input itself when the input also seals an earlier du
   expect(state.commands?.c1?.root).toBe(own(first));
   expect(state.commands?.c2?.root).toBe(own(second));
 });
+
+/**
+ * The L ledger with L's sync order (K8 host.ts `sync`): the Turn steps, then `settleDelegations` on the K8 `intentFacts` adapter.
+ * Commands take the intent rows as the L Host's owner commands and outcomes do (host.ts `commitOwner`, `committed`).
+ */
+function settlementSubject(): SettlementSubject {
+  const base = ledgerSubject(), ledger = base.ledger;
+  const execution = (s: LedgerState, turnId: string) => s.executions[taskId(turnId, 0)]!;
+  return {
+    ...base,
+    commit: request => commitInLedger(ledger, request, (s: LedgerState) => {
+      const own = ports(stateOf(s.application), (id, value) => project(s, id, value));
+      return { ...own, intents: intentRows(s), outcome: { ...own.outcome!, committed: intentRows(s) } };
+    }),
+    settle: (now, timers) => {
+      ledger.transaction((s, rows) => {
+        const state = stateOf(s.application);
+        for (const turn of Object.values(state.turns)) syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now });
+        settleDelegations(s, state, now, (id, value) => project(s, id, value), timers);
+      });
+    },
+    submit: turnId => { ledger.transaction(s => { execution(s, turnId).submission = 'uncertain'; }); },
+    claim: turnId => { ledger.transaction(s => { Object.assign(execution(s, turnId), { submission: 'delivered', started: true }); }); },
+    terminal: (turnId, type, payload) => {
+      ledger.transaction(s => { execution(s, turnId).terminal = { envelope: { task_id: taskId(turnId, 0), type, payload } } as never; });
+    },
+    conclude: (turnId, conclusion, cancelReason) => {
+      ledger.transaction(s => { Object.assign(s.intents[hash(turnId)]!, { phase: 'settled', conclusion, ...(cancelReason ? { cancelReason } : {}) }); });
+    },
+  };
+}
+settlementVectors('L HostLedger', settlementSubject);

@@ -1219,6 +1219,12 @@ or `sealing_policy_mismatch` in `code`. These codes go only on the plaintext
 `task.decline_sealed` refuses them: a device that cannot open or use the
 scope key often cannot seal a reply either, so one outcome has one encoding.
 
+**Merge limits (decision 12b).** After the merge, the receiver validates the
+plaintext type, except that a moved field listed in the split table's `limits`
+takes that limit instead of the plaintext one. `task.artifact_sealed` lists
+`inline` at 2 MiB (the plaintext `task.artifact.inline` limit is 64 KB). The
+category limit of 2 MiB still bounds the whole opened content.
+
 **Host rule for task output.** The Host reads the frozen `sealing` of the
 task from its offer. When `categories` includes `task-output`, the device
 reports every output sealed. A plaintext output is legal only when each field
@@ -2437,14 +2443,17 @@ Hosts tell this case apart from a full mailbox (507) and from a server fault
 
 **Chunking an oversized outbound queue is a client-side implementation
 detail, not a new wire rule.** A daemon that has accumulated more than
-`MAX_MESSAGES_PER_BATCH` queued envelopes (e.g. after an extended outage)
+`MAX_MESSAGES_PER_BATCH` queued envelopes (e.g. after an extended outage),
+or more than `MESSAGES_SEND_MAX_BODY_BYTES` (2 MiB) of encoded request body,
 must split them across multiple `POST /byok/messages` calls, each within
-the cap, rather than send one oversized batch and have the server reject
-the whole thing outright — and then, if it naively retried the identical
-oversized batch unchanged, stall permanently. The reference client
-(`ConnectionManager.drainOutbox`) does this by importing the same
-`MAX_MESSAGES_PER_BATCH` constant the schema enforces (exported from
-`@byok-sdk/protocol`, not a hard-coded copy), so the two can never drift apart.
+both caps, rather than send one oversized batch and have the server reject
+the whole thing outright (400 above the count, 413 above the bytes) — and
+then, if it naively retried the identical oversized batch unchanged, stall
+permanently. The reference client (`ConnectionManager.drainOutbox`) does
+this by importing the same constants the server enforces (exported from
+`@byok-sdk/protocol`, not hard-coded copies), so the two can never drift
+apart. One envelope always goes, so an envelope above the byte cap alone is
+sent alone.
 
 ### 8.3 Historical transport note (pre-WP3B Step4b)
 
