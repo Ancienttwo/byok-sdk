@@ -887,7 +887,7 @@ export declare class PostgresE2eeMemberStore implements E2eeMemberStore {
         readonly afterSeq: number;
         readonly limit: number;
     }): Promise<readonly E2eeMemberChainRow[]>;
-    putScopeKeyPackages(tenant: TenantId, { rows }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult>;
+    putScopeKeyPackages(tenant: TenantId, { rows, proof }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult>;
     readScopeKeyPackages(tenant: TenantId, input: {
         readonly scopeId: string;
         readonly epoch?: number;
