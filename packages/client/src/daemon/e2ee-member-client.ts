@@ -227,8 +227,8 @@ export class E2eeMemberClient {
    * One page of this member's key packages of a scope above `afterEpoch`, by
    * their `epoch` in ascending order, and the newest epoch the Host holds for
    * the scope. A page shorter than {@link E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX} is
-   * the last. A page out of order or past the page size is refused, so a
-   * paging caller always moves forward.
+   * the last. A page out of order, past the page size, or with a scope head
+   * below its packages is refused, so a paging caller always moves forward.
    */
   async readOwnKeyPackages(
     scopeId: string, afterEpoch: number, signal?: AbortSignal,
@@ -250,6 +250,7 @@ export class E2eeMemberClient {
       byEpoch.set(epoch, pkg);
       last = epoch;
     }
+    if (last > afterEpoch && (scopeHeadEpoch === null || (scopeHeadEpoch as number) < last)) throw refuse('a scope head below its packages');
     return { packages: byEpoch, scopeHeadEpoch: scopeHeadEpoch === null ? undefined : scopeHeadEpoch as number };
   }
 

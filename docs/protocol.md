@@ -1582,7 +1582,8 @@ command and not only the string.
   (`MEMBER_PACKAGE_PAGE_MAX_BYTES`), an error body at 1 KiB. A key package
   read that returns more than one package is refused, and so is a page with
   more than 16 packages, packages not in ascending epoch order above
-  `afterEpoch`, or no valid `scopeHeadEpoch`.
+  `afterEpoch`, or no valid `scopeHeadEpoch`, or one below the newest
+  package of the page.
 - Each later start walks the chain from seq 1 again. The stored head must be
   on the new walk, with the same hash at the same seq. A shorter chain or
   another history keeps E2EE off for that run, so a Host cannot rewind the
