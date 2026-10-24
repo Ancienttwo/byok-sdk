@@ -396,6 +396,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
         scopeKey.fill(0);
         return;
       }
+      // The notice of this device's own package may have cached this epoch's key during the puts.
+      this.#drop(keyOf(scopeId, epoch));
       this.#keys.set(keyOf(scopeId, epoch), { scopeKey, keyId: packages[0]!.keyId, sender: self });
       this.#rotated.set(keyOf(scopeId, epoch), head.seq);
       const points = this.#fresh.get(scopeId) ?? new Map<number, MemberChainPoint>();
@@ -404,6 +406,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       this.options.log(`rotated scope ${JSON.stringify(scopeId)} to epoch ${epoch} for ${recipients.length} members`);
     } catch (error) {
       scopeKey.fill(0);
+      // A key the notice cached for the abandoned epoch must not outlive it.
+      this.#drop(keyOf(scopeId, epoch));
       if (!(error instanceof E2eeMemberClientError && error.code === 'e2ee_scope_key_conflict')) throw error;
       // Another client may hold the epoch without a package for this member, so a read would show it free again.
       this.#take(scopeId, epoch);
@@ -447,6 +451,12 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
    */
   #heldEpochs(scopeId: string): Set<number> {
     return new Set([...scopeEpochs(this.#keys.keys(), scopeId), ...scopeEpochs(this.#rotated.keys(), scopeId)]);
+  }
+
+  /** Zero and remove the cached key at `at`, if any. */
+  #drop(at: string): void {
+    this.#keys.get(at)?.scopeKey.fill(0);
+    this.#keys.delete(at);
   }
 
   #take(scopeId: string, epoch: number): void {
