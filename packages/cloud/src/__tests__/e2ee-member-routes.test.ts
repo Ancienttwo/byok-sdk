@@ -292,6 +292,8 @@ describe('E2EE member device routes', () => {
     expect(await answer(await env.read(device, '/byok/e2ee/key-packages'))).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
     expect(await answer(await env.read(unregistered, '/byok/e2ee/key-packages?scopeId=scope-1&epoch=1')))
       .toEqual({ status: 409, body: { error: 'e2ee_member_not_registered' } });
+    expect(await answer(await env.read(unregistered, '/byok/e2ee/key-packages?scopeId=scope-1&afterEpoch=0')))
+      .toEqual({ status: 409, body: { error: 'e2ee_member_not_registered' } });
     expect(await answer(await env.read(unregistered, '/byok/e2ee/key-packages'))).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
   });
 
