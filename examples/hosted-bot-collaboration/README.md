@@ -100,6 +100,10 @@ keeps the insertion order of each kind.
   keeps the old CHECK, so a new kind needs an explicit `ALTER` in a later migration.
 - H has no migrations while it is unreleased. After a DDL change, recreate the H schema. `migrate()` on a schema
   from an older revision fails in its one transaction and changes nothing.
+- The H reconciler reads an open intent's SDK attempt again after `pollMs` (30 s by default), and L's after 100 ms
+  (`reconcileMs`). The room step reads `started` from the claim that it records, so a Bot that claims its seat Turn
+  less than one poll before the seat deadline can still be marked `busy` and have its work cancelled. The room rule is
+  unchanged; a shorter `pollMs` narrows the window.
 - One commit must not delete a map key and add it back. The store keeps the old ordinal, but a JavaScript
   object moves the key to the end. K8 never deletes a map entry today.
 
@@ -180,10 +184,19 @@ error. A confirmed or rejected card then adds its `action_result` Turn, so the r
 card starts no Turn. The due scheduler syncs a scope when a card's `expiresAt` is reached. H has no connector step (L's
 `flushCards`), so in H a confirmed card never gets its result: it is not reported and gets no `action_result` Turn.
 
-H does not yet run these L sync and pass steps: `advanceRooms`, the reply checks (`reconcileReply`, `retryReply`), the
-device observation (`observeDevices`), and the card and Agent home flushes. The due scheduler syncs a scope when one of
-the due times is reached (see Due scheduler). Until H runs the step that clears it, that sync leaves the scope due, and
-the scheduler reports the scope as stalled.
+### Room step
+
+Each sync round runs the K8 room step (`advanceRoomSeats`, through `./rules/commands`) after the batch seal and the card
+expiry and before the Turn steps, as L's sync runs it (#793 S6). Its seat facts come from the intent row of each seat Turn: `admitted` when the row exists,
+`started` from the reconciliation's claim fact, and the row's conclusion. A seat Turn that the step queues freezes in the
+same round. The step cancels a seat's admitted work through `cancelIntent`, as a delegation cancel does: an untried row
+concludes `cancelled` in that sync, and a tried row keeps its cancel reason for the reconciliation. A seat Turn with no
+intent fails with the seat's conclusion. The due scheduler syncs a scope when a seat's deadline is reached.
+
+H does not yet run these L sync and pass steps: the reply checks (`reconcileReply`, `retryReply`), the device
+observation (`observeDevices`), and the card and Agent home flushes. The due scheduler syncs a scope when one of the due
+times is reached (see Due scheduler). Until H runs the step that clears it, that sync leaves the scope due, and the
+scheduler reports the scope as stalled.
 
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
 record and keeps the revision. A throw writes nothing. The rule's `executionStarted` fact is the intent's `started`
@@ -356,8 +369,8 @@ did not change, so a step that keeps it does not rewrite the scope row. A sync r
 It calls the deployment's `sync(scope, now)`, which runs `store.sync` with the deployment's sync options, and reads the
 clock for each sync; the pass time only selects the scopes. Only syncs count against `batch` (default 100).
 
-- A sync that leaves the scope due is reported in `stalled`. That covers the times whose step H does not yet run: seat
-  deadlines (`advanceRooms`, S6) and the reply checks (S7). A sync that
+- A sync that leaves the scope due is reported in `stalled`. That covers the times whose step H does not yet run: the
+  reply checks (S7). A sync that
   throws is reported in `failed` and wrote nothing. Either scope waits `backoffMs` (default 60 s, in memory only)
   before its next sync, so it is synced at most once per backoff, and each pass reports it again when it is retried.
 - H has no timer. The deployment runs `run()` on its own interval, which bounds how late a due step runs.
@@ -500,6 +513,10 @@ three and runs these suites.
   input admission that a caller cannot replace, and an idle seal in a later round of one sync.
 - The K8 card vectors (`cardVectors`) run on the store, as on L: the expiry before a freeze, the decision projection once,
   the `action_result` Turn of a rejected card, and a confirmed card that waits for its result.
+- The K8 room vectors (`roomVectors`) run on the store, as on L: the first seat queued and frozen, the deadline cancel of
+  an unclaimed seat, a claimed seat released late, a concluded seat, and a Bot that left the room with and without an
+  intent. H tests add the conclusion of an untried cancelled seat intent, a tried one kept open, a second room step in
+  the same sync after a Turn step blocks a seat, and a rollback.
 - The settlement tests build each delegation through the product path (an outcome `delegate`, then a sync), and cover
   each verdict, the units, `target_archived`, the timers, the late terminal audit, the Main Bot cancel in the terminal
   transaction, a rollback, the settlement facts, a verdict at the sync of a reported scope, and the store's refusal of

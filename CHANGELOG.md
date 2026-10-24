@@ -17,6 +17,19 @@
   (`AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY`), and server and hosted
   cloud refuse the value to a device without it, before the task exists. The
   terminal does not report which mode ran.
+- **Feature (examples)** — K8 runs the Host's own K4 work on the Bot tenant's
+  core (#882). `enqueueHostIntent(input, handler)` enqueues a K4 intent and
+  stores the name of its `BotOptions.hostIntents` handler in one transaction.
+  The handler gets the result document in the terminal transaction. The intent
+  shares the FIFO of its Agent. `BotOptions` passes `reconcileMs` and
+  `onOutbox` to the K4 core. `CollaborationState` gets the optional
+  `hostIntents`, and its version stays 3.
+- **Breaking (examples)** — K8 `drain()` rejects with `IntentOutcomeError`
+  when a K4 terminal cannot apply (#882): its key is neither a Bot Turn nor a
+  Host intent, or its Host handler throws or is async. Before, an intent from a
+  direct `bot.core.enqueue` stayed in flight with only a K4 `lastError`. Every
+  API that runs a pass rejects until the outcome applies, and the audit gets
+  one row for each key and reason.
 - **Fix (examples)** — in external team mode, the K8 `create_room` and
   `update_room` schemas offer only current Bots as members and admin (#881).
   Before, they also offered `new_bot_1` to `new_bot_3`, which only
