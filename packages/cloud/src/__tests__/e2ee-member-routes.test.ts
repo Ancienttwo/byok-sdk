@@ -136,6 +136,13 @@ describe('E2EE member device routes', () => {
     expect(e2eeRoutes(setup().cloud)).toEqual(E2EE_ROUTES);
     expect(e2eeRoutes(setup({ capabilities: fullCapabilityDeclaration() }).cloud)).toEqual({});
     expect(fullCapabilityDeclaration().capabilities).not.toContain(CLOUD_CAPABILITIES.e2eeMember);
+    expect(fullCapabilityDeclaration().capabilities).not.toContain(CLOUD_CAPABILITIES.e2eeMemberKemEpoch);
+  });
+
+  it('declares e2ee.member.kem-epoch exactly with e2ee.member', async () => {
+    expect(CLOUD_CAPABILITIES.e2eeMemberKemEpoch).toBe('e2ee.member.kem-epoch');
+    const declared = (await answer(await setup().fetch('/byok/capabilities'))).body as { capabilities: string[] };
+    expect(declared.capabilities).toEqual(expect.arrayContaining(['e2ee.member', 'e2ee.member.kem-epoch']));
     expect(() => setup({ e2eeMemberStore: undefined })).toThrowError(expect.objectContaining({ code: 'capability_over_declared' }));
   });
 
@@ -277,12 +284,13 @@ describe('E2EE member device routes', () => {
     expect(await answer(await put({ packages: [await keyPackage(TENANT_A, other, member, 1)] }))).toEqual({ status: 409, body: { error: 'e2ee_scope_key_conflict' } });
     expect(await answer(await put({ packages: [await keyPackage(TENANT_B, other, member, 1)] }))).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
 
-    expect(await answer(await env.read(device, '/byok/e2ee/key-packages?scopeId=scope-1'))).toEqual({ status: 200, body: { packages: [mine] } });
+    expect(await answer(await env.read(device, '/byok/e2ee/key-packages?scopeId=scope-1&epoch=1'))).toEqual({ status: 200, body: { packages: [mine] } });
+    expect(await answer(await env.read(device, '/byok/e2ee/key-packages?scopeId=scope-1'))).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
     expect(await answer(await env.read(device, '/byok/e2ee/key-packages?scopeId=scope-1&epoch=2'))).toEqual({ status: 200, body: { packages: [] } });
     expect(await answer(await env.read(device, `/byok/e2ee/key-packages?scopeId=scope-1&recipient=${other.bundle.memberId}`)))
       .toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
     expect(await answer(await env.read(device, '/byok/e2ee/key-packages'))).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
-    expect(await answer(await env.read(unregistered, '/byok/e2ee/key-packages?scopeId=scope-1')))
+    expect(await answer(await env.read(unregistered, '/byok/e2ee/key-packages?scopeId=scope-1&epoch=1')))
       .toEqual({ status: 409, body: { error: 'e2ee_member_not_registered' } });
     expect(await answer(await env.read(unregistered, '/byok/e2ee/key-packages'))).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
   });
@@ -317,7 +325,49 @@ describe('E2EE member device routes', () => {
     expect(await answer(await env.write(device, '/byok/e2ee/key-packages', E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, { packages: [pkg], extra: 1 })))
       .toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
     expect(await answer(await env.read(device, '/byok/e2ee/chain'))).toEqual({ status: 200, body: { entries: [] } });
-    expect(await answer(await env.read(device, '/byok/e2ee/key-packages?scopeId=scope-1'))).toEqual({ status: 200, body: { packages: [] } });
+    expect(await answer(await env.read(device, '/byok/e2ee/key-packages?scopeId=scope-1&afterEpoch=0')))
+      .toEqual({ status: 200, body: { packages: [], scopeHeadEpoch: null } });
+  });
+
+  it('pages the device member own packages by epoch, with the scope head epoch', async () => {
+    const env = setup();
+    const device = await env.pair(TENANT_A);
+    const member = await newMember(device.deviceId);
+    const other = await newMember();
+    expect((await env.write(device, '/byok/e2ee/member-key', E2EE_MEMBER_KEY_REGISTER_OPERATION, { member: member.bundle, mac: MAC })).status).toBe(200);
+    const mine = await Promise.all(Array.from({ length: 17 }, (_, index) => keyPackage(TENANT_A, other, member, index + 1)));
+    // The scope head epoch 18 holds no package of this member.
+    const packages = [...mine, await keyPackage(TENANT_A, other, other, 18)];
+    expect((await env.write(device, '/byok/e2ee/key-packages', E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, { packages })).status).toBe(200);
+    const page = (query: string) => env.read(device, `/byok/e2ee/key-packages?scopeId=scope-1&${query}`);
+
+    expect(await answer(await page('afterEpoch=0'))).toEqual({ status: 200, body: { packages: mine.slice(0, 16), scopeHeadEpoch: 18 } });
+    expect(await answer(await page('afterEpoch=16'))).toEqual({ status: 200, body: { packages: mine.slice(16), scopeHeadEpoch: 18 } });
+    expect(await answer(await page('afterEpoch=17'))).toEqual({ status: 200, body: { packages: [], scopeHeadEpoch: 18 } });
+    expect(await answer(await env.read(device, '/byok/e2ee/key-packages?scopeId=scope-2&afterEpoch=0')))
+      .toEqual({ status: 200, body: { packages: [], scopeHeadEpoch: null } });
+    for (const query of ['epoch=1&afterEpoch=0', 'afterEpoch=-1', 'afterEpoch=x', `afterEpoch=${Number.MAX_SAFE_INTEGER + 1}`, 'afterEpoch=0&afterEpoch=1']) {
+      expect(await answer(await page(query)), query).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
+    }
+    expect(await answer(await env.read(device, '/byok/e2ee/key-packages?afterEpoch=0'))).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
+  });
+
+  it('refuses a version 1 package put with 400 and a package below its recipient KEM floor with 409', async () => {
+    const env = setup();
+    const device = await env.pair(TENANT_A);
+    const client = await newMember();
+    const put = (packages: unknown) => env.write(device, '/byok/e2ee/key-packages', E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, { packages });
+    const sealed = await keyPackage(TENANT_A, client, client, 1);
+    const { recipientKemEpoch: _, ...v1 } = { ...sealed, v: 1 };
+    expect(await answer(await put([v1]))).toEqual({ status: 400, body: { error: 'coordination_input_invalid' } });
+
+    const entries = await signedChain(TENANT_A, client, [
+      { op: 'add', subject: { member: client.bundle as unknown as JsonValue } },
+      { op: 'rotate', subject: { memberId: client.bundle.memberId, kemPublicJwk: client.bundle.kemPublicJwk, kemEpoch: 2, kemSig: client.bundle.kemSig } as unknown as JsonValue },
+    ]);
+    expect((await env.write(device, '/byok/e2ee/chain', E2EE_MEMBER_CHAIN_APPEND_OPERATION, { entries })).status).toBe(200);
+    expect(await answer(await put([sealed]))).toEqual({ status: 409, body: { error: 'e2ee_scope_key_package_stale' } });
+    expect(await env.cloud.readScopeKeyPackages(TENANT_A, { scopeId: 'scope-1' })).toEqual({ packages: [] });
   });
 
   it('reads the relayed client MAC, and refuses every read once the device is revoked', async () => {
