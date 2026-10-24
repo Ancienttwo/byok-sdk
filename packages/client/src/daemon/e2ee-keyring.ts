@@ -26,10 +26,11 @@
  *
  * Device rotation (E2d-4, §7.5): when no epoch is fresh, the device is the
  * next sender, so it rotates. It wraps a new scope key at the epoch after the
- * newest one it knows to every current member of the scope policy, puts the
- * packages, and only then keeps the key, with the head it chose the
- * recipients at as the epoch's freshness point. Such an epoch is also stale
- * after a member is added to the scope policy or rotates its KEM key.
+ * newest one it knows, or finds held in a short read above it, to every
+ * current member of the scope policy, puts the packages, and only then keeps
+ * the key, with the head it chose the recipients at as the epoch's freshness
+ * point. Such an epoch is also stale after a member is added to the scope
+ * policy or rotates its KEM key.
  */
 import {
   applyMemberChainEntries,

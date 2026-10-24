@@ -1167,18 +1167,25 @@ refreshed hello adds it, and removes it again when the member is lost.
   The points live in memory, so after a restart they come back from the next
   opened content.
 - **Device rotation (#654 E2d-4, design §7.5).** With no fresh epoch, the
-  device is the next sender. It catches the chain up, takes the epoch after
-  the newest one it knows (the offer's, a fresh one, or one the Host holds
-  for it at `GET /byok/e2ee/key-packages?scopeId=`), wraps a new scope key to
-  every current member of the scope policy, and puts the packages
+  device is the next sender. It catches the chain up and starts from the
+  newest epoch it knows: the offer's, one it holds a key or a freshness
+  point for, or one the Host showed taken in this run. It reads its package
+  of each of the next four epochs (`GET /byok/e2ee/key-packages?scopeId=&epoch=`)
+  and takes the epoch after the newest one that holds a package. When the
+  fourth holds one, the scope is further ahead than the device checks, and
+  the rotation fails. The device wraps a new scope key to every current
+  member of the scope policy and puts the packages
   (`POST /byok/e2ee/key-packages`). After the put, the verified head it chose
   the recipients at is the new epoch's freshness point, so a `remove` that
-  landed during the put makes it stale. A Host that holds that epoch under
-  another `keyId` refuses the put with `e2ee_scope_key_conflict`. A policy
-  that leaves no current member but the device is not rotated, because no
-  client could open the output. Then, and on any other failed rotation, the
-  offer is declined with `sealed_key_unavailable`. Concurrent seals of one
-  scope share one rotation.
+  landed during the put makes it stale. So does a member added to the scope
+  policy or a member `rotate` of its KEM key after that point, because the
+  packages name the members and KEM keys at the point. A Host that holds
+  that epoch under another `keyId` refuses the put with
+  `e2ee_scope_key_conflict`; the next rotation starts above that epoch. A
+  policy that leaves no current member but the device is not rotated,
+  because no client could open the output. Then, and on any other failed
+  rotation, the offer is declined with `sealed_key_unavailable`. Concurrent
+  seals of one scope share one rotation.
   So an output-only task (`categories: ['task-output']`), which carries no
   sealed input, seals at the new epoch. The Host notifies the device of its
   own new package as of any other.
