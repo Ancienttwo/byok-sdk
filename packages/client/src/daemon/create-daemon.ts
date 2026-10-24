@@ -1803,6 +1803,12 @@ export function buildDaemonWithAdapters(
   let sealedUploads: BlobClient | undefined;
   // A start under way opens a session, so a sealed output waits for its flags.
   let startInProgress = false;
+  // The latest run's sealed tasks. A terminal the commit queue holds past a
+  // failed stop seals through the run it runs in, never through the stopped
+  // run's keyring, which its shutdown retires.
+  let latestSealedTasks: SealedTasks | undefined;
+  /** Set by each start: retires that run's member keyring at shutdown. */
+  let retireSealedMember: (() => void) | undefined;
   let sealedOutputSettled: (() => Promise<void>) | undefined;
   let inputPreparationStatusAbort: AbortController | undefined;
   let lifecycle: DaemonLifecycle = { phase: 'stopped' };
@@ -2448,8 +2454,10 @@ export function buildDaemonWithAdapters(
       },
     });
     sealedTasks = opened;
+    latestSealedTasks = opened;
     sealedOutputSettled = () => opened.settled();
     activateSealedTasks = (keyring) => { sealedMember ??= keyring; };
+    retireSealedMember = () => sealedMember?.retire();
     // Contract §8.1 / §8.3: the device-level capability string is NOT computed
     // here. It is the one flag whose answer depends on a deployment fact this
     // daemon has not read yet at this point in `start()`, so it is added (and
@@ -2508,7 +2516,7 @@ export function buildDaemonWithAdapters(
             reason: 'terminal_result_too_large', retryable: false,
             ...terminalIdentity(task.claimedRuntime, offerPayload.agentRef),
           }, { taskId });
-          const failure = sealedTasks === undefined ? plainFailure : await sealedTasks.sealRecovered(offer, plainFailure);
+          const failure = await latestSealedTasks!.sealRecovered(offer, plainFailure);
           const failureBytes = encodeEnvelope(failure);
           await activeJournal.recordTerminal({ taskId, terminalType: 'failed', bytes: failureBytes,
             payloadHash: journalHash(failureBytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
@@ -2522,6 +2530,24 @@ export function buildDaemonWithAdapters(
           // recovery; the oversized result itself is never silently dropped.
         }
       }, seal);
+    };
+
+    /**
+     * #654: seals a sealed task's terminal when the commit queue runs it. The
+     * queue can hold it past a failed stop. Then it seals through the run it
+     * runs in, after that run's start and member resume: a throw here is a
+     * retry. A run whose resume found no member, or whose member is lost,
+     * gives the closed plaintext form.
+     */
+    const sealQueuedTerminal = async (owner: SealedTasks, envelope: Envelope): Promise<Envelope | undefined> => {
+      const taskId = envelope.task_id!;
+      if (startInProgress) throw new Error(`${envelope.type} for sealed task ${taskId} waits for the start under way`);
+      const current = latestSealedTasks!;
+      if (current === owner) return owner.sealOutbound(envelope);
+      if (memberResuming) throw new Error(`${envelope.type} for sealed task ${taskId} waits for this run's member`);
+      const task = await activeJournal!.readTask(taskId, journalIdentity!);
+      if (!task || !('envelopeBytes' in task)) throw new Error(`missing durable offer of sealed task ${taskId}`);
+      return current.sealRecovered(decodeEnvelope(task.envelopeBytes), envelope);
     };
 
     // #654: a task waits on its approval request. One that cannot be sealed
@@ -2549,7 +2575,7 @@ export function buildDaemonWithAdapters(
         observer.captureOutboundApproval(envelope);
         const sealedTaskOutput = sealedTasks;
         if (terminal) {
-          commitTerminal(envelope.task_id!, () => sealedTaskOutput.sealOutbound(envelope));
+          commitTerminal(envelope.task_id!, () => sealQueuedTerminal(sealedTaskOutput, envelope));
           return;
         }
         // Without a journal no commit queue holds a terminal, so a terminal
@@ -3604,6 +3630,10 @@ export function buildDaemonWithAdapters(
     // journal, before the drain below decides the connection is idle.
     await attempt(() => sealedOutputSettled?.(), false);
     const journalTailSettled = journal ? await attempt(() => terminalCommits.stop(), true) : true;
+    // This run seals nothing after the barrier: no key or chain view of its
+    // member outlives it.
+    retireSealedMember?.();
+    retireSealedMember = undefined;
     sealedUploadAbort?.abort();
     // stop() cleared the maintenance timer synchronously above. Await the pass
     // that may already have been inside SQLite only here, immediately before

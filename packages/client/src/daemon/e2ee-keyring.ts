@@ -243,6 +243,18 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     return { scopeKey: key, epoch, sender: current.member.memberId, chainHead: { seq: now.seq, hash: now.hash } };
   }
 
+  /**
+   * Ends this keyring with its daemon run, without `onLost`: the cached keys
+   * are zeroed and the chain view and freshness points are dropped, so a
+   * seal or open that still holds this keyring finds no key.
+   */
+  retire(): void {
+    this.#session = undefined;
+    for (const key of this.#keys.values()) key.scopeKey.fill(0);
+    this.#keys.clear();
+    this.#fresh.clear();
+  }
+
   async #advance(): Promise<void> {
     const current = this.#session;
     if (current === undefined) return;
@@ -250,6 +262,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     const entries = await this.options.client.readChainFrom(head.seq, this.#requestSignal());
     if (entries.length === 0 || this.#session !== current) return;
     const applied = await applyMemberChainEntries(current.state, entries);
+    // A retire while the entries were checked ends the catch-up.
+    if (this.#session !== current) return;
     if (!applied.ok) return this.#lose(`a member chain entry after seq ${head.seq} is invalid (${applied.reason}); E2EE stays off`);
     if (!applied.state.members.has(current.member.memberId)) return this.#lose('this device is no longer a current member of the chain; E2EE stays off');
     const { records, tenantId, deviceId } = this.options;
@@ -258,6 +272,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     const session = {
       ...current, state: applied.state, entries: [...current.entries, ...verified], hashes: [...current.hashes, ...await entryHashes(entries)],
     };
+    if (this.#session !== current) return;
     this.#session = session;
     this.#record(verified);
     // A shred drops the scope, and a policy can drop this device or the sender, or add another device: their keys go.
