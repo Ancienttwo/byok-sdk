@@ -24,7 +24,7 @@ connector. Route the embedded server's `wake.consume` to `bot.consume`.
 Route its `agentMessage.consume` to `bot.consumeMessage`.
 Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
 server or the ledger. Do not call the K4 core's mutation methods directly.
-Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, `setRoutineLifecycle`, `cancelDelegation`, and `abandonDelegation`.
+Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, `setRoutineLifecycle`, `endRoutine`, `cancelDelegation`, and `abandonDelegation`.
 Use `receive` for IM messages ([IM channel input](#im-channel-input)).
 Read `snapshot` or upload K4 projections with `core.flushProjections`.
 
@@ -145,6 +145,13 @@ keeps the current version while work is unsettled. Cancel marks the routine
 completed and stops new occurrences. Accepted work finishes with its old
 version. To stop an execution too, use K4 cancellation explicitly. Routine
 results are owner turns with source `routine`.
+
+`updateRoutine` and `setRoutineLifecycle` change only the routines of this
+Host's Bot. `endRoutine(id)` runs the keyless `end_routine` command (§55c): the
+Main Bot completes any open Bot routine, an archived owner's too, as cancel
+does. Without it, the routine of an archived Bot would fire at every slot. The
+command needs the Main Bot role and gets the K4 rows through the
+`CommandPorts.routines` port.
 
 `compact` removes settled routine rows: a promoted
 occurrence through its intent key, and a concluded occurrence through its
@@ -302,11 +309,12 @@ The keyed commands are owner input, received IM input, room input, answers,
 card decisions, team snapshots, and three K4 callbacks: a terminal outcome, an Agent message
 and a Bot routine occurrence. The keyless commands are `setMainBot`,
 `updateRoom`, `retryPersona`, `enablePushRoute`, `revokePushRoute`,
-`resendDelivery`, `cancelDelegation`, `abandonDelegation` and `cancelTurn`.
+`resendDelivery`, `cancelDelegation`, `abandonDelegation`, `cancelTurn` and `endRoutine`.
 `src/rules/commands.ts` decides all of them. The Host checks the principal
 and the channel before the commit, and it calls K4 cancel and delivers cancel
-facts after the commit. The routine owner APIs are K4 commands on K4 rows and
-do not commit here.
+facts after the commit. `updateRoutine` and `setRoutineLifecycle` are K4
+commands on K4 rows and do not commit here; `endRoutine` commits `end_routine`,
+whose port runs K4 `setLifecycle`.
 
 In this L example the scope is the ledger tenant. Owner APIs pass no expected
 revision. K4 already deduplicates terminals (`applied`) and accepted messages (the
@@ -347,10 +355,13 @@ the intent cancel and the occurrence conclusion. The L sync transaction also
 runs other Host steps before and after the per-Turn steps. Before them, it
 seals due input batches, expires pending cards and advances rooms. After
 them, it settles delegations, reports card decisions and adds their action
-result Turns, cleans reply tokens and projects input batches. This contract
+result Turns, cleans reply tokens and projects input batches. The card steps
+are the K8 rule `src/rules/cards.ts` (`expireCards`, `reportCardDecisions`),
+which the `cardVectors` hold for L and H. This contract
 defines only the per-Turn step. The `syncVectors` in
 `src/commit-vectors.test-support.ts` hold these rules for the in-memory store
-and for L.
+and for L. The `coalesceVectors` there hold the batch seal before the
+per-Turn steps and the batch projection after them, for L and H.
 
 `collaborationDue(state, timers)` in `src/rules/due.ts` lists the times when a
 sync has collaboration work to do: each open input batch's seal, each pending
