@@ -7,16 +7,20 @@
   keeps the next key beside the current one, appends its `rotate` entry,
   re-wraps its own packages to the next key, and drops the old key only
   after every re-wrap reads back. It reads its packages one epoch at a time,
-  four at a time, up to four epochs above the newest one it knows and at most
-  256 per scope; a package at the top epoch, a scope past the cap, or an
-  epoch whose key it holds but cannot read stops the rotation and keeps the
-  old key. A second read-back of every re-wrapped epoch across all scopes
-  runs just before the old key goes. Every Host request of the rotation is
-  cut off after the member request timeout. Known limitation: a late put of
-  a package wrapped to the old key can still replace a re-wrapped row after
-  that read-back; the recipient `kemEpoch` in the signed package and the Host
-  row closes it and must land before a production trigger (E5b-2). Core adds
-  `beginMemberKemRotation` and `finishMemberKemRotation`.
+  four at a time, from epoch 1 to 256 in every scope it may use: up to 64
+  batches of 4 reads per scope per pass, three passes per rotation. A
+  package at epoch 256, a known epoch past it, or an epoch whose key it
+  holds or that has a freshness point but reads no package stops the
+  rotation and keeps the old key. Just before the old key goes, it catches
+  up and reads back every scope it may use then, including one created
+  during the rotation; any epoch that opens only with the old key, or a
+  re-wrapped epoch that no longer reads back, stops the rotation and is
+  logged with its scope and epoch. Every Host request of the rotation is
+  cut off after the member request timeout. That final read-back is an
+  interim measure: a late put of a package wrapped to the old key can still
+  land after it; the recipient `kemEpoch` in the signed package and the Host
+  row closes it and must land before a production trigger (E5b-2). Core
+  adds `beginMemberKemRotation` and `finishMemberKemRotation`.
 - **Fixed (client)** — a terminal whose journal commit failed during a
   `stop()` is sent after the next `start()` in the same process. Startup
   recovery no longer replaces it with `task.fail` `daemon_interrupted`.

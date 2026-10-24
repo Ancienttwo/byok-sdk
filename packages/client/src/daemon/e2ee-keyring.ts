@@ -39,8 +39,9 @@
  * current one, appends its `rotate` entry after a local walk (§7.9
  * requirement 2), re-wraps each of its own packages that it may use now to
  * the next key, reads them back, catches up and reads every usable scope
- * back once more, and only then drops the old private key. Until then a package opens
- * with either key, and a resumed rotation picks up where it stopped.
+ * back once more, and only then drops the old private key. Until then a
+ * package opens with either key, and a resumed rotation picks up where it
+ * stopped.
  */
 import {
   applyMemberChainEntries,
