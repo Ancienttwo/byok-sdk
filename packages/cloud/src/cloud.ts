@@ -823,6 +823,8 @@ export interface ByokCloud {
    * A newly stored `shred` entry, whose subject must be exactly `{ scopeId }`,
    * deletes that scope's key packages and epochs in the same write, marks the
    * scope shredded, and records an `e2ee-scope-shred:<scopeId>` receipt.
+   * A newly stored `rotate` entry raises its member's KEM floor to its
+   * `kemEpoch` in the same write; a floor never falls.
    */
   appendMemberChainEntries(
     tenant: TenantId,
@@ -834,10 +836,12 @@ export interface ByokCloud {
     input?: { readonly afterSeq?: number; readonly limit?: number },
   ): Promise<{ readonly entries: readonly E2eeMemberChainEntry[] }>;
   /**
-   * Host control plane: store scope key packages. The first package of a
-   * scope epoch fixes its `keyId`; a package with another `keyId` throws
+   * Host control plane: store version 2 scope key packages. The first package
+   * of a scope epoch fixes its `keyId`; a package with another `keyId` throws
    * `e2ee_scope_key_conflict`, and the call stores nothing. A package of a
-   * shredded scope throws `e2ee_scope_shredded`, and the call stores nothing.
+   * shredded scope throws `e2ee_scope_shredded`, and one whose
+   * `recipientKemEpoch` is below its recipient's KEM floor throws
+   * `e2ee_scope_key_package_stale`; either way the call stores nothing.
    *
    * After the commit, each recipient that is a registered device gets one
    * `e2ee.key_package.available` notice per scope epoch, also on a replay.

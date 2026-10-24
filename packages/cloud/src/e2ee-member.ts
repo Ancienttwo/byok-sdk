@@ -22,12 +22,14 @@ import {
   E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
   E2EE_SCOPE_ID_MAX_LENGTH,
+  E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX,
   E2EE_SCOPE_KEY_PACKAGE_PUT_MAX,
   E2eeClientPairingMacSchema,
   E2eeMemberChainEntrySchema,
   E2eeMemberKeyBundleSchema,
   E2eeMemberKeyRegisterRequestSchema,
   E2eeScopeKeyPackageSchema,
+  E2eeScopeKeyPackageV2Schema,
   requiredReceiverCapabilities,
   type E2eeClientPairingMac,
   type E2eeKeyPackageAvailablePayload,
@@ -83,6 +85,8 @@ export interface E2eeMemberChainAppendInput {
   readonly rows: readonly E2eeMemberChainRow[];
   /** The `shred` entries among `rows`, in seq order. */
   readonly shreds: readonly E2eeScopeShred[];
+  /** The `rotate` entries among `rows`, in seq order: each raises its member's KEM floor (owner batch §77a). */
+  readonly rotations: readonly { readonly seq: number; readonly memberId: string; readonly kemEpoch: number }[];
   /** Set for a device write, absent for a Host control-plane write. */
   readonly proof?: E2eeProvenWrite;
 }
@@ -119,8 +123,12 @@ export interface E2eeScopeKeyPackageRow {
 }
 
 export interface E2eeScopeKeyPackagePutInput {
-  /** Sorted by `(scopeId, epoch, recipient)` in code point order, one row per scope epoch and recipient. */
-  readonly rows: readonly E2eeScopeKeyPackageRow[];
+  /**
+   * Sorted by `(scopeId, epoch, recipient)` in code point order, one row per
+   * scope epoch and recipient. `recipientKemEpoch` is the package's own field,
+   * for the floor check only; the store keeps it in `package` and nowhere else.
+   */
+  readonly rows: readonly (E2eeScopeKeyPackageRow & { readonly recipientKemEpoch: number })[];
   /** Set for a device write, absent for a Host control-plane write. */
   readonly proof?: E2eeProvenWrite;
 }
@@ -131,6 +139,8 @@ export type E2eeScopeKeyPackagePutResult =
   | { readonly outcome: 'key_id_conflict'; readonly scopeId: string; readonly epoch: number; readonly keyId: string }
   /** The member chain shredded this scope. Nothing was written. */
   | { readonly outcome: 'scope_shredded'; readonly scopeId: string }
+  /** A package is wrapped to an older KEM epoch than its recipient's floor. Nothing was written. */
+  | { readonly outcome: 'kem_epoch_stale'; readonly recipient: string; readonly kemEpoch: number; readonly floor: number }
   /** The device already used this `requestId` with another binding. Nothing was written. */
   | { readonly outcome: 'request_conflict' };
 
@@ -186,6 +196,11 @@ export interface E2eeMemberStore {
    * already there. A replayed row shreds nothing again. A refused append
    * deletes nothing. A store that has concurrent writers serializes each
    * shred with every package put of the same scope.
+   *
+   * For each rotation whose row this call newly stores, in the same atomic
+   * write: raise the member's KEM floor to `kemEpoch`; a floor never falls.
+   * A store that has concurrent writers serializes it with every package put
+   * to that member.
    */
   appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult>;
   /** Entries with `seq > afterSeq`, ascending, at most `limit`. */
@@ -194,12 +209,19 @@ export interface E2eeMemberStore {
     input: { readonly afterSeq: number; readonly limit: number },
   ): Promise<readonly E2eeMemberChainRow[]>;
   /**
-   * A row of a shredded scope refuses the whole put. The first package of a
+   * A row of a shredded scope refuses the whole put. Then a row whose
+   * `recipientKemEpoch` is below its recipient's KEM floor refuses the whole
+   * put, naming the first such row. The first package of a
    * `(scopeId, epoch)` fixes its `keyId`, also within this call: a second
    * `keyId` for that scope epoch refuses the whole put. A package with that
    * `keyId` inserts or replaces the row of its recipient.
    */
   putScopeKeyPackages(tenant: TenantId, input: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult>;
+  /** This recipient's packages of one scope with `epoch > afterEpoch`, by epoch, at most `limit`; and the scope's newest epoch. */
+  readOwnScopeKeyPackages(
+    tenant: TenantId,
+    input: { readonly scopeId: string; readonly recipient: string; readonly afterEpoch: number; readonly limit: number },
+  ): Promise<{ readonly rows: readonly E2eeScopeKeyPackageRow[]; readonly scopeHeadEpoch: number | undefined }>;
   /** Ordered by epoch, then recipient. */
   readScopeKeyPackages(
     tenant: TenantId,
@@ -330,6 +352,7 @@ export async function appendMemberChainEntries(
 ): Promise<{ readonly appended: number; readonly replayed: number }> {
   const list = boundedList(() => input.entries, E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, 'Member chain entries');
   const shreds: E2eeScopeShred[] = [];
+  const rotations: { seq: number; memberId: string; kemEpoch: number }[] = [];
   const shreddedAt = ctx.now().toISOString();
   const rows = list.map((input, index) => {
     const { text, value } = canonicalParse(E2eeMemberChainEntrySchema, input, `Member chain entry ${index}`);
@@ -337,7 +360,11 @@ export async function appendMemberChainEntries(
       throw invalid(`Member chain entry ${index} exceeds ${E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES} bytes`);
     }
     if (value.tenantId !== ctx.tenant) throw invalid(`Member chain entry ${index} names another tenant`);
-    // The entry schema has checked that a shred subject is exactly { scopeId }.
+    // The entry schema has checked the exact subject of a shred and a rotate.
+    if (value.op === 'rotate') {
+      const { memberId, kemEpoch } = value.subject as { readonly memberId: string; readonly kemEpoch: number };
+      rotations.push({ seq: value.seq, memberId, kemEpoch });
+    }
     const scopeId = value.op === 'shred' ? (value.subject as { readonly scopeId: string }).scopeId : undefined;
     // A scope id over the Host limit gets no shred record: every put and read
     // refuses that id, so it has no packages or epochs. It would also not fit
@@ -361,7 +388,7 @@ export async function appendMemberChainEntries(
   if (rows.some((row, index) => row.seq !== rows[0]!.seq + index)) {
     throw invalid('Member chain entries must have contiguous ascending seqs');
   }
-  const result = await ctx.store.appendChainEntries(ctx.tenant, { rows, shreds, ...proofOf(writer) });
+  const result = await ctx.store.appendChainEntries(ctx.tenant, { rows, shreds, rotations, ...proofOf(writer) });
   if (result.outcome === 'request_conflict') throw requestConflict();
   if (result.outcome === 'conflict') {
     throw new ByokCloudError('e2ee_member_chain_conflict', `A different member chain entry is stored at seq ${result.seq}.`);
@@ -395,7 +422,7 @@ export async function putScopeKeyPackages(
 ): Promise<{ readonly stored: number; readonly skippedDeviceIds: readonly string[] }> {
   const list = boundedList(() => input.packages, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, 'Scope key packages');
   const rows = list.map((input, index) => {
-    const { text, value } = canonicalParse(E2eeScopeKeyPackageSchema, input, `Scope key package ${index}`);
+    const { text, value } = canonicalParse(E2eeScopeKeyPackageV2Schema, input, `Scope key package ${index}`);
     if (value.tenantId !== ctx.tenant) throw invalid(`Scope key package ${index} names another tenant`);
     if (!scopeIdValid(value.scopeId)) throw invalid(`Scope key package ${index} has a scopeId over ${E2EE_SCOPE_ID_MAX_LENGTH} characters`);
     return {
@@ -405,6 +432,7 @@ export async function putScopeKeyPackages(
       keyId: value.keyId,
       sender: value.sender,
       package: text,
+      recipientKemEpoch: value.recipientKemEpoch,
     };
   });
   // One lock order for every writer: Postgres puts and device cleanup both
@@ -423,6 +451,12 @@ export async function putScopeKeyPackages(
   if (result.outcome === 'request_conflict') throw requestConflict();
   if (result.outcome === 'scope_shredded') {
     throw new ByokCloudError('e2ee_scope_shredded', `Scope ${result.scopeId} was shredded on the member chain.`);
+  }
+  if (result.outcome === 'kem_epoch_stale') {
+    throw new ByokCloudError(
+      'e2ee_scope_key_package_stale',
+      `A package to ${result.recipient} is wrapped to KEM epoch ${result.kemEpoch}, below its floor ${result.floor}.`,
+    );
   }
   if (result.outcome === 'key_id_conflict') {
     throw new ByokCloudError(
@@ -568,18 +602,39 @@ export async function registerDeviceMemberKey(
   return { memberId: value.member.memberId };
 }
 
-/** The scope key packages addressed to the device's own registered member. */
+/**
+ * The scope key packages addressed to the device's own registered member,
+ * with exactly one of `epoch` (that epoch) or `afterEpoch` (one page after
+ * it, by epoch, and the scope's newest epoch or `null`).
+ */
 export async function readDeviceScopeKeyPackages(
   ctx: E2eeMemberContext,
   deviceId: string,
-  input: { readonly scopeId: string; readonly epoch?: number },
-): Promise<{ readonly packages: readonly E2eeScopeKeyPackage[] }> {
-  const query = scopeQuery(readFields(input));
+  input: { readonly scopeId: string; readonly epoch?: number; readonly afterEpoch?: number },
+): Promise<{ readonly packages: readonly E2eeScopeKeyPackage[]; readonly scopeHeadEpoch?: number | null }> {
+  const fields = readFields(input);
+  const { afterEpoch } = fields;
+  if ((fields.epoch === undefined) === (afterEpoch === undefined)) throw invalid('Exactly one of epoch and afterEpoch is required');
+  if (afterEpoch !== undefined && (typeof afterEpoch !== 'number' || !Number.isSafeInteger(afterEpoch) || afterEpoch < 0)) {
+    throw invalid('afterEpoch must be a nonnegative safe integer');
+  }
+  const query = scopeQuery(fields);
   const registration = await ctx.store.readMemberRegistration(ctx.tenant, { deviceId, now: ctx.now().toISOString() });
   if (registration === undefined) {
     throw new ByokCloudError('e2ee_member_not_registered', `Device ${deviceId} has not registered a member key bundle.`);
   }
-  return readScopeKeyPackages(ctx, { ...query, recipient: registration.memberId });
+  const recipient = registration.memberId;
+  if (afterEpoch === undefined) return readScopeKeyPackages(ctx, { ...query, recipient });
+  const page = await ctx.store.readOwnScopeKeyPackages(ctx.tenant, {
+    scopeId: query.scopeId,
+    recipient,
+    afterEpoch,
+    limit: E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX,
+  });
+  return {
+    packages: page.rows.map(row => storedValue(E2eeScopeKeyPackageSchema, row.package, 'scope key package')),
+    scopeHeadEpoch: page.scopeHeadEpoch ?? null,
+  };
 }
 
 /** The client pairing MAC relayed to the device, while its pairing window is open. */
