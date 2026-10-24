@@ -36,7 +36,10 @@ function open(options: Partial<BotOptions> = { team: 'external', persona: 'exter
 }
 const MAIN = (profileRevision?: string, persona = 'Main persona'): TeamSnapshotBot => ({ id: 'main', name: 'Main', role: 'Team owner', persona,
   model: 'default', mainBot: true, ...(profileRevision === undefined ? {} : { profileRevision }) });
+const MEMBER = (id: string, profileRevision: string, persona = `${id} persona`): TeamSnapshotBot => ({ id, name: id, role: 'Member', persona,
+  model: 'default', mainBot: false, profileRevision });
 const frozen = (turnId: string) => bot!.core.intent(turnId)?.execution.payload.agentRef;
+const submittedRefs = () => submitted.map(payload => payload.agentRef);
 
 it('freezes a Turn only after the Host reports its profile revision, and queues no projection', async () => {
   bot = open();
@@ -45,8 +48,10 @@ it('freezes a Turn only after the Host reports its profile revision, and queues 
     bots: { main: { revision: '5', readyRevision: null, execution: { payload: { agentRef: { agentId: 'main', profileRevision: '5' } } } } } });
   const first = await bot.input('k1', 'Hello');
   expect(frozen(first)).toBeUndefined();
+  expect(submitted).toEqual([]);
   await bot.personaReady('main', '5');
   expect(frozen(first)).toEqual({ agentId: 'main', profileRevision: '5' });
+  expect(submittedRefs()).toEqual([{ agentId: 'main', profileRevision: '5' }]);
   expect(calls).toEqual([]);
 });
 
@@ -60,10 +65,45 @@ it('waits for the new revision, and an older report does not ready it', async ()
   const turnId = await bot.input('k1', 'Hello');
   await bot.personaReady('main', '5');
   expect(frozen(turnId)).toBeUndefined();
+  expect(submitted).toEqual([]);
   await expect(bot.personaReady('main', '7')).rejects.toThrow('Profile revision 7 is newer than the Bot revision 6');
   await bot.personaReady('main', '6');
   expect(frozen(turnId)).toEqual({ agentId: 'main', profileRevision: '6' });
+  expect(submittedRefs()).toEqual([{ agentId: 'main', profileRevision: '6' }]);
   expect(calls).toEqual([]);
+});
+
+it('keeps the ready revision across a restart', async () => {
+  bot = open();
+  await bot.applyTeam({ revision: 1, bots: [MAIN('5')] });
+  await bot.personaReady('main', '5');
+  await bot.close(); ledger!.close(); bot = ledger = undefined;
+  bot = open();
+  expect(bot.snapshot().team.bots.main).toMatchObject({ revision: '5', readyRevision: '5' });
+  const turnId = await bot.input('k1', 'Hello');
+  expect(frozen(turnId)).toEqual({ agentId: 'main', profileRevision: '5' });
+});
+
+it('refuses personaReady for a Bot that a snapshot dropped, or that never existed', async () => {
+  bot = open();
+  await bot.applyTeam({ revision: 1, bots: [MAIN('5'), MEMBER('other', '1')] });
+  await bot.applyTeam({ revision: 2, bots: [MAIN('5')] });
+  expect(bot.snapshot().team.bots.other).toMatchObject({ archived: true, readyRevision: null });
+  await expect(bot.personaReady('other', '1')).rejects.toThrow('Bot is archived or absent');
+  await expect(bot.personaReady('ghost', '1')).rejects.toThrow('Bot is archived or absent');
+  expect(bot.snapshot().team.bots.other).toMatchObject({ archived: true, readyRevision: null });
+});
+
+it('refuses a multi-Bot snapshot at a later Bot, and leaves earlier and archived Bots as before', async () => {
+  bot = open();
+  await bot.applyTeam({ revision: 1, bots: [MEMBER('alpha', '1'), MEMBER('beta', '1'), MEMBER('carol', '1'), MAIN('5')] });
+  await bot.applyTeam({ revision: 2, bots: [MEMBER('alpha', '1'), MEMBER('carol', '1'), MAIN('5')] });
+  const before = bot.snapshot();
+  expect(before.team.bots.beta!.archived).toBe(true);
+  // `alpha` sorts before `main`, so it is written first. `carol` is absent, so it would be archived too.
+  await expect(bot.applyTeam({ revision: 3, bots: [MEMBER('alpha', '2', 'New persona'), MAIN('4')] })).rejects.toThrow('Profile revision 4 of main is older than 5');
+  expect(bot.snapshot()).toEqual(before);
+  expect(bot.snapshot().team.bots).toMatchObject({ alpha: { revision: '1', persona: 'alpha persona' }, beta: { archived: true }, carol: { archived: false } });
 });
 
 it.each<[string, TeamSnapshotBot[], string]>([

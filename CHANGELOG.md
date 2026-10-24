@@ -23,6 +23,11 @@
   `ExternalTeam` the optional `persona`. Without the option nothing changes,
   except that a snapshot with `profileRevision` is refused.
 
+- **Fixed (examples)** — K8 validates `profileRevision` with the protocol
+  `AgentHomeProjectionProfileRevisionSchema` (#879). Before, its own copy of
+  the rule accepted `0`, so a snapshot with `profileRevision: '0'` and
+  `personaReady(botId, '0')` passed. Both are refused now.
+
 - **Feature (examples)** — K8 `BotOptions.roomHistory` reads the room
   messages of a seat ContextPack from an external authority (#883). The
   authority selects the messages for the seat's Bot. The seat Turn stores only
