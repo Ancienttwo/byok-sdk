@@ -5,7 +5,8 @@ commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
 Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c), result
 reconciliation (D2d), the device binding (D2e), retention (D2g), routines (D2f-2), their scheduler (D2f-3), the outbox
-sender (D2b-out-2) and delegation settlement (D2f-5). The command entry and the inbound echo path come in later slices of #793.
+sender (D2b-out-2), delegation settlement (D2f-5) and the inbound channel entry (D2b-out-3). The command entry comes in a
+later slice of #793.
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -326,7 +327,8 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
   after the call and before the settle sends the same value again. A sent projection keeps its row with `settled_at`,
   where K4 deletes it (design §5 D2: the same record is updated). So a projection id published again with another value
   throws `Projection identity conflict` for as long as the row is kept, where K4 takes the new value once it has sent the
-  old one. K8 publishes each id once (plan §3.3); the check of that on L (plan §4) is in D2b-out-3.
+  old one. K8 publishes each id once (plan §3.3). On L this is checked by every K8 vector: no L vector subject flushes its
+  outbox, so K4 `project` throws `Projection identity conflict` for any id that a vector publishes with two values.
 - **Deliveries** run the K8 delivery rules (`channel.ts`, `delivery.ts`, `delivery-routing.ts`) through the store, as L's
   `flushDeliveries` does: the claim (`startDelivery`) commits before the send, the route with its reply token stays in
   memory, and the settle (`settleDelivery` or `unknownDelivery`) is fenced by the attempt. A claim whose lease passed
@@ -348,6 +350,19 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
 - The sync and each delivery settle drop expired or unneeded reply tokens (`cleanReplyTokens`). L's sync does it too;
   L's call in each flush pass is a call in each delivery settle here. H drops an expired token at the next sync or settle
   of its scope.
+- **Inbound** (`receive(scope, message, identity, ports)`, #793 D2b-out-3) is L `receive()`. K8 `classifyInbound` sorts
+  the message by the Host's channel identity (`owner`, and the Host's own bot ids by channel in `self`). The identity is
+  Host configuration from verified identity, never a field of the message:
+  - an `echo` settles the one delivery it names, by `deliveryId` or by platform message id (K8 `echoCandidates` and
+    `acceptDeliveryEcho`), under the scope lock, or writes an `unmatched_echo` audit line; the reply tokens are cleaned in
+    the same transaction. An echo never creates input;
+  - `owner_input` and `room_input` run the K8 `receive` command under the command id `hash(['receive', inboundKey])`, so
+    a redelivered event replays. With `{ channel: true }`, the store keeps the inbound and its reply route (K8
+    `rememberInbound`);
+  - `bot_background` runs the K8 `room_input` command of a bot with no mention, as L `roomInput` does for a bot;
+  - any other kind writes only an audit line, one for each delivery, as L.
+  The store owns the `remember` port: `commit()` refuses the `receive` command with `InboundCommandError`, and its ports
+  carry no `remember` port.
 - An unsettled delivery row whose entity is not in the state fails as drift (`Delivery outbox row unsettled for an
   archived entity`) and waits `backoffMs`, as a row with no entity anywhere does (`Delivery not found`). Nothing is
   settled for it.
@@ -412,12 +427,13 @@ three and runs these suites.
   `bot-routine` refusal.
 - The D2f-1 routine vectors (`routineVectors`) run on the store, with the scheduler fire and a submitter pass on an SDK
   tenant in memory.
-- The K8 delivery vectors (`deliveryVectors`) run on the store and the outbox sender, except the echo vectors 10 and 14,
-  which wait for the H inbound echo path (D2b-out-3). After each Host step, the delivery outbox index matches the K8 entities. The
+- The K8 delivery vectors (`deliveryVectors`) run on the store, its inbound entry and the outbox sender, all 21. After each Host step, the delivery outbox index matches the K8 entities. The
   sender tests cover the projection claim, lease, fence, backoff, race, order and version filter, the archived and
   missing delivery entity, the retention refusal of an unsettled delivery row, a terminal delivery on the reply route,
   a hung readback, the clock read after the scope lock, the readback lease, a failed readback fenced by its attempt, a
   wait that never moves `next_at` earlier, the option checks, and a wait that cannot be written.
+- The inbound tests cover owner input with and without a channel and its replay, room input and bot background, the
+  audit kinds, an echo that names one delivery, none or two, and the refusal of `receive` in `commit()`.
 - The scheduler tests cover on-time and late fires, the supersede in the fire, the device fence and its paging, two
   racing fires, a fire that throws and its backoff, the interval guard, and the start and pass upkeep.
 - The reconciliation tests run a real daemon for the completed outcome, a replayed terminal and a busy decline. The
