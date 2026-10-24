@@ -547,6 +547,17 @@ describe('the prepared pi launch entry', () => {
     expect((state.data as { sessionId?: string } | undefined)?.sessionId).toBe(session.sessionRef);
   }, 60_000);
 
+  it.each([
+    ['the prepared request', 'prompt_prepared', /prepared request transport failed/u],
+    ['get_state', 'get_state', /before confirming the prepared session id/u],
+  ])('marks a host that exits before it answers %s runtime_exited (#869)', async (_label, frame, reason) => {
+    const endpoint = await providerEndpoint();
+    const prepared = await prepareOnThisDevice(endpoint);
+    await expect(startPrepared(prepared, { spawnFn: exitOnFrame(frame) })).rejects.toMatchObject({
+      phase: 'start', message: expect.stringMatching(reason), failure: { class: 'runtime_exited' },
+    });
+  }, 60_000);
+
   it('refuses a prepared operation that also carries a sealed sessionRef', async () => {
     const endpoint = await providerEndpoint();
     const prepared = await prepareOnThisDevice(endpoint);
@@ -848,6 +859,20 @@ interface LauncherRecord {
  * exists for is everything ABOVE and BELOW the launcher: the argv the adapter
  * hands it, and the prepared host it parents.
  */
+/** The real host, killed from outside the client when the client writes a frame of this type. */
+function exitOnFrame(type: string): PiAdapterOptions['spawnFn'] {
+  return ((command: string, args: string[], spawnOptions: Record<string, unknown>) => {
+    const child = nodeSpawn(command, args, spawnOptions as never);
+    const write = child.stdin.write.bind(child.stdin) as (...parts: unknown[]) => boolean;
+    child.stdin.write = ((chunk: unknown, ...rest: unknown[]) => {
+      if (!String(chunk).includes(`"type":"${type}"`)) return write(chunk, ...rest);
+      child.kill('SIGKILL');
+      return true;
+    }) as typeof child.stdin.write;
+    return child;
+  }) as PiAdapterOptions['spawnFn'];
+}
+
 function launcherSpawn(options: {
   profile: ModelProviderProfile;
   record: LauncherRecord;

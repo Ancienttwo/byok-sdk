@@ -214,9 +214,46 @@ describe('GrokAdapter sessions', () => {
 
   it('maps prompt errors to semantic failures, retryable only when rate limited', async () => {
     const failed = await failureOf(await open(adapter(), { instruction: 'fail' }, await ctx()));
-    expect(failed).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', message: 'model provider failed' });
+    expect(failed).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', message: 'Internal error' });
     const limited = await failureOf(await open(adapter(), { instruction: 'rate-limited' }, await ctx()));
     expect(limited).toMatchObject({ phase: 'run', category: 'semantic', retry: 'retryable' });
+  });
+
+  it('passes the vendored OAR failure class through, with the reason unchanged (#869)', async () => {
+    const classOf = async (instruction: string) => {
+      const failed = await failureOf(await open(adapter(), { instruction }, await ctx()));
+      return { failure: (failed as RuntimeExecutionFailure).failure, message: (failed as RuntimeExecutionFailure).message };
+    };
+    // -32003 covers every 429, a usage limit included: Grok cannot show quota.
+    expect(await classOf('rate-limited')).toEqual({ failure: { class: 'rate_limited' }, message: 'Rate limited' });
+    expect(await classOf('retry-failed:auth')).toEqual({ failure: { class: 'auth' }, message: 'Internal error' });
+    expect(await classOf('retry-failed:context_length')).toEqual({ failure: { class: 'input_too_large' }, message: 'Internal error' });
+    // A -32603 with no retry_state, or with an error_type OAR does not map, names no cause:
+    // OAR's text rule reads "Internal error" as `provider`, which is not structured evidence.
+    expect(await classOf('fail')).toEqual({ failure: { class: 'unknown' }, message: 'Internal error' });
+    expect(await classOf('retry-failed:network')).toEqual({ failure: { class: 'unknown' }, message: 'Internal error' });
+    expect((await failureOf(await open(adapter(), { instruction: 'exit' }, await ctx())) as RuntimeExecutionFailure).failure).toEqual({ class: 'runtime_exited' });
+    const refusedLogin = await startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_AUTH: 'refuse' })).catch(error => error);
+    expect(refusedLogin).toMatchObject({ phase: 'start', failure: { class: 'auth' } });
+    const refusedModel = await startPreparedOperation(adapter({ model: 'no-such-model' }), { instruction: 'x' }, await ctx()).catch(error => error);
+    expect(refusedModel).toMatchObject({ phase: 'start', failure: { class: 'model_unavailable' } });
+  });
+
+  it('marks an agent exit during the open runtime_exited, and an open it did not end unknown (#869)', async () => {
+    await expect(startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_INITIALIZE: 'exit' }))).rejects.toMatchObject({
+      phase: 'start', category: 'infrastructure', failure: { class: 'runtime_exited' },
+    });
+    // The kernel kills the agent itself after the refused initialize.
+    await expect(startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_INITIALIZE: 'error' }))).rejects.toMatchObject({
+      phase: 'start', message: 'Internal error', failure: { class: 'unknown' },
+    });
+  });
+
+  it('sends unknown for a class OAR took from error text, keeping the retry it derives (#869)', async () => {
+    const failed = await failureOf(await open(adapter(), { instruction: 'fail-text:429 rate limit' }, await ctx()));
+    expect(failed).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failed).toMatchObject({ phase: 'run', category: 'semantic', retry: 'retryable', message: 'Internal error: 429 rate limit' });
+    expect((failed as RuntimeExecutionFailure).failure).toEqual({ class: 'unknown' });
   });
 
   it('fails the session and ends the agent when retained records exceed the byte budget', async () => {

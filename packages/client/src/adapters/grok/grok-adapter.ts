@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, TaskFailure, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import {
   freezeRuntimeAdapterDescriptor,
@@ -17,7 +17,7 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure';
 import { buildRuntimeEnv } from '../../daemon/environment';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
@@ -202,13 +202,17 @@ export class GrokAdapter implements RuntimeAdapter {
       // A failed record stream is the cause; the open or prompt error is its consequence.
       const error = session.halted ?? thrown;
       // A missing session, a refused login or a refused model cannot succeed on retry: fail closed.
-      if (error instanceof acp.SessionNotFoundError || error instanceof acp.RuntimeFailureError)
+      if (error instanceof acp.SessionNotFoundError)
         throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason: error.message });
+      if (error instanceof acp.RuntimeFailureError)
+        throw new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason: error.message,
+          failure: { class: runtimeFailureClassOf(error.failure) } });
       throw new RuntimeExecutionFailure({
         phase: 'start',
         category: isRuntimeExecutionFailure(error) ? error.category : 'infrastructure',
         retry: isRuntimeExecutionFailure(error) ? error.retry : 'retryable',
         reason: error instanceof Error ? error.message : 'grok open failed',
+        failure: isRuntimeExecutionFailure(error) ? error.failure : { class: session.exitedOnItsOwn ? 'runtime_exited' : 'unknown' },
       });
     }
   }
@@ -223,13 +227,14 @@ function grokAuthPresent(env: NodeJS.ProcessEnv): boolean {
 
 const authority = (reason: string) =>
   new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
-const infrastructure = (reason: string) =>
-  new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason });
+const infrastructure = (reason: string, failure?: TaskFailure) =>
+  new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable', reason, failure });
 
 class GrokSession implements Session {
   sessionRef = '';
   private raw?: RawAcpSession;
   private child?: { dispose(): Promise<void>; kill(): void };
+  private exit?: { readonly exitedOnItsOwn: boolean };
   private projection?: GrokProjection;
   private readonly queue = new AsyncQueue<AgentEvent | MessageDraftDelta>();
   private failure?: RuntimeExecutionFailure;
@@ -249,8 +254,12 @@ class GrokSession implements Session {
     private readonly expectedSessionRef?: string,
   ) {}
 
-  own(child: { dispose(): Promise<void>; kill(): void }): void {
+  own(child: { dispose(): Promise<void>; kill(): void; readonly exitedOnItsOwn: boolean }): void {
     this.child = child;
+    this.exit = child;
+  }
+  get exitedOnItsOwn(): boolean {
+    return this.exit?.exitedOnItsOwn === true;
   }
   /** The agent's lines stop at the transport once the record stream halted. */
   gate<T extends { onLine(handler: (line: string) => void): void }>(child: T): T {
@@ -292,6 +301,8 @@ class GrokSession implements Session {
         category: 'semantic',
         retry: turn.failure === 'rate_limited' ? 'retryable' : 'non-retryable',
         reason: turn.reason,
+        // A class OAR took from error text is not structured evidence (docs/spec.md runtime failure class).
+        failure: { class: turn.fromText ? 'unknown' : turn.failure },
       }));
   }
   fail(error: unknown): void {
@@ -303,7 +314,9 @@ class GrokSession implements Session {
     void this.close().catch(() => {});
   }
   exited(): void {
-    if (!this.stopping) this.fail(infrastructure('grok agent exited'));
+    if (!this.stopping) {
+      this.fail(infrastructure('grok agent exited', { class: this.exitedOnItsOwn ? 'runtime_exited' : 'unknown' }));
+    }
   }
   get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
     const self = this;

@@ -2,7 +2,7 @@
 
 Source: https://github.com/botiverse/oar, version 0.70.0, fixed commit `44d7d61c558eef8ac3e61ecc54a8d4962eacadbd`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 81 source files plus LICENSE. Seventy-two source files keep upstream bytes. Nine source files contain BYOK changes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) and the Grok Build session (`runtimes/grok/session.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok install, update, inventory, model-list and account-usage modules are not included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 81 source files plus LICENSE. Sixty-eight source files keep upstream bytes. Thirteen source files contain BYOK changes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) and the Grok Build session (`runtimes/grok/session.ts`) with their import closure. No Cursor, CLI, arena, executable manager, other runtime or branded resources are included. The Grok install, update, inventory, model-list and account-usage modules are not included.
 
 The SDK typechecks this source with the ES2024 library (`packages/client/tsconfig.json`, `scripts/api-surface/tsconfig.oar-bridge.json`). The emit target stays ES2022, and the Node 24 engine floor provides the ES2023/ES2024 built-ins upstream uses (`Array.prototype.toSorted`, `Promise.withResolvers`).
 
@@ -19,8 +19,11 @@ Policy: follow upstream. A file is maintained only where the SDK's ownership of 
 - `shared/acp/terminal.ts`. Invariant: every process the SDK starts is inside its process-tree authority. Each `terminal/create` command is spawned, adopted and reaped by the injected terminal spawn, with the session env plus the request's env entries. A released or disposed terminal stays tracked until its tree is gone. One disposal serves concurrent callers, so the session's dispose waits for the reap that the exit observer started. A failed reap is reported, and a later dispose retries every tree still alive. A `terminal/create` after disposal began is refused.
 - `shared/acp/client-app.ts`. Invariant: no permission request gets a permissive fallback. Every `session/request_permission` is answered `cancelled`, and the request and answer stay recorded.
 - `shared/acp/turns.ts`. Invariant: a failed prompt reads its turn frames only after the notifications received before the failure are recorded. A rejected `session/prompt` yields one event-loop turn before it reads its frames and picks the failure outcome, as `promptAcp` already does after a successful answer. The yield is bounded by that one turn, because the official SDK dispatches a notification through promise handlers only, with no timers.
+- `contracts/failure.ts`, `shared/failure-class.ts`, `runtimes/codex/failure.ts` and `shared/acp/failure.ts`. Invariant: a failure class that a text rule chose is marked, so the SDK sends it as `unknown`. Every `FailedTurn` variant and `Classified` take an optional `fromText: true`. `acpFailureOutcome` sets it on its `classifyFailure` fallback, and `failureFromErrorBody` sets it on a class from Anthropic's 400 wording (`anthropicLimitText`), which Codex `codexErrorInfo` `other` carries through. The class itself, and so every OAR consumer of `failure`, is unchanged.
 
 The SDK adapters own the retained-record budget (`maxRetainedBytes`, default 16 MiB) and the Codex operation deadlines (`operationTimeoutMs`, default 30000ms); see the last history section. The SDK releases the retained stream at completion. The SDK JS/declaration bridge (`src/runtime/codex-session-runtime.{js,d.ts}`) exposes text-only `prompt` and `steer`, `abort`, `records` and `dispose`; `scripts/api-surface/oar-bridge-types.ts` checks it against these sources.
+
+The SDK bridge `src/runtime/oar-failure-runtime.{js,d.ts}` re-exports two failure tables: `codexFailure` (`runtimes/codex/failure.ts`) and `failureFromStatus` (`shared/failure-class.ts`). The Codex and Claude adapters classify a failed turn with them, so the class reaches the `task.fail` terminal (#869), not BYOK events. The Codex adapter sends `unknown` for a `codexFailure` result marked `fromText`. `scripts/api-surface/oar-bridge-types.ts` checks the bridge and that the protocol's `RuntimeFailureClass` equals `FailureClass`.
 
 The SDK bridge `src/runtime/acp-session-runtime.{js,d.ts}` declares one start signature for every vendored ACP runtime: text-only `prompt`, `abort`, `records` and `dispose`. It exports `grokSession` from the Grok profile, which keeps upstream bytes. The build emits it as the private `#byok-acp-runtime` entry, so `@agentclientprotocol/sdk` loads only when an ACP session starts, never with `@byok-sdk/client/adapters`. `scripts/api-surface/oar-bridge-types.ts` checks it against these sources.
 
@@ -411,3 +414,29 @@ before it reads the turn frames, the same yield `promptAcp` takes on success.
 The process-exit branch, the success path and the failure tables are
 unchanged. Upstream OAR `main` still reads the frames without the yield. When
 upstream fixes it, a re-vendor returns this file to upstream bytes.
+
+### Failure class reaches the terminal (#869)
+
+No vendored file changes. The new private bridge `src/runtime/oar-failure-runtime.{js,d.ts}` re-exports `codexFailure` and `failureFromStatus`. The Codex adapter classifies a failed turn from the native frame's `turn.error` with `codexFailure`, and the Claude adapter reads a result's `api_error_status` with `failureFromStatus`. The Grok adapter passes the class of its vendored turn outcome and of the start `RuntimeFailureError` through. The class goes onto `task.fail.failure`. SDK events still read native frames only, so the derived failure class still does not reach BYOK events.
+
+### Text-rule failure class (#869)
+
+Same base commit `44d7d61c558eef8ac3e61ecc54a8d4962eacadbd`. `contracts/failure.ts`,
+`shared/failure-class.ts`, `runtimes/codex/failure.ts` and `shared/acp/failure.ts`
+become maintained, so the maintained set grows from nine files to thirteen.
+
+The rule (owner decision, option B): the runtime failure class on the wire
+comes from structured runtime fields only. Two vendored paths take a class
+from error text. When `grokFailureOutcome` names no class (a -32603 with no
+ended `retry_state`, or an `error_type` outside its table), `acpFailureOutcome`
+falls back to `classifyFailure`, a regex table over the error text; grok's own
+"Internal error" reads as `provider`. Codex `codexErrorInfo` `other` reads the
+provider body through `failureFromErrorBody`, whose `invalid_request_error`
+branch takes `billing` or `quota` from Anthropic's wording.
+
+BYOK change: those two points mark the outcome `fromText: true`. The class is
+unchanged, so OAR's own consumers and the SDK's Grok retry rule
+(`rate_limited` is retryable) read the same value. The Grok and Codex adapters
+send `unknown` for a marked outcome. `classifyFailure`, `anthropicLimitText`
+and `failureFromStatus` keep upstream logic. When upstream marks or drops its
+text rules, a re-vendor returns these files to upstream bytes.

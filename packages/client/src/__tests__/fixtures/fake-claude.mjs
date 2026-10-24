@@ -153,6 +153,14 @@
 //                                          `--mcp-config` server's tools.
 //   FAKE_CLAUDE_MCP_STATUS_NO_ACK=1     -> never answer `mcp_status`.
 //   FAKE_CLAUDE_MCP_STATUS_RECEIPT=<path> -> append each `mcp_status` request.
+//   FAKE_CLAUDE_FAILURES=<json array>   -> entry N fails turn N+1 the way an
+//                                          API error does: an optional
+//                                          `rate_limit_event` with
+//                                          `rateLimit` as its info, an
+//                                          assistant frame with `error`, then
+//                                          an `is_error` result with
+//                                          `api_error_status: status`.
+//                                          `{ "exit": true }` exits instead.
 //   FAKE_CLAUDE_RESULT_MALFORMED=1      -> cross-model re-review (P1
 //                                          regression): the turn's `result`
 //                                          frame is sent with `is_error`
@@ -592,6 +600,24 @@ function runProbeOrTurnFlow() {
 
     if (process.env.FAKE_CLAUDE_HANG_AFTER_TOOL === '1') {
       return; // stay "running" indefinitely — see the toggle's doc comment above
+    }
+
+    const failure = JSON.parse(process.env.FAKE_CLAUDE_FAILURES ?? '[]')[turn - 1];
+    if (failure) {
+      if (failure.exit === true) process.exit(1);
+      if (failure.rateLimit !== undefined) send({ type: 'rate_limit_event', rate_limit_info: failure.rateLimit, session_id: reportedSessionId });
+      const text = failure.text ?? 'API Error: fixture failure';
+      send({
+        type: 'assistant',
+        message: { model: '<synthetic>', id: `msg_${turn}e`, role: 'assistant', content: [{ type: 'text', text }] },
+        ...(failure.error === undefined ? {} : { error: failure.error }),
+        session_id: reportedSessionId,
+      });
+      send({
+        type: 'result', subtype: 'success', is_error: true, duration_ms: 10, duration_api_ms: 8, num_turns: turn,
+        session_id: reportedSessionId, total_cost_usd: 0, usage: {}, result: text, api_error_status: failure.status ?? null, permission_denials: [],
+      });
+      return;
     }
 
     const finalText = `reply-${turn}:${mcpResultText ?? incomingText}`;

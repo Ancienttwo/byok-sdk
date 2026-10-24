@@ -47,7 +47,8 @@
       "path": "contracts/failure.ts",
       "sourcePath": "packages/oar/src/contracts/failure.ts",
       "upstreamSha256": "9422fcb7460b25443c2c2f13cdc6f8de2653369a130eb4cbb1b7994f888302bd",
-      "vendoredSha256": "9422fcb7460b25443c2c2f13cdc6f8de2653369a130eb4cbb1b7994f888302bd"
+      "vendoredSha256": "4547aa15d0762548c63c3c431489ac3a3034bb131af0140918537b6a7212c4f1",
+      "delta": "Text-rule mark: every FailedTurn variant takes an optional fromText: true, set when a text rule over the runtime's words chose the class rather than a structured field."
     },
     {
       "path": "contracts/graph.ts",
@@ -186,7 +187,8 @@
       "path": "runtimes/codex/failure.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/failure.ts",
       "upstreamSha256": "96ed35871e6aafc9bda3372d6ae2500d8c1f387a3824488366474439e806fa00",
-      "vendoredSha256": "96ed35871e6aafc9bda3372d6ae2500d8c1f387a3824488366474439e806fa00"
+      "vendoredSha256": "9b1d9aa8f2c38aa59fa338c9951a39c9e7d1c075e9c7f993dadd51821e2b0ea5",
+      "delta": "Text-rule mark: codexErrorInfo other returns the provider body's Classified, so a class from Anthropic's 400 wording keeps its fromText mark on the failed turn."
     },
     {
       "path": "runtimes/codex/input-delivery.ts",
@@ -310,7 +312,8 @@
       "path": "shared/acp/failure.ts",
       "sourcePath": "packages/oar/src/shared/acp/failure.ts",
       "upstreamSha256": "f3b375e0620a2133aeed185a28e2b7837b1bcc4fa20ddc38ca4bb07f8adf59fb",
-      "vendoredSha256": "f3b375e0620a2133aeed185a28e2b7837b1bcc4fa20ddc38ca4bb07f8adf59fb"
+      "vendoredSha256": "123222ae1b6ddabd23941f1660cc1da7d3b9bbd931a2fa449342e3c5a9d99675",
+      "delta": "Text-rule mark: when the profile's reader names no class, acpFailureOutcome marks the classifyFailure fallback fromText. The process-exit and auth-required branches are unchanged."
     },
     {
       "path": "shared/acp/launch-args.ts",
@@ -434,7 +437,8 @@
       "path": "shared/failure-class.ts",
       "sourcePath": "packages/oar/src/shared/failure-class.ts",
       "upstreamSha256": "b499c00723b79fbbd8bea072cc1d6a1e9221d711c388a9f3ddd5956c741a7f2a",
-      "vendoredSha256": "b499c00723b79fbbd8bea072cc1d6a1e9221d711c388a9f3ddd5956c741a7f2a"
+      "vendoredSha256": "0ddc6c93d03e07a06c105392f717f5ed7d052dd317374dd313ab655bf3df701b",
+      "delta": "Text-rule mark: Classified takes an optional fromText: true, and failureFromErrorBody returns a Classified, marking a class from Anthropic's 400 wording (anthropicLimitText) fromText. classifyFailure and failureFromStatus are unchanged."
     },
     {
       "path": "shared/held-input.ts",

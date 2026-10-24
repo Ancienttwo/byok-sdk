@@ -70,6 +70,11 @@ function piInvocation(bin: ResolvedBin): { command: string; entry?: string } {
     : { command: bin.command };
 }
 
+/** A start request pi's own exit ended is `runtime_exited`. Read before disposal, whose termination also closes the client. */
+function startupExit(rpc: PiRpcClient) {
+  return rpc.processExited ? { class: 'runtime_exited' as const } : undefined;
+}
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -557,10 +562,11 @@ export class PiAdapter implements RuntimeAdapter {
           try {
             response = await rpc.send({ type: 'prompt', message: startInput.instruction });
           } catch (cause) {
+            const failure = startupExit(rpc);
             await disposePiStartup(rpc, startInput.scratch);
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'infrastructure', retry: 'retryable',
-              reason: `pi initial prompt transport failed: ${errorMessage(cause)}`,
+              reason: `pi initial prompt transport failed: ${errorMessage(cause)}`, failure,
             }, { cause });
           }
           if (response.success === false) {
@@ -868,10 +874,11 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     // that is written.
     response = await rpc.send(buildPreparedPromptCommand(envelope, preparation.expected, PREPARED_PROMPT_COMMAND_ID));
   } catch (cause) {
+    const failure = startupExit(rpc);
     await disposePiStartup(rpc, input.scratch);
     throw new RuntimeExecutionFailure({
       phase: 'start', category: 'infrastructure', retry: 'retryable',
-      reason: `pi prepared request transport failed: ${errorMessage(cause)}`,
+      reason: `pi prepared request transport failed: ${errorMessage(cause)}`, failure,
     }, { cause });
   }
   if (response.success === false) {
@@ -901,10 +908,11 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
   try {
     state = await rpc.send({ type: 'get_state' });
   } catch (cause) {
+    const failure = startupExit(rpc);
     await disposePiStartup(rpc, input.scratch);
     throw new RuntimeExecutionFailure({
       phase: 'start', category: 'infrastructure', retry: 'retryable',
-      reason: `pi transport ended before confirming the prepared session id: ${errorMessage(cause)}`,
+      reason: `pi transport ended before confirming the prepared session id: ${errorMessage(cause)}`, failure,
     }, { cause });
   }
   const stateData = state.data as { sessionId?: unknown } | undefined;
@@ -1024,6 +1032,7 @@ async function resolveAuthoritativeSessionId(rpc: PiRpcClient): Promise<string> 
       category: 'infrastructure',
       retry: 'retryable',
       reason: `pi transport ended before yielding an authoritative session id: ${errorMessage(err)}`,
+      failure: startupExit(rpc),
     }, {
       cause: err,
     });
@@ -1097,6 +1106,7 @@ class PiSession implements Session {
                   category: 'infrastructure',
                   retry: 'retryable',
                   reason: 'pi runtime process ended before agent_settled',
+                  failure: { class: rpc.processExited ? 'runtime_exited' : 'unknown' },
                 }, { cause: rpc.terminalError });
               }
               if (value.type === 'agent_settled') {

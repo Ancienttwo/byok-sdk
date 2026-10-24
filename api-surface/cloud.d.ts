@@ -4929,7 +4929,7 @@ export interface CloudRootStores {
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
-import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TaskFailPayload, type TaskDeclinePayload } from '@byok-sdk/protocol';
+import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TaskFailPayload, type TaskFailure, type TaskDeclinePayload } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports';
 declare const DEVICE_TERMINAL_TYPES: readonly ['task.complete', 'task.fail', 'task.decline', 'task.cancelled', 'task.complete_sealed', 'task.fail_sealed', 'task.decline_sealed', 'task.cancelled_sealed'];
 /**
@@ -5008,6 +5008,13 @@ export interface TerminalResult {
     /** Terminal cause projection; currently the protocol's terminal reason. */
     readonly terminalCause?: string;
     readonly retryable?: boolean;
+    /**
+     * The machine-readable runtime failure class, verbatim `task.fail.failure`
+     * (plaintext on `task.fail_sealed` too). Read the class here, never from
+     * `reason`. Absent when the daemon or the server predates the field, or the
+     * daemon built the terminal while it had no live connection.
+     */
+    readonly failure?: TaskFailure;
     /** When the receipt store wrote the terminal fact — the first one, by its own first-write-wins rule. */
     readonly recordedAt: string;
 }

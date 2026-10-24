@@ -265,6 +265,7 @@ export declare class ClaudeProcessClient {
     private readonly eventQueue;
     private closed;
     private exitError;
+    private exited;
     private transportError;
     private readonly pendingWrites;
     private readonly closedPromise;
@@ -312,6 +313,8 @@ export declare class ClaudeProcessClient {
     get events(): AsyncIterable<ClaudeStreamMessage>;
     /** Local transport diagnostic retained when the process closes; consumers classify it at the session boundary. */
     get terminalError(): Error | undefined;
+    /** The child process closed on its own (a `close` event, not a spawn error), and no adoption or transport failure outranked that exit; consumers classify it at the session boundary. */
+    get processExited(): boolean;
     /**
      * Record a claude stream-json frame/subtype/content-block label that
      * `ClaudeSession`'s event iterator (`../claude-adapter.ts`) decided has
@@ -783,6 +786,7 @@ export declare class PiRpcClient {
     private readonly eventQueue;
     private closed;
     private exitError;
+    private exited;
     private readonly closedPromise;
     private resolveClosed;
     private disposalAttempt;
@@ -813,6 +817,8 @@ export declare class PiRpcClient {
     get events(): AsyncIterable<PiRpcMessage>;
     /** Local transport diagnostic retained when the process closes; consumers must classify it explicitly. */
     get terminalError(): Error | undefined;
+    /** The child process closed on its own (a `close` event, not a spawn error), and no adoption failure outranked that exit; consumers classify it at the session boundary. */
+    get processExited(): boolean;
     /**
      * Stdout frames this client dropped because it could not decode them: a
      * complete line that is not a JSON object, or the unterminated last line of
@@ -9973,6 +9979,7 @@ export declare class TaskRunner {
      * decline before the open: the task's output could not be sent to it.
      */
     private handleSealedOffer;
+    private failurePayload;
     private sealedCodesAllowed;
     /**
      * Declines a sealed offer once, non-retryably, before any claim. To a server
@@ -13194,6 +13201,7 @@ export declare function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescrip
     readonly harnessId: string;
 };
 // ==== @byok-sdk/client dist/runtime-failure.d.ts ====
+import type { RuntimeFailureClass, TaskFailure } from '@byok-sdk/protocol';
 /** Closed lifecycle phases for failures after an offer has been admitted. */
 export type RuntimeFailurePhase = 'start' | 'run';
 /** Closed semantic axis. Retryability is explicit and is never inferred from this field. */
@@ -13213,6 +13221,12 @@ export interface RuntimeExecutionFailureInput {
     retry: RuntimeRetryDisposition;
     /** Stable operator-facing reason. Provider diagnostics may be included, but are never parsed by TaskRunner. */
     reason: string;
+    /**
+     * The runtime's failure class, from structured runtime evidence only (#869);
+     * omitted means `unknown`. `resetsAt` exists only on `quota`, only when the
+     * runtime reported it, written as `Date#toISOString` writes it.
+     */
+    failure?: TaskFailure;
 }
 /**
  * Expected failure of an owned runtime-resource disposal barrier. This never
@@ -13233,12 +13247,16 @@ export declare class RuntimeExecutionFailure extends Error {
     readonly phase: RuntimeFailurePhase;
     readonly category: RuntimeFailureCategory;
     readonly retry: RuntimeRetryDisposition;
+    readonly failure: TaskFailure;
     constructor(input: RuntimeExecutionFailureInput, options?: ErrorOptions);
 }
+/** A class string a runtime reported, or `unknown` when it is none of the closed classes. */
+export declare function runtimeFailureClassOf(value: unknown): RuntimeFailureClass;
 export declare function isRuntimeExecutionFailure(value: unknown): value is RuntimeExecutionFailure;
 export interface RuntimeFailureProjection {
     reason: string;
     retryable: boolean;
+    failure: TaskFailure;
 }
 /**
  * Exhaustive wire projection for a valid typed failure. A failure from the

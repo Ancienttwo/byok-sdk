@@ -77,6 +77,7 @@ export class PiRpcClient {
   private readonly eventQueue = new AsyncQueue<PiRpcMessage>();
   private closed = false;
   private exitError: Error | undefined;
+  private exited = false;
   private readonly closedPromise: Promise<void>;
   private resolveClosed!: () => void;
   private disposalAttempt: Promise<void> | undefined;
@@ -118,10 +119,10 @@ export class PiRpcClient {
     // ever wrote has already been delivered to our listeners, so the error
     // built below always has the complete stderr tail, not a truncated one.
     this.child.on('close', (code, signal) => {
-      this.onClosed(this.buildExitError(code, signal));
+      this.onClosed(this.buildExitError(code, signal), true);
     });
     this.child.on('error', (err) => {
-      this.onClosed(err);
+      this.onClosed(err, false);
     });
   }
 
@@ -159,6 +160,11 @@ export class PiRpcClient {
   /** Local transport diagnostic retained when the process closes; consumers must classify it explicitly. */
   get terminalError(): Error | undefined {
     return this.exitError;
+  }
+
+  /** The child process closed on its own (a `close` event, not a spawn error), and no adoption failure outranked that exit; consumers classify it at the session boundary. */
+  get processExited(): boolean {
+    return this.exited;
   }
 
   /**
@@ -365,7 +371,7 @@ export class PiRpcClient {
     return new Error(parts.join('; '));
   }
 
-  private onClosed(err: Error): void {
+  private onClosed(err: Error, exited: boolean): void {
     if (this.closed) return;
     this.closed = true;
     // `close` delivers every stdout byte first, so a non-empty buffer here is
@@ -379,6 +385,7 @@ export class PiRpcClient {
     // the only reason anyone can act on.
     const terminal = this.adoptionFailure ?? err;
     this.exitError = terminal;
+    this.exited = exited && terminal === err;
     this.resolveClosed();
     for (const [, waiter] of this.pending) waiter.reject(terminal);
     this.pending.clear();

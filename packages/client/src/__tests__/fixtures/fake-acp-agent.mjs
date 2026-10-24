@@ -10,6 +10,8 @@
 // observed fact (argv, env, cwd, requests) so a test can assert the wire.
 // FAKE_ACP_REPLY_GATE=<dir>: the default reply waits for `<dir>/release`
 // after its two chunks and before the prompt answer.
+// FAKE_ACP_INITIALIZE=exit ends the agent on `initialize`; =error answers it
+// with an internal error.
 import { appendFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -67,11 +69,17 @@ async function prompt(message) {
   if (input === 'hold' || process.env.FAKE_ACP_HANG === '1') { pending.set(message.id, 'hold'); return; }
   if (input === 'hold-silent') { pending.set(message.id, 'silent'); return; }
   if (input === 'exit') { process.exit(9); }
-  if (input === 'fail') { error(message.id, -32603, 'model provider failed'); return; }
+  // Grok's own words for a -32603; `fail-text:` adds the provider's answer as `data`.
+  if (input === 'fail') { error(message.id, -32603, 'Internal error'); return; }
+  if (input.startsWith('fail-text:')) { error(message.id, -32603, 'Internal error', input.slice('fail-text:'.length)); return; }
   if (input === 'rate-limited') { error(message.id, -32003, 'Rate limited'); return; }
-  // Grok names the cause of a -32603 in the retry_state that ended its
-  // retries. Both lines go out in one write, so the client reads them in one
-  // pipe chunk, as it does under load.
+  // Grok names the cause of a -32603 in the retry_state that ended its retries.
+  if (input.startsWith('retry-failed:')) {
+    vendor({ sessionUpdate: 'retry_state', type: 'failed', error_type: input.slice('retry-failed:'.length) });
+    error(message.id, -32603, 'Internal error');
+    return;
+  }
+  // The same two lines in one write: the client reads them in one pipe chunk, as it does under load.
   if (input.startsWith('retry-failed-one-write:')) {
     const retry = { method: '_x.ai/session_notification', params: { sessionId: SESSION, update: { sessionUpdate: 'retry_state', type: 'failed', error_type: input.slice('retry-failed-one-write:'.length) } } };
     const failed = { id: message.id, error: { code: -32603, message: 'Internal error' } };
@@ -144,6 +152,8 @@ function request(message) {
   switch (message.method) {
     case 'initialize':
       log({ kind: 'initialize', params: message.params });
+      if (process.env.FAKE_ACP_INITIALIZE === 'exit') process.exit(1);
+      if (process.env.FAKE_ACP_INITIALIZE === 'error') { error(message.id, -32603, 'Internal error'); return; }
       result(message.id, {
         protocolVersion: 1,
         agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {}, close: {} }, promptCapabilities: { image: false }, mcpCapabilities: { http: true } },

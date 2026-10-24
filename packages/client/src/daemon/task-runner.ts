@@ -39,6 +39,7 @@ import {
   type TerminalProjectionSelection,
   type TaskOfferPayload,
   type TaskDeclinePayload,
+  type TaskFailure,
   type TaskOfferForAgentPayload,
   type TaskOfferForAgentWithEgressPayload,
   type TaskOfferForAgentWithEgressFreshPayload,
@@ -101,6 +102,7 @@ import {
 import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { SealedTasks } from './sealed-task';
+import { DAEMON_TASK_FAILURE, taskFailureField } from './task-failure';
 import type {
   AgentResultDescribeParams,
   AgentResultDescribeResult,
@@ -2092,6 +2094,7 @@ export class TaskRunner {
       return createEnvelope('task.fail', {
         reason,
         retryable,
+        ...this.failurePayload(DAEMON_TASK_FAILURE),
         ...this.terminalInferenceUsagePayload(active),
         ...this.preparedObservationPayload(active),
         ...this.agentTerminalPayload(active),
@@ -3075,12 +3078,12 @@ export class TaskRunner {
         await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed', 'repository-invalid');
         gitLease?.release();
         if (agentBinding === undefined) {
-          await this.fail(taskId, failure.reason, failure.retryable);
+          await this.fail(taskId, failure.reason, failure.retryable, failure.failure);
         } else {
           await this.failClaimedAgent(taskId, failure.reason, failure.retryable, {
             binding: agentBinding,
             runtimeId: pick.descriptor.id,
-          });
+          }, failure.failure);
         }
         return;
       }
@@ -4448,7 +4451,7 @@ export class TaskRunner {
       active.executionRecord.streamEnded();
       const failure = projectRuntimeBoundaryFailure(undefined, 'run');
       console.error('[byok/client] runtime adapter events iterable ended without terminal authority');
-      await this.fail(active.taskId, failure.reason, failure.retryable);
+      await this.fail(active.taskId, failure.reason, failure.retryable, failure.failure);
     } catch (err) {
       if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
       active.batcher.flush();
@@ -4470,7 +4473,7 @@ export class TaskRunner {
           `[byok/client] runtime adapter ${active.adapter.descriptor.id} events iterable returned an untyped failure for task ${active.taskId}`,
         );
       }
-      await this.fail(active.taskId, failure.reason, failure.retryable);
+      await this.fail(active.taskId, failure.reason, failure.retryable, failure.failure);
     }
   }
 
@@ -5151,6 +5154,7 @@ export class TaskRunner {
       await this.persistAgentTerminalEvidence(active, 'failed', reason ?? 'rejected');
       return createEnvelope('task.fail', {
         reason: reason ?? 'rejected', retryable: false,
+        ...this.failurePayload(DAEMON_TASK_FAILURE),
         ...this.terminalInferenceUsagePayload(active),
         ...this.preparedObservationPayload(active),
         ...this.agentTerminalPayload(active),
@@ -5185,6 +5189,10 @@ export class TaskRunner {
     }
   }
 
+  private failurePayload(failure: TaskFailure): { failure?: TaskFailure } {
+    return taskFailureField(failure, this.deps.getServerCapabilities?.() ?? []);
+  }
+
   private sealedCodesAllowed(): boolean {
     const capabilities = this.deps.getServerCapabilities?.() ?? [];
     return requiredReceiverCapabilities('task.decline', { reason: 'sealed_open_failed', code: 'sealed_open_failed' })
@@ -5217,7 +5225,7 @@ export class TaskRunner {
     ));
   }
 
-  private async fail(taskId: string, reason: string, retryable: boolean): Promise<void> {
+  private async fail(taskId: string, reason: string, retryable: boolean, failure = DAEMON_TASK_FAILURE): Promise<void> {
     const active = this.tasks.get(taskId);
     if (active !== undefined) {
       await this.settleSemanticTerminal(active, async () => {
@@ -5226,6 +5234,7 @@ export class TaskRunner {
         return createEnvelope('task.fail', {
           reason,
           retryable,
+          ...this.failurePayload(failure),
           ...this.terminalInferenceUsagePayload(active),
           ...this.preparedObservationPayload(active),
           ...this.agentTerminalPayload(active),
@@ -5234,7 +5243,7 @@ export class TaskRunner {
       return;
     }
     this.deps.send(createEnvelope('task.fail', {
-      reason, retryable, ...terminalIdentity(this.claimedHarnesses.get(taskId)),
+      reason, retryable, ...this.failurePayload(failure), ...terminalIdentity(this.claimedHarnesses.get(taskId)),
     }, { taskId }));
     await this.finish(taskId);
   }
@@ -5251,6 +5260,7 @@ export class TaskRunner {
     reason: string,
     retryable: boolean,
     context: ClaimedAgentFailureContext,
+    failure = DAEMON_TASK_FAILURE,
   ): Promise<boolean> {
     await this.pendingMessageTasks.get(taskId)?.outbox.revoke(taskId);
     const agentRef = context.binding.resolution.agentRef;
@@ -5281,7 +5291,7 @@ export class TaskRunner {
     }
     this.deps.send(createEnvelope(
       'task.fail',
-      { reason, retryable, ...terminalIdentity(context.runtimeId, agentRef) },
+      { reason, retryable, ...this.failurePayload(failure), ...terminalIdentity(context.runtimeId, agentRef) },
       { taskId },
     ));
     return result.ok;

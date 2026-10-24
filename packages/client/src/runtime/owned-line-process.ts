@@ -15,7 +15,10 @@ interface SpawnDependencies {
   label?: string;
 }
 
-/** JSONL transport over the existing BYOK owned-tree adoption/disposal authority. */
+/**
+ * JSONL transport over the existing BYOK owned-tree adoption/disposal authority.
+ * `exitedOnItsOwn`: the process ended before any kill, disposal or transport failure.
+ */
 // Structural return types keep the BYOK source declaration build independent of the unconnected vendor tree.
 export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
   const label = deps.label ?? 'codex app-server';
@@ -33,6 +36,8 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     let closed = false;
     let released = false;
     let adopted = false;
+    let terminationRequested = false;
+    let exitedOnItsOwn = false;
     let exitCode: number | null = null;
     let failure: Error | undefined;
     const pendingWrites = new Set<(error: Error) => void>();
@@ -56,7 +61,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
       }
       return disposal;
     };
-    const kill = (): void => { void cleanup().catch(error => { failure ??= error instanceof Error ? error : new Error(String(error)); }); };
+    const kill = (): void => { terminationRequested = true; void cleanup().catch(error => { failure ??= error instanceof Error ? error : new Error(String(error)); }); };
     const fail = (error: Error): void => {
       failure ??= error;
       for (const reject of [...pendingWrites]) reject(error);
@@ -116,6 +121,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     child.once('close', (code: number | null) => {
       if (closed) return;
       closed = true; exitCode = code; resolveClosed();
+      exitedOnItsOwn = !terminationRequested && failure === undefined;
       for (const reject of [...pendingWrites]) reject(failure ?? new Error('owned line process closed during write'));
       // exited is a tree-quiescence receipt, not merely a root exit event.
       void cleanup().then(() => undefined, error => { failure ??= error instanceof Error ? error : new Error(String(error)); }).then(() => {
@@ -129,7 +135,9 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
       });
     });
     return {
-      spawned, exited, kill, dispose: cleanup,
+      spawned, exited, kill,
+      dispose: (): Promise<void> => { terminationRequested = true; return cleanup(); },
+      get exitedOnItsOwn() { return exitedOnItsOwn; },
       exitError: () => failure ?? new Error(`app-server exited (code=${exitCode})${stderrTail.length ? `; stderr: ${stderrTail.toString('utf8').trim()}` : ''}`),
       write(text: string) {
         if (!adopted || closed || failure !== undefined) throw failure ?? new Error('owned line process is not writable');

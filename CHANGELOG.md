@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Feature (client, protocol, server, cloud)** — a failed task now carries
+  `failure.class`, a closed runtime failure class (the vendored OAR
+  `FailureClass` values, `unknown` included), and `failure.resetsAt` when the
+  runtime reported when a quota resets (#869). Read it from `task.fail`,
+  `TaskResult.failure` (`tasks.get()`) and `TerminalResult.failure`; `reason`
+  stays display text. Claude reads its assistant error, result status and
+  `rate_limit_event`; Codex reads `codexErrorInfo`; Grok passes its OAR
+  outcome through; Pi and Hermes report `unknown`. A runtime process that ends
+  on its own before its terminal is `runtime_exited` (not Pi's durable lane, which
+  reports `unknown`, nor an exit the SDK asked for), and a failure the daemon makes
+  itself is `unknown`. The field is gated on the new server flag
+  `runtime-failure-class` (`RUNTIME_FAILURE_CLASS_CAPABILITY`), which the
+  reference server and the hosted cloud advertise. It stays plaintext on
+  `task.fail_sealed`. `RuntimeExecutionFailure` takes an optional `failure`.
+  A class the vendored OAR derives from error text, such as Grok's "Internal
+  error" or Anthropic limit wording in a Codex `other` error, is sent as
+  `unknown`; Grok's `retry` still follows OAR's class.
 - **Feature (client)** — the device member can rotate its own KEM key
   (#654 E2d-5, design §7.5); no daemon path starts a rotation yet. The device
   keeps the next key beside the current one, appends its `rotate` entry,

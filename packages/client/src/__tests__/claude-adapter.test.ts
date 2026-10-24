@@ -425,6 +425,39 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(session.sessionRef).toBe('fake-claude-session-1');
   });
 
+  it('classifies a failed turn from the frames, per turn, with the reason unchanged (#869)', async () => {
+    const resetsAt = 1_792_832_400;
+    const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_FAILURES: JSON.stringify([
+      { rateLimit: { status: 'rejected', resetsAt, rateLimitType: 'five_hour' }, error: 'rate_limit', status: 429 },
+      { error: 'model_not_found', status: 404 },
+    ]) });
+    const session = await startAdapter(fakeClaudeAdapter(), baseTask, ctx);
+    openSessions.push(session);
+    const failedTurn = async () => takeTurn(session).then(() => undefined, (error: unknown) => error);
+
+    const first = await failedTurn();
+    expect(first).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(first).toMatchObject({ message: 'claude reported terminal task failure', failure: { class: 'quota', resetsAt: new Date(resetsAt * 1000).toISOString() } });
+
+    await session.followUp({ instruction: 'again' });
+    const second = await failedTurn();
+    expect((second as RuntimeExecutionFailure).failure).toEqual({ class: 'model_unavailable' });
+  });
+
+  it('marks a process exit before the result frame runtime_exited (#869)', async () => {
+    const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_FAILURES: JSON.stringify([{ exit: true }]) });
+    const session = await startAdapter(fakeClaudeAdapter(), baseTask, ctx);
+    openSessions.push(session);
+    await expect(takeTurn(session)).rejects.toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });
+  });
+
+  it('marks claude exiting before system/init on a --resume of a missing session runtime_exited (#869)', async () => {
+    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
+    await expect(startAdapter(fakeClaudeAdapter(), task, await makeCtx())).rejects.toMatchObject({
+      phase: 'start', category: 'infrastructure', message: expect.stringMatching(/No conversation found/), failure: { class: 'runtime_exited' },
+    });
+  });
+
   it('followUp() fails closed on a blob-ref instruction, same as start()', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
