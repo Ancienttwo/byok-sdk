@@ -72,8 +72,18 @@ a Bot Turn nor a Host intent, for example from a direct `bot.core.enqueue`, or a
 Host handler that throws or returns a promise. Then `drain()` rejects with
 `IntentOutcomeError`, and so does every API that runs a pass, including `input`
 and the `wake.consume` hook. The audit gets one row for each key and reason. The
-intent stays at the head of its FIFO until its outcome applies. `BotOptions`
-passes `reconcileMs` (default 100) and `onOutbox` to the K4 core.
+intent stays at the head of its FIFO until its outcome applies, for example
+after a restart with a fixed handler, or until the owner calls
+`failStuckIntent(key)`. That call runs a K4 drain first, so it also works right
+after a restart. If that drain refuses the intent's terminal again, one
+transaction settles the intent as `failed` with the K4 `settle` transition and
+adds the audit row `Intent failed by owner <code>: <key> <reason>`. No handler
+runs, and the intent records no terminal; the server task keeps it. Later drains
+move past it. A Host intent keeps its `hostIntents` record until K4 compacts it,
+so an exact replay of `enqueueHostIntent` returns the failed intent. The call
+refuses an unknown key, a settled intent, and an intent whose terminal K8 did not
+refuse, such as one still running. `BotOptions` passes `reconcileMs` (default
+100) and `onOutbox` to the K4 core.
 
 ## Actions and context
 

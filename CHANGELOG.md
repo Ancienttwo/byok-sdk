@@ -240,6 +240,14 @@
   as before. `outcomeOffer` checks an offer, and `SyncOptions.offer` takes its
   result, so the H sync uses the same rule. Turns frozen before keep their
   schema.
+- **Feature (examples)** — the K8 owner call `failStuckIntent(key)` ends an
+  intent whose K4 terminal K8 refuses with `IntentOutcomeError` (#882). It
+  runs a K4 drain, and if that drain refuses the terminal again, it settles
+  the intent as `failed` and writes the audit row
+  `Intent failed by owner <code>: <key> <reason>` in one transaction. No
+  handler runs, and `drain()` then moves past the intent. The call refuses an
+  unknown key, a settled intent and an intent whose terminal K8 did not
+  refuse. K4 now exports its `settle` transition for this.
 
 ## 0.30.0 — 2026-10-24 (published)
 
