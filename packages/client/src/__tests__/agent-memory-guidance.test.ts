@@ -436,3 +436,40 @@ describe('agentMemory read-if-admitted', () => {
     for (const start of [writer!, reader!]) expect(start.ctx.mcpServers?.byokagentmemory).toBeUndefined();
   });
 });
+
+// #833: `read-write-if-admitted` runs as `read-write` when the daemon admits the memory MCP, and as `none` when it does
+// not. A memory-reader cannot select it, whatever the admission.
+describe('agentMemory read-write-if-admitted', () => {
+  it.skipIf(process.platform === 'win32')('runs a writer exactly as read-write when the daemon admits memory', async () => {
+    const { adapter, offer, declineOf } = await createMemoryRunner('auto');
+    await offer('writer-rw', { agentId: 'agent-writer-rw', agentMemory: 'read-write' });
+    await offer('writer-rw-if', { agentId: 'agent-writer-rw-if', agentMemory: 'read-write-if-admitted' });
+    expect(declineOf('writer-rw-if')).toBeUndefined();
+    expect(adapter.startCalls).toHaveLength(2);
+    const [readWrite, ifAdmitted] = adapter.startCalls;
+    expect(ifAdmitted!.task.instruction).toBe(prependAgentMemoryGuidance('instruction for writer-rw-if'));
+    expect(readWrite!.task.instruction).toBe(prependAgentMemoryGuidance('instruction for writer-rw'));
+    expect(ifAdmitted!.ctx.mcpServers?.byokagentmemory?.env).toMatchObject({
+      BYOK_PREPARED_AGENT_MEMORY_MODE: 'read-write', BYOK_AGENT_MEMORY_TOOL_LIST: 'granted',
+    });
+  });
+
+  it('runs a writer exactly as none when the daemon does not admit memory, with no decline and no adapter MCP support', async () => {
+    const { adapter, offer, declineOf } = await createMemoryRunner('off', false);
+    await offer('writer-rw-if', { agentId: 'agent-writer-rw-if', agentMemory: 'read-write-if-admitted' });
+    expect(declineOf('writer-rw-if')).toBeUndefined();
+    expect(adapter.startCalls).toHaveLength(1);
+    expect(adapter.startCalls[0]!.task.instruction).toBe('instruction for writer-rw-if');
+    expect(adapter.startCalls[0]!.ctx.mcpServers?.byokagentmemory).toBeUndefined();
+  });
+
+  it.each(['auto', 'off'] as const)('declines a memory-reader that selects it before it starts (agentMemoryMcp %s)', async (agentMemoryMcp) => {
+    const { adapter, offer, declineOf } = await createMemoryRunner(agentMemoryMcp);
+    await offer('reader-rw-if', { reader: true, agentMemory: 'read-write-if-admitted' });
+    expect(declineOf('reader-rw-if')?.payload).toMatchObject({
+      retryable: false, reason: expect.stringContaining('agent_memory_selection_invalid'),
+    });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+});
+

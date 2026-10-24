@@ -187,13 +187,15 @@ interface DispatchInputBase {
    */
   homeAccess?: AgentHomeAccess;
   /**
-   * The Agent memory of this one task: `none`, `read`, `read-write` or
+   * The Agent memory of this one task: `none`, `read`, `read-write`,
    * `read-if-admitted` (`read` when the daemon admits the memory MCP, else
-   * `none`; the device must also advertise `agent-memory-read-if-admitted`).
+   * `none`; the device must also advertise `agent-memory-read-if-admitted`) or
+   * `read-write-if-admitted` (`read-write` when admitted, else `none`; the
+   * device must also advertise `agent-memory-read-write-if-admitted`).
    * Requires `agentRef` and a device that advertises `agent-memory-selection`;
-   * the kernel refuses it otherwise, before the task exists. `read-write` with
-   * `homeAccess: 'memory-reader'` is refused before the task exists. Absent
-   * keeps the daemon admission.
+   * the kernel refuses it otherwise, before the task exists. `read-write` or
+   * `read-write-if-admitted` with `homeAccess: 'memory-reader'` is refused
+   * before the task exists. Absent keeps the daemon admission.
    */
   agentMemory?: AgentMemorySelection;
   /** Host-only product destination/freshness authority; never serialized to the daemon. */
