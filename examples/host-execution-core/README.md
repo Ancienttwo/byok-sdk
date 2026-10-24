@@ -29,6 +29,7 @@ The crash test sends SIGKILL to a child Host during wake delivery.
 | `src/core.ts` | FIFO dispatch, exact recovery, cancellation, retry, outcome application, occurrence hooks and outbox scans. |
 | `src/ledger.ts` | A separate Host SQLite ledger with synchronous transactions. |
 | `src/model.ts`, `src/transitions.ts` | Durable records, stable identities, atomic state changes, and the FIFO head and queued expiry rules. |
+| `src/canonical.ts` | Canonical JSON and its SHA-256. The `./canonical` entry exports only these two and imports only `node:crypto` (#884). |
 | `src/submit.ts` | The frozen-offer submit protocol: readback first, the frozen offer check and the stop hook. Shared with the hosted lane. |
 | `src/routines.ts` | Occurrence deduplication, next-slot commit, coalescing, lifecycle, version switches and Host occurrence transitions. |
 | `src/schedule.ts` | The default UTC interval calendar and the shared calendar callback type. |
