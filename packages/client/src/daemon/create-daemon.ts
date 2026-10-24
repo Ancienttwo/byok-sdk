@@ -2436,8 +2436,9 @@ export function buildDaemonWithAdapters(
         // session's flags are unknown. Once the daemon stopped, halted or
         // crashed with no start under way, no session will advertise any.
         serverCapabilities: () => {
+          if (lifecycle.phase === 'halted' || lifecycle.phase === 'crashed') return [];
           if (lifecycle.phase === 'running') return connection?.isOpen() === true ? connection.getServerCapabilities() : undefined;
-          return startInProgress && lifecycle.phase === 'stopped' ? undefined : [];
+          return startInProgress ? undefined : [];
         },
       });
       sealedTasks = opened;

@@ -700,6 +700,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     { step: 'create', status: 503 },
     // The signed content URL answers 401 once its `sig`/`exp` pair expired.
     { step: 'content', status: 401 },
+    { step: 'content', status: 403 },
   ] as const)('retries a terminal whose ciphertext blob $step answers $status, and never replaces the result with a sealed failure', async ({ step, status }) => {
     const keyring = new TestKeyring();
     const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
