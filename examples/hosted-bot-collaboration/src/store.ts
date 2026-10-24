@@ -9,7 +9,7 @@ import { commitCommand, syncTurn, type Command, type CommandPorts, type SyncOpti
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, bindDevice, revokeDevice } from './binding';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
-import { cancelIntent, syncFacts, writeSyncStep } from './intents';
+import { cancelIntent, deliverCancels, syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
 import { decideFinish, type TaskEvidence } from './reconcile';
 import { commitStored, decideRetention } from './retention';
@@ -63,7 +63,9 @@ export class HostedCollaborationStore {
    * a request for another scope is a `scope_mismatch` conflict. A throw leaves every row unchanged.
    *
    * A new `cancel_turn` of a Turn with a frozen intent runs the K4 cancel in the same transaction, in L's order (K8
-   * host.ts `cancelTurn`): the commit, the cancel of the intent, then the version switch check (#793 D2f-4).
+   * host.ts `cancelTurn`): the commit, the cancel of the intent, then the version switch check (#793 D2f-4). A new commit
+   * that leaves a delegation cancel fact to deliver (`cancel_turn` of an open chain, `cancel_delegation`,
+   * `abandon_delegation`) delivers it in the same transaction, as L `settleChain` does after its commit.
    */
   commit(scope: string, request: CommitRequest<Command>, ports: PortsFactory): Promise<CommitResult> {
     const key = storedKey(scope);
@@ -72,12 +74,13 @@ export class HostedCollaborationStore {
       const result = await commitStored(client, scope, state, request, base);
       // A new commit moves the head by 1. A replay returns its first result and writes nothing.
       if (result.revision !== head + 1) return { value: result, outbox: [] };
-      const value = result.disposition.outcome === 'accepted' ? result.disposition.value as { target?: string; admitted?: boolean } | undefined : undefined;
+      const value = result.disposition.outcome === 'accepted'
+        ? result.disposition.value as { target?: string; admitted?: boolean; deliver?: boolean } | undefined : undefined;
       if (request.command.kind === 'cancel_turn' && value?.admitted && value.target !== undefined) {
         const now = base.now();
         await cancelIntent(client, scope, value.target, now);
         await switchDueVersions(client, key, now);
-      }
+      } else if (value?.deliver) await deliverCancels(client, scope, state, base.now());
       return { value: result, outbox: result.outbox };
     });
   }

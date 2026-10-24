@@ -1,7 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 import { agentKey, canonical, fifoHeads, promoteOccurrence, queuedExpiry, submitFrozen, taskId,
   type Conclusion, type ExecutionTemplate, type FrozenInput, type FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
-import type { Turn } from '@byok-sdk/example-bot-collaboration/model';
+import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { activeBinding, DeviceBindingError } from './binding';
@@ -97,6 +97,19 @@ export async function cancelIntent(client: PoolClient, scope: string, turnId: st
     ...(row.retry_until === null ? {} : { retryUntil: Number(row.retry_until) }) }, now);
   await client.query('UPDATE intent SET conclusion = $3 WHERE scope = $1 AND key = $2', [scopeKey, key, conclusion]);
   return true;
+}
+
+/**
+ * K8 `deliverCancels` (host.ts): the K4 cancel of the frozen target of each committed delegation cancel fact, then
+ * `delivered`. L marks a fact delivered whatever K4 finds, and so does H. The caller holds the scope lock and writes
+ * `state` in the same transaction.
+ */
+export async function deliverCancels(client: PoolClient, scope: string, state: CollaborationState, now: number): Promise<void> {
+  for (const d of Object.values(state.delegations)) {
+    if (!d.cancel || d.cancel.delivered) continue;
+    await cancelIntent(client, scope, d.cancel.targetTurnId, now);
+    d.cancel.delivered = true;
+  }
 }
 
 /**
