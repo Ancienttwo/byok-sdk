@@ -445,8 +445,9 @@ transaction, in the same phase as `history`.
 - K8 still writes `room.messages`. Round counts, mention seats and the seat
   request text read it.
 - A read that throws or returns another shape leaves the seat queued, and the
-  timer reads again. The seat deadline still applies, so a seat whose read
-  never succeeds is released as `busy` and its Turn expires.
+  timer reads again. A read still open at the seat deadline counts as failed.
+  The seat deadline still applies, so a seat whose read never succeeds is
+  released as `busy` and its Turn expires.
 - No projection carries an accepted room post yet. The Host reads posts from
   `snapshot().team.rooms` to write them to its authority.
 

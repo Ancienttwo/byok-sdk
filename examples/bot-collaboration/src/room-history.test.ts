@@ -77,6 +77,23 @@ it('#883 acceptance 3: a failed or malformed read leaves the seat queued, and a 
   expect(contextOf(seat).room.messages).toEqual(ROWS);
 });
 
+it('counts a room read still open at the seat deadline as failed, so the seat expires and the Host keeps working', async () => {
+  let now = Date.now(), stall = false;
+  const { other, room } = await open(async () => {
+    if (stall) return new Promise<never>(() => {});
+    throw new Error('authority offline');
+  }, () => now);
+  const round = await host().roomInput('ask', room.id, 'Review', [other]);
+  const seat = host().snapshot().team.rounds[round]!.seats[0]!;
+  stall = true;
+  now += ROOM_GRACE_MS;
+  await host().drain();
+  expect(host().snapshot().team.seats[seat]).toMatchObject({ status: 'busy', released: true });
+  expect(host().snapshot().turns[seat]).toMatchObject({ status: 'failed', conclusion: 'expired' });
+  // The exclusive queue is free: an unrelated input still commits.
+  await expect(host().input('after', 'Still working')).resolves.toEqual(expect.any(String));
+});
+
 it('releases a seat whose room read never succeeds at its deadline', async () => {
   let now = Date.now();
   const { other, room } = await open(async () => { throw new Error('authority offline'); }, () => now);

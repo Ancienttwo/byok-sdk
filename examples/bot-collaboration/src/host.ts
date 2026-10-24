@@ -88,7 +88,8 @@ export interface BotOptions {
    * Present: before a seat Turn freezes its offer, the Host reads here the room messages that the seat's Bot can see,
    * oldest first. The authority selects them for that Bot. The rows replace `room.messages` in that ContextPack and are
    * not stored; the seat Turn keeps only their hash. `room.messages` is still written, for the request text and mentions.
-   * A read that throws or returns another shape leaves the seat queued, and the timer tries again until the seat deadline.
+   * A read that throws, returns another shape or is still open at the seat deadline leaves the seat queued, and the timer
+   * tries again until the seat deadline.
    */
   roomHistory?: (input: { roomId: string; botId: string; turnId: string }) => Promise<readonly RoomMessage[]>;
   /**
@@ -120,6 +121,12 @@ interface InjectedHistory {
 export type MessageServer = { tasks: Partial<Pick<ByokServer['tasks'], 'agentMessage'>> };
 export type AgentMessageInput = Parameters<NonNullable<CreateByokServerOptions['agentMessage']>['consume']>[0];
 
+/** A room read still open at the seat deadline counts as a failed read, so the sync can expire the seat (#883). */
+function byDeadline<T>(read: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Room history read passed the seat deadline')), Math.max(0, ms)); });
+  return Promise.race([read, late]).finally(() => clearTimeout(timer));
+}
 /** A Turn that has no offer yet and can freeze one: not concluded or failed, and its Bot is active with its profile applied. */
 function awaitsOffer(ledger: LedgerState, state: CollaborationState, turn: Turn): boolean {
   const bot = state.team.bots[turn.botId];
@@ -733,7 +740,8 @@ export class BotCollaboration {
       const seat = turn.source === 'room_slot' ? state.team.seats[turn.id] : undefined;
       try {
         if (seat && readRoom && !seat.released) {
-          const rows = roomMessages(await readRoom({ roomId: state.team.rounds[seat.roundId]!.roomId, botId: turn.botId, turnId: turn.id }));
+          const pending = readRoom({ roomId: state.team.rounds[seat.roundId]!.roomId, botId: turn.botId, turnId: turn.id });
+          const rows = roomMessages(await (seat.deadline === undefined ? pending : byDeadline(pending, seat.deadline - this.now())));
           injected.rooms.set(turn.id, { rows, digest: hash(canonical(rows)) });
         } else if (turn.source !== 'room_slot' && read) {
           const rows = contextTurns(await read({ botId: turn.botId, turnId: turn.id }));
