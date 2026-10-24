@@ -51,6 +51,22 @@ export async function chain(tenant: TenantId, signer: Member, length: number): P
   return entries;
 }
 
+/** Signed entries from seq 1, all by `signer`. The first must add `signer`. */
+export async function signedChain(
+  tenant: TenantId,
+  signer: Member,
+  ops: readonly Pick<MemberChainEntryV1, 'op' | 'subject'>[],
+): Promise<MemberChainEntryV1[]> {
+  const entries: MemberChainEntryV1[] = [];
+  let prev: string | null = null;
+  for (const [index, { op, subject }] of ops.entries()) {
+    const unsigned = { v: 1 as const, tenantId: tenant, seq: index + 1, prev, op, subject, signer: signer.bundle.memberId };
+    entries.push(await signMemberChainEntry(unsigned, signer.signer));
+    prev = await memberChainEntryHash(unsigned);
+  }
+  return entries;
+}
+
 export async function keyPackage(
   tenant: TenantId,
   sender: Member,

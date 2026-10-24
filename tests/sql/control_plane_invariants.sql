@@ -29,6 +29,7 @@
 --   deploy/sql/0025_drop_storage_usage_mailbox_bytes.sql (drops the retired storage_usage counter column; no new table or key)
 --   deploy/sql/0026_agent_message_draft.sql (ephemeral tenant-first Agent message draft snapshot; one row per task)
 --   deploy/sql/0027_e2ee_member.sql (tenant-first E2EE member chain, member keys, scope key packages and pairing MACs)
+--   deploy/sql/0028_e2ee_scope_shred.sql (tenant-first record of the scopes the member chain shredded)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -420,6 +421,67 @@ BEGIN
      AND t.relname IN ('e2ee_member_chain_entry', 'e2ee_member_key', 'e2ee_scope_epoch', 'e2ee_scope_key_package', 'e2ee_pairing_mac');
   IF defaulted_columns IS NOT NULL THEN
     RAISE EXCEPTION 'E2EE member columns must have no default, found %', defaulted_columns;
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 0.12 The E2EE shred record is tenant-first, one row per scope
+-- ---------------------------------------------------------------------------
+--
+-- 0028 records each scope the member chain shredded, with the seq of its
+-- first shred. A second shred of the scope keeps the first row, so the key
+-- is exactly (tenant_id, scope_id).
+DO $$
+DECLARE
+  missing_columns text;
+  defaulted_columns text;
+  key_columns text[];
+BEGIN
+  SELECT string_agg(required.column_name, ', ' ORDER BY required.column_name)
+    INTO missing_columns
+    FROM unnest(ARRAY['tenant_id', 'scope_id', 'chain_seq']) AS required(column_name)
+   WHERE NOT EXISTS (
+      SELECT 1
+        FROM pg_class t
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        JOIN pg_attribute a ON a.attrelid = t.oid
+       WHERE n.nspname = current_schema()
+         AND t.relname = 'e2ee_scope_shred'
+         AND a.attname = required.column_name
+         AND a.attnotnull
+         AND a.attnum > 0
+         AND NOT a.attisdropped
+    );
+  IF missing_columns IS NOT NULL THEN
+    RAISE EXCEPTION
+      'control-plane invariants ran without complete 0028_e2ee_scope_shred.sql: e2ee_scope_shred.% missing or nullable',
+      missing_columns;
+  END IF;
+
+  SELECT array_agg(a.attname::text ORDER BY k.ordinality)
+    INTO key_columns
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality)
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'e2ee_scope_shred'
+     AND c.contype = 'p';
+  IF key_columns IS DISTINCT FROM ARRAY['tenant_id', 'scope_id']::text[] THEN
+    RAISE EXCEPTION 'e2ee_scope_shred primary key must be (tenant_id, scope_id), found %', key_columns;
+  END IF;
+
+  SELECT string_agg(a.attname, ', ' ORDER BY a.attname)
+    INTO defaulted_columns
+    FROM pg_attrdef d
+    JOIN pg_class t ON t.oid = d.adrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.adnum
+   WHERE n.nspname = current_schema()
+     AND t.relname = 'e2ee_scope_shred';
+  IF defaulted_columns IS NOT NULL THEN
+    RAISE EXCEPTION 'e2ee_scope_shred columns must have no default, found %', defaulted_columns;
   END IF;
 END $$;
 
