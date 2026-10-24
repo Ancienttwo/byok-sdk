@@ -190,6 +190,11 @@ from occurrence admission (`recordedAt + waitMs`), not handler completion. A new
 committed slot supersedes a late escalation; pause removes the cancelled successor
 cutoff. Normal Agent validation, retry and terminal settlement then apply.
 
+Promotion is the default (`hostJobExecution: 'promote'`). A Host with no owner for
+such an intent sets `hostJobExecution: 'fail'`: a result with `execution` then stores
+its summary and concludes the occurrence `failed`, with no promotion and no retry, and
+the drain rejects with `host_job_execution_unsupported`. K8's L and H Hosts do not promote.
+
 Committed results are never rerun on wake replay or `recover()`. On handler failure
 or invalid output, the pending outbox retains `lastError`, `job.attempts` increases,
 and the drain rejects after processing other work. SDK wake redelivery, `recover()`

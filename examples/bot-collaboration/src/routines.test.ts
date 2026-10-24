@@ -278,6 +278,18 @@ it('runs a Host job routine and a Bot routine on one Bot Host core, and keeps th
   expect(routineOf(bot!, id).next!.dedupKey).toMatch(new RegExp(`^${id}:1:`));
 });
 
+it('concludes a Host job result with execution as failed, with no intent and no Turn, as H does (#793 K5)', async () => {
+  const digest = vi.fn<HostJobHandler>(async () => ({ summary: { escalate: true }, execution: template(fixture!.deviceId) }));
+  await setup({ hostJobs: { digest } });
+  await bot!.core.addRoutine(hostJob('nightly', schedule));
+  await expect(due('nightly')).rejects.toThrow('Wake dispatch failed');
+  expect(occurrences('nightly')[0]).toMatchObject({ conclusion: 'failed', job: { summary: { escalate: true } } });
+  expect(fixture!.ledger.snapshot().intents).toEqual({});
+  expect(turns()).toEqual([]);
+  await bot!.drain();
+  expect(digest).toHaveBeenCalledTimes(1);
+});
+
 it('refuses a version 1 ledger with a clear error and leaves it unchanged', async () => {
   const options = { botId: 'main', execution: template('device'), connector: async () => null };
   await setup();
