@@ -4,8 +4,8 @@ Private reference example for #793 (#606 D2). It is the hosted (H) adapter of th
 commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
 Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c), result
-reconciliation (D2d), the device binding (D2e), retention (D2g), routines (D2f-2) and their scheduler (D2f-3). The command
-entry comes in a later slice of #793.
+reconciliation (D2d), the device binding (D2e), retention (D2g), routines (D2f-2), their scheduler (D2f-3) and the outbox
+sender (D2b-out-2). The command entry and the inbound echo path come in later slices of #793.
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -72,7 +72,7 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `entity` | map entry of the state (Turn, card, Bot, room, delivery, ...), keyed by its id |
 | `entry` | element of a list (audit, rejected, team note, home operation, room message), keyed by position |
 | `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
-| `outbox` | projection or delivery that a commit wrote |
+| `outbox` | projection or delivery to send: a projection's value and send state, or a delivery's scan index (owner §54a, signed) |
 | `intent` | Turn intent: the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
 | `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision and its revoke time |
 | `retired_identity` | K8 identity that retention retired for good: `hash([namespace, id])` |
@@ -92,6 +92,8 @@ keeps the insertion order of each kind.
   `rejected`, `audit` and `homeOperations` lists, so their positions change; their content and order stay.
 - The `kind` CHECK lists come from the layout at the first `migrate()`. `CREATE TABLE IF NOT EXISTS`
   keeps the old CHECK, so a new kind needs an explicit `ALTER` in a later migration.
+- H has no migrations while it is unreleased. After a DDL change, recreate the H schema. `migrate()` on a schema
+  from an older revision fails in its one transaction and changes nothing.
 - One commit must not delete a map key and add it back. The store keeps the old ordinal, but a JavaScript
   object moves the key to the end. K8 never deletes a map entry today.
 
@@ -280,6 +282,52 @@ interval every slot would fire as `catch_up`, and its occurrence key would diffe
   routine. The slice load still scans that history for the unpromoted open rows, so a fire costs more as the routine
   ages. A fix (a `promoted` flag, or moving unpromoted rows) is a DDL change.
 
+## Outbox sender
+
+`HostedOutboxSender.run()` is one pass over the unsettled outbox rows that are due, across scopes (`outbox_due`). Each row
+runs in its own steps, and a failed row does not stop the later rows. A scope of an unknown store version is left out
+before the limit. The outbox DDL is the D2b-out plan text, signed by the owner (§54a). Each claim and settle reads the clock after
+the scope lock. After a step that threw, the row waits `backoffMs`. That wait never moves `next_at` earlier, so it cannot
+shorten the lease of a newer claim. If the wait cannot be written, `run()` rejects and that pass's result is lost.
+
+- **Projections** are sent at least once, as K4's projection flush. A claim raises `tries` and takes a lease under the
+  scope lock; the receiver call runs with no lock; the settle is fenced by that `tries`, so a stale settle after another
+  claim changes nothing. A receiver error keeps the row with `last_error` and waits `backoffMs`. The wait is flat, where
+  the plan grows it with `tries`: K4 tries again at each flush with no wait, and the receiver deduplicates, so one wait is
+  enough to keep a broken receiver from a call on every pass. **The receiver must deduplicate by `(scope, id)`**: a crash
+  after the call and before the settle sends the same value again. A sent projection keeps its row with `settled_at`,
+  where K4 deletes it (design §5 D2: the same record is updated). So a projection id published again with another value
+  throws `Projection identity conflict` for as long as the row is kept, where K4 takes the new value once it has sent the
+  old one. K8 publishes each id once (plan §3.3); the check of that on L (plan §4) is in D2b-out-3.
+- **Deliveries** run the K8 delivery rules (`channel.ts`, `delivery.ts`, `delivery-routing.ts`) through the store, as L's
+  `flushDeliveries` does: the claim (`startDelivery`) commits before the send, the route with its reply token stays in
+  memory, and the settle (`settleDelivery` or `unknownDelivery`) is fenced by the attempt. A claim whose lease passed
+  becomes `unknown` (`interrupted`), as L recovers a claim at startup. The lease, not a startup sweep, gates it, because
+  several senders can run at once. **The lease must be longer than `sendTimeoutMs`** (the constructor refuses it
+  otherwise). An `unknown` row is read back at the next pass when the channel has a readback, and `readbackMs` after
+  each readback that leaves it `unknown`. With no readback it waits an hour: only an echo or a manual resend changes it.
+  A readback claim takes the same lease, so one sender reads a row back at a time. A readback result counts only for the
+  attempt that it read back (K8 `readbackDelivery` takes that attempt). A readback that throws or outlasts
+  `sendTimeoutMs` is missing evidence: the row stays `unknown` and waits `readbackMs`, but only while it is still
+  `unknown` at that attempt. L awaits a readback with no deadline.
+- **The K8 delivery entity is the authority.** The outbox delivery row is a scan index that one hook in each store
+  transaction writes from the entity diff: a row for each new delivery, `settled_at` once it is `accepted` or
+  `rejected`, and `next_at` for a `pending` one. So the push fallback that `refuseRoute` inserts with no outbox intent
+  gets its row too. A seed writes no outbox row.
+- **The store owns the channel outbox port.** With `{ channel: true }`, a K4 callback (an Agent message or an outcome)
+  queues its deliveries with K8 `queueDelivery`, which reads the intent conclusions of the scope as they were before
+  the transaction wrote, as L reads its committed ledger. A caller's ports cannot supply `deliver`.
+- The sync and each delivery settle drop expired or unneeded reply tokens (`cleanReplyTokens`). L's sync does it too;
+  L's call in each flush pass is a call in each delivery settle here. H drops an expired token at the next sync or settle
+  of its scope.
+- An unsettled delivery row whose entity is not in the state fails as drift (`Delivery outbox row unsettled for an
+  archived entity`) and waits `backoffMs`, as a row with no entity anywhere does (`Delivery not found`). Nothing is
+  settled for it.
+- Retention refuses a root while an outbox row of one of its deliveries is unsettled. It is a drift guard: the
+  transaction that settles a delivery entity settles its row too, so no product path reaches it. Projection rows are left
+  out: a projection row carries its own value and belongs to no root.
+- Reply readback, Agent home projections and connector card calls are not in the sender (§54c A).
+
 ## Deployment config
 
 H is not deployed yet (see Status). A deployment composes these parts. For the tests, `hosted-cloud.test-support.ts`
@@ -305,7 +353,9 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
 - **Retention.** The Host calls `retain(scope, input, limits)` with the acknowledged roots. `retentionMs` must be at
   least seven days (see Retention). The SDK side has its own `retentionPolicyId` in the tenant's entitlement.
 - **Workers.** The Host runs, each on its own interval: `HostedSubmitter.run()`, `HostedReconciler.run()`,
-  `store.sync(scope, …)` for scopes with work, and `HostedRoutineScheduler.run()` every `intervalMs` after one `start()`.
+  `store.sync(scope, …)` for scopes with work, `HostedOutboxSender.run()` with the projection receiver and the channel,
+  and `HostedRoutineScheduler.run()` every `intervalMs` after one `start()`. A Host with a channel opens its store with
+  `{ channel: true }`.
   `hostedMessageConsumer(store, …)` is the `agentMessage` option of `createByokCloud`.
 
 ## Tests
@@ -331,6 +381,12 @@ three and runs these suites.
   `bot-routine` refusal.
 - The D2f-1 routine vectors (`routineVectors`) run on the store, with the scheduler fire and a submitter pass on an SDK
   tenant in memory.
+- The K8 delivery vectors (`deliveryVectors`) run on the store and the outbox sender, except the echo vectors 10 and 14,
+  which wait for the H inbound echo path (D2b-out-3). After each Host step, the delivery outbox index matches the K8 entities. The
+  sender tests cover the projection claim, lease, fence, backoff, race, order and version filter, the archived and
+  missing delivery entity, the retention refusal of an unsettled delivery row, a terminal delivery on the reply route,
+  a hung readback, the clock read after the scope lock, the readback lease, a failed readback fenced by its attempt, a
+  wait that never moves `next_at` earlier, the option checks, and a wait that cannot be written.
 - The scheduler tests cover on-time and late fires, the supersede in the fire, the device fence and its paging, two
   racing fires, a fire that throws and its backoff, the interval guard, and the start and pass upkeep.
 - The reconciliation tests run a real daemon for the completed outcome, a replayed terminal and a busy decline. The

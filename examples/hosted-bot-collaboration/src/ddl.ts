@@ -52,16 +52,28 @@ CREATE TABLE IF NOT EXISTS command (
   UNIQUE (scope, ordinal)
 );
 CREATE TABLE IF NOT EXISTS outbox (
-  scope     text   NOT NULL REFERENCES scope (scope),
-  key       text   NOT NULL,
-  ordinal   bigint NOT NULL CHECK (ordinal >= 0),
-  kind      text   NOT NULL CHECK (kind IN ('projection', 'delivery')),
+  scope       text    NOT NULL REFERENCES scope (scope),
+  key         text    NOT NULL,
+  ordinal     bigint  NOT NULL CHECK (ordinal >= 0),
+  kind        text    NOT NULL CHECK (kind IN ('projection', 'delivery')),
   -- The projection value. NULL for a delivery: its content is the delivery entity.
-  body      json,
+  body        json,
+  -- #793 D2b-out. The earliest time the sender looks at the row again: 0 when new, a lease while a send
+  -- is in flight, then a backoff. For a delivery it is an index only: the entity decides what to send.
+  next_at     bigint  NOT NULL DEFAULT 0 CHECK (next_at >= 0),
+  -- Projection send tries. Each try raises it under the scope lock before the receiver call, and the
+  -- settle write is fenced by it. Always 0 for a delivery: the entity's \`attempts\` is the authority.
+  tries       integer NOT NULL DEFAULT 0 CHECK (tries >= 0),
+  last_error  text,
+  -- Set once: the receiver confirmed the projection, or the delivery entity reached 'accepted' or 'rejected'.
+  settled_at  bigint  CHECK (settled_at >= 0),
   CHECK ((kind = 'projection') = (body IS NOT NULL)),
+  CHECK (kind = 'projection' OR (tries = 0 AND last_error IS NULL)),
   PRIMARY KEY (scope, key),
   UNIQUE (scope, ordinal)
 );
+-- The sender scan: unsettled rows by due time, across scopes.
+CREATE INDEX IF NOT EXISTS outbox_due ON outbox (next_at, scope, ordinal) WHERE settled_at IS NULL;
 -- One row per Turn intent (#793 D2b). No intent row is deleted before D2g adds tombstones:
 -- a deleted row would let the same Turn freeze again under the same task id.
 CREATE TABLE IF NOT EXISTS intent (
