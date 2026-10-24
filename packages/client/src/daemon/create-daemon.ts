@@ -159,8 +159,12 @@ import { SessionWorkspaceStore } from './session-workspace-store';
 import { AgentSessionHandoffStore } from './agent-session-handoff-store';
 import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
-import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceEnrollment, type DeviceRecord } from './store';
-import { createDeviceCredentialStore } from './device-credential-provider';
+import { DeviceRecordRePairRequiredError, DeviceStore, enrollmentIdentityOf, type DeviceEnrollment, type DeviceRecord } from './store';
+import { createDeviceCredentialStore, createDeviceMemberCustody } from './device-credential-provider';
+import { DeviceMemberRecords } from './device-member-custody';
+import { checkVerificationSecret, enrollDeviceMember, resumeDeviceMember, type DeviceMemberSession } from './device-member';
+import { StoredDeviceProofSigner } from './device-proof-signer';
+import { E2eeMemberClient } from './e2ee-member-client';
 import { JournalRecordTooLargeError, JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord } from './journal/journal';
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
 import { isSqliteAvailable, type JournalOpenFaultSeam } from './journal/sqlite-support';
@@ -812,8 +816,13 @@ export interface DaemonStatus {
 export interface Daemon {
   /** Present only with agentMemoryExport: true. Holds the home writer lease; AgentHomeBusyError is retryable. Raw contents remain Host-owned. */
   exportAgentMemory?(agentRef: AgentRef, options?: AgentMemoryExportOptions): Promise<AgentMemoryExport>;
-  /** Pairing result is intentionally credential-blind. */
-  pair(pairingCode: string): Promise<DeviceEnrollment>;
+  /**
+   * Pairing result is intentionally credential-blind. With
+   * `verificationSecret`, the base32 secret the web client shows after the
+   * pairing code (#654 §7.2), the device also enrolls as an E2EE member; the
+   * secret never reaches the Host. Without it the device pairs without E2EE.
+   */
+  pair(pairingCode: string, options?: { readonly verificationSecret?: string }): Promise<DeviceEnrollment>;
   /**
    * Resolves once local startup is done — store ownership, storage, journal
    * recovery, the control socket and the task runner — with the reconnect
@@ -1625,6 +1634,29 @@ export function buildDaemonWithAdapters(
   const store = new DeviceStore(storeDir, overrides.deviceCredentials === undefined ? createDeviceCredentialStore({
     productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials,
   }) : overrides.deviceCredentials);
+  // #654 E2d-1: the member entries live in the same OS custody as the
+  // enrollment. An injected enrollment backend has no member custody, so such
+  // a daemon refuses an E2EE pairing rather than split one device's secrets
+  // across two custodians.
+  const memberRecords = overrides.deviceCredentials === undefined
+    ? new DeviceMemberRecords(createDeviceMemberCustody({ productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials }))
+    : undefined;
+  /** This run's verified member, once the background resume finds one. E2d-2 and E2d-3 read it. */
+  let deviceMember: DeviceMemberSession | undefined;
+  let memberAbort: AbortController | undefined;
+  let memberResume: Promise<void> | undefined;
+  const logMember = (message: string): void => console.warn(`[byok/client] ${message}`);
+  function memberClient(record: DeviceRecord, signal?: AbortSignal): E2eeMemberClient {
+    const identity = enrollmentIdentityOf(record);
+    return new E2eeMemberClient({
+      serverUrl: config.serverUrl,
+      auth,
+      signer: new StoredDeviceProofSigner({
+        auth, tenantId: identity.tenantId, productId: config.productId, keyId: identity.proofKeyId, keyEpoch: identity.proofKeyEpoch,
+      }),
+      ...(signal === undefined ? {} : { signal }),
+    });
+  }
   const operationalHealth = new OperationalHealthTracker(storeDir);
   const ownedProcessLedger = new OwnedProcessLedger(storeDir);
   let detachOwnedProcessGroupLedger: (() => void) | undefined;
@@ -1903,17 +1935,21 @@ export function buildDaemonWithAdapters(
     }
   }
 
-  async function pair(pairingCode: string): Promise<DeviceEnrollment> {
+  async function pair(pairingCode: string, options?: { readonly verificationSecret?: string }): Promise<DeviceEnrollment> {
     checkServerUrl();
+    const verificationSecret = options?.verificationSecret === undefined ? undefined : checkVerificationSecret(options.verificationSecret);
+    if (verificationSecret !== undefined && memberRecords === undefined) {
+      throw new TypeError('an E2EE pairing needs the OS credential custody; this daemon uses an injected credential backend');
+    }
     // Serialize every lifecycle mutation, not only pair/pair. A process-local
     // operation may borrow the daemon's retained cross-process lease, so pair,
     // start, stop, control shutdown and unpair must never decide independently
     // who releases that shared lease.
-    const record = await runLifecycleMutation(() => pairUnderLease(pairingCode));
+    const record = await runLifecycleMutation(() => pairUnderLease(pairingCode, verificationSecret));
     return Object.freeze({ deviceId: record.deviceId });
   }
 
-  async function pairUnderLease(pairingCode: string): Promise<DeviceRecord> {
+  async function pairUnderLease(pairingCode: string, verificationSecret?: string): Promise<DeviceRecord> {
     const wasRunning = daemonStarted;
     if (wasRunning) tenantRebinding = true;
     // Pairing persists device.json. It intentionally does not arm proactive
@@ -1960,6 +1996,18 @@ export function buildDaemonWithAdapters(
       }
       if (previous && previous.deviceId !== record.deviceId) {
         await cursorStore.clear(config.serverUrl, previous.deviceId);
+      }
+      // A new enrollment is a new member (§7.5); the previous one's entries are void (10b).
+      await memberRecords?.clear();
+      if (verificationSecret !== undefined) {
+        try {
+          await enrollDeviceMember({
+            records: memberRecords!, client: memberClient(record), tenantId: record.tenantId, deviceId: record.deviceId,
+            verificationSecret, log: logMember,
+          });
+        } catch (error) {
+          throw new Error(`device ${record.deviceId} is paired, but its E2EE member enrollment failed; re-pair to enable E2EE: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
       observer.notePaired(record.deviceId);
       if (acquiredHere) {
@@ -3084,6 +3132,7 @@ export function buildDaemonWithAdapters(
     startPresenceProducer();
     await connection.start();
     daemonStarted = true;
+    startDeviceMember(record);
     } catch (err) {
       const haltReason = startupHaltReason(err);
       if (haltReason === undefined) {
@@ -3312,6 +3361,23 @@ export function buildDaemonWithAdapters(
    * control-socket shutdown followed by `runStartCommand`'s own
    * `daemon.stop()`), which must neither double-fail a task nor throw.
    */
+  /** Resume this enrollment's member off the start path; shutdown and re-pair abort it. */
+  function startDeviceMember(record: DeviceRecord): void {
+    if (memberRecords === undefined) return;
+    const abort = new AbortController();
+    memberAbort = abort;
+    memberResume = resumeDeviceMember({
+      records: memberRecords, client: memberClient(record, abort.signal), tenantId: record.tenantId, deviceId: record.deviceId,
+      log: logMember, signal: abort.signal,
+    }).then((session) => {
+      if (abort.signal.aborted || session === undefined) return;
+      deviceMember = session;
+      console.info(`[byok/client] E2EE member ${session.member.memberId} verified at chain seq ${session.state.head!.seq}`);
+    }, (error: unknown) => {
+      if (!abort.signal.aborted) logMember(`E2EE member resume failed; E2EE stays off: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+
   async function runShutdownSequence(reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {
     // Plan `device-assertion-broker` (codex F1): the assertion-minting latch is
     // armed at the top of THIS function, synchronously, before the first
@@ -3330,6 +3396,12 @@ export function buildDaemonWithAdapters(
     inputPreparationStatusAbort = undefined;
     blobLifecycleAbort?.abort();
     blobLifecycleAbort = undefined;
+    // The member resume writes custody entries; it ends before this run releases ownership.
+    memberAbort?.abort();
+    memberAbort = undefined;
+    deviceMember = undefined;
+    await memberResume;
+    memberResume = undefined;
     const errors: unknown[] = [];
     let mutationBarrierComplete = hostedStorageInitializationBarrierComplete;
     if (!hostedStorageInitializationBarrierComplete) {
@@ -3613,6 +3685,7 @@ export function buildDaemonWithAdapters(
         throw error;
       }
       if (current) await cursorStore.clear(config.serverUrl, current.deviceId);
+      await memberRecords?.clear();
     } finally {
       await cleanupLease.release();
     }
@@ -3783,8 +3856,17 @@ export function buildDaemonWithAdapters(
         if (!parsed) {
           throw new ControlError(
             'bad_request',
-            `enrollment.pair requires exactly {pairingCode} with 1-${ENROLLMENT_PAIRING_CODE_MAX_BYTES} UTF-8 bytes`,
+            `enrollment.pair requires {pairingCode} with 1-${ENROLLMENT_PAIRING_CODE_MAX_BYTES} UTF-8 bytes, and an optional verificationSecret`,
           );
+        }
+        let verificationSecret: string | undefined;
+        try {
+          verificationSecret = parsed.verificationSecret === undefined ? undefined : checkVerificationSecret(parsed.verificationSecret);
+        } catch {
+          throw new ControlError('bad_request', 'enrollment.pair verificationSecret is not a pairing verification secret');
+        }
+        if (verificationSecret !== undefined && memberRecords === undefined) {
+          throw new ControlError('bad_request', 'an E2EE pairing needs the OS credential custody; this daemon uses an injected credential backend');
         }
         if (!serviceEnrollmentWaiting || daemonStarted) {
           throw new ControlError('already_paired', 'this service daemon is not waiting for initial enrollment');
@@ -3795,7 +3877,7 @@ export function buildDaemonWithAdapters(
         serviceEnrollmentTransitioning = true;
         let record: DeviceRecord;
         try {
-          record = await runLifecycleMutation(() => pairUnderLease(parsed.pairingCode));
+          record = await runLifecycleMutation(() => pairUnderLease(parsed.pairingCode, verificationSecret));
         } catch (err) {
           serviceEnrollmentTransitioning = false;
           throw err;

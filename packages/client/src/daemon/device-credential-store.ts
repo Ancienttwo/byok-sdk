@@ -228,7 +228,7 @@ function quoteInteractive(value: string): string {
   return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
-export interface DeviceCredentialStoreOptions extends DeviceCredentialConfig {
+export interface OsCredentialEntryOptions extends DeviceCredentialConfig {
   readonly storeDir: string;
   readonly productId: string;
   readonly platform?: NodeJS.Platform;
@@ -236,20 +236,29 @@ export interface DeviceCredentialStoreOptions extends DeviceCredentialConfig {
 }
 
 /**
- * Internal OS-backed authority for the bearer token and device private key.
- * Every operation targets the selected platform provider. An explicit macOS
- * keychain selects custody within that provider, without a file fallback.
+ * One named entry of this product's OS credential provider: the macOS
+ * keychain, the Windows Credential Manager or the Linux Secret Service. It
+ * moves raw strings; each owner encodes and checks its own value. An explicit
+ * macOS keychain selects custody within that provider, without a file
+ * fallback.
  */
-export class DeviceCredentialStore implements DeviceCredentialBackend {
+export class OsCredentialEntry {
   readonly #storeDir: string;
   readonly #service: string;
+  readonly #account: string;
+  readonly #label: string;
+  /** What the entry holds, for error messages. */
+  readonly #subject: string;
   readonly #platform: NodeJS.Platform;
   readonly #run: DeviceCommandRunner;
   readonly #macosKeychainPath: string | undefined;
 
-  constructor(options: DeviceCredentialStoreOptions) {
+  constructor(options: OsCredentialEntryOptions & { readonly account: string; readonly label: string; readonly subject: string }) {
     this.#storeDir = options.storeDir;
     this.#service = serviceFor(options.productId);
+    this.#account = options.account;
+    this.#label = options.label;
+    this.#subject = options.subject;
     this.#platform = options.platform ?? process.platform;
     const keychainPath = options.macosKeychainPath;
     if (keychainPath !== undefined && (
@@ -262,22 +271,8 @@ export class DeviceCredentialStore implements DeviceCredentialBackend {
     this.#run = options.commandRunner ?? runDeviceCommand;
   }
 
-  async read(): Promise<DeviceRecord | undefined> {
-    const authority = await this.#readAuthority();
-    return authority === undefined || isFirstPairingAttempt(authority) ? undefined : authority;
-  }
-
-  async readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined> {
-    const authority = await this.#readAuthority();
-    return authority !== undefined && isFirstPairingAttempt(authority) ? authority : undefined;
-  }
-
-  async saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void> {
-    assertFirstPairingAttempt(attempt);
-    await this.#replaceAuthority(attempt);
-  }
-
-  async #readAuthority(): Promise<DeviceCredentialAuthority | undefined> {
+  /** The stored value, or `undefined` when the entry is absent. */
+  async read(): Promise<string | undefined> {
     const result = await this.#invoke('read');
     this.#checkInteraction(result);
     if (
@@ -287,48 +282,33 @@ export class DeviceCredentialStore implements DeviceCredentialBackend {
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0) {
       throw new DeviceCredentialStoreError(
-        `operating-system credential provider could not read device credentials${providerDiagnostic(result.stderr)}`,
+        `operating-system credential provider could not read ${this.#subject}${providerDiagnostic(result.stderr)}`,
       );
     }
-    return decode(result.stdout.trimEnd());
+    return result.stdout.trimEnd();
   }
 
-  async replace(record: DeviceRecord): Promise<void> {
-    const encoded = encode(record);
-    await this.#replaceEncoded(encoded);
-  }
-
-  async #replaceAuthority(authority: DeviceCredentialAuthority): Promise<void> {
-    await this.#replaceEncoded(encode(authority));
-  }
-
-  async #replaceEncoded(encoded: string): Promise<void> {
-    const result = await this.#invoke('replace', encoded);
+  async replace(value: string): Promise<void> {
+    const result = await this.#invoke('replace', value);
     this.#checkInteraction(result);
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0) {
       throw new DeviceCredentialStoreError(
-        `operating-system credential provider could not replace device credentials${providerDiagnostic(result.stderr)}`,
+        `operating-system credential provider could not replace ${this.#subject}${providerDiagnostic(result.stderr)}`,
       );
     }
   }
 
-  /** Returns true only after the sole secret authority is confirmed absent. */
-  async clear(): Promise<boolean> {
-    const before = await this.#readAuthority();
-    if (before === undefined) return false;
+  /** Delete the entry. An absent entry is already deleted. */
+  async delete(): Promise<void> {
     const result = await this.#invoke('clear');
     this.#checkInteraction(result);
     if (result.exitCode === 127) throw new DeviceCredentialStoreUnavailableError();
     if (result.exitCode !== 0 && result.exitCode !== NOT_FOUND) {
       throw new DeviceCredentialStoreError(
-        `operating-system credential provider could not clear device credentials${providerDiagnostic(result.stderr)}`,
+        `operating-system credential provider could not clear ${this.#subject}${providerDiagnostic(result.stderr)}`,
       );
     }
-    if ((await this.#readAuthority()) !== undefined) {
-      throw new DeviceCredentialStoreError('operating-system credential provider reported deletion but device credentials remain');
-    }
-    return true;
   }
 
   async #invoke(operation: 'read' | 'replace' | 'clear', encoded?: string): Promise<DeviceCommandResult> {
@@ -352,20 +332,20 @@ export class DeviceCredentialStore implements DeviceCredentialBackend {
 
   #macos(operation: 'read' | 'replace' | 'clear', encoded?: string): Promise<DeviceCommandResult> {
     const keychain = this.#macosKeychainPath === undefined ? [] : [this.#macosKeychainPath];
-    if (operation === 'read') return this.#run('/usr/bin/security', ['find-generic-password', '-a', ENTRY_ACCOUNT, '-s', this.#service, '-w', ...keychain]);
-    if (operation === 'clear') return this.#run('/usr/bin/security', ['delete-generic-password', '-a', ENTRY_ACCOUNT, '-s', this.#service, ...keychain]);
+    if (operation === 'read') return this.#run('/usr/bin/security', ['find-generic-password', '-a', this.#account, '-s', this.#service, '-w', ...keychain]);
+    if (operation === 'clear') return this.#run('/usr/bin/security', ['delete-generic-password', '-a', this.#account, '-s', this.#service, ...keychain]);
     const command = [
-      'add-generic-password', '-U', '-a', quoteInteractive(ENTRY_ACCOUNT), '-s', quoteInteractive(this.#service), '-w', quoteInteractive(encoded!),
+      'add-generic-password', '-U', '-a', quoteInteractive(this.#account), '-s', quoteInteractive(this.#service), '-w', quoteInteractive(encoded!),
       ...keychain.map(quoteInteractive),
     ].join(' ');
     return this.#run('/usr/bin/security', ['-i'], `${command}\n`);
   }
 
   #linux(operation: 'read' | 'replace' | 'clear', encoded?: string): Promise<DeviceCommandResult> {
-    const attrs = ['service', this.#service, 'account', ENTRY_ACCOUNT];
+    const attrs = ['service', this.#service, 'account', this.#account];
     if (operation === 'read') return this.#run('secret-tool', ['lookup', ...attrs]);
     if (operation === 'clear') return this.#run('secret-tool', ['clear', ...attrs]);
-    return this.#run('secret-tool', ['store', '--label=BYOK device enrollment', ...attrs], encoded);
+    return this.#run('secret-tool', ['store', `--label=${this.#label}`, ...attrs], encoded);
   }
 
   async #windows(operation: 'read' | 'replace' | 'clear', encoded?: string): Promise<DeviceCommandResult> {
@@ -374,7 +354,7 @@ export class DeviceCredentialStore implements DeviceCredentialBackend {
     const request = [
       operation,
       Buffer.from(this.#service, 'utf8').toString('base64'),
-      Buffer.from(ENTRY_ACCOUNT, 'utf8').toString('base64'),
+      Buffer.from(this.#account, 'utf8').toString('base64'),
       encoded === undefined ? '' : Buffer.from(encoded, 'utf8').toString('base64'),
     ].join('\n');
     let result: DeviceCommandResult | undefined;
@@ -404,6 +384,57 @@ export class DeviceCredentialStore implements DeviceCredentialBackend {
       throw new DeviceCredentialStoreError('Windows credential bridge did not produce a result');
     }
     return result;
+  }
+}
+
+export type DeviceCredentialStoreOptions = OsCredentialEntryOptions;
+
+/**
+ * Internal OS-backed authority for the bearer token and device private key,
+ * in the entry `device-enrollment`.
+ */
+export class DeviceCredentialStore implements DeviceCredentialBackend {
+  readonly #entry: OsCredentialEntry;
+
+  constructor(options: DeviceCredentialStoreOptions) {
+    this.#entry = new OsCredentialEntry({
+      ...options, account: ENTRY_ACCOUNT, label: 'BYOK device enrollment', subject: 'device credentials',
+    });
+  }
+
+  async read(): Promise<DeviceRecord | undefined> {
+    const authority = await this.#readAuthority();
+    return authority === undefined || isFirstPairingAttempt(authority) ? undefined : authority;
+  }
+
+  async readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined> {
+    const authority = await this.#readAuthority();
+    return authority !== undefined && isFirstPairingAttempt(authority) ? authority : undefined;
+  }
+
+  async saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void> {
+    assertFirstPairingAttempt(attempt);
+    await this.#entry.replace(encode(attempt));
+  }
+
+  async #readAuthority(): Promise<DeviceCredentialAuthority | undefined> {
+    const raw = await this.#entry.read();
+    return raw === undefined ? undefined : decode(raw);
+  }
+
+  async replace(record: DeviceRecord): Promise<void> {
+    await this.#entry.replace(encode(record));
+  }
+
+  /** Returns true only after the sole secret authority is confirmed absent. */
+  async clear(): Promise<boolean> {
+    const before = await this.#readAuthority();
+    if (before === undefined) return false;
+    await this.#entry.delete();
+    if ((await this.#readAuthority()) !== undefined) {
+      throw new DeviceCredentialStoreError('operating-system credential provider reported deletion but device credentials remain');
+    }
+    return true;
   }
 }
 
