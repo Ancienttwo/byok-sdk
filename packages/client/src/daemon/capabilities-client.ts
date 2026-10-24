@@ -31,6 +31,9 @@ import { toHttpBase } from './url';
  */
 export const PRESENCE_HINTS_CAPABILITY = 'presence.hints';
 
+/** The hosted E2EE member routes (#654). The daemon advertises `sealed-payload-v1` only where they exist. */
+export const E2EE_MEMBER_CAPABILITY = 'e2ee.member';
+
 /** Thrown for every way discovery can fail. One type: a caller only ever needs "no declaration was read". */
 export class CapabilityDiscoveryError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
