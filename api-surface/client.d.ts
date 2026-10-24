@@ -313,6 +313,7 @@ export declare class ClaudeProcessClient {
     get events(): AsyncIterable<ClaudeStreamMessage>;
     /** Local transport diagnostic retained when the process closes; consumers classify it at the session boundary. */
     get terminalError(): Error | undefined;
+    /** The child process closed on its own (a `close` event, not a spawn error), and no adoption or transport failure outranked that exit; consumers classify it at the session boundary. */
     get processExited(): boolean;
     /**
      * Record a claude stream-json frame/subtype/content-block label that
@@ -816,6 +817,7 @@ export declare class PiRpcClient {
     get events(): AsyncIterable<PiRpcMessage>;
     /** Local transport diagnostic retained when the process closes; consumers must classify it explicitly. */
     get terminalError(): Error | undefined;
+    /** The child process closed on its own (a `close` event, not a spawn error), and no adoption failure outranked that exit; consumers classify it at the session boundary. */
     get processExited(): boolean;
     /**
      * Stdout frames this client dropped because it could not decode them: a
