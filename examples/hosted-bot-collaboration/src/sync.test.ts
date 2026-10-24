@@ -22,6 +22,8 @@ const table = (name: string) => `"${store().schema}".${name}`;
 async function hosted(): Promise<SyncSubject> {
   const scope = `tenant:${randomUUID()}`, pool = opened!.pool;
   await store().seed(scope, state => seedCollaboration(state));
+  // The seeded Bot runs on `device`, so a freeze needs its H binding (#793 D2e).
+  await store().bindDevice(scope, 'device');
   return {
     scope,
     commit: request => store().commit(scope, request, vectorPorts),
