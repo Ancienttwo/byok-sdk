@@ -1303,8 +1303,10 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   same checks as the Host control plane calls `appendMemberChainEntries` and
   `putScopeKeyPackages`.
 - **Shred.** A chain entry with `op: 'shred'` must have exactly the subject
-  `{ scopeId }` (a nonempty string); any other subject gets 400. When the
-  append newly stores a `shred` entry, the Host, in the same transaction,
+  `{ scopeId }` (a nonempty string); any other subject gets 400. A `scopeId`
+  over 512 UTF-16 code units names no Host scope, so the Host stores that
+  entry and does nothing else for it. When the append newly stores a `shred`
+  entry for a shorter `scopeId`, the Host, in the same transaction,
   deletes the scope's key packages and epochs, records the scope as
   shredded, and writes the receipt `e2ee-scope-shred:<scopeId>` (an identity
   receipt) with the entry's seq, the time and who appended it. A replayed

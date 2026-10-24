@@ -4,7 +4,7 @@
  */
 import { canonicalizeJson, createMutableClock, type JsonValue, type TenantId } from '@byok-sdk/core';
 import { generateScopeKey, type MemberChainEntryV1 } from '@byok-sdk/core/sealed-payload';
-import { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES } from '@byok-sdk/protocol';
+import { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_SCOPE_ID_MAX_LENGTH } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { PAIRING_CODE_TTL_MS } from '../auth/plane';
 import { createHmacTokenSigner } from '../auth/tokens';
@@ -102,6 +102,26 @@ describe('E2EE member control plane', () => {
     expect(await code(cloud.putScopeKeyPackages(TENANT_A, { packages: [await keyPackage(TENANT_A, client, client, 2)] })))
       .toBe('e2ee_scope_shredded');
     expect((await cloud.readScopeKeyPackages(TENANT_B, { scopeId: 'scope-1' })).packages).toHaveLength(1);
+  });
+
+  it('stores a shred of a scope id over the Host limit and records nothing for it', async () => {
+    const { cloud, base, store } = setup();
+    const client = await newMember();
+    const scopeId = 's'.repeat(E2EE_SCOPE_ID_MAX_LENGTH + 1);
+    const entries = await signedChain(TENANT_A, client, [
+      { op: 'add', subject: { member: client.bundle as unknown as JsonValue } },
+      { op: 'shred', subject: { scopeId } },
+    ]);
+    const appends: Parameters<typeof store.appendChainEntries>[1][] = [];
+    const append = store.appendChainEntries.bind(store);
+    store.appendChainEntries = async (tenant, input) => {
+      appends.push(input);
+      return append(tenant, input);
+    };
+    expect(await cloud.appendMemberChainEntries(TENANT_A, { entries })).toEqual({ appended: 2, replayed: 0 });
+    expect(appends.map((input) => input.shreds)).toEqual([[]]);
+    expect(await base.stores.receipts.get(TENANT_A, `${E2EE_SCOPE_SHRED_RECEIPT_PREFIX}${scopeId}`)).toBeUndefined();
+    expect((await cloud.readMemberChain(TENANT_A)).entries).toEqual(entries);
   });
 
   it('files the shred receipt as an identity receipt that never expires', () => {
