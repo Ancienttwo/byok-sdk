@@ -542,6 +542,23 @@ describe('device member keyring rotation (E2d-4)', () => {
     expect(await openStored(server.e2ee, device, 'scope-a', 3, helper.member.memberId, helper.keys.kem)).toEqual(next.scopeKey);
   });
 
+  it('rotates again after a scope member add, even when later content at the rotated epoch moved its point past the add', async () => {
+    const { server, web, device, keyring } = await member();
+    const helper = await stranger();
+    await web.append('add', { member: helper.member });
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(2);
+    const members = [device.memberId, web.member.memberId, helper.member.memberId].sort();
+    await web.append('scope-policy', { scopeId: 'scope-a', categories: ['task-input', 'task-output'], members });
+    await keyring.catchUp();
+    // The web client seals at epoch 2 after the add: the epoch's point moves past it.
+    expect(await keyring.acceptHeader(header('scope-a', 2, web.head!, web.member.memberId))).toBe(true);
+    const next = (await keyring.sealingKey('scope-a', 1))!;
+    expect(next.epoch).toBe(3);
+    expect(await openStored(server.e2ee, device, 'scope-a', 3, helper.member.memberId, helper.keys.kem)).toEqual(next.scopeKey);
+  });
+
   it('does not seal at a new epoch that a member KEM rotation made stale while its packages were put', async () => {
     const { server, web, device, keyring } = await member();
     await web.putScope('scope-a', [device]);
