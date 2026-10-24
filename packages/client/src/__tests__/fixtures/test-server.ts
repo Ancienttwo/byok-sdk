@@ -87,6 +87,8 @@ export class TestServer {
   private blobUploadHold: Promise<void> | undefined;
   /** Blob content PUTs that reached a hold (see {@link holdBlobUploads}). */
   blobUploadsHeld = 0;
+  /** Blob content PUTs refused by {@link setFailBlobUploads}. */
+  blobUploadsFailed = 0;
   private dropNextBlobFinalizeResponse = false;
   /** Capabilities advertised in every subsequent long-poll response. */
   private ackCapabilities: string[] = [];
@@ -551,6 +553,7 @@ export class TestServer {
       return;
     }
     if (this.failBlobUploads) {
+      this.blobUploadsFailed += 1;
       await readRawBody(req); // drain so the client's PUT doesn't hang on a full send buffer
       res.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'simulated upload failure' }));
       return;

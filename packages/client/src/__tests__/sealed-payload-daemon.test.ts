@@ -657,6 +657,24 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     expect(await openOutput(keyring, complete!, deviceId)).toMatchObject({ summary });
   });
 
+  it('retries a failed terminal upload, and never replaces the result with a sealed failure', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
+    server.send(await sealedOffer(keyring, 'upload-retry', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    server.setFailBlobUploads(true);
+    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
+    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(server.blobUploadsFailed).toBeGreaterThan(0), BUDGET_MS);
+    server.setFailBlobUploads(false);
+
+    const complete = await server.waitFor((envelope) => envelope.type === 'task.complete_sealed' && envelope.task_id === 'upload-retry', BUDGET_MS);
+    expect((complete.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
+    expect(await openOutput(keyring, complete, deviceId)).toMatchObject({ summary });
+    expect(taskEnvelopes('upload-retry').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
+  });
+
   it('uploads an artifact over the inline frame as an octet-stream ciphertext blob', async () => {
     const keyring = new TestKeyring();
     const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
