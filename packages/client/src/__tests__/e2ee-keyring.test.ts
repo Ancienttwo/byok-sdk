@@ -344,6 +344,29 @@ describe('device member keyring rotation (E2d-4)', () => {
     await keyring.catchUp();
     expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(2);
     expect(server.e2ee.devicePuts.map((put) => put.length)).toEqual([E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, 2]);
+    expect(server.e2ee.devicePuts[0]![0]!.recipient).toBe(device.memberId);
+  });
+
+  it('moves past an epoch whose first put landed and a later one failed', async () => {
+    const { server, web, device, keyring } = await member();
+    const clients = await Promise.all(Array.from({ length: E2EE_SCOPE_KEY_PACKAGE_PUT_MAX }, () => stranger()));
+    for (const client of clients) await web.append('add', { member: client.member });
+    await web.putScope('scope-a', [device, ...clients.map((client) => client.member)]);
+    await keyring.catchUp();
+    const put = server.e2ee.devicePuts;
+    // The second put of the rotation fails after the first stored.
+    const original = server.e2ee.handle.bind(server.e2ee);
+    let posts = 0;
+    server.e2ee.handle = async (req, res, url) => {
+      if (req.method === 'POST' && url.pathname.endsWith('/key-packages') && ++posts === 2) {
+        res.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'unavailable' }));
+        return true;
+      }
+      return original(req, res, url);
+    };
+    await expect(keyring.sealingKey('scope-a', 1)).rejects.toThrow(/HTTP 503/u);
+    expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(3);
+    expect(put.map((batch) => batch[0]!.epoch)).toEqual([2, 3, 3]);
   });
 
   it('rotates once for concurrent seals of one scope', async () => {
