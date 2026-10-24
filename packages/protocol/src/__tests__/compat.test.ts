@@ -482,6 +482,10 @@ describe('compat: published 0.26.1 (byok-protocol-previous) is a rejection oracl
         // #654: a sealed type is new in v3 and gated as a whole type.
         expect(requiredReceiverCapabilities(line.type, line.payload)[0]).toBe(SEALED_PAYLOAD_CAPABILITY);
         expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.UnknownMessageTypeError);
+      } else if (line.type === 'e2ee.key_package.available') {
+        // #654 E2c-3: the key package notice is new in v3 and gated as a whole type.
+        expect(requiredReceiverCapabilities(line.type, line.payload)).toEqual([SEALED_PAYLOAD_CAPABILITY]);
+        expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.UnknownMessageTypeError);
       } else {
         expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.EnvelopeValidationError);
       }

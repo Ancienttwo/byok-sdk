@@ -153,8 +153,8 @@ export class PostgresActivityStore implements ActivityStore {
                  WHERE jsonb_typeof(entry) <> 'object'
                     OR NOT (entry ?& ARRAY[
                          'taskId', 'sourceEnvelopeId', 'batchSeq',
-                         'eventIndex', 'receivedAt', 'event'
-                       ])
+                         'eventIndex', 'receivedAt'
+                       ] AND (entry ? 'event' OR entry ? 'sealed'))
               )
               AND NOT EXISTS (
                 SELECT 1

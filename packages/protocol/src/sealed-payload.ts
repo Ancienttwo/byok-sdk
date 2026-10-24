@@ -20,6 +20,8 @@ import { z } from 'zod';
 
 import { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 
+import { SEALED_SPLIT_TABLE } from './sealed-split-table';
+
 export { SEALED_SPLIT_TABLE, isSealedMessageType } from './sealed-split-table';
 export type { SealedDigestRule, SealedMessageType, SealedSplitEntry } from './sealed-split-table';
 
@@ -51,6 +53,46 @@ export const SEALED_DECLINE_CODES = [
   'sealing_policy_mismatch',
 ] as const;
 export type SealedDeclineCode = (typeof SEALED_DECLINE_CODES)[number];
+
+/**
+ * The closed plaintext codes of a task whose output is sealed (#654 12d).
+ * It lists each plaintext output type that has a plaintext form on such a
+ * task, with the codes that each field moved or dropped by its sealed type
+ * may hold. Such a field that is not listed here must be absent. An output
+ * type with a sealed form that is not listed has no plaintext form. An
+ * interrupted task reports `daemon_interrupted`; a device that cannot seal
+ * reports `sealed_key_unavailable`. The Host check, the daemon and the member
+ * display read this one list, and compare by exact match.
+ */
+export const SEALED_TASK_PLAIN_CODES = Object.freeze({
+  'task.fail': { reason: ['daemon_interrupted', 'sealed_key_unavailable'] },
+  'task.decline': { reason: SEALED_DECLINE_CODES },
+  'task.cancelled': { reason: [] },
+} as const);
+
+/**
+ * True when `payload` is a legal plaintext `type` message of a task whose
+ * output is sealed: each field that a `task-output` sealed type of `type`
+ * moves or drops is absent or holds one of {@link SEALED_TASK_PLAIN_CODES}.
+ * A type that has a sealed output form and is not listed there is never
+ * legal. A plaintext decline also names its code as `code`. A type with no
+ * sealed output form is always legal.
+ */
+export function isSealedTaskPlainOutput(type: string, payload: object): boolean {
+  const codes: { readonly [field: string]: readonly string[] } = Object.hasOwn(SEALED_TASK_PLAIN_CODES, type)
+    ? SEALED_TASK_PLAIN_CODES[type as keyof typeof SEALED_TASK_PLAIN_CODES]
+    : {};
+  const fields = Object.values(SEALED_SPLIT_TABLE)
+    .filter((entry) => entry.category === 'task-output' && entry.plainType === type)
+    .flatMap((entry): readonly string[] => [...entry.moved, ...entry.forbidden]);
+  if (fields.length > 0 && !Object.hasOwn(SEALED_TASK_PLAIN_CODES, type)) return false;
+  const record = payload as Readonly<Record<string, unknown>>;
+  for (const field of fields) {
+    const value = record[field];
+    if (value !== undefined && !(typeof value === 'string' && (codes[field] ?? []).includes(value))) return false;
+  }
+  return type !== 'task.decline' || record.reason === undefined || record.code === record.reason;
+}
 
 /** Padded frames above this length travel as a ciphertext blob (§8.6). */
 export const SEALED_INLINE_MAX_PADDED_LENGTH = 256 * 1024;
@@ -207,22 +249,57 @@ export const TaskSealingSchema = z
   .strict();
 export type TaskSealing = z.infer<typeof TaskSealingSchema>;
 
+/**
+ * A canonical UTC instant, `YYYY-MM-DDTHH:mm:ss.sssZ` and a real calendar
+ * instant. This is the form core binds as `notAfter` in the AAD
+ * (`@byok-sdk/core` `isCanonicalTimestamp`), so a device can rebuild the AAD
+ * from the wire value byte for byte.
+ */
+const CanonicalInstantSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u)
+  .refine((value) => {
+    const instant = Date.parse(value);
+    return Number.isFinite(instant) && new Date(instant).toISOString() === value;
+  }, 'must be a canonical UTC instant');
+
+/**
+ * The routine template of a sealed execution (design §6.3). The offer's
+ * `sealed` member is then the template, family `routine.template`, which the
+ * member sealed once for every occurrence. The device rebuilds its binding
+ * from these fields: identity `{ routineId, definitionVersion }`, no device,
+ * the offer's `agentRef` and `sealing.categories`, and `notAfter`. They travel
+ * in plaintext because the AAD binds them. `definitionVersion` is an integer,
+ * because the binding tells `4` and `"4"` apart. The device, not the Host,
+ * checks `notAfter` against its clock.
+ */
+export const RoutineRefSchema = z
+  .object({
+    routineId: z.string().min(1),
+    definitionVersion: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    notAfter: CanonicalInstantSchema,
+  })
+  .strict();
+
 
 /**
  * The rule of a sealed offer, for `superRefine`: `sealed` is present exactly
  * when the task's `sealing` includes `task-input`, and then `instruction` is
  * absent and `sealed.scope` is the task's scope at the task's epoch. When the
- * task seals only its output, `instruction` is plaintext and required.
+ * task seals only its output, `instruction` is plaintext and required. A
+ * `routineRef` names a routine template, which is sealed task input, so it
+ * needs a task that seals `task-input`.
  *
  * Whether a task's later messages must be sealed is the Host's and the
  * device's check: they know the task's `sealing`, this payload does not.
  */
 export function sealedOfferRule(
-  payload: { readonly instruction?: unknown; readonly sealing: TaskSealing; readonly sealed?: SealedPayload },
+  payload: { readonly instruction?: unknown; readonly sealing: TaskSealing; readonly sealed?: SealedPayload; readonly routineRef?: unknown },
   ctx: z.RefinementCtx,
 ): void {
-  const { instruction, sealing, sealed } = payload;
+  const { instruction, sealing, sealed, routineRef } = payload;
   if (!sealing.categories.includes('task-input')) {
+    if (routineRef !== undefined) ctx.addIssue({ code: 'custom', path: ['routineRef'], message: 'a routine template is sealed task input, so routineRef needs a task that seals task-input' });
     if (sealed !== undefined) ctx.addIssue({ code: 'custom', path: ['sealed'], message: 'a task that does not seal task-input carries no sealed member' });
     if (instruction === undefined) ctx.addIssue({ code: 'custom', path: ['instruction'], message: 'a task that does not seal task-input carries a plaintext instruction' });
     return;

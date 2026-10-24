@@ -15,12 +15,16 @@ import {
   E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES,
   E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
+  E2EE_SCOPE_ID_MAX_LENGTH,
   E2EE_SCOPE_KEY_PACKAGE_PUT_MAX,
   E2eeClientPairingMacSchema,
   E2eeMemberChainEntrySchema,
   E2eeMemberKeyBundleSchema,
+  E2eeMemberKeyRegisterRequestSchema,
   E2eeScopeKeyPackageSchema,
+  requiredReceiverCapabilities,
   type E2eeClientPairingMac,
+  type E2eeKeyPackageAvailablePayload,
   type E2eeMemberChainEntry,
   type E2eeMemberKeyBundle,
   type E2eeScopeKeyPackage,
@@ -135,13 +139,6 @@ export interface E2eeMemberStore {
   ): Promise<string | undefined>;
 }
 
-/**
- * The longest scope id, in UTF-16 code units, as for other opaque Host ids.
- * Core sets no maximum, so the bound lives here, not in the protocol shape
- * the parity test compares; it keeps every backend's index key in range.
- */
-const E2EE_SCOPE_ID_MAX_LENGTH = 512;
-
 function invalid(message: string): ByokCloudError {
   return new ByokCloudError('coordination_input_invalid', message);
 }
@@ -203,6 +200,8 @@ export interface E2eeMemberContext {
   readonly tenant: TenantId;
   readonly devices: DeviceDirectory;
   readonly now: () => Date;
+  /** Enqueue `e2ee.key_package.available` for one device; it refuses a device without the gate capability. */
+  readonly enqueueKeyPackageNotice: (deviceId: string, payload: E2eeKeyPackageAvailablePayload) => Promise<unknown>;
 }
 
 export async function appendMemberChainEntries(
@@ -250,7 +249,7 @@ export async function readMemberChain(
 export async function putScopeKeyPackages(
   ctx: E2eeMemberContext,
   input: { readonly packages: readonly E2eeScopeKeyPackage[] },
-): Promise<{ readonly stored: number }> {
+): Promise<{ readonly stored: number; readonly skippedDeviceIds: readonly string[] }> {
   const list = boundedList(() => input.packages, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, 'Scope key packages');
   const rows = list.map((input, index) => {
     const { text, value } = canonicalParse(E2eeScopeKeyPackageSchema, input, `Scope key package ${index}`);
@@ -284,24 +283,56 @@ export async function putScopeKeyPackages(
       `Scope ${result.scopeId} epoch ${result.epoch} already has keyId ${result.keyId}.`,
     );
   }
-  return { stored: result.stored };
+  return { stored: result.stored, skippedDeviceIds: await notifyRecipientDevices(ctx, rows) };
+}
+
+/**
+ * After the commit, notify each recipient that is a registered device (§7.4,
+ * notice-and-fetch). A replayed put notifies again, because a crash between
+ * the commit and the notice must not lose it; the derived mailbox message id
+ * makes a repeat return the same row. A device without the gate capability
+ * gets no notice and is returned, so the Host can show it; it fetches the
+ * package after an upgrade. A recipient with no device registration, such as
+ * a browser member, has no mailbox. `rows` holds one row per scope epoch and
+ * recipient, so each device gets one notice per scope epoch.
+ */
+async function notifyRecipientDevices(ctx: E2eeMemberContext, rows: readonly E2eeScopeKeyPackageRow[]): Promise<string[]> {
+  const required = requiredReceiverCapabilities('e2ee.key_package.available', {});
+  const now = ctx.now().toISOString();
+  const skipped: string[] = [];
+  for (const device of await ctx.devices.list(ctx.tenant)) {
+    const registration = await ctx.store.readMemberRegistration(ctx.tenant, { deviceId: device.deviceId, now });
+    const notices = rows.filter(row => row.recipient === registration?.memberId);
+    if (notices.length === 0) continue;
+    if (!required.every(capability => device.capabilities?.includes(capability) === true)) {
+      skipped.push(device.deviceId);
+      continue;
+    }
+    for (const row of notices) await ctx.enqueueKeyPackageNotice(device.deviceId, { scopeId: row.scopeId, epoch: row.epoch });
+  }
+  return skipped.sort(compareCodePoints);
+}
+
+function scopeQuery(fields: { readonly scopeId?: unknown; readonly epoch?: unknown }): { readonly scopeId: string; readonly epoch?: number } {
+  const { scopeId, epoch } = fields;
+  if (!scopeIdValid(scopeId)) throw invalid(`scopeId must have 1 to ${E2EE_SCOPE_ID_MAX_LENGTH} characters`);
+  if (epoch !== undefined && (typeof epoch !== 'number' || !Number.isSafeInteger(epoch) || epoch < 1)) {
+    throw invalid('epoch must be a positive safe integer');
+  }
+  return epoch === undefined ? { scopeId } : { scopeId, epoch };
 }
 
 export async function readScopeKeyPackages(
   ctx: E2eeMemberContext,
   input: { readonly scopeId: string; readonly epoch?: number; readonly recipient?: string },
 ): Promise<{ readonly packages: readonly E2eeScopeKeyPackage[] }> {
-  const { scopeId, epoch, recipient } = readFields(input);
-  if (!scopeIdValid(scopeId)) throw invalid(`scopeId must have 1 to ${E2EE_SCOPE_ID_MAX_LENGTH} characters`);
-  if (epoch !== undefined && (!Number.isSafeInteger(epoch) || epoch < 1)) {
-    throw invalid('epoch must be a positive safe integer');
-  }
+  const fields = readFields(input);
+  const { recipient } = fields;
   if (recipient !== undefined && (typeof recipient !== 'string' || recipient.length === 0)) {
     throw invalid('recipient must be a nonempty string');
   }
   const rows = await ctx.store.readScopeKeyPackages(ctx.tenant, {
-    scopeId,
-    ...(epoch === undefined ? {} : { epoch }),
+    ...scopeQuery(fields),
     ...(recipient === undefined ? {} : { recipient }),
   });
   return { packages: rows.map(row => storedValue(E2eeScopeKeyPackageSchema, row.package, 'scope key package')) };
@@ -355,4 +386,57 @@ export async function relayClientPairingMac(
   if (result === 'not_registered') {
     throw new ByokCloudError('e2ee_member_not_registered', `Device ${deviceId} has not registered a member key bundle.`);
   }
+}
+
+/**
+ * A device registers its own member key bundle with the device pairing MAC
+ * (§7.2 step 3). The bundle must name the proven device. The MAC is kept for
+ * one pairing window; a retry with the same bundle replaces the MAC and its expiry.
+ */
+export async function registerDeviceMemberKey(
+  ctx: E2eeMemberContext,
+  deviceId: string,
+  input: unknown,
+): Promise<{ readonly memberId: string }> {
+  const { value } = canonicalParse(E2eeMemberKeyRegisterRequestSchema, input, 'Member key registration');
+  if (value.member.deviceId !== deviceId) throw invalid('The member key bundle names another device');
+  const result = await ctx.store.registerMember(ctx.tenant, {
+    deviceId,
+    memberId: value.member.memberId,
+    bundle: canonicalizeJson(value.member as unknown as JsonValue),
+    deviceMac: value.mac,
+    macExpiresAt: new Date(ctx.now().getTime() + PAIRING_CODE_TTL_MS).toISOString(),
+  });
+  if (result === 'device_conflict' || result === 'member_conflict') {
+    throw new ByokCloudError(
+      'e2ee_member_key_conflict',
+      result === 'device_conflict'
+        ? `Device ${deviceId} registered another member key bundle.`
+        : `Member ${value.member.memberId} is registered to another device.`,
+    );
+  }
+  return { memberId: value.member.memberId };
+}
+
+/** The scope key packages addressed to the device's own registered member. */
+export async function readDeviceScopeKeyPackages(
+  ctx: E2eeMemberContext,
+  deviceId: string,
+  input: { readonly scopeId: string; readonly epoch?: number },
+): Promise<{ readonly packages: readonly E2eeScopeKeyPackage[] }> {
+  const query = scopeQuery(readFields(input));
+  const registration = await ctx.store.readMemberRegistration(ctx.tenant, { deviceId, now: ctx.now().toISOString() });
+  if (registration === undefined) {
+    throw new ByokCloudError('e2ee_member_not_registered', `Device ${deviceId} has not registered a member key bundle.`);
+  }
+  return readScopeKeyPackages(ctx, { ...query, recipient: registration.memberId });
+}
+
+/** The client pairing MAC relayed to the device, while its pairing window is open. */
+export async function readDeviceClientPairingMac(
+  ctx: E2eeMemberContext,
+  deviceId: string,
+): Promise<E2eeClientPairingMac | undefined> {
+  const body = await ctx.store.readClientPairingMac(ctx.tenant, { deviceId, now: ctx.now().toISOString() });
+  return body === undefined ? undefined : storedValue(E2eeClientPairingMacSchema, body, 'client pairing MAC');
 }
