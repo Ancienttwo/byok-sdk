@@ -56,10 +56,12 @@
   head, or the offer gets `sealed_open_failed` and a steer is dropped. Output
   is sealed at the newest epoch with no scope member `remove` and no
   member-dropping `scope-policy` after its freshness point. An output-only
-  task with no freshness point in the run gets `sealed_key_unavailable`. A
+  task with no freshness point from this run, or carried from the previous run
+  of the same process, gets `sealed_key_unavailable`. A
   terminal that a failed `stop()` left queued is sealed by the next run in the
-  same process, which keeps the freshness points that are on its verified
-  chain. A terminal that the startup replay builds from the journal is in the
+  same process when that run has the same tenant, device and member, and is
+  otherwise in the closed form; the next run keeps the freshness points that
+  are on its verified chain. A terminal that the startup replay builds from the journal is in the
   closed form. The internal `sealedPayload` test parameter of
   `buildDaemonWithAdapters` is removed.
 - **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is

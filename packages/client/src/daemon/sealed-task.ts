@@ -265,13 +265,15 @@ export class SealedTasks {
    * A terminal the daemon builds from a journaled offer (recovery, or a
    * result over the journal bound), sealed with that offer's context when it
    * seals output. A closed plaintext form, such as `daemon_interrupted`,
-   * stays plaintext.
+   * stays plaintext. With `sealable` false (the keyring is another member's),
+   * a terminal that seals output takes its closed plaintext form.
    */
-  async sealRecovered(offer: Envelope, terminal: Envelope): Promise<Envelope> {
+  async sealRecovered(offer: Envelope, terminal: Envelope, sealable = true): Promise<Envelope> {
     const { sealing, agentRef } = offer.payload as { sealing?: TaskSealing; agentRef?: AgentRef };
     if (!isSealedMessageType(offer.type) || sealing === undefined || !sealing.categories.includes('task-output') || isSealedTaskPlainOutput(terminal.type, terminal.payload)) {
       return terminal;
     }
+    if (!sealable) return this.unsealable(terminal)!;
     const task: SealedTask = { sealing, agentRef: agentRef ?? null, steerIds: new Set(), tail: Promise.resolve() };
     return (await this.#sealOutbound(task, terminal))!;
   }
@@ -303,7 +305,7 @@ export class SealedTasks {
       sealed = await this.#seal(taskId, task, 'task.fail', failure);
       plain = createEnvelope('task.fail', failure as never, { taskId });
     }
-    if (sealed === undefined) return this.#unsealable(envelope);
+    if (sealed === undefined) return this.unsealable(envelope);
     this.#plainBySealedId.set(sealed.id, plain);
     return sealed;
   }
@@ -386,7 +388,7 @@ export class SealedTasks {
   }
 
   /** The closed plaintext form of a terminal that has no sealing key (decision 12d). */
-  #unsealable(envelope: Envelope): Envelope | undefined {
+  unsealable(envelope: Envelope): Envelope | undefined {
     const taskId = envelope.task_id!;
     const payload = envelope.payload as JsonObject;
     const code = 'sealed_key_unavailable';

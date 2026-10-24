@@ -1201,7 +1201,9 @@ refreshed hello adds it, and removes it again when the member is lost.
   the member resumes, and the freshness points live in memory, so the Host
   never learns the real failure reason. A terminal that the same process
   still holds for commit after a failed stop seals with the next run's
-  member, once that run's start and member resume are over.
+  member, once that run's start and member resume are over, and only when
+  that run has the same tenant, device and member as the run that owned the
+  task; otherwise it is in the closed form.
 - A key is fetched on its first miss, so a notice that came before the
   advertisement needs no redelivery.
 
