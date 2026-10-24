@@ -250,7 +250,7 @@ on keys.
 
 0.30.0 is a MINOR under the general policy above, with no exception. It adds gated wire types
 and public API, and it has pre-1.0 breaking cuts in protocol, server, cloud and
-client. See the [0.30.0 candidate notes](releases/v0.30.0.md).
+client. See the [0.30.0 release notes](releases/v0.30.0.md).
 
 0.29.0 was a MINOR under the general policy above, with no exception. It added
 public API and behavior and had pre-1.0 breaking cuts in client and keys. See
@@ -271,21 +271,19 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-Public registry metadata read on 2026-10-23 at 10:20 UTC reports `latest`
-0.29.0 for all nine packages. The keys 0.29.0 package depends on exactly
-`@byok-sdk/core` 0.29.0. The same read lists 0.28.3, 0.28.2, 0.28.1 / keys
-0.13.1 and 0.28.0 / keys 0.13.0 as the earlier published versions. Version
-0.30.0 was absent for all nine packages at that read, and at a read on
-2026-10-24 at 05:51 UTC; recheck before publishing. The registry publication
-times are 2026-10-20 (UTC) for 0.28.0 / keys 0.13.0,
+Public registry metadata read on 2026-10-24 at 07:39 UTC reports `latest`
+0.30.0 for all nine packages. The keys 0.30.0 package depends on exactly
+`@byok-sdk/core` 0.30.0. The same read lists 0.29.0, 0.28.3, 0.28.2, 0.28.1 /
+keys 0.13.1 and 0.28.0 / keys 0.13.0 as the earlier published versions. The
+registry publication times are 2026-10-20 (UTC) for 0.28.0 / keys 0.13.0,
 2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22 (UTC) for 0.28.2 and
-0.28.3, and 2026-10-23 (UTC) for 0.29.0. The tag `v0.29.0` and its GitHub
-Release point to `df0c91d2`, the merge of #773. The tag `v0.28.3` points to
-`9ca1f3ea`, the merge of #742. The 0.28.0 to 0.29.0 source-candidate notes are
-preparation history. They are not publication records. This read confirms
-registry availability. It does not establish isolated-install qualification.
-Publication of 0.30.0 needs the accepted final-commit CI artifact and separate
-owner authorization.
+0.28.3, 2026-10-23 (UTC) for 0.29.0, and 2026-10-24 (UTC) for 0.30.0. The tag
+`v0.30.0` and its GitHub Release point to `6b779cff`, the merge of #837. The
+tag `v0.29.0` points to `df0c91d2`, the merge of #773. The 0.28.0 to 0.30.0
+source-candidate notes are preparation history. They are not publication
+records. This read confirms registry availability. It does not establish
+isolated-install qualification. A later release needs the accepted
+final-commit CI artifact and separate owner authorization.
 
 0.27.0 / keys 0.12.0 was published on `latest` from `v0.27.0` (`cd977261`). It
 was `latest` until 0.28.0.
