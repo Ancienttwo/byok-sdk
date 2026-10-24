@@ -74,6 +74,8 @@ if (argv[0] === 'gateway' && argv[1] === 'run') {
   }
   // The real gateway prints a banner on stdout even with --quiet.
   console.log('Hermes Gateway Starting...');
+  // FAKE_HERMES_GATEWAY_EXIT_BEFORE_READY=1: the gateway ends without ever answering identify.
+  if (env.FAKE_HERMES_GATEWAY_EXIT_BEFORE_READY === '1') process.exit(1);
   const readyAt = Date.now() + Number(env.FAKE_HERMES_GATEWAY_READY_DELAY_MS ?? 0);
   const served = realHome();
   serveIdentify(controlPath(), () => ({

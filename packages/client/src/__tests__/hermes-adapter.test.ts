@@ -434,6 +434,13 @@ describe('HermesAdapter session', () => {
     expect(alive(log[0]!.pid)).toBe(false);
   });
 
+  it('keeps the runtime_exited class when the gateway exits before it reports ready (#869)', async () => {
+    const { open } = await setup({ FAKE_HERMES_GATEWAY_EXIT_BEFORE_READY: '1' });
+    const failure = await open().then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', message: 'hermes gateway exited', failure: { class: 'runtime_exited' } });
+  });
+
   it('stops startup on an abort signal and disposes the owned gateway', async () => {
     const { adapter, entries, workspaceDir, root, env } = await setup({ FAKE_HERMES_GATEWAY_READY_DELAY_MS: '10000' });
     const prepared = await adapter.prepare({ offer: task, descriptor: adapter.descriptor, requiredToolsetIds: [] });
