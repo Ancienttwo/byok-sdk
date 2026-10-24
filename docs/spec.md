@@ -2636,6 +2636,9 @@ member (#654 E2d-1, [protocol §2.6](./protocol.md)). The member keys, `pv` and
 the member state are three more entries of the same OS credential provider,
 cleared at a re-pair and at unpair. A daemon with an injected enrollment
 backend refuses an E2EE pairing.
+Copy the complete command from the Host's pairing page. A string used once
+without `--e2ee` is burned: start a new registration at the Host and do not
+retry it (protocol §2.6, device enrollment).
 
 `DaemonConfig.strictAgentOnly` is an additive local-security gate. It requires
 successful construction-time Agent-home preflight and only then advertises

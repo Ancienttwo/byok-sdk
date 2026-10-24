@@ -1369,6 +1369,13 @@ pairs with the pairing verification secret `pv` (design §7.2):
 <code>.<pv>`. The CLI splits on the last `.` only under `--e2ee`, because a
 Host's own pairing code may hold a `.`. `pv` never reaches the Host.
 
+A string `<code>.<pv>` that was used once without `--e2ee` is burned. Without
+`--e2ee` the CLI sends the whole string to the Host as the pairing code, so the
+Host learns `pv`. Do not retry that string with `--e2ee`: start a new
+registration from the Host, which gives a new code and a new `pv`. A Host's
+pairing page shows the complete command, with `--e2ee`, so that users copy the
+command and not only the string.
+
 - At pair time the device creates its member keys for the new enrollment,
   stores `pv` with a 10-minute deadline and its bundle in its OS credential
   store, and registers the bundle. A failed registration is retried at start

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is
+  burned: start a new registration at the Host, do not retry it (#654 E2d).
 - **Breaking (cloud)** — the device-proof `requestId` is single-use on the
   three E2EE member writes, as on the truth put (#654, owner batch §41a A).
   The store records the `requestId`, its binding and the result with the
