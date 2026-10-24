@@ -516,10 +516,12 @@ there is one projection writer and one revision for each agentRef.
   The current revision readies the Bot, an older one changes nothing, and a
   newer one refuses. A Bot's Turns freeze their offers only when it is ready,
   as before. After a newer revision, the Bot keeps its last ready revision, so
-  it stays a delegate target while its Turns wait.
+  it stays a delegate target while its Turns wait. The Host reports
+  `personaReady` only after the snapshot that introduces that revision
+  resolves: an earlier report is refused, not stored.
 - `retryPersona` refuses with `external_persona`.
-- The ledger stores this mode too, so a restart cannot change it. The option
-  needs `team: 'external'`.
+- The ledger stores this mode too, so a restart cannot change it. The mode is
+  fixed once stored, with no migration. The option needs `team: 'external'`.
 
 With `history` and `team: 'external'` together, the device ledger holds
 neither the history nor the team authority.
