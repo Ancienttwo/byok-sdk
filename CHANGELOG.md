@@ -15,7 +15,17 @@
   (no migration); SQLite adds that table on open. Store implementers: the
   append and put inputs take an optional `proof`, and
   `E2eeMemberRegistrationInput` takes `request`; the results can be
-  `request_conflict`.
+  `request_conflict`. A proof `requestId` longer than 120
+  characters (`TRUTH_REQUEST_ID_MAX_LENGTH`) gets 409 `proof_request_conflict`
+  before any store call, as on the truth put; the proof check already refuses
+  an empty one with 401. A store replays a recorded
+  result only after `parseRecordedWriteResult` (a new export of
+  `@byok-sdk/cloud`) accepts it; an invalid one
+  fails with `e2ee_member_state_unreadable`. Public API: the writer type
+  `E2eeMemberChainWriter` is renamed `E2eeMemberWriter`, and a device writer
+  now carries its `proof` instead of a `deviceId`;
+  `registerDeviceMemberKey(ctx, deviceId, input)` is now
+  `registerDeviceMemberKey(ctx, proof, input)`.
 - **Feature (examples)** — K8 has a Host persona mode for an external team
   (#879). With `persona: 'external'`, each snapshot Bot carries the Host's
   `profileRevision`, which K8 uses as the agentRef revision, and K8 queues no
