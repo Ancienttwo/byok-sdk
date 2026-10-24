@@ -14,6 +14,17 @@ export interface ClaudeAdapterOptions {
     interruptTimeoutMs?: number;
     /** Local Host callbacks for native stdio requests; never enables remote boolean approvals. */
     nativeInteractions?: NativeInteractionHostOptions;
+    /**
+     * For an Agent task (`task.offer_for_agent`), `excluded` starts Claude with
+     * `--strict-mcp-config`, so only the task's and the SDK's MCP servers load,
+     * and with a `--settings` file that excludes the `CLAUDE.md`,
+     * `CLAUDE.local.md` and rules of the Claude config directory and of every
+     * directory above the Agent home, and turns off Claude auto memory. The
+     * user's settings, deny rules, hooks, model and env still apply. It affects
+     * new sessions only: a resumed session keeps its history. Other tasks are
+     * unchanged. Default `inherit`.
+     */
+    agentUserContext?: 'inherit' | 'excluded';
 }
 /**
  * Claude Code stream-json adapter.

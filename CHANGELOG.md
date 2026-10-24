@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Breaking (cloud)** — the device-proof `requestId` is single-use on the
+  three E2EE member writes, as on the truth put (#654, owner batch §41a A).
+  The store records the `requestId`, its binding and the result with the
+  write. A replay with the same binding writes nothing and returns the
+  recorded result, so a replayed registration no longer extends or replaces
+  the pairing MAC and a replayed package put no longer overwrites a newer
+  package. The same `requestId` with another binding gets 409
+  `proof_request_conflict`. Postgres records it in `proof_request_receipt`
+  (no migration); SQLite adds that table on open. Store implementers: the
+  append and put inputs take an optional `proof`, and
+  `E2eeMemberRegistrationInput` takes `request`; the results can be
+  `request_conflict`.
+
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select `agentMemory: 'read-write-if-admitted'` (#833). It runs exactly as
   `read-write` when the daemon admits the memory MCP, and exactly as `none`
@@ -17,6 +30,26 @@
   (`AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY`), and server and hosted
   cloud refuse the value to a device without it, before the task exists. The
   terminal does not report which mode ran.
+- **Feature (client)** — an opt-in Claude option for Agent tasks (#871,
+  #873). `ClaudeAdapterOptions.agentUserContext: 'excluded'` starts a
+  `task.offer_for_agent` task with `--strict-mcp-config`, so only the task's
+  and the SDK's MCP servers load, also when the task has none. A 0600
+  `--settings` file in the execution's scratch directory excludes the
+  `CLAUDE.md`, `CLAUDE.local.md` and rules of the Claude config directory and
+  of every directory above the sealed `lease.canonicalHome`, and sets
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in the flag-layer `env`, which outranks
+  a user `settings.json` `env` block. `--setting-sources` is untouched, so the
+  user's settings, deny rules, hooks, model and env still apply. An Agent
+  task without a sealed absolute canonical home, with a cwd outside it, or
+  with a relative `CLAUDE_CONFIG_DIR` fails to start as a non-retryable
+  authority failure. The switch affects new sessions only: a resumed session
+  keeps its history. Other tasks and the default, `'inherit'`, are unchanged.
+  `createDaemon` does not pass the option; a Host sets it through
+  `createDaemonWithAdapters`. On Windows only fixture tests cover the
+  patterns. `docs/adapter-capabilities.md` now lists, for every adapter,
+  whether the user's MCP servers reach a task and what runtime memory loads.
+  The evidence is in
+  `docs/notes/2026-10-24-871-873-claude-agent-user-context.md`.
 - **Feature (examples)** — K8 runs the Host's own K4 work on the Bot tenant's
   core (#882). `enqueueHostIntent(input, handler)` enqueues a K4 intent and
   stores the name of its `BotOptions.hostIntents` handler in one transaction.
@@ -48,6 +81,12 @@
   applied, so that scope keeps its packages and accepts new puts. A stored
   `shred` entry whose subject is not `{ scopeId }` makes every chain read that
   includes it fail with `e2ee_member_state_unreadable`.
+- **Docs and vectors** — `docs/security.md` gains a Scope shred section: what
+  a Host shred removes, the unverified delete, and the backup gap until each
+  member rotates its KEM key (#654 E5b-3). The hosted Host contract lists the
+  shred in §6 and §7. `member-rules-v1.json` gains a `shred` section: after a
+  shred, a `scope-policy` or a second `shred` of that scope is invalid, and
+  another scope stays live.
 - **Docs (examples)** — K8 has a vendor contract, `src/VENDOR.md` (#886). It
   lists the files to copy in three layers: `rules/`, the L Host and the shared
   vectors. It says how to resolve K4, which SDK packages the copy needs, and

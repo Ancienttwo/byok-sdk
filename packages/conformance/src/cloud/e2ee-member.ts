@@ -17,15 +17,20 @@ const other = tenantId('e2ee-other');
 const T0 = '2026-10-24T00:00:00.000Z';
 const T1 = '2026-10-24T00:10:00.000Z';
 const BEFORE_T1 = '2026-10-24T00:09:59.999Z';
+let requests = 0;
+/** A device-proof binding with a requestId no other write has used. */
+const freshRequest = () => ({ requestId: `request-${++requests}`, operation: 'e2ee-member-key.register', resource: '/byok/e2ee/member-key', bodySha256: 'sha256', bodySize: 1 });
 const entry = (seq: number, note = 'a') => ({ seq, entry: `{"note":"${note}","seq":${seq}}` });
 const pkg = (epoch: number, recipient: string, keyId: string, note = 'a', scopeId = 'scope-1'): E2eeScopeKeyPackageRow => ({
   scopeId, epoch, recipient, keyId, sender: 'sender', package: `{"epoch":${epoch},"keyId":"${keyId}","note":"${note}","recipient":"${recipient}"}`,
 });
+const proof = (requestId: string, bodySha256 = 'sha256-a', deviceId = 'dev-1') =>
+  ({ deviceId, request: { requestId, operation: 'op', resource: '/resource', bodySha256, bodySize: 10 } });
 const shred = (seq: number, scopeId = 'scope-1', note = 'a'): E2eeScopeShred => ({
   seq, scopeId, receipt: { key: `e2ee-scope-shred:${scopeId}`, body: `{"chainSeq":${seq},"note":"${note}"}` },
 });
 const registration = (deviceId: string, memberId: string, bundle = `{"memberId":"${memberId}"}`, deviceMac = 'mac-1') =>
-  ({ deviceId, memberId, bundle, deviceMac, macExpiresAt: T1 });
+  ({ deviceId, memberId, bundle, deviceMac, macExpiresAt: T1, request: freshRequest() });
 
 /** The store contract every E2EE member store backend must meet (#654 E2c). */
 export function runE2eeMemberStoreConformance(name: string, factory: E2eeMemberCompositionFactory): void {
@@ -172,6 +177,58 @@ export function runE2eeMemberStoreConformance(name: string, factory: E2eeMemberC
       ]);
       expect(['stored', 'scope_shredded']).toContain(put.outcome);
       expect(await store.readScopeKeyPackages(tenant, { scopeId: 'scope-1' })).toEqual([]);
+    });
+    check('records a device append request once: the same binding gets the recorded result, another is refused', async store => {
+      expect(await store.appendChainEntries(tenant, { rows: [entry(1)], shreds: [], proof: proof('a1') }))
+        .toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
+      expect(await store.appendChainEntries(tenant, { rows: [entry(1)], shreds: [], proof: proof('a1') }))
+        .toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
+      expect(await store.appendChainEntries(tenant, { rows: [entry(2)], shreds: [], proof: proof('a1', 'sha256-b') }))
+        .toEqual({ outcome: 'request_conflict' });
+      expect((await store.readChainEntries(tenant, { afterSeq: 0, limit: 256 })).map(row => row.seq)).toEqual([1]);
+      // The id is per device and per tenant, and a Host write records nothing.
+      expect(await store.appendChainEntries(tenant, { rows: [entry(2)], shreds: [], proof: proof('a1', 'sha256-b', 'dev-2') }))
+        .toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
+      expect(await store.appendChainEntries(other, { rows: [entry(1)], shreds: [], proof: proof('a1', 'sha256-b') }))
+        .toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
+      expect(await store.appendChainEntries(tenant, { rows: [entry(3)], shreds: [] })).toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
+    });
+    check('a recorded append request shreds nothing again', async (store, h) => {
+      await store.appendChainEntries(tenant, { rows: [entry(1, 'shred')], shreds: [shred(1)], proof: proof('s1') });
+      expect(await store.appendChainEntries(tenant, { rows: [entry(1, 'shred')], shreds: [shred(1, 'scope-1', 'b')], proof: proof('s1') }))
+        .toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
+      expect(await receiptBody(h, 'scope-1')).toBe('{"chainSeq":1,"note":"a"}');
+    });
+    check('a refused device request records nothing, so the same request can succeed later', async store => {
+      expect(await store.appendChainEntries(tenant, { rows: [entry(2)], shreds: [], proof: proof('g1') }))
+        .toEqual({ outcome: 'gap', seq: 2, headSeq: 0 });
+      await store.appendChainEntries(tenant, { rows: [entry(1)], shreds: [] });
+      expect(await store.appendChainEntries(tenant, { rows: [entry(2)], shreds: [], proof: proof('g1') }))
+        .toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
+      await store.putScopeKeyPackages(tenant, { rows: [pkg(1, 'r1', 'k1')] });
+      expect(await store.putScopeKeyPackages(tenant, { rows: [pkg(1, 'r2', 'k2')], proof: proof('p0') }))
+        .toEqual({ outcome: 'key_id_conflict', scopeId: 'scope-1', epoch: 1, keyId: 'k1' });
+      expect(await store.putScopeKeyPackages(tenant, { rows: [pkg(1, 'r2', 'k2')], proof: proof('p0', 'sha256-b') }))
+        .toEqual({ outcome: 'key_id_conflict', scopeId: 'scope-1', epoch: 1, keyId: 'k1' });
+    });
+    check('a recorded put request does not overwrite a newer package', async store => {
+      expect(await store.putScopeKeyPackages(tenant, { rows: [pkg(1, 'r1', 'k1', 'old')], proof: proof('p1') })).toEqual({ outcome: 'stored', stored: 1 });
+      expect(await store.putScopeKeyPackages(tenant, { rows: [pkg(1, 'r1', 'k1', 'new')], proof: proof('p2') })).toEqual({ outcome: 'stored', stored: 1 });
+      expect(await store.putScopeKeyPackages(tenant, { rows: [pkg(1, 'r1', 'k1', 'old')], proof: proof('p1') })).toEqual({ outcome: 'stored', stored: 1 });
+      expect(await store.readScopeKeyPackages(tenant, { scopeId: 'scope-1' })).toEqual([pkg(1, 'r1', 'k1', 'new')]);
+      expect(await store.putScopeKeyPackages(tenant, { rows: [pkg(1, 'r1', 'k1', 'other')], proof: proof('p1', 'sha256-b') }))
+        .toEqual({ outcome: 'request_conflict' });
+      expect(await store.readScopeKeyPackages(tenant, { scopeId: 'scope-1' })).toEqual([pkg(1, 'r1', 'k1', 'new')]);
+    });
+    check('a recorded registration request does not touch the MAC', async store => {
+      const register = (mac: string, requestId: string, bodySha256?: string) =>
+        store.registerMember(tenant, { ...registration('dev-1', 'm1', undefined, mac), request: proof(requestId, bodySha256).request });
+      expect(await register('mac-1', 'r1')).toBe('registered');
+      expect(await register('mac-2', 'r2')).toBe('replayed');
+      expect(await register('mac-1', 'r1')).toBe('registered');
+      expect(await register('mac-3', 'r1', 'sha256-b')).toBe('request_conflict');
+      expect(await store.readMemberRegistration(tenant, { deviceId: 'dev-1', now: T0 }))
+        .toEqual({ memberId: 'm1', bundle: '{"memberId":"m1"}', deviceMac: 'mac-2' });
     });
     check('registers one bundle per device and one device per member', async store => {
       expect(await store.registerMember(tenant, registration('dev-1', 'm1'))).toBe('registered');

@@ -42,6 +42,9 @@ function setup(withStore = true, makeStore = (receipts: RequestReceiptStore) => 
   return { cloud, store, clock, base, registerDevice };
 }
 
+let requests = 0;
+/** A device-proof binding with a requestId no other write has used. */
+const freshRequest = () => ({ requestId: `request-${++requests}`, operation: 'e2ee-member-key.register', resource: '/byok/e2ee/member-key', bodySha256: 'sha256', bodySize: 1 });
 async function code(promise: Promise<unknown>): Promise<string> {
   try {
     await promise;
@@ -280,7 +283,7 @@ describe('E2EE member control plane', () => {
     await store.putScopeKeyPackages(TENANT_A, { rows: [{ scopeId: 'scope-1', epoch: 1, recipient: 'r', keyId: 'k', sender: 's', package: 'not json' }] });
     expect(await code(cloud.readScopeKeyPackages(TENANT_A, { scopeId: 'scope-1' }))).toBe('e2ee_member_state_unreadable');
     await registerDevice(TENANT_A, 'device-1');
-    await store.registerMember(TENANT_A, { deviceId: 'device-1', memberId: 'm', bundle: '{}', deviceMac: 'mac', macExpiresAt: clock.now().toISOString() });
+    await store.registerMember(TENANT_A, { deviceId: 'device-1', memberId: 'm', bundle: '{}', deviceMac: 'mac', macExpiresAt: clock.now().toISOString(), request: freshRequest() });
     expect(await code(cloud.readMemberKeyRegistration(TENANT_A, 'device-1'))).toBe('e2ee_member_state_unreadable');
   });
 
@@ -291,7 +294,7 @@ describe('E2EE member control plane', () => {
     expect(await cloud.readMemberKeyRegistration(TENANT_A, 'device-1')).toBeUndefined();
     await store.registerMember(TENANT_A, {
       deviceId: 'device-1', memberId: device.bundle.memberId, bundle: canonicalizeJson(device.bundle as unknown as JsonValue),
-      deviceMac: 'device-mac', macExpiresAt: new Date(clock.now().getTime() + PAIRING_CODE_TTL_MS).toISOString(),
+      deviceMac: 'device-mac', macExpiresAt: new Date(clock.now().getTime() + PAIRING_CODE_TTL_MS).toISOString(), request: freshRequest(),
     });
     expect(await cloud.readMemberKeyRegistration(TENANT_A, 'device-1')).toEqual({ member: device.bundle, deviceMac: 'device-mac' });
     clock.advance(PAIRING_CODE_TTL_MS);
@@ -327,7 +330,7 @@ describe('E2EE member control plane', () => {
       await registerDevice(TENANT_A, 'device-1', machineId);
       await store.registerMember(TENANT_A, {
         deviceId: 'device-1', memberId: device.bundle.memberId, bundle: canonicalizeJson(device.bundle as unknown as JsonValue),
-        deviceMac: 'device-mac', macExpiresAt: new Date(clock.now().getTime() + PAIRING_CODE_TTL_MS).toISOString(),
+        deviceMac: 'device-mac', macExpiresAt: new Date(clock.now().getTime() + PAIRING_CODE_TTL_MS).toISOString(), request: freshRequest(),
       });
       const relay = { mac: 'A'.repeat(42) + 'E', member: client.bundle, chainHead: { seq: 2, hash: `sha256:${'0'.repeat(64)}` } };
       await cloud.relayClientPairingMac(TENANT_A, 'device-1', relay);
@@ -353,7 +356,7 @@ describe('E2EE member control plane', () => {
     expect(await code(cloud.relayClientPairingMac(TENANT_A, 'device-1', relay))).toBe('e2ee_member_not_registered');
     await store.registerMember(TENANT_A, {
       deviceId: 'device-1', memberId: device.bundle.memberId, bundle: canonicalizeJson(device.bundle as unknown as JsonValue),
-      deviceMac: 'device-mac', macExpiresAt: clock.now().toISOString(),
+      deviceMac: 'device-mac', macExpiresAt: clock.now().toISOString(), request: freshRequest(),
     });
     expect(await code(cloud.relayClientPairingMac(TENANT_A, 'device-1', { ...relay, member: device.bundle }))).toBe('coordination_input_invalid');
     expect(await code(cloud.relayClientPairingMac(TENANT_A, 'device-1', { ...relay, mac: 'A'.repeat(42) + 'B' }))).toBe('coordination_input_invalid');
