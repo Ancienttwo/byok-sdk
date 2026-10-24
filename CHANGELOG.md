@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Docs** — `docs/architecture/sdk-architecture.md` matches the source again
+  (#927): the `server → core` and `keys → core` edges, message types grouped by
+  `EnvelopeSchema` with no count, wire v3, Grok and the built-in versus
+  Host-injected adapters, pairing that returns the access token, offers read
+  from a held long-poll page, per-envelope `outcomes` with a stalled cursor for
+  an unknown executable message, and terminals recorded by the cloud inbound
+  gate. The journal is described as the one mode of every daemon (#924).
+- **Docs (protocol)** — the `CAPABILITY_FLAGS` comment says the daemon sends its
+  flags in `conn.hello` and the server sends its own on every long-poll
+  response; it no longer describes a `conn.ack` handshake (#925, phase 0). No
+  wire change.
+- **Changed (server)** — the package description no longer names a protocol
+  version (#927).
+- **Changed (cloud-do)** — `@byok-sdk/client` is a declared devDependency. The
+  cloud-do tests import client source, so a client change now also runs the
+  cloud-do suite in CI (#927).
+- **Removed (repo)** — the root scripts `check:brain-manifest`,
+  `check:architecture-sync` and `sync:brain-docs`. They called repo-harness
+  helpers that no longer exist, and `repo-harness run` exits 0 on an unknown
+  helper, so they passed without checking anything (#927).
+
 ## 0.30.1 — source candidate
 
 0.30.1 is a PATCH release under a one-release exception to the pre-1.0

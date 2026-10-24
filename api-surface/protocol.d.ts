@@ -7828,9 +7828,10 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  */
 export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
 /**
- * Capability flags exchanged during the connection handshake (`conn.hello` /
- * `conn.ack`). Additional flags may be introduced without a protocol version
- * bump; unrecognized flags must be ignored by both sides.
+ * Capability flags. The daemon sends its flags in `conn.hello`; the server
+ * sends its own on every long-poll response (`EventsPollResponse`). Additional
+ * flags may be introduced without a protocol version bump; unrecognized flags
+ * must be ignored by both sides.
  *
  * `interactive-approval` is RESERVED as of this addition: it gates the
  * (currently unexercised) approval seam — a server must not route an
@@ -7841,10 +7842,9 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * `approval_resolved` (additive-minor): a SERVER-advertised flag meaning
  * "I understand the `task.approval_resolved` message" (`messages.ts`). This
  * is the N/N-1 answer for that new daemon -> server message: an old server's
- * `CAPABILITY_FLAGS`/`conn.ack.capabilities` never includes it, so a new
- * daemon talking to an old server never sends `task.approval_resolved` at
- * all (see `packages/client`'s `task-runner.ts`) and falls back to the
- * pre-existing implicit-resume inference
+ * advertised capabilities never include it, so a new daemon talking to an old
+ * server never sends `task.approval_resolved` at all (see `packages/client`'s
+ * `task-runner.ts`) and falls back to the pre-existing implicit-resume inference
  * (`ConnectionHub.resumeIfImplicitlyApproved`, `packages/server/src/hub.ts`)
  * unconditionally, exactly as before this flag existed. Unlike
  * `interactive-approval`, this one IS exercised the moment both sides

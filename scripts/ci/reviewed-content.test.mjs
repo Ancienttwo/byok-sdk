@@ -55,7 +55,8 @@ test('a bin API entry selects the package that declares the bin; an undeclared b
   const f = fixture(t);
   f.write('packages/client/package.json', { ...f.manifest, bin: { 'byok-agent-memory-mcp': './dist/bin/byok-agent-memory-mcp.js' } });
   f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 1 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } }, 'bin:byok-agent-memory-mcp': { policy: { budgetBytes: 2 } } });
-  assert.deepEqual(selectImpact(['api-surface/entries.json'], f).dirs.filter(dir => dir.startsWith('packages/')), ['packages/client']);
+  // The owner, then its one package dependent: cloud-do tests import client source (#927).
+  assert.deepEqual(selectImpact(['api-surface/entries.json'], f).dirs.filter(dir => dir.startsWith('packages/')), ['packages/client', 'packages/cloud-do']);
   f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 1 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } }, 'bin:byok-unknown': {} });
   assert.throws(() => selectImpact(['api-surface/entries.json'], f), /unmapped API entry bin:byok-unknown/);
 });
@@ -600,4 +601,65 @@ test('#884: the K4 manifest admits only the I/O-free ./canonical entry', t => {
   }
   f.write(path, { ...manifest, private: false, exports: { ...exports, './canonical': './src/canonical.ts' } });
   assert.throws(() => selectImpact([path], f), /must stay private/);
+});
+
+function rebase(f, message) {
+  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', message);
+  f.base = git('rev-parse', 'HEAD').trim();
+}
+
+test('#927: the root manifest drops only the three retired repo-harness scripts', t => {
+  const f = fixture(t);
+  const retired = {
+    'check:brain-manifest': 'repo-harness run check-brain-manifest',
+    'check:architecture-sync': 'repo-harness run check-architecture-sync',
+    'sync:brain-docs': 'repo-harness run sync-brain-docs --all',
+  };
+  const kept = { 'check:task-sync': 'repo-harness run check-task-sync' };
+  const scripts = { ...f.rootManifest.scripts, ...retired, ...kept };
+  f.write('package.json', { scripts }); rebase(f, 'root with the retired scripts');
+  f.write('package.json', { scripts: { ...f.rootManifest.scripts, ...kept } });
+  assert.equal(selectImpact(['package.json'], f).reason, 'root-ci-scripts');
+  for (const [candidate, reason] of [
+    [{ ...f.rootManifest.scripts }, 'a kept script removed too'],
+    [{ ...f.rootManifest.scripts, ...kept, 'check:brain-manifest': 'true' }, 'a retired script rewritten instead of removed'],
+  ]) {
+    f.write('package.json', { scripts: candidate });
+    assert.throws(() => selectImpact(['package.json'], f), /more than/, reason);
+  }
+});
+
+test('#927: the server manifest admits only the reviewed description without a protocol version', t => {
+  const f = fixture(t);
+  const path = 'packages/server/package.json';
+  const from = 'BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, protocol v2, memory or single-process SQLite storage.';
+  const manifest = { name: '@byok-sdk/server', version: '0.30.1', description: from };
+  f.write(path, manifest); rebase(f, 'server with the v2 description');
+  f.write(path, { ...manifest, description: from.replace('protocol v2, ', '') });
+  assert.deepEqual(selectImpact([path], f).families, ['npm-release-pack']);
+  for (const description of [from.replace('protocol v2', 'protocol v3'), 'BYOK SDK server']) {
+    f.write(path, { ...manifest, description });
+    assert.throws(() => selectImpact([path], f), /more than/, description);
+  }
+});
+
+test('#927: the cloud-do client test edge is admitted only as a workspace spec, in manifest and lock', t => {
+  const f = fixture(t);
+  const path = 'packages/cloud-do/package.json';
+  const manifest = { name: '@byok-sdk/cloud-do', version: '0.30.1', devDependencies: { '@byok-sdk/keys': 'workspace:*' } };
+  f.write(path, manifest);
+  f.lock.workspaces['packages/cloud-do'] = { name: manifest.name, version: manifest.version, devDependencies: { '@byok-sdk/keys': 'workspace:*' } };
+  f.write('bun.lock', f.lock); rebase(f, 'cloud-do without the client edge');
+  const edge = { '@byok-sdk/client': 'workspace:*', '@byok-sdk/keys': 'workspace:*' };
+  f.write(path, { ...manifest, devDependencies: edge });
+  f.lock.workspaces['packages/cloud-do'].devDependencies = edge; f.write('bun.lock', f.lock);
+  const plan = selectImpact([path, 'bun.lock'], f);
+  assert.ok(plan.dirs.includes('packages/cloud-do')); assert.deepEqual(plan.families, ['npm-release-pack']);
+  for (const spec of ['^0.30.1', 'workspace:^']) {
+    f.write(path, { ...manifest, devDependencies: { ...edge, '@byok-sdk/client': spec } });
+    assert.throws(() => selectImpact([path], f), /more than/, spec);
+  }
+  f.write(path, { ...manifest, dependencies: { '@byok-sdk/client': 'workspace:*' } });
+  assert.throws(() => selectImpact([path], f), /more than/, 'a runtime edge');
 });
