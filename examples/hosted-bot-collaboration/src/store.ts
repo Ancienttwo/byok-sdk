@@ -1,17 +1,18 @@
 import type { Pool, PoolClient } from 'pg';
-import { canonical, hash, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, occurrenceRun, taskId, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type Json,
+  type Routine } from '@byok-sdk/example-host-execution-core';
 import { botRoutines, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
 import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { collaborationDue, commitCommand, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type SyncOptions,
-  type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { checkReply, collaborationDue, commitCommand, replyCheckDue, settleDelegations, syncTurn, type Command, type CommandPorts,
+  type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, bindDevice, revokeDevice } from './binding';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
-import { cancelIntent, deliverCancels, intentConclusions, settleFacts, syncFacts, writeSyncStep } from './intents';
+import { cancelIntent, deliverCancels, frozenIntent, intentConclusions, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
 import { decideFinish, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
@@ -91,6 +92,17 @@ export interface HostedStoreOptions {
    * the Host gives each sync in `limits`. Each sync checks it against that budget. Without it, each input keeps its own Turn.
    */
   coalesce?: CoalescePolicy;
+}
+/** The delegation fields that a reply check read. A settle applies only while they are unchanged. */
+export interface ReplyFence { checks?: number; nextCheckAt: number }
+/**
+ * One due reply check (#793 S7): the delegation, its fence, and the chain end's frozen task. A chain end with no intent row
+ * has no task.
+ */
+export interface DueReplyCheck {
+  delegationId: string;
+  fence: ReplyFence;
+  task?: { taskId: string; deviceId: string; agentRef: FrozenInput['payload']['agentRef'] };
 }
 /**
  * The sender's view of one delivery step (#793 D2b-out-2). `none`: the claim changed nothing. `moved`: it changed the entity
@@ -250,13 +262,7 @@ export class HostedCollaborationStore {
 
   /** The stored state of a scope, with every command record. A scope row of an unknown store version is refused. */
   async read(scope: string): Promise<CollaborationState> {
-    const key = storedKey(scope);
-    return this.transaction(async client => {
-      const head = await client.query<{ state_version: number; frame: string }>('SELECT state_version, frame::text AS frame FROM scope WHERE scope = $1', [key]);
-      if (head.rows[0] && !SUPPORTED_STORE_VERSIONS.has(head.rows[0].state_version)) throw new HostedStoreVersionError(head.rows[0].state_version);
-      const rows = await this.load(client, key, head.rows[0]?.frame ?? EMPTY_FRAME, undefined);
-      return stateOf({ collaboration: assemble(rows) as unknown as Json });
-    }, true);
+    return this.transaction(client => this.snapshot(client, storedKey(scope)), true);
   }
 
   /** Every stored row of a scope, in a fixed order, as text. */
@@ -429,6 +435,39 @@ export class HostedCollaborationStore {
   finish(scope: string, turnId: string, evidence: TaskEvidence, ports: FinishPortsFactory): Promise<Conclusion | undefined> {
     return this.transaction(client => this.decideIn(client, storedKey(scope), evidence.terminal.envelope.task_id,
       (state, publish) => decideFinish(client, scope, turnId, state, publish, evidence, ports, this.channel)), false);
+  }
+
+  /**
+   * The due reply checks of `scope` at `now` (#793 S7), selected by K8 `replyCheckDue` as L's `flushReplies` selects them,
+   * read in one snapshot with no lock. A scope with no row has none.
+   */
+  replyChecks(scope: string, now: number): Promise<DueReplyCheck[]> {
+    return this.transaction(async client => {
+      const checks: DueReplyCheck[] = [];
+      for (const d of Object.values((await this.snapshot(client, storedKey(scope))).delegations)) {
+        if (!replyCheckDue(d, now)) continue;
+        const frozen = await frozenIntent(client, scope, taskId(d.chainTurnIds.at(-1)!, 0));
+        checks.push({ delegationId: d.id, fence: { ...(d.checks === undefined ? {} : { checks: d.checks }), nextCheckAt: d.nextCheckAt! },
+          ...(frozen ? { task: { taskId: frozen.input.taskId, deviceId: frozen.input.deviceId, agentRef: frozen.input.payload.agentRef } } : {}) });
+      }
+      return checks;
+    }, true);
+  }
+
+  /**
+   * Applies one reply check (#793 S7), the K8 `checkReply` decision with the store's timers, in one transaction under the
+   * scope lock. The SDK read ran before, outside any transaction. When the delegation is gone, is no longer due at `now` (a
+   * verdict, or a later check time), or no longer matches `fence` (another check applied first), it writes nothing and
+   * returns false. A throw writes nothing.
+   */
+  settleReplyCheck(scope: string, delegationId: string, fence: ReplyFence, check: ReplyCheck, now: number): Promise<boolean> {
+    return this.transaction(client => this.decideIn(client, storedKey(scope), undefined, async (state, publish) => {
+      const d = state.delegations[delegationId];
+      if (!d || !replyCheckDue(d, now) || d.checks !== fence.checks || d.nextCheckAt !== fence.nextCheckAt) return { value: false, outbox: [] };
+      const published = new Set<string>();
+      checkReply(state, d, check, now, (id, body) => { publish(id, body); published.add(id); }, this.timers?.uncertainAfterMs);
+      return { value: true, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now };
+    }), false);
   }
 
   /**
@@ -621,6 +660,14 @@ export class HostedCollaborationStore {
     // The scope's due time is a projection of the state that this transaction commits (#793 S4).
     await client.query('UPDATE scope SET due_at = $2 WHERE scope = $1 AND due_at IS DISTINCT FROM $2', [key, this.dueAt(state)]);
     return value;
+  }
+
+  /** The stored state of a scope in the caller's transaction. A scope row of an unknown store version is refused. */
+  private async snapshot(client: PoolClient, key: string): Promise<CollaborationState> {
+    const head = await client.query<{ state_version: number; frame: string }>('SELECT state_version, frame::text AS frame FROM scope WHERE scope = $1', [key]);
+    if (head.rows[0] && !SUPPORTED_STORE_VERSIONS.has(head.rows[0].state_version)) throw new HostedStoreVersionError(head.rows[0].state_version);
+    const rows = await this.load(client, key, head.rows[0]?.frame ?? EMPTY_FRAME, undefined);
+    return stateOf({ collaboration: assemble(rows) as unknown as Json });
   }
 
   /** The earliest time that the K8 rule `collaborationDue` gives for `state`, or null for none. */

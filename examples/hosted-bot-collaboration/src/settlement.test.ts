@@ -5,7 +5,7 @@ import { hash, taskId, type Json } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import type { Command, DelegationTimers } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { seedCollaboration, settlementVectors, SYNC_OPTIONS, VECTOR_NOW, type SettlementSubject,
+import { replyVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, VECTOR_NOW, type ReplySubject, type SettlementSubject,
   type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
 import type { FrozenInput } from '@byok-sdk/example-host-execution-core';
 import { frozenIntent, settleFacts } from './intents';
@@ -13,6 +13,7 @@ import { storedKey } from './layout';
 import { callbackPorts, vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL, VectorStore } from './postgres.test-support';
 import { HostedReconciler, type HostedTaskPort, type TaskEvidence } from './reconcile';
+import { HostedReplyChecker } from './replies';
 import { inSchema, lockScope } from './store';
 
 // #793 D2f-5: the K8 delegation settlement in the H sync, and the cancel fact that a terminal's outcome freezes.
@@ -97,11 +98,20 @@ async function settlementSubject(): Promise<SettlementSubject> {
   };
 }
 
+/** The settlement subject with H's reply check (#793 S7): `HostedReplyChecker.check` with `read` as the SDK readback. */
+async function replySubject(): Promise<ReplySubject> {
+  const subject = await settlementSubject();
+  return { ...subject, checkReplies: async (now, read, timers) => {
+    await new HostedReplyChecker(timed(timers), { port: () => ({ agentMessage: read }) }).check(subject.scope, now);
+  } };
+}
+
 describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5)', () => {
   beforeAll(async () => { opened = await openStore(); });
   afterAll(async () => { await opened?.close(); });
 
   settlementVectors('H HostedCollaborationStore on Postgres', settlementSubject);
+  replyVectors('H HostedCollaborationStore on Postgres', replySubject);
 
   const TIMERS: DelegationTimers = { cancelGraceMs: 1_000, uncertainAfterMs: 5_000 };
   const unit = (state: CollaborationState, id: string) => state.units[hash([id, 'B'])]!.state;
@@ -343,5 +353,88 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
     expect(await facts()).toMatchObject({ started: [true, true, false], decline: undefined });
     await h.set(h.id, `terminal = NULL, started = true`);
     expect(await facts()).toMatchObject({ started: [true, true, false], decline: undefined });
+  });
+
+  describe('reply checks (#793 S7)', () => {
+    const PENDING = {};
+    /** B's chain end succeeded with no Host reply record, so its delegation's reply check is due at `VECTOR_NOW`. */
+    const pending = async () => {
+      const h = await delegated();
+      expect(await h.finish(h.id, 'task.complete', { document: {} })).toBe('succeeded');
+      await h.sync();
+      expect(await h.delegation()).toMatchObject({ status: 'reply_pending', checks: 0, nextCheckAt: VECTOR_NOW });
+      const reads: string[] = [];
+      const checker = (read: () => Promise<unknown> = async () => PENDING, timeoutMs?: number) => new HostedReplyChecker(store(),
+        { port: () => ({ agentMessage: async taskId => { reads.push(taskId); return read() as never; } }), ...(timeoutMs ? { timeoutMs } : {}) });
+      return { ...h, reads, checker };
+    };
+
+    it('selects the due checks with their fence and the chain end task, and none before the check time', async () => {
+      const h = await pending();
+      expect(await store().replyChecks(h.scope, VECTOR_NOW - 1)).toEqual([]);
+      expect(await store().replyChecks(h.scope, VECTOR_NOW)).toEqual([{ delegationId: h.id, fence: { checks: 0, nextCheckAt: VECTOR_NOW },
+        task: { taskId: taskId(h.id, 0), deviceId: 'device', agentRef: template('device', 'b').payload.agentRef } }]);
+      expect(await store().replyChecks(`tenant:${randomUUID()}`, VECTOR_NOW)).toEqual([]);
+    });
+
+    /** Settles a failed read of `h` with `fence` at `now`, and checks that it writes nothing. */
+    const refused = async (h: Awaited<ReturnType<typeof pending>>, fence: { checks?: number; nextCheckAt: number }, now: number) => {
+      const before = await h.stored();
+      expect(await store().settleReplyCheck(h.scope, h.id, fence, { taskId: taskId(h.id, 0), failed: true }, now)).toBe(false);
+      expect(await h.stored()).toBe(before);
+    };
+    it('writes nothing for a settle whose fence is stale, because another check applied first', async () => {
+      const h = await pending();
+      expect(await h.checker().check(h.scope, VECTOR_NOW)).toBe(1);
+      expect(await h.delegation()).toMatchObject({ checks: 1, nextCheckAt: VECTOR_NOW + 1000 });
+      await refused(h, { checks: 0, nextCheckAt: VECTOR_NOW }, VECTOR_NOW + 1000);
+    });
+    it('writes nothing for a settle after the delegation was answered', async () => {
+      const h = await pending();
+      // The reply body arrives, and the next sync answers the delegation.
+      await store().seed(h.scope, state => {
+        state.replies[taskId(h.id, 0)] = { turnId: h.id, messageId: 'm1', contentHash: 'sha256:m1', contentType: 'text/markdown', acceptedAt: VECTOR_NOW, body: 'Done' };
+      });
+      await h.sync();
+      expect(await h.delegation()).toMatchObject({ verdict: 'answered' });
+      await refused(h, { checks: 0, nextCheckAt: VECTOR_NOW }, VECTOR_NOW);
+    });
+    it('writes nothing for a settle before the check time, with a current fence', async () => {
+      const h = await pending();
+      await h.checker().check(h.scope, VECTOR_NOW);
+      await refused(h, { checks: 1, nextCheckAt: VECTOR_NOW + 1000 }, VECTOR_NOW + 999);
+    });
+
+    it('applies one check when two checkers read the same delegation', async () => {
+      const h = await pending();
+      const applied = await Promise.all([h.checker().check(h.scope, VECTOR_NOW), h.checker().check(h.scope, VECTOR_NOW)]);
+      expect(applied[0] + applied[1]).toBe(1);
+      expect(await h.delegation()).toMatchObject({ status: 'reply_pending', checks: 1, nextCheckAt: VECTOR_NOW + 1000 });
+    });
+
+    it('takes a chain end with no intent row as a failed read, with no SDK call', async () => {
+      const h = await pending();
+      await opened!.pool.query(`DELETE FROM ${table('intent')} WHERE scope = $1 AND key = $2`, [storedKey(h.scope), storedKey(h.id)]);
+      expect(await store().replyChecks(h.scope, VECTOR_NOW)).toEqual([{ delegationId: h.id, fence: { checks: 0, nextCheckAt: VECTOR_NOW } }]);
+      expect(await h.checker().check(h.scope, VECTOR_NOW)).toBe(1);
+      expect(h.reads).toEqual([]);
+      expect(await h.delegation()).toMatchObject({ status: 'reply_pending', checks: 1, nextCheckAt: VECTOR_NOW + 1000 });
+    });
+
+    it('takes a read that does not finish within timeoutMs as a failed read', async () => {
+      const h = await pending();
+      expect(await h.checker(() => new Promise(() => {}), 20).check(h.scope, VECTOR_NOW)).toBe(1);
+      expect(h.reads).toEqual([taskId(h.id, 0)]);
+      expect(await h.delegation()).toMatchObject({ status: 'reply_pending', checks: 1, nextCheckAt: VECTOR_NOW + 1000 });
+    });
+
+    it('writes nothing when the settle throws, and the check rejects', async () => {
+      const h = await pending();
+      // A delegation whose batch is gone: the verdict's batch join throws.
+      await store().seed(h.scope, state => { delete state.batches[state.delegations[h.id]!.batch]; });
+      const before = await h.stored();
+      await expect(h.checker(async () => undefined).check(h.scope, VECTOR_NOW)).rejects.toThrow();
+      expect(await h.stored()).toBe(before);
+    });
   });
 });

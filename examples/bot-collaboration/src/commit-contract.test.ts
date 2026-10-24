@@ -12,11 +12,11 @@ import { retentionVectors, type RetentionSubject } from './retention-vectors.tes
 import type { CommandRecord } from './rules/commit';
 import { DatabaseSync } from 'node:sqlite';
 import { commitCommand, refuseRetired, RetiredIdentityError, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
-import { coalesceVectors, commitVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CoalesceSubject,
-  type CommitSubject, type SeedTeam, type SettlementSubject, type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support';
+import { coalesceVectors, commitVectors, replyVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CoalesceSubject,
+  type CommitSubject, type ReplySubject, type SeedTeam, type SettlementSubject, type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support';
 import { intentRows, settleDelegations } from './delegation';
 import { syncTurn } from './rules/sync';
-import type { Conclusion } from './rules/delegation';
+import { checkReply, replyCheckDue, type Conclusion, type ReplyCheck } from './rules/delegation';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { writeSnapshotBot } from './team';
 
@@ -205,7 +205,7 @@ it('records the root of the input itself when the input also seals an earlier du
  * The L ledger with L's sync order (K8 host.ts `sync`): the Turn steps, then `settleDelegations` on the K8 `intentFacts` adapter.
  * Commands take the intent rows as the L Host's owner commands and outcomes do (host.ts `commitOwner`, `committed`).
  */
-function settlementSubject(): SettlementSubject {
+function settlementSubject(): SettlementSubject & { ledger: HostLedger } {
   const base = ledgerSubject(), ledger = base.ledger;
   const execution = (s: LedgerState, turnId: string) => s.executions[taskId(turnId, 0)]!;
   return {
@@ -232,6 +232,32 @@ function settlementSubject(): SettlementSubject {
   };
 }
 settlementVectors('L HostLedger', settlementSubject);
+
+/**
+ * The L settlement ledger with L's reply check (K8 host.ts `flushReplies`), written out here: each due delegation's chain end
+ * intent, the read outside the transaction, then `checkReply` in one ledger transaction.
+ */
+function replySubject(): ReplySubject {
+  const base = settlementSubject(), ledger = base.ledger;
+  return {
+    ...base,
+    checkReplies: async (now, read, timers) => {
+      for (const d of Object.values(stateOf(ledger.snapshot().application).delegations)) {
+        if (!replyCheckDue(d, now)) continue;
+        const intent = ledger.snapshot().intents[hash(d.chainTurnIds.at(-1)!)];
+        let check: ReplyCheck = { failed: true };
+        if (intent) try {
+          check = { taskId: intent.taskId, failed: false, readback: await read(intent.taskId, intent.execution.deviceId, intent.execution.payload.agentRef) };
+        } catch { check = { taskId: intent.taskId, failed: true }; }
+        ledger.transaction(s => {
+          const state = stateOf(s.application);
+          checkReply(state, state.delegations[d.id]!, check, now, (id, value) => project(s, id, value), timers?.uncertainAfterMs);
+        });
+      }
+    },
+  };
+}
+replyVectors('L HostLedger', replySubject);
 
 /**
  * The L ledger with L's coalescing (K8 host.ts `commitOwner` and `sync`): the owner commands admit inputs with the policy, and
