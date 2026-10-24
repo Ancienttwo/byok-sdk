@@ -1357,8 +1357,11 @@ makes itself `unknown`. The class never changes `retry`.
 | Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a -32603 with no ended `retry_state`, or an unmapped `error_type`) is sent as `unknown` |
 | Pi, Hermes | no structured field: `unknown` |
 
-Every adapter reports a runtime process that ends before its terminal as
-`runtime_exited`.
+Claude, Codex, Grok, Pi (the rpc and prepared lanes) and Hermes report a runtime
+process that ends on its own before its terminal, during start or a turn, as
+`runtime_exited`; an exit the SDK or the vendored session asked for is not one.
+Pi's durable lane reports `unknown` for a worker exit: it recovers a crash during
+a run and otherwise fails without a class.
 
 ### Terminal inference usage observation
 

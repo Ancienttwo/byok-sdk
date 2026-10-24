@@ -10,7 +10,8 @@
   stays display text. Claude reads its assistant error, result status and
   `rate_limit_event`; Codex reads `codexErrorInfo`; Grok passes its OAR
   outcome through; Pi and Hermes report `unknown`. A runtime process that ends
-  before its terminal is `runtime_exited`, and a failure the daemon makes
+  on its own before its terminal is `runtime_exited` (not Pi's durable lane, which
+  reports `unknown`, nor an exit the SDK asked for), and a failure the daemon makes
   itself is `unknown`. The field is gated on the new server flag
   `runtime-failure-class` (`RUNTIME_FAILURE_CLASS_CAPABILITY`), which the
   reference server and the hosted cloud advertise. It stays plaintext on
