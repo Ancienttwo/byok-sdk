@@ -354,4 +354,41 @@ describe('device member keyring sealing rules (E2d-3)', () => {
     await keyring.catchUp();
     expect(await keyring.sealingKey('scope-a', 1)).toBeUndefined();
   });
+
+  it('checks freshness again after the key read caught up past a remove of a scope member', async () => {
+    const { web, device, keyring } = await member();
+    const helper = await stranger();
+    await web.append('add', { member: helper.member });
+    await web.putScope('scope-a', [device, helper.member]);
+    await keyring.catchUp();
+    expect(await keyring.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    // The key is not cached, so the key read catches up, and the remove arrives only there.
+    expect(keyring.cached('scope-a', 1)).toBeUndefined();
+    await web.append('remove', { memberId: helper.member.memberId });
+    expect(await keyring.sealingKey('scope-a', 1)).toBeUndefined();
+    expect(keyring.session!.state.head).toEqual(web.head);
+  });
+
+  it('keeps the key bytes an opening read returned when a concurrent catch-up drops the scope', async () => {
+    const { server, web, device, keyring } = await member();
+    const scopeKey = await web.putScope('scope-a', [device]);
+    let releasePackages!: () => void;
+    let releaseChain!: () => void;
+    server.e2ee.holdPackageReads = new Promise<void>((resolve) => { releasePackages = resolve; });
+    const opening = keyring.openingKey({ id: 'scope-a', epoch: 1 });
+    while (server.e2ee.packageReads === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+    await web.append('shred', { scopeId: 'scope-a' });
+    server.e2ee.holdChainReads = new Promise<void>((resolve) => { releaseChain = resolve; });
+    const chainReads = server.e2ee.chainReads;
+    const catching = keyring.catchUp();
+    while (server.e2ee.chainReads === chainReads) await new Promise((resolve) => setTimeout(resolve, 5));
+    releasePackages();
+    const key = await opening;
+    releaseChain();
+    await catching;
+    // The catch-up zeroed the cached key; the bytes the read returned are its own.
+    expect(keyring.cached('scope-a', 1)).toBeUndefined();
+    expect(key).toEqual(scopeKey);
+    expect(key!.some((byte) => byte !== 0)).toBe(true);
+  });
 });
