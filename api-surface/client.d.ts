@@ -5361,6 +5361,8 @@ export interface DeviceCommandResult {
     readonly stderr: string;
 }
 export type DeviceCommandRunner = (executable: string, args: readonly string[], stdin?: string) => Promise<DeviceCommandResult>;
+/** The Windows generic-credential blob bound, kept on every OS entry of this product. */
+export declare const OS_CREDENTIAL_ENTRY_MAX_BYTES = 2400;
 /** Typed unavailability; callers must surface re-pair/operational failure, never write a file fallback. */
 export declare class DeviceCredentialStoreUnavailableError extends Error {
     constructor(message?: string);
@@ -5410,14 +5412,13 @@ export declare class OsCredentialEntry {
     /** Delete the entry. An absent entry is already deleted. */
     delete(): Promise<void>;
 }
-export type DeviceCredentialStoreOptions = OsCredentialEntryOptions;
 /**
  * Internal OS-backed authority for the bearer token and device private key,
  * in the entry `device-enrollment`.
  */
 export declare class DeviceCredentialStore implements DeviceCredentialBackend {
     #private;
-    constructor(options: DeviceCredentialStoreOptions);
+    constructor(options: OsCredentialEntryOptions);
     read(): Promise<DeviceRecord | undefined>;
     readFirstPairingAttempt(): Promise<FirstPairingAttempt | undefined>;
     saveFirstPairingAttempt(attempt: FirstPairingAttempt): Promise<void>;

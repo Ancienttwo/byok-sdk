@@ -55,6 +55,8 @@ export type DeviceCommandRunner = (
 
 const ENTRY_ACCOUNT = 'device-enrollment';
 const ENCODED_PREFIX = 'byok-device-credential-v1:';
+/** The Windows generic-credential blob bound, kept on every OS entry of this product. */
+export const OS_CREDENTIAL_ENTRY_MAX_BYTES = 2_400;
 const NOT_FOUND = 44;
 
 function providerDiagnostic(stderr: string): string {
@@ -167,7 +169,7 @@ function encode(authority: DeviceCredentialAuthority): string {
   const value = `${ENCODED_PREFIX}${encoded}`;
   // Windows generic-credential blobs are limited; do not silently truncate a
   // bearer/key authority into a different credential.
-  if (Buffer.byteLength(value, 'utf8') > 2_400) {
+  if (Buffer.byteLength(value, 'utf8') > OS_CREDENTIAL_ENTRY_MAX_BYTES) {
     throw new DeviceCredentialStoreError('device credential exceeds the OS credential entry bound');
   }
   return value;
@@ -394,8 +396,6 @@ export class OsCredentialEntry {
   }
 }
 
-export type DeviceCredentialStoreOptions = OsCredentialEntryOptions;
-
 /**
  * Internal OS-backed authority for the bearer token and device private key,
  * in the entry `device-enrollment`.
@@ -403,7 +403,7 @@ export type DeviceCredentialStoreOptions = OsCredentialEntryOptions;
 export class DeviceCredentialStore implements DeviceCredentialBackend {
   readonly #entry: OsCredentialEntry;
 
-  constructor(options: DeviceCredentialStoreOptions) {
+  constructor(options: OsCredentialEntryOptions) {
     this.#entry = new OsCredentialEntry({
       ...options, account: ENTRY_ACCOUNT, label: 'BYOK device enrollment', subject: 'device credentials',
     });
