@@ -56,6 +56,9 @@ export const AGENT_MEMORY_SELECTION_CAPABILITY = 'agent-memory-selection' as con
 /** Device capability required before an ordinary Agent offer may carry `agentMemory: 'read-if-admitted'`. */
 export const AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY = 'agent-memory-read-if-admitted' as const;
 
+/** Device capability required before an ordinary Agent offer may carry `agentMemory: 'read-write-if-admitted'`. */
+export const AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY = 'agent-memory-read-write-if-admitted' as const;
+
 /** Exact capability of the single input-preparation wire authority. */
 export const AGENT_INPUT_PREPARATION_CAPABILITY =
   `agent-input-preparation-v${INPUT_PREPARATION_WIRE_VERSION}` as const;

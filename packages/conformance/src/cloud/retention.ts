@@ -7,6 +7,7 @@ const IDENTITY_KEYS = [
   'agent-content-request:1', 'agent-content-receipt:1', 'agent-home-projection-request:1',
   'agent-home-projection-completion:1', 'agent-input-preparation-request:1',
   'agent-input-preparation-completion:1', 'pairing-completion:v1:1', 'host-unregistered:1',
+  'e2ee-scope-shred:scope-1',
 ];
 export function runCloudRetentionConformance(name: string, factory: CloudCompositionFactory, options: { readonly requestPrefixMock?: string } = {}): void {
   describe(`cloud retention [${name}]`, () => {

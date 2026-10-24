@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
 import { canonical, hash, HostLedger, project, taskId, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
-import { stateOf, type CollaborationState } from './model';
+import { addTurn, stateOf, type CollaborationState } from './model';
 import { admitUserInput, projectInputBatches, sealDueBatches } from './coalesce';
 import { coalescePolicy, type CoalescePolicy } from './rules/coalesce';
 import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitRequest } from './commit';
@@ -11,12 +11,15 @@ import { retainRoots, type RetentionStore } from './retention';
 import { retentionVectors, type RetentionSubject } from './retention-vectors.test-support';
 import type { CommandRecord } from './rules/commit';
 import { DatabaseSync } from 'node:sqlite';
-import { commitCommand, expireCards, refuseRetired, reportCardDecisions, RetiredIdentityError, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
-import { cardVectors, coalesceVectors, commitVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CardSubject,
-  type CoalesceSubject, type CommitSubject, type SeedTeam, type SettlementSubject, type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support';
+import { commitCommand, expireCards, refuseRetired, reportCardDecisions, RetiredIdentityError, seatTurn, type AdmittedIds, type Command,
+  type CommandPorts } from './rules/commands';
+import { cardVectors, coalesceVectors, commitVectors, replyVectors, roomVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors,
+  VECTOR_NOW, type CardSubject, type CoalesceSubject, type CommitSubject, type ReplySubject, type RoomSubject, type SeedTeam, type SettlementSubject,
+  type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support';
+import { advanceRooms } from './rooms';
 import { intentRows, settleDelegations } from './delegation';
 import { syncTurn } from './rules/sync';
-import type { Conclusion } from './rules/delegation';
+import { checkReply, replyCheckDue, type Conclusion, type ReplyCheck } from './rules/delegation';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { writeSnapshotBot } from './team';
 
@@ -217,7 +220,7 @@ it('records the root of the input itself when the input also seals an earlier du
  * The L ledger with L's sync order (K8 host.ts `sync`): the Turn steps, then `settleDelegations` on the K8 `intentFacts` adapter.
  * Commands take the intent rows as the L Host's owner commands and outcomes do (host.ts `commitOwner`, `committed`).
  */
-function settlementSubject(): SettlementSubject {
+function settlementSubject(): SettlementSubject & { ledger: HostLedger } {
   const base = ledgerSubject(), ledger = base.ledger;
   const execution = (s: LedgerState, turnId: string) => s.executions[taskId(turnId, 0)]!;
   return {
@@ -246,6 +249,32 @@ function settlementSubject(): SettlementSubject {
 settlementVectors('L HostLedger', settlementSubject);
 
 /**
+ * The L settlement ledger with L's reply check (K8 host.ts `flushReplies`), written out here: each due delegation's chain end
+ * intent, the read outside the transaction, then `checkReply` in one ledger transaction.
+ */
+function replySubject(): ReplySubject {
+  const base = settlementSubject(), ledger = base.ledger;
+  return {
+    ...base,
+    checkReplies: async (now, read, timers) => {
+      for (const d of Object.values(stateOf(ledger.snapshot().application).delegations)) {
+        if (!replyCheckDue(d, now)) continue;
+        const intent = ledger.snapshot().intents[hash(d.chainTurnIds.at(-1)!)];
+        let check: ReplyCheck = { failed: true };
+        if (intent) try {
+          check = { taskId: intent.taskId, failed: false, readback: await read(intent.taskId, intent.execution.deviceId, intent.execution.payload.agentRef) };
+        } catch { check = { taskId: intent.taskId, failed: true }; }
+        ledger.transaction(s => {
+          const state = stateOf(s.application);
+          checkReply(state, state.delegations[d.id]!, check, now, (id, value) => project(s, id, value), timers?.uncertainAfterMs);
+        });
+      }
+    },
+  };
+}
+replyVectors('L HostLedger', replySubject);
+
+/**
  * The L ledger with L's coalescing (K8 host.ts `commitOwner` and `sync`): the owner commands admit inputs with the policy, and
  * a sync seals the due batches first, runs the Turn steps, and projects the batches last.
  */
@@ -269,3 +298,21 @@ function coalesceSubject(policy?: CoalescePolicy): CoalesceSubject {
 }
 coalesceVectors('L HostLedger', coalesceSubject);
 cardVectors('L HostLedger', cardSubject);
+
+/** The L ledger with L's room step (K8 host.ts `sync`): the room step on the K4 intents, then the Turn steps. */
+function roomSubject(): RoomSubject {
+  const base = ledgerSubject(), ledger = base.ledger;
+  return {
+    ...base,
+    sync: now => {
+      ledger.transaction((s, rows) => {
+        const state = stateOf(s.application);
+        advanceRooms(s, state, now, (id, botId, request) => addTurn(state, seatTurn(id, botId, request)));
+        for (const turn of Object.values(state.turns)) syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now });
+      });
+    },
+    claim: turnId => { ledger.transaction(s => { s.executions[taskId(turnId, 0)]!.started = true; }); },
+    cancelReason: turnId => ledger.snapshot().intents[hash(turnId)]?.cancelReason,
+  };
+}
+roomVectors('L HostLedger', roomSubject);
