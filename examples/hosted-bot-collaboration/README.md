@@ -3,8 +3,9 @@
 Private reference example for #793 (#606 D2). It is the hosted (H) adapter of the K8 collaboration
 commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
-Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c) and
-result reconciliation (D2d). The command entry, the routine scheduler and retention come in later slices of #793.
+Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c), result
+reconciliation (D2d) and the device binding (D2e). The command entry, the routine scheduler and retention come in later
+slices of #793.
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -58,6 +59,7 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
 | `outbox` | projection or delivery that a commit wrote |
 | `intent` | Turn intent: the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
+| `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision and its revoke time |
 
 Each scope and each key is stored as `JSON.stringify(value)`, so two values that UTF-8 would merge stay
 apart, and a NUL is safe. Each body is `json` text, so the stored bytes keep their key order. `ordinal`
@@ -141,6 +143,33 @@ of K4 `reconcile` and `finish`. It reads `readTaskOffer`, `readDeviceTerminal` a
 - Each SDK call runs outside the scope lock. Each write takes the lock and is fenced on `conclusion IS NULL`.
 - A row with no terminal is read again after `pollMs`. The SDK task observer does not wake the reconciler yet.
 
+## Device binding
+
+The mode binding of plan §4.1 is a Host record, not an SDK field. `HostedCollaborationStore.bindDevice(scope, deviceId)`
+binds a device to H at mode revision 1. `revokeDevice(scope, deviceId, revokedAt)` sets `revoked_at` and raises the
+mode revision in one write, and keeps the row as the tombstone.
+
+- A second bind and a second revoke change nothing. A revoked device id is never bound again (O1 option A): a
+  returning device pairs under a new id. A revoke of a device id that was never bound is final too: it writes a
+  tombstone row in the default mode L at revision 2 (creating the scope row if needed), so a later bind of the id is
+  refused.
+- Each write that can create execution checks the binding under the scope lock, and throws `DeviceBindingError`
+  unless the device has an active binding in mode H: the freeze of a new intent (so a sync that would freeze a Turn
+  for such a device throws and writes nothing), and the submit claim (the row backs off with the error).
+- Right before the SDK call, the submitter reads the binding again. A revoked or changed binding throws, so the try
+  backs off with the error. It does not record an expiry.
+- The reconciliation and the message consumer do not check the binding: the result of work that started still lands
+  under its own identity. A revoke does not cancel the open intents of the device. One that was not delivered concludes
+  `expired` at its `wait_until`, through the claim's queued expiry or through the reconciliation, with the revoke
+  reason in `last_error`. A delivered task keeps reconciling under its own identity.
+- One device with no active H binding stalls the sync of its whole scope. The sync writes every Turn of a scope in one
+  transaction, and a freeze for that device throws, so no Turn, cancel or projection of the scope is written. An
+  accepted delegation to a Bot on an unbound or revoked device triggers it too. The owner recovers with a command that
+  does not check the binding: `cancel_turn` for the Turn, `abandon_delegation` for the delegation, or a `team_snapshot`
+  that moves the Bot to a bound device. A per-device refusal (a K8 sync fact per Turn, plus a refusal at the command
+  entry) waits for owner question §55a.
+- The command entry and the routine scheduler take the same check when they are built.
+
 ## Tests
 
 ```sh
@@ -157,6 +186,7 @@ three and runs these suites.
 - The D1 commit vectors run on the store and on a reference subject (the pure rules in memory).
 - The D2b sync vectors run on the store.
 - The message consumer tests port the K4 Host-side message vectors (`host-execution-core/src/message.test.ts`).
+- The device binding tests use an SDK tenant in memory for the submit checks.
 - The reconciliation tests run a real daemon for the completed outcome, a replayed terminal and a busy decline. The
   busy decline runs on L too (K4 with the sync rule's wait), and both conclude `declined` at generation 0. An SDK
   tenant in memory covers the cancel, expiry, lease and identity cases.

@@ -23,6 +23,7 @@ const consumer = () => hostedMessageConsumer(store(), { scopeOf: tenant => tenan
 async function fixture(turnId = 't1') {
   const scope = `tenant:${randomUUID()}`;
   await store().seed(scope, state => seedCollaboration(state));
+  await store().bindDevice(scope, 'device');
   await inSchema(opened!.pool, store().schema, async client => {
     await lockScope(client, storedKey(scope));
     await freezeIntent(client, scope, { key: turnId, source: 'user', execution, waitUntil: 60_000 });

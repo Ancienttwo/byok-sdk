@@ -51,6 +51,7 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H reconciliation on a real SDK server and da
       state.team.bots.main!.execution = template(host!.deviceId, agentId);
       state.turns[turnId] = { id: turnId, root: turnId, botId: 'main', source: 'user', request: 'First', hop: 0, status: 'queued', authority: 'owner' };
     });
+    await store().bindDevice(scope, host!.deviceId);
     await store().sync(scope, { ...SYNC_OPTIONS, history: undefined, now: Date.now() });
     expect(await new HostedSubmitter(opened!.pool, store().schema, { port: () => host!.port }).run()).toEqual({ tried: 1, failed: [] });
     return { scope, turnId, task: taskId(turnId, 0) };
@@ -165,6 +166,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
       state.schemas.q1 = state.schemas.t1!;
       edit(state);
     });
+    await store().bindDevice(scope, 'device');
     const input = await inSchema(opened!.pool, store().schema, async client => {
       await lockScope(client, storedKey(scope));
       return freezeIntent(client, scope, { key: 'q1', source: 'user', execution: template('device'), waitUntil: clock + 60_000 });
