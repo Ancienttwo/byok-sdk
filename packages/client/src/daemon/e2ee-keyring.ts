@@ -28,7 +28,8 @@
  * next sender, so it rotates. It wraps a new scope key at the epoch after the
  * newest one it knows to every current member of the scope policy, puts the
  * packages, and only then keeps the key, with the head it chose the
- * recipients at as the epoch's freshness point.
+ * recipients at as the epoch's freshness point. Such an epoch is also stale
+ * after a member is added to the scope policy or rotates its KEM key.
  */
 import {
   applyMemberChainEntries,
@@ -108,6 +109,10 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   readonly #keys = new Map<string, ScopeKey>();
   readonly #policies = new Map<string, PolicyVersion[]>();
   readonly #removals: Array<{ readonly seq: number; readonly memberId: string }> = [];
+  /** The KEM key rotations of verified entries. */
+  readonly #kemRotations: Array<{ readonly seq: number; readonly memberId: string }> = [];
+  /** The scope epochs this run rotated to itself, by `keyOf`. */
+  readonly #rotated = new Set<string>();
   /** The newest authenticated chain head per scope, then per epoch. */
   readonly #fresh = new Map<string, Map<number, MemberChainPoint>>();
   /** The rotation in flight per scope, so concurrent seals rotate once. */
@@ -271,7 +276,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
 
   #freshEpoch(scopeId: string, minEpoch: number, headSeq: number): number | undefined {
     const epochs = [...(this.#fresh.get(scopeId) ?? new Map<number, MemberChainPoint>())]
-      .filter(([epoch, point]) => epoch >= minEpoch && !this.#stale(scopeId, point.seq, headSeq))
+      .filter(([epoch, point]) => epoch >= minEpoch && !this.#stale(scopeId, epoch, point.seq, headSeq))
       .map(([epoch]) => epoch);
     return epochs.length === 0 ? undefined : Math.max(...epochs);
   }
@@ -282,7 +287,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     if (key === undefined) return undefined;
     // The key read can catch up: the scope and the epoch must still hold at the head it left.
     const current = this.#session;
-    if (current === undefined || this.#scope(current, scopeId) === undefined || this.#stale(scopeId, point.seq, current.state.head!.seq)) {
+    if (current === undefined || this.#scope(current, scopeId) === undefined || this.#stale(scopeId, epoch, point.seq, current.state.head!.seq)) {
       key.fill(0);
       return undefined;
     }
@@ -330,6 +335,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
         return;
       }
       this.#keys.set(keyOf(scopeId, epoch), { scopeKey, keyId: packages[0]!.keyId, sender: self });
+      this.#rotated.add(keyOf(scopeId, epoch));
       const points = this.#fresh.get(scopeId) ?? new Map<number, MemberChainPoint>();
       this.#fresh.set(scopeId, points);
       points.set(epoch, { seq: head.seq, hash: head.hash });
@@ -411,6 +417,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
         this.#policies.set(subject.scopeId!, versions);
       } else if (entry.op === 'remove') {
         this.#removals.push({ seq: entry.seq, memberId: subject.memberId! });
+      } else if (entry.op === 'rotate') {
+        this.#kemRotations.push({ seq: entry.seq, memberId: subject.memberId! });
       }
     }
   }
@@ -422,13 +430,20 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   /**
    * Whether a chain change after `from`, up to `to`, may have left a member
    * out of the epoch. Conservative: a member of any policy version counts.
+   * An epoch this run rotated to holds packages for the members and KEM keys
+   * at `from` only, so a member added to the scope, or a member KEM rotation,
+   * after it also counts: the next seal rotates again.
    */
-  #stale(scopeId: string, from: number, to: number): boolean {
+  #stale(scopeId: string, epoch: number, from: number, to: number): boolean {
     const versions = this.#policies.get(scopeId) ?? [];
     const members = new Set(versions.flatMap((version) => version.members));
-    if (this.#removals.some((removal) => removal.seq > from && removal.seq <= to && members.has(removal.memberId))) return true;
-    return versions.some((version, index) => version.seq > from && version.seq <= to && index > 0
-      && versions[index - 1]!.members.some((member) => !version.members.includes(member)));
+    const after = (change: { readonly seq: number }): boolean => change.seq > from && change.seq <= to;
+    if (this.#removals.some((removal) => after(removal) && members.has(removal.memberId))) return true;
+    const own = this.#rotated.has(keyOf(scopeId, epoch));
+    if (own && this.#kemRotations.some((rotation) => after(rotation) && members.has(rotation.memberId))) return true;
+    return versions.some((version, index) => after(version) && index > 0 && (
+      versions[index - 1]!.members.some((member) => !version.members.includes(member))
+      || (own && version.members.some((member) => !versions[index - 1]!.members.includes(member)))));
   }
 
   #scope(session: DeviceMemberSession, scopeId: string): MemberChainScope | undefined {

@@ -9,7 +9,15 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createMemberKeyBundle, generateMemberKeyRecord, openMemberKeyRecord, type SealedContentHeaderV1 } from '@byok-sdk/core/sealed-payload';
+import {
+  createMemberKeyBundle,
+  generateMemberKeyRecord,
+  openMemberKeyRecord,
+  openScopeKeyPackage,
+  type MemberKeyBundleV1,
+  type MemberKeys,
+  type SealedContentHeaderV1,
+} from '@byok-sdk/core/sealed-payload';
 import { E2EE_SCOPE_KEY_PACKAGE_PUT_MAX } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AuthManager } from '../daemon/auth-manager';
@@ -272,6 +280,19 @@ function header(scopeId: string, epoch: number, chainHead: { seq: number; hash: 
   return { scope: { id: scopeId, epoch }, chainHead, sender } as SealedContentHeaderV1;
 }
 
+/** Open the stored package of one scope epoch for `recipient` with the KEM key pair given; it throws when there is none or it does not open. */
+async function openStored(host: E2eeTestHost, sender: MemberKeyBundleV1, scopeId: string, epoch: number, recipient: string, kem: MemberKeys['kem']): Promise<Uint8Array> {
+  const pkg = host.packages.find((stored) => stored.scopeId === scopeId && stored.epoch === epoch && stored.recipient === recipient);
+  const opened = await openScopeKeyPackage({
+    package: pkg,
+    expected: { tenantId: 'tenant-test', scopeId, epoch },
+    recipient: { memberId: recipient, kemPublicJwk: kem.publicJwk, kemPrivateKey: kem.privateKey },
+    senderSigningPublicJwk: sender.signingPublicJwk,
+  });
+  if (!opened.ok) throw new Error(`the package of epoch ${epoch} does not open: ${opened.reason}`);
+  return opened.scopeKey;
+}
+
 describe('device member keyring sealing rules (E2d-3)', () => {
   it('refuses a scope whose policy holds another device (§7.9 requirement 1)', async () => {
     const { web, device, keyring } = await member();
@@ -499,5 +520,49 @@ describe('device member keyring rotation (E2d-4)', () => {
     expect(await keyring.sealingKey('scope-d', 1)).toBeUndefined();
     expect(logs.join('\n')).toContain('scope "scope-d" has no current member but this device; it is not rotated');
     expect(server.e2ee.devicePuts).toHaveLength(0);
+  });
+  it('does not seal at a new epoch that a member added to the scope while its packages were put', async () => {
+    const { server, web, device, keyring } = await member();
+    const helper = await stranger();
+    await web.append('add', { member: helper.member });
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    let release!: () => void;
+    server.e2ee.holdPackagePuts = new Promise<void>((resolve) => { release = resolve; });
+    const sealing = keyring.sealingKey('scope-a', 1);
+    while (server.e2ee.devicePuts.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+    const members = [device.memberId, web.member.memberId, helper.member.memberId].sort();
+    await web.append('scope-policy', { scopeId: 'scope-a', categories: ['task-input', 'task-output'], members });
+    await keyring.catchUp();
+    release();
+    expect(await sealing).toBeUndefined();
+    server.e2ee.holdPackagePuts = undefined;
+    const next = (await keyring.sealingKey('scope-a', 1))!;
+    expect(next.epoch).toBe(3);
+    expect(await openStored(server.e2ee, device, 'scope-a', 3, helper.member.memberId, helper.keys.kem)).toEqual(next.scopeKey);
+  });
+
+  it('does not seal at a new epoch that a member KEM rotation made stale while its packages were put', async () => {
+    const { server, web, device, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    let release!: () => void;
+    server.e2ee.holdPackagePuts = new Promise<void>((resolve) => { release = resolve; });
+    const sealing = keyring.sealingKey('scope-a', 1);
+    while (server.e2ee.devicePuts.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+    const kem = (await openMemberKeyRecord(await generateMemberKeyRecord({ tenantId: 'tenant-test' })))!.kem;
+    const kemEpoch = web.member.kemEpoch + 1;
+    const rotated = await createMemberKeyBundle({
+      signingPublicJwk: web.keys.signing.publicJwk, signingPrivateKey: web.keys.signing.privateKey, kemPublicJwk: kem.publicJwk, kemEpoch,
+    });
+    await web.append('rotate', { memberId: web.member.memberId, kemPublicJwk: rotated.kemPublicJwk, kemEpoch, kemSig: rotated.kemSig });
+    await keyring.catchUp();
+    release();
+    expect(await sealing).toBeUndefined();
+    server.e2ee.holdPackagePuts = undefined;
+    const next = (await keyring.sealingKey('scope-a', 1))!;
+    expect(next.epoch).toBe(3);
+    expect(await openStored(server.e2ee, device, 'scope-a', 3, web.member.memberId, kem)).toEqual(next.scopeKey);
+    await expect(openStored(server.e2ee, device, 'scope-a', 3, web.member.memberId, web.keys.kem)).rejects.toThrow(/does not open/u);
   });
 });
