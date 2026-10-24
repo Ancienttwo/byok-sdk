@@ -52,6 +52,20 @@ async function tombstones(client: PoolClient, scopeKey: string, ids: Array<[Reti
 const identities = (namespace: RetiredNamespace, id: string): Array<[RetiredNamespace, string]> =>
   namespace === 'round' ? [['round', id]] : [['turn', id], ['input', id]];
 
+/** The intent tombstone of a Turn id (#793 S8): compaction removed its intent row for good. `intent` is not a K8 row namespace. */
+export const intentIdentity = (turnId: string): string => hash(['intent', turnId]);
+/** The Turn ids among `turnIds` whose intent compaction retired (#793 S8). */
+export async function retiredIntents(client: PoolClient, scopeKey: string, turnIds: readonly string[]): Promise<Set<string>> {
+  const retired = await retiredHashes(client, scopeKey, turnIds.map(intentIdentity));
+  return new Set(turnIds.filter(id => retired.has(intentIdentity(id))));
+}
+/** Writes permanent tombstones. They never expire. */
+export async function retire(client: PoolClient, scopeKey: string, identities: Iterable<string>): Promise<void> {
+  for (const identity of identities) {
+    await client.query('INSERT INTO retired_identity (scope, identity) VALUES ($1, $2) ON CONFLICT DO NOTHING', [scopeKey, identity]);
+  }
+}
+
 /** The Turn ids among `turnIds` that retention retired (#798), as L reads them in its sync (K8 `commit.ts`). */
 export async function retiredTurns(client: PoolClient, scopeKey: string, turnIds: readonly string[]): Promise<Set<string>> {
   const isRetired = await tombstones(client, scopeKey, turnIds.flatMap(id => identities('turn', id)));
@@ -143,8 +157,6 @@ export async function decideRetention(client: PoolClient, scopeKey: string, stat
     }
     if (row.namespace === 'commands') await client.query('DELETE FROM command WHERE scope = $1 AND key = $2', [scopeKey, storedKey(row.id)]);
   }
-  for (const identity of retired) {
-    await client.query('INSERT INTO retired_identity (scope, identity) VALUES ($1, $2) ON CONFLICT DO NOTHING', [scopeKey, identity]);
-  }
+  await retire(client, scopeKey, retired);
   return result;
 }
