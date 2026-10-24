@@ -29,7 +29,7 @@ async function fixture(plan: WorkerPlan[]) {
   return started;
 }
 /** Starts the durable lane over the inert worker; a start failure is returned, not thrown. */
-async function start(plan: WorkerPlan[]) {
+async function start(plan: WorkerPlan[], options: { blockConfigWrite?: boolean } = {}) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'fix-pi-durable-recovery-')));
   roots.push(root);
   const home = path.join(root, 'home');
@@ -38,6 +38,8 @@ async function start(plan: WorkerPlan[]) {
   const journal: string[] = [];
   const children: ChildProcess[] = [];
   const scratch = await testExecutionScratch();
+  // A directory where the launch config goes makes its write fail after replica admission.
+  if (options.blockConfigWrite) await mkdir(path.join(scratch.sdkDir, 'config.json'));
   const release = vi.fn(() => scratch.release());
   // The injected spawn launches only our inert fixture, never Pi.
   const starting = startDurablePi({
@@ -173,6 +175,17 @@ describe.skipIf(process.platform === 'win32')('durable start contract', () => {
       message: 'durable runtime start failed', failure: { class: 'runtime_exited' },
     });
     expect(children).toHaveLength(1);
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('disposes the admitted replica and releases the launch when the config write fails', async () => {
+    const started = await start([{ complete: true }], { blockConfigWrite: true });
+    const { startError, children, release } = started as { startError: unknown; children: ChildProcess[]; release: () => unknown };
+    expect(startError).toMatchObject({
+      phase: 'start', category: 'infrastructure', retry: 'non-retryable',
+      message: 'durable runtime start failed', failure: { class: 'unknown' },
+    });
+    expect(children).toHaveLength(0);
     expect(release).toHaveBeenCalledOnce();
   });
 

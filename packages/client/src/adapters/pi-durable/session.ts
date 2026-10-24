@@ -39,20 +39,20 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   if (!selection || (selection.lane !== 'byok' && selection.lane !== 'byok-profile')) throw startFailure('authority', 'durable requires BYOK selection');
   const binding = { agentRef: { ...manifest.agentRef, tenantId: context.tenantId }, taskId: manifest.taskId, leaseId: manifest.lease.leaseId, canonicalHome: manifest.lease.canonicalHome };
   const configDir = input.scratch.sdkDir;
-  let file: Awaited<ReturnType<typeof admitReplica>>;
-  try { file = await admitReplica(options.replicaRoot, binding); await fs.chmod(configDir, 0o700); }
-  catch (error) { throw startFailure('infrastructure', undefined, false, error); }
   const configPath = path.join(configDir, 'config.json');
   const profileRef = selection.lane === 'byok-profile' ? selection.providerProfile.profileRef : selection.providerId;
   const model = selection.lane === 'byok-profile' ? selection.providerProfile.modelId : selection.modelId;
-  const serialized = serializePiHostConfig({ format: 'byok.pi.durable-launch', version: 2,
-    replica: binding, replicaRoot: options.replicaRoot,
-    provider: `byok-sdk-${profileRef}`, model, instruction: input.instruction,
-    mcp: { mcpEnv: input.mcpEnv, mcpServers: input.mcpServers ?? {}, observation: input.mcpToolsetTools ?? {},
-      launchCwd: binding.canonicalHome },
-  });
-  try { await fs.writeFile(configPath, serialized.bytes, { mode: 0o600 }); }
-  catch (error) { await input.scratch.release(); throw startFailure('infrastructure', undefined, false, error); }
+  let serialized: ReturnType<typeof serializePiHostConfig>;
+  let file: Awaited<ReturnType<typeof admitReplica>>;
+  try {
+    serialized = serializePiHostConfig({ format: 'byok.pi.durable-launch', version: 2,
+      replica: binding, replicaRoot: options.replicaRoot,
+      provider: `byok-sdk-${profileRef}`, model, instruction: input.instruction,
+      mcp: { mcpEnv: input.mcpEnv, mcpServers: input.mcpServers ?? {}, observation: input.mcpToolsetTools ?? {},
+        launchCwd: binding.canonicalHome },
+    });
+    file = await admitReplica(options.replicaRoot, binding);
+  } catch (error) { throw startFailure('infrastructure', undefined, false, error); }
   const shellGroups = new Set<number>();
   let workerPid: number | undefined;
   const queue = new AsyncQueue<AgentEvent>();
@@ -97,7 +97,10 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
     disposal = attempt.catch(error => { disposal = undefined; throw error; });
     return disposal;
   };
+  // A typed start failure claims cleanup: everything after admission is disposed through close().
   try {
+    await fs.chmod(configDir, 0o700);
+    await fs.writeFile(configPath, serialized.bytes, { mode: 0o600 });
     const first = await spawn(false);
     pump = (async () => {
       let child = first;
