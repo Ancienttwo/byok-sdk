@@ -221,6 +221,16 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       after.exports = before.exports;
     }
   } else if (path === 'package.json') {
+    // repo-harness owns its generated command scripts. Admit additions, removals
+    // and edits whose old and new values both invoke repo-harness; every other
+    // script and field stays in the deep comparison below.
+    const harnessScript = value => typeof value === 'string' && value.startsWith('repo-harness ');
+    for (const name of new Set([...Object.keys(before.scripts ?? {}), ...Object.keys(after.scripts ?? {})])) {
+      const oldValue = before.scripts?.[name], newValue = after.scripts?.[name];
+      if ((oldValue === undefined || harnessScript(oldValue)) && (newValue === undefined || harnessScript(newValue))) {
+        delete before.scripts?.[name]; delete after.scripts?.[name];
+      }
+    }
     const oldCommand = before.scripts?.['test:scripts'], newCommand = after.scripts?.['test:scripts'];
     const prefix = 'node --test --test-concurrency=1 ';
     if (!oldCommand?.startsWith(prefix) || !newCommand?.startsWith(prefix)) throw new Error('Unreviewed test command');
