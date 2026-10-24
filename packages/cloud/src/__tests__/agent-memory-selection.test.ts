@@ -1,5 +1,6 @@
 import {
   AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY,
+  AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY,
   AGENT_MEMORY_SELECTION_CAPABILITY,
   decodeEnvelope,
   type AgentEgressPolicy,
@@ -114,5 +115,31 @@ describe('hosted agentMemory read-if-admitted (#815)', () => {
     const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId, afterSeq: 0, limit: 10 });
     expect(page.messages).toHaveLength(1);
     expect(decodeEnvelope(page.messages[0]!.body).payload).toMatchObject({ agentMemory: 'read-if-admitted' });
+  });
+});
+
+describe('hosted agentMemory read-write-if-admitted (#833)', () => {
+  const readWriteIfAdmitted = memoryOffersWith('read-write-if-admitted');
+  const selection = [...BASE_CAPABILITIES, AGENT_MEMORY_SELECTION_CAPABILITY];
+
+  it.each(readWriteIfAdmitted)('%s refuses read-write-if-admitted to a device without agent-memory-read-write-if-admitted before task or mailbox state', async (_name, enqueue) => {
+    // The read-if-admitted flag does not stand in for this one.
+    const { harness, deviceId } = await deviceWith([...selection, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY]);
+
+    await expect(enqueue(harness, deviceId, 'memory-refused')).rejects.toMatchObject({
+      code: 'agent_capability_missing',
+      message: expect.stringContaining(AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY),
+    });
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, 'memory-refused')).toBeUndefined();
+    expect(await mailboxTypes(harness, deviceId)).toEqual([]);
+  });
+
+  it.each(readWriteIfAdmitted)('%s delivers read-write-if-admitted to a device that advertises both flags', async (_name, enqueue) => {
+    const { harness, deviceId } = await deviceWith([...selection, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY]);
+
+    await enqueue(harness, deviceId, 'memory-admitted');
+    const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId, afterSeq: 0, limit: 10 });
+    expect(page.messages).toHaveLength(1);
+    expect(decodeEnvelope(page.messages[0]!.body).payload).toMatchObject({ agentMemory: 'read-write-if-admitted' });
   });
 });
