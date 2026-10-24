@@ -63,9 +63,10 @@ export class DeviceMemberKeyring {
     return this.#session;
   }
 
-  /** The opened key of one scope epoch, if this run holds it and the verified scope still holds this device. */
+  /** The opened key of one scope epoch, if this run holds it and the latest policy still holds this device and its sender. */
   cached(scopeId: string, epoch: number): ScopeKey | undefined {
-    return this.#session !== undefined && this.#scopeHoldsSelf(this.#session, scopeId) ? this.#keys.get(keyOf(scopeId, epoch)) : undefined;
+    const key = this.#keys.get(keyOf(scopeId, epoch));
+    return key !== undefined && this.#session !== undefined && this.#refusal(this.#session, scopeId, key.sender) === undefined ? key : undefined;
   }
 
   /**
@@ -86,17 +87,18 @@ export class DeviceMemberKeyring {
     await this.catchUp();
     const session = this.#session;
     if (session === undefined) return { ok: false, reason: 'member_lost' };
-    const scope = session.state.scopes.get(scopeId);
-    if (scope === undefined) return { ok: false, reason: 'scope_unknown' };
-    const self = session.member.memberId;
-    if (!scope.members.includes(self)) return { ok: false, reason: 'not_a_scope_member' };
-    const known = this.#keys.get(keyOf(scopeId, epoch));
+    const refused = this.#refusal(session, scopeId);
+    if (refused !== undefined) return { ok: false, reason: refused };
+    const known = this.cached(scopeId, epoch);
     if (known !== undefined) return { ok: true, key: known };
+    const self = session.member.memberId;
     const packages = await this.options.client.readKeyPackages(scopeId, epoch);
     // The Host keeps one package per (scope, epoch, recipient).
     if (packages.length !== 1) return { ok: false, reason: packages.length === 0 ? 'key_package_missing' : 'key_package_invalid' };
-    const pkg = packages[0] as { readonly sender?: unknown };
-    const sender = typeof pkg.sender === 'string' && scope.members.includes(pkg.sender) ? session.state.members.get(pkg.sender) : undefined;
+    const pkg: unknown = packages[0];
+    if (typeof pkg !== 'object' || pkg === null) return { ok: false, reason: 'key_package_invalid' };
+    const senderId = (pkg as { readonly sender?: unknown }).sender;
+    const sender = typeof senderId === 'string' && this.#refusal(session, scopeId, senderId) === undefined ? session.state.members.get(senderId) : undefined;
     if (sender === undefined) return { ok: false, reason: 'key_package_sender_invalid' };
     const opened = await openScopeKeyPackage({
       package: pkg,
@@ -105,11 +107,13 @@ export class DeviceMemberKeyring {
       senderSigningPublicJwk: sender.signingPublicJwk,
     });
     if (!opened.ok) return opened;
-    // A concurrent fetch, or a loss, may have settled this epoch meanwhile.
+    // A concurrent fetch may have settled this epoch, or a catch-up moved the view, while the package was read and opened.
     const raced = this.cached(scopeId, epoch);
-    if (raced !== undefined || this.#session === undefined) {
+    const current = this.#session;
+    const lost = current === undefined ? 'member_lost' : this.#refusal(current, scopeId, sender.memberId);
+    if (raced !== undefined || lost !== undefined) {
       opened.scopeKey.fill(0);
-      return raced === undefined ? { ok: false, reason: 'member_lost' } : { ok: true, key: raced };
+      return raced !== undefined ? { ok: true, key: raced } : { ok: false, reason: lost! };
     }
     const key = { scopeKey: opened.scopeKey, keyId: opened.keyId, sender: sender.memberId };
     this.#keys.set(keyOf(scopeId, epoch), key);
@@ -129,17 +133,22 @@ export class DeviceMemberKeyring {
     await records.saveState({ tenantId, deviceId, member: current.member, anchor: current.anchor, head: applied.state.head! });
     const session = { ...current, state: applied.state, hashes: [...current.hashes, ...await entryHashes(entries)] };
     this.#session = session;
-    // A shred drops the scope, and a policy can drop this device: their keys go.
+    // A shred drops the scope, and a policy can drop this device or the sender: their keys go.
     for (const [at, key] of this.#keys) {
-      if (!this.#scopeHoldsSelf(session, at.slice(at.indexOf('\0') + 1))) {
+      if (this.#refusal(session, at.slice(at.indexOf('\0') + 1), key.sender) !== undefined) {
         key.scopeKey.fill(0);
         this.#keys.delete(at);
       }
     }
   }
 
-  #scopeHoldsSelf(session: DeviceMemberSession, scopeId: string): boolean {
-    return session.state.scopes.get(scopeId)?.members.includes(session.member.memberId) === true;
+  /** Why a key of this scope, from this sender, is not usable in the verified state; `undefined` when it is. */
+  #refusal(session: DeviceMemberSession, scopeId: string, sender?: string): 'scope_unknown' | 'not_a_scope_member' | 'key_package_sender_invalid' | undefined {
+    const scope = session.state.scopes.get(scopeId);
+    if (scope === undefined) return 'scope_unknown';
+    if (!scope.members.includes(session.member.memberId)) return 'not_a_scope_member';
+    if (sender !== undefined && !(scope.members.includes(sender) && session.state.members.has(sender))) return 'key_package_sender_invalid';
+    return undefined;
   }
 
   #lose(message: string): void {
