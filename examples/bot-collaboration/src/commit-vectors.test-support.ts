@@ -12,6 +12,8 @@ import type { Conclusion, DelegationTimers, ReplyReadback } from './rules/delega
 import type { Json } from './rules/turn';
 import type { CoalescePolicy } from './rules/coalesce';
 import { ROOM_GRACE_MS, roomFields, roomInput, type Seat } from './rules/rooms';
+import { projectionRequestId, type HomeReadback } from './team';
+import type { HomeOperation } from './team-model';
 
 /**
  * #739 D1 commit contract vectors. Each store runs the same cases: the K8 L ledger now, and the H adapter in D2.
@@ -1030,6 +1032,143 @@ export function cardCallVectors(name: string, open: () => CardCallSubject | Prom
       await h.decide('rejected');
       await h.unchanged(h.connector({ sent: true }));
       expect(h.calls).toEqual([]);
+    });
+  });
+}
+
+/** The SDK Agent home calls of a Host flush, as L binds `readAgentHomeProjection` and `enqueueAgentHomeProjection`. */
+export interface HomeCalls {
+  read(request: HomeOperation['request']): Promise<HomeReadback | undefined>;
+  enqueue(request: HomeOperation['request']): Promise<unknown>;
+}
+/**
+ * #793 S13 Agent home flush. `flushHomes(now, calls)` is the Host's home flush at `now`, as L's `flushHomes` runs it: for
+ * each Bot's oldest pending operation, while that Bot has no intent with no conclusion, the readback of each request in
+ * order through `calls.read` (K8 `checkHomeReadback`), then K8 `applyHomeTerminal`, or `planHomeRetry`, the enqueue of the
+ * latest request through `calls.enqueue` and `homeEnqueued`; a step that throws runs `failHomeFlush`. A Host may skip an
+ * idempotent enqueue before `retryAt` (L enqueues at each pass), and may wait before it looks at a Bot that was busy, so
+ * these vectors flush an hour later after such a wait.
+ */
+export interface HomeSubject extends SyncSubject {
+  flushHomes(now: number, calls: HomeCalls): void | Promise<void>;
+}
+export function homeVectors(name: string, open: () => HomeSubject | Promise<HomeSubject>): void {
+  describe(`Agent home flush contract: ${name}`, () => {
+    const HOUR = 3_600_000;
+    /** Bot `bot` at profile revision 2, ready at 1, with a pending home operation for revision 2. Returns its sequence. */
+    const pendingBot = (state: CollaborationState, bot: string): number => {
+      state.team.bots[bot] = { ...state.team.bots.main!, id: bot, name: bot, mainBot: false, revision: '2', readyRevision: '1', execution: template('device', bot) };
+      const sequence = ++state.sequence;
+      state.team.homeOperations.push({ sequence, botId: bot, status: 'pending', retries: [], request: { deviceId: 'device', payload: {
+        requestId: projectionRequestId([bot, '2']), agentRef: { agentId: bot, profileRevision: '2' }, projectionHash: `sha256:${bot}`,
+        projection: { schemaVersion: 'bot-profile.v1', name: bot, role: 'Member', persona: '', model: 'default' } } } as HomeOperation['request'] });
+      return sequence;
+    };
+    /** `t1` is concluded and reported, and Bots `b` and `c` each wait for one home operation. */
+    const opened = async () => {
+      const subject = await open();
+      const sequences: Record<string, number> = {};
+      await subject.change(state => {
+        Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+        for (const bot of ['b', 'c']) sequences[bot] = pendingBot(state, bot);
+      });
+      const operation = async (bot: string, index = 0) => (await subject.state()).team.homeOperations.filter(op => op.botId === bot)[index]!;
+      const reads: string[] = [], enqueued: string[] = [];
+      /** Home calls that log each request id and answer a read with `answer(request)`. */
+      const calls = (answer: (request: HomeOperation['request']) => HomeReadback | undefined | Error = () => undefined): HomeCalls => ({
+        read: async request => {
+          reads.push(request.payload.requestId);
+          const value = answer(request);
+          if (value instanceof Error) throw value;
+          return value;
+        },
+        enqueue: async request => { enqueued.push(request.payload.requestId); },
+      });
+      /** The readback of `request` with `status`. */
+      const readback = (request: HomeOperation['request'], status: HomeReadback['status']): HomeReadback =>
+        ({ deviceId: request.deviceId, agentRef: request.payload.agentRef, requestId: request.payload.requestId, projectionHash: request.payload.projectionHash, status });
+      return { subject, sequences, operation, reads, enqueued, calls, readback };
+    };
+
+    for (const status of ['applied', 'idempotent'] as const) {
+      it(`applies an operation whose readback is ${status}, readies its Bot at that revision, and reads it no more`, async () => {
+        const h = await opened();
+        await h.subject.flushHomes(VECTOR_NOW, h.calls(request => h.readback(request, status)));
+        expect(await h.operation('b')).toMatchObject({ status: 'applied' });
+        expect((await h.subject.state()).team.bots.b).toMatchObject({ revision: '2', readyRevision: '2' });
+        expect(h.enqueued).toEqual([]);
+        const reads = h.reads.length, before = await h.subject.stored();
+        await h.subject.flushHomes(VECTOR_NOW + HOUR, h.calls(request => h.readback(request, status)));
+        expect(h.reads).toHaveLength(reads);
+        expect(await h.subject.stored()).toBe(before);
+      });
+    }
+
+    it('fails an operation whose readback is terminal and not applied, and publishes persona-failed', async () => {
+      const h = await opened();
+      await h.subject.flushHomes(VECTOR_NOW, h.calls(request => h.readback(request, 'conflict')));
+      expect(await h.operation('b')).toMatchObject({ status: 'failed', error: 'conflict' });
+      expect((await h.subject.state()).team.bots.b).toMatchObject({ readyRevision: '1' });
+      expect(await h.subject.projection(`persona-failed:${h.sequences.b}`)).toEqual([{ owner: 'b', revision: '2', reason: 'conflict', recoverable: true }]);
+    });
+
+    it('keeps an operation pending with the error when a readback is for another request, and enqueues nothing', async () => {
+      const h = await opened();
+      await h.subject.flushHomes(VECTOR_NOW, h.calls(request => ({ ...h.readback(request, 'applied'), projectionHash: 'sha256:other' })));
+      expect(await h.operation('b')).toMatchObject({ status: 'pending', error: 'Home readback identity conflict' });
+      expect(h.enqueued).toEqual([]);
+    });
+
+    it('enqueues the first request with no terminal, then once retryAt has passed a retry with the next request id and a backoff', async () => {
+      const h = await opened();
+      const first = (await h.operation('b')).request.payload.requestId;
+      await h.subject.flushHomes(VECTOR_NOW, h.calls());
+      expect(h.enqueued).toContain(first);
+      expect(await h.operation('b')).toMatchObject({ status: 'pending', retries: [], retryAt: VECTOR_NOW + 1000 });
+      h.reads.length = 0; h.enqueued.length = 0;
+      await h.subject.flushHomes(VECTOR_NOW + 1000, h.calls());
+      const retry = projectionRequestId([first, 1]);
+      expect(await h.operation('b')).toMatchObject({ retries: [{ payload: { requestId: retry } }], retryAt: VECTOR_NOW + 3000 });
+      // Every request is read back, in order, before the retry is enqueued.
+      expect(h.reads.filter(id => id === first || id === retry)).toEqual([first]);
+      expect(h.enqueued.filter(id => id === first || id === retry)).toEqual([retry]);
+      // A terminal readback of the first request still settles the operation.
+      await h.subject.flushHomes(VECTOR_NOW + HOUR, h.calls(request => request.payload.requestId === first ? h.readback(request, 'applied') : undefined));
+      expect(await h.operation('b')).toMatchObject({ status: 'applied' });
+    });
+
+    it('keeps an operation pending with the error when a read throws', async () => {
+      const h = await opened();
+      await h.subject.flushHomes(VECTOR_NOW, h.calls(() => new Error('home read down')));
+      expect(await h.operation('b')).toMatchObject({ status: 'pending', error: 'home read down' });
+    });
+
+    it('waits while a Bot has an intent with no conclusion, without blocking another Bot, and flushes it after the intent concludes', async () => {
+      const h = await opened();
+      // Bot `b` runs at revision 2 already, so its Turn freezes; its operation for revision 2 is still pending.
+      await h.subject.change(state => { state.team.bots.b!.readyRevision = '2'; });
+      const turn = await h.subject.commit({ scope: h.subject.scope, commandId: 'busy-b', command: { kind: 'input', botId: 'b', key: 'busy', request: 'Work', sender: 'owner' } });
+      const turnId = (turn.disposition as { value: string }).value;
+      await h.subject.sync();
+      expect(await h.subject.intent(turnId)).toBeDefined();
+      await h.subject.flushHomes(VECTOR_NOW, h.calls(request => h.readback(request, 'applied')));
+      expect(await h.operation('b')).toMatchObject({ status: 'pending' });
+      expect(await h.operation('c')).toMatchObject({ status: 'applied' });
+      expect(h.reads.filter(id => id === projectionRequestId(['b', '2']))).toEqual([]);
+      await h.subject.concludeIntent(turnId, 'succeeded');
+      await h.subject.flushHomes(VECTOR_NOW + HOUR, h.calls(request => h.readback(request, 'applied')));
+      expect(await h.operation('b')).toMatchObject({ status: 'applied' });
+    });
+
+    it('flushes only the oldest pending operation of a Bot, and the next one after it settles', async () => {
+      const h = await opened();
+      await h.subject.change(state => { pendingBot(state, 'b'); state.team.homeOperations.at(-1)!.request.payload.requestId = projectionRequestId(['b', '3']); });
+      await h.subject.flushHomes(VECTOR_NOW, h.calls(request => h.readback(request, 'applied')));
+      expect(await h.operation('b', 0)).toMatchObject({ status: 'applied' });
+      expect(await h.operation('b', 1)).toMatchObject({ status: 'pending' });
+      expect(h.reads).not.toContain(projectionRequestId(['b', '3']));
+      await h.subject.flushHomes(VECTOR_NOW + HOUR, h.calls(request => h.readback(request, 'applied')));
+      expect(await h.operation('b', 1)).toMatchObject({ status: 'applied' });
     });
   });
 }
