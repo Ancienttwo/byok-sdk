@@ -690,9 +690,10 @@ describe('device member keyring rotation (E2d-4)', () => {
     const current = new DeviceMemberKeyring(resumed.session!, { ...options, carried });
     expect(await current.sealingKey('scope-a', 1)).toEqual({ scopeKey, epoch: 1, sender: device.memberId, chainHead: web.head });
 
+    // A point that is not kept leaves no fresh epoch, so the device rotates past epoch 1 (E2d-4).
     const forged = { ...carried, points: new Map([['scope-a', new Map([[1, { ...web.head!, hash: `sha256:${'0'.repeat(64)}` }]])]]) };
-    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: forged }).sealingKey('scope-a', 1)).toBeUndefined();
+    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: forged }).sealingKey('scope-a', 1)).toMatchObject({ epoch: 2 });
     const otherMember = { ...carried, memberId: web.member.memberId };
-    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: otherMember }).sealingKey('scope-a', 1)).toBeUndefined();
+    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: otherMember }).sealingKey('scope-a', 1)).toMatchObject({ epoch: 3 });
   });
 });
