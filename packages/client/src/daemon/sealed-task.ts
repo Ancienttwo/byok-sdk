@@ -68,7 +68,8 @@ export interface SealedTasksOptions {
   /**
    * The flags the current session's server advertised, which decide whether
    * an output may name its ciphertext blob. `undefined` while the connection
-   * is between sessions: the next session's flags are not known yet.
+   * is between sessions or a start is under way: the next session's flags
+   * are not known yet.
    */
   readonly serverCapabilities: () => readonly string[] | undefined;
 }
@@ -339,7 +340,10 @@ export class SealedTasks {
       const message = `ciphertext upload failed: ${error instanceof Error ? error.message : String(error)}`;
       // A 4xx other than a timeout or a rate limit (a quota, the blob size
       // limit, a bad request) refuses every later reservation the same way.
-      if (error instanceof BlobHttpError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
+      // A 401 or 403 from the signed content URL is its `sig`/`exp` pair
+      // expiring (`docs/protocol.md` §7.1); the next attempt reserves a new URL.
+      if (error instanceof BlobHttpError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429
+        && !(error.signedUrl && (error.status === 401 || error.status === 403))) {
         throw new Error(message);
       }
       throw new SealedRetryError(message);
