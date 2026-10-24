@@ -8,7 +8,7 @@ import path from 'node:path';
 import os from 'node:os';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
-import { sealRuntimeOperationManifest, type Session } from '../types';
+import { sealRuntimeOperationManifest, type Session, type MessageDraftDelta } from '../types';
 import { parseModelProviderProfile } from '../../../keys/src/provider-profile';
 import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 import { buildPiPreparedArgs, buildPiProviderProjection } from '../../../keys/src/pi-provider-projection';
@@ -82,7 +82,7 @@ function liveGroup(pgid:number):number[] {return execFileSync('ps',['-eo','pid=,
 describe.skipIf(process.platform === 'win32')('durable ordinary worker through custody argv', () => {
   it('real worker sends Host input and reports completion and ordinary usage', async () => {
     const f = await fixture(res => finish(res, 'complete'));
-    const events:AgentEvent[] = []; for await (const event of f.session.events) events.push(event);
+    const events:Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);
     expect(events.some(event => event.type === 'error')).toBe(false);
     expect(events.at(-1)).toEqual({ type: 'turn_end' });
     expect(events.filter(event => event.type === 'usage')).toEqual([{ type: 'usage', inputTokens: 3, cachedInputTokens: 0, outputTokens: 2, totalTokens: 5 }]);
@@ -96,7 +96,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     expect(process.env.BYOK_TEST_ENV_MARKER).toBe('1');
     const command = `${JSON.stringify(process.execPath)} -e 'console.log(JSON.stringify({key:process.env.PI_PROVIDER_API_KEY,control:process.env.BYOK_TEST_ENV_MARKER}))'`;
     const f = await fixture((res,n) => { if (n === 1) tool(res, command); else finish(res, 'isolated'); });
-    const events:AgentEvent[] = []; for await (const event of f.session.events) events.push(event);
+    const events:Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);
     expect(events.some(event => event.type === 'error')).toBe(false); expect(f.calls()).toBe(2);
     const use = events.find(event => event.type === 'tool_use'), result = events.find(event => event.type === 'tool_result');
     expect(use?.type).toBe('tool_use'); expect(result?.type).toBe('tool_result');
@@ -113,7 +113,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     const dir = await mkdtemp(path.join(os.tmpdir(),'byok-path-outside-')); roots.push(dir);
     const outside = path.join(dir,'outside.txt'); await writeFile(outside,'ORIGINAL_DENIED_DATA\nOUTSIDE_FILE_MARKER');
     const f = await fixture((res,n) => { if (n === 1) tool(res,`@${outside}`,name); else finish(res,'reached'); });
-    const events:AgentEvent[] = []; for await (const event of f.session.events) events.push(event);
+    const events:Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);
     const result = events.find(event => event.type === 'tool_result');
     expect(result?.type).toBe('tool_result'); if (result?.type !== 'tool_result') throw new Error('result missing');
     expect(result.isError).toBe(false);
@@ -124,7 +124,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
   it.each(['read','write','edit'])('real %s rejects a path inside the durable replica store before file access', async name => {
     let target = '';
     const f = await fixture((res,n,_body,paths) => { target = path.join(paths.store,'durable-replicas','probe.txt'); if (n === 1) tool(res,target,name); else finish(res,'denied'); });
-    const events:AgentEvent[] = []; for await (const event of f.session.events) events.push(event);
+    const events:Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);
     const result = events.find(event => event.type === 'tool_result');
     expect(result?.type).toBe('tool_result'); if (result?.type !== 'tool_result') throw new Error('result missing');
     expect(result.isError).toBe(true); expect(JSON.stringify(result.output)).toContain('structured tool path inside replica store');
@@ -133,7 +133,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
   it('credential never enters the real worker initial environment, including OS process introspection from bash', async () => {
     const command = process.platform === 'darwin' ? 'ps eww -p "$PPID"' : process.platform === 'linux' ? 'cat /proc/$PPID/environ' : 'env';
     const f = await fixture((res,n) => { if (n === 1) tool(res, command); else finish(res, 'introspection complete'); });
-    const events:AgentEvent[] = []; for await (const event of f.session.events) events.push(event);
+    const events:Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);
     expect(events.some(event => event.type === 'error')).toBe(false);
     const result = events.find(event => event.type === 'tool_result');
     expect(result?.type).toBe('tool_result');
@@ -157,7 +157,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     expect(await readFile(path.join(f.home, 'marker'), 'utf8')).toBe('once');
     const group=Number(execFileSync('ps',['-p',(await readFile(path.join(f.home,'tool-pid'),'utf8')).trim(),'-o','pgid='],{encoding:'utf8'}).trim());ownedGroups.add(group);expect(liveGroup(group).length).toBeGreaterThan(0);
     f.children[0]!.kill('SIGKILL');
-    const events:AgentEvent[] = []; await expect((async()=>{for await (const event of f.session.events) events.push(event);})()).rejects.toMatchObject({phase:'run',retry:'non-retryable'});
+    const events:Array<AgentEvent | MessageDraftDelta> = []; await expect((async()=>{for await (const event of f.session.events) events.push(event);})()).rejects.toMatchObject({phase:'run',retry:'non-retryable'});
     expect(events.at(-1)?.type).toBe('error'); expect(events.some(event => event.type === 'turn_end')).toBe(false);
     expect(f.calls()).toBe(1); expect(f.journal).toEqual(['tool-intent:0']);
     await vi.waitFor(()=>expect(liveGroup(group)).toEqual([]),{timeout:4_000,interval:20});
@@ -167,7 +167,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     let kill: (() => void) | undefined;
     const f = await fixture((res,n) => { if (n === 1) { setTimeout(() => kill?.(), 20); return; } finish(res, 'resumed'); });
     kill = () => { f.children[0]!.kill('SIGKILL'); };
-    const events:AgentEvent[] = []; for await (const event of f.session.events) events.push(event);
+    const events:Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);
     expect(f.calls()).toBe(2); expect(f.journal).toEqual(['respawn-intent:1']);
     expect(events.some(event => event.type === 'error')).toBe(false); expect(events.at(-1)).toEqual({ type: 'turn_end' });
     expect(f.session).not.toHaveProperty('resultDocument');
@@ -176,7 +176,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
   it('third respawn is refused after two checkpoint recoveries without more model activity', async () => {
     let f: Awaited<ReturnType<typeof fixture>>;
     f=await fixture((_res,n)=>{setTimeout(()=>f.children[n-1]?.kill('SIGKILL'),50);});
-    const events:AgentEvent[]=[];await expect((async()=>{for await(const event of f.session.events)events.push(event);})()).rejects.toMatchObject({phase:'run',retry:'non-retryable'});
+    const events:Array<AgentEvent | MessageDraftDelta>=[];await expect((async()=>{for await(const event of f.session.events)events.push(event);})()).rejects.toMatchObject({phase:'run',retry:'non-retryable'});
     expect(f.children).toHaveLength(3);expect(f.calls()).toBe(3);expect(f.journal).toEqual(['respawn-intent:1','respawn-intent:2']);
     expect(events.at(-1)?.type).toBe('error');expect(events.some(event=>event.type==='turn_end')).toBe(false);
     await new Promise(resolve=>setTimeout(resolve,150));expect(f.calls()).toBe(3);
@@ -184,7 +184,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
   it('lease loss while respawn intent is being committed refuses a replacement worker', async () => {
     let owned=true;let f:Awaited<ReturnType<typeof fixture>>;
     f=await fixture(()=>{setTimeout(()=>f.children[0]?.kill('SIGKILL'),50);},{ownsLease:()=>owned,record:async kind=>{if(kind==='respawn-intent')owned=false;}});
-    const events:AgentEvent[]=[];await expect((async()=>{for await(const event of f.session.events)events.push(event);})()).rejects.toMatchObject({phase:'run',retry:'non-retryable'});
+    const events:Array<AgentEvent | MessageDraftDelta>=[];await expect((async()=>{for await(const event of f.session.events)events.push(event);})()).rejects.toMatchObject({phase:'run',retry:'non-retryable'});
     expect(f.children).toHaveLength(1);expect(f.calls()).toBe(1);expect(f.journal).toEqual(['respawn-intent:1']);expect(events.at(-1)?.type).toBe('error');
     await new Promise(resolve=>setTimeout(resolve,150));expect(f.calls()).toBe(1);
   },30_000);
@@ -208,7 +208,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
       const calls=[{name:'bash',args:{command:`sleep 0.1; ln -s ${JSON.stringify(path.join(paths.store,"durable-replicas"))} race-link; printf ready > race-ready`}},{name:'write',args:{path:'race-link/forbidden.txt',content:'RACE_WRITE'}}];
       res.writeHead(200,{'content-type':'text/event-stream'});res.end([{...base,choices:[{index:0,delta:{role:'assistant',tool_calls:calls.map((call,index)=>({index,id:`race-${index}`,type:'function',function:{name:call.name,arguments:JSON.stringify(call.args)}}))},finish_reason:null}]},{...base,choices:[{index:0,delta:{},finish_reason:'tool_calls'}],usage:{prompt_tokens:3,completion_tokens:2,total_tokens:5}}].map(value=>`data: ${JSON.stringify(value)}\n\n`).join('')+'data: [DONE]\n\n');
     },{record:async kind=>{if(kind==='tool-intent'&&++intents===2)await vi.waitFor(async()=>expect(await readFile(path.join(home,'race-ready'),'utf8')).toBe('ready'),{timeout:4_000,interval:20});}});
-    const events:AgentEvent[]=[];for await(const event of f.session.events)events.push(event);
+    const events:Array<AgentEvent | MessageDraftDelta>=[];for await(const event of f.session.events)events.push(event);
     const results=events.filter(event=>event.type==='tool_result');expect(results).toHaveLength(2);expect(results[1]?.isError).toBe(true);expect(JSON.stringify(results[1])).toContain('structured tool path');
     await expect(readFile(path.join(home,'race-link/forbidden.txt'))).rejects.toThrow();expect(await readFile(path.join(home,'race-ready'),'utf8')).toBe('ready');
   },30_000);

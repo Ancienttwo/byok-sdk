@@ -12,7 +12,7 @@ import type { SpawnFn } from '../adapters/pi/rpc-client';
 import { createPiInputPreparationCompiler, resolvePinnedPiRuntimeIdentity } from '../adapters/pi/input-preparation';
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import { sealRuntimeOperationManifest, type RuntimePreparedLaunchV1 } from '../types';
+import { sealRuntimeOperationManifest, type RuntimePreparedLaunchV1, type MessageDraftDelta } from '../types';
 
 /**
  * The 0.86 response-timing change, at the one seam that has to tolerate it.
@@ -116,7 +116,7 @@ async function prepareArtifact(cwd: string, artifactPath: string): Promise<Runti
 }
 
 /** The real adapter start path, with only the prepared runtime child substituted. */
-async function startPrepared(refuse: boolean): Promise<{ close: () => Promise<void>; events: AsyncIterable<AgentEvent> }> {
+async function startPrepared(refuse: boolean): Promise<{ close: () => Promise<void>; events: AsyncIterable<AgentEvent | MessageDraftDelta> }> {
 const __executionScratch = await testExecutionScratch();
 
   const workspace = await tmpDir('byok-prepared-timing-cwd-');
@@ -187,7 +187,7 @@ describe('the prepared response now arrives after the run\'s first session event
       // `PiSession` existed, and both still reach the session's stream. Two is
       // the smallest number that makes ORDER a claim at all — one frame is in
       // order by construction.
-      const seen: AgentEvent[] = [];
+      const seen: Array<AgentEvent | MessageDraftDelta> = [];
       const iterator = events[Symbol.asyncIterator]();
       for (let read = 0; read < 2; read += 1) {
         const next = await iterator.next();

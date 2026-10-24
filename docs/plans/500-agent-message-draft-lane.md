@@ -154,5 +154,5 @@ Stop advertising `agent-message-draft`; the daemon stops sending. Rows expire by
 
 ## Deferred
 
-- Token-level drafts for Claude Code (`--include-partial-messages`) and Codex (`item/agentMessage/delta`). Reason: the adapters do not emit partial text today and the Claude closing-reply path changed in #501. Owner: a follow-up issue after #501 and PR B merge.
+- Token-level drafts for Claude Code (`--include-partial-messages`) and Codex (`item/agentMessage/delta`). Reason: the adapters do not emit partial text today and the Claude closing-reply path changed in #501. Owner: #870, which also adds Grok and Hermes.
 - Draft events on `TaskHandle.events()` for `dispatch()` callers. Reason: #500 uses `executions.submit`.

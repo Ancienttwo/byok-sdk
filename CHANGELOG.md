@@ -38,6 +38,21 @@
   (`AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY`), and server and hosted
   cloud refuse the value to a device without it, before the task exists. The
   terminal does not report which mode ran.
+- **Feature (client)** — the Claude, Codex, Grok and Hermes adapters declare
+  `messageDraft`, so a Host that reads `tasks.messageDraft` sees their reply
+  while it is written (#870). Claude always runs with
+  `--include-partial-messages`. Its text deltas, Codex
+  `item/agentMessage/delta` and Grok's ACP text deltas feed the draft only.
+  Hermes already sends one `progress` per chunk. The accepted message stays
+  the only authority: each later `progress` event reconciles the draft, and
+  `progress`, the closing reply and the published body are unchanged. There
+  is no protocol or wire change.
+- **Type change (client)** — `Session.events` is now
+  `AsyncIterable<AgentEvent | MessageDraftDelta>`, and `MessageDraftDelta`
+  is exported from `@byok-sdk/client`. Code that iterates `Session.events`
+  and types each item as `AgentEvent` no longer compiles. It must widen the
+  type or skip items of type `message_draft_delta`. An adapter whose
+  `events` yields only `AgentEvent` still compiles.
 - **Feature (client)** — an opt-in Claude option for Agent tasks (#871,
   #873). `ClaudeAdapterOptions.agentUserContext: 'excluded'` starts a
   `task.offer_for_agent` task with `--strict-mcp-config`, so only the task's
