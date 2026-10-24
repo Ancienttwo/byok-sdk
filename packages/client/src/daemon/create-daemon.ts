@@ -163,8 +163,10 @@ import { GitWorkspaceStore } from './git-workspace-store';
 import { DeviceRecordRePairRequiredError, DeviceStore, enrollmentIdentityOf, type DeviceEnrollment, type DeviceRecord } from './store';
 import { createDeviceCredentialStore, createDeviceMemberCustody } from './device-credential-provider';
 import { DeviceMemberRecords } from './device-member-custody';
-import { checkVerificationSecret, enrollDeviceMember, resumeDeviceMember, type DeviceMemberSession } from './device-member';
+import { checkVerificationSecret, enrollDeviceMember, resumeDeviceMember } from './device-member';
 import { StoredDeviceProofSigner } from './device-proof-signer';
+import { processE2eeKeyPackageNotice, type DeviceMemberStatus } from './e2ee-key-package-notice';
+import { DeviceMemberKeyring } from './e2ee-keyring';
 import { E2eeMemberClient } from './e2ee-member-client';
 import { JournalRecordTooLargeError, JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord } from './journal/journal';
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
@@ -1645,8 +1647,10 @@ export function buildDaemonWithAdapters(
   const memberRecords = overrides.deviceCredentials === undefined
     ? new DeviceMemberRecords(createDeviceMemberCustody({ productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials }))
     : undefined;
-  /** This run's verified member, once the background resume finds one. E2d-2 and E2d-3 read it. */
-  let deviceMember: DeviceMemberSession | undefined;
+  /** This run's verified member, once the background resume finds one. */
+  let deviceMember: DeviceMemberKeyring | undefined;
+  let memberResuming = false;
+  const memberStatus = (): DeviceMemberStatus => deviceMember ?? (memberResuming ? 'resuming' : 'none');
   let memberAbort: AbortController | undefined;
   let memberResume: Promise<void> | undefined;
   const logMember = (message: string): void => console.warn(`[byok/client] ${message}`);
@@ -2813,6 +2817,13 @@ export function buildDaemonWithAdapters(
       await processProviderProvisioningNotice(envelope.payload);
       return true;
     };
+    const handleE2eeKeyPackageEnvelope = async (envelope: Envelope): Promise<boolean> => {
+      if (envelope.type !== 'e2ee.key_package.available') return false;
+      // Task-free and never journaled, like provisioning. It throws only while
+      // the member resumes or when a Host read fails, which keeps the row.
+      await processE2eeKeyPackageNotice(envelope.payload, memberStatus(), logMember);
+      return true;
+    };
     const handleAgentEgressEnvelope = async (envelope: Envelope): Promise<boolean> => {
       if (envelope.type !== 'agent.egress.ack') return false;
       if (config.agentEgress === undefined) return true;
@@ -2996,6 +3007,7 @@ export function buildDaemonWithAdapters(
               if (await handleAgentInputPreparationEnvelope(envelope)) return;
               if (await handleProviderProvisioningEnvelope(envelope)) return;
               if (await handleAgentMemoryIntentEnvelope(envelope)) return;
+              if (await handleE2eeKeyPackageEnvelope(envelope)) return;
               if (await handleAgentEgressEnvelope(envelope)) return;
               if (await handleAgentContentReadEnvelope(envelope)) return;
               // S3b (L-003): §12.7.2.1's `emergency` row — "fail-closed，不 ack
@@ -3059,6 +3071,7 @@ export function buildDaemonWithAdapters(
               if (envelope.type === 'agent.input.preparation') return handleAgentInputPreparationEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'provider.provisioning.available') return handleProviderProvisioningEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.memory.intent.available') return handleAgentMemoryIntentEnvelope(envelope).then(() => undefined);
+              if (envelope.type === 'e2ee.key_package.available') return handleE2eeKeyPackageEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.egress.ack') return handleAgentEgressEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.message.disposition') return runner?.handleEnvelope(envelope) ?? Promise.resolve();
               if (envelope.type === 'agent.content.read') return handleAgentContentReadEnvelope(envelope).then(() => undefined);
@@ -3134,9 +3147,10 @@ export function buildDaemonWithAdapters(
     });
     await replayRecoveryTerminals();
     startPresenceProducer();
+    // Before the connection, so a key package notice in the first poll waits for the resume.
+    startDeviceMember(record);
     await connection.start();
     daemonStarted = true;
-    startDeviceMember(record);
     } catch (err) {
       const haltReason = startupHaltReason(err);
       if (haltReason === undefined) {
@@ -3369,16 +3383,21 @@ export function buildDaemonWithAdapters(
   function startDeviceMember(record: DeviceRecord): void {
     if (memberRecords === undefined) return;
     const abort = new AbortController();
+    const options = {
+      records: memberRecords, client: memberClient(record, abort.signal), tenantId: record.tenantId, deviceId: record.deviceId, log: logMember,
+    };
     memberAbort = abort;
-    memberResume = resumeDeviceMember({
-      records: memberRecords, client: memberClient(record, abort.signal), tenantId: record.tenantId, deviceId: record.deviceId,
-      log: logMember, signal: abort.signal,
-    }).then((session) => {
-      if (abort.signal.aborted || session === undefined) return;
-      deviceMember = session;
+    memberResuming = true;
+    memberResume = resumeDeviceMember({ ...options, signal: abort.signal }).then((session) => {
+      if (abort.signal.aborted) return;
+      memberResuming = false;
+      if (session === undefined) return;
+      deviceMember = new DeviceMemberKeyring(session, options);
       console.info(`[byok/client] E2EE member ${session.member.memberId} verified at chain seq ${session.state.head!.seq}`);
     }, (error: unknown) => {
-      if (!abort.signal.aborted) logMember(`E2EE member resume failed; E2EE stays off: ${error instanceof Error ? error.message : String(error)}`);
+      if (abort.signal.aborted) return;
+      memberResuming = false;
+      logMember(`E2EE member resume failed; E2EE stays off: ${error instanceof Error ? error.message : String(error)}`);
     });
   }
 
@@ -3404,6 +3423,7 @@ export function buildDaemonWithAdapters(
     memberAbort?.abort();
     memberAbort = undefined;
     deviceMember = undefined;
+    memberResuming = false;
     await memberResume;
     memberResume = undefined;
     const errors: unknown[] = [];
