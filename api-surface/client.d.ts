@@ -8316,6 +8316,8 @@ export declare class SealedTasks {
     sealRecovered(offer: Envelope, terminal: Envelope): Promise<Envelope>;
     /** The plaintext envelope a sealed outbound replaced, so the local observer keeps reading plaintext. */
     plainOf(envelope: Envelope): Envelope;
+    /** The closed plaintext form of a terminal that has no sealing key (decision 12d). */
+    unsealable(envelope: Envelope): Envelope | undefined;
 }
 // ==== @byok-sdk/client dist/daemon/session-workspace-store.d.ts ====
 /** What's recoverable for a given `sessionRef` — see the class doc comment. */
