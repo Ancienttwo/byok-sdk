@@ -1,0 +1,160 @@
+/**
+ * The verified device member of one daemon run and the scope keys it opened
+ * (#654 E2d-2; design §7.4).
+ *
+ * The chain view only moves forward: `catchUp()` reads the entries after the
+ * verified head, applies them to the verified state, and stores the new
+ * head. An invalid entry, or a chain that no longer holds this device as a
+ * current member, ends the member for this run.
+ *
+ * A scope key comes from the one key package the Host holds for this
+ * member at `(scope, epoch)`. The package is opened only when the scope is
+ * in the verified state and both this device and the sender are in its
+ * latest `scope-policy`; the sender's signing key comes from the verified
+ * chain, never from the Host. The opened keys are kept in memory only.
+ */
+import { applyMemberChainEntries, openScopeKeyPackage, type ScopeKeyPackageOpenResult } from '@byok-sdk/core/sealed-payload';
+import type { DeviceMemberRecords } from './device-member-custody';
+import { entryHashes, type DeviceMemberLog, type DeviceMemberSession } from './device-member';
+import type { E2eeMemberClient } from './e2ee-member-client';
+
+export interface ScopeKey {
+  readonly scopeKey: Uint8Array;
+  readonly keyId: string;
+  /** Member id of the member that sealed the package. */
+  readonly sender: string;
+}
+
+export type ScopeKeyFetchFailure =
+  | 'member_lost'
+  | 'scope_unknown'
+  | 'not_a_scope_member'
+  | 'key_package_missing'
+  | 'key_package_sender_invalid'
+  | Extract<ScopeKeyPackageOpenResult, { ok: false }>['reason'];
+
+export type ScopeKeyFetchResult =
+  | { readonly ok: true; readonly key: ScopeKey }
+  | { readonly ok: false; readonly reason: ScopeKeyFetchFailure };
+
+export interface DeviceMemberKeyringOptions {
+  readonly records: DeviceMemberRecords;
+  readonly client: E2eeMemberClient;
+  readonly tenantId: string;
+  readonly deviceId: string;
+  readonly log: DeviceMemberLog;
+}
+
+function keyOf(scopeId: string, epoch: number): string {
+  return `${epoch}\0${scopeId}`;
+}
+
+export class DeviceMemberKeyring {
+  #session: DeviceMemberSession | undefined;
+  readonly #keys = new Map<string, ScopeKey>();
+  #tail: Promise<void> = Promise.resolve();
+
+  constructor(session: DeviceMemberSession, private readonly options: DeviceMemberKeyringOptions) {
+    this.#session = session;
+  }
+
+  /** The verified member, or `undefined` once this run lost it. */
+  get session(): DeviceMemberSession | undefined {
+    return this.#session;
+  }
+
+  /** The opened key of one scope epoch, if this run holds it and the latest policy still holds this device and its sender. */
+  cached(scopeId: string, epoch: number): ScopeKey | undefined {
+    const key = this.#keys.get(keyOf(scopeId, epoch));
+    return key !== undefined && this.#session !== undefined && this.#refusal(this.#session, scopeId, key.sender) === undefined ? key : undefined;
+  }
+
+  /**
+   * Apply the chain entries after the verified head. Calls run one at a
+   * time. A transport failure throws and leaves the view as it was.
+   */
+  catchUp(): Promise<void> {
+    const run = this.#tail.then(() => this.#advance());
+    this.#tail = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
+   * Catch up, then fetch and open the key package of one scope epoch. A
+   * transport failure throws; every other end is a result.
+   */
+  async fetch(scopeId: string, epoch: number): Promise<ScopeKeyFetchResult> {
+    await this.catchUp();
+    const session = this.#session;
+    if (session === undefined) return { ok: false, reason: 'member_lost' };
+    const refused = this.#refusal(session, scopeId);
+    if (refused !== undefined) return { ok: false, reason: refused };
+    const known = this.cached(scopeId, epoch);
+    if (known !== undefined) return { ok: true, key: known };
+    const self = session.member.memberId;
+    const packages = await this.options.client.readKeyPackages(scopeId, epoch);
+    // The Host keeps one package per (scope, epoch, recipient).
+    if (packages.length !== 1) return { ok: false, reason: packages.length === 0 ? 'key_package_missing' : 'key_package_invalid' };
+    const pkg: unknown = packages[0];
+    if (typeof pkg !== 'object' || pkg === null) return { ok: false, reason: 'key_package_invalid' };
+    const senderId = (pkg as { readonly sender?: unknown }).sender;
+    const sender = typeof senderId === 'string' && this.#refusal(session, scopeId, senderId) === undefined ? session.state.members.get(senderId) : undefined;
+    if (sender === undefined) return { ok: false, reason: 'key_package_sender_invalid' };
+    const opened = await openScopeKeyPackage({
+      package: pkg,
+      expected: { tenantId: this.options.tenantId, scopeId, epoch },
+      recipient: { memberId: self, kemPublicJwk: session.keys.kem.publicJwk, kemPrivateKey: session.keys.kem.privateKey },
+      senderSigningPublicJwk: sender.signingPublicJwk,
+    });
+    if (!opened.ok) return opened;
+    // A concurrent fetch may have settled this epoch, or a catch-up moved the view, while the package was read and opened.
+    const raced = this.cached(scopeId, epoch);
+    const current = this.#session;
+    const lost = current === undefined ? 'member_lost' : this.#refusal(current, scopeId, sender.memberId);
+    if (raced !== undefined || lost !== undefined) {
+      opened.scopeKey.fill(0);
+      return raced !== undefined ? { ok: true, key: raced } : { ok: false, reason: lost! };
+    }
+    const key = { scopeKey: opened.scopeKey, keyId: opened.keyId, sender: sender.memberId };
+    this.#keys.set(keyOf(scopeId, epoch), key);
+    return { ok: true, key };
+  }
+
+  async #advance(): Promise<void> {
+    const current = this.#session;
+    if (current === undefined) return;
+    const head = current.state.head!;
+    const entries = await this.options.client.readChainFrom(head.seq);
+    if (entries.length === 0 || this.#session !== current) return;
+    const applied = await applyMemberChainEntries(current.state, entries);
+    if (!applied.ok) return this.#lose(`a member chain entry after seq ${head.seq} is invalid (${applied.reason}); E2EE stays off`);
+    if (!applied.state.members.has(current.member.memberId)) return this.#lose('this device is no longer a current member of the chain; E2EE stays off');
+    const { records, tenantId, deviceId } = this.options;
+    await records.saveState({ tenantId, deviceId, member: current.member, anchor: current.anchor, head: applied.state.head! });
+    const session = { ...current, state: applied.state, hashes: [...current.hashes, ...await entryHashes(entries)] };
+    this.#session = session;
+    // A shred drops the scope, and a policy can drop this device or the sender: their keys go.
+    for (const [at, key] of this.#keys) {
+      if (this.#refusal(session, at.slice(at.indexOf('\0') + 1), key.sender) !== undefined) {
+        key.scopeKey.fill(0);
+        this.#keys.delete(at);
+      }
+    }
+  }
+
+  /** Why a key of this scope, from this sender, is not usable in the verified state; `undefined` when it is. */
+  #refusal(session: DeviceMemberSession, scopeId: string, sender?: string): 'scope_unknown' | 'not_a_scope_member' | 'key_package_sender_invalid' | undefined {
+    const scope = session.state.scopes.get(scopeId);
+    if (scope === undefined) return 'scope_unknown';
+    if (!scope.members.includes(session.member.memberId)) return 'not_a_scope_member';
+    if (sender !== undefined && !(scope.members.includes(sender) && session.state.members.has(sender))) return 'key_package_sender_invalid';
+    return undefined;
+  }
+
+  #lose(message: string): void {
+    this.#session = undefined;
+    for (const key of this.#keys.values()) key.scopeKey.fill(0);
+    this.#keys.clear();
+    this.options.log(message);
+  }
+}

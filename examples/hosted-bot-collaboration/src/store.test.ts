@@ -172,6 +172,23 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
     expect(keys).toEqual(Object.keys((await memorySubject().state()).turns.t1!).reverse());
   });
 
+  it('loads 11 or more entries of a list and 10 or more entities of a kind in their stored order', async () => {
+    // Postgres orders by an output column before a table column of the same name, so `position::text` once sorted 10 before 2.
+    const scope = `tenant:${randomUUID()}`, lines = Array.from({ length: 12 }, (_, i) => `line ${i}`);
+    const ids = Array.from({ length: 12 }, (_, i) => `n${i}`);
+    await store().seed(scope, state => {
+      seedCollaboration(state);
+      state.audit.push(...lines);
+      for (const id of ids) state.questions[id] = { ...state.questions.q1!, id };
+    });
+    const state = await store().read(scope);
+    expect(state.audit.slice(-lines.length)).toEqual(lines);
+    expect(Object.keys(state.questions)).toEqual(['q1', ...ids]);
+    // The dump, which the "writes nothing" checks compare, lists the entries in position order too.
+    const entries = (JSON.parse(await store().dump(scope)) as string[][][])[2]!.filter(row => row[0] === 'audit').map(row => Number(row[2]));
+    expect(entries).toEqual(entries.map((_, i) => i));
+  });
+
   it('keeps the root of a command record, and no root where the record has none (#793 25a)', async () => {
     const h = await hosted();
     const result = { revision: 1, disposition: { outcome: 'accepted' as const }, outbox: [] };

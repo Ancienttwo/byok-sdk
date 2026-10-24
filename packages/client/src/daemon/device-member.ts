@@ -51,6 +51,8 @@ export interface DeviceMemberSession {
   readonly keys: MemberKeys;
   /** This device's own bundle, as registered. */
   readonly member: MemberKeyBundleV1;
+  /** The pinned approver key and its `add(device)` entry, as stored. */
+  readonly anchor: NonNullable<DeviceMemberState['anchor']>;
   readonly state: MemberChainState;
   /** `hashes[seq - 1]` is the entry hash of chain entry `seq`. */
   readonly hashes: readonly string[];
@@ -124,7 +126,7 @@ function samePoint(left: MemberChainPoint | null | undefined, right: MemberChain
   return left !== null && left !== undefined && right !== null && right !== undefined && left.seq === right.seq && left.hash === right.hash;
 }
 
-async function entryHashes(entries: readonly unknown[]): Promise<string[]> {
+export async function entryHashes(entries: readonly unknown[]): Promise<string[]> {
   // Only called on entries the walk verified, so each one parses.
   return Promise.all(entries.map((entry) => {
     const { sig: _sig, ...unsigned } = entry as UnsignedMemberChainEntryV1 & { sig: string };
@@ -221,17 +223,14 @@ async function completePairing(options: ResumeDeviceMemberOptions, state: Device
     const relayed = registered && await poll(options, deadline, async () => checkRelay(await client.readPairingMac(), pv, log));
     const entries = relayed && await poll(options, deadline, () => client.readChainFrom(0));
     if (!relayed || !entries) return signal.aborted ? undefined : giveUp(EXPIRED);
+    const anchor = { approverSigningPublicJwk: relayed.client.signingPublicJwk, entry: relayed.chainHead };
     const anchored = await verifyMemberChainFromAnchor({
       tenantId, entries, self: member, approverSigningPublicJwk: relayed.client.signingPublicJwk, authenticatedHead: relayed.chainHead,
     });
     if (!anchored.ok) return giveUp(`the member chain does not hold the add(device) entry the client confirmed (${anchored.reason}); re-pair the device to enable E2EE`);
-    await records.saveState({
-      tenantId, deviceId, member,
-      anchor: { approverSigningPublicJwk: relayed.client.signingPublicJwk, entry: relayed.chainHead },
-      head: anchored.state.head!,
-    });
+    await records.saveState({ tenantId, deviceId, member, anchor, head: anchored.state.head! });
     await records.deletePending();
-    return session(keys, member, anchored.state, await entryHashes(entries), log);
+    return session(keys, member, anchor, anchored.state, await entryHashes(entries), log);
   } catch (error) {
     return now() >= deadline ? giveUp(EXPIRED) : giveUp(`E2EE member pairing failed; re-pair the device to enable E2EE: ${describe(error)}`);
   }
@@ -288,13 +287,20 @@ async function rewalk(options: ResumeDeviceMemberOptions, state: DeviceMemberSta
   if (!samePoint(applied.state.head, head)) {
     await records.saveState({ tenantId, deviceId, member, anchor, head: applied.state.head! });
   }
-  return session(keys, member, applied.state, await entryHashes(entries), log);
+  return session(keys, member, anchor, applied.state, await entryHashes(entries), log);
 }
 
-function session(keys: MemberKeys, member: MemberKeyBundleV1, state: MemberChainState, hashes: string[], log: DeviceMemberLog): DeviceMemberSession | undefined {
+function session(
+  keys: MemberKeys,
+  member: MemberKeyBundleV1,
+  anchor: DeviceMemberSession['anchor'],
+  state: MemberChainState,
+  hashes: string[],
+  log: DeviceMemberLog,
+): DeviceMemberSession | undefined {
   if (!state.members.has(member.memberId)) {
     log('this device is no longer a current member of the chain; E2EE stays off');
     return undefined;
   }
-  return { keys, member, state, hashes };
+  return { keys, member, anchor, state, hashes };
 }
