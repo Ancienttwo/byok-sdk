@@ -75,9 +75,7 @@ async function prompt(message) {
     error(message.id, -32603, 'Internal error');
     return;
   }
-  // Grok names the cause of a -32603 in the retry_state that ended its
-  // retries. Both lines go out in one write, so the client reads them in one
-  // pipe chunk, as it does under load.
+  // The same two lines in one write: the client reads them in one pipe chunk, as it does under load.
   if (input.startsWith('retry-failed-one-write:')) {
     const retry = { method: '_x.ai/session_notification', params: { sessionId: SESSION, update: { sessionUpdate: 'retry_state', type: 'failed', error_type: input.slice('retry-failed-one-write:'.length) } } };
     const failed = { id: message.id, error: { code: -32603, message: 'Internal error' } };
