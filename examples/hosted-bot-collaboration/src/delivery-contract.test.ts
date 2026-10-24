@@ -43,9 +43,23 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
   opened.push(db);
   const store = new HostedCollaborationStore(db.pool, db.store.schema, { channel: true });
   const scope = `tenant:${randomUUID()}`;
-  let now = Date.UTC(2026, 0, 1), armed = false;
-  /** A held send: `started` resolves when it starts, `open` lets it go on, and `holder` is the sender pass that waits for it. */
-  let hold: { armed: boolean; started: Promise<void>; begin(): void; gate: Promise<void>; open(): void; holder?: Promise<void> } | undefined;
+  let now = Date.UTC(2026, 0, 1), crash = false;
+  /**
+   * A held channel call: `started` resolves when it starts, `open` lets its result return, and `holder` is the sender pass
+   * that waits for it. `armed` is the hold that the next call of its kind takes.
+   */
+  type Hold = { kind: 'send' | 'readback'; started: Promise<void>; begin(): void; gate: Promise<void>; open(): void; holder?: Promise<void> };
+  let armed: Hold | undefined;
+  /** Makes the call at once, and returns its result once the hold that it took opens. */
+  const held = async <T>(kind: Hold['kind'], call: () => Promise<T>): Promise<T> => {
+    const hold = armed?.kind === kind ? armed : undefined;
+    if (!hold) return call();
+    armed = undefined;
+    const result = call();
+    hold.begin();
+    await hold.gate;
+    return result;
+  };
   const roots = new Map<string, string>();
   const execution = { ...template('device', 'main'), agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'delivery' } };
   await store.seed(scope, state => { seedCollaboration(state); state.team.bots.main!.execution = execution; });
@@ -67,7 +81,7 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
   const crashing = new Proxy(store, { get(target, name, receiver) {
     if (name === 'claimDelivery') return async (...args: Parameters<HostedCollaborationStore['claimDelivery']>) => {
       const claim = await target.claimDelivery(...args);
-      if (armed && claim.kind === 'send') { armed = false; dropped.add(`${args[1]}:${claim.attempt}`); }
+      if (crash && claim.kind === 'send') { crash = false; dropped.add(`${args[1]}:${claim.attempt}`); }
       return claim;
     };
     if (name === 'finishDelivery') return async (...args: Parameters<HostedCollaborationStore['finishDelivery']>) => {
@@ -75,14 +89,8 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
     };
     return Reflect.get(target, name, receiver) as unknown;
   } });
-  const channel: ChannelPort = { ...port, send: async (input, signal) => {
-    if (hold?.armed) {
-      hold.armed = false;
-      hold.begin();
-      await hold.gate;
-    }
-    return port.send(input, signal);
-  } };
+  const channel: ChannelPort = { send: (input, signal) => held('send', () => port.send(input, signal)),
+    ...(port.readback ? { readback: (id: string) => held('readback', () => port.readback!(id)) } : {}) };
   // The send deadline outlives the steps of a case while a send is held; a hanging send (vector 5) still times out.
   const sender = new HostedOutboxSender(db.pool, crashing, { projections: { deliver: async () => {} }, channel, now: () => now,
     leaseMs: LEASE_MS, sendTimeoutMs: 2_000 });
@@ -95,21 +103,25 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
   const deliveries = async () => Object.values((await store.read(scope)).channel?.deliveries ?? {});
   /**
    * Runs the Host as one L pass does: the sync, then the sender, again while the sender changed a row. A pass that starts
-   * the held send keeps waiting for it, and this run returns. A later run is another sender pass on the same rows: the
+   * a held call keeps waiting for it, and this run returns. A later run is another sender pass on the same rows: the
    * other Host.
    */
   const run = async () => {
     for (let round = 0; ; round++) {
       if (round === 10) throw new Error('The Host does not settle');
       await store.sync(scope, { ...SYNC_OPTIONS, now, history: undefined });
-      const pass = passOf();
-      if (hold?.armed) {
-        const held = hold;
-        if (await Promise.race([pass.then(() => false), held.started.then(() => true)])) { held.holder = pass.then(() => undefined); return; }
-      }
+      const pass = passOf(), hold = armed;
+      if (hold && await Promise.race([pass.then(() => false), hold.started.then(() => true)])) { hold.holder = pass.then(() => undefined); return; }
       if (!(await pass).steps) break;
     }
     expect(await indexDrift(db, scope, await deliveries())).toEqual([]);
+  };
+  const holdNext = (kind: Hold['kind']) => {
+    let begin!: () => void, open!: () => void;
+    const started = new Promise<void>(resolve => { begin = resolve; }), gate = new Promise<void>(resolve => { open = resolve; });
+    const hold: Hold = { kind, started, begin, gate, open };
+    armed = hold;
+    return { release: async () => { hold.open(); await hold.holder; await run(); } };
   };
   const consume = hostedMessageConsumer(store, { scopeOf: tenant => tenant, ports: ports() });
 
@@ -143,13 +155,8 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
       await run();
       expect((await store.read(scope)).turns[root]).toMatchObject({ conclusion: 'cancelled' });
     },
-    holdNextSend: () => {
-      let begin!: () => void, open!: () => void;
-      const started = new Promise<void>(resolve => { begin = resolve; }), gate = new Promise<void>(resolve => { open = resolve; });
-      const held: NonNullable<typeof hold> = { armed: true, started, begin, gate, open };
-      hold = held;
-      return { release: async () => { held.open(); await held.holder; hold = undefined; await run(); } };
-    },
+    holdNextSend: () => holdNext('send'),
+    holdNextReadback: () => holdNext('readback'),
     enablePush: async target => {
       const id = await keyless({ kind: 'enable_push_route', conversation: DIRECT, channel: 'fake', target, owner: 'owner' }) as string;
       await run();
@@ -158,7 +165,7 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
     revokePush: async id => { await keyless({ kind: 'revoke_push_route', routeId: id }); await run(); },
     echo: () => { throw new Error('The H echo path comes in D2b-out-3'); },
     resend: async id => { const next = await keyless({ kind: 'resend_delivery', deliveryId: id }) as string; await run(); return next; },
-    crashOnNextSend: () => { armed = true; },
+    crashOnNextSend: () => { crash = true; },
     recoveryMs: LEASE_MS,
     deliveries,
     projections: async () => (await db.pool.query<{ key: string; body: Json }>(`SELECT key, body FROM "${store.schema}".outbox

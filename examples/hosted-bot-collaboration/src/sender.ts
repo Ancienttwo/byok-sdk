@@ -114,13 +114,14 @@ export class HostedOutboxSender {
     if (claim.kind === 'none') return true;
     if (claim.kind === 'readback') {
       let result: Awaited<ReturnType<NonNullable<ChannelPort['readback']>>>;
-      // Missing readback evidence leaves the row unknown, as in L.
-      try { result = await port.readback!(id); }
+      // Missing readback evidence leaves the row unknown, as in L. A readback that outlasts the send deadline is missing
+      // evidence too, so one hung readback cannot stop the rest of the pass.
+      try { result = await this.deadline(() => port.readback!(id)); }
       catch (error) {
         await this.store.deferOutbox(scope, id, this.now() + this.times.readbackMs);
         return { error };
       }
-      await this.store.readDelivery(scope, id, result, this.now(), this.times.readbackMs);
+      await this.store.readDelivery(scope, id, claim.attempt, result, this.now(), this.times.readbackMs);
       return true;
     }
     let outcome: Parameters<HostedCollaborationStore['finishDelivery']>[3];
@@ -133,7 +134,10 @@ export class HostedOutboxSender {
     return true;
   }
 
-  /** Runs `send` with an abort signal, and rejects with `SendDeadline` after `sendTimeoutMs`, as L's delivery deadline. */
+  /**
+   * Runs a channel or receiver call with an abort signal, and rejects with `SendDeadline` after `sendTimeoutMs`, as L's
+   * delivery deadline. H bounds a readback with it too, where L awaits a readback with no deadline.
+   */
   private async deadline<T>(send: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
