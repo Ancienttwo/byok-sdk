@@ -65,7 +65,7 @@ async function member(keyringOptions: { readonly requestTimeoutMs?: number } = {
   await enrollDeviceMember({ ...options, verificationSecret: web.verificationSecret });
   const device = await web.approve(deviceId);
   const session = (await resumeDeviceMember({ ...options, minDelayMs: 5, maxDelayMs: 20 }))!;
-  return { server: server!, web, device, custody, logs, keyring: new DeviceMemberKeyring(session, { ...options, ...keyringOptions }) };
+  return { server: server!, web, device, custody, logs, options, session, keyring: new DeviceMemberKeyring(session, { ...options, ...keyringOptions }) };
 }
 
 function head(custody: InMemoryDeviceMemberCustody): unknown {
@@ -390,5 +390,36 @@ describe('device member keyring sealing rules (E2d-3)', () => {
     expect(keyring.cached('scope-a', 1)).toBeUndefined();
     expect(key).toEqual(scopeKey);
     expect(key!.some((byte) => byte !== 0)).toBe(true);
+  });
+
+  it('retires without onLost, zeroing its keys, and hands only on-chain points of the same member to the next run', async () => {
+    const { web, device, options, session } = await member();
+    let lost = 0;
+    const first = new DeviceMemberKeyring(session, { ...options, onLost: () => { lost += 1; } });
+    const scopeKey = await web.putScope('scope-a', [device]);
+    await first.catchUp();
+    expect(await first.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    const fetched = await first.fetch('scope-a', 1);
+    if (!fetched.ok) throw new Error(fetched.reason);
+
+    const carried = first.retire()!;
+    expect(lost).toBe(0);
+    expect(first.session).toBeUndefined();
+    expect(fetched.key.scopeKey.every((byte) => byte === 0)).toBe(true);
+    expect(await first.sealingKey('scope-a', 1)).toBeUndefined();
+    expect(carried.points.get('scope-a')?.get(1)).toEqual(web.head);
+
+    // A next run whose verified chain does not reach the point keeps nothing of it.
+    const next = new DeviceMemberKeyring(session, { ...options, carried });
+    expect(await next.sealingKey('scope-a', 1)).toBeUndefined();
+    const resumed = new DeviceMemberKeyring(next.session!, options);
+    await resumed.catchUp();
+    const current = new DeviceMemberKeyring(resumed.session!, { ...options, carried });
+    expect(await current.sealingKey('scope-a', 1)).toEqual({ scopeKey, epoch: 1, sender: device.memberId, chainHead: web.head });
+
+    const forged = { ...carried, points: new Map([['scope-a', new Map([[1, { ...web.head!, hash: `sha256:${'0'.repeat(64)}` }]])]]) };
+    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: forged }).sealingKey('scope-a', 1)).toBeUndefined();
+    const otherMember = { ...carried, memberId: web.member.memberId };
+    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: otherMember }).sealingKey('scope-a', 1)).toBeUndefined();
   });
 });
