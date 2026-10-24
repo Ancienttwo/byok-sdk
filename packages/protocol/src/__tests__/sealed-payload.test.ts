@@ -388,6 +388,22 @@ describe('sealed payload v1: capability gates (§8.4)', () => {
     }
   });
 
+  it('gates a sealed task output that names its ciphertext blob on the server flag, except the inline-only types (§58a)', () => {
+    const outputs = SEALED_TYPES.filter((type) => SEALED_SPLIT_TABLE[type].category === 'task-output');
+    const inlineOnly = outputs.filter((type) => (SEALED_SPLIT_TABLE[type] as SealedSplitEntry).inlineOnly === true);
+    expect(inlineOnly).toEqual(['task.progress_sealed', 'task.await_approval_sealed']);
+    for (const type of outputs) {
+      const byReference = sealedLines.find((line) => line.type === type && 'ciphertextRef' in (line.payload.sealed as object))!;
+      const inline = sealedLines.find((line) => line.type === type && 'ciphertext' in (line.payload.sealed as object))!;
+      const gated = !inlineOnly.includes(type);
+      expect(requiredReceiverCapabilities(type, byReference.payload).includes('sealed-output-ciphertext-ref'), type).toBe(gated);
+      expect(requiredReceiverCapabilities(type, inline.payload), type).not.toContain('sealed-output-ciphertext-ref');
+    }
+    for (const type of SEALED_TYPES.filter((candidate) => SEALED_SPLIT_TABLE[candidate].category === 'task-input')) {
+      expect(WIRE_ADDITIONS.filter((entry) => entry.surface === type && entry.rule === 'gated' && entry.capability === 'sealed-output-ciphertext-ref'), type).toEqual([]);
+    }
+  });
+
   it('never needs fewer flags than its plaintext type needs for the same plaintext fields', () => {
     for (const line of sealedLines.filter((candidate) => isSealedMessageType(candidate.type))) {
       const type = line.type as SealedMessageType;

@@ -10,7 +10,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { parseEnrollmentPairParams } from '../daemon/control-protocol';
+import { connectControlClient } from '../bin/control-client';
+import { parseEnrollmentPairParams, type ControlStatusResult } from '../daemon/control-protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { InMemoryDeviceCredentialStore, testDeviceMemberCustody } from './fixtures/credential-backend';
 import { E2eeWebClient } from './fixtures/e2ee-web-client';
@@ -175,6 +176,44 @@ describe('E2EE member enrollment (E2d-1)', () => {
     await paired.unpair();
     expect(custody.entries.size).toBe(0);
   });
+
+  it('keeps the device paired when the member entries cannot be deleted after the pairing is saved (#861 L4)', async () => {
+    const { server, custody, daemon } = await setup();
+    custody.delete = async () => { throw new Error('provider unavailable'); };
+    const paired = daemon();
+    await expect(paired.pair('pair-code')).rejects.toThrow(
+      'device device-1 is paired, but the previous E2EE member entries could not be deleted: provider unavailable',
+    );
+    expect(server.pairRequests).toHaveLength(1);
+    await paired.start();
+    expect(paired.status().paired).toBe(true);
+  });
+
+  it('starts a service daemon whose member entries cannot be deleted after the pairing is saved (#861 L4)', async () => {
+    const { custody, config } = await setup();
+    custody.delete = async () => { throw new Error('provider unavailable'); };
+    const service = createDaemonWithAdapters({ ...config, serviceEnrollment: { enabled: true } }, [new StubRuntimeAdapter('pi')]);
+    daemons.push(service);
+    await service.start();
+    const enrollment = await connectControlClient({ storeDir: config.storeDir, productId: config.productId });
+    if (!enrollment.ok) throw new Error('expected the enrollment control endpoint');
+    await expect(enrollment.client.request('enrollment.pair', { pairingCode: 'pair-code' })).rejects.toMatchObject({
+      code: 'internal_error', message: expect.stringContaining('device device-1 is paired, but the previous E2EE member entries could not be deleted'),
+    });
+    enrollment.client.close();
+    await vi.waitFor(async () => {
+      const conn = await connectControlClient({ storeDir: config.storeDir, productId: config.productId });
+      expect(conn.ok).toBe(true);
+      if (!conn.ok) return;
+      try {
+        const status = await conn.client.request<ControlStatusResult>('status');
+        expect(status.paired).toBe(true);
+        expect(status.lifecycle.phase).toBe('running');
+      } finally {
+        conn.client.close();
+      }
+    }, { timeout: 5_000 });
+  }, 10_000);
 
   it('clears the previous member at a re-pair without a verification secret', async () => {
     const { server, custody, daemon } = await setup();
