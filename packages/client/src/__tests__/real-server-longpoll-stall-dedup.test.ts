@@ -167,8 +167,12 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
 
     // Let several stalled re-poll cycles land while B's start() is blocked —
     // long enough for a pre-fix build to have piled up multiple queued
-    // duplicate deliveries of B's own offer behind the first.
-    await new Promise((resolve) => setTimeout(resolve, 10 * retryDelayMs));
+    // duplicate deliveries of B's own offer behind the first. A slow runner
+    // may need longer than the window for the second read to arrive.
+    await Promise.all([
+      new Promise((resolve) => setTimeout(resolve, 10 * retryDelayMs)),
+      vi.waitFor(() => expect(taskBOfferReads).toBeGreaterThanOrEqual(2), { timeout: 5_000 }),
+    ]);
     expect(taskBOfferReads).toBeGreaterThanOrEqual(2);
 
     releaseB();
