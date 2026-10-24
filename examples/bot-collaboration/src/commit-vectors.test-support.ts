@@ -523,8 +523,8 @@ export function cardVectors(name: string, open: () => CardSubject | Promise<Card
       expect(state.turns[result]).toBeUndefined();
       // The Turn that froze in the same sync sees the expiry in its ContextPack.
       const instruction = String(((await subject.intent('q1'))!.execution as { payload: { instruction: unknown } }).payload.instruction);
-      expect(instruction).toContain('c1');
-      expect(instruction).not.toContain('pending');
+      expect(instruction).toContain(`"id":"c1","turnId":"t1",`);
+      expect(instruction).toContain(`"state":"expired","expiresAt":${VECTOR_NOW + 10}`);
       const before = await subject.stored();
       await subject.sync(VECTOR_NOW + 10);
       expect(await subject.stored()).toBe(before);
