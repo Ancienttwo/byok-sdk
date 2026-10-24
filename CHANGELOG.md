@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fixed (client)** — Pi's durable lane now follows the #869 contract. A
+  start failure is a typed, non-retryable `RuntimeExecutionFailure` with a
+  fixed reason, instead of being reported as "runtime adapter contract
+  violation during start"; a worker that ends on its own before its start
+  receipt is `runtime_exited`. A run whose worker ended on its own and could
+  not be recovered, or whose respawned worker ended on its own before its
+  start receipt, fails as `runtime_exited` instead of `unknown` (#869).
+
 ## 0.30.1 — source candidate
 
 0.30.1 is a PATCH release under a one-release exception to the pre-1.0
