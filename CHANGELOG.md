@@ -15,6 +15,9 @@
   `runtime-failure-class` (`RUNTIME_FAILURE_CLASS_CAPABILITY`), which the
   reference server and the hosted cloud advertise. It stays plaintext on
   `task.fail_sealed`. `RuntimeExecutionFailure` takes an optional `failure`.
+  A class the vendored OAR derives from error text, such as Grok's "Internal
+  error" or Anthropic limit wording in a Codex `other` error, is sent as
+  `unknown`; Grok's `retry` still follows OAR's class.
 
 - **Fixed (client)** — a terminal whose journal commit failed during a
   `stop()` is sent after the next `start()` in the same process. Startup

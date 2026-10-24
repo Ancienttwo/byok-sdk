@@ -198,4 +198,5 @@ export type CheckFailureExports = Assert<Equal<keyof typeof FailureBridge, 'code
 export type CheckFailureFromStatus = Assert<Equal<typeof FailureBridge.failureFromStatus, typeof vendorFailureFromStatus>>;
 export type CheckCodexFailureParameters = Assert<Equal<Parameters<typeof FailureBridge.codexFailure>, Parameters<typeof vendorCodexFailure>>>;
 export type CheckCodexFailureClass = Assert<Equal<ReturnType<typeof FailureBridge.codexFailure>['failure'], ReturnType<typeof vendorCodexFailure>['failure']>>;
+export type CheckCodexFailureFromText = Assert<Equal<ReturnType<typeof FailureBridge.codexFailure>['fromText'], Field<ReturnType<typeof vendorCodexFailure>, 'fromText'>>>;
 export type CheckCodexFailureVendor = Assert<Assignable<typeof vendorCodexFailure, typeof FailureBridge.codexFailure>>;

@@ -434,13 +434,15 @@ class CodexSession implements Session {
         if (body.native?.turn?.status === 'failed') {
           const reason = body.native.turn.error?.message ?? 'codex turn failed';
           // The native frame precedes the fold, which classifies the same `turn.error`.
+          // A class OAR took from error text is not structured evidence: send `unknown`.
+          const classified = codexFailure(reason, body.native.turn.error);
           this.fail(
             new RuntimeExecutionFailure({
               phase: 'run',
               category: 'semantic',
               retry: 'non-retryable',
               reason,
-              failure: { class: codexFailure(reason, body.native.turn.error).failure },
+              failure: { class: classified.fromText ? 'unknown' : classified.failure },
             }),
           );
         }

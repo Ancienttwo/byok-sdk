@@ -392,6 +392,22 @@ describe('Codex persistent app-server adapter', () => {
     expect((thrown as RuntimeExecutionFailure).failure).toEqual(failure);
     expect((thrown as RuntimeExecutionFailure).message).toBe('provider said no');
   });
+  it.each([
+    ['Anthropic limit wording', { type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' } }, { class: 'unknown' }],
+    ['an invalid_request_error type', { type: 'error', error: { type: 'invalid_request_error', message: 'prompt is too long' } }, { class: 'invalid_request' }],
+    ['an error code', { error: { code: 'insufficient_quota', message: 'You exceeded your current quota.' } }, { class: 'quota' }],
+  ] as const)('classifies codexErrorInfo other with %s from the body, sending unknown for a text rule (#869)', async (_label, body, failure) => {
+    const message = JSON.stringify(body);
+    const s = await open(adapter(), task, await ctx({
+      FAKE_CODEX_TURN_FAILS: '1',
+      FAKE_CODEX_FAIL_MESSAGE: message,
+      FAKE_CODEX_ERROR_INFO: '"other"',
+    }));
+    const thrown = await turn(s).then(() => undefined, (error: unknown) => error);
+    expect(thrown).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(thrown).toMatchObject({ retry: 'non-retryable', message });
+    expect((thrown as RuntimeExecutionFailure).failure).toEqual(failure);
+  });
   it('marks an app-server exit before the terminal runtime_exited (#869)', async () => {
     const s = await open(adapter(), task, await ctx({ FAKE_CODEX_EXIT_NO_TERMINAL: '1' }));
     await expect(turn(s)).rejects.toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });

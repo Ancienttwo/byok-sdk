@@ -67,7 +67,9 @@ async function prompt(message) {
   if (input === 'hold' || process.env.FAKE_ACP_HANG === '1') { pending.set(message.id, 'hold'); return; }
   if (input === 'hold-silent') { pending.set(message.id, 'silent'); return; }
   if (input === 'exit') { process.exit(9); }
-  if (input === 'fail') { error(message.id, -32603, 'model provider failed'); return; }
+  // Grok's own words for a -32603; `fail-text:` adds the provider's answer as `data`.
+  if (input === 'fail') { error(message.id, -32603, 'Internal error'); return; }
+  if (input.startsWith('fail-text:')) { error(message.id, -32603, 'Internal error', input.slice('fail-text:'.length)); return; }
   if (input === 'rate-limited') { error(message.id, -32003, 'Rate limited'); return; }
   // Grok names the cause of a -32603 in the retry_state that ended its retries.
   if (input.startsWith('retry-failed:')) {

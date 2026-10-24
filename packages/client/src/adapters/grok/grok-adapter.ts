@@ -296,7 +296,8 @@ class GrokSession implements Session {
         category: 'semantic',
         retry: turn.failure === 'rate_limited' ? 'retryable' : 'non-retryable',
         reason: turn.reason,
-        failure: { class: turn.failure },
+        // A class OAR took from error text is not structured evidence (docs/spec.md runtime failure class).
+        failure: { class: turn.fromText ? 'unknown' : turn.failure },
       }));
   }
   fail(error: unknown): void {
