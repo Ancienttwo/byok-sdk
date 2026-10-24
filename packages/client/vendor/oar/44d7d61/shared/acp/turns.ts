@@ -1,3 +1,4 @@
+// BYOK change: Modified from OAR 44d7d61 so a failed prompt reads its turn frames only after earlier notifications are recorded (Apache-2.0).
 import type {
   InputImage,
   InputOptions,
@@ -155,6 +156,16 @@ export function createAcpTurns(deps: {
           closeTurn(state);
           return;
         }
+        // BYOK change: a failed prompt reads its turn frames only after the
+        // notifications received before the failure are recorded. The SDK
+        // rejects the prompt as soon as it reads the error, while a
+        // notification from the same pipe read is still in its microtask
+        // handler chain (grok's retry_state names the failure class). One
+        // event-loop turn drains that chain, as promptAcp already yields on
+        // success.
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
         const turnFrames = kernel.records().flatMap((record) => (record.kind === "frame" && record.seq > state.since ? [record.body] : []));
         const outcome = state.abortRequested ? { kind: "aborted" as const } : acpFailureOutcome(error, turnFrames, profile.failureOutcome);
         finishRequest(state, requestNumber, {

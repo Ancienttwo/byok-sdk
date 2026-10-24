@@ -1,5 +1,5 @@
 import type { RoomFields } from '@byok-sdk/protocol';
-import { hash } from '@byok-sdk/example-host-execution-core';
+import { hash } from '@byok-sdk/example-host-execution-core/canonical';
 import { addBatchTurns, addTurn, json, type Json, type Turn } from './turn';
 import { activeBot, archiveBot, profileRevision, refuseExternalTeam, requireMain, teamSnapshot, TeamModeError, type ExternalTeam, type TeamSnapshot,
   type TeamSnapshotBot } from './team';
@@ -19,6 +19,7 @@ export { OFFER_WAIT_MS, syncTurn, type FreezeExecution, type SyncBot, type SyncF
 export { checkReply, delegationDue, replyCheckDue, settleDelegations, type DelegationTimers, type ReplyCheck, type ReplyReadback } from './delegation';
 export { advanceRoomSeats, seatTurn, type SeatFacts } from './rooms';
 export { collaborationDue } from './due';
+export { compactVeto, type CompactFacts, type CompactState } from './compaction';
 export { expireCards, reportCardDecisions } from './cards';
 
 /** Commands with a caller key or a K4 key. The store records them, so a retry replays the first result. */

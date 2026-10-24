@@ -1,4 +1,4 @@
-import { canonical, hash } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash } from '@byok-sdk/example-host-execution-core/canonical';
 import type { Json } from './turn';
 
 /**

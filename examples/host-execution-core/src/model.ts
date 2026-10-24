@@ -1,5 +1,5 @@
 import type { MemoryState } from './memory';
-import { createHash } from 'node:crypto';
+import { canonical, hash } from './canonical';
 import type { AgentExecutionInput, ByokServer, WakeScheduleInput } from '@byok-sdk/server';
 import { HarnessIdSchema, RuntimeIdSchema } from '@byok-sdk/protocol';
 
@@ -99,14 +99,8 @@ export interface LedgerState {
   applied: Record<string, true>; application: Record<string, Json>;
   scanWake: WakeScheduleInput | null;
 }
-export function hash(value: unknown): string { return createHash('sha256').update(canonical(value)).digest('hex'); }
+export { canonical, hash };
 export function taskId(key: string, generation: number): string { return hash([key, generation]); }
-export function canonical(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined';
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record).filter(key => record[key] !== undefined).sort().map(key => `${JSON.stringify(key)}:${canonical(record[key])}`).join(',')}}`;
-}
 export function time(value: number): number {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error('Time must be a nonnegative safe integer');
   return value;

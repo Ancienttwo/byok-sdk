@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { acpSession, type AcpSessionHooks } from '../../vendor/oar/44d7d61/shared/acp/session';
 import type { AcpSessionProfile } from '../../vendor/oar/44d7d61/shared/acp/profile';
 import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/44d7d61/contracts/session';
+import { grokFailureOutcome } from '../../vendor/oar/44d7d61/runtimes/grok/failure';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
@@ -130,6 +131,27 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     await session.dispose();
     expect(__hostExitBackstopForTests.registeredPids()).not.toContain(children[0]);
     if (process.platform !== 'win32') expect(() => process.kill(-children[0]!, 0)).toThrow();
+  });
+
+  it('records a notification read with the prompt error before the failed turn reads its frames', async () => {
+    // Grok's failure reader on the neutral profile: the -32603 class comes
+    // from the retry_state notification that shares the error's pipe read.
+    const startWithReader = acpSession({ ...profile, extensionNotifications: ['_x.ai/session_notification'], failureOutcome: grokFailureOutcome });
+    const { dir } = workspace();
+    const records: RawEvent[] = [];
+    const session = await startWithReader(spawnOwnedLineProcess, spawnOwnedTerminalProcess, { kind: 'available', via: 'executable', command: FAKE }, {
+      cwd: dir, env: { PATH: process.env.PATH ?? '' },
+    }, { onRecord: record => records.push(record) });
+    live.push(session);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const since = records.length;
+      await turn(session, records, 'retry-failed-one-write:context_length');
+      const frames = records.slice(since).filter((record): record is Extract<RawEvent, { kind: 'frame' }> => record.kind === 'frame');
+      const retry = frames.find(frame => frame.body.type === '_x.ai/session_notification');
+      const failed = frames.find(frame => frame.body.type === 'session/prompt/error');
+      expect(retry?.seq).toBeLessThan(failed!.seq);
+      expect(failed!.body.events).toContainEqual({ kind: 'turn_ended', outcome: { kind: 'failed', reason: 'Internal error', failure: 'input_too_large' } });
+    }
   });
 
   it('delivers every record from seq 0 to the record consumer and swallows its errors', async () => {
