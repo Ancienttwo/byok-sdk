@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Fixed (client)** — a terminal whose journal commit failed during a
+  `stop()` is sent after the next `start()` in the same process. Startup
+  recovery no longer replaces it with `task.fail` `daemon_interrupted`.
 - **Breaking (cloud)** — a sealed terminal (`task.complete_sealed`,
   `task.fail_sealed`, `task.decline_sealed`, `task.cancelled_sealed`) or
   `task.artifact_sealed` may carry `ciphertextRef` above the 256 KiB inline
@@ -15,9 +18,6 @@
   required member `objects`, the tenant-bound `get`, `addReference` and
   `removeReference` of the core `ObjectStore`. `tenantStoresFor` builds it, so
   only code that builds a `TenantStores` literal needs to add it.
-- **Fixed (client)** — a terminal whose journal commit failed during a
-  `stop()` is sent after the next `start()` in the same process. Startup
-  recovery no longer replaces it with `task.fail` `daemon_interrupted`.
 - **Feature (client)** — when the server advertises
   `sealed-output-ciphertext-ref`, the daemon uploads a sealed task output
   over the inline frame as a ciphertext blob and sends the terminal or
@@ -41,7 +41,17 @@
   (no migration); SQLite adds that table on open. Store implementers: the
   append and put inputs take an optional `proof`, and
   `E2eeMemberRegistrationInput` takes `request`; the results can be
-  `request_conflict`.
+  `request_conflict`. A proof `requestId` longer than 120
+  characters (`TRUTH_REQUEST_ID_MAX_LENGTH`) gets 409 `proof_request_conflict`
+  before any store call, as on the truth put; the proof check already refuses
+  an empty one with 401. A store replays a recorded
+  result only after `parseRecordedWriteResult` (a new export of
+  `@byok-sdk/cloud`) accepts it; an invalid one
+  fails with `e2ee_member_state_unreadable`. Public API: the writer type
+  `E2eeMemberChainWriter` is renamed `E2eeMemberWriter`, and a device writer
+  now carries its `proof` instead of a `deviceId`;
+  `registerDeviceMemberKey(ctx, deviceId, input)` is now
+  `registerDeviceMemberKey(ctx, proof, input)`.
 - **Feature (examples)** — K8 has a Host persona mode for an external team
   (#879). With `persona: 'external'`, each snapshot Bot carries the Host's
   `profileRevision`, which K8 uses as the agentRef revision, and K8 queues no
@@ -50,6 +60,11 @@
   stores the mode. `TeamSnapshotBot` gets the optional `profileRevision`, and
   `ExternalTeam` the optional `persona`. Without the option nothing changes,
   except that a snapshot with `profileRevision` is refused.
+
+- **Fixed (examples)** — K8 validates `profileRevision` with the protocol
+  `AgentHomeProjectionProfileRevisionSchema` (#879). Before, its own copy of
+  the rule accepted `0`, so a snapshot with `profileRevision: '0'` and
+  `personaReady(botId, '0')` passed. Both are refused now.
 
 - **Feature (examples)** — K8 `BotOptions.roomHistory` reads the room
   messages of a seat ContextPack from an external authority (#883). The
@@ -151,6 +166,11 @@
   how to record the source commit. A test checks each list against the import
   graph. The shared vectors need the L files and the K4 root entry, not
   `rules/` alone. No code changes.
+- **Fixed (client)** — with `agentUserContext: 'excluded'`, an ancestor
+  directory named `**` made the literal exclude patterns match the Agent home's
+  own CLAUDE.md files. The patterns now escape glob syntax in every directory
+  part, so all of them follow one rule. The config directory exclusion is
+  decided on its real path, as Claude matches it.
 - **Fix (examples)** — in external team mode, the K8 `create_room` and
   `update_room` schemas offer only current Bots as members and admin (#881).
   Before, they also offered `new_bot_1` to `new_bot_3`, which only
@@ -158,6 +178,14 @@
   action that named one was always refused. Local mode is unchanged. A Host
   that copies K8 in external mode freezes a different schema for new owner
   Main Bot Turns.
+- **Feature (examples)** — K8 `BotOptions.outcome` narrows the outcome offer
+  of new Turns (#881). `actions.turn` and `actions.main` are allowlists for a
+  Bot Turn and for the extra actions of an owner Main Bot Turn. `timeZones`
+  sets 1 to 8 IANA zones for the routine actions. `confirmable` sets the
+  `confirmable_action` branches. Without the option, every schema is the same
+  as before. `outcomeOffer` checks an offer, and `SyncOptions.offer` takes its
+  result, so the H sync uses the same rule. Turns frozen before keep their
+  schema.
 
 ## 0.30.0 — 2026-10-24 (published)
 

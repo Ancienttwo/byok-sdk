@@ -1220,7 +1220,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 613688,
+      "budgetBytes": 614789,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1273,7 +1273,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 888136,
+      "budgetBytes": 889414,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1398,7 +1398,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 843331,
+      "budgetBytes": 844609,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1969,7 +1969,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 773592,
+      "budgetBytes": 774863,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2066,7 +2066,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 642017,
+      "budgetBytes": 643118,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

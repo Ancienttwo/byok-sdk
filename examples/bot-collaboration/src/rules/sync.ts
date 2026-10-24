@@ -2,7 +2,7 @@ import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, type ResultSchema
 import { json, type Turn } from './turn';
 import { BOT_REPLY_MAX_BYTES, type IntentFacts, type Publish } from './delegation';
 import { CurrentRequestTooLargeError } from './history';
-import { outcomeSchema, type ContextBot, type ContextRoutine, type ContextState } from './schema';
+import { outcomeSchema, type ContextBot, type ContextRoutine, type ContextState, type CheckedOffer } from './schema';
 import { botTurnInstruction, type BotHistoryState, type ContextTurn, type InstructionLimits } from './context';
 import { admitBotToolsets } from './team';
 import type { RoomMessage, Seat } from './rooms';
@@ -61,6 +61,8 @@ export interface SyncOptions<R extends ContextRoutine> {
   /** The room messages of this seat Turn, in room history mode. */
   roomHistory?: { readonly rows: readonly RoomMessage[]; readonly digest: string };
   routines: readonly R[];
+  /** The Host's outcome offer (#881), checked by `outcomeOffer`. Absent: every action, the default time zones and `send_message`. */
+  offer?: CheckedOffer;
 }
 /**
  * What the store writes for one Turn:
@@ -138,7 +140,7 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   if (options.roomHistoryMode && turn.source === 'room_slot' && !room) return undefined;
   let schema: ResultSchema, frozen: ReturnType<typeof botTurnInstruction>;
   try {
-    schema = outcomeSchema(turn.botId, state, turn, options.models, options.routines);
+    schema = outcomeSchema(turn.botId, state, turn, options.models, options.routines, options.offer);
     frozen = botTurnInstruction(state, turn, options.limits, options.routines, history?.rows, room?.rows);
   } catch (error) {
     if (error instanceof BotTurnOutcomeSchemaError && error.code === 'schema-over-budget') {

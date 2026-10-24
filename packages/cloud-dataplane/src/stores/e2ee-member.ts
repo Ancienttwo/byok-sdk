@@ -12,6 +12,7 @@ import type {
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
 } from '@byok-sdk/cloud';
+import { parseRecordedWriteResult } from '@byok-sdk/cloud';
 import type { Pool, PoolClient } from 'pg';
 
 type PackageRow = { scope_id: string; epoch: string; recipient: string; key_id: string; sender: string; package: string };
@@ -33,7 +34,12 @@ async function rollback(client: PoolClient): Promise<void> {
  * an E2EE write of one `requestId` also run one after the other. It is taken
  * first, before the scope locks.
  */
-async function recordedRequest<T>(client: PoolClient, tenant: TenantId, proof: E2eeProvenWrite | undefined): Promise<T | 'request_conflict' | undefined> {
+async function recordedRequest<T>(
+  client: PoolClient,
+  tenant: TenantId,
+  proof: E2eeProvenWrite | undefined,
+  parse: (text: string) => T,
+): Promise<T | 'request_conflict' | undefined> {
   if (proof === undefined) return undefined;
   const { deviceId, request } = proof;
   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify(['truth-receipt', tenant, deviceId, request.requestId])]);
@@ -44,7 +50,7 @@ async function recordedRequest<T>(client: PoolClient, tenant: TenantId, proof: E
   if (row === undefined) return undefined;
   const same = row.operation === request.operation && row.resource === request.resource
     && row.body_sha256 === request.bodySha256 && row.body_size === String(request.bodySize);
-  return same ? JSON.parse(row.response_body) as T : 'request_conflict';
+  return same ? parse(row.response_body) : 'request_conflict';
 }
 
 async function recordRequest<T>(client: PoolClient, tenant: TenantId, proof: E2eeProvenWrite | undefined, result: T, now: Date): Promise<T> {
@@ -58,11 +64,11 @@ async function recordRequest<T>(client: PoolClient, tenant: TenantId, proof: E2e
 }
 
 /**
- * Take the transaction lock of each `(tenant, scope)` before any other
- * statement of the transaction, in one sorted order so two lockers cannot
- * deadlock. A shred and a package put of one scope then run one after the
- * other, also for a new scope or a new epoch, which has no row to lock yet
- * (owner batch §50h A).
+ * Take the transaction lock of each `(tenant, scope)` before any other e2ee
+ * statement of the transaction, and after the request lock, in one sorted
+ * order so two lockers cannot deadlock. A shred and a package put of one
+ * scope then run one after the other, also for a new scope or a new epoch,
+ * which has no row to lock yet (owner batch §50h A).
  */
 async function lockScopes(client: PoolClient, tenant: TenantId, scopeIds: Iterable<string>): Promise<void> {
   for (const scopeId of [...new Set(scopeIds)].sort()) {
@@ -100,7 +106,7 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
     const { rows } = input;
     let refusal: E2eeMemberChainAppendResult | undefined;
     const result = await this.#transaction<E2eeMemberChainAppendResult>(async client => {
-      const replay = await recordedRequest<E2eeMemberChainAppendResult>(client, tenant, input.proof);
+      const replay = await recordedRequest(client, tenant, input.proof, text => parseRecordedWriteResult('chainAppend', text));
       if (replay === 'request_conflict') {
         refusal = { outcome: 'request_conflict' };
         return undefined;
@@ -179,7 +185,7 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
     let refusal: E2eeScopeKeyPackagePutResult | undefined;
     const updatedAt = this.clock.now();
     const result = await this.#transaction<E2eeScopeKeyPackagePutResult>(async client => {
-      const replay = await recordedRequest<E2eeScopeKeyPackagePutResult>(client, tenant, proof);
+      const replay = await recordedRequest(client, tenant, proof, text => parseRecordedWriteResult('keyPackagePut', text));
       if (replay === 'request_conflict') {
         refusal = { outcome: 'request_conflict' };
         return undefined;
@@ -236,7 +242,7 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
     let refusal: E2eeMemberRegisterResult | undefined;
     const proof = { deviceId: input.deviceId, request: input.request };
     const result = await this.#transaction<E2eeMemberRegisterResult>(async client => {
-      const replay = await recordedRequest<E2eeMemberRegisterResult>(client, tenant, proof);
+      const replay = await recordedRequest(client, tenant, proof, text => parseRecordedWriteResult('memberKeyRegister', text));
       if (replay === 'request_conflict') {
         refusal = replay;
         return undefined;
