@@ -1,13 +1,15 @@
 import type { Pool, PoolClient } from 'pg';
 import { canonical, type Conclusion, type ExecutionTemplate, type Json } from '@byok-sdk/example-host-execution-core';
 import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { commitCommand, syncTurn, type Command, type CommandPorts, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { syncTurn, type Command, type CommandPorts, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { bindDevice, revokeDevice } from './binding';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
 import { decideFinish, type TaskEvidence } from './reconcile';
+import { commitStored, decideRetention } from './retention';
+import type { RetentionInput, RetentionLimits, RetentionResult } from '@byok-sdk/example-bot-collaboration/retention';
 import { assemble, entryGroup, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
 
 /** A stored scope row of a store version that this code does not support. Nothing was written. */
@@ -50,9 +52,9 @@ export class HostedCollaborationStore {
    * a request for another scope is a `scope_mismatch` conflict. A throw leaves every row unchanged.
    */
   commit(scope: string, request: CommitRequest<Command>, ports: PortsFactory): Promise<CommitResult> {
-    return this.change(scope, request.commandId, (state, publish) => {
+    return this.change(scope, request.commandId, async (state, publish, client) => {
       const head = revisionOf(state);
-      const result = commitCommand(state, request, { scope, recordCallbacks: true }, ports(state, publish));
+      const result = await commitStored(client, scope, state, request, ports(state, publish));
       // A new commit moves the head by 1. A replay returns its first result and writes nothing.
       return { value: result, outbox: result.revision === head + 1 ? result.outbox : [] };
     });
@@ -87,6 +89,8 @@ export class HostedCollaborationStore {
         `SELECT key, task_id, ordinal::text, agent, source, input::text, wait_until::text, submission, tries, next_at::text, last_error,
           cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text FROM intent WHERE scope = $1 ORDER BY key`,
         'SELECT device, ordinal::text, mode, mode_revision::text, revoked_at::text FROM device_binding WHERE scope = $1 ORDER BY device',
+        'SELECT identity FROM retired_identity WHERE scope = $1 ORDER BY identity',
+        'SELECT namespace, id, body::text, expires_at::text FROM archived_row WHERE scope = $1 ORDER BY namespace, id',
       ]) rows.push((await client.query({ text: query, values: [storedKey(scope)], rowMode: 'array' })).rows);
       return JSON.stringify(rows);
     }, true);
@@ -133,6 +137,20 @@ export class HostedCollaborationStore {
   finish(scope: string, turnId: string, evidence: TaskEvidence, ports: PortsFactory): Promise<Conclusion | undefined> {
     return this.transaction(client => this.decideIn(client, storedKey(scope), evidence.terminal.envelope.task_id,
       (state, publish) => decideFinish(client, scope, turnId, state, publish, evidence, ports)), false);
+  }
+
+  /**
+   * One K8 retention call on `scope` (#793 D2g, #798), in one transaction under the scope lock: the acknowledged roots move
+   * into `archived_row`, their ids are retired in `retired_identity`, and the moved command records answer replays until
+   * they expire. A refusal or a throw writes nothing. A scope with no row has no rows to retain, so the rule runs on the
+   * empty state, as L runs it on an empty ledger.
+   */
+  retain(scope: string, input: RetentionInput, limits: RetentionLimits): Promise<RetentionResult> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      if (!(await client.query('SELECT 1 FROM scope WHERE scope = $1', [key])).rowCount) return decideRetention(client, key, stateOf({}), input, limits);
+      return this.decideIn(client, key, undefined, async state => ({ value: await decideRetention(client, key, state, input, limits), outbox: [] }));
+    }, false);
   }
 
   /**
