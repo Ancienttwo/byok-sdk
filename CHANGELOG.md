@@ -162,6 +162,11 @@
   how to record the source commit. A test checks each list against the import
   graph. The shared vectors need the L files and the K4 root entry, not
   `rules/` alone. No code changes.
+- **Fixed (client)** — with `agentUserContext: 'excluded'`, an ancestor
+  directory named `**` made the literal exclude patterns match the Agent home's
+  own CLAUDE.md files. The patterns now escape glob syntax in every directory
+  part, so all of them follow one rule. The config directory exclusion is
+  decided on its real path, as Claude matches it.
 - **Fix (examples)** — in external team mode, the K8 `create_room` and
   `update_room` schemas offer only current Bots as members and admin (#881).
   Before, they also offered `new_bot_1` to `new_bot_3`, which only
