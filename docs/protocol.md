@@ -1397,7 +1397,35 @@ Host's own pairing code may hold a `.`. `pv` never reaches the Host.
   per device, so the recovery is a re-pair, which mints a new device id.
 - The device signs `e2ee-member-key.register`, and
   `e2ee-scope-key-package.put` when it rotates a scope epoch (§2.5, device
-  rules). It appends no chain entry.
+  rules) or re-wraps its packages. It appends only the `rotate` entry of its
+  own KEM rotation (`e2ee-member-chain.append`).
+
+**Device KEM rotation (#654 E2d-5, design §7.5).** The device member's KEM key
+rotates by epoch; its member id does not change. No daemon path starts a
+rotation yet. The steps:
+
+1. The device stores a next KEM key at `kemEpoch + 1` in its member key
+   record, beside the current key. A crash leaves both, and the next
+   rotation resumes with the same next key.
+2. It signs `rotate { memberId, kemPublicJwk, kemEpoch, kemSig }`, walks it
+   on its verified chain first, and appends it. A seq conflict is caught up
+   and tried once more. If the verified chain already names the next key,
+   it appends nothing.
+3. For each scope whose policy ever held the device, it reads its own
+   packages (`GET /byok/e2ee/key-packages?scopeId=`). It re-wraps to the next
+   key each package that opens with the old key and whose sender was in a
+   policy of that scope, with the device as the sender, and puts them. A
+   package from any other sender, or one that opens with neither key, stays
+   as it is.
+4. It reads the packages back. If one still opens only with the old key, the
+   rotation stops and keeps the old key.
+5. Only then does it drop the old private key from the record.
+
+Until step 5, a package opens with either key, so a client that already
+wraps to the new key loses nothing. Each start checks that the record holds
+the KEM key the verified chain names for the device: the current key, or the
+next key of a rotation whose `rotate` entry is on the chain. Otherwise E2EE
+stays off for that run.
 
 ### 2.7 E2EE key package notice (#654 E2c-3)
 

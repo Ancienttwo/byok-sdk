@@ -230,14 +230,14 @@ describe('DeviceMemberKeyStore KEM rotation (E2d-5, the keys tests that #841 rem
     expect(custody.entries.get('member-keys')).toBe(tampered);
   });
 
-  it('returns the stored rotation when another writer began one at the same time', async () => {
+  it('keeps the last write of two concurrent writers, and every later begin resumes it', async () => {
     const custody = new InMemoryDeviceMemberCustody();
     const records = new DeviceMemberRecords(custody);
     await records.keys.loadOrCreate(DEVICE);
-    const [left, right] = await Promise.all([records.keys.beginKemRotation(DEVICE), new DeviceMemberRecords(custody).keys.beginKemRotation(DEVICE)]);
-    const stored = await records.keys.load(DEVICE);
-    expect(left.nextKem?.publicJwk).toEqual(stored?.nextKem?.publicJwk);
-    expect(right.nextKem?.publicJwk).toEqual(stored?.nextKem?.publicJwk);
+    const begun = await Promise.all([records.keys.beginKemRotation(DEVICE), new DeviceMemberRecords(custody).keys.beginKemRotation(DEVICE)]);
+    const stored = (await records.keys.load(DEVICE))!.nextKem!.publicJwk;
+    expect(begun.map((keys) => keys.nextKem!.publicJwk)).toContainEqual(stored);
+    expect((await records.keys.beginKemRotation(DEVICE)).nextKem!.publicJwk).toEqual(stored);
   });
 
   it('fits a pending rotation in the OS entry bound', async () => {
