@@ -350,7 +350,8 @@ them, it settles delegations, reports card decisions and adds their action
 result Turns, cleans reply tokens and projects input batches. This contract
 defines only the per-Turn step. The `syncVectors` in
 `src/commit-vectors.test-support.ts` hold these rules for the in-memory store
-and for L.
+and for L. The `coalesceVectors` there hold the batch seal before the
+per-Turn steps and the batch projection after them, for L and H.
 
 Known L limit: K4 stores the whole Host ledger, with the collaboration state,
 in one JSON row per tenant. Turns, replies, audit rows and command records
