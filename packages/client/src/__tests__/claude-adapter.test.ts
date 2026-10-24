@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import type { SpawnFn } from '../adapters/claude/process-client';
-import { SteerUnsupportedError, type Session } from '../types';
+import { SteerUnsupportedError, type Session, type MessageDraftDelta } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { observationOf } from './fixtures/mcp-observation';
@@ -18,8 +18,8 @@ function fakeClaudeAdapter(): ClaudeAdapter {
   return new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }) });
 }
 
-async function takeEvents(session: Session, count: number): Promise<AgentEvent[]> {
-  const results: AgentEvent[] = [];
+async function takeEvents(session: Session, count: number): Promise<Array<AgentEvent | MessageDraftDelta>> {
+  const results: Array<AgentEvent | MessageDraftDelta> = [];
   for await (const event of session.events) {
     results.push(event);
     if (results.length >= count) break;
@@ -27,8 +27,8 @@ async function takeEvents(session: Session, count: number): Promise<AgentEvent[]
   return results;
 }
 
-async function takeTurn(session: Session): Promise<AgentEvent[]> {
-  const events: AgentEvent[]=[];
+async function takeTurn(session: Session): Promise<Array<AgentEvent | MessageDraftDelta>> {
+  const events: Array<AgentEvent | MessageDraftDelta>=[];
   for await (const event of session.events) { events.push(event); if(event.type==='turn_end')break; }
   return events;
 }
@@ -115,6 +115,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
+      messageDraft: true,
     });
     // Claude reads MCP tools itself; the daemon takes no tools/list observation for it.
     expect(adapter.descriptor.requiresMcpToolsetToolObservation).not.toBe(true);
@@ -382,7 +383,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     // resolving). Post-fix, the iterator itself ends once this turn's own
     // `result` frame has been fully drained, so this loop terminates well
     // under the timeout without the process ever being killed here.
-    const events: AgentEvent[] = [];
+    const events: Array<AgentEvent | MessageDraftDelta> = [];
     let failure: unknown;
     try {
       for await (const event of session.events) events.push(event);

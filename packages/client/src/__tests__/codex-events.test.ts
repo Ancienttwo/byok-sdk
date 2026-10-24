@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
+import type { MessageDraftDelta } from '../types';
 import { CodexProjection } from '../adapters/codex/projection';
 import { createSessionKernel } from '../../vendor/oar/44d7d61/shared/session-kernel';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 function setup() {
   const kernel = createSessionKernel('root');
   const projection = new CodexProjection('/workspace', 'root');
-  const output: AgentEvent[] = [];
+  const output: Array<AgentEvent | MessageDraftDelta> = [];
   const feed = (
     type: string,
     native: unknown,
@@ -135,7 +136,7 @@ describe('required Codex native projection', () => {
       origin: 'byok-native',
     } as never);
     let ordinal = 0;
-    const first: AgentEvent[] = [];
+    const first: Array<AgentEvent | MessageDraftDelta> = [];
     expect(() =>
       s.projection.consume(s.kernel, row, (e) => {
         if (ordinal++ === 1) throw new Error('sink failed');
@@ -219,7 +220,7 @@ describe('required Codex native projection', () => {
   it('keeps resumed usage unknown until a reliable cumulative boundary exists', () => {
     const kernel = createSessionKernel('root');
     const projection = new CodexProjection('/workspace', 'root', false);
-    const out: AgentEvent[] = [];
+    const out: Array<AgentEvent | MessageDraftDelta> = [];
     const feed = (type: string, native: unknown) => {
       const body = { type, native, origin: 'byok-native', events: [] };
       projection.consume(kernel, kernel.frame(body), (e) => out.push(e));

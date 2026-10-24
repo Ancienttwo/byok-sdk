@@ -8,7 +8,7 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { createClaudeControlChannel } from '../adapters/claude/control-channel';
 import { claudeMcpEventIdentities } from '../adapters/claude/mcp-identity';
 import { AGENT_MESSAGE_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
-import type { Session } from '../types';
+import type { Session, MessageDraftDelta } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
@@ -122,7 +122,7 @@ describe('ordinary ClaudeAdapter MCP event identity against fake-claude', () => 
   const sessions: Session[] = [];
   afterEach(async () => { await Promise.all(sessions.splice(0).map(session => session.close())); });
 
-  async function runTurn(instruction: string, env: NodeJS.ProcessEnv = {}): Promise<{ events: AgentEvent[]; receipt: string }> {
+  async function runTurn(instruction: string, env: NodeJS.ProcessEnv = {}): Promise<{ events: Array<AgentEvent | MessageDraftDelta>; receipt: string }> {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-mcp-identity-'));
     const receipt = path.join(workspaceDir, 'mcp-status.ndjson');
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }) });
@@ -133,11 +133,11 @@ describe('ordinary ClaudeAdapter MCP event identity against fake-claude', () => 
       mcpServers: { salesko: { command: process.execPath, args: [SALESKO_MCP_FIXTURE] } },
     });
     sessions.push(session);
-    const events: AgentEvent[] = [];
+    const events: Array<AgentEvent | MessageDraftDelta> = [];
     for await (const event of session.events) { events.push(event); if (event.type === 'turn_end') break; }
     return { events, receipt };
   }
-  const toolEvents = (events: AgentEvent[]) => events.filter(event => event.type === 'tool_use' || event.type === 'tool_result');
+  const toolEvents = (events: Array<AgentEvent | MessageDraftDelta>) => events.filter(event => event.type === 'tool_use' || event.type === 'tool_result');
 
   it('annotates both MCP tool events from one mcp_status lookup', async () => {
     const { events, receipt } = await runTurn('salesko:find-leads');
