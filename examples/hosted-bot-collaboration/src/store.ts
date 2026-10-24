@@ -47,7 +47,8 @@ export interface HostedStoreOptions {
  * The sender's view of one delivery step (#793 D2b-out-2). `send`: the claim committed; send `body` on `route` now.
  * `readback`: read back the row's `unknown` attempt `attempt`, and give its result with that attempt.
  */
-export type DeliveryClaim = { kind: 'none' } | { kind: 'readback'; attempt: number }
+/** `none`: the claim changed nothing. `moved`: it changed the entity or its wait, and there is nothing to call. */
+export type DeliveryClaim = { kind: 'none' } | { kind: 'moved' } | { kind: 'readback'; attempt: number }
   | { kind: 'send'; attempt: number; route: ReplyRoute | PushRoute; body: string };
 /** The outbox index times of a delivery that the sender owns: its lease, and the wait of an `unknown` row. */
 export interface DeliveryTimes {
@@ -359,7 +360,7 @@ export class HostedCollaborationStore {
           if (Number(index.next_at) > now) return done({ kind: 'none' });
           recoverDelivery(row);
           nextAt = times.readback ? now : now + UNKNOWN_WAIT_MS;
-          return done({ kind: 'none' });
+          return done({ kind: 'moved' });
         }
         if (row.state === 'unknown') {
           if (times.readback) {
@@ -369,11 +370,11 @@ export class HostedCollaborationStore {
             return done({ kind: 'readback', attempt: row.attempts });
           }
           nextAt = now + UNKNOWN_WAIT_MS;
-          return done({ kind: 'none' });
+          return done({ kind: 'moved' });
         }
         if (row.state !== 'pending' || (row.nextAttemptAt ?? 0) > now) return done({ kind: 'none' });
         const route = deliveryRoute(state, row, now);
-        if (!route) { refuseRoute(state, row); return done({ kind: 'none' }); }
+        if (!route) { refuseRoute(state, row); return done({ kind: 'moved' }); }
         if (!startDelivery(row, now)) return done({ kind: 'none' });
         nextAt = now + times.leaseMs;
         return done({ kind: 'send', attempt: row.attempts, route, body: row.body });

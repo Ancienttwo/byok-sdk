@@ -119,7 +119,8 @@ export class HostedOutboxSender {
     const port = this.options.channel;
     if (!port) throw new Error('The Host has no channel for a delivery');
     const claim = await this.store.claimDelivery(scope, id, this.now, this.times);
-    if (claim.kind === 'none') return true;
+    if (claim.kind === 'none') return false;
+    if (claim.kind === 'moved') return true;
     if (claim.kind === 'readback') {
       // Missing readback evidence leaves the row unknown, as in L. A readback that outlasts the send deadline is missing
       // evidence too, so one hung readback cannot stop the rest of the pass. Its wait is fenced by the attempt it read back.
