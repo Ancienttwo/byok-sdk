@@ -132,6 +132,14 @@
   action that named one was always refused. Local mode is unchanged. A Host
   that copies K8 in external mode freezes a different schema for new owner
   Main Bot Turns.
+- **Feature (examples)** — K8 `BotOptions.outcome` narrows the outcome offer
+  of new Turns (#881). `actions.turn` and `actions.main` are allowlists for a
+  Bot Turn and for the extra actions of an owner Main Bot Turn. `timeZones`
+  sets 1 to 8 IANA zones for the routine actions. `confirmable` sets the
+  `confirmable_action` branches. Without the option, every schema is the same
+  as before. `outcomeOffer` checks an offer, and `SyncOptions.offer` takes its
+  result, so the H sync uses the same rule. Turns frozen before keep their
+  schema.
 
 ## 0.30.0 — 2026-10-24 (published)
 
