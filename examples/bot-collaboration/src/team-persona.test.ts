@@ -71,12 +71,21 @@ it.each<[string, TeamSnapshotBot[], string]>([
   ['a revision that goes back', [MAIN('4')], 'Profile revision 4 of main is older than 5'],
   ['a profile change at the same revision', [MAIN('5', 'Changed')], 'A profile change of main needs a newer profile revision'],
   ['a revision that is not canonical', [MAIN('05')], 'Invalid profile revision'],
+  ['a revision of 0, which the protocol refuses', [MAIN('0')], 'Invalid profile revision'],
 ])('refuses a snapshot with %s, and changes nothing', async (_name, bots, message) => {
   bot = open();
   await bot.applyTeam({ revision: 1, bots: [MAIN('5')] });
   const before = bot.snapshot();
   await expect(bot.applyTeam({ revision: 2, bots })).rejects.toThrow(message);
   expect(bot.snapshot()).toEqual(before);
+});
+
+it('refuses a persona_ready report of revision 0, and changes nothing', async () => {
+  bot = open();
+  await bot.applyTeam({ revision: 1, bots: [MAIN('5')] });
+  const before = bot.snapshot();
+  await expect(bot.personaReady('main', '0')).rejects.toThrow('Invalid profile revision');
+  expect(bot.snapshot().team).toEqual(before.team);
 });
 
 it('refuses retryPersona, and a ledger keeps its persona mode', async () => {
