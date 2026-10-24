@@ -138,7 +138,6 @@ Thumbs.db
 
 # BEGIN: internal agent/process state (never product source)
 /.ai/
-/.archcontext/
 /.claude/
 /.codex/
 /agents/
