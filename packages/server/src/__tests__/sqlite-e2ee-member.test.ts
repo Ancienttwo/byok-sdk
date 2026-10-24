@@ -19,7 +19,7 @@ if (isSqliteAvailable()) {
   runE2eeMemberStoreConformance('sqlite', {
     create() {
       const stores = open(':memory:');
-      return { store: stores.e2eeMember, dispose: () => stores.close() };
+      return { store: stores.e2eeMember, receipts: stores.cloud.receipts, dispose: () => stores.close() };
     },
   });
 }
@@ -33,7 +33,7 @@ async function seed(stores: SqliteEmbeddedStores, deviceId: string, machineId?: 
   expect(await stores.e2eeMember.registerMember(TENANT, { deviceId, memberId, bundle: `{"m":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: EXPIRES }))
     .toBe('registered');
   expect(await stores.e2eeMember.putClientPairingMac(TENANT, { deviceId, body: '{"mac":"client"}', expiresAt: EXPIRES })).toBe('stored');
-  expect(await stores.e2eeMember.putScopeKeyPackages(TENANT, [{ scopeId: 'scope', epoch: 1, recipient: memberId, keyId: 'key', sender: memberId, package: '{}' }]))
+  expect(await stores.e2eeMember.putScopeKeyPackages(TENANT, { rows: [{ scopeId: 'scope', epoch: 1, recipient: memberId, keyId: 'key', sender: memberId, package: '{}' }] }))
     .toEqual({ outcome: 'stored', stored: 1 });
   return memberId;
 }
@@ -61,7 +61,7 @@ describeSqlite('SQLite E2EE member state', () => {
     const path = tempPath();
     const first = open(path);
     const memberId = await seed(first, 'device-1');
-    expect(await first.e2eeMember.appendChainEntries(TENANT, [{ seq: 1, entry: '{"seq":1}' }])).toMatchObject({ outcome: 'appended' });
+    expect(await first.e2eeMember.appendChainEntries(TENANT, { rows: [{ seq: 1, entry: '{"seq":1}' }], shreds: [] })).toMatchObject({ outcome: 'appended' });
     await first.close();
 
     const second = open(path);
@@ -84,7 +84,7 @@ describeSqlite('SQLite E2EE member state', () => {
 
     const reopened = open(path);
     try {
-      expect(await reopened.e2eeMember.appendChainEntries(TENANT, [{ seq: 1, entry: '{}' }])).toMatchObject({ outcome: 'appended' });
+      expect(await reopened.e2eeMember.appendChainEntries(TENANT, { rows: [{ seq: 1, entry: '{}' }], shreds: [] })).toMatchObject({ outcome: 'appended' });
     } finally {
       await reopened.close();
     }
