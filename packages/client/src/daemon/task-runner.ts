@@ -2287,16 +2287,19 @@ export class TaskRunner {
       decline('agent_memory_selection_invalid: prepared offers require an explicit memory selection', false);
       return;
     }
-    // The prepared lane refused `read-if-admitted` above, so this view is exact there.
-    const agentMemory = offeredMemory === 'read-if-admitted' ? undefined : offeredMemory;
+    // The prepared lane refused both `*-if-admitted` values above, so this view is exact there.
+    const agentMemory = offeredMemory === 'read-if-admitted' || offeredMemory === 'read-write-if-admitted'
+      ? undefined
+      : offeredMemory;
     const preparedMemorySelected = preparation !== undefined && agentMemory !== 'none';
     // An ordinary Agent offer may select its own memory (#614). Absent keeps the
     // daemon admission: a writer `read-write`, a reader `read`, and `off` none.
     // An explicit selection is never changed to a smaller one, except
-    // `read-if-admitted`, which runs as `read` when admitted and else `none`
-    // (#815). Admission is read once here; the runtime binding uses this answer.
+    // `read-if-admitted` and `read-write-if-admitted`, which run as `read` and
+    // `read-write` when admitted and else `none` (#815, #833). Admission is read
+    // once here; the runtime binding uses this answer.
     const ordinaryMemory = preparation === undefined ? offeredMemory : undefined;
-    if (ordinaryMemory === 'read-write' && readerAttempt) {
+    if ((ordinaryMemory === 'read-write' || ordinaryMemory === 'read-write-if-admitted') && readerAttempt) {
       decline('agent_memory_selection_invalid: a memory-reader Attempt reads memory only', false);
       return;
     }
@@ -2307,7 +2310,9 @@ export class TaskRunner {
     }
     const ordinaryMemoryMode: PreparedAgentMemoryMode = ordinaryMemory === 'read-if-admitted'
       ? (memoryAdmitted ? 'read' : 'none')
-      : ordinaryMemory ?? (this.deps.agentMemoryMcp === 'off' ? 'none' : readerAttempt ? 'read' : 'read-write');
+      : ordinaryMemory === 'read-write-if-admitted'
+        ? (memoryAdmitted ? 'read-write' : 'none')
+        : ordinaryMemory ?? (this.deps.agentMemoryMcp === 'off' ? 'none' : readerAttempt ? 'read' : 'read-write');
     const ordinaryMemoryMcp = ordinaryMemoryMode !== 'none' && memoryAdmitted;
     const preparationLane = this.deps.inputPreparationLane;
     if (preparation !== undefined) {
