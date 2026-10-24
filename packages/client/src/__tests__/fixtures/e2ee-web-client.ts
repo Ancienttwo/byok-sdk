@@ -50,6 +50,12 @@ export class E2eeWebClient {
     return encodePairingVerificationSecret(this.pv);
   }
 
+  /** Take the host chain's last entry as the head, after another member appended. */
+  async follow(): Promise<void> {
+    const { sig: _sig, ...unsigned } = this.host.chain.at(-1) as MemberChainEntryV1;
+    this.head = { seq: unsigned.seq, hash: await memberChainEntryHash(unsigned) };
+  }
+
   /** Sign the next chain entry and append it. */
   async append(op: MemberChainOp, subject: object): Promise<MemberChainEntryV1> {
     const seq = (this.head?.seq ?? 0) + 1;
