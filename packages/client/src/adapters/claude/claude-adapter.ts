@@ -13,6 +13,7 @@ import {
   SteerUnsupportedError,
   freezeRuntimeAdapterDescriptor,
   type McpStdioServerConfig,
+  type MessageDraftDelta,
   type RuntimeAdapter,
   type RuntimeDetectResult,
   type RuntimeAdapterPrepareInput,
@@ -128,6 +129,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         resume: true,
         approvalInteractive: false,
         mcpToolsets: true,
+        messageDraft: true,
         ...(this.nativeOptions === undefined ? {} : { nativeInteractions: CLAUDE_NATIVE_INTERACTION_CAPABILITIES }),
       },
     });
@@ -288,6 +290,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
         // "Error: When using --print, --output-format=stream-json requires
         // --verbose", before spawning any model call.
         '--verbose',
+        // Text deltas for the display-only draft (`stream_event` frames).
+        '--include-partial-messages',
         ...(manifestModelId ? ['--model', manifestModelId] : []),
         ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
         // YOLO by default, as in OAR (`runtimes/claude/session.ts`): no human
@@ -499,7 +503,7 @@ class ClaudeSession implements Session {
     private readonly toolsetServers: ReadonlyMap<string, McpStdioServerConfig> = new Map(),
   ) { this.correlation = createToolUseCorrelation(this.mcpIdentities); if (native !== undefined) this.interactions = native.channel; }
 
-  get events(): AsyncIterable<AgentEvent> {
+  get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
     const client = this.client;
     const correlation = this.correlation;
     const assistantMessages = this.assistantMessages;
@@ -509,7 +513,7 @@ class ClaudeSession implements Session {
     const mcpIdentities = this.mcpIdentities;
     const session = this;
     return {
-      [Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
+      [Symbol.asyncIterator](): AsyncIterator<AgentEvent | MessageDraftDelta> {
         const inner = client.events[Symbol.asyncIterator]();
         // A single raw claude frame can map to more than one AgentEvent
         // (e.g. a Write `tool_result` plus a derived `artifact` — see
@@ -517,7 +521,7 @@ class ClaudeSession implements Session {
         // pulling the next raw line, so this iterator still yields exactly
         // one `AgentEvent` per `next()` call like every other adapter's
         // `Session.events`.
-        let pending: AgentEvent[] = [];
+        let pending: Array<AgentEvent | MessageDraftDelta> = [];
         let terminalFailure: RuntimeExecutionFailure | undefined;
         // Cross-model re-review finding (P1 regression, the "claude-hang
         // class"): set once THIS turn's own `result` frame has been read off
@@ -546,7 +550,7 @@ class ClaudeSession implements Session {
         // turn_end" branch report the task as Failed instead of hanging.
         let turnSettled = false;
         return {
-          async next(): Promise<IteratorResult<AgentEvent>> {
+          async next(): Promise<IteratorResult<AgentEvent | MessageDraftDelta>> {
             for (;;) {
               const buffered = pending.shift();
               if (buffered) return { value: buffered, done: false };
