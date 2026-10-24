@@ -80,6 +80,13 @@ export interface BotOptions {
    * in the ledger, so a ledger cannot change its mode at a restart.
    */
   team?: 'external';
+  /**
+   * Host persona mode (#879), only with `team: 'external'`. The Host projects each Bot's Agent home itself. A snapshot
+   * Bot carries the Host's `profileRevision`, which becomes its agentRef revision, and K8 queues no persona projection.
+   * The Host reports an applied revision with `personaReady`. `retryPersona` refuses with `external_persona`.
+   * The ledger stores the mode, so a restart cannot change it.
+   */
+  persona?: 'external';
 }
 /** Phase 1 of a history-mode sync: the injected rows of each Turn that can freeze its offer next. */
 type InjectedHistory = ReadonlyMap<string, { rows: ContextTurn[]; digest: string }>;
@@ -134,6 +141,12 @@ export class BotCollaboration {
     if (options.team === 'external' ? !team.external && Object.keys(team.bots).length : team.external) {
       throw new Error(`This ledger has ${team.external ? 'an external' : 'a local'} team`);
     }
+    if (options.persona !== undefined && (options.persona !== 'external' || options.team !== 'external')) {
+      throw new Error("The Host persona mode needs team: 'external'");
+    }
+    if (team.external && !!team.external.persona !== (options.persona === 'external')) {
+      throw new Error(`This ledger has ${team.external.persona ? 'Host' : 'K8'} persona projections`);
+    }
     // An archived Bot never runs a new Turn, so its stored template is not "current".
     for (const bot of Object.values(team.bots)) if (!bot.archived) admitBotToolsets(bot.execution, options.readOnlyToolsets);
     // Recovery can resubmit a frozen older generation after the Bot changes models.
@@ -173,7 +186,7 @@ export class BotCollaboration {
       const state = stateOf(s.application);
       promoteReplyReceipts(ledger, s, state, this.now());
       if (options.team === 'external') {
-        state.team.external ??= { revision: 0 };
+        state.team.external ??= { revision: 0, ...(options.persona === 'external' ? { persona: true as const } : {}) };
         return;
       }
       state.team.bots[options.botId] ??= { id: options.botId, name: 'Main Bot', role: 'Team owner', persona: '',
@@ -381,6 +394,16 @@ export class BotCollaboration {
     }
   }
 
+  /**
+   * Host persona mode (#879): the Host applied `revision` of this Bot's profile to its Agent home. The current revision
+   * readies the Bot. An older revision changes nothing, and a newer one refuses.
+   */
+  async personaReady(botId: string, revision: string): Promise<void> {
+    await this.exclusive(async () => {
+      this.commitKeyless({ kind: 'persona_ready', botId, revision });
+      await this.process();
+    });
+  }
   /** Owner API. Advance the desired revision after a rejected persona delivery. */
   async retryPersona(botId: string): Promise<void> {
     await this.exclusive(async () => {

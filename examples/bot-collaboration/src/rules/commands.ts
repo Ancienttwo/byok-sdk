@@ -1,7 +1,8 @@
 import type { RoomFields } from '@byok-sdk/protocol';
 import { hash } from '@byok-sdk/example-host-execution-core';
 import { addBatchTurns, addTurn, json, type Json, type Turn } from './turn';
-import { activeBot, archiveBot, refuseExternalTeam, requireMain, teamSnapshot, type ExternalTeam, type TeamSnapshot, type TeamSnapshotBot } from './team';
+import { activeBot, archiveBot, profileRevision, refuseExternalTeam, requireMain, teamSnapshot, TeamModeError, type ExternalTeam, type TeamSnapshot,
+  type TeamSnapshotBot } from './team';
 import { roomInput, updateRoom, type Mentions } from './rooms';
 import { sealBatchForCancel, type InputFields } from './coalesce';
 import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } from './delegation';
@@ -47,6 +48,8 @@ export type KeylessCommand =
   | { kind: 'set_main_bot'; botId: string; mainBot: boolean }
   | { kind: 'update_room'; roomId: string; update: Partial<RoomFields> }
   | { kind: 'retry_persona'; botId: string }
+  /** Host persona mode (#879): the Host applied this profile revision of the Bot's Agent home. */
+  | { kind: 'persona_ready'; botId: string; revision: string }
   | { kind: 'enable_push_route'; conversation: Conversation; channel: string; target: string; owner: string }
   | { kind: 'revoke_push_route'; routeId: string }
   | { kind: 'resend_delivery'; deliveryId: string }
@@ -61,7 +64,7 @@ export type Command = KeyedCommand | KeylessCommand;
 interface TeamRows {
   team: {
     external?: ExternalTeam;
-    bots: Readonly<Record<string, { mainBot: boolean; archived: boolean; readonly revision: string; readonly persona: string }>>;
+    bots: Readonly<Record<string, { mainBot: boolean; archived: boolean; readonly revision: string; readyRevision: string | null; readonly persona: string }>>;
     homeOperations: ReadonlyArray<{ readonly botId: string; readonly status: string;
       readonly request: { readonly payload: { readonly agentRef: { readonly profileRevision: string } } } }>;
   };
@@ -137,7 +140,7 @@ export interface CommandStore {
 }
 
 const CALLBACKS = new Set<Command['kind']>(['outcome', 'message', 'occurrence']);
-const KEYLESS = new Set<Command['kind']>(['set_main_bot', 'update_room', 'retry_persona', 'enable_push_route', 'revoke_push_route',
+const KEYLESS = new Set<Command['kind']>(['set_main_bot', 'update_room', 'retry_persona', 'persona_ready', 'enable_push_route', 'revoke_push_route',
   'resend_delivery', 'cancel_delegation', 'abandon_delegation', 'cancel_turn', 'end_routine']);
 export function isKeyless(command: Command): command is KeylessCommand { return KEYLESS.has(command.kind); }
 /** The fields that decide each command's effect: the fields that the existing identity checks compare. */
@@ -249,6 +252,7 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
       updateRoom(state.team, command.roomId, command.update);
       return accepted();
     case 'retry_persona': {
+      if (state.team.external?.persona) throw new TeamModeError('external_persona', 'external_persona: the Host owns persona projections');
       const bot = activeBot(state.team, command.botId);
       const failed = state.team.homeOperations.find(op => op.botId === command.botId
         && op.request.payload.agentRef.profileRevision === bot.revision && op.status === 'failed');
@@ -259,6 +263,14 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
         if (turn.botId === command.botId && !intents.intent(turn.id)) delete turn.profileFailure;
       }
       publish(`persona-retry:${bot.id}:${bot.revision}`, json({ owner: bot.id, revision: bot.revision, status: 'pending' }));
+      return accepted();
+    }
+    case 'persona_ready': {
+      if (!state.team.external?.persona) throw new Error('persona_ready needs the Host persona mode');
+      const bot = activeBot(state.team, command.botId), revision = BigInt(profileRevision(command.revision));
+      if (revision > BigInt(bot.revision)) throw new Error(`Profile revision ${command.revision} is newer than the Bot revision ${bot.revision}`);
+      // An older report changes nothing, so it never readies a newer revision.
+      if (revision === BigInt(bot.revision)) bot.readyRevision = bot.revision;
       return accepted();
     }
     case 'enable_push_route': {
@@ -304,6 +316,10 @@ function applyTeamSnapshot(state: CommandState, snapshot: TeamSnapshot, ports: C
   }
   // An archive is permanent, as for delete_bot. Check before any change.
   if (snapshot.bots.some(bot => team.bots[bot.id]?.archived)) throw new Error('An archived Bot cannot return');
+  // #879: in Host persona mode each Bot carries the Host's profile revision. Otherwise K8 counts its own.
+  if (snapshot.bots.some(bot => (bot.profileRevision !== undefined) !== !!external.persona)) {
+    throw new Error(external.persona ? 'Each snapshot Bot needs a profileRevision in the Host persona mode' : 'profileRevision needs the Host persona mode');
+  }
   const listed = new Set(snapshot.bots.map(bot => bot.id));
   for (const bot of Object.values(team.bots)) if (!bot.archived && !listed.has(bot.id)) archiveBot(team, bot.id);
   const write = need(ports.teamBot, 'team_snapshot');
