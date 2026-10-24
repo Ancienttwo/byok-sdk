@@ -352,6 +352,13 @@ defines only the per-Turn step. The `syncVectors` in
 `src/commit-vectors.test-support.ts` hold these rules for the in-memory store
 and for L.
 
+`collaborationDue(state, timers)` in `src/rules/due.ts` lists the times when a
+sync has collaboration work to do: each open input batch's seal, each pending
+card's expiry, each unreleased seat's deadline, and the delegation times
+(`delegationDue`). `src/rules/commands.ts` exports it. L arms its timer with
+these times and its own L-only ones. H stores their minimum as the scope's due
+time (#793 S4). Routine slots are K4's, so they are not in the list.
+
 Known L limit: K4 stores the whole Host ledger, with the collaboration state,
 in one JSON row per tenant. Turns, replies, audit rows and command records
 make that row grow. Command records are dedup evidence; retention must not

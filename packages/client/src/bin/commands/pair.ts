@@ -1,3 +1,4 @@
+import { encodePairingVerificationSecret, parsePairingInput } from '@byok-sdk/core/sealed-payload';
 import { createDaemon, type Daemon, type DaemonConfig } from '../../index';
 import { connectControlClient } from '../control-client';
 import { resolveStoreDir } from '../config';
@@ -10,10 +11,29 @@ export interface PairDeps {
   connectControl?: typeof connectControlClient;
 }
 
-export async function runPairCommand(config: DaemonConfig, code: string, deps: PairDeps = {}): Promise<void> {
+/**
+ * The CLI pair input. With `e2ee`, it is `<pairing code>.<verification
+ * secret>` and splits on the last `.`; without it, the whole input is the
+ * code. The flag, never the text, decides: a Host's own code may hold a `.`.
+ */
+export function readPairInput(input: string, e2ee: boolean): { readonly code: string; readonly verificationSecret?: string } {
+  if (!e2ee) return { code: input };
+  const { pairingCode, pv } = parsePairingInput(input);
+  const verificationSecret = encodePairingVerificationSecret(pv);
+  pv.fill(0);
+  return { code: pairingCode, verificationSecret };
+}
+
+/**
+ * `verificationSecret` is the base32 `pv` of an E2EE pairing (#654 §7.2): the
+ * device keeps it and sends only the code to the Host.
+ */
+export async function runPairCommand(config: DaemonConfig, code: string, deps: PairDeps = {}, verificationSecret?: string): Promise<void> {
   const log = deps.log ?? ((line: string) => console.log(line));
+  const options = verificationSecret === undefined ? undefined : { verificationSecret };
+  const pair = (daemon: Pick<Daemon, 'pair'>) => (options === undefined ? daemon.pair(code) : daemon.pair(code, options));
   if (deps.daemon) {
-    const result = await deps.daemon.pair(code);
+    const result = await pair(deps.daemon);
     log(`paired: deviceId=${result.deviceId}`);
     return;
   }
@@ -22,7 +42,7 @@ export async function runPairCommand(config: DaemonConfig, code: string, deps: P
   const conn = await connectControl({ storeDir: resolveStoreDir(config), productId: config.productId });
   if (conn.ok) {
     try {
-      const result = await conn.client.request<{ deviceId: string }>('enrollment.pair', { pairingCode: code });
+      const result = await conn.client.request<{ deviceId: string }>('enrollment.pair', { pairingCode: code, ...options });
       log(`paired: deviceId=${result.deviceId}`);
       return;
     } finally {
@@ -30,7 +50,6 @@ export async function runPairCommand(config: DaemonConfig, code: string, deps: P
     }
   }
 
-  const daemon = createDaemon(config);
-  const result = await daemon.pair(code);
+  const result = await pair(createDaemon(config));
   log(`paired: deviceId=${result.deviceId}`);
 }
