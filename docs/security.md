@@ -741,17 +741,22 @@ The Host runs `createByokCloud` from `@byok-sdk/cloud` with the `@byok-sdk/cloud
 The [hosted Host contract](hosted-host-contract.md) gives its rules.
 Code citations use `path:line` at commit `c824092b`.
 
-The SDK does not encrypt task content on the hosted wire.
+Without sealed payload v1, the SDK does not encrypt task content on the hosted wire.
 The Host decodes each envelope that a device sends (`packages/protocol/src/http-api.ts:271-272`).
 It decodes each mailbox row again before delivery (`packages/cloud/src/handlers/events.ts:157`).
 The stores keep each payload as they get it.
 Issue [#654](https://github.com/Ancienttwo/byok-sdk/issues/654) asks for end-to-end encryption by data category.
 The design draft is [`docs/plans/2026-10-22-654-hosted-wire-e2ee.md`](plans/2026-10-22-654-hosted-wire-e2ee.md).
+A task whose offer has `sealing` keeps each category named in `sealing.categories` (task input, task output, or both) as ciphertext ([protocol §2.5](protocol.md#25-sealed-payload-v1-654-gated-addition)).
+For those categories the Host stores and reads back only the sealed member and the closed plaintext codes.
+Agent messages, egress, memory projections and routing metadata are not sealed in v1, so their rows below apply to a sealed task too.
+The Host refuses a draft for a sealed task.
 
 `@byok-sdk/cloud-do` is not on this surface.
 It is a session host in a Durable Object (`packages/cloud-do/README.md:3-5`).
 It runs the model with platform keys (`packages/cloud-do/README.md:104-105`), so it must read plaintext.
 Tenant erasure does not reach its storage.
+A sealed task must not go to `@byok-sdk/cloud-do`, because it would read the sealed content in plaintext.
 
 ### Readers by data category
 

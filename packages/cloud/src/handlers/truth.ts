@@ -14,7 +14,7 @@ import {
   type TruthRecordKind,
 } from '@byok-sdk/core';
 import type { Context } from 'hono';
-import { authenticateDeviceProof, type DeviceProofAuthDeps } from '../auth/device-proof';
+import type { DeviceProofAuthDeps } from '../auth/device-proof';
 import {
   TRUTH_MANIFEST_MAX_LIMIT,
   TruthRecordKeySchema,
@@ -29,13 +29,13 @@ import {
   type TruthRecordMetadata,
 } from '../truth/contract';
 import { isTruthCommitError } from '../truth/errors';
-import { cancelBody, readBoundedRawBody } from './shared';
+import { authenticateProofRequest, readProofRequestBody } from './device-proof-request';
 
 // Re-exported from core (single source of truth for the wire header); still
 // part of this module's public surface for callers importing it from cloud.
 export { DEVICE_PROOF_HEADER };
+export { MAX_DEVICE_PROOF_HEADER_BYTES } from './device-proof-request';
 export const DEFAULT_MAX_TRUTH_REQUEST_BYTES = 2 * 1024 * 1024;
-export const MAX_DEVICE_PROOF_HEADER_BYTES = 16 * 1024;
 
 const EMPTY_BODY = new Uint8Array();
 const RECORD_PREFIX_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
@@ -102,7 +102,7 @@ export function truthGetHandler(deps: TruthRouteDeps) {
 
 export function truthPutHandler(deps: TruthRouteDeps) {
   return async (c: Context): Promise<Response> => {
-    const body = await readBoundedBody(c, deps.maxRequestBytes);
+    const body = await readProofRequestBody(c, deps.maxRequestBytes);
     if (body === 'too_large') return c.json({ error: 'truth request body too large' }, 413);
     if (body === undefined) return c.json({ error: 'invalid truth request body' }, 400);
 
@@ -238,60 +238,12 @@ function prepareWrite(
   };
 }
 
-async function authenticateTruthRequest(
+function authenticateTruthRequest(
   c: Context,
   deps: TruthRouteDeps,
   request: { readonly body: Uint8Array; readonly operation: string; readonly resource: string },
 ): Promise<ProofContext | undefined> {
-  const proof = decodeProofHeader(c.req.header(DEVICE_PROOF_HEADER));
-  if (proof === undefined) return undefined;
-  const url = new URL(c.req.url);
-  return authenticateDeviceProof(
-    proof,
-    {
-      method: c.req.method,
-      path: `${url.pathname}${url.search}`,
-      operation: request.operation,
-      resource: request.resource,
-      body: request.body,
-    },
-    deps.proof,
-  );
-}
-
-function decodeProofHeader(value: string | undefined): unknown | undefined {
-  if (value === undefined || value.length === 0 || value.length > MAX_DEVICE_PROOF_HEADER_BYTES) {
-    return undefined;
-  }
-  if (!/^[A-Za-z0-9_-]+$/.test(value) || value.length % 4 === 1) return undefined;
-  try {
-    const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (value.length % 4)) % 4);
-    const binary = atob(padded);
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-  } catch {
-    return undefined;
-  }
-}
-
-async function readBoundedBody(
-  c: Context,
-  maximum: number,
-): Promise<Uint8Array | 'too_large' | undefined> {
-  const length = c.req.header('content-length');
-  if (length !== undefined) {
-    const parsed = Number(length);
-    if (!Number.isSafeInteger(parsed) || parsed < 0) return undefined;
-    if (parsed > maximum) {
-      cancelBody(c.req.raw.body);
-      return 'too_large';
-    }
-  }
-  try {
-    return await readBoundedRawBody(c.req.raw.body, maximum);
-  } catch {
-    return undefined;
-  }
+  return authenticateProofRequest(c, deps.proof, request);
 }
 
 function parseJsonBytes(bytes: Uint8Array): unknown | undefined {
