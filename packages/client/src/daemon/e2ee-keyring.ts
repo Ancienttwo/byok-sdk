@@ -567,8 +567,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
    * catch-up moves the view during the try, it starts again, at most three
    * times. Every package found that `fetch` accepts, and every epoch this
    * run holds a key of, must then read back and open with `next` under its
-   * `keyId`, and no package `fetch` accepts may still open only with the old
-   * key.
+   * `keyId`, every epoch with a freshness point must hold a package, and no
+   * package `fetch` accepts may still open only with the old key.
    */
   async #rewrapScope(scopeId: string, next: MemberKemKey): Promise<KemRotationFailure | ReadonlyMap<number, string>> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -577,6 +577,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       if (this.#scopeFailure(view, scopeId) !== undefined) return new Map();
       // Taken with the view: a catch-up drops the keys of a sender it drops in the same step.
       const held = this.#heldEpochs(scopeId);
+      const fresh = [...(this.#fresh.get(scopeId)?.keys() ?? [])];
       const { kem: old, signing } = view.keys;
       const found = await this.#readEpochs(scopeId);
       if (found === undefined) return 'scope_epochs_exceeded';
@@ -604,7 +605,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
         expected.set(epoch, sealed.keyId);
       }
       if (this.#session !== view) continue;
-      const unopened = [...held].find((epoch) => !expected.has(epoch));
+      // A row found at a fresh epoch from a sender `fetch` refuses gives no key to keep, so only a missing one stops the rotation.
+      const unopened = [...held].find((epoch) => !expected.has(epoch)) ?? fresh.find((epoch) => !found.has(epoch));
       if (unopened !== undefined) {
         this.options.log(`epoch ${unopened} of scope ${JSON.stringify(scopeId)} is held but its key package was not ${found.has(unopened) ? 'opened' : 'read'}`);
         return found.has(unopened) ? 'rewrap_unverified' : 'key_package_missing';

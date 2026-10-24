@@ -1132,6 +1132,38 @@ describe('device member KEM rotation (E2d-5)', () => {
     expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
   });
 
+  it('keeps the old key when the Host reads no package at an epoch with a freshness point and no key', async () => {
+    const { server, web, device, custody, logs, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    expect(await keyring.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    const handle = server.e2ee.handle.bind(server.e2ee);
+    server.e2ee.handle = async (req, res, url) => {
+      if (req.method === 'GET' && url.pathname.endsWith('/key-packages') && url.searchParams.get('epoch') === '1') {
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ packages: [] }));
+        return true;
+      }
+      return handle(req, res, url);
+    };
+    expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'key_package_missing' });
+    expect(logs.join('\n')).toContain('epoch 1 of scope "scope-a" is held but its key package was not read');
+    expect(server.e2ee.devicePuts).toHaveLength(0);
+    expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+  });
+
+  it('finishes when an epoch with a freshness point holds a package from a sender that was removed since', async () => {
+    const { server, web, device, custody, keyring } = await member();
+    const helper = await stranger();
+    await web.append('add', { member: helper.member });
+    await web.putScope('scope-a', [device, helper.member]);
+    const removed = await helper.sealPackage('scope-a', device, new Uint8Array(32).fill(6), 2);
+    server.e2ee.clientPutPackages(removed);
+    expect(await keyring.acceptHeader(header('scope-a', 2, web.head!, helper.member.memberId))).toBe(true);
+    await web.append('remove', { memberId: helper.member.memberId });
+    expect(await keyring.rotateKem()).toEqual({ ok: true, epoch: 2 });
+    expect(server.e2ee.packages).toContainEqual(removed);
+    expect(stored(custody).nextKem).toBeUndefined();
+  });
+
   it('shares one rotation between concurrent calls, and refuses one after the member is lost', async () => {
     const { server, web, device, keyring } = await member();
     await web.putScope('scope-a', [device]);
