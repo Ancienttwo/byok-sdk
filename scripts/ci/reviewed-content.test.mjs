@@ -391,6 +391,7 @@ test('reviewed Pi 1.4.0 move admits only all nine exact pins and the reviewed lo
     ['client range pin', moved(s => { s.client.dependencies['@earendil-works/pi-ai'] = '^1.4.0'; }), 'packages/client/package.json', refused.client],
     ['partial client move', moved(s => { s.client.dependencies['@earendil-works/chord'] = '1.3.0'; }), 'packages/client/package.json', refused.client],
     ['another dependency next to Pi', moved(s => { s.client.dependencies.x = '2.0.0'; }), 'packages/client/package.json', refused.client],
+    ['runtime pin left behind', moved(s => { s.client.byok.piRuntimePin = '1.3.0'; }), 'packages/client/package.json', /must move byok\.piRuntimePin with the Pi pins/],
     ['another Pi version', state('1.4.1'), 'packages/cloud-do/package.json', refused.cloudDo],
     ['another lock dependency next to Pi', moved(s => { s.lock.workspaces['packages/client'].dependencies.x = '2.0.0'; s.lock.packages.x = ['x@2.0.0']; }), 'bun.lock', refused.lock],
     ['another integrity', moved(s => { s.lock.packages['@earendil-works/pi-ai'] = [...PI_LOCK['@earendil-works/pi-ai'].slice(0, 3), 'sha512-other']; }), 'bun.lock', refused.together],

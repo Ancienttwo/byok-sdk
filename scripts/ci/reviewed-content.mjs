@@ -319,7 +319,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     if (UNDICI_FIELDS[dir] && revertUndiciMove(before, after, UNDICI_FIELDS[dir])) qualify.push(dir);
     if (PI_FIELDS[dir] && revertPiMove(before, after, PI_FIELDS[dir])) {
       qualify.push(dir);
-      if (dir === 'packages/client' && before.byok?.piRuntimePin === PI_MOVE.from && after.byok?.piRuntimePin === PI_MOVE.to) after.byok.piRuntimePin = PI_MOVE.from;
+      if (dir === 'packages/client') {
+        if (before.byok?.piRuntimePin !== PI_MOVE.from || after.byok?.piRuntimePin !== PI_MOVE.to) {
+          throw new Error('Reviewed CI mapping required: packages/client/package.json must move byok.piRuntimePin with the Pi pins');
+        }
+        after.byok.piRuntimePin = PI_MOVE.from;
+      }
     }
     delete before.version; delete after.version;
   }

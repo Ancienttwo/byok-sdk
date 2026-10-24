@@ -80,7 +80,7 @@ async function resumedAndFresh(
 
 const DEFAULTS = ['read', 'bash', 'edit', 'write'];
 
-describe('resumed Pi session tools (Pi 1.3)', () => {
+describe('resumed Pi session tools (Pi 1.4)', () => {
   // Pi 1.3 kept a load-time tool the transcript did not declare inactive;
   // Pi 1.4 (upstream #11062) activates it natively.
   it('without the reset, native Pi 1.4 offers a load-time tool the transcript did not declare', async () => {
