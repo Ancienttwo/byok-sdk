@@ -593,7 +593,7 @@ export class BotCollaboration {
         const result = await port.readback(old.id);
         this.ledger.transaction(s => {
           const row = stateOf(s.application).channel?.deliveries[old.id];
-          if (row) readbackDelivery(row, result, this.now());
+          if (row) readbackDelivery(row, old.attempts, result, this.now());
         });
       } catch { continue; } // Missing readback evidence leaves this row unknown.
     }

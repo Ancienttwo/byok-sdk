@@ -75,9 +75,12 @@ export function recoverDelivery(row: Delivery): void {
   if (row.state === 'sending') unknownDelivery(row, row.attempts, 'interrupted');
 }
 
-/** Only authoritative absence permits a new attempt after uncertain I/O. */
-export function readbackDelivery(row: Delivery, result: ReadbackResult, now: number): void {
-  if (row.state !== 'unknown') return;
+/**
+ * Only authoritative absence permits a new attempt after uncertain I/O. `attempt` is the attempt that the readback observed:
+ * a result that comes after a later attempt changes nothing, as `settleDelivery` is fenced by its attempt.
+ */
+export function readbackDelivery(row: Delivery, attempt: number, result: ReadbackResult, now: number): void {
+  if (row.state !== 'unknown' || row.attempts !== attempt) return;
   if (result === 'accepted') {
     row.state = 'accepted';
     delete row.code;
