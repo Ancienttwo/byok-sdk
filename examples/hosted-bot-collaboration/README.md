@@ -467,9 +467,9 @@ clock for each sync; the pass time only selects the scopes. Only syncs that reso
 
 - A sync that leaves the scope due is reported in `stalled`, for example a reply check time when the deployment's
   `sync` does not run `HostedReplyChecker` first. A sync that
-  throws is reported in `failed`. With the composed `sync` (the reply checker, then `store.sync`), each reply settle
-  commits in its own transaction: if a later settle or `store.sync` throws, the earlier settles of that pass stay
-  committed, and one settle never writes partly. Either scope waits `backoffMs` (default 60 s, in memory only)
+  throws is reported in `failed`. With the composed `sync` (the reply checker, the device observer, then
+  `store.sync`), each reply settle and the device observation commit in their own transactions: if a later step or
+  `store.sync` throws, the earlier steps of that pass stay committed, and one step never writes partly. Either scope waits `backoffMs` (default 60 s, in memory only)
   before its next sync, so it is synced at most once per backoff, and each pass reports it again when it is retried.
 - H has no timer. The deployment runs `run()` on its own interval, which bounds how late a due step runs in a scope that
   is not stalled. A stalled scope keeps the due time that H cannot clear, so each of its other due times can run up to
