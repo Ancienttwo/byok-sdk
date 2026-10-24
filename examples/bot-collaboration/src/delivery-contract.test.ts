@@ -43,17 +43,25 @@ afterEach(async () => { for (const close of closers.splice(0).reverse()) await c
 
 async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
   let bot!: BotCollaboration, reopened: HostLedger | undefined, now = Date.now(), armed = false, checkpoint: string | undefined;
+  /** A held send: `started` resolves when it starts, `open` lets it go on, and `holder` is the drain that waits for it. */
+  let hold: { armed: boolean; started: Promise<void>; begin(): void; gate: Promise<void>; open(): void; holder?: Promise<void>; takenOver?: true } | undefined;
+  const roots = new Map<string, string>();
   const adapter = new DraftAdapter();
   const fixture: TestHost = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, adapter,
     consume: (wake, signal) => bot.consume(wake, signal), agentMessage: { consume: input => bot.consumeMessage(input) } });
   const ledger = () => reopened ?? fixture.ledger;
   // The crash boundary: the claim is committed, and this copy of the database is what a restarted Host opens.
-  const send: ChannelPort['send'] = (input, signal) => {
+  const send: ChannelPort['send'] = async (input, signal) => {
     if (armed) {
       armed = false;
       const db = new DatabaseSync(join(fixture.root, 'host.sqlite'));
       checkpoint = join(fixture.root, `crash-${randomUUID()}.sqlite`);
       db.exec(`VACUUM INTO '${checkpoint.replaceAll("'", "''")}'`); db.close();
+    }
+    if (hold?.armed) {
+      hold.armed = false;
+      hold.begin();
+      await hold.gate;
     }
     return port.send(input, signal);
   };
@@ -62,7 +70,8 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'delivery' }, payload: { ...base.payload,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 } } },
     connector: async () => null, now: () => now,
-    channel: { port: { send, ...(port.readback ? { readback: port.readback } : {}) }, self: { fake: ['own-bot'] }, sendTimeoutMs: 10 } };
+    // Long enough for a held send to outlive the steps of its vector; a hanging send still times out within the case.
+    channel: { port: { send, ...(port.readback ? { readback: port.readback } : {}) }, self: { fake: ['own-bot'] }, sendTimeoutMs: 2_000 } };
   bot = new BotCollaboration(fixture.server, fixture.ledger, options);
   closers.push(async () => { await bot.close(); reopened?.close(); await fixture.close(); });
   /** A crashed claim: the replacement Host opens the checkpoint and recovers at startup. */
@@ -76,7 +85,26 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
     bot = new BotCollaboration(fixture.server, reopened, options);
     await bot.recover();
   };
-  const run = async () => { await bot.drain(); await settle(); };
+  /**
+   * Runs the Host. While a send is held, its Host is busy in that send, so another Host on the same ledger takes over: L
+   * recovers at startup, so its claim becomes `unknown` (`interrupted`) at once.
+   */
+  const run = async () => {
+    if (hold?.holder && !hold.takenOver) {
+      const holding = bot, holder = hold.holder;
+      bot = new BotCollaboration(fixture.server, ledger(), options);
+      closers.push(async () => { await holder; await holding.close(); });
+      hold.takenOver = true;
+      await bot.recover();
+    }
+    const pass = bot.drain();
+    if (hold && hold.armed) {
+      // The held send may start in this pass: then this verb returns while the pass waits for it.
+      const started = await Promise.race([pass.then(() => false), hold.started.then(() => true)]);
+      if (started) { hold.holder = pass; return; }
+    } else await pass;
+    await settle();
+  };
   const agentMessage = (turnId: string): AgentMessageInput => {
     const intent = bot.core.intent(turnId)!;
     return { tenant: tenantId(ledger().tenant), taskId: intent.taskId, deviceId: fixture.deviceId,
@@ -92,10 +120,37 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
       const message: InboundMessage = { channel: 'fake', platformMessageId: key, conversation, sender: { id: 'owner', kind: 'human' }, text: 'Answer me',
         mentions: [], ...(replyMs === null ? {} : { replyRoute: { kind: 'reply', channel: 'fake', inboundId: key, token: replyToken(key), expiresAt: now + replyMs } }) };
       const root = (await bot.receive(message)).id!;
+      roots.set(key, root);
       await bot.drain();
       await adapter.started(bot.core.intent(root)!.taskId);
       expect(await bot.consumeMessage(agentMessage(root))).toEqual({ outcome: 'accepted' });
       await run();
+    },
+    end: async key => {
+      const root = roots.get(key)!, taskId = bot.core.intent(root)!.taskId;
+      const events = fixture.server.events.subscribe()[Symbol.asyncIterator]();
+      try {
+        await bot.cancelTurn(root);
+        for (;;) {
+          const next = await events.next();
+          if (next.done) throw new Error('Server event stream ended before the task terminal');
+          if (next.value.kind === 'task.state' && next.value.taskId === taskId && ['Complete', 'Failed', 'Cancelled'].includes(next.value.state)) break;
+        }
+      } finally { await events.return?.(); }
+      // K4 takes the terminal through its own wake, so the Turn can conclude a pass after the server event.
+      for (let tries = 0; !bot.snapshot().turns[root]?.conclusion; tries++) {
+        if (tries === 100) throw new Error('The Turn did not conclude');
+        await run();
+        if (!bot.snapshot().turns[root]?.conclusion) await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      expect(bot.snapshot().turns[root]).toMatchObject({ conclusion: 'cancelled' });
+    },
+    holdNextSend: () => {
+      let begin!: () => void, open!: () => void;
+      const started = new Promise<void>(resolve => { begin = resolve; }), gate = new Promise<void>(resolve => { open = resolve; });
+      const held = { armed: true, started, begin, gate, open } as NonNullable<typeof hold>;
+      hold = held;
+      return { release: async () => { held.open(); await held.holder; hold = undefined; await settle(); } };
     },
     enablePush: async target => { const id = await bot.enablePushRoute(conversation, 'fake', target); await run(); return id; },
     revokePush: async id => { await bot.revokePushRoute(id); await run(); },
