@@ -4,15 +4,15 @@
 
 ## 0.30.0 — source candidate
 
-0.30.0 is a MINOR release under the default pre-1.0 policy, with no
-exception. It adds public API, gated wire types and behavior, and it has
-breaking changes in protocol, server, cloud and client. The owner confirmed
-the breaking labels of #783, #784, #831 and #834. The examples changes of
-#820 and #823 are also breaking for a Host that copies the K8 example. This
-candidate is not published. A default 0.30.0 daemon does not advertise
-`sealed-payload-v1`. See the [release notes](docs/releases/v0.30.0.md) for
-scope, the release rule of `sealed-payload-v1` and the upgrade notes. All
-nine public manifests and their lock records move to 0.30.0.
+0.30.0 is a MINOR release under the default pre-1.0 policy, with no exception.
+It adds public API, gated wire types and behavior, and it has breaking changes
+in protocol, server, cloud and client. The owner confirmed the breaking labels
+of #783, #784, #831 and #834. The examples changes of #820, #823 and #852 are
+also breaking for a Host that copies the K8 example. This candidate is not
+published. A default 0.30.0 daemon does not advertise `sealed-payload-v1`. See
+the [release notes](docs/releases/v0.30.0.md) for scope, the release rule of
+`sealed-payload-v1` and the upgrade notes. All nine public manifests and their
+lock records move to 0.30.0.
 
 - **Feature (protocol, cloud)** — a sealed
   `task.offer_for_agent_with_egress_fresh_sealed` can carry a plaintext
@@ -381,10 +381,12 @@ nine public manifests and their lock records move to 0.30.0.
   `DelegationTimers` (#854), and `./test-support` gets `settlementVectors`.
   K4 exports its routine rules, from `recordOccurrence` to `scheduleNext`,
   with the types `RoutineValidation` and `RoutineCommandOptions` (#848). K4
-  behavior does not change. On the local Host, K8 `readbackDelivery` takes the
-  attempt that the readback saw, and a readback of an older attempt changes
-  nothing (#852). The delivery rules take the new `IntentConclusions` type,
-  and a K4 `LedgerState` fits it.
+  behavior does not change. The delivery rules take the new
+  `IntentConclusions` type, and a K4 `LedgerState` fits it (#852).
+- **Breaking (examples)** — K8 `readbackDelivery(row, attempt, result, now)`
+  takes the attempt that the readback saw (#852). A readback of an older
+  attempt changes nothing. The local Host passes the attempt of the row.
+  Upgrade: add the `attempt` argument to your own `readbackDelivery` calls.
 - **Feature (examples)** — the hosted package binds devices and retains
   settled roots (#793 D2e, D2g; #845, #847). `bindDevice` and `revokeDevice`
   use the new table `device_binding`. A write that can create execution
