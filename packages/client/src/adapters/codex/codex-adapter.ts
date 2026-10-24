@@ -294,6 +294,9 @@ export class CodexAdapter implements RuntimeAdapter {
           : 'infrastructure',
         retry: isRuntimeExecutionFailure(error) ? error.retry : 'retryable',
         reason: error instanceof Error ? error.message : 'codex open failed',
+        failure: isRuntimeExecutionFailure(error)
+          ? error.failure
+          : { class: 'unknown' },
       });
     }
   }

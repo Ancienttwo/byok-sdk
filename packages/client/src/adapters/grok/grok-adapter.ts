@@ -212,6 +212,7 @@ export class GrokAdapter implements RuntimeAdapter {
         category: isRuntimeExecutionFailure(error) ? error.category : 'infrastructure',
         retry: isRuntimeExecutionFailure(error) ? error.retry : 'retryable',
         reason: error instanceof Error ? error.message : 'grok open failed',
+        failure: isRuntimeExecutionFailure(error) ? error.failure : { class: 'unknown' },
       });
     }
   }
