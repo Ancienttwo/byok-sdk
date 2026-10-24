@@ -1,5 +1,5 @@
 export { CallbackCommandError, HostedCollaborationStore, HostedStoreVersionError, InboundCommandError, type CommitPorts, type CommitPortsFactory,
-  type FinishPortsFactory, type HostedSyncOptions, type InboundIdentity, type PortsFactory, type Publish, type SyncResult } from './store';
+  type FinishPortsFactory, type HostedStoreOptions, type HostedSyncOptions, type InboundIdentity, type PortsFactory, type Publish, type SyncResult } from './store';
 export { DDL, STORE_VERSION } from './ddl';
 export { hostedMessageConsumer, type AgentMessageConsumer, type AgentMessageInput, type MessageConsumerOptions, type MessageDecision } from './messages';
 export { freezeIntent, HostedSubmitter, type IntentFreeze, type SubmitFailure, type SubmitPass, type SubmitterOptions } from './intents';
