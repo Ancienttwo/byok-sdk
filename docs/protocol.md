@@ -1143,6 +1143,77 @@ sealed offer type, so a device without the flag never receives it. A
 plaintext type that has a sealed sibling refuses `sealing` and `sealed`, so
 the schema never strips a sealing policy or sealed content.
 
+**Device rules (#654 E2d-3, E2d-4).** The daemon opens and seals with the scope keys
+of its own verified member (§2.6, §2.7). It advertises `sealed-payload-v1`
+only while it holds a verified member and the deployment declares
+`e2ee.member`. The first `conn.hello` of a run never carries the flag; a
+refreshed hello adds it, and removes it again when the member is lost.
+
+- **Usable scope.** The scope must be in the verified chain state (a shred
+  removes it), and its latest `scope-policy` must hold the device and no
+  other device (design §7.9, requirement 1). Else the offer is declined with
+  `sealed_key_unavailable`.
+- **Policy floor.** The offer's `sealing.categories` must include every
+  category of the scope policy (design §6.2). Else `sealing_policy_mismatch`.
+  This also covers a routine template; a template's old epoch or chain head
+  is only a hint.
+- **Sender view.** After each open (offer, steer, routine template), the
+  header's `chainHead` must be on the verified chain (the daemon catches up
+  when it is ahead), and its `sender` a current member in the scope policy
+  at that head. Else the offer is declined with `sealed_open_failed`, and a
+  steer is dropped.
+- **Freshness (owner §50d).** Each accepted header records its `chainHead` as
+  the freshness point of its scope epoch. The daemon seals output at the
+  newest epoch, at or after the offer's `epoch`, that has a point with no
+  `remove` of a scope member and no member-dropping `scope-policy` after it.
+  It checks this before the task runs; without such an epoch it rotates
+  first (below). The sealed header names the device member and its verified
+  head. An epoch that the recheck after the key read finds stale declines
+  that seal; the next seal chooses again and may rotate.
+  The points live in memory. A start after a stop in the same process keeps
+  each point that is on the new run's verified chain; after a process
+  restart they come back from the next opened content.
+- **Device rotation (#654 E2d-4, design §7.5).** With no fresh epoch, the
+  device is the next sender. It catches the chain up and starts from the
+  newest epoch it knows: the offer's, one it holds a key or a freshness
+  point for, or one the Host showed taken in this run. It reads its package
+  of each of the next four epochs (`GET /byok/e2ee/key-packages?scopeId=&epoch=`)
+  and takes the epoch after the newest one that holds a package. When the
+  fourth holds one, the scope is further ahead than the device checks, and
+  the rotation fails. The device wraps a new scope key to every current
+  member of the scope policy and puts the packages
+  (`POST /byok/e2ee/key-packages`). After the put, the verified head it chose
+  the recipients at is the new epoch's freshness point, so a `remove` that
+  landed during the put makes it stale. So does a member added to the scope
+  policy or a member `rotate` of its KEM key after the seq the packages were
+  wrapped at, because the packages name the members and KEM keys at that seq.
+  The count starts at the wrap seq even after opened content moves the
+  freshness point forward. The wrap seq is kept within one process only (a
+  start after a stop carries it); after a process restart, only the `remove`
+  and member-dropping policy rules apply to that epoch. A Host that holds
+  that epoch under another `keyId` refuses the put with
+  `e2ee_scope_key_conflict`; the next rotation starts above that epoch. A
+  policy that leaves no current member but the device is not rotated,
+  because no client could open the output. Then, and on any other failed
+  rotation, the offer is declined with `sealed_key_unavailable`. Concurrent
+  seals of one scope share one rotation; a seal that joined another seal's
+  rotation checks the result and may rotate again.
+  So an output-only task (`categories: ['task-output']`), which carries no
+  sealed input, seals at the new epoch. The Host notifies the device of its
+  own new package as of any other.
+- **Recovered terminals.** A terminal that the startup replay builds from the
+  journal for a task that seals output is always in a closed plaintext form:
+  `daemon_interrupted` stays as it is, and a result-reply failure becomes
+  `task.fail` with `reason` `sealed_key_unavailable`. The replay runs before
+  the member resumes, and the freshness points live in memory, so the Host
+  never learns the real failure reason. A terminal that the same process
+  still holds for commit after a failed stop seals with the next run's
+  member, once that run's start and member resume are over, and only when
+  that run has the same tenant, device and member as the run that owned the
+  task; otherwise it is in the closed form.
+- A key is fetched on its first miss, so a notice that came before the
+  advertisement needs no redelivery.
+
 **Routine template.** A `task.offer_for_agent_with_egress_fresh_sealed` can
 carry a plaintext `routineRef: { routineId, definitionVersion, notAfter }`.
 Its `sealed` member is then a routine template: the member sealed it once, as
@@ -1444,8 +1515,94 @@ command and not only the string.
 - Without `pv`, or with an expired one, the device is no member. Missing or
   malformed member keys are never replaced: the Host keeps the first bundle
   per device, so the recovery is a re-pair, which mints a new device id.
-- The device signs only `e2ee-member-key.register`. It appends no chain entry
-  and puts no package.
+- The device signs `e2ee-member-key.register`, and
+  `e2ee-scope-key-package.put` when it rotates a scope epoch (§2.5, device
+  rules) or re-wraps its packages. It appends only the `rotate` entry of its
+  own KEM rotation (`e2ee-member-chain.append`).
+
+**Device KEM rotation (#654 E2d-5, design §7.5).** The device member's KEM key
+rotates by epoch; its member id does not change. No daemon path starts a
+rotation yet. The steps:
+
+1. The device stores a next KEM key at `kemEpoch + 1` in its member key
+   record, beside the current key. A crash leaves both, and the next
+   rotation resumes with the same next key.
+2. It signs `rotate { memberId, kemPublicJwk, kemEpoch, kemSig }`, walks it
+   on its verified chain first, and appends it. A seq conflict is caught up
+   and tried once more. If the verified chain already names the next key,
+   it appends nothing.
+3. For each scope it may use now (device rules, §2.5), it reads its own
+   package of each epoch (`GET /byok/e2ee/key-packages?scopeId=&epoch=`),
+   four reads at a time, from epoch 1 up to 256 (`KEM_REWRAP_MAX_EPOCHS`).
+   The verified chain holds no scope epochs, so the device cannot prove that
+   no higher epoch holds its package, and every pass reads to the bound: up
+   to 64 batches of 4 reads per scope per pass. The rotation stops, and keeps
+   the old key, when epoch 256 holds a package, or when an epoch the run
+   knows for the scope (one it opened, holds a freshness point for, or found
+   taken) is above 256. It re-wraps to the next key each package that
+   opens with the old key and whose sender is a current member of the scope
+   policy, the rule a fetch applies, with the device as the sender, and puts
+   them. A package from a removed member or another sender, or one that
+   opens with neither key, stays as it is, so it never gains the device's
+   signature. After step 6 the device no longer opens it. Each epoch whose
+   key the run holds (it opened it, or rotated to it) must be found and
+   opened, and each epoch with a freshness point must be found; otherwise
+   the rotation stops before any put of that scope. A package found at a
+   fresh epoch from a sender a fetch refuses does not stop it: that epoch
+   gives the device no key either way. The senders are checked against one
+   verified view; when a catch-up moves the view before the put, the scope
+   starts again, at most three times.
+4. It reads the scope's epochs again, with the same range and stops. Each
+   epoch it re-wrapped or found already wrapped to the next key must open
+   with the next key under its `keyId`, and no package from an accepted
+   sender may still open only with the old key. Otherwise the rotation stops
+   and keeps the old key.
+5. Once every scope is done, it catches up and reads back, the same way,
+   every scope it may use at the new head, including one that became usable
+   or was created during the rotation. Each epoch of step 4 must still open
+   with the next key under its `keyId`, and no package from an accepted
+   sender at any epoch may open only with the old key, such as a new epoch
+   that a client which has not seen the `rotate` wrapped to the old key.
+   Otherwise the rotation stops and keeps the old key. Each failed read-back
+   logs the scope id and the epoch.
+6. Only then does it drop the old private key from the record.
+
+A rotation reads every usable scope three times (steps 3 to 5), each up to
+256 reads in batches of 4. A scope that starts step 3 again after the chain
+moved is read once more each time, so the worst case is five passes (1,280
+reads) for that scope. Every Host request of the rotation, the reads,
+the `rotate` append and the puts, is cut off after
+`MEMBER_REQUEST_TIMEOUT_MS`; a cut-off request throws and leaves the
+rotation to resume.
+
+Known limitation: step 5 is an interim measure until the recipient
+`kemEpoch` lands (the E5b-2 prerequisite). A package wrapped to the old key
+that lands late (a held-back or retried put, a put that timed out at the
+device and still landed, or a new epoch from a client that has not seen the
+`rotate`) replaces or adds a row. Step 5 catches one that lands before its
+read of that scope, but such a put can still land between that read and
+step 6, and the device then loses that epoch. The complete fix carries the
+recipient `kemEpoch` in the signed package fields and in the Host row, and
+the Host refuses a put older than the stored one. It is a prerequisite
+before a production path starts a rotation (E5b-2). Step 5 also does not
+read a scope that is created after its catch-up; that scope is in the same
+window.
+
+Known limitation: the device reads no epoch above 256. When all its
+packages of a scope are above epoch 256 and none is at 256 (for example a
+device added to the scope after epoch 256), steps 3 to 5 find nothing and
+the device loses those epochs at step 6. The recipient `kemEpoch` does not
+close this; it needs a Host read of the scope's newest epoch, which is
+deferred. A scope that the device may not use during the rotation (for
+example one shared with another device at that time) is not read or
+re-wrapped, so its packages wrapped to the old key do not open if the scope
+becomes usable again.
+
+Until step 6, a package opens with either key, so a client that already
+wraps to the new key loses nothing. Each start checks that the record holds
+the KEM key the verified chain names for the device: the current key, or the
+next key of a rotation whose `rotate` entry is on the chain. Otherwise E2EE
+stays off for that run.
 
 ### 2.7 E2EE key package notice (#654 E2c-3)
 

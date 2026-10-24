@@ -43,6 +43,8 @@ const routineLines = readFileSync(new URL('../../../protocol/src/__tests__/golde
 const [first, second, expired] = routineLines as [Line, Line, Line];
 
 class GoldenKeyring implements SealedScopeKeyring {
+  async scopeCategories() { return []; }
+  async acceptHeader() { return true; }
   async openingKey(scope: { readonly id: string; readonly epoch: number }) {
     return scope.id === GOLDEN_SCOPE.scopeId && scope.epoch === GOLDEN_SCOPE.epoch ? GOLDEN_SCOPE_KEY : undefined;
   }
