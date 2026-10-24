@@ -2828,7 +2828,8 @@ export function buildDaemonWithAdapters(
     const handleE2eeKeyPackageEnvelope = async (envelope: Envelope): Promise<boolean> => {
       if (envelope.type !== 'e2ee.key_package.available') return false;
       // Task-free and never journaled, like provisioning. It throws only while
-      // the member resumes or when a Host read fails, which keeps the row.
+      // the member resumes or when a Host read fails or times out, which keeps
+      // the row; a final Host answer is acknowledged.
       await processE2eeKeyPackageNotice(envelope.payload, memberStatus(), logMember);
       return true;
     };
@@ -3393,10 +3394,11 @@ export function buildDaemonWithAdapters(
     const abort = new AbortController();
     const options = {
       records: memberRecords, client: memberClient(record, abort.signal), tenantId: record.tenantId, deviceId: record.deviceId, log: logMember,
+      signal: abort.signal,
     };
     memberAbort = abort;
     memberResuming = true;
-    memberResume = resumeDeviceMember({ ...options, signal: abort.signal }).then((session) => {
+    memberResume = resumeDeviceMember(options).then((session) => {
       if (abort.signal.aborted) return;
       memberResuming = false;
       if (session === undefined) return;
