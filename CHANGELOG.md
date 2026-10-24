@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Fixed (examples)** — K8 L no longer leaves a room seat waiting when a Turn
+  step releases the seat before it (a blocked or retired seat Turn). The L
+  sync runs the room step and the Turn steps again, as H's sync does since
+  #876, so the next seat gets its Turn in the same sync. Before, a round whose
+  seat Turns all blocked stopped after four seats, with no timer for the next.
+  A shared room vector holds both Hosts to this.
+- **Fixed (examples)** — K8 bounds the `history` and `roomHistory` reads with
+  the new `historyTimeoutMs` option (default 10 seconds). A read still open
+  after it counts as failed: the Turn stays queued and the timer reads again.
+  Before, a stalled `history` authority held the Host queue with no bound.
+
 ## 0.30.1 — source candidate
 
 0.30.1 is a PATCH release under a one-release exception to the pre-1.0
