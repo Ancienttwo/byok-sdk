@@ -1,6 +1,6 @@
 import { WAKE_MAX_FUTURE_MS, type DueWake, type WakeScheduleInput } from '@byok-sdk/server';
-import { canonical, hash, time, type Conclusion, type ExecutionTemplate, type IgnoredWakeAudit, type Intent, type LedgerState, type Occurrence,
-  type Routine, type RoutineDefinition } from './model';
+import { canonical, hash, time, validateInput, validateJson, validateRetry, type Conclusion, type ExecutionTemplate, type HostOccurrenceRun,
+  type IgnoredWakeAudit, type Intent, type LedgerState, type Occurrence, type Routine, type RoutineDefinition } from './model';
 import { cancelWake, enqueue, settle } from './transitions';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 
@@ -69,6 +69,65 @@ export function applyPlan(state: LedgerState, routine: Routine, plan: WakePlan, 
   delete routine.scheduleRetryAt; delete routine.scheduleRetryCount;
   if (plan.completed) { routine.lifecycle = 'completed'; routine.status = 'ok'; delete routine.pending; }
   scheduleNext(state, routine, now);
+}
+
+/** The Host time, and the registered handlers a definition may name: Host job types and occurrence hook types, each mapped to its function. */
+export interface RoutineValidation { now: number; hostJobs: ReadonlyMap<string, unknown>; occurrenceHooks: ReadonlyMap<string, unknown> }
+/** Refuses a routine definition that the Host cannot run at `now`. Pure: it reads no ledger. */
+export function validateRoutineDefinition(definition: RoutineDefinition, { now, hostJobs, occurrenceHooks }: RoutineValidation): void {
+  if (!definition.id.trim() || definition.id.startsWith('host-scan:') || !Number.isSafeInteger(definition.version) || definition.version < 1
+    || definition.waitMs < 1) throw new Error('Invalid routine definition');
+  time(definition.waitMs); time(definition.lateAfterMs);
+  time(now + definition.waitMs);
+  if (definition.retry !== undefined) validateRetry(definition.retry);
+  if (definition.endAt !== undefined) time(definition.endAt);
+  if ([definition.execution, definition.hostJob, definition.hostOccurrence].filter(kind => kind !== undefined).length !== 1) {
+    throw new Error('Supply exactly one of execution, hostJob or hostOccurrence');
+  }
+  if (definition.hostJob) {
+    if (!definition.hostJob.type?.trim() || typeof hostJobs.get(definition.hostJob.type) !== 'function') throw new Error('Host job handler not registered');
+    validateJson(definition.hostJob.input);
+  } else if (definition.hostOccurrence) {
+    if (!definition.hostOccurrence.type?.trim() || typeof occurrenceHooks.get(definition.hostOccurrence.type) !== 'function') {
+      throw new Error('Occurrence hook not registered');
+    }
+    validateJson(definition.hostOccurrence.input);
+  } else {
+    validateInput({ key: definition.id, source: 'routine', execution: definition.execution!, waitUntil: now + definition.waitMs, retry: definition.retry });
+  }
+}
+
+/** Routine commands in the caller's transaction. A refused command throws before it changes any state. */
+export interface RoutineCommands {
+  /** The rules of `addRoutine`. */
+  create(definition: RoutineDefinition): void;
+  /** The rules of `updateRoutine`. */
+  update(definition: RoutineDefinition): void;
+  /** The rules of `lifecycle()`. */
+  lifecycle(id: string, lifecycle: Routine['lifecycle']): void;
+  /** Copies of the routine rows, including changes earlier in this transaction. */
+  list(): Routine[];
+}
+/** The inputs of `routineCommands`: the Host clock and calendar, and the registered handlers a definition may name. */
+export interface RoutineCommandOptions extends Omit<RoutineValidation, 'now'> { now: () => number; nextTime: NextOccurrence }
+/** The one path for routine commands. Each command validates and plans before it writes, so a caught refusal changes nothing. */
+export function routineCommands(state: LedgerState, options: RoutineCommandOptions): RoutineCommands {
+  const { now, nextTime } = options;
+  const validate = (definition: RoutineDefinition) => validateRoutineDefinition(definition,
+    { now: now(), hostJobs: options.hostJobs, occurrenceHooks: options.occurrenceHooks });
+  return {
+    create: definition => {
+      validate(definition);
+      createRoutine(state, definition, now(), nextTime);
+    },
+    update: definition => {
+      validate(definition);
+      nextWake(definition, now(), nextTime, now()); // Refuse a calendar error before staging.
+      stageVersion(state, definition, now(), nextTime);
+    },
+    lifecycle: (id, lifecycle) => setLifecycle(state, id, lifecycle, now(), nextTime),
+    list: () => structuredClone(Object.values(state.routines)),
+  };
 }
 
 /** Creates a validated routine. The same definition is idempotent; another definition for the ID throws before any change. */
@@ -192,6 +251,12 @@ export function promote(state: LedgerState, tenant: string, occurrence: Occurren
   if (occurrence.job?.executionSuperseded || occurrence.hook?.executionSuperseded) settle(state, intent, 'superseded');
   else if (routine.lifecycle === 'active' && occurrence.nextAt !== null) intent.retryUntil = occurrence.nextAt;
   return intent;
+}
+/** The hook input of a `hostOccurrence` occurrence of `routine`. Each call returns fresh copies. */
+export function occurrenceRun(routine: Readonly<Routine>, occurrence: Readonly<Occurrence>): HostOccurrenceRun {
+  const { type, input } = routine.definition.hostOccurrence!;
+  return { type, input: structuredClone(input), occurrenceKey: occurrence.key, routineId: occurrence.routineId,
+    definitionVersion: occurrence.definitionVersion, trigger: structuredClone(occurrence.trigger) };
 }
 function openHostOccurrence(state: LedgerState, occurrenceKey: string): Occurrence {
   const occurrence = Object.hasOwn(state.occurrences, occurrenceKey) ? state.occurrences[occurrenceKey]! : undefined;

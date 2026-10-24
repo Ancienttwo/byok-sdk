@@ -12,7 +12,9 @@
     "./team": "./src/team.ts",
     "./test-support": "./src/commit-vectors.test-support.ts",
     "./retention": "./src/retention.ts",
-    "./retention-vectors": "./src/retention-vectors.test-support.ts"
+    "./retention-vectors": "./src/retention-vectors.test-support.ts",
+    "./routines": "./src/routines.ts",
+    "./routine-vectors": "./src/routine-vectors.test-support.ts"
   },
   "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": {

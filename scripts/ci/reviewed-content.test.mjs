@@ -447,6 +447,34 @@ test('#793 D2g: the K8 manifest admits the retention entries only on top of the 
   }
 });
 
+test('#793 D2f-1: the K8 manifest admits the routine entries only on top of the hosted and retention entries', t => {
+  const f = fixture(t);
+  const dir = 'examples/bot-collaboration', path = `${dir}/package.json`;
+  const hosted = {
+    './rules/commands': './src/rules/commands.ts', './rules/commit': './src/rules/commit.ts', './model': './src/model.ts',
+    './coalesce': './src/coalesce.ts', './team': './src/team.ts', './test-support': './src/commit-vectors.test-support.ts',
+    './retention': './src/retention.ts', './retention-vectors': './src/retention-vectors.test-support.ts',
+  };
+  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1', exports: hosted };
+  f.write(path, manifest);
+  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the hosted and retention entries');
+  f.base = git('rev-parse', 'HEAD').trim();
+  const routines = { './routines': './src/routines.ts', './routine-vectors': './src/routine-vectors.test-support.ts' };
+  f.write(path, { ...manifest, exports: { ...hosted, ...routines } });
+  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
+  const { './retention': _retention, './retention-vectors': _vectors, ...withoutRetention } = hosted;
+  for (const [candidate, reason] of [
+    [{ ...manifest, exports: { ...hosted, './routines': './src/routines.ts' } }, 'one of the two entries'],
+    [{ ...manifest, exports: { ...hosted, ...routines, './host': './src/host.ts' } }, 'another entry'],
+    [{ ...manifest, exports: { ...hosted, ...routines, './routines': './src/host.ts' } }, 'an entry retargeted to another file'],
+    [{ ...manifest, exports: { ...withoutRetention, ...routines } }, 'the routine entries without the retention entries'],
+  ]) {
+    f.write(path, candidate);
+    assert.throws(() => selectImpact([path], f), /more than/, reason);
+  }
+});
+
 test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
   const f = fixture(t);
   const path = 'examples/bot-collaboration/package.json';
