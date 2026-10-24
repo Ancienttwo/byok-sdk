@@ -266,7 +266,7 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
     expect(await refCount(task, ref)).toBe(1);
   });
 
-  it.each(BY_REFERENCE)('refuses %s naming a blob that is not committed, before the envelope identity is reserved', async (type) => {
+  it.each(BY_REFERENCE)('refuses %s naming a blob that does not exist, and records no terminal', async (type) => {
     const task = await offeredTask(OUTPUT_SEALING, type !== 'task.decline_sealed');
     const payload = { ...SEALED_OUTPUTS[type], sealed: BY_REFERENCE_MEMBER };
     expect(await task.send(type, payload)).toEqual(refused('sealed_ciphertext_invalid'));
@@ -274,13 +274,29 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
     expect(await task.harness.cloud.readDeviceTerminal(TENANT_A, task.taskId)).toBeUndefined();
   });
 
-  it('refuses a blob whose size is not the declared size', async () => {
+  const mismatches: readonly (readonly [string, (task: Task) => Promise<{ uploaded: CiphertextRef; declared: CiphertextRef }>])[] = [
+    ['a blob that is not finalized', async (task) => {
+      const uploaded = await uploadCiphertext(task.harness, task.device, randomBytes(REFERENCE_SIZE), { finalize: false });
+      return { uploaded, declared: uploaded };
+    }],
+    ['a blob whose size is not the declared size', async (task) => {
+      const uploaded = await uploadCiphertext(task.harness, task.device, randomBytes(REFERENCE_SIZE - 1));
+      return { uploaded, declared: { ...uploaded, size: REFERENCE_SIZE } };
+    }],
+    ['a blob whose content type is not the declared type', async (task) => {
+      const uploaded = await uploadCiphertext(task.harness, task.device, randomBytes(REFERENCE_SIZE), { contentType: 'text/plain' });
+      return { uploaded, declared: { ...uploaded, contentType: 'application/octet-stream' } };
+    }],
+  ];
+
+  it.each(mismatches)('refuses %s, and holds no reference to it', async (_name, prepare) => {
     const task = await offeredTask(OUTPUT_SEALING);
-    const ref = await uploadCiphertext(task.harness, task.device, randomBytes(REFERENCE_SIZE - 1));
-    const member = { ...BY_REFERENCE_MEMBER, ciphertextRef: { ...ref, size: REFERENCE_SIZE } };
+    const { uploaded, declared } = await prepare(task);
+    const member = { ...BY_REFERENCE_MEMBER, ciphertextRef: declared };
     expect(await task.send('task.complete_sealed', { ...SEALED_OUTPUTS['task.complete_sealed'], sealed: member }))
       .toEqual(refused('sealed_ciphertext_invalid'));
-    expect(await refCount(task, ref)).toBe(0);
+    expect(await refCount(task, uploaded)).toBe(0);
+    expect(await task.harness.cloud.readDeviceTerminal(TENANT_A, task.taskId)).toBeUndefined();
   });
 
   it('a later terminal with another blob does not replace the first, and holds no reference to its blob', async () => {
