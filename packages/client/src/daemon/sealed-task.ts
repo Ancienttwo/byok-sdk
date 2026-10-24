@@ -303,7 +303,7 @@ export class SealedTasks {
       sealed = await this.#seal(taskId, task, 'task.fail', failure);
       plain = createEnvelope('task.fail', failure as never, { taskId });
     }
-    if (sealed === undefined) return this.#unsealable(envelope);
+    if (sealed === undefined) return this.unsealable(envelope);
     this.#plainBySealedId.set(sealed.id, plain);
     return sealed;
   }
@@ -386,7 +386,7 @@ export class SealedTasks {
   }
 
   /** The closed plaintext form of a terminal that has no sealing key (decision 12d). */
-  #unsealable(envelope: Envelope): Envelope | undefined {
+  unsealable(envelope: Envelope): Envelope | undefined {
     const taskId = envelope.task_id!;
     const payload = envelope.payload as JsonObject;
     const code = 'sealed_key_unavailable';

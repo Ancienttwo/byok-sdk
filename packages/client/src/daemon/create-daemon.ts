@@ -1651,6 +1651,10 @@ export function buildDaemonWithAdapters(
   let activateSealedTasks: ((keyring: DeviceMemberKeyring) => void) | undefined;
   /** The freshness points a retired keyring left for the next run's member (§50d); a new enrollment voids them. */
   let carriedFreshness: MemberFreshness | undefined;
+  const sealIdentityOf = (record: DeviceRecord, member: DeviceMemberKeyring | undefined): string | undefined => {
+    const memberId = member?.session?.member.memberId;
+    return memberId === undefined ? undefined : JSON.stringify([record.tenantId, record.deviceId, memberId]);
+  };
   const memberStatus = (): DeviceMemberStatus => deviceMember ?? (memberResuming ? 'resuming' : 'none');
   let memberAbort: AbortController | undefined;
   let memberResume: Promise<void> | undefined;
@@ -1809,6 +1813,8 @@ export function buildDaemonWithAdapters(
   // failed stop seals through the run it runs in, never through the stopped
   // run's keyring, which its shutdown retires.
   let latestSealedTasks: SealedTasks | undefined;
+  /** The latest run's (tenant, device, member); `undefined` while it has no usable member. */
+  let latestSealIdentity: (() => string | undefined) | undefined;
   /** Set by each start: retires that run's member keyring at shutdown. */
   let retireSealedMember: (() => void) | undefined;
   let sealedOutputSettled: (() => Promise<void>) | undefined;
@@ -2460,7 +2466,9 @@ export function buildDaemonWithAdapters(
     latestSealedTasks = opened;
     sealedOutputSettled = () => opened.settled();
     activateSealedTasks = (keyring) => { sealedMember ??= keyring; };
-    retireSealedMember = () => { if (sealedMember !== undefined) carriedFreshness = sealedMember.retire(); };
+    // Only the next run receives this run's points, so a run with no member leaves none.
+    retireSealedMember = () => { carriedFreshness = sealedMember?.retire(); };
+    latestSealIdentity = () => sealIdentityOf(record, sealedMember);
     // Contract §8.1 / §8.3: the device-level capability string is NOT computed
     // here. It is the one flag whose answer depends on a deployment fact this
     // daemon has not read yet at this point in `start()`, so it is added (and
@@ -2542,12 +2550,14 @@ export function buildDaemonWithAdapters(
      * retry. A run whose resume found no member, or whose member is lost,
      * gives the closed plaintext form.
      */
-    const sealQueuedTerminal = async (owner: SealedTasks, envelope: Envelope): Promise<Envelope | undefined> => {
+    const sealQueuedTerminal = async (owner: SealedTasks, ownerIdentity: string | undefined, envelope: Envelope): Promise<Envelope | undefined> => {
       const taskId = envelope.task_id!;
       if (startInProgress) throw new Error(`${envelope.type} for sealed task ${taskId} waits for the start under way`);
       const current = latestSealedTasks!;
       if (current === owner) return owner.sealOutbound(envelope);
       if (memberResuming) throw new Error(`${envelope.type} for sealed task ${taskId} waits for this run's member`);
+      // A run under another tenant, device or member never seals this task's output.
+      if (ownerIdentity === undefined || ownerIdentity !== latestSealIdentity?.()) return current.unsealable(envelope);
       const task = await activeJournal!.readTask(taskId, journalIdentity!);
       if (!task || !('envelopeBytes' in task)) throw new Error(`missing durable offer of sealed task ${taskId}`);
       return current.sealRecovered(decodeEnvelope(task.envelopeBytes), envelope);
@@ -2578,7 +2588,8 @@ export function buildDaemonWithAdapters(
         observer.captureOutboundApproval(envelope);
         const sealedTaskOutput = sealedTasks;
         if (terminal) {
-          commitTerminal(envelope.task_id!, () => sealQueuedTerminal(sealedTaskOutput, envelope));
+          const ownerIdentity = sealIdentityOf(record, sealedMember);
+          commitTerminal(envelope.task_id!, () => sealQueuedTerminal(sealedTaskOutput, ownerIdentity, envelope));
           return;
         }
         // Without a journal no commit queue holds a terminal, so a terminal
@@ -3486,6 +3497,9 @@ export function buildDaemonWithAdapters(
    */
   /** Resume this enrollment's member off the start path; shutdown and re-pair abort it. */
   function startDeviceMember(record: DeviceRecord): void {
+    // Points pass to the immediately next run only, even when its resume finds no member.
+    const carried = carriedFreshness;
+    carriedFreshness = undefined;
     if (memberRecords === undefined) return;
     const abort = new AbortController();
     const options = {
@@ -3500,12 +3514,11 @@ export function buildDaemonWithAdapters(
       if (session === undefined) return;
       const member = new DeviceMemberKeyring(session, {
         ...options,
-        carried: carriedFreshness,
+        carried,
         onLost: () => {
           if (deviceMember === member) applyCapabilityDeclaration(deploymentDeclaration);
         },
       });
-      carriedFreshness = undefined;
       deviceMember = member;
       activateSealedTasks?.(member);
       applyCapabilityDeclaration(deploymentDeclaration);
