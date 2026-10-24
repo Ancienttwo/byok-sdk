@@ -53,11 +53,14 @@ function record<T>(state: TenantState, proof: E2eeProvenWrite | undefined, resul
 /**
  * Reference E2EE member store. Each method checks and writes in one
  * synchronous step, so no other call interleaves with it. A shred receipt
- * goes to `receipts`, the composition's request receipt store, after that step.
+ * goes to `receipts`, the composition's request receipt store, after that
+ * step. Appends run one at a time through their receipt writes, so a later
+ * shred of a scope cannot record its receipt before the first one.
  */
 export class InMemoryE2eeMemberStore implements E2eeMemberStore {
   readonly #tenants = new Map<TenantId, TenantState>();
   readonly #receipts: Pick<RequestReceiptStore, 'record'>;
+  #appends: Promise<unknown> = Promise.resolve();
 
   constructor(receipts: Pick<RequestReceiptStore, 'record'>) {
     this.#receipts = receipts;
@@ -81,7 +84,13 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
     return state;
   }
 
-  async appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult> {
+  appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult> {
+    const run = this.#appends.then(() => this.#append(tenant, input));
+    this.#appends = run.catch(() => undefined);
+    return run;
+  }
+
+  async #append(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult> {
     const state = this.#state(tenant);
     const replay = recorded<E2eeMemberChainAppendResult>(state, input.proof);
     if (replay === 'request_conflict') return { outcome: 'request_conflict' };

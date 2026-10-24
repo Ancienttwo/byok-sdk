@@ -160,6 +160,35 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres shred serializes with package puts of 
   const row = (epoch: number, keyId: string) => ({ scopeId: 'scope', epoch, recipient: 'member', keyId, sender: 'member', package: `{"epoch":${epoch}}` });
   const shred = { seq: 1, scopeId: 'scope', receipt: { key: 'e2ee-scope-shred:scope', body: '{"chainSeq":1}' } };
 
+  it('locks the packages of every shredded scope in cleanup order, so a racing cleanup does not deadlock', async () => {
+    const scope = await createDataplaneScope(4);
+    const holder = await scope.pool.connect();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const store = new PostgresE2eeMemberStore(scope.pool, createMutableClock());
+      for (const scopeId of ['a', 'b']) {
+        await store.putScopeKeyPackages(TENANT_A, { rows: [{ ...row(1, 'k1'), scopeId }] });
+      }
+      const lock = `SELECT 1 FROM e2ee_scope_key_package WHERE tenant_id = $1 AND scope_id = $2 AND epoch = 1 AND recipient = 'member' FOR UPDATE`;
+      // The holder locks rows as device cleanup does: 'a', then 'b'. The append shreds 'b' before 'a'.
+      await holder.query('BEGIN');
+      await holder.query(lock, [TENANT_A, 'a']);
+      const appended = store.appendChainEntries(TENANT_A, {
+        rows: [{ seq: 1, entry: '{"op":"shred","scope":"b"}' }, { seq: 2, entry: '{"op":"shred","scope":"a"}' }],
+        shreds: [{ ...shred, seq: 1, scopeId: 'b' }, { ...shred, seq: 2, scopeId: 'a', receipt: { key: 'e2ee-scope-shred:a', body: '{"chainSeq":2}' } }],
+      });
+      await waitForLockWait(scope.pool);
+      await holder.query(lock, [TENANT_A, 'b']);
+      await holder.query('COMMIT');
+      await expect(appended).resolves.toEqual({ outcome: 'appended', appended: 2, replayed: 0 });
+      const left = await scope.pool.query<{ packages: number }>('SELECT count(*)::int AS packages FROM e2ee_scope_key_package WHERE tenant_id = $1', [TENANT_A]);
+      expect(left.rows[0]).toEqual({ packages: 0 });
+    } finally {
+      holder.release();
+      await scope.dispose();
+    }
+  });
+
   it('makes a put of a new epoch wait for a shred, then refuses it', async () => {
     const scope = await createDataplaneScope(4);
     const holder = await scope.pool.connect();

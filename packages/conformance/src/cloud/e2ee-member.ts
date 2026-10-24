@@ -161,6 +161,14 @@ export function runE2eeMemberStoreConformance(name: string, factory: E2eeMemberC
       expect(await receiptBody(h, 'scope-2')).toBeUndefined();
       expect(await store.putScopeKeyPackages(tenant, { rows: [pkg(2, 'r1', 'k2', 'a', 'scope-2')] })).toEqual({ outcome: 'stored', stored: 1 });
     });
+    check('a concurrent later shred of a scope does not take the first shred receipt', async (store, h) => {
+      const results = await Promise.all([
+        store.appendChainEntries(tenant, { rows: [entry(1, 'shred'), entry(2, 'shred')], shreds: [shred(1, 'scope-a'), shred(2, 'scope-b')] }),
+        store.appendChainEntries(tenant, { rows: [entry(3, 'shred')], shreds: [shred(3, 'scope-b', 'later')] }),
+      ]);
+      expect(results[0]).toEqual({ outcome: 'appended', appended: 2, replayed: 0 });
+      expect(await receiptBody(h, 'scope-b')).toBe('{"chainSeq":2,"note":"a"}');
+    });
     check('a shred and a concurrent put of a new epoch leave the scope with no packages', async store => {
       await store.putScopeKeyPackages(tenant, { rows: [pkg(1, 'r1', 'k1')] });
       const [, put] = await Promise.all([

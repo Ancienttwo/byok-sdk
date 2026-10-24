@@ -138,19 +138,24 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
         replayed += 1;
       }
       const now = this.clock.now();
-      for (const shred of input.shreds) {
-        if (shred.seq <= headSeq) continue;
-        // Packages before their epochs, which they reference. The package rows
-        // are locked in the order a put and device cleanup lock them.
+      const shreds = input.shreds.filter(shred => shred.seq > headSeq);
+      const scopeIds = [...new Set(shreds.map(shred => shred.scopeId))];
+      if (scopeIds.length > 0) {
+        // Packages before their epochs, which they reference. One statement
+        // locks the package rows of every shredded scope in the order a put
+        // and device cleanup lock them, (scope_id, epoch, recipient) in code
+        // point order, so a racing device cleanup cannot deadlock with it.
         await client.query(
           `DELETE FROM e2ee_scope_key_package p USING (
              SELECT scope_id, epoch, recipient FROM e2ee_scope_key_package
-              WHERE tenant_id = $1 AND scope_id = $2
-              ORDER BY epoch, recipient COLLATE "C"
+              WHERE tenant_id = $1 AND scope_id = ANY($2::text[])
+              ORDER BY scope_id COLLATE "C", epoch, recipient COLLATE "C"
               FOR UPDATE) locked
             WHERE p.tenant_id = $1 AND p.scope_id = locked.scope_id AND p.epoch = locked.epoch AND p.recipient = locked.recipient`,
-          [tenant, shred.scopeId]);
-        await client.query('DELETE FROM e2ee_scope_epoch WHERE tenant_id = $1 AND scope_id = $2', [tenant, shred.scopeId]);
+          [tenant, scopeIds]);
+        await client.query('DELETE FROM e2ee_scope_epoch WHERE tenant_id = $1 AND scope_id = ANY($2::text[])', [tenant, scopeIds]);
+      }
+      for (const shred of shreds) {
         await client.query(
           `INSERT INTO e2ee_scope_shred (tenant_id, scope_id, chain_seq) VALUES ($1, $2, $3)
            ON CONFLICT (tenant_id, scope_id) DO NOTHING`, [tenant, shred.scopeId, shred.seq]);
