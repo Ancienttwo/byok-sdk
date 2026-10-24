@@ -26,9 +26,6 @@
   may not use during the rotation is not re-wrapped, and its packages
   wrapped to the old key do not open if it becomes usable again. Core
   adds `beginMemberKemRotation` and `finishMemberKemRotation`.
-- **Fixed (client)** — a sealed steer is dropped when its open catches the
-  chain up to a scope the device may no longer use, or to a policy its task's
-  categories do not cover, as a sealed offer is declined (#654 E2d-3).
 - **Fixed (client)** — a terminal whose journal commit failed during a
   `stop()` is sent after the next `start()` in the same process. Startup
   recovery no longer replaces it with `task.fail` `daemon_interrupted`.
@@ -80,8 +77,10 @@
   `sealing.categories` must include every category of the scope policy, or
   the offer gets `sealing_policy_mismatch`. The header's `chainHead` must be
   on the verified chain and its `sender` a member of the scope policy at that
-  head, or the offer gets `sealed_open_failed` and a steer is dropped. Output
-  is sealed at the newest epoch with no scope member `remove` and no
+  head, or the offer gets `sealed_open_failed` and a steer is dropped. The
+  scope and category checks run again against the view the open caught up
+  to, and a steer that fails them is dropped. Output is sealed at the newest
+  epoch with no scope member `remove` and no
   member-dropping `scope-policy` after its freshness point. A
   terminal that a failed `stop()` left queued is sealed by the next run in the
   same process when that run has the same tenant, device and member, and is
