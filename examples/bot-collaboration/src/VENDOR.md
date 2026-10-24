@@ -35,8 +35,9 @@ git diff <recorded-commit>..<new-commit> -- examples/bot-collaboration examples/
 ## Published SDK packages
 
 The copy imports `@byok-sdk/protocol`, `@byok-sdk/core`, `@byok-sdk/server` and
-`@byok-sdk/client` from npm. Every layer needs all four, because every layer
-needs the K4 root entry (see the [K4](#k4) list). These packages are released
+`@byok-sdk/client` from npm. Layers 2 and 3 need all four, because they need
+the K4 root entry (see the [K4](#k4) list). Layer 1 needs only the packages
+its list names. These packages are released
 together under one version. Use exactly the version of the tag you copied. A commit between tags
 can use package changes that are not on npm yet. K4 needs Node 24.15 or later,
 because its ledger uses `node:sqlite`.
@@ -46,9 +47,11 @@ because its ledger uses `node:sqlite`.
 `src/rules/` holds the pure rules: no I/O, no ledger and no clock (#606 §5.5).
 `src/rules-boundary.test.ts` also holds this layer to its imports.
 
-The rules import `hash` and `canonical` from the K4 root entry. That entry loads
-all of K4, including `node:sqlite` and `node:async_hooks`. So a copy of this
-layer alone still needs K4 (see [K4](#k4)).
+The rules import `hash` and `canonical` from the K4 `./canonical` entry, never
+the K4 root entry (#884). That entry is K4 `src/canonical.ts` and imports only
+`node:crypto`. So a copy of this layer alone needs only that K4 file, resolved
+as `@byok-sdk/example-host-execution-core/canonical`, and no `node:sqlite` or
+`node:async_hooks` (see [K4](#k4)).
 
 ```vendor rules
 src/rules/cards.ts
@@ -68,7 +71,7 @@ src/rules/sync.ts
 src/rules/team.ts
 src/rules/turn.ts
 @byok-sdk/protocol
-@byok-sdk/example-host-execution-core: canonical hash
+@byok-sdk/example-host-execution-core/canonical: canonical hash
 ```
 
 ## Layer 2: L Host
@@ -146,6 +149,8 @@ vitest
 K8 imports K4 by its package name, `@byok-sdk/example-host-execution-core`. The
 root entry (`.`, `src/index.ts`) reaches every non-test file of K4 `src/`, except
 `src/test-support.ts` and `src/fixtures/`. The test checks this. The
+`./canonical` entry is `src/canonical.ts`, one of those files, and it is the
+only K4 file that [Layer 1](#layer-1-rules) imports. The
 `./test-support` entry is not copied ([Layer 3](#layer-3-shared-vectors)). The K4
 [README](../../host-execution-core/README.md#files) describes those files.
 
@@ -156,6 +161,7 @@ imports and `src/rules-boundary.test.ts` use it. The root entry imports these
 files and packages:
 
 ```vendor k4
+src/canonical.ts
 src/core.ts
 src/index.ts
 src/ledger.ts
