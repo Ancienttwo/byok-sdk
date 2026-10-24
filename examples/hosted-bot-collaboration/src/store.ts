@@ -254,7 +254,7 @@ export class HostedCollaborationStore {
       for (const query of [
         'SELECT state_version, frame::text, due_at::text FROM scope WHERE scope = $1',
         'SELECT kind, key, ordinal::text, body::text FROM entity WHERE scope = $1 ORDER BY kind, key',
-        'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, position',
+        'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, entry.position',
         'SELECT key, ordinal::text, evidence, result::text, root FROM command WHERE scope = $1 ORDER BY key',
         'SELECT key, ordinal::text, kind, body::text FROM outbox WHERE scope = $1 ORDER BY key',
         `SELECT key, task_id, ordinal::text, agent, source, input::text, wait_until::text, submission, tries, next_at::text, last_error,
@@ -616,14 +616,14 @@ export class HostedCollaborationStore {
     const rows: Split & { ordinals: Map<EntityKind, Map<string, number>> } =
       { frame, entities: new Map(), entries: new Map(), commands: new Map(), ordinals: new Map() };
     const entities = await client.query<{ kind: EntityKind; key: string; ordinal: string; body: string }>(
-      'SELECT kind, key, ordinal::text, body::text FROM entity WHERE scope = $1 ORDER BY kind, ordinal', [scopeKey]);
+      'SELECT kind, key, ordinal::text, body::text FROM entity WHERE scope = $1 ORDER BY kind, entity.ordinal', [scopeKey]);
     for (const row of entities.rows) {
       if (!rows.entities.has(row.kind)) { rows.entities.set(row.kind, new Map()); rows.ordinals.set(row.kind, new Map()); }
       rows.entities.get(row.kind)!.set(row.key, row.body);
       rows.ordinals.get(row.kind)!.set(row.key, Number(row.ordinal));
     }
     const entries = await client.query<{ kind: EntryKind; owner: string; position: string; body: string }>(
-      'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, position', [scopeKey]);
+      'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, entry.position', [scopeKey]);
     for (const row of entries.rows) {
       const group = entryGroup(row.kind, row.owner);
       if (!rows.entries.has(group)) rows.entries.set(group, { kind: row.kind, owner: row.owner, bodies: [] });
