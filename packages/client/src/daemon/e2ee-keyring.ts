@@ -44,6 +44,7 @@ import {
 } from '@byok-sdk/core/sealed-payload';
 import type { DeviceMemberRecords, MemberChainPoint } from './device-member-custody';
 import { entryHashes, type DeviceMemberLog, type DeviceMemberSession } from './device-member';
+import { E2EE_SCOPE_KEY_PACKAGE_PUT_MAX } from '@byok-sdk/protocol';
 import { E2eeMemberClientError, type E2eeMemberClient } from './e2ee-member-client';
 import type { SealedScopeKeyring, SealingKey } from './sealed-task';
 
@@ -280,7 +281,10 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
         scopeKey, tenantId: this.options.tenantId, scopeId, epoch,
         recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk }, sender,
       })));
-      await this.options.client.putKeyPackages(packages);
+      // The Host takes at most this many per put; the epoch is fresh only after every put.
+      for (let at = 0; at < packages.length; at += E2EE_SCOPE_KEY_PACKAGE_PUT_MAX) {
+        await this.options.client.putKeyPackages(packages.slice(at, at + E2EE_SCOPE_KEY_PACKAGE_PUT_MAX));
+      }
       const current = this.#session;
       if (current === undefined || this.#scopeFailure(current, scopeId) !== undefined) {
         scopeKey.fill(0);
