@@ -23,6 +23,7 @@ import {
   E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
   E2EE_MEMBER_KEY_REGISTER_OPERATION,
+  E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX,
   E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
 } from '@byok-sdk/protocol';
 import type { AuthManager } from './auth-manager';
@@ -47,6 +48,8 @@ export const MEMBER_CHAIN_PAGE_MAX_BYTES = E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES * 
  * besides its ids; a 512-unit scope id escaped as `\uXXXX` adds 3 KiB.
  */
 export const MEMBER_OBJECT_MAX_BYTES = 8 * 1024;
+/** The largest page of own key packages: 16 packages of at most 1.1 KiB each, with the scope head. */
+export const MEMBER_PACKAGE_PAGE_MAX_BYTES = 32 * 1024;
 /** The largest error body read; it only carries a code of at most 64 characters. */
 const MEMBER_ERROR_BODY_MAX_BYTES = 1024;
 
@@ -144,7 +147,9 @@ export class E2eeMemberClient {
 
   /**
    * Put the key packages of one new scope epoch (E2d-4). A Host that holds
-   * the epoch under another `keyId` answers 409 `e2ee_scope_key_conflict`.
+   * the epoch under another `keyId` answers 409 `e2ee_scope_key_conflict`,
+   * and one that holds a newer KEM epoch of a recipient 409
+   * `e2ee_scope_key_package_stale`.
    */
   async putKeyPackages(packages: readonly ScopeKeyPackageV2[], signal?: AbortSignal): Promise<void> {
     const response = await this.#proofPost(BYOK_E2EE_KEY_PACKAGES_PATH, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, { packages }, 'key package put', signal);
@@ -216,6 +221,36 @@ export class E2eeMemberClient {
     if (!Array.isArray(packages)) throw new E2eeMemberClientError('key package read returned no package list');
     if (packages.length > 1) throw new E2eeMemberClientError('key package read returned more than one package', undefined, undefined, true);
     return packages;
+  }
+
+  /**
+   * One page of this member's key packages of a scope above `afterEpoch`, by
+   * their `epoch` in ascending order, and the newest epoch the Host holds for
+   * the scope. A page shorter than {@link E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX} is
+   * the last. A page out of order or past the page size is refused, so a
+   * paging caller always moves forward.
+   */
+  async readOwnKeyPackages(
+    scopeId: string, afterEpoch: number, signal?: AbortSignal,
+  ): Promise<{ readonly packages: ReadonlyMap<number, unknown>; readonly scopeHeadEpoch: number | undefined }> {
+    const url = new URL(BYOK_E2EE_KEY_PACKAGES_PATH, this.#base);
+    url.searchParams.set('scopeId', scopeId);
+    url.searchParams.set('afterEpoch', String(afterEpoch));
+    const response = await this.#get(url, signal);
+    if (!response.ok) throw await errorOf(response, 'key package page read');
+    const { packages, scopeHeadEpoch } = await jsonOf(response, 'key package page read', MEMBER_PACKAGE_PAGE_MAX_BYTES);
+    const refuse = (why: string) => new E2eeMemberClientError(`key package page read returned ${why}`, undefined, undefined, true);
+    if (!Array.isArray(packages) || packages.length > E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX) throw refuse('no package list of at most one page');
+    if (scopeHeadEpoch !== null && !(Number.isSafeInteger(scopeHeadEpoch) && (scopeHeadEpoch as number) > 0)) throw refuse('no scope head');
+    const byEpoch = new Map<number, unknown>();
+    let last = afterEpoch;
+    for (const pkg of packages) {
+      const epoch: unknown = isRecord(pkg) ? pkg.epoch : undefined;
+      if (typeof epoch !== 'number' || !Number.isSafeInteger(epoch) || epoch <= last) throw refuse('packages out of epoch order');
+      byEpoch.set(epoch, pkg);
+      last = epoch;
+    }
+    return { packages: byEpoch, scopeHeadEpoch: scopeHeadEpoch === null ? undefined : scopeHeadEpoch as number };
   }
 
   /** A device-proof POST of `payload`; a status other than 2xx throws. */

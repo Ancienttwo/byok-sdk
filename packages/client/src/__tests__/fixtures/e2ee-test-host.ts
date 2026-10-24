@@ -4,7 +4,8 @@
  * plays the web client through the `client*` methods, which stand for the
  * Host control plane (relay the client MAC, append chain entries, put key
  * packages). A device puts key packages and appends chain entries through
- * the proof routes, with the Host's first-writer rules.
+ * the proof routes, with the Host's first-writer rules and the member KEM
+ * floor that `rotate` entries raise (E5b-2).
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash, createPublicKey, verify as edVerify } from 'node:crypto';
@@ -18,6 +19,7 @@ import {
   E2EE_MEMBER_CHAIN_APPEND_OPERATION,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
   E2EE_MEMBER_KEY_REGISTER_OPERATION,
+  E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX,
   E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
 } from '@byok-sdk/protocol';
 
@@ -72,6 +74,8 @@ export class E2eeTestHost {
   holdPairingMacReads: Promise<void> | undefined;
   /** Every key package put, as stored. */
   readonly packages: ScopeKeyPackageV2[] = [];
+  /** The KEM floor per member: the epoch of its latest appended `rotate` entry. */
+  readonly kemFloors = new Map<string, number>();
   /** Answer this many key package reads with 503 first. */
   failPackageReads = 0;
   /** When set, every key package read answers with this status. */
@@ -79,8 +83,14 @@ export class E2eeTestHost {
   /** When set, a rejected key package read carries this body instead of its error code. */
   rejectPackageBody: unknown;
   packageReads = 0;
-  /** When set, every key package read answers with this list as it is. */
+  /** When set, every key package read of one epoch answers with this list as it is. */
   packageResponse: unknown[] | undefined;
+  /** Paged own-package reads answered. */
+  pageReads = 0;
+  /** When set, every paged own-package read answers with this body as it is. */
+  pageResponse: unknown;
+  /** When set, paged own-package reads leave out each package it matches, as a Host that withholds rows. */
+  withholdPages: ((pkg: ScopeKeyPackageV2) => boolean) | undefined;
   /** When set, each key package read waits for it before it answers. */
   holdPackageReads: Promise<void> | undefined;
   /** Every device key package put body, in order. */
@@ -105,12 +115,18 @@ export class E2eeTestHost {
 
   /** Host control plane: append signed entries at the end of the chain. */
   clientAppend(...entries: unknown[]): void {
-    this.chain.push(...entries);
+    for (const entry of entries) this.#push(entry);
   }
 
-  /** Host control plane: store key packages, one per (scope, epoch, recipient). */
-  clientPutPackages(...packages: ScopeKeyPackageV2[]): void {
+  /**
+   * Host control plane: store key packages, one per (scope, epoch,
+   * recipient). `false` when a package is wrapped below its recipient's KEM
+   * floor: nothing is stored.
+   */
+  clientPutPackages(...packages: ScopeKeyPackageV2[]): boolean {
+    if (this.#stale(packages)) return false;
     this.packages.push(...packages);
+    return true;
   }
 
   /** The registered bundle and the latest device MAC of a device. */
@@ -155,18 +171,34 @@ export class E2eeTestHost {
         respond(res, this.rejectPackageReads, this.rejectPackageBody ?? { error: 'forbidden' });
         return true;
       }
+      const recipient = this.registration(device.deviceId)?.member.memberId;
+      const scopeId = url.searchParams.get('scopeId');
+      const epoch = url.searchParams.get('epoch');
+      const afterEpoch = url.searchParams.get('afterEpoch');
+      // The Host reads one epoch, or one page of the member's own packages, per request.
+      if ((epoch === null) === (afterEpoch === null)) {
+        respond(res, 400, { error: 'coordination_input_invalid' });
+        return true;
+      }
+      if (afterEpoch !== null) {
+        this.pageReads += 1;
+        await this.holdPackageReads;
+        if (this.pageResponse !== undefined) {
+          respond(res, 200, this.pageResponse);
+          return true;
+        }
+        const scope = this.packages.filter((pkg) => pkg.scopeId === scopeId);
+        respond(res, 200, {
+          packages: scope.filter((pkg) => pkg.recipient === recipient && pkg.epoch > Number(afterEpoch) && this.withholdPages?.(pkg) !== true)
+            .sort((left, right) => left.epoch - right.epoch).slice(0, E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX),
+          scopeHeadEpoch: scope.length === 0 ? null : Math.max(...scope.map((pkg) => pkg.epoch)),
+        });
+        return true;
+      }
       this.packageReads += 1;
       await this.holdPackageReads;
       if (this.packageResponse !== undefined) {
         respond(res, 200, { packages: this.packageResponse });
-        return true;
-      }
-      const recipient = this.registration(device.deviceId)?.member.memberId;
-      const scopeId = url.searchParams.get('scopeId');
-      const epoch = url.searchParams.get('epoch');
-      // The Host reads one epoch per request.
-      if (epoch === null) {
-        respond(res, 400, { error: 'coordination_input_invalid' });
         return true;
       }
       respond(res, 200, {
@@ -240,6 +272,8 @@ export class E2eeTestHost {
     const { packages } = JSON.parse(body.toString('utf8')) as { packages: ScopeKeyPackageV2[] };
     this.devicePuts.push(packages);
     await this.holdPackagePuts;
+    if (packages.some((pkg) => pkg.v !== 2)) return respond(res, 400, { error: 'coordination_input_invalid' });
+    if (this.#stale(packages)) return respond(res, 409, { error: 'e2ee_scope_key_package_stale' });
     if (this.dropPackagePuts) return respond(res, 200, { stored: packages.length, skippedDeviceIds: [] });
     const conflict = packages.some((put) => this.packages.some((stored) => stored.scopeId === put.scopeId && stored.epoch === put.epoch && stored.keyId !== put.keyId));
     if (conflict) return respond(res, 409, { error: 'e2ee_scope_key_conflict' });
@@ -264,7 +298,7 @@ export class E2eeTestHost {
     let replayed = 0;
     for (const entry of entries) {
       if (entry.seq === this.chain.length + 1) {
-        this.chain.push(entry);
+        this.#push(entry);
         appended += 1;
       } else if (JSON.stringify(this.chain[entry.seq - 1]) === JSON.stringify(entry)) {
         replayed += 1;
@@ -273,6 +307,20 @@ export class E2eeTestHost {
       }
     }
     respond(res, 200, { appended, replayed });
+  }
+
+  /** Append one chain entry; a `rotate` raises its member's KEM floor. */
+  #push(entry: unknown): void {
+    this.chain.push(entry);
+    const { op, subject } = entry as { op?: unknown; subject?: { memberId?: string; kemEpoch?: number } };
+    if (op === 'rotate' && subject?.memberId !== undefined && subject.kemEpoch !== undefined) {
+      this.kemFloors.set(subject.memberId, Math.max(this.kemFloors.get(subject.memberId) ?? 0, subject.kemEpoch));
+    }
+  }
+
+  /** Whether a package is wrapped to an older KEM epoch than its recipient's floor. */
+  #stale(packages: readonly ScopeKeyPackageV2[]): boolean {
+    return packages.some((pkg) => pkg.recipientKemEpoch < (this.kemFloors.get(pkg.recipient) ?? 0));
   }
 
   async #register(req: IncomingMessage, res: ServerResponse): Promise<void> {
