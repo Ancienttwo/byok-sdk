@@ -1191,7 +1191,9 @@ daemon output, is accepted with a `ciphertextRef` only when the object with
 its `contentHash` is `committed` in the same tenant, with the declared `size`
 and `contentType`. Otherwise a hosted entry fails with
 `coordination_input_invalid`, and a daemon output is refused with
-`payload_invalid`, before any task, receipt or mailbox write. The receiver checks that the SHA-256 of the bytes it fetches by
+`payload_invalid`, before any task, receipt or mailbox write. The check binds
+a `ciphertextRef` to the tenant, not to the device that uploaded the object.
+The receiver checks that the SHA-256 of the bytes it fetches by
 `blobId` equals `contentHash`, before it opens them. The task then holds an
 object reference to the object (kind `sealed-task`, id the task id), so
 orphan GC keeps the ciphertext while the task lives. `redactTasks` releases
@@ -1206,7 +1208,10 @@ reference only when no reference held the object before it, so one that names
 the task's offer or steer blob leaves that reference in place. An artifact that arrives once its task is terminal changes no
 reference: a new one holds nothing, and a replay keeps the reference of its
 earlier delivery. A terminal replayed after redaction is complete as received,
-so the Host does not check its blob.
+so the Host does not check its blob. A terminal replay that arrives after
+redaction deleted the object but before it committed its audit receipt fails
+the object check with `payload_invalid`, and the daemon treats that terminal
+as rejected.
 
 **Host comparison of a sealed retry.** The Host compares two sealed
 submissions of one identity by their comparison projection: the plaintext
