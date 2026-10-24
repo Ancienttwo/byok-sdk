@@ -20,6 +20,7 @@ import { migrate } from '../migrate';
 import { PostgresObjectStore } from '../stores/core/objects';
 import { PostgresQuotaStore } from '../stores/core/quota';
 import { PostgresTruthCommitter } from '../truth-committer';
+import { PostgresProofRequestReceiptStore } from '../stores/proof-receipts';
 import { createDataplaneScope, SKIP_DATAPLANE } from './support/dataplane';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
@@ -381,6 +382,35 @@ describe.skipIf(SKIP_DATAPLANE)('atomic truth commit authority', () => {
       await harness.scope.dispose();
     }
   });
+  // A used request id is dropped only after its proof can no longer authenticate.
+  it('prunes proof receipts recorded before the cutoff and keeps later ones replayable', async () => {
+    const harness = await createHarness();
+    const receipts = new PostgresProofRequestReceiptStore(harness.scope.pool, harness.clock);
+    try {
+      const oldInput = commitInput('old-1', [await inlineWrite('memory', 'old-1', 0, 'one')]);
+      await harness.committer.commit(TENANT, oldInput);
+      await harness.committer.commit(TENANT, commitInput('old-2', [await inlineWrite('memory', 'old-2', 0, 'two')]));
+      const cutoff = '2026-08-09T00:15:00.000Z';
+      harness.clock.set(new Date(cutoff));
+      const keptInput = commitInput('kept', [await inlineWrite('memory', 'kept', 0, 'kept')]);
+      const kept = await harness.committer.commit(TENANT, keptInput);
+
+      const prune = (limit: number) => receipts.collectExpired(TENANT, { now: cutoff, limit, recordedBefore: cutoff });
+      expect(await prune(1)).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: true });
+      expect(await prune(5)).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: false });
+      expect(await prune(5)).toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
+      expect(await receipts.collectExpired(tenantId('tenant-truth-other'), { now: cutoff, limit: 5, recordedBefore: cutoff }))
+        .toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
+
+      // The receipt recorded at the cutoff still answers the same request with its recorded response.
+      expect(await harness.committer.commit(TENANT, keptInput)).toEqual({ response: kept.response, replayed: true });
+      // A pruned request id is no longer recorded, so the same request runs again and loses on expectedRev.
+      await expect(harness.committer.commit(TENANT, oldInput)).rejects.toSatisfy((error: unknown) => isCoreConflictError(error, 'truth_revision_conflict'));
+      await expect(receipts.collectExpired(TENANT, { now: cutoff, limit: 5, recordedBefore: 'yesterday' })).rejects.toThrow();
+    } finally {
+      await harness.scope.dispose();
+    }
+  });
 });
 
 async function createHarness(poolSize = 8) {
@@ -398,6 +428,7 @@ async function createHarness(poolSize = 8) {
   });
   return {
     scope,
+    clock,
     quota,
     objects: new PostgresObjectStore(scope.pool, clock, new R2ObjectMaintenanceStore((await createObjectStorageScope()).config)),
     committer: new PostgresTruthCommitter({ pool: scope.pool, clock, crypto: createWebCrypto() }),
