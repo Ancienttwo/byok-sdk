@@ -4,6 +4,7 @@ import {
   ByokCloudError,
   approvalTimelineCursor,
   parseApprovalObservations,
+  sameApprovalTimelineEvent,
   validateApprovalTimelineAppend,
   validateApprovalTimelineResolve,
   type ApprovalTimelineAppendInput,
@@ -97,7 +98,7 @@ export class PostgresApprovalTimelineStore implements ApprovalTimelineStore {
         (entry) => entry.sourceEnvelopeId === input.sourceEnvelopeId,
       );
       if (duplicate !== undefined) {
-        if (JSON.stringify(duplicate.event) !== JSON.stringify(event)) {
+        if (!sameApprovalTimelineEvent(duplicate.event, event)) {
           throw new ByokCloudError(
             'coordination_input_invalid',
             'Approval source envelope identity already belongs to another lifecycle event.',
@@ -186,7 +187,7 @@ export class PostgresApprovalTimelineStore implements ApprovalTimelineStore {
       const duplicate = live.entries.find((entry) => entry.sourceEnvelopeId === input.sourceEnvelopeId);
       if (duplicate !== undefined) {
         await client.query('COMMIT');
-        return JSON.stringify(duplicate.event) === JSON.stringify(event)
+        return sameApprovalTimelineEvent(duplicate.event, event)
           ? { status: 'replayed', tail: live }
           : { status: 'conflict', tail: live };
       }

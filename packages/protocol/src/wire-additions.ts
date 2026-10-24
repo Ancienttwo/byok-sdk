@@ -132,6 +132,7 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   { kind: 'envelope', rule: 'gated', surface: 'agent.input.preparation', capability: 'agent-input-preparation-v9', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'provider.provisioning.available', capability: 'provider-provisioning.v1', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'agent.memory.intent.available', capability: 'agent-memory-intent.v1', advertisedBy: 'device' },
+  { kind: 'envelope', rule: 'gated', surface: 'e2ee.key_package.available', capability: 'sealed-payload-v1', advertisedBy: 'device' },
   // One optional runtime capability, shared by discovery and the claim snapshot.
   { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'runtimes[].capabilities.messageDraft' },
   { kind: 'envelope', rule: 'strip-safe', surface: 'conn.hello', field: 'harnesses[].capabilities.messageDraft' },
