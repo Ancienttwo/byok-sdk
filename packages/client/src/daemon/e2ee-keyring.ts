@@ -63,9 +63,9 @@ export class DeviceMemberKeyring {
     return this.#session;
   }
 
-  /** The opened key of one scope epoch, if this run holds it. */
+  /** The opened key of one scope epoch, if this run holds it and the verified scope still holds this device. */
   cached(scopeId: string, epoch: number): ScopeKey | undefined {
-    return this.#session === undefined ? undefined : this.#keys.get(keyOf(scopeId, epoch));
+    return this.#session !== undefined && this.#scopeHoldsSelf(this.#session, scopeId) ? this.#keys.get(keyOf(scopeId, epoch)) : undefined;
   }
 
   /**
@@ -86,12 +86,12 @@ export class DeviceMemberKeyring {
     await this.catchUp();
     const session = this.#session;
     if (session === undefined) return { ok: false, reason: 'member_lost' };
-    const known = this.#keys.get(keyOf(scopeId, epoch));
-    if (known !== undefined) return { ok: true, key: known };
     const scope = session.state.scopes.get(scopeId);
     if (scope === undefined) return { ok: false, reason: 'scope_unknown' };
     const self = session.member.memberId;
     if (!scope.members.includes(self)) return { ok: false, reason: 'not_a_scope_member' };
+    const known = this.#keys.get(keyOf(scopeId, epoch));
+    if (known !== undefined) return { ok: true, key: known };
     const packages = await this.options.client.readKeyPackages(scopeId, epoch);
     // The Host keeps one package per (scope, epoch, recipient).
     if (packages.length !== 1) return { ok: false, reason: packages.length === 0 ? 'key_package_missing' : 'key_package_invalid' };
@@ -127,7 +127,19 @@ export class DeviceMemberKeyring {
     if (!applied.state.members.has(current.member.memberId)) return this.#lose('this device is no longer a current member of the chain; E2EE stays off');
     const { records, tenantId, deviceId } = this.options;
     await records.saveState({ tenantId, deviceId, member: current.member, anchor: current.anchor, head: applied.state.head! });
-    this.#session = { ...current, state: applied.state, hashes: [...current.hashes, ...await entryHashes(entries)] };
+    const session = { ...current, state: applied.state, hashes: [...current.hashes, ...await entryHashes(entries)] };
+    this.#session = session;
+    // A shred drops the scope, and a policy can drop this device: their keys go.
+    for (const [at, key] of this.#keys) {
+      if (!this.#scopeHoldsSelf(session, at.slice(at.indexOf('\0') + 1))) {
+        key.scopeKey.fill(0);
+        this.#keys.delete(at);
+      }
+    }
+  }
+
+  #scopeHoldsSelf(session: DeviceMemberSession, scopeId: string): boolean {
+    return session.state.scopes.get(scopeId)?.members.includes(session.member.memberId) === true;
   }
 
   #lose(message: string): void {

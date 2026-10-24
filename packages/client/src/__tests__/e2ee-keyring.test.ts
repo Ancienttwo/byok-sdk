@@ -144,6 +144,25 @@ describe('device member keyring (E2d-2)', () => {
     expect(logs.join('\n')).toContain('is invalid (member_chain_');
   });
 
+  it('drops a cached key once a policy drops the device, and once the scope is shredded', async () => {
+    const { web, device, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await web.putScope('scope-b', [device]);
+    const [first, second] = [await keyring.fetch('scope-a', 1), await keyring.fetch('scope-b', 1)];
+    if (!first.ok || !second.ok) throw new Error('the packages did not open');
+
+    await web.append('scope-policy', { scopeId: 'scope-a', categories: ['task-input'], members: [web.member.memberId] });
+    await web.append('shred', { scopeId: 'scope-b' });
+    expect(keyring.cached('scope-a', 1)).toBeDefined();
+    await keyring.catchUp();
+    expect(keyring.cached('scope-a', 1)).toBeUndefined();
+    expect(keyring.cached('scope-b', 1)).toBeUndefined();
+    expect(first.key.scopeKey.every((byte) => byte === 0)).toBe(true);
+    expect(second.key.scopeKey.every((byte) => byte === 0)).toBe(true);
+    expect(await keyring.fetch('scope-a', 1)).toEqual({ ok: false, reason: 'not_a_scope_member' });
+    expect(await keyring.fetch('scope-b', 1)).toEqual({ ok: false, reason: 'scope_unknown' });
+  });
+
   it('ends the member when the chain removes this device', async () => {
     const { web, device, logs, keyring } = await member();
     await web.append('remove', { memberId: device.memberId });

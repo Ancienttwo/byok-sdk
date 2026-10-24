@@ -3143,9 +3143,10 @@ export function buildDaemonWithAdapters(
     });
     await replayRecoveryTerminals();
     startPresenceProducer();
+    // Before the connection, so a key package notice in the first poll waits for the resume.
+    startDeviceMember(record);
     await connection.start();
     daemonStarted = true;
-    startDeviceMember(record);
     } catch (err) {
       const haltReason = startupHaltReason(err);
       if (haltReason === undefined) {
