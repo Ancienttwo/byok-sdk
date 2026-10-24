@@ -153,6 +153,14 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       expect(await row(scope, 'bot-turn:t1')).toEqual({ next_at: String(NOW + 35_000), tries: 2, last_error: 'live receiver', settled_at: null });
     });
 
+    it('keeps a projection whose receiver rejects with no reason, as a failure', async () => {
+      const scope = await scoped();
+      await project(scope, 'bot-turn:t1', { status: 'done' });
+      const pass = await sender({ projections: receiver(async () => { throw undefined; }).port }).run();
+      expect(pass).toEqual({ steps: 1, failed: [{ scope, id: 'bot-turn:t1', error: undefined }] });
+      expect(await row(scope, 'bot-turn:t1')).toEqual({ next_at: String(NOW + 5_000), tries: 1, last_error: 'undefined', settled_at: null });
+    });
+
     it('keeps a projection whose receiver throws, with its error, and sends it again after the backoff', async () => {
       const scope = await scoped();
       await project(scope, 'bot-turn:t1', { status: 'done' });
@@ -372,6 +380,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       await claimed(channelStore, scope, turnId);
       // With no readback, the recovered attempt waits an hour, and the claim after that hour moves the wait again.
       expect(await channelStore.claimDelivery(scope, 'd1', () => NOW + TIMES.leaseMs, TIMES)).toEqual({ kind: 'moved' });
+      // A claim before that wait passed changes nothing.
+      expect(await channelStore.claimDelivery(scope, 'd1', () => NOW + TIMES.leaseMs + 1, TIMES)).toEqual({ kind: 'none' });
       const later = NOW + TIMES.leaseMs + UNKNOWN_WAIT_MS;
       expect(await channelStore.claimDelivery(scope, 'd1', () => later, TIMES)).toEqual({ kind: 'moved' });
       expect(await row(scope, 'd1')).toMatchObject({ next_at: String(later + UNKNOWN_WAIT_MS) });
@@ -451,6 +461,26 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       const broken = new Broken(opened!.pool, store().schema);
       await expect(new HostedOutboxSender(opened!.pool, broken, { projections: receiver().port, channel: channel(), now: () => clock,
         leaseMs: 20_000, sendTimeoutMs: 10_000 }).run()).rejects.toThrow('store down');
+      // The error keeps the step error that the wait was for.
+      const failure = await new HostedOutboxSender(opened!.pool, broken, { projections: receiver().port, channel: channel(), now: () => clock,
+        leaseMs: 20_000, sendTimeoutMs: 10_000 }).run().catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect((failure as AggregateError).errors).toEqual([new Error('store down'), new Error('Delivery not found')]);
+    });
+
+    it('leaves the wait of a later unknown attempt alone when a readback of an earlier attempt ends', async () => {
+      const { channelStore, scope, turnId } = await received();
+      const at = await unknownAt(channelStore, scope, turnId);
+      // Attempt 1 reads back absent, attempt 2 is sent, and its send fails: it is unknown at attempt 2.
+      await channelStore.readDelivery(scope, 'd1', 1, 'absent', () => at, TIMES.readbackMs);
+      expect(await channelStore.claimDelivery(scope, 'd1', () => at + 1_000, TIMES)).toMatchObject({ kind: 'send', attempt: 2 });
+      await channelStore.finishDelivery(scope, 'd1', 2, { code: 'send_failed' }, () => at + 2_000, TIMES);
+      expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'unknown', attempts: 2 });
+      const wait = (await row(scope, 'd1'))!.next_at;
+      for (const result of [undefined, 'unsupported'] as const) {
+        await channelStore.readDelivery(scope, 'd1', 1, result, () => at + 3_000, TIMES.readbackMs);
+        expect(await row(scope, 'd1')).toMatchObject({ next_at: wait });
+      }
     });
 
     it('drops a reply token at a delivery settle once the intent of its root concluded, before a sync ends the Turn', async () => {

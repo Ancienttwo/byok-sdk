@@ -47,10 +47,10 @@ export interface HostedStoreOptions {
   channel?: boolean;
 }
 /**
- * The sender's view of one delivery step (#793 D2b-out-2). `send`: the claim committed; send `body` on `route` now.
- * `readback`: read back the row's `unknown` attempt `attempt`, and give its result with that attempt.
+ * The sender's view of one delivery step (#793 D2b-out-2). `none`: the claim changed nothing. `moved`: it changed the entity
+ * or its wait, and there is nothing to call. `send`: the claim committed; send `body` on `route` now. `readback`: read back
+ * the row's `unknown` attempt `attempt`, and give its result with that attempt.
  */
-/** `none`: the claim changed nothing. `moved`: it changed the entity or its wait, and there is nothing to call. */
 export type DeliveryClaim = { kind: 'none' } | { kind: 'moved' } | { kind: 'readback'; attempt: number }
   | { kind: 'send'; attempt: number; route: ReplyRoute | PushRoute; body: string };
 /** The outbox index times of a delivery that the sender owns: its lease, and the wait of an `unknown` row. */
@@ -376,9 +376,9 @@ export class HostedCollaborationStore {
           return done({ kind: 'moved' });
         }
         if (row.state === 'unknown') {
+          // Another sender's readback holds the row until its lease passes, and a row that waits is not due yet.
+          if (Number(index.next_at) > now) return done({ kind: 'none' });
           if (times.readback) {
-            // Another sender's readback holds the row until its lease passes.
-            if (Number(index.next_at) > now) return done({ kind: 'none' });
             nextAt = now + times.leaseMs;
             return done({ kind: 'readback', attempt: row.attempts });
           }
