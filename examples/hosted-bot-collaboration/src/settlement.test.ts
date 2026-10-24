@@ -5,14 +5,15 @@ import { hash, taskId, type Json } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import type { Command, DelegationTimers } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { replyVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, VECTOR_NOW, type ReplySubject, type SettlementSubject,
-  type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
+import { deviceVectors, replyVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, VECTOR_NOW, type DeviceSubject, type ReplySubject,
+  type SettlementSubject, type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
 import type { FrozenInput } from '@byok-sdk/example-host-execution-core';
 import { frozenIntent, settleFacts } from './intents';
 import { storedKey } from './layout';
 import { TEST_HOST, VECTOR_ROUTINES, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL, VectorStore } from './postgres.test-support';
 import { HostedReconciler, type HostedTaskPort, type TaskEvidence } from './reconcile';
+import { connectedDevices, HostedDeviceObserver, type HostedDevicePort } from './devices';
 import { HostedReplyChecker } from './replies';
 import { inSchema, lockScope } from './store';
 
@@ -106,12 +107,28 @@ async function replySubject(): Promise<ReplySubject> {
   } };
 }
 
+/**
+ * The settlement subject with H's device step (#793 S11): `store.observeDevices`. The delivery edit writes the intent row
+ * columns that the submitter and the reconciliation write: `submission`, and the SDK attempt json, whose `status` the
+ * `offeredTo` fact reads.
+ */
+async function deviceSubject(): Promise<DeviceSubject> {
+  const subject = await settlementSubject();
+  return { ...subject,
+    observeDevices: async devices => { await store().observeDevices(subject.scope, devices, () => VECTOR_NOW); },
+    deliver: async (turnId, status) => {
+      await opened!.pool.query(`UPDATE ${table('intent')} SET submission = 'delivered', tries = 1, attempt = $3::json WHERE scope = $1 AND key = $2`,
+        [storedKey(subject.scope), storedKey(turnId), status ? JSON.stringify({ taskId: taskId(turnId, 0), deviceId: 'device', status }) : null]);
+    } };
+}
+
 describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5)', () => {
   beforeAll(async () => { opened = await openStore(); });
   afterAll(async () => { await opened?.close(); });
 
   settlementVectors('H HostedCollaborationStore on Postgres', settlementSubject);
   replyVectors('H HostedCollaborationStore on Postgres', replySubject);
+  deviceVectors('H HostedCollaborationStore on Postgres', deviceSubject);
 
   const TIMERS: DelegationTimers = { cancelGraceMs: 1_000, uncertainAfterMs: 5_000 };
   const unit = (state: CollaborationState, id: string) => state.units[hash([id, 'B'])]!.state;
@@ -339,11 +356,19 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
       await lockScope(client, storedKey(h.scope));
       const read = await settleFacts(client, h.scope, [h.id, h.root, 'none']);
       return { started: [read.started(h.id), read.started(h.root), read.started('none')], decline: read.declineCode(h.id),
-        intent: read.intent(h.id), offered: (() => { try { return read.offeredTo(h.id); } catch (error) { return (error as Error).message; } })() };
+        intent: read.intent(h.id), offered: [read.offeredTo(h.id), read.offeredTo(h.root), read.offeredTo('none')] };
     });
-    // The root has a complete terminal: a start. B has no claim and no terminal yet.
+    // The root has a complete terminal: a start. B has no claim and no terminal yet, and no delivered offer.
     expect(await facts()).toEqual({ started: [false, true, false], decline: undefined, intent: { taskId: taskId(h.id, 0) },
-      offered: 'offeredTo is not a settlement fact' });
+      offered: [undefined, undefined, undefined] });
+    // A delivered offer that the stored SDK attempt still shows as offered gives its frozen device (#793 S11).
+    await h.set(h.id, `submission = 'delivered', tries = 1, attempt = '{"status":"offered"}'::json`);
+    expect(await facts()).toMatchObject({ offered: ['device', undefined, undefined] });
+    await h.set(h.id, `attempt = '{"status":"running"}'::json`);
+    expect(await facts()).toMatchObject({ offered: [undefined, undefined, undefined] });
+    await h.set(h.id, `attempt = '{"status":"offered"}'::json, started = true`);
+    expect(await facts()).toMatchObject({ offered: [undefined, undefined, undefined] });
+    await h.set(h.id, `started = false`);
     const terminal = (type: string, payload: Json) => h.set(h.id, `terminal = '${JSON.stringify({ envelope: { task_id: taskId(h.id, 0), type, payload } })}'::json`);
     await terminal('task.decline', { code: 'model_unavailable' });
     expect(await facts()).toMatchObject({ started: [false, true, false], decline: 'model_unavailable' });
@@ -447,4 +472,52 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
       expect(await h.stored()).toBe(before);
     });
   });
+  describe('device observer (#793 S11)', () => {
+    /** A delegated scope whose chain end's offer was delivered and is still `offered`, and an observer over a counting port. */
+    const offered = async () => {
+      const h = await delegated();
+      await h.set(h.id, `submission = 'delivered', tries = 1, attempt = '{"status":"offered"}'::json`);
+      const reads: string[] = [];
+      const observer = (readiness: HostedDevicePort['readiness'], timeoutMs?: number) => new HostedDeviceObserver(store(),
+        { port: scope => ({ readiness: () => { reads.push(scope); return readiness(); } }), now: () => VECTOR_NOW, ...(timeoutMs ? { timeoutMs } : {}) });
+      const device = (presence?: object) => async () => ({ devices: [{ deviceId: 'device', productId: 'p', deviceName: 'D', revoked: false,
+        ...(presence ? { presence } : {}) }] }) as never;
+      return { ...h, reads, observer, device };
+    };
+
+    it('reads the SDK readiness of the scope, and shows the delegation waiting while its device has no presence', async () => {
+      const h = await offered();
+      expect(await h.observer(h.device()).observe(h.scope)).toBe(1);
+      expect(h.reads).toEqual([h.scope]);
+      expect((await h.delegation()).status).toBe('waiting_device');
+      expect(await h.observer(h.device({ level: 'ready' })).observe(h.scope)).toBe(1);
+      expect((await h.delegation()).status).toBe('queued');
+    });
+
+    it('reads nothing when no delegation can change: none, or one with a verdict', async () => {
+      const h = await offered();
+      const none = `tenant:${randomUUID()}`;
+      await store().seed(none, state => seedCollaboration(state));
+      expect(await h.observer(h.device()).observe(none)).toBe(0);
+      await h.finish(h.id, 'task.fail');
+      await h.sync();
+      expect(await h.delegation()).toMatchObject({ verdict: 'failed' });
+      expect(await h.observer(h.device()).observe(h.scope)).toBe(0);
+      expect(h.reads).toEqual([]);
+    });
+
+    it('writes nothing when the read throws or takes longer than timeoutMs', async () => {
+      const h = await offered(), before = await h.stored();
+      expect(await h.observer(async () => { throw new Error('down'); }).observe(h.scope)).toBe(0);
+      expect(await h.observer(() => new Promise(() => {}), 20).observe(h.scope)).toBe(0);
+      expect(h.reads).toEqual([h.scope, h.scope]);
+      expect(await h.stored()).toBe(before);
+    });
+  });
+});
+
+it('maps each readiness device to connected when it has unexpired presence, as the server gives machines to L', () => {
+  const device = { productId: 'p', deviceName: 'D', revoked: false };
+  expect(connectedDevices({ devices: [{ ...device, deviceId: 'on', presence: { level: 'ready', observedAt: '', expiresAt: '' } }, { ...device, deviceId: 'off' }] } as never))
+    .toEqual(new Map([['on', true], ['off', false]]));
 });

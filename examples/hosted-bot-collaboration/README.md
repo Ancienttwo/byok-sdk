@@ -5,8 +5,8 @@ commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
 Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c), result
 reconciliation (D2d), the device binding (D2e), retention (D2g), routines (D2f-2), their scheduler (D2f-3), the outbox
-sender (D2b-out-2), delegation settlement (D2f-5), the inbound channel entry (D2b-out-3), the batch seal and the
-authenticated command entry (S10).
+sender (D2b-out-2), delegation settlement (D2f-5), the inbound channel entry (D2b-out-3), the batch seal, the
+authenticated command entry (S10) and the device observation (S11).
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -227,7 +227,29 @@ offer receipt, and writes nothing. K8 `delegationDue` puts each check time into 
 the checker from its due scheduler `sync`, before `store.sync`, as L's pass syncs after its reply checks (see
 Deployment config).
 
-H does not yet run these L pass steps: the device observation (`observeDevices`), and the card and Agent home flushes.
+### Device observation
+
+A delegation whose chain end has a delivered offer that no device has claimed shows whether that device is connected:
+`waiting_device` while it is not, `queued` again once it is. `HostedDeviceObserver.observe(scope)` runs L's
+`refreshDevices` step (#793 S11) on the shared K8 rule `observeDevices`:
+- `store.awaitsDevice(scope)` reads in one snapshot, with no lock, whether a delegation can change: no verdict, no
+  cancel, and `queued` or `waiting_device`, as L checks before its read. With none, the observer reads nothing.
+- The observer reads the SDK readiness of the scope's tenant through the port's `readiness` (the SDK
+  `readTenantReadiness`, the read behind L's `machines.list`), outside any transaction. `connectedDevices` gives each
+  device's `connected` fact as the server gives it to L: connected when it has unexpired presence. A device that the
+  read lacks gives no fact. A read that throws or takes longer than `timeoutMs` (default 1 s, as L) writes nothing.
+- `store.observeDevices(scope, devices, clock)` runs the rule in one transaction under the scope lock, and the changed
+  delegations' projections reach the outbox in it. A store error propagates.
+
+The rule reads K8's `offeredTo` fact from the chain end's intent row: no conclusion, `submission = 'delivered'`, not
+`started`, and the stored SDK attempt still `offered`; the device is the frozen input's `deviceId`. The reconciliation
+writes that attempt, so the display can lag the SDK by up to its `pollMs`. Presence is display only: the rule never
+changes a submit, an expiry or a verdict.
+
+The step has no due time of its own. The deployment runs it from its due scheduler `sync`, after the reply checker and
+before `store.sync`, so a waiting delegation's display can lag until its scope's next sync. L polls on every pass.
+
+H does not yet run these L pass steps: the card and Agent home flushes.
 The due scheduler syncs a scope when one of the due times is reached (see Due scheduler).
 
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
@@ -562,8 +584,10 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   ```ts
   const checker = new HostedReplyChecker(store, { port: scope => ({
     agentMessage: (taskId, deviceId, agentRef) => cloud.readTaskAgentMessage(tenantOf(scope), deviceId, taskId, agentRef) }) });
+  const devices = new HostedDeviceObserver(store, { port: scope => ({ readiness: () => cloud.readTenantReadiness(tenantOf(scope)) }) });
   const due = new HostedDueScheduler(pool, store, { sync: async (scope, now) => {
     await checker.check(scope, now);
+    await devices.observe(scope);
     return store.sync(scope, { ...syncOptions, now });
   } });
   ```
@@ -631,6 +655,12 @@ three and runs these suites.
   `uncertainAfterMs`; a read that throws and an accepted message with no Host record check again. H tests add the due
   check selection, the settle that writes nothing (a stale fence, after the delegation was answered, before the check
   time), two checkers on one delegation, a chain end with no intent row, a read timeout, and a settle that throws.
+- The K8 device vectors (`deviceVectors`) run on the store, as on L: a delivered offer on an offline device waits and
+  is queued again once the device connects, with one projection each; the same observation again and a device that
+  the read lacks change nothing; nothing changes before delivery (no submit, an uncertain submit, no attempt read),
+  after a claim (by the attempt or the claim fact), or for a cancel or a verdict. H tests add the `offeredTo` fact of
+  the intent row, the readiness read of the scope, no read when no delegation can change, a read that throws or times
+  out, and the presence mapping.
 - The due tests check the stored due time against the K8 rule after each seed, commit, sync and finish, a cancel commit
   with the store's timers, a command that throws, a step that keeps the time, and the DDL check. The due scheduler tests
   cover a due scope whose sync clears it, the clock read for each sync, a stalled scope and a failed sync with their
