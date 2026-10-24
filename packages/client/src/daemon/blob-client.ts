@@ -143,7 +143,7 @@ export class BlobClient implements BlobResolver {
       options.signal,
     );
     if (!putRes.ok) {
-      throw new BlobHttpError(`failed to upload blob content: HTTP ${putRes.status}`, putRes.status);
+      throw new BlobHttpError(`failed to upload blob content: HTTP ${putRes.status}`, putRes.status, true);
     }
 
     this.#throwIfAborted(options.signal);
