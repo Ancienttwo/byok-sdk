@@ -123,11 +123,11 @@
   how to record the source commit. A test checks each list against the import
   graph. The shared vectors need the L files and the K4 root entry, not
   `rules/` alone. No code changes.
-- **Fixed (client)** — with `agentUserContext: 'excluded'`, the Claude exclude
-  patterns escape glob syntax in the directory part of every pattern, not only
-  `rules/**`, so an ancestor directory named `**` or `(x86)` no longer drops
-  the Agent home's CLAUDE.md or keeps its own CLAUDE.md in the task. The config
-  directory exclusion is decided on its real path, as Claude matches it.
+- **Fixed (client)** — with `agentUserContext: 'excluded'`, an ancestor
+  directory named `**` made the literal exclude patterns match the Agent home's
+  own CLAUDE.md files. The patterns now escape glob syntax in every directory
+  part, so all of them follow one rule. The config directory exclusion is
+  decided on its real path, as Claude matches it.
 
 ## 0.30.0 — 2026-10-24 (published)
 

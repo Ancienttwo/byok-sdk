@@ -88,7 +88,7 @@ describe('claudeAgentUserContextSettings', () => {
     expect(settings.claudeMdExcludes.some(pattern => pattern.includes('/a1'))).toBe(false);
   });
 
-  it.each([['(x86)', '?x86?'], ['[1]', '?1?']])('excludes the CLAUDE.md of an ancestor directory named %s', (name, escaped) => {
+  it.each([['(x86)', '?x86?'], ['[1]', '?1?']])('escapes the directory part for an ancestor named %s', (name, escaped) => {
     const agentHome = `/srv/${name}/a1`;
     const settings = claudeAgentUserContextSettings({ lease: lease(agentHome), cwd: agentHome }, { HOME: '/home/x' }, 'linux', unusedHomedir, same);
     expect(settings.claudeMdExcludes).toEqual([
