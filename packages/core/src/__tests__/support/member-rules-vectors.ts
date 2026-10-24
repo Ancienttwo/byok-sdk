@@ -58,6 +58,8 @@ export interface MemberRulesVectors {
   };
   /** Scope signers (owner batch §50f A). Signatures are verify-only. */
   readonly scopeSigners: ScopeSignerVectors;
+  /** A shredded scope (design §11.2). Signatures are verify-only. */
+  readonly shred: ShredVectors;
 }
 
 export interface ScopeSignerVectors {
@@ -72,6 +74,19 @@ export interface ScopeSignerVectors {
     readonly hash: string;
     readonly outcome: 'ok' | MemberChainWalkFailure;
   }[];
+}
+
+export interface ShredVectors {
+  /**
+   * After `scopeSigners.entries`: the `policy-member-shreds` case entry (the
+   * client shreds `scope-device`), then scope-policy `scope-client` (client)
+   * by client.
+   */
+  readonly entries: readonly MemberChainEntryV1[];
+  /** `sha256:<hex>` of each unsigned entry. */
+  readonly hashes: readonly string[];
+  /** Each case is one entry after `entries`, with the walk's outcome. */
+  readonly cases: ScopeSignerVectors['cases'];
 }
 
 export interface MemberRulesCheckCounts {
@@ -92,7 +107,7 @@ function expectEqual(label: string, actual: unknown, expected: unknown): void {
   }
 }
 
-function findMember(vectors: MemberRulesVectors, name: string): MemberRulesVectorMember {
+function findMember(vectors: Pick<MemberRulesVectors, 'members'>, name: string): MemberRulesVectorMember {
   const found = vectors.members.find((candidate) => candidate.name === name);
   if (found === undefined) throw new Error(`no vector member ${name}`);
   return found;
@@ -109,19 +124,12 @@ async function unsignedHash(entry: MemberChainEntryV1): Promise<string> {
   return memberChainEntryHash(unsigned);
 }
 
-/**
- * Build the scope signer vectors on top of `chain.entries`. Each case shares
- * one seq, so each is a separate one-entry continuation of the same chain.
- */
-export async function buildScopeSignerVectors(vectors: Pick<MemberRulesVectors, 'tenantId' | 'members' | 'chain'>): Promise<ScopeSignerVectors> {
-  const [client, device, stranger] = (['client', 'device', 'stranger'] as const).map((name) => {
-    const found = vectors.members.find((candidate) => candidate.name === name);
-    if (found === undefined) throw new Error(`no vector member ${name}`);
-    return found;
-  }) as [MemberRulesVectorMember, MemberRulesVectorMember, MemberRulesVectorMember];
-  const sign = async (signer: MemberRulesVectorMember, seq: number, prev: string, op: MemberChainEntryV1['op'], subject: JsonObject) =>
+type VectorSigner = (signer: MemberRulesVectorMember, seq: number, prev: string, op: MemberChainEntryV1['op'], subject: JsonObject) => Promise<MemberChainEntryV1>;
+
+function vectorSigner(tenantId: string): VectorSigner {
+  return async (signer, seq, prev, op, subject) =>
     signMemberChainEntry(
-      { v: 1, tenantId: vectors.tenantId, seq, prev, op, subject, signer: signer.memberId },
+      { v: 1, tenantId, seq, prev, op, subject, signer: signer.memberId },
       {
         publicJwk: vectorPublicJwk(signer.signing),
         privateKey: await crypto.subtle.importKey(
@@ -133,8 +141,26 @@ export async function buildScopeSignerVectors(vectors: Pick<MemberRulesVectors, 
         ),
       },
     );
-  const ids = (...members: MemberRulesVectorMember[]) => members.map((member) => member.memberId).sort();
-  const policy = (scopeId: string, members: readonly string[]): JsonObject => ({ scopeId, categories: ['task-input'], members: [...members] });
+}
+
+function vectorMembers(vectors: Pick<MemberRulesVectors, 'members'>): [MemberRulesVectorMember, MemberRulesVectorMember, MemberRulesVectorMember] {
+  return (['client', 'device', 'stranger'] as const).map((name) => findMember(vectors, name)) as [
+    MemberRulesVectorMember,
+    MemberRulesVectorMember,
+    MemberRulesVectorMember,
+  ];
+}
+
+const ids = (...members: MemberRulesVectorMember[]) => members.map((member) => member.memberId).sort();
+const policy = (scopeId: string, members: readonly string[]): JsonObject => ({ scopeId, categories: ['task-input'], members: [...members] });
+
+/**
+ * Build the scope signer vectors on top of `chain.entries`. Each case shares
+ * one seq, so each is a separate one-entry continuation of the same chain.
+ */
+export async function buildScopeSignerVectors(vectors: Pick<MemberRulesVectors, 'tenantId' | 'members' | 'chain'>): Promise<ScopeSignerVectors> {
+  const [client, device, stranger] = vectorMembers(vectors);
+  const sign = vectorSigner(vectors.tenantId);
 
   const addStranger = await sign(client, 3, vectors.chain.hashes[1]!, 'add', { member: stranger.bundle });
   const addHash = await unsignedHash(addStranger);
@@ -166,6 +192,58 @@ export async function checkScopeSignerVectors(vectors: MemberRulesVectors): Prom
     expectEqual(`scope signer case ${vector.name} hash`, await unsignedHash(vector.entry), vector.hash);
     const result = await applyMemberChainEntries(prefix.state, [vector.entry]);
     expectEqual(`scope signer case ${vector.name}`, result.ok ? 'ok' : result.reason, vector.outcome);
+  }
+  return cases.length;
+}
+
+/**
+ * Build the shred vectors on top of `scopeSigners.entries`. The shred is the
+ * `policy-member-shreds` case entry as pinned, so the golden holds one
+ * signature for it. Each case shares one seq after `entries`.
+ */
+export async function buildShredVectors(vectors: Pick<MemberRulesVectors, 'tenantId' | 'members' | 'scopeSigners'>): Promise<ShredVectors> {
+  const [client, device] = vectorMembers(vectors);
+  const sign = vectorSigner(vectors.tenantId);
+  const shred = shredCase(vectors);
+  const clientPolicy = await sign(client, 6, shred.hash, 'scope-policy', policy('scope-client', ids(client)));
+  const clientPolicyHash = await unsignedHash(clientPolicy);
+
+  const cases: ShredVectors['cases'][number][] = [];
+  for (const [name, signer, op, subject, outcome] of [
+    ['policy-after-shred', device, 'scope-policy', policy('scope-device', ids(client, device)), 'member_chain_subject_invalid'],
+    ['shred-again', client, 'shred', { scopeId: 'scope-device' }, 'member_chain_subject_invalid'],
+    ['shred-unknown-scope', client, 'shred', { scopeId: 'scope-unknown' }, 'member_chain_subject_invalid'],
+    ['shred-extra-key', client, 'shred', { scopeId: 'scope-client', reason: 'cleanup' }, 'member_chain_subject_invalid'],
+    ['shred-other-scope', client, 'shred', { scopeId: 'scope-client' }, 'ok'],
+  ] as const) {
+    const entry = await sign(signer, 7, clientPolicyHash, op, subject);
+    cases.push({ name, entry, hash: await unsignedHash(entry), outcome });
+  }
+  return { entries: [shred.entry, clientPolicy], hashes: [shred.hash, clientPolicyHash], cases };
+}
+
+function shredCase(vectors: Pick<MemberRulesVectors, 'scopeSigners'>): ScopeSignerVectors['cases'][number] {
+  const found = vectors.scopeSigners.cases.find((vector) => vector.name === 'policy-member-shreds');
+  if (found === undefined) throw new Error('no scope signer case policy-member-shreds');
+  return found;
+}
+
+/** Walk the scope signer prefix, the shred entries, then each shred case after them. Returns the number of cases. */
+export async function checkShredVectors(vectors: MemberRulesVectors): Promise<number> {
+  const { entries, hashes, cases } = vectors.shred;
+  expectEqual('shred entry 0', entries[0], shredCase(vectors).entry);
+  for (const [index, entry] of entries.entries()) expectEqual(`shred entry ${index} hash`, await unsignedHash(entry), hashes[index]);
+  const prefix = await applyMemberChainEntries(emptyMemberChainState(vectors.tenantId), [
+    ...vectors.chain.entries,
+    ...vectors.scopeSigners.entries,
+    ...entries,
+  ]);
+  if (!prefix.ok) throw new Error(`shred prefix: ${prefix.reason} at ${prefix.index}`);
+  expectEqual('shred prefix scopes', [[...prefix.state.scopes.keys()], [...prefix.state.shredded]], [['scope-client'], ['scope-device']]);
+  for (const vector of cases) {
+    expectEqual(`shred case ${vector.name} hash`, await unsignedHash(vector.entry), vector.hash);
+    const result = await applyMemberChainEntries(prefix.state, [vector.entry]);
+    expectEqual(`shred case ${vector.name}`, result.ok ? 'ok' : result.reason, vector.outcome);
   }
   return cases.length;
 }
@@ -220,6 +298,7 @@ export async function checkMemberRulesVectors(vectors: MemberRulesVectors): Prom
   });
   expectEqual('chain anchor', result.ok ? result.anchorSeq : result, anchor.anchorSeq);
   await checkScopeSignerVectors(vectors);
+  await checkShredVectors(vectors);
 
   return {
     members: vectors.members.length,

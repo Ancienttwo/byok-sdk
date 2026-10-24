@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Breaking (cloud)** — the device-proof `requestId` is single-use on the
+  three E2EE member writes, as on the truth put (#654, owner batch §41a A).
+  The store records the `requestId`, its binding and the result with the
+  write. A replay with the same binding writes nothing and returns the
+  recorded result, so a replayed registration no longer extends or replaces
+  the pairing MAC and a replayed package put no longer overwrites a newer
+  package. The same `requestId` with another binding gets 409
+  `proof_request_conflict`. Postgres records it in `proof_request_receipt`
+  (no migration); SQLite adds that table on open. Store implementers: the
+  append and put inputs take an optional `proof`, and
+  `E2eeMemberRegistrationInput` takes `request`; the results can be
+  `request_conflict`.
+
 - **Feature (examples)** — K8 `BotOptions.roomHistory` reads the room
   messages of a seat ContextPack from an external authority (#883). The
   authority selects the messages for the seat's Bot. The seat Turn stores only
@@ -75,6 +88,12 @@
   applied, so that scope keeps its packages and accepts new puts. A stored
   `shred` entry whose subject is not `{ scopeId }` makes every chain read that
   includes it fail with `e2ee_member_state_unreadable`.
+- **Docs and vectors** — `docs/security.md` gains a Scope shred section: what
+  a Host shred removes, the unverified delete, and the backup gap until each
+  member rotates its KEM key (#654 E5b-3). The hosted Host contract lists the
+  shred in §6 and §7. `member-rules-v1.json` gains a `shred` section: after a
+  shred, a `scope-policy` or a second `shred` of that scope is invalid, and
+  another scope stays live.
 
 ## 0.30.0 — 2026-10-24 (published)
 
