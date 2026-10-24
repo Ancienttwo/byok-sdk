@@ -110,6 +110,7 @@ export const workspaceGraph = {
   "packages/cloud-do": {
     "name": "@byok-sdk/cloud-do",
     "dependencies": [
+      "@byok-sdk/client",
       "@byok-sdk/keys"
     ]
   },
