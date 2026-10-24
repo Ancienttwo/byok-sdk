@@ -293,8 +293,10 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       return typeof epoch === 'number' && Number.isSafeInteger(epoch) ? [epoch] : [];
     });
     const epoch = Math.max(minEpoch, ...held, ...(this.#fresh.get(scopeId)?.keys() ?? [])) + 1;
-    const recipients = memberChainScopeRecipients(session.state, scopeId);
-    if (recipients.every((recipient) => recipient.memberId === session.member.memberId)) {
+    const self = session.member.memberId;
+    // This member's own package goes in the first put: after any put that landed, the next rotation sees the epoch and moves past it.
+    const recipients = [...memberChainScopeRecipients(session.state, scopeId)].sort((left, right) => Number(right.memberId === self) - Number(left.memberId === self));
+    if (recipients.every((recipient) => recipient.memberId === self)) {
       this.options.log(`scope ${JSON.stringify(scopeId)} has no current member but this device; it is not rotated`);
       return;
     }
@@ -314,7 +316,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
         scopeKey.fill(0);
         return;
       }
-      this.#keys.set(keyOf(scopeId, epoch), { scopeKey, keyId: packages[0]!.keyId, sender: session.member.memberId });
+      this.#keys.set(keyOf(scopeId, epoch), { scopeKey, keyId: packages[0]!.keyId, sender: self });
       const points = this.#fresh.get(scopeId) ?? new Map<number, MemberChainPoint>();
       this.#fresh.set(scopeId, points);
       points.set(epoch, { seq: head.seq, hash: head.hash });
