@@ -210,7 +210,8 @@ describe('Agent memory guidance', () => {
 });
 
 // #614 follow-ups: the guidance follows `agentMemoryMcp`, and a reader gets no write tool.
-async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mcpToolsets = true) {
+// `withHelperBin: false` under `auto` leaves out the memory MCP helper, which is admission `unavailable`.
+async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mcpToolsets = true, withHelperBin = true) {
   const hostStorageRoot = await makeRoot();
   const workspaceRoot = await makeRoot();
   const storeDir = await makeRoot();
@@ -240,7 +241,7 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
     tenantId: 'tenant-memory-admission',
     // `off` resolves no helper in the daemon; `auto` models an admitted
     // secure filesystem (the macOS release helper is never opened here).
-    ...(agentMemoryMcp === 'off' ? { agentMemoryMcp } : {
+    ...(agentMemoryMcp === 'off' ? { agentMemoryMcp } : !withHelperBin ? { agentMemoryMcp: 'auto' as const } : {
       ...(agentMemoryMcp === undefined ? {} : { agentMemoryMcp }),
       agentMemoryMcpBin: { command: 'node', args: ['memory-mcp.js'] },
       ...(process.platform === 'darwin' ? { resolveAgentMemoryFilesystemHelperBin: () => '/sdk/release/agent-memory-fs' } : {}),
@@ -435,6 +436,18 @@ describe('agentMemory read-if-admitted', () => {
     expect(reader!.task.instruction).toBe(prependAgentReaderResultGuidance('instruction for reader-if'));
     for (const start of [writer!, reader!]) expect(start.ctx.mcpServers?.byokagentmemory).toBeUndefined();
   });
+
+  it('runs exactly as none when admission is unavailable (auto, no helper), with no decline', async () => {
+    const { adapter, offer, declineOf } = await createMemoryRunner('auto', true, false);
+    await offer('writer-if', { agentId: 'agent-writer-if', agentMemory: 'read-if-admitted' });
+    await offer('reader-if', { agentId: 'agent-reader-if', reader: true, agentMemory: 'read-if-admitted' });
+    for (const taskId of ['writer-if', 'reader-if']) expect(declineOf(taskId), taskId).toBeUndefined();
+    expect(adapter.startCalls).toHaveLength(2);
+    const [writer, reader] = adapter.startCalls;
+    expect(writer!.task.instruction).toBe('instruction for writer-if');
+    expect(reader!.task.instruction).toBe(prependAgentReaderResultGuidance('instruction for reader-if'));
+    for (const start of [writer!, reader!]) expect(start.ctx.mcpServers?.byokagentmemory).toBeUndefined();
+  });
 });
 
 // #833: `read-write-if-admitted` runs as `read-write` when the daemon admits the memory MCP, and as `none` when it does
@@ -460,6 +473,27 @@ describe('agentMemory read-write-if-admitted', () => {
     expect(declineOf('writer-rw-if')).toBeUndefined();
     expect(adapter.startCalls).toHaveLength(1);
     expect(adapter.startCalls[0]!.task.instruction).toBe('instruction for writer-rw-if');
+    expect(adapter.startCalls[0]!.ctx.mcpServers?.byokagentmemory).toBeUndefined();
+  });
+
+  it('runs a writer exactly as none when admission is unavailable (auto, no helper), with no decline', async () => {
+    const { adapter, offer, declineOf } = await createMemoryRunner('auto', true, false);
+    await offer('writer-rw-if', { agentId: 'agent-writer-rw-if', agentMemory: 'read-write-if-admitted' });
+    expect(declineOf('writer-rw-if')).toBeUndefined();
+    expect(adapter.startCalls).toHaveLength(1);
+    expect(adapter.startCalls[0]!.task.instruction).toBe('instruction for writer-rw-if');
+    expect(adapter.startCalls[0]!.ctx.mcpServers?.byokagentmemory).toBeUndefined();
+  });
+
+  // An absent field keeps the daemon default, which is keyed on `agentMemoryMcp` alone: `auto` without a helper
+  // still defaults a writer to read-write guidance, though no memory MCP is bound. The `*-if-admitted` value above
+  // is keyed on admission and differs from it.
+  it('keeps the default read-write guidance, with no memory MCP, for an absent field when admission is unavailable', async () => {
+    const { adapter, offer, declineOf } = await createMemoryRunner('auto', true, false);
+    await offer('writer-absent', { agentId: 'agent-writer-absent' });
+    expect(declineOf('writer-absent')).toBeUndefined();
+    expect(adapter.startCalls).toHaveLength(1);
+    expect(adapter.startCalls[0]!.task.instruction).toBe(prependAgentMemoryGuidance('instruction for writer-absent'));
     expect(adapter.startCalls[0]!.ctx.mcpServers?.byokagentmemory).toBeUndefined();
   });
 
