@@ -3,8 +3,10 @@ import { agentKey, canonical, fifoHeads, queuedExpiry, submitFrozen, taskId,
   type ExecutionTemplate, type FrozenInput, type FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
 import type { Turn } from '@byok-sdk/example-bot-collaboration/model';
 import type { SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { activeBinding, DeviceBindingError } from './binding';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { storedKey } from './layout';
+import { retiredTurns } from './retention';
 import { inSchema, lockScope } from './store';
 
 /** What a Turn freezes: the `freeze` step input of the sync rule. `key` is the Turn id. */
@@ -28,6 +30,8 @@ export async function freezeIntent(client: PoolClient, scope: string, freeze: In
     }
     return input;
   }
+  // A new intent can create execution, so its device must have an active H binding (#793 D2e).
+  await activeBinding(client, scopeKey, freeze.execution.deviceId);
   await client.query(`INSERT INTO intent (scope, key, task_id, ordinal, agent, source, input, wait_until, submission)
     SELECT $1, $2, $3, coalesce(max(ordinal) + 1, 0), $4, $5, $6::json, $7, 'reserved' FROM intent WHERE scope = $1`,
   [scopeKey, key, input.taskId, agentKey(scope, freeze.execution), freeze.source, JSON.stringify(input), freeze.waitUntil]);
@@ -45,7 +49,7 @@ export async function frozenIntent(client: PoolClient, scope: string, task: stri
 type IntentFact = NonNullable<ReturnType<SyncFacts['intent']>>;
 /**
  * The sync rule facts of these Turns, read in the sync transaction. `started` is the reconciliation's attempt fact
- * (D2d). H retires no Turn id before D2g.
+ * (D2d). `retired` reads the Turn tombstones of retention (D2g).
  */
 export async function syncFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<SyncFacts> {
   const found = await client.query<{ key: string; task_id: string; conclusion: IntentFact['conclusion'] | null;
@@ -55,7 +59,10 @@ export async function syncFacts(client: PoolClient, scope: string, turnIds: read
   const facts = new Map(found.rows.map(row => [row.key, { taskId: row.task_id, ...(row.conclusion ? { conclusion: row.conclusion } : {}),
     ...(row.cancel_reason ? { cancelReason: row.cancel_reason } : {}) } satisfies IntentFact]));
   const started = new Set(found.rows.filter(row => row.started).map(row => row.key));
-  return { intent: turnId => facts.get(storedKey(turnId)), executionStarted: turnId => started.has(storedKey(turnId)), retired: () => undefined };
+  // H keeps every intent row, so no intent result is retired before it is seen. Retention retires Turn ids (#793 D2g).
+  const retired = await retiredTurns(client, storedKey(scope), turnIds);
+  return { intent: turnId => facts.get(storedKey(turnId)), executionStarted: turnId => started.has(storedKey(turnId)),
+    retired: turnId => retired.has(turnId) ? 'turn_retired' : undefined };
 }
 
 /** Writes the intent side of one sync step, as L writes it to K4. The caller holds the scope lock. */
@@ -80,7 +87,7 @@ export interface SubmitterOptions {
   /** The most rows that one pass takes. */
   batch?: number;
 }
-type Claim = { scopeKey: string; key: string; tries: number; input: FrozenInput; waitUntil: number };
+type Claim = { scopeKey: string; key: string; tries: number; input: FrozenInput; waitUntil: number; modeRevision: number };
 /** A row whose try threw outside the SDK call, for example on an unknown store version. The pass went on. */
 export interface SubmitFailure { scope: string; turnId: string; error: unknown }
 export interface SubmitPass { tried: number; failed: SubmitFailure[] }
@@ -152,10 +159,19 @@ export class HostedSubmitter {
    * is the guard for that case.
    */
   private async mayStillSubmit(claim: Claim): Promise<boolean> {
-    const found = await inSchema(this.pool, this.schema, client => client.query<{ open: boolean }>(
-      'SELECT conclusion IS NULL AND cancel_reason IS NULL AS open FROM intent WHERE scope = $1 AND key = $2', [claim.scopeKey, claim.key]), true);
+    const open = await inSchema(this.pool, this.schema, async client => {
+      const found = await client.query<{ open: boolean }>(
+        'SELECT conclusion IS NULL AND cancel_reason IS NULL AS open FROM intent WHERE scope = $1 AND key = $2', [claim.scopeKey, claim.key]);
+      if (found.rows[0]?.open !== true) return false;
+      // The device binding must still be the one that the claim saw (#793 D2e). A change throws, so the try backs off
+      // with the error; a stop would record an expiry.
+      if (await activeBinding(client, claim.scopeKey, claim.input.deviceId) !== claim.modeRevision) {
+        throw new DeviceBindingError(claim.input.deviceId, 'revision');
+      }
+      return true;
+    }, true);
     // The clock is read after the round trip, so a read that crosses the deadline stops the submit.
-    return found.rows[0]?.open === true && this.now() < claim.waitUntil;
+    return open && this.now() < claim.waitUntil;
   }
 
   /** Step 1: under the scope lock, expire an untried row, or take the lease and raise `tries`. */
@@ -181,9 +197,11 @@ export class HostedSubmitter {
           return 'expired';
         }
       }
+      // The try can create execution, so the device must have an active H binding (#793 D2e). A throw backs the row off.
+      const modeRevision = await activeBinding(client, scopeKey, row.input.deviceId);
       const raised = await client.query<{ tries: number }>(`UPDATE intent SET submission = 'uncertain', tries = tries + 1, next_at = $3
         WHERE scope = $1 AND key = $2 RETURNING tries`, [scopeKey, key, now + (this.options.leaseMs ?? 60_000)]);
-      return { scopeKey, key, tries: raised.rows[0]!.tries, input: row.input, waitUntil };
+      return { scopeKey, key, tries: raised.rows[0]!.tries, input: row.input, waitUntil, modeRevision };
     });
   }
 

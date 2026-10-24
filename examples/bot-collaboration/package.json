@@ -10,7 +10,9 @@
     "./model": "./src/model.ts",
     "./coalesce": "./src/coalesce.ts",
     "./team": "./src/team.ts",
-    "./test-support": "./src/commit-vectors.test-support.ts"
+    "./test-support": "./src/commit-vectors.test-support.ts",
+    "./retention": "./src/retention.ts",
+    "./retention-vectors": "./src/retention-vectors.test-support.ts"
   },
   "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": {

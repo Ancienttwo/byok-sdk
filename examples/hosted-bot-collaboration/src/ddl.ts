@@ -108,4 +108,35 @@ CREATE INDEX IF NOT EXISTS intent_unsettled ON intent (scope, agent, ordinal) WH
 CREATE INDEX IF NOT EXISTS intent_due ON intent (next_at) WHERE conclusion IS NULL AND submission <> 'delivered' AND cancel_reason IS NULL;
 -- The paged reconciliation scan: every tried row that has no conclusion, across scopes (#793 D2d).
 CREATE INDEX IF NOT EXISTS intent_reconcile ON intent (reconcile_at, scope, key) WHERE conclusion IS NULL AND submission <> 'reserved';
+CREATE TABLE IF NOT EXISTS device_binding (
+  scope          text    NOT NULL REFERENCES scope (scope),
+  -- JSON.stringify(device id).
+  device         text    NOT NULL,
+  ordinal        bigint  NOT NULL CHECK (ordinal >= 0),
+  -- §4.1 record shape. Until the switch slice exists, D2e writes only 'H'.
+  mode           text    NOT NULL CHECK (mode IN ('L', 'H')),
+  -- The owner revision. Every write that can create execution checks it.
+  mode_revision  bigint  NOT NULL CHECK (mode_revision >= 1),
+  -- Set once by revoke, in the same write that raises mode_revision. The row is kept as the tombstone.
+  revoked_at     bigint  CHECK (revoked_at >= 0),
+  PRIMARY KEY (scope, device),
+  UNIQUE (scope, ordinal)
+);
+-- Permanent K8 row tombstones (K4 kind 'row'). They never expire.
+CREATE TABLE IF NOT EXISTS retired_identity (
+  scope     text NOT NULL REFERENCES scope (scope),
+  -- K4 hash([namespace, id]).
+  identity  text NOT NULL,
+  PRIMARY KEY (scope, identity)
+);
+CREATE TABLE IF NOT EXISTS archived_row (
+  scope       text   NOT NULL REFERENCES scope (scope),
+  namespace   text   NOT NULL,
+  -- JSON.stringify(row id). Code checks the K4 namespace and id limits (K4 ledger.ts:52-58) on the raw values.
+  id          text   NOT NULL,
+  body        json   NOT NULL,
+  expires_at  bigint CHECK (expires_at >= 0),
+  PRIMARY KEY (scope, namespace, id)
+);
+CREATE INDEX IF NOT EXISTS archived_row_expiry ON archived_row (scope, namespace, expires_at) WHERE expires_at IS NOT NULL;
 `;

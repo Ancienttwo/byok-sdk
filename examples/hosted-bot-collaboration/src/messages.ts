@@ -2,9 +2,10 @@ import type { PoolClient } from 'pg';
 import type { ByokCloudOptions, TenantId } from '@byok-sdk/cloud';
 import { canonical } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { commitCommand } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { CommitConflict, revisionOf, type CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { frozenIntent } from './intents';
+import { storedKey } from './layout';
+import { acceptedReply, commitStored } from './retention';
 import type { Decision, HostedCollaborationStore, PortsFactory, Publish } from './store';
 
 /** The SDK admission hook that H installs (#793 D2c). */
@@ -28,14 +29,16 @@ export async function decideMessage(client: PoolClient, scope: string, state: Co
   if (input.deviceId !== frozen.input.deviceId || canonical(input.payload.agentRef) !== canonical(frozen.input.payload.agentRef)
     || canonical(input.context) !== canonical(frozen.input.agentMessageContext)) return refuse('binding_mismatch');
   // One accepted message per task, as the K4 receipt. The command record keys one message, so it cannot see another one.
-  const reply = state.replies[input.taskId];
+  // Retention moves the reply with its Turn and keeps it, so an exact replay is accepted after its record expires (#651).
+  const reply = await acceptedReply(client, storedKey(scope), state, input.taskId);
   if (reply && (reply.messageId !== input.payload.messageId || reply.contentHash !== input.payload.contentHash)) return refuse('message_conflict');
+  if (reply) return { value: { outcome: 'accepted' }, outbox: [] };
   const head = revisionOf(state);
   let result: CommitResult;
   try {
-    result = commitCommand(state, { scope, commandId: messageCommandId(input),
+    result = await commitStored(client, scope, state, { scope, commandId: messageCommandId(input),
       command: { kind: 'message', turnId: frozen.turnId, message: { taskId: input.taskId, payload: input.payload } } },
-    { scope, recordCallbacks: true }, ports(state, publish));
+    ports(state, publish));
   } catch (cause) {
     // Other content for the id of a refused message: the refusal that K4 gives for an accepted one.
     if (cause instanceof CommitConflict && cause.code === 'identity_conflict') return refuse('message_conflict');
