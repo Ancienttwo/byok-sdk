@@ -72,6 +72,7 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
 // ==== @byok-sdk/client dist/adapters/claude/events.d.ts ====
 import type { McpEventIdentities } from '../../mcp/event-identity';
 import type { AgentEvent } from '@byok-sdk/protocol';
+import type { MessageDraftDelta } from '../../types';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 /**
  * A raw parsed line from `claude --output-format stream-json`. Shapes vary
@@ -112,7 +113,7 @@ export interface MapClaudeMessageOptions {
     workspaceDir: string;
 }
 export interface MapClaudeMessageResult {
-    events: AgentEvent[];
+    events: Array<AgentEvent | MessageDraftDelta>;
     /** Present only when this frame is authoritative terminal failure evidence. */
     terminalFailure?: RuntimeExecutionFailure;
     /**
@@ -165,14 +166,20 @@ export declare const ROUTINE_CLAUDE_SYSTEM_SUBTYPES: ReadonlySet<string>;
  * own `progress` event. This records which of those events continue a
  * message whose non-blank text already started, for
  * `Session.progressStartsMessage`. Text blocks in one frame always share a
- * message. Routine `system` frames can arrive mid-message and do not end it;
- * any other frame does. A frame with no string id never continues an
- * earlier frame.
+ * message. Routine `system` frames and `stream_event` frames can arrive
+ * mid-message and do not end it; any other frame does. A frame with no
+ * string id never continues an earlier frame.
+ *
+ * Draft deltas (`stream_event`, from `--include-partial-messages`) carry the
+ * message's `api_message_id`. The first non-blank delta of a new id starts a
+ * draft message. Claude 2.1.302 sends a block's deltas before its `assistant`
+ * frame, so the draft message starts before its `progress` does.
  */
 export declare class AssistantMessageTracker {
     private readonly continuations;
     private open;
-    observe(msg: ClaudeStreamMessage, events: readonly AgentEvent[]): void;
+    private draft;
+    observe(msg: ClaudeStreamMessage, events: ReadonlyArray<AgentEvent | MessageDraftDelta>): void;
     startsMessage(event: AgentEvent): boolean;
 }
 /**
@@ -10662,7 +10669,7 @@ export type OperationalHealthFixResult = {
     sizeBytes: number;
 };
 // ==== @byok-sdk/client dist/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, Session, SessionEvidence, GitWorkspaceConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, Session, MessageDraftDelta, SessionEvidence, GitWorkspaceConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
 export type { AgentRef } from './agent-home';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store';
@@ -13537,6 +13544,17 @@ export interface ApprovalChannel {
     resolve(approved: boolean, reason?: string): Promise<void>;
 }
 /**
+ * Display-only text for the daemon's Agent message draft lane. It is not an
+ * `AgentEvent`: the daemon never batches, records or replies with it. The
+ * adapter's own message tracker sets `startsMessage` on the first non-blank
+ * delta of a new message, and each later `progress` event reconciles the draft.
+ */
+export interface MessageDraftDelta {
+    type: 'message_draft_delta';
+    text: string;
+    startsMessage: boolean;
+}
+/**
  * A running (or resumable) unit of work on a runtime. One `Session` maps to
  * one underlying runtime process/session for the lifetime of a task.
  */
@@ -13545,8 +13563,8 @@ export interface Session {
     readonly interactions?: NativeInteractionChannel;
     /** Opaque runtime session id, reported back to the server via `task.complete.sessionRef`. */
     sessionRef: string;
-    /** Normalized events for this session; the daemon batches these into `task.progress`. */
-    events: AsyncIterable<AgentEvent>;
+    /** Normalized events for this session; the daemon batches these into `task.progress`. A `MessageDraftDelta` only feeds the display-only draft. */
+    events: AsyncIterable<AgentEvent | MessageDraftDelta>;
     /**
      * For an adapter whose descriptor sets `progressEventsAreMessages` but
      * emits one assistant message as several `progress` events. Return false

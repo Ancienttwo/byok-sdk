@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { AgentEventSchema, type AgentEvent } from '@byok-sdk/protocol';
+import type { MessageDraftDelta } from '../types';
 import { mcpEventIdentities } from '../mcp/event-identity';
 import { createToolUseCorrelation, mapClaudeMessageToAgentEvents } from '../adapters/claude/events';
 import { mapPiMessageToAgentEvent } from '../adapters/pi/events';
@@ -57,7 +58,7 @@ it('annotates both durable Pi tool events from the exact observed toolset name o
 });
 
 it('assigns Grok no MCP identity from its collapsed tool name', () => {
-  const events: AgentEvent[] = [];
+  const events: Array<AgentEvent | MessageDraftDelta> = [];
   // Grok 1.0.62 names an MCP tool `<server>__<tool>` and also routes MCP calls through `use_tool` / `CallMcpTool`.
   const tools = ['market__feed__get__quote', name, 'use_tool', 'CallMcpTool', 'run_terminal_command'];
   new GrokProjection('root').consume({ seq: 1, sessionId: 'root', agentPath: [], kind: 'frame', body: { events: tools.flatMap((tool, index) => [
@@ -69,7 +70,7 @@ it('assigns Grok no MCP identity from its collapsed tool name', () => {
 });
 
 it('assigns Hermes no MCP identity from its ACP title', () => {
-  const events: AgentEvent[] = [];
+  const events: Array<AgentEvent | MessageDraftDelta> = [];
   const projection = new HermesProjection();
   // Hermes 0.22.4 titles an MCP call with its registry name, often followed by `: <preview>`.
   for (const [index, title] of [name, `${name}: AAPL`, 'terminal: ls'].entries()) {

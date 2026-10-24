@@ -138,6 +138,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
+      messageDraft: true,
     });
 
     // codex: persistent app-server steering with YOLO-only auto permission mode.
@@ -146,6 +147,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
+      messageDraft: true,
     });
 
     // The wire value remains adapter-generated. The shipped adapters all

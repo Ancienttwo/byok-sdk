@@ -4,6 +4,8 @@ This copy-and-own example implements K8a and K8b in the Bot PRD.
 It uses the K4 Host execution core and K8-S public schema and calendar APIs.
 It has no paid runtime call. Tests use a synthetic adapter with the real SDK,
 daemon, HTTP transport, SQLite stores, and `submit_result` helper.
+To copy K8 into a Host repository, see [src/VENDOR.md](src/VENDOR.md): what
+to copy in each layer, how to resolve K4, and how to record the source.
 
 ## Run
 
@@ -324,7 +326,7 @@ the state change, the command record and the outbox rows.
 The keyed commands are owner input, received IM input, room input, answers,
 card decisions, team snapshots, and three K4 callbacks: a terminal outcome, an Agent message
 and a Bot routine occurrence. The keyless commands are `setMainBot`,
-`updateRoom`, `retryPersona`, `enablePushRoute`, `revokePushRoute`,
+`updateRoom`, `retryPersona`, `personaReady`, `enablePushRoute`, `revokePushRoute`,
 `resendDelivery`, `cancelDelegation`, `abandonDelegation`, `cancelTurn` and `endRoutine`.
 `src/rules/commands.ts` decides all of them. The Host checks the principal
 and the channel before the commit, and it calls K4 cancel and delivers cancel
@@ -462,6 +464,25 @@ template.
   local.
 - The ledger stores the mode. A ledger with a local team cannot open in
   external mode, and an external ledger cannot open without the option.
+
+With `persona: 'external'` as well, the Host owns the persona projection of
+each Bot (#879). The Host projects the Agent home with its own daemon hook, so
+there is one projection writer and one revision for each agentRef.
+
+- Each snapshot Bot carries the Host's `profileRevision`, a decimal string.
+  K8 uses it as the Bot revision and as the agentRef `profileRevision` of its
+  execution. K8 queues no projection and counts no revision of its own.
+- The revision never goes back. A changed name, role, persona or model needs a
+  newer revision. A snapshot that breaks either rule is refused, and nothing
+  changes. Without the option, a snapshot with `profileRevision` is refused.
+- `personaReady(botId, revision)` reports that the Host applied this revision.
+  The current revision readies the Bot, an older one changes nothing, and a
+  newer one refuses. A Bot's Turns freeze their offers only when it is ready,
+  as before. After a newer revision, the Bot keeps its last ready revision, so
+  it stays a delegate target while its Turns wait.
+- `retryPersona` refuses with `external_persona`.
+- The ledger stores this mode too, so a restart cannot change it. The option
+  needs `team: 'external'`.
 
 With `history` and `team: 'external'` together, the device ledger holds
 neither the history nor the team authority.

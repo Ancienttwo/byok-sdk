@@ -25,6 +25,10 @@ export class AgentMessageDraftPublisher {
   private overflow = false;
   private stopped = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
+  /** Mirror of TaskRunner's finalTextParts: the text the progress events have settled. */
+  private authority = '';
+  private deltaSeen = false;
+  private openedByDelta = false;
 
   constructor(private readonly options: AgentMessageDraftPublisherOptions) {}
 
@@ -33,14 +37,46 @@ export class AgentMessageDraftPublisher {
     if (!this.canSend()) return;
     if (event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'needs_approval') {
       this.reset();
+      this.authority = '';
     } else if (event.type === 'progress') {
-      if (startsMessage) this.reset();
+      if (startsMessage) this.authority = '';
+      if (startsMessage && !this.openedByDelta) this.reset();
+      this.openedByDelta = false;
+      this.authority += event.text;
       if (this.overflow) return;
-      this.pending += event.text;
+      if (!this.deltaSeen) this.pending += event.text;
+      else {
+        // The progress event is the authority for text its deltas showed.
+        this.deltaSeen = false;
+        const shown = this.emittedText + this.pending;
+        if (this.authority.startsWith(shown)) this.pending += this.authority.slice(shown.length);
+        else {
+          this.reset();
+          this.pending = this.authority;
+        }
+      }
       this.drain(false, false);
     } else {
       return;
     }
+    this.schedule();
+  }
+
+  /** Draft-only text that a later progress event reconciles. */
+  pushDelta(text: string, startsMessage: boolean): void {
+    if (!this.canSend()) return;
+    if (startsMessage) {
+      this.reset();
+      this.openedByDelta = true;
+    }
+    this.deltaSeen = true;
+    if (this.overflow) return;
+    this.pending += text;
+    this.drain(false, false);
+    this.schedule();
+  }
+
+  private schedule(): void {
     if (!this.overflow && (this.pending !== '' || this.resetPending) && this.timer === undefined) {
       this.timer = setTimeout(() => {
         this.timer = undefined;
@@ -84,6 +120,8 @@ export class AgentMessageDraftPublisher {
     this.pending = '';
     this.resetPending = true;
     this.overflow = false;
+    this.deltaSeen = false;
+    this.openedByDelta = false;
   }
 
   private canSend(): boolean {
