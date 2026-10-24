@@ -2712,7 +2712,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       return e2eeMember.readMemberChain(e2eeMemberContext(tenant), input);
     },
     async putScopeKeyPackages(tenant, input) {
-      return e2eeMember.putScopeKeyPackages(e2eeMemberContext(tenant), input);
+      return e2eeMember.putScopeKeyPackages(e2eeMemberContext(tenant), input, { kind: 'host' });
     },
     enqueueScopeKeyPackageNotice,
     async readScopeKeyPackages(tenant, input) {
