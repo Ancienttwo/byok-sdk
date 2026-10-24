@@ -30,11 +30,12 @@ describe.skipIf(POSTGRES_URL === undefined)('H intent table checks on real Postg
       .rejects.toThrow(/intent_cancel_reason_check/);
   });
 
-  it('accepts a user or bot source, and refuses a routine source before D2f (#793 D2b-2)', async () => {
+  it('accepts a user, bot or routine source, and refuses any other (#793 D2b-2, D2f)', async () => {
     const scope = `tenant:${randomUUID()}`;
     await opened!.store.seed(scope, () => {});
     await insert(scope, 'u', taskId('u', 0), taskId('u', 0), 0, 'user');
     await insert(scope, 'b', taskId('b', 0), taskId('b', 0), 1, 'bot');
-    await expect(insert(scope, 'r', taskId('r', 0), taskId('r', 0), 2, 'routine')).rejects.toThrow(/intent_source_check/);
+    await insert(scope, 'r', taskId('r', 0), taskId('r', 0), 2, 'routine');
+    await expect(insert(scope, 'x', taskId('x', 0), taskId('x', 0), 3, 'room_slot')).rejects.toThrow(/intent_source_check/);
   });
 });

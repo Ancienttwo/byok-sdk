@@ -1,5 +1,9 @@
 import type { Pool, PoolClient } from 'pg';
-import { canonical, type Conclusion, type ExecutionTemplate, type Json } from '@byok-sdk/example-host-execution-core';
+import { canonical, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
+import { botRoutines, owned, updateDefinition } from '@byok-sdk/example-bot-collaboration/routines';
+import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
+/** A K8 `update_routine` action. */
+type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { syncTurn, type Command, type CommandPorts, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
@@ -9,6 +13,7 @@ import { syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
 import { decideFinish, type TaskEvidence } from './reconcile';
 import { commitStored, decideRetention } from './retention';
+import { hostedRoutineCommands, loadSlice, switchDueVersions, writeSlice } from './routines';
 import type { RetentionInput, RetentionLimits, RetentionResult } from '@byok-sdk/example-bot-collaboration/retention';
 import { assemble, entryGroup, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
 
@@ -20,8 +25,11 @@ export type Publish = (id: string, value: Json) => void;
 export type Decision<T> = { value: T; outbox: OutboxIntent[] };
 type Decide<T> = (state: CollaborationState, publish: Publish, client: PoolClient) => Decision<T> | Promise<Decision<T>>;
 type TurnHistory = NonNullable<SyncOptions<never>['history']>;
-/** The sync options of a scope. In history mode, `history` holds the rows of each Turn that may freeze, by Turn id. */
-export type HostedSyncOptions = Omit<SyncOptions<never>, 'history'> & { history?: ReadonlyMap<string, TurnHistory> };
+/**
+ * The sync options of a scope. In history mode, `history` holds the rows of each Turn that may freeze, by Turn id.
+ * The store reads the routines itself (#793 D2f).
+ */
+export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines'> & { history?: ReadonlyMap<string, TurnHistory> };
 /** Builds the command ports on the state of the open commit. `publish` writes a projection in the same commit. */
 export type PortsFactory = (state: CollaborationState, publish: Publish) => CommandPorts;
 
@@ -87,10 +95,14 @@ export class HostedCollaborationStore {
         'SELECT key, ordinal::text, evidence, result::text, root FROM command WHERE scope = $1 ORDER BY key',
         'SELECT key, ordinal::text, kind, body::text FROM outbox WHERE scope = $1 ORDER BY key',
         `SELECT key, task_id, ordinal::text, agent, source, input::text, wait_until::text, submission, tries, next_at::text, last_error,
-          cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text FROM intent WHERE scope = $1 ORDER BY key`,
+          cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text, retry_until::text FROM intent WHERE scope = $1 ORDER BY key`,
         'SELECT device, ordinal::text, mode, mode_revision::text, revoked_at::text FROM device_binding WHERE scope = $1 ORDER BY device',
         'SELECT identity FROM retired_identity WHERE scope = $1 ORDER BY identity',
         'SELECT namespace, id, body::text, expires_at::text FROM archived_row WHERE scope = $1 ORDER BY namespace, id',
+        `SELECT id, ordinal::text, definition::text, pending::text, lifecycle, status, next_at::text, calendar_errors::text FROM routine
+          WHERE scope = $1 ORDER BY id`,
+        `SELECT key, ordinal::text, routine_id, definition_version, trigger_kind, planned_at::text, recorded_at::text, next_at::text,
+          execution_superseded, conclusion FROM occurrence WHERE scope = $1 ORDER BY key`,
       ]) rows.push((await client.query({ text: query, values: [storedKey(scope)], rowMode: 'array' })).rows);
       return JSON.stringify(rows);
     }, true);
@@ -99,19 +111,49 @@ export class HostedCollaborationStore {
   /**
    * One Host sync of a scope (#793 D2b-2): the sync rule for each stored Turn, in insertion order, in one transaction
    * under the scope lock. It reads the intent facts in that transaction, and writes each step with the state and the
-   * projections. It writes no command record and keeps the revision. A throw writes nothing.
+   * projections. Every frozen instruction lists the scope's Bot routines, in insertion order. A routine Turn joins the FIFO
+   * as its occurrence intent, and a routine Turn that ends before that concludes its occurrence (#793 D2f). It writes no
+   * command record and keeps the revision. A throw writes nothing.
    */
   sync(scope: string, options: HostedSyncOptions): Promise<void> {
+    const key = storedKey(scope);
     return this.change(scope, undefined, async (state, publish, client) => {
       const facts = await syncFacts(client, scope, Object.keys(state.turns)), published = new Set<string>();
+      const slice = await loadSlice(client, key), routines = botRoutines(Object.values(slice.state.routines));
       const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
       for (const turn of Object.values(state.turns)) {
-        const step = syncTurn(state, turn, facts, { ...options, history: options.history?.get(turn.id) },
+        const step = syncTurn(state, turn, facts, { ...options, routines, history: options.history?.get(turn.id) },
           (id, body) => { publish(id, body); published.add(id); });
         if (step) steps.push([turn, step]);
       }
-      for (const [turn, step] of steps) await writeSyncStep(client, scope, turn, step);
+      for (const [turn, step] of steps) await writeSyncStep(client, scope, turn, step, slice);
+      await writeSlice(client, key, slice);
+      await switchDueVersions(client, key, options.now);
       return { value: undefined, outbox: [...published].map(id => ({ kind: 'projection' as const, id })) };
+    });
+  }
+
+  /**
+   * Owner API for the Main Bot's own routines (#793 D2f), as L `updateRoutine` (K8 host.ts:462-467): stages the next version of
+   * routine `action.routineId` of Bot `botId`. The authenticated command entry calls it. A refusal writes nothing.
+   */
+  updateRoutine(scope: string, botId: string, action: UpdateRoutineAction, now: number): Promise<void> {
+    return this.routineCommand(scope, botId, now, commands => commands.update(updateDefinition(commands.list(), botId, action)));
+  }
+  /** Owner API, as L `setRoutineLifecycle` (K8 host.ts:456-461): pauses, resumes or completes a routine of the Main Bot `botId`. */
+  setRoutineLifecycle(scope: string, botId: string, id: string, lifecycle: Routine['lifecycle'], now: number): Promise<void> {
+    return this.routineCommand(scope, botId, now, commands => commands.lifecycle(owned(commands.list(), botId, id).definition.id, lifecycle));
+  }
+  private routineCommand(scope: string, botId: string, now: number, run: (commands: ReturnType<typeof hostedRoutineCommands>) => void): Promise<void> {
+    const key = storedKey(scope);
+    return this.change(scope, undefined, async (state, _publish, client) => {
+      // H has no Host-wide Bot id, so the caller names the acting Bot. Only the Main Bot owns this API.
+      requireMain(state.team, botId);
+      const slice = await loadSlice(client, key);
+      run(hostedRoutineCommands(slice, now));
+      await writeSlice(client, key, slice);
+      await switchDueVersions(client, key, now);
+      return { value: undefined, outbox: [] };
     });
   }
 

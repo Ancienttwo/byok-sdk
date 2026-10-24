@@ -1,22 +1,26 @@
 import type { Pool, PoolClient } from 'pg';
-import { agentKey, canonical, fifoHeads, queuedExpiry, submitFrozen, taskId,
-  type ExecutionTemplate, type FrozenInput, type FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
+import { agentKey, canonical, fifoHeads, promoteOccurrence, queuedExpiry, submitFrozen, taskId,
+  type Conclusion, type ExecutionTemplate, type FrozenInput, type FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
 import type { Turn } from '@byok-sdk/example-bot-collaboration/model';
+import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { activeBinding, DeviceBindingError } from './binding';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { storedKey } from './layout';
 import { retiredTurns } from './retention';
+import { switchDueVersions, type RoutineSlice } from './routines';
 import { inSchema, lockScope } from './store';
 
-/** What a Turn freezes: the `freeze` step input of the sync rule. `key` is the Turn id. */
-export interface IntentFreeze { key: string; source: 'user' | 'bot'; waitUntil: number; execution: ExecutionTemplate }
+/** What a Turn freezes: the `freeze` step input of the sync rule, or a promoted routine occurrence. `key` is the Turn id. */
+export interface IntentFreeze { key: string; source: 'user' | 'bot' | 'routine'; waitUntil: number; execution: ExecutionTemplate }
+/** The K4 times of a promoted routine intent (#793 D2f): its retry bound, and `superseded` when a newer slot already exists. */
+export interface RoutineTimes { retryUntil?: number; conclusion?: Conclusion }
 
 /**
  * Saves one intent with its frozen input and its stable task id, `taskId(key, 0)`. The caller holds the scope lock.
  * A second freeze of the same Turn with the same identity changes nothing; another identity throws, as in K4 `enqueue`.
  */
-export async function freezeIntent(client: PoolClient, scope: string, freeze: IntentFreeze): Promise<FrozenInput> {
+export async function freezeIntent(client: PoolClient, scope: string, freeze: IntentFreeze, routine: RoutineTimes = {}): Promise<FrozenInput> {
   // H never retries a task (#793 D2d option A), so it cannot honor a K4 retry policy. It refuses one instead of dropping it.
   if ((freeze as IntentFreeze & { retry?: unknown }).retry !== undefined) throw new Error('H intents have no retry policy');
   const scopeKey = storedKey(scope), key = storedKey(freeze.key);
@@ -32,9 +36,10 @@ export async function freezeIntent(client: PoolClient, scope: string, freeze: In
   }
   // A new intent can create execution, so its device must have an active H binding (#793 D2e).
   await activeBinding(client, scopeKey, freeze.execution.deviceId);
-  await client.query(`INSERT INTO intent (scope, key, task_id, ordinal, agent, source, input, wait_until, submission)
-    SELECT $1, $2, $3, coalesce(max(ordinal) + 1, 0), $4, $5, $6::json, $7, 'reserved' FROM intent WHERE scope = $1`,
-  [scopeKey, key, input.taskId, agentKey(scope, freeze.execution), freeze.source, JSON.stringify(input), freeze.waitUntil]);
+  await client.query(`INSERT INTO intent (scope, key, task_id, ordinal, agent, source, input, wait_until, submission, retry_until, conclusion)
+    SELECT $1, $2, $3, coalesce(max(ordinal) + 1, 0), $4, $5, $6::json, $7, 'reserved', $8, $9 FROM intent WHERE scope = $1`,
+  [scopeKey, key, input.taskId, agentKey(scope, freeze.execution), freeze.source, JSON.stringify(input), freeze.waitUntil,
+    routine.retryUntil ?? null, routine.conclusion ?? null]);
   return input;
 }
 
@@ -65,15 +70,26 @@ export async function syncFacts(client: PoolClient, scope: string, turnIds: read
     retired: turnId => retired.has(turnId) ? 'turn_retired' : undefined };
 }
 
-/** Writes the intent side of one sync step, as L writes it to K4. The caller holds the scope lock. */
-export async function writeSyncStep(client: PoolClient, scope: string, turn: Turn, step: SyncStep<ExecutionTemplate>): Promise<void> {
+/**
+ * Writes the intent side of one sync step, as L writes it to K4 (K8 commit.ts). A routine step and a routine Turn's `ended`
+ * step run the K4 rules on `slice`, which the caller writes back after the last step. The caller holds the scope lock.
+ */
+export async function writeSyncStep(client: PoolClient, scope: string, turn: Turn, step: SyncStep<ExecutionTemplate>, slice: RoutineSlice): Promise<void> {
   if (step.kind === 'freeze') await freezeIntent(client, scope, step.input);
-  else if (step.kind === 'cancel') {
+  else if (step.kind === 'routine') {
+    // K4 times the intent from the occurrence record. The row takes the step's execution and those times, not the K4
+    // retry policy, because H never retries (#793 D2d option A). The freeze checks the device binding (#793 D2e).
+    const intent = promoteOccurrence(slice.state, scope, routineOccurrence(turn), step.execution);
+    await freezeIntent(client, scope, { key: turn.id, source: 'routine', waitUntil: intent.waitUntil, execution: step.execution },
+      { ...(intent.retryUntil === undefined ? {} : { retryUntil: intent.retryUntil }), ...(intent.conclusion ? { conclusion: intent.conclusion } : {}) });
+  } else if (step.kind === 'ended') {
+    if (turn.source === 'routine') concludeRoutineTurn(slice.state, turn);
+  } else if (step.kind === 'cancel') {
     // A row that was never tried has no SDK call, because the claim runs under this lock. It concludes now, as K4
     // queuedExpiry concludes a cancelled queued intent. A tried row waits for the reconciliation to check its attempt.
     await client.query(`UPDATE intent SET cancel_reason = 'cancelled', conclusion = CASE WHEN tries = 0 THEN 'cancelled' ELSE conclusion END
       WHERE scope = $1 AND key = $2 AND conclusion IS NULL`, [storedKey(scope), storedKey(turn.id)]);
-  } else if (step.kind === 'routine' || turn.source === 'routine') throw new Error('H has no routine Turns before #793 D2f');
+  }
 }
 
 export interface SubmitterOptions {
@@ -179,8 +195,8 @@ export class HostedSubmitter {
     return inSchema(this.pool, this.schema, async client => {
       await lockScope(client, scopeKey);
       const now = this.now();
-      const found = await client.query<{ agent: string; ordinal: string; tries: number; wait_until: string; input: FrozenInput }>(
-        `SELECT agent, ordinal::text, tries, wait_until::text, input FROM intent WHERE scope = $1 AND key = $2
+      const found = await client.query<{ agent: string; ordinal: string; tries: number; wait_until: string; retry_until: string | null; input: FrozenInput }>(
+        `SELECT agent, ordinal::text, tries, wait_until::text, retry_until::text, input FROM intent WHERE scope = $1 AND key = $2
           AND conclusion IS NULL AND submission <> 'delivered' AND cancel_reason IS NULL AND next_at <= $3 FOR UPDATE`, [scopeKey, key, now]);
       const row = found.rows[0];
       if (!row) return 'skipped';
@@ -190,10 +206,13 @@ export class HostedSubmitter {
       const [head] = fifoHeads(open.rows.map(other => ({ key: other.key, agent: row.agent, sequence: Number(other.ordinal) })));
       if (head?.key !== key) return 'skipped';
       const waitUntil = Number(row.wait_until);
+      // K4 `begin`: an untried row stops at `wait_until`, or at `retry_until` when a newer routine slot ends its retries.
+      // A tried row keeps its submit to `wait_until`, as K4 `submit` does not read `retryUntil`.
       if (row.tries === 0) {
-        const conclusion = queuedExpiry({ waitUntil }, now);
+        const conclusion = queuedExpiry({ waitUntil, ...(row.retry_until === null ? {} : { retryUntil: Number(row.retry_until) }) }, now);
         if (conclusion) {
           await client.query('UPDATE intent SET conclusion = $3 WHERE scope = $1 AND key = $2', [scopeKey, key, conclusion]);
+          await switchDueVersions(client, scopeKey, now);
           return 'expired';
         }
       }
