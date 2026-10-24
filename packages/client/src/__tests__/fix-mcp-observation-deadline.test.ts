@@ -115,8 +115,10 @@ describe('S18-2: observation-wide deadline', () => {
   });
 
   it('keeps long-lived clients on independent per-request deadlines', async () => {
-    const f = await fixture({ initializeMs: 450, listMs: 450, callMs: 450 });
-    const client = new McpStdioClient(f.server, { env: ENV, timeoutMs: 800 });
+    // Each request gets 900 ms of headroom (initialize also pays child startup),
+    // while 3 x 600 = 1_800 > 1_500 still fails a single shared deadline.
+    const f = await fixture({ initializeMs: 600, listMs: 600, callMs: 600 });
+    const client = new McpStdioClient(f.server, { env: ENV, timeoutMs: 1_500 });
     try {
       await client.connect();
       expect(await client.listTools()).toHaveLength(1);
