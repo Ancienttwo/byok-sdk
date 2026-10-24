@@ -31,6 +31,10 @@
   `InMemoryE2eeMemberStore` takes the composition's `RequestReceiptStore`.
   Postgres needs migration `0028_e2ee_scope_shred.sql`; SQLite adds the table
   on open.
+  Upgrade note: a `shred` entry that a 0.30.0 Host already stored is not
+  applied, so that scope keeps its packages and accepts new puts. A stored
+  `shred` entry whose subject is not `{ scopeId }` makes every chain read that
+  includes it fail with `e2ee_member_state_unreadable`.
 
 ## 0.30.0 — 2026-10-24 (published)
 
