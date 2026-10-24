@@ -59,7 +59,7 @@ function proofWriteHandler(deps: E2eeMemberRouteDeps, operation: string, resourc
     const proven = await authenticateProofRequest(c, deps.proof, { body, operation, resource });
     if (proven === undefined) return c.json({ error: 'unauthorized' }, 401);
     // The truth put refuses the same ids with the same answer; the receipt table is shared.
-    if (proven.requestId.length === 0 || proven.requestId.length > TRUTH_REQUEST_ID_MAX_LENGTH) {
+    if (proven.requestId.length > TRUTH_REQUEST_ID_MAX_LENGTH) {
       return c.json({ error: 'proof_request_conflict' }, 409);
     }
     let json: unknown;
