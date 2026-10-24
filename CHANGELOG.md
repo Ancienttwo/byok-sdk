@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.30.1 — source candidate
+
+0.30.1 is a PATCH release under a one-release exception to the pre-1.0
+policy. On 2026-10-24 the owner chose 0.30.x instead of 0.31.0 (issue #872),
+although it adds public API, gated wire additions and Postgres migration
+0028, and it has breaking changes. #857, #859 and #860 are breaking in
+cloud. The pi-durable SQLite migration of #909 is breaking in client and
+cloud-do: a migrated store cannot go back to Pi 1.3.0. The examples changes
+of #882 and #884 are also breaking for a Host that copies the K8 example.
+This candidate is not published. A 0.30.1 daemon paired as an E2EE member
+advertises `sealed-payload-v1` while its member is verified and the
+deployment declares `e2ee.member`. See the
+[release notes](docs/releases/v0.30.1.md) for scope, the release rule of
+`sealed-payload-v1` and the upgrade notes. All nine public manifests and
+their lock records move to 0.30.1.
+
 - **Changed (client, cloud-do, keys)** — pin the nine official Pi packages to
   exactly 1.4.0 (closureDigest `79c414be`). A preparation compiled for 1.3.0
   declines with `preparation_runtime_identity_mismatch`; prepare it again.
@@ -85,6 +101,46 @@
   refuses the Turn, and a sync that has not seen the Turn's result fails it
   as `result_retired`, as L does. Routine intents are refused. Nothing runs
   it automatically.
+- **Feature (examples)** — the Main Bot ends any open Bot routine with the
+  keyless K8 command `end_routine` (#793 S3, owner batch §55c). It completes
+  the routine of any owner, an archived Bot's too, with K4
+  `setLifecycle('completed')`, so the routine of an archived Bot no longer
+  fires at every slot. The rule checks the Main Bot role and reaches the K4
+  rows through the new optional `CommandPorts.routines` port. L adds the owner
+  API `endRoutine(id)`, which commits; H runs the command in its commit.
+  A shared routine vector runs on L and H and checks that no Host still holds
+  a slot to fire the routine.
+- **Feature (examples)** — the hosted collaboration example H runs more of
+  L's sync steps (#793 S1, S4, S5). The coalesce policy is store
+  configuration, `new HostedCollaborationStore(pool, schema, { coalesce })`
+  (`HostedStoreOptions`), checked with K8 `coalescePolicy`; the store admits
+  each input with K8 `admitUserInput`, and `CommitPorts` declares
+  `admitInput?: never`. Each sync round starts with K8 `sealDueBatches` and
+  ends with `projectInputBatches`, in L's order, and runs the K8 card steps
+  `expireCards` and `reportCardDecisions` at L's positions. Each store
+  transaction writes the new column `scope.due_at`, the earliest time that
+  the new K8 rule `collaborationDue` gives for the state it commits, indexed
+  by the new partial index `scope_due`. `HostedDueScheduler` syncs each due
+  scope in due order, so a batch seal, a card expiry or a delegation timer
+  runs without new input; a scope still due after its sync is reported as
+  `stalled`, and a stalled or failed scope backs off. H has no migrations
+  while it is unreleased, and `STORE_VERSION` stays 2: recreate the H schema.
+- **Feature (examples)** — H runs the K8 room step and the reply checks in
+  its sync (#793 S6, S7). The room step runs K8 `advanceRoomSeats` before the
+  Turn steps, with seat facts from the intent rows, and cancels the admitted
+  work of a seat with the K4 cancel; a released seat runs the room step again.
+  `HostedReplyChecker` runs L's reply check for each due check of a scope: the
+  SDK readback of the chain end, read outside any transaction with a
+  `timeoutMs` limit (default 10 s), then the new K8 rule `checkReply`, settled
+  under the scope lock and fenced, so a second checker applies nothing. The
+  deployment runs it from its due scheduler `sync`, before `store.sync`. The
+  H README describes the reply-check failure and outage limits (#897).
+- **Fixed (examples)** — H fences a delivery readback wait by its claim's
+  lease (#793 S2). `store.readDelivery` takes the `lease` that the readback
+  claim returned, so a readback that outlasted its lease no longer overwrites
+  a later readback claim's lease, and two readbacks never run at once. H also
+  loads entities and entries in integer order: the queries sorted by the text
+  form of `ordinal` and `position`, so position 10 came before 2 (#878).
 - **Breaking (cloud)** — a sealed terminal (`task.complete_sealed`,
   `task.fail_sealed`, `task.decline_sealed`, `task.cancelled_sealed`) or
   `task.artifact_sealed` may carry `ciphertextRef` above the 256 KiB inline
@@ -108,6 +164,54 @@
   for good, and an artifact becomes a sealed error event.
   Known limit: a terminal sent by reference and refused for good by the Host
   reaches the Host as no terminal (`docs/protocol.md` §2.5).
+- **Feature (client, core)** — a device can pair as an E2EE member (#654
+  E2d-1). `byok-agent pair <code> --server <url> --e2ee` takes the
+  `<pairing code>.<verification secret>` that the web client shows and splits
+  it on the last dot; without the flag the whole input is the code.
+  `pair(code, { verificationSecret })` and the control request
+  `enrollment.pair` take the secret. The secret (`pv`) never reaches the Host.
+  Pairing creates the member keys and stores them, `pv` with its deadline and
+  the member state as three new entries of the device's OS credential
+  provider, each apart from the enrollment entry. It stores them before it
+  registers the member bundle, so a lost registration is retried at start with
+  the same bundle. The started daemon polls the client MAC with a 2 s to 15 s
+  backoff until the `pv` deadline, verifies it, walks the chain to the `add`
+  of the device that the client signed, and stores the anchor and head. Each
+  start walks the chain from seq 1 again; a stored head that is not on the new
+  walk keeps E2EE off for that run. A daemon with an injected enrollment
+  backend (`DaemonOverrides.deviceCredentials`) refuses an E2EE pairing. A
+  re-pair and `unpair` clear the member entries. The device signs only
+  `e2ee-member-key.register`. `@byok-sdk/core/sealed-payload` adds
+  `generateMemberKeyRecord`, which creates a member at KEM epoch 1 as one
+  canonical JSON text, `openMemberKeyRecord`, which imports both keys
+  non-extractable and proves each private scalar against its public point,
+  and `MemberKeyStore`, the custody port each member implements.
+- **Feature (client)** — a daemon paired as an E2EE member handles the
+  `e2ee.key_package.available` notice (#654 E2d-2). It consumes the notice
+  before its journal, like the provisioning notice. It catches the member
+  chain up from its verified head, then reads and opens the package of that
+  scope epoch with the sender key from the verified chain, and keeps the
+  scope key in memory. A scope key is usable only while the latest scope
+  policy holds this device and the package sender, and the sender is a
+  current member; a catch-up that shreds the scope or drops the device zeroes
+  and drops its keys. The notice row stays only while the member resumes or a
+  Host read fails; every other end is acknowledged with a log line. The
+  member resume starts before the connection, so a notice in the first poll
+  waits for it.
+- **Fixed (client)** — every daemon request for E2EE membership is bounded
+  (#654 E2d-1b). Each member request has a 60 s timeout and, during pairing,
+  ends at the `pv` deadline; an answer at or after the deadline is not used.
+  The chain read is capped at 16384 entries, and each answer body is read
+  through a byte cap (a chain page at 256 times the largest valid entry plus
+  1 KiB; a key package list, pairing MAC or registration answer at 8 KiB; an
+  error body at 1 KiB). A key package read refuses more than one package. The
+  keyring's chain and key package reads get the request timeout. A key
+  package notice whose fetch fails with a final error is acknowledged, with
+  one log line that has no scope id; other errors keep the notice row. A
+  restart re-walk stops after 10 minutes and ends with no member instead of
+  staying in "resuming". `docs/protocol.md` states the timeouts, caps, the
+  re-walk deadline and the notice ack rule. No wire, route or public type
+  change.
 - **Feature (client)** — a daemon paired as an E2EE member (`byok-agent pair
   --e2ee`) opens and seals sealed task content with its own member keyring
   (#654 E2d-3). It advertises `sealed-payload-v1` only while the member is
@@ -177,12 +281,10 @@
   stores the mode. `TeamSnapshotBot` gets the optional `profileRevision`, and
   `ExternalTeam` the optional `persona`. Without the option nothing changes,
   except that a snapshot with `profileRevision` is refused.
-
 - **Fixed (examples)** — K8 validates `profileRevision` with the protocol
   `AgentHomeProjectionProfileRevisionSchema` (#879). Before, its own copy of
   the rule accepted `0`, so a snapshot with `profileRevision: '0'` and
   `personaReady(botId, '0')` passed. Both are refused now.
-
 - **Feature (examples)** — K8 `BotOptions.roomHistory` reads the room
   messages of a seat ContextPack from an external authority (#883). The
   authority selects the messages for the seat's Bot. The seat Turn stores only

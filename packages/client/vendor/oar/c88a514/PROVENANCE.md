@@ -417,7 +417,7 @@ upstream fixes it, a re-vendor returns this file to upstream bytes.
 
 ### Failure class reaches the terminal (#869)
 
-No vendored file changes. The new private bridge `src/runtime/oar-failure-runtime.{js,d.ts}` re-exports `codexFailure` and `failureFromStatus`. The Codex adapter classifies a failed turn from the native frame's `turn.error` with `codexFailure`, and the Claude adapter reads a result's `api_error_status` with `failureFromStatus`. The Grok adapter passes the class of its vendored turn outcome and of the start `RuntimeFailureError` through. The class goes onto `task.fail.failure`. SDK events still read native frames only, so the derived failure class still does not reach BYOK events.
+The same change, #894, also marks a class taken from error text in four vendored files (`fromText`); the next section describes it. The new private bridge `src/runtime/oar-failure-runtime.{js,d.ts}` re-exports `codexFailure` and `failureFromStatus`. The Codex adapter classifies a failed turn from the native frame's `turn.error` with `codexFailure`, and the Claude adapter reads a result's `api_error_status` with `failureFromStatus`. The Grok adapter passes the class of its vendored turn outcome and of the start `RuntimeFailureError` through. The class goes onto `task.fail.failure`. SDK events still read native frames only, so the derived failure class still does not reach BYOK events.
 
 ### Text-rule failure class (#869)
 
