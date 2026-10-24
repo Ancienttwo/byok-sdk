@@ -22,7 +22,7 @@ const MAC = 'A'.repeat(42) + 'E';
 function setup() {
   const clock = createMutableClock();
   const base = createInMemoryByokCloud({ clock });
-  const store = new InMemoryE2eeMemberStore();
+  const store = new InMemoryE2eeMemberStore(base.stores.receipts);
   const cloud: ByokCloud = createByokCloud({
     core: base.core,
     cloud: base.stores,

@@ -316,6 +316,15 @@ capability flag `agent-memory-read-if-admitted`; server and hosted cloud refuse
 it otherwise before task creation or mailbox append. The other values do not
 change.
 
+**Landed additive minor: `agentMemory: 'read-write-if-admitted'`.** The same
+three ordinary Agent offers, and their sealed forms, accept a fifth
+`agentMemory` value, `read-write-if-admitted` (§2.2). `task.offer_prepared`
+does not accept it. A host sends the value only to a device that durably
+advertises both `agent-memory-selection` and the new capability flag
+`agent-memory-read-write-if-admitted`; server and hosted cloud refuse it
+otherwise before task creation or mailbox append. The other values do not
+change.
+
 **Agent message drafts (additive v3).** `agent.message.draft` is gated on the
 server's `agent-message-draft` flag. Its payload is strict. It has no reliable
 ack or spool entry. `RuntimeCapabilities.messageDraft` is optional strip-safe
@@ -439,7 +448,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Historical handshake acknowledgement; current long-poll uses response metadata |
 | `task.offer` | S→D | **required** | **required** | `instruction`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
-| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `homeAccess?` (additive — §2.2), `agentMemory?` (additive — §2.2; `read-if-admitted` needs `agent-memory-read-if-admitted`), `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
+| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `homeAccess?` (additive — §2.2), `agentMemory?` (additive — §2.2; `read-if-admitted` needs `agent-memory-read-if-admitted`, `read-write-if-admitted` needs `agent-memory-read-write-if-admitted`), `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
 | `task.offer_for_agent_with_egress` | S→D | **required** | **required** | All strict Agent fields plus required `sessionRef` and exact `egressPolicy` | An Agent dispatch targets a daemon that consumed the revisioned egress contract |
 | `task.offer_for_agent_with_egress_fresh` | S→D | **required** | **required** | All strict Agent fields plus exact `egressPolicy`, with no `sessionRef` | A fresh Agent dispatch targets a daemon advertising `agent-egress-fresh-session` |
 | `task.offer_prepared` | S→D | **required** | **required** | `agentRef`, `homeAccess?`, `agentMemory`, `egressPolicy`, `messageEgress?`, `preparation` (`reference`, `requestDigest`, `artifactDigest?`), `runtime?`, `dispatchSelection?`, `requiredToolsets?`, `terminalProjection?`, `limits?` — and deliberately NO `instruction` and NO `sessionRef` | An already-counted preparation is dispatched to the device that counted it |
@@ -770,11 +779,16 @@ the reference server refuses that dispatch before the task exists. `read` or
 non-retryable decline (`agent_memory_unavailable`); the daemon never changes
 the selection to `none`. `read-if-admitted` runs as `read` when the daemon
 admits the memory MCP and as `none` when it does not, for a writer and a
-reader; it never gets `agent_memory_unavailable`. The daemon reads its
-admission once per offer and binds the memory MCP from that one answer. The
-terminal does not report which mode ran. A daemon advertises
-`agent-memory-selection` and `agent-memory-read-if-admitted` whenever it has an
-Agent home, whatever its memory admission.
+reader; it never gets `agent_memory_unavailable`. `read-write-if-admitted`
+runs as `read-write` when the daemon admits the memory MCP and as `none` when
+it does not; it never gets `agent_memory_unavailable`. A `memory-reader` offer
+that selects it gets `agent_memory_selection_invalid` whatever the admission,
+and the reference server refuses that dispatch before the task exists. The
+daemon reads its admission once per offer and binds the memory MCP from that
+one answer. The terminal does not report which mode ran. A daemon advertises
+`agent-memory-selection`, `agent-memory-read-if-admitted` and
+`agent-memory-read-write-if-admitted` whenever it has an Agent home, whatever
+its memory admission.
 
 ### 2.3 Task-free sealed provider provisioning notice
 
@@ -1327,6 +1341,20 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   top-level field gets 400. The chain append and the package put run the
   same checks as the Host control plane calls `appendMemberChainEntries` and
   `putScopeKeyPackages`.
+- **Shred.** A chain entry with `op: 'shred'` must have exactly the subject
+  `{ scopeId }` (a nonempty string); any other subject gets 400. A `scopeId`
+  over 512 UTF-16 code units names no Host scope, so the Host stores that
+  entry and does nothing else for it. When the append newly stores a `shred`
+  entry for a shorter `scopeId`, the Host, in the same transaction,
+  deletes the scope's key packages and epochs, records the scope as
+  shredded, and writes the receipt `e2ee-scope-shred:<scopeId>` (an identity
+  receipt) with the entry's seq, the time and who appended it. A replayed
+  `shred` entry deletes nothing again, and a later `shred` of the same scope
+  keeps the first receipt. After a shred, a package put that names the scope
+  gets 409 `e2ee_scope_shredded` and stores nothing, for any epoch. The Host
+  verifies no signature, so any paired device of the tenant can shred a
+  scope on the Host ([security](security.md#deletion-paths)). The Host
+  control plane `appendMemberChainEntries` does the same.
 - **Proof replay.** A device proof is not single-use on the three writes.
   Anyone who captures a proof and its body can send them again while the
   proof's `issuedAt` is within the Host clock skew (60 s by default). A
@@ -1349,7 +1377,7 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   | 400 | `coordination_input_invalid`, or an unreadable body |
   | 401 | `unauthorized` |
   | 404 | `e2ee_pairing_mac_not_found` |
-  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_member_key_conflict`, `e2ee_member_not_registered` |
+  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_scope_shredded`, `e2ee_member_key_conflict`, `e2ee_member_not_registered` |
   | 413 | the body is over `maxE2eeRequestBytes` |
   | 500 | `e2ee_member_state_unreadable` |
 

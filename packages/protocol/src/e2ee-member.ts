@@ -74,8 +74,18 @@ export type E2eeMemberKeyBundle = z.infer<typeof E2eeMemberKeyBundleSchema>;
 export const E2EE_MEMBER_CHAIN_OPS = ['add', 'remove', 'rotate', 'scope-policy', 'shred'] as const;
 
 /**
+ * The subject of a `shred` entry (design §11.2). The Host reads it to delete
+ * the scope's key packages (owner batch §50g A), so it checks this one
+ * subject strictly. Core's walk refuses any other `shred` subject too. Like
+ * core, it sets no maximum length: a scope id the Host never stored has no
+ * packages to delete.
+ */
+const E2eeScopeShredSubjectSchema = z.strictObject({ scopeId: z.string().min(1) });
+
+/**
  * One signed member chain entry. `subject` must be a JSON object; the Host
  * stores the entry as canonical JSON, which refuses any value outside JSON.
+ * A `shred` subject must also be exactly `{ scopeId }`.
  */
 export const E2eeMemberChainEntrySchema = z
   .strictObject({
@@ -93,6 +103,10 @@ export const E2eeMemberChainEntrySchema = z
   .refine(entry => (entry.seq === 1) === (entry.prev === null), {
     path: ['prev'],
     message: 'the first entry, and only the first, has no prev',
+  })
+  .refine(entry => entry.op !== 'shred' || E2eeScopeShredSubjectSchema.safeParse(entry.subject).success, {
+    path: ['subject'],
+    message: 'a shred subject is exactly { scopeId }',
   });
 export type E2eeMemberChainEntry = z.infer<typeof E2eeMemberChainEntrySchema>;
 
