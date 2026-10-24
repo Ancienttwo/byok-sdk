@@ -423,7 +423,9 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
 
     it('takes a read that does not finish within timeoutMs as a failed read', async () => {
       const h = await pending();
-      expect(await h.checker(() => new Promise(() => {}), 20).check(h.scope, VECTOR_NOW)).toBe(1);
+      // The check ends long before the default timeout (10 s).
+      const late = new Promise(resolve => { setTimeout(() => resolve('late'), 2_000).unref(); });
+      expect(await Promise.race([h.checker(() => new Promise(() => {}), 20).check(h.scope, VECTOR_NOW), late])).toBe(1);
       expect(h.reads).toEqual([taskId(h.id, 0)]);
       expect(await h.delegation()).toMatchObject({ status: 'reply_pending', checks: 1, nextCheckAt: VECTOR_NOW + 1000 });
     });
