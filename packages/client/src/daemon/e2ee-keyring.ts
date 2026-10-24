@@ -470,7 +470,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     const keys = await records.keys.beginKemRotation({ tenantId, deviceId });
     const next = keys.nextKem!;
     await this.#useKeys(keys);
-    const failure = await this.#registerKem(next) ?? await this.#rewrap(next);
+    // A run retired after its last read-back leaves the old key for the next run's resumed rotation.
+    const failure = await this.#registerKem(next) ?? await this.#rewrap(next) ?? (this.#session === undefined ? 'member_lost' : undefined);
     if (failure !== undefined) {
       log(`the KEM rotation to epoch ${next.epoch} stopped (${failure}); the old key stays`);
       return { ok: false, reason: failure };

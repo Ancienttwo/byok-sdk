@@ -899,6 +899,24 @@ describe('device member KEM rotation (E2d-5)', () => {
     expect(server.e2ee.devicePuts.flat().map((pkg) => pkg.epoch)).toEqual([1]);
   });
 
+  it('never drops the old key in a run retired after its last read-back', async () => {
+    const { web, device, custody, options, keyring, restart } = await member();
+    const scopeKey = await web.putScope('scope-a', [device]);
+    const read = options.client.readKeyPackages.bind(options.client);
+    let ones = 0;
+    // The reads of epoch 1 are the scan, the scope's read-back and the final read-back: the run retires once the last one answered.
+    vi.spyOn(options.client, 'readKeyPackages').mockImplementation(async (scopeId, epoch, signal) => {
+      const packages = await read(scopeId, epoch, signal);
+      if (epoch === 1 && ++ones === 3) keyring.retire();
+      return packages;
+    });
+    expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'member_lost' });
+    expect(ones).toBe(3);
+    expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+    vi.restoreAllMocks();
+    expect(await (await restart()).fetch('scope-a', 1)).toMatchObject({ ok: true, key: { scopeKey } });
+  });
+
   it('starts no run whose custody lacks the KEM key the chain names for this device', async () => {
     const { web, device, custody, logs, keyring, resume } = await member();
     await web.putScope('scope-a', [device]);
