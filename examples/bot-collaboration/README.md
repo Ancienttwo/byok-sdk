@@ -352,7 +352,8 @@ are the K8 rule `src/rules/cards.ts` (`expireCards`, `reportCardDecisions`),
 which the `cardVectors` hold for L and H. This contract
 defines only the per-Turn step. The `syncVectors` in
 `src/commit-vectors.test-support.ts` hold these rules for the in-memory store
-and for L.
+and for L. The `coalesceVectors` there hold the batch seal before the
+per-Turn steps and the batch projection after them, for L and H.
 
 `collaborationDue(state, timers)` in `src/rules/due.ts` lists the times when a
 sync has collaboration work to do: each open input batch's seal, each pending

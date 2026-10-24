@@ -4,16 +4,16 @@ import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
 import { canonical, hash, HostLedger, project, taskId, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { stateOf, type CollaborationState } from './model';
-import { admitUserInput } from './coalesce';
-import { coalescePolicy } from './rules/coalesce';
+import { admitUserInput, projectInputBatches, sealDueBatches } from './coalesce';
+import { coalescePolicy, type CoalescePolicy } from './rules/coalesce';
 import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitRequest } from './commit';
 import { retainRoots, type RetentionStore } from './retention';
 import { retentionVectors, type RetentionSubject } from './retention-vectors.test-support';
 import type { CommandRecord } from './rules/commit';
 import { DatabaseSync } from 'node:sqlite';
 import { commitCommand, expireCards, refuseRetired, reportCardDecisions, RetiredIdentityError, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
-import { cardVectors, commitVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CardSubject, type CommitSubject, type SeedTeam,
-  type SettlementSubject, type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support';
+import { cardVectors, coalesceVectors, commitVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CardSubject,
+  type CoalesceSubject, type CommitSubject, type SeedTeam, type SettlementSubject, type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support';
 import { intentRows, settleDelegations } from './delegation';
 import { syncTurn } from './rules/sync';
 import type { Conclusion } from './rules/delegation';
@@ -244,4 +244,28 @@ function settlementSubject(): SettlementSubject {
   };
 }
 settlementVectors('L HostLedger', settlementSubject);
+
+/**
+ * The L ledger with L's coalescing (K8 host.ts `commitOwner` and `sync`): the owner commands admit inputs with the policy, and
+ * a sync seals the due batches first, runs the Turn steps, and projects the batches last.
+ */
+function coalesceSubject(policy?: CoalescePolicy): CoalesceSubject {
+  const base = ledgerSubject(), ledger = base.ledger;
+  return {
+    ...base,
+    commit: request => commitInLedger(ledger, request, (s: LedgerState) => {
+      const state = stateOf(s.application);
+      return { ...ports(state, (id, value) => project(s, id, value)), admitInput: fields => admitUserInput(state, fields, policy, VECTOR_NOW) };
+    }),
+    sync: now => {
+      ledger.transaction((s, rows) => {
+        const state = stateOf(s.application);
+        sealDueBatches(state, policy, now);
+        for (const turn of Object.values(state.turns)) syncTurnInLedger(ledger, s, rows, turn, { ...SYNC_OPTIONS, now });
+        projectInputBatches(state, (id, value) => project(s, id, value));
+      });
+    },
+  };
+}
+coalesceVectors('L HostLedger', coalesceSubject);
 cardVectors('L HostLedger', cardSubject);
