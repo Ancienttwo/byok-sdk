@@ -250,8 +250,8 @@ on keys.
 
 0.30.1 uses a one-release exception. The owner's 2026-10-24 instruction
 selected PATCH (0.30.x instead of 0.31.0) despite the new public API, the
-gated wire field, Postgres migration 0028 and the pre-1.0 breaking changes in
-cloud, client and cloud-do. This explicit exception does not change the
+gated wire additions, Postgres migration 0028 and the pre-1.0 breaking changes
+in cloud, client and cloud-do. This explicit exception does not change the
 general policy above or waive validation, publication authorization, or
 registry readback. See the [0.30.1 candidate notes](releases/v0.30.1.md).
 

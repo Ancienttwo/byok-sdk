@@ -228,8 +228,9 @@ describe('GrokAdapter sessions', () => {
     expect(await classOf('rate-limited')).toEqual({ failure: { class: 'rate_limited' }, message: 'Rate limited' });
     expect(await classOf('retry-failed:auth')).toEqual({ failure: { class: 'auth' }, message: 'Internal error' });
     expect(await classOf('retry-failed:context_length')).toEqual({ failure: { class: 'input_too_large' }, message: 'Internal error' });
-    // A -32603 with no retry_state, or with an error_type OAR does not map, names no cause:
-    // OAR's text rule reads "Internal error" as `provider`, which is not structured evidence.
+    // A failed prompt that is not a process exit, -32000 or -32003, and whose last ended retry_state is missing or
+    // has an error_type outside Grok's table, names no cause: OAR's text rule reads "Internal error" as `provider`,
+    // which is not structured evidence.
     expect(await classOf('fail')).toEqual({ failure: { class: 'unknown' }, message: 'Internal error' });
     expect(await classOf('retry-failed:network')).toEqual({ failure: { class: 'unknown' }, message: 'Internal error' });
     expect((await failureOf(await open(adapter(), { instruction: 'exit' }, await ctx())) as RuntimeExecutionFailure).failure).toEqual({ class: 'runtime_exited' });
