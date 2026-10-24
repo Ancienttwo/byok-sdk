@@ -22,7 +22,22 @@
   now carries its `proof` instead of a `deviceId`;
   `registerDeviceMemberKey(ctx, deviceId, input)` is now
   `registerDeviceMemberKey(ctx, proof, input)`.
+- **Feature (examples)** — K8 has a Host persona mode for an external team
+  (#879). With `persona: 'external'`, each snapshot Bot carries the Host's
+  `profileRevision`, which K8 uses as the agentRef revision, and K8 queues no
+  persona projection. `personaReady(botId, revision)` readies the Bot's
+  current revision. `retryPersona` refuses with `external_persona`. The ledger
+  stores the mode. `TeamSnapshotBot` gets the optional `profileRevision`, and
+  `ExternalTeam` the optional `persona`. Without the option nothing changes,
+  except that a snapshot with `profileRevision` is refused.
 
+- **Feature (examples)** — K8 `BotOptions.roomHistory` reads the room
+  messages of a seat ContextPack from an external authority (#883). The
+  authority selects the messages for the seat's Bot. The seat Turn stores only
+  their hash in `historyDigest`, and a failed read leaves the seat queued until
+  its deadline. K8 still writes `room.messages`. `ContextHistory` gets the
+  optional `room`, and `SyncOptions` the optional `roomHistoryMode` and
+  `roomHistory`. Without the option nothing changes.
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select `agentMemory: 'read-write-if-admitted'` (#833). It runs exactly as
   `read-write` when the daemon admits the memory MCP, and exactly as `none`
@@ -110,6 +125,12 @@
   shred in §6 and §7. `member-rules-v1.json` gains a `shred` section: after a
   shred, a `scope-policy` or a second `shred` of that scope is invalid, and
   another scope stays live.
+- **Docs (examples)** — K8 has a vendor contract, `src/VENDOR.md` (#886). It
+  lists the files to copy in three layers: `rules/`, the L Host and the shared
+  vectors. It says how to resolve K4, which SDK packages the copy needs, and
+  how to record the source commit. A test checks each list against the import
+  graph. The shared vectors need the L files and the K4 root entry, not
+  `rules/` alone. No code changes.
 
 ## 0.30.0 — 2026-10-24 (published)
 

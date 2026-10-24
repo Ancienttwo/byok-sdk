@@ -24,7 +24,7 @@ import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCale
 import { applyManagement, updateBot, writeSnapshotBot } from './team';
 import { botCompactVeto } from './compaction';
 import { teamSnapshot, TeamModeError, type TeamSnapshot } from './rules/team';
-import { advanceRooms, type Mentions } from './rooms';
+import { advanceRooms, roomMessages, type Mentions, type RoomMessage } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
@@ -79,10 +79,19 @@ export interface BotOptions {
    * External history authority (#739 Q4). Absent: the ContextPack reads this ledger's Turns.
    * Present: before a Bot Turn freezes its offer, the Host reads the Bot's earlier history here, oldest first,
    * in the ContextPack row shape. The rows replace the stored Turns in that ContextPack and are not stored;
-   * the Turn keeps only their hash. Cards, questions and rejected actions stay Host state. Room seats read room messages.
+   * the Turn keeps only their hash. Cards, questions and rejected actions stay Host state. Room seats read `roomHistory`.
    * A read that throws or returns another shape leaves the Turn queued, and the timer tries again.
    */
   history?: (input: { botId: string; turnId: string }) => Promise<readonly ContextTurn[]>;
+  /**
+   * External room history authority (#883). Absent: a seat ContextPack reads the room messages of this ledger.
+   * Present: before a seat Turn freezes its offer, the Host reads here the room messages that the seat's Bot can see,
+   * oldest first. The authority selects them for that Bot. The rows replace `room.messages` in that ContextPack and are
+   * not stored; the seat Turn keeps only their hash. `room.messages` is still written, for the request text and mentions.
+   * A read that throws, returns another shape or is still open at the seat deadline leaves the seat queued, and the timer
+   * tries again until the seat deadline.
+   */
+  roomHistory?: (input: { roomId: string; botId: string; turnId: string }) => Promise<readonly RoomMessage[]>;
   /**
    * External team authority (#739 Q4c). Absent: this Host creates the Main Bot and owns its local team.
    * `external`: the constructor creates no Bot. `applyTeam` writes the authority's Bot snapshots, and
@@ -90,6 +99,13 @@ export interface BotOptions {
    * in the ledger, so a ledger cannot change its mode at a restart.
    */
   team?: 'external';
+  /**
+   * Host persona mode (#879), only with `team: 'external'`. The Host projects each Bot's Agent home itself. A snapshot
+   * Bot carries the Host's `profileRevision`, which becomes its agentRef revision, and K8 queues no persona projection.
+   * The Host reports an applied revision with `personaReady`. `retryPersona` refuses with `external_persona`.
+   * The ledger stores the mode, so a restart cannot change it.
+   */
+  persona?: 'external';
 }
 /** Synchronous. A throw or a thenable leaves the intent open, and `drain()` rejects. */
 export type HostIntentHandler = (document: unknown, transaction: OutcomeTransaction) => void;
@@ -103,12 +119,21 @@ export class IntentOutcomeError extends Error {
 function hostIntent(state: CollaborationState, key: string): { handler: string } | undefined {
   return state.hostIntents && Object.hasOwn(state.hostIntents, key) ? state.hostIntents[key] : undefined;
 }
-/** Phase 1 of a history-mode sync: the injected rows of each Turn that can freeze its offer next. */
-type InjectedHistory = ReadonlyMap<string, { rows: ContextTurn[]; digest: string }>;
+/** Phase 1 of a history-mode sync: the injected rows of each Turn that can freeze its offer next, by Turn id. */
+interface InjectedHistory {
+  turns: ReadonlyMap<string, { rows: ContextTurn[]; digest: string }>;
+  rooms: ReadonlyMap<string, { rows: RoomMessage[]; digest: string }>;
+}
 /** Reply readback port (§3.3). The Host acceptance record stays the body authority. */
 export type MessageServer = { tasks: Partial<Pick<ByokServer['tasks'], 'agentMessage'>> };
 export type AgentMessageInput = Parameters<NonNullable<CreateByokServerOptions['agentMessage']>['consume']>[0];
 
+/** A room read still open at the seat deadline counts as a failed read, so the sync can expire the seat (#883). */
+function byDeadline<T>(read: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Room history read passed the seat deadline')), Math.max(0, ms)); });
+  return Promise.race([read, late]).finally(() => clearTimeout(timer));
+}
 /** A Turn that has no offer yet and can freeze one: not concluded or failed, and its Bot is active with its profile applied. */
 function awaitsOffer(ledger: LedgerState, state: CollaborationState, turn: Turn): boolean {
   const bot = state.team.bots[turn.botId];
@@ -161,6 +186,12 @@ export class BotCollaboration {
     if (options.team === 'external' ? !team.external && Object.keys(team.bots).length : team.external) {
       throw new Error(`This ledger has ${team.external ? 'an external' : 'a local'} team`);
     }
+    if (options.persona !== undefined && (options.persona !== 'external' || options.team !== 'external')) {
+      throw new Error("The Host persona mode needs team: 'external'");
+    }
+    if (team.external && !!team.external.persona !== (options.persona === 'external')) {
+      throw new Error(`This ledger has ${team.external.persona ? 'Host' : 'K8'} persona projections`);
+    }
     // An archived Bot never runs a new Turn, so its stored template is not "current".
     for (const bot of Object.values(team.bots)) if (!bot.archived) admitBotToolsets(bot.execution, options.readOnlyToolsets);
     // Recovery can resubmit a frozen older generation after the Bot changes models.
@@ -208,7 +239,7 @@ export class BotCollaboration {
       const state = stateOf(s.application);
       promoteReplyReceipts(ledger, s, state, this.now());
       if (options.team === 'external') {
-        state.team.external ??= { revision: 0 };
+        state.team.external ??= { revision: 0, ...(options.persona === 'external' ? { persona: true as const } : {}) };
         return;
       }
       state.team.bots[options.botId] ??= { id: options.botId, name: 'Main Bot', role: 'Team owner', persona: '',
@@ -470,6 +501,16 @@ export class BotCollaboration {
     }
   }
 
+  /**
+   * Host persona mode (#879): the Host applied `revision` of this Bot's profile to its Agent home. The current revision
+   * readies the Bot. An older revision changes nothing, and a newer one refuses.
+   */
+  async personaReady(botId: string, revision: string): Promise<void> {
+    await this.exclusive(async () => {
+      this.commitKeyless({ kind: 'persona_ready', botId, revision });
+      await this.process();
+    });
+  }
   /** Owner API. Advance the desired revision after a rejected persona delivery. */
   async retryPersona(botId: string): Promise<void> {
     await this.exclusive(async () => {
@@ -611,7 +652,8 @@ export class BotCollaboration {
     const limits = { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes, instructionMaxBytes: this.instructionMaxBytes };
     for (const turn of Object.values(state.turns)) {
       materialized = syncTurnInLedger(this.ledger, s, rows, turn, { now: this.now(), models: Object.keys(this.models()),
-        readOnlyToolsets: this.options.readOnlyToolsets ?? [], limits, historyMode: !!this.options.history, history: injected?.get(turn.id), routines }) || materialized;
+        readOnlyToolsets: this.options.readOnlyToolsets ?? [], limits, historyMode: !!this.options.history, history: injected?.turns.get(turn.id),
+        roomHistoryMode: !!this.options.roomHistory, roomHistory: injected?.rooms.get(turn.id), routines }) || materialized;
     }
     settleDelegations(s, state, this.now(), (key, value) => project(s, key, value), this.timers);
     reportCardDecisions(state, (key, value) => project(s, key, value));
@@ -712,17 +754,25 @@ export class BotCollaboration {
     return this.ledger.transaction((s, rows) => this.sync(s, rows, injected));
   }
   private async readHistory(): Promise<InjectedHistory | undefined> {
-    const read = this.options.history;
-    if (!read) return undefined;
-    const ledger = this.ledger.snapshot(), state = stateOf(ledger.application), rows = new Map<string, { rows: ContextTurn[]; digest: string }>();
+    const read = this.options.history, readRoom = this.options.roomHistory;
+    if (!read && !readRoom) return undefined;
+    const ledger = this.ledger.snapshot(), state = stateOf(ledger.application);
+    const injected = { turns: new Map<string, { rows: ContextTurn[]; digest: string }>(), rooms: new Map<string, { rows: RoomMessage[]; digest: string }>() };
     for (const turn of Object.values(state.turns)) {
-      if (turn.source === 'room_slot' || !awaitsOffer(ledger, state, turn) || this.unread.has(turn.id)) continue;
+      if (!awaitsOffer(ledger, state, turn) || this.unread.has(turn.id)) continue;
+      const seat = turn.source === 'room_slot' ? state.team.seats[turn.id] : undefined;
       try {
-        const history = contextTurns(await read({ botId: turn.botId, turnId: turn.id }));
-        rows.set(turn.id, { rows: history, digest: hash(canonical(history)) });
+        if (seat && readRoom && !seat.released) {
+          const pending = readRoom({ roomId: state.team.rounds[seat.roundId]!.roomId, botId: turn.botId, turnId: turn.id });
+          const rows = roomMessages(await (seat.deadline === undefined ? pending : byDeadline(pending, seat.deadline - this.now())));
+          injected.rooms.set(turn.id, { rows, digest: hash(canonical(rows)) });
+        } else if (turn.source !== 'room_slot' && read) {
+          const rows = contextTurns(await read({ botId: turn.botId, turnId: turn.id }));
+          injected.turns.set(turn.id, { rows, digest: hash(canonical(rows)) });
+        }
       } catch { this.unread.add(turn.id); }
     }
-    return rows;
+    return injected;
   }
   /** A failed pass still re-arms the timer, so other timer work keeps its times. K4 retries a failed wake call itself. */
   private async process(): Promise<void> {
