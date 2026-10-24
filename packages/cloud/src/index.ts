@@ -114,14 +114,19 @@ export type {
 } from './task-redaction';
 
 export type {
+  E2eeMemberChainAppendInput,
   E2eeMemberChainAppendResult,
   E2eeMemberChainRow,
   E2eeMemberRegisterResult,
   E2eeMemberRegistrationInput,
   E2eeMemberRegistrationRow,
   E2eeMemberStore,
+  E2eeProofRequest,
+  E2eeProvenWrite,
+  E2eeScopeKeyPackagePutInput,
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
+  E2eeScopeShred,
 } from './e2ee-member';
 
 // Capability declaration (ADR-010)

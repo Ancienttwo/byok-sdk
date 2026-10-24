@@ -56,6 +56,10 @@ export const CLOUD_ERROR_CODES = {
   e2ee_member_chain_conflict: 'e2ee_member_chain_conflict',
   /** The first package of that scope epoch fixed another `keyId`. */
   e2ee_scope_key_conflict: 'e2ee_scope_key_conflict',
+  /** The member chain shredded that scope (design §11.2), so the Host stores no more key packages for it. */
+  e2ee_scope_shredded: 'e2ee_scope_shredded',
+  /** The device already used this device-proof `requestId` with another request. A proof is single-use. */
+  proof_request_conflict: 'proof_request_conflict',
   /** The device has not registered a member key bundle. */
   e2ee_member_not_registered: 'e2ee_member_not_registered',
   /** The device registered another member key bundle, or another device registered this member id. */

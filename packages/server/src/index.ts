@@ -48,6 +48,8 @@ import {
   AgentHomeAccessSchema,
   AgentMemorySelectionSchema,
   type AgentHomeProjectionPayload,
+  type AgentHomeAccess,
+  type AgentMemorySelection,
   type AgentRef,
   type AgentMessagePublishPayload,
   type AgentMessageDispositionPayload,
@@ -296,6 +298,13 @@ export interface ByokServer {
    * surfaced remotely builds its own authenticated route around this method.
    */
   stats(): Promise<HubStats>;
+}
+
+// A memory-reader Attempt reads memory only, so it cannot select a writing mode.
+function refuseReaderMemoryWrite(agentMemory: AgentMemorySelection | undefined, homeAccess: AgentHomeAccess | undefined): void {
+  if ((agentMemory === 'read-write' || agentMemory === 'read-write-if-admitted') && homeAccess === 'memory-reader') {
+    throw new Error(`agentMemory ${agentMemory} requires a writer; a memory-reader Attempt reads memory only`);
+  }
 }
 
 /**
@@ -549,9 +558,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     if (agentMemory !== undefined && agentRef === undefined) {
       throw new Error('agentMemory requires an explicit AgentRef; legacy task dispatch has no Agent memory');
     }
-    if (agentMemory === 'read-write' && homeAccess === 'memory-reader') {
-      throw new Error('agentMemory read-write requires a writer; a memory-reader Attempt reads memory only');
-    }
+    refuseReaderMemoryWrite(agentMemory, homeAccess);
     const agentMessageContext =
       messageEgress === undefined ? undefined : AgentMessageServerContextSchema.parse(input.agentMessageContext);
     const dispatchSelection =
@@ -801,9 +808,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       async submit(input) {
         refuseSealedFields((input as { payload?: unknown } | undefined)?.payload);
         const submission = AgentExecutionInputSchema.parse(input);
-        if (submission.payload.agentMemory === 'read-write' && submission.payload.homeAccess === 'memory-reader') {
-          throw new Error('agentMemory read-write requires a writer; a memory-reader Attempt reads memory only');
-        }
+        refuseReaderMemoryWrite(submission.payload.agentMemory, submission.payload.homeAccess);
         const { taskId } = submission;
         if (dispatching.has(taskId)) throw new Error('submission for this taskId is already in progress; retain the original binding');
         dispatching.add(taskId);
