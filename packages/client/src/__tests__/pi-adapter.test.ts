@@ -524,6 +524,22 @@ const __executionScratch = await testExecutionScratch();
     expect(failure).toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });
   });
 
+  it('marks pi exiting before it answers the initial prompt runtime_exited (#869)', async () => {
+    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
+    await expect(startAdapter(fakePiAdapter(), task, await makeCtx())).rejects.toMatchObject({
+      phase: 'start', message: expect.stringMatching(/No session found matching/), failure: { class: 'runtime_exited' },
+    });
+  });
+
+  it('marks pi exiting before get_state runtime_exited, and a refused get_state unknown (#869)', async () => {
+    await expect(startAdapter(fakePiAdapter(), baseTask, await makeCtx({ ...process.env, FAKE_PI_GET_STATE_EXIT: '1' }))).rejects.toMatchObject({
+      phase: 'start', message: expect.stringMatching(/before yielding an authoritative session id/), failure: { class: 'runtime_exited' },
+    });
+    await expect(startAdapter(fakePiAdapter(), baseTask, await makeCtx({ ...process.env, FAKE_PI_GET_STATE_FAIL: '1' }))).rejects.toMatchObject({
+      phase: 'start', category: 'authority', failure: { class: 'unknown' },
+    });
+  });
+
   it('a task.offer carrying a known sessionRef resumes it via the real `--session <id>` flag', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_PI_SESSION_ID: 'resume-me-123' });

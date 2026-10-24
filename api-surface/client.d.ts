@@ -785,6 +785,7 @@ export declare class PiRpcClient {
     private readonly eventQueue;
     private closed;
     private exitError;
+    private exited;
     private readonly closedPromise;
     private resolveClosed;
     private disposalAttempt;
@@ -815,6 +816,7 @@ export declare class PiRpcClient {
     get events(): AsyncIterable<PiRpcMessage>;
     /** Local transport diagnostic retained when the process closes; consumers must classify it explicitly. */
     get terminalError(): Error | undefined;
+    get processExited(): boolean;
     /**
      * Stdout frames this client dropped because it could not decode them: a
      * complete line that is not a JSON object, or the unterminated last line of

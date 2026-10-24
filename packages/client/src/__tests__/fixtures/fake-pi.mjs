@@ -37,6 +37,7 @@
 //                                    start(), which must now fail closed
 //                                    (finding F8) instead of falling back to
 //                                    a locally-generated UUID.
+//   FAKE_PI_GET_STATE_EXIT=1     -> exit 1 on get_state, before answering it.
 //   FAKE_PI_CRASH_WITH_STDERR=<msg> -> write <msg> to stderr and exit 1
 //                                    immediately, before reading any stdin —
 //                                    simulates finding #1's "bad flag ->
@@ -233,6 +234,7 @@ async function handleCommand(msg) {
       send({ type: 'response', command: 'get_session_stats', id: msg.id, success: true, data: { contextUsage: JSON.parse(process.env.FAKE_PI_CONTEXT_USAGE ?? '{"tokens":0,"contextWindow":1000000,"percent":0}') } });
       break;
     case 'get_state':
+      if (process.env.FAKE_PI_GET_STATE_EXIT === '1') process.exit(1);
       if (process.env.FAKE_PI_GET_STATE_FAIL === '1') {
         // Simulates get_state failing/omitting sessionId (finding F8) —
         // start() must fail closed here, not mint a fabricated session id.
