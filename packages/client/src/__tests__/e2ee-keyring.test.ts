@@ -521,7 +521,7 @@ describe('device member keyring rotation (E2d-4)', () => {
     expect(logs.join('\n')).toContain('scope "scope-d" has no current member but this device; it is not rotated');
     expect(server.e2ee.devicePuts).toHaveLength(0);
   });
-  it('does not seal at a new epoch that a member added to the scope while its packages were put', async () => {
+  it('does not seal at a new epoch that a scope member add made stale while its packages were put', async () => {
     const { server, web, device, keyring } = await member();
     const helper = await stranger();
     await web.append('add', { member: helper.member });
