@@ -69,6 +69,18 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
   syncVectors('H HostedCollaborationStore on Postgres', hosted);
   cardVectors('H HostedCollaborationStore on Postgres', hostedCards);
 
+  it('freezes a decided card\'s action_result Turn in the same sync that adds it: the new Turn starts another round', async () => {
+    const h = await hostedCards(), result = hash(['action_result', 'c1']);
+    await h.change(state => {
+      Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+      state.cards.c1!.expiresAt = Number.MAX_SAFE_INTEGER;
+    });
+    await h.commit({ scope: h.scope, commandId: 'decide', command: { kind: 'decide', cardId: 'c1', decision: 'rejected' } });
+    await h.sync(SYNC_OPTIONS.now);
+    expect((await h.state()).turns[result]).toMatchObject({ source: 'action_result' });
+    expect(await h.intent(result)).toMatchObject({ key: result });
+  });
+
   it('freezes the same input bytes as K4 enqueue in an L ledger, from the same rule step, with the same state', async () => {
     const h = await hosted();
     await h.change(queueTurns);
