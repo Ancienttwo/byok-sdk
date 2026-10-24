@@ -21,8 +21,12 @@ CREATE TABLE IF NOT EXISTS scope (
   state_version  integer NOT NULL CHECK (state_version >= 2),
   -- The state with each map emptied and each list cleared: the scalars (revision, sequence,
   -- team.external), the key order and which optional fields exist. It does not grow with history.
-  frame          json    NOT NULL
+  frame          json    NOT NULL,
+  -- The earliest time that the K8 rule \`collaborationDue\` gives for this scope's state, or NULL for none. Each store
+  -- transaction writes it from the state that it commits.
+  due_at         bigint  CHECK (due_at >= 0)
 );
+CREATE INDEX IF NOT EXISTS scope_due ON scope (due_at, scope) WHERE due_at IS NOT NULL;
 CREATE TABLE IF NOT EXISTS entity (
   scope    text   NOT NULL REFERENCES scope (scope),
   kind     text   NOT NULL CHECK (kind IN (${names(MAPS.map(([kind]) => kind))})),

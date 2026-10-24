@@ -11,9 +11,9 @@ import { canonical, hash, project, setLifecycle, time, type ApplicationRows, typ
 import { addTurn, json, stateOf, type CollaborationState, type Turn } from './model';
 import { contextTurns, SYSTEM_PROMPT, type ContextTurn } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
-  delegationDue, intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
+  intentRows, minimumInstructionBytes, observeDevices, reconcileReply, REPLY_UNCERTAIN_AFTER_MS, resolveDelegation, retryReply,
   settleDelegations, type DelegationTimers } from './delegation';
-import { commitCommand, type Command, type CommandPorts, type CommandStore, type KeylessCommand } from './rules/commands';
+import { collaborationDue, commitCommand, type Command, type CommandPorts, type CommandStore, type KeylessCommand } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
 import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
@@ -695,11 +695,8 @@ export class BotCollaboration {
       // K4 retries a failed wake call from its own timer.
       const due = [...(this.options.channel ? Object.values(state.channel?.deliveries ?? {}).filter(row => row.state === 'pending').map(row => row.nextAttemptAt ?? this.now()) : []),
         ...Object.values(state.channel?.inbounds ?? {}).filter(row => row.reply?.token).map(row => row.reply!.expiresAt),
-        ...Object.values(state.cards).filter(c => c.state === 'pending').map(c => c.expiresAt),
-        ...Object.values(state.team.seats).filter(seat => !seat.released && seat.deadline !== undefined).map(seat => seat.deadline!),
+        ...collaborationDue(state, this.timers),
         ...state.team.homeOperations.filter(op => op.status === 'pending').map(op => Math.max(this.now() + 1000, op.retryAt ?? 0)),
-        ...delegationDue(state, this.timers),
-        ...Object.values(state.inputBatches ?? {}).filter(batch => batch.state === 'open').map(batch => batch.sealAt),
         ...Object.values(state.delegations).filter(d => d.cancel && !d.cancel.delivered).map(() => this.now() + 1000),
         ...this.unread.size ? [this.now() + 1000] : []];
       if (due.length) {

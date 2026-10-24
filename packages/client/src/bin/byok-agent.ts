@@ -9,7 +9,7 @@ import { formatHaltRemedy } from './format';
 import { applyLoginShellEnvironment, SERVICE_FLAG } from '../lifecycle/service-environment';
 import { runApprovalsCommand } from './commands/approvals';
 import { runApproveCommand, runRejectCommand } from './commands/approve-reject';
-import { runPairCommand } from './commands/pair';
+import { readPairInput, runPairCommand } from './commands/pair';
 import { runDoctorCommand } from './commands/doctor';
 import { runRetireInputPreparationCommand } from './commands/retire-input-preparation';
 import { runRuntimesCommand } from './commands/runtimes';
@@ -83,12 +83,15 @@ import { runVersionCommand } from './version';
  * authenticated control socket.
  */
 
+/** `pair --e2ee`: the input is `<pairing code>.<verification secret>` (#654 §7.2, owner §50c). */
+const E2EE_PAIR_FLAG = '--e2ee';
+
 function usage(): never {
   console.error(
     [
       'Usage:',
       '  byok-agent --version',
-      '  byok-agent pair <code> --server <url> [--config <path>]',
+      '  byok-agent pair <code> --server <url> [--e2ee] [--config <path>]   (--e2ee: <code> is the <pairing code>.<verification secret> the web client shows)',
       '  byok-agent start [--config <path>] [--service]            (or BYOK_CONFIG env var; launchd/systemd pass --service)',
       '  byok-agent status [--config <path>]',
       '  byok-agent doctor [--json] [--fix --yes] [--config <path>]',
@@ -169,11 +172,12 @@ async function main(): Promise<void> {
   }
 
   if (command === 'pair') {
-    const [code] = positionalArgs(rest, ['--server', '--config']);
+    const [input] = positionalArgs(rest, ['--server', '--config']).filter((arg) => arg !== E2EE_PAIR_FLAG);
     const server = argValue(rest, '--server');
-    if (!code || !server) usage();
+    if (!input || !server) usage();
     const config = loadConfig(argValue(rest, '--config'), { serverUrl: server });
-    return runPairCommand(config, code);
+    const { code, verificationSecret } = readPairInput(input, hasFlag(rest, E2EE_PAIR_FLAG));
+    return runPairCommand(config, code, {}, verificationSecret);
   }
 
   if (command === 'start') {
