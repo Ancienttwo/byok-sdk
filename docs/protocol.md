@@ -1167,9 +1167,9 @@ refreshed hello adds it, and removes it again when the member is lost.
   newest epoch, at or after the offer's `epoch`, that has a point with no
   `remove` of a scope member and no member-dropping `scope-policy` after it.
   It checks this before the task runs; without such an epoch it rotates
-  first (below). An epoch that the recheck after the key read finds stale
-  declines that seal, and the next seal rotates. Its header names the device
-  member and its verified head.
+  first (below). The sealed header names the device member and its verified
+  head. An epoch that the recheck after the key read finds stale declines
+  that seal; the next seal chooses again and may rotate.
   The points live in memory. A start after a stop in the same process keeps
   each point that is on the new run's verified chain; after a process
   restart they come back from the next opened content.

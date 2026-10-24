@@ -74,9 +74,10 @@
   when the fourth is held, the seal fails with `sealed_key_unavailable`. A
   Host that holds the epoch under another key answers 409, and the next
   rotation starts above it. A Host request that hangs is cut off at its
-  timeout. A scope whose only current member is the device is not rotated. A rotated epoch goes stale
-  after a later member add, KEM rotation, `remove` or member-dropping policy,
-  counted from the chain seq it was wrapped at.
+  timeout. A scope whose only current member is the device is not rotated.
+  A rotated epoch goes stale after a `remove` or a member-dropping policy
+  after its freshness point, or after a member add or KEM rotation after the
+  chain seq it was wrapped at (within one process).
 - **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is
   burned: start a new registration at the Host, do not retry it (#654 E2d).
 - **Breaking (cloud)** — the device-proof `requestId` is single-use on the
