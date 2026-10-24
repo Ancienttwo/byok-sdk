@@ -35,7 +35,7 @@ import {
   type E2eeMemberKeyBundle,
   type E2eeScopeKeyPackage,
 } from '@byok-sdk/protocol';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { PAIRING_CODE_TTL_MS } from './auth/plane';
 import type { DeviceDirectory } from './stores/ports';
 import { ByokCloudError } from './errors';
@@ -245,6 +245,24 @@ function storedValue<S extends z.ZodType>(schema: S, text: string, what: string)
     throw new ByokCloudError('e2ee_member_state_unreadable', `A stored ${what} is not valid. The store contract is broken.`);
   }
   return parsed.data;
+}
+
+const RECORDED_WRITE_RESULTS = {
+  chainAppend: z.strictObject({ outcome: z.literal('appended'), appended: z.number().int().nonnegative(), replayed: z.number().int().nonnegative() }),
+  keyPackagePut: z.strictObject({ outcome: z.literal('stored'), stored: z.number().int().nonnegative() }),
+  memberKeyRegister: z.enum(['registered', 'replayed']),
+};
+
+/**
+ * The result a store recorded with a device write, read back for a replay.
+ * A store records only a successful result, so any other stored text breaks
+ * the store contract and fails closed.
+ */
+export function parseRecordedWriteResult<K extends keyof typeof RECORDED_WRITE_RESULTS>(
+  write: K,
+  text: string,
+): z.infer<(typeof RECORDED_WRITE_RESULTS)[K]> {
+  return storedValue(RECORDED_WRITE_RESULTS[write], text, 'recorded request result');
 }
 
 function scopeIdValid(scopeId: unknown): scopeId is string {

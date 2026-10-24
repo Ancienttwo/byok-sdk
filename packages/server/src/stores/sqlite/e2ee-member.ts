@@ -12,6 +12,7 @@ import type {
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
 } from '@byok-sdk/cloud';
+import { parseRecordedWriteResult } from '@byok-sdk/cloud';
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
@@ -98,7 +99,12 @@ export function deleteE2eeDeviceState(db: DatabaseSync, tenant: TenantId, device
  * the Postgres `proof_request_receipt`. The recorded result of this device
  * request, `request_conflict` for another binding, or `undefined` for a new one.
  */
-function recordedRequest<T>(db: DatabaseSync, tenant: TenantId, proof: E2eeProvenWrite | undefined): T | 'request_conflict' | undefined {
+function recordedRequest<T>(
+  db: DatabaseSync,
+  tenant: TenantId,
+  proof: E2eeProvenWrite | undefined,
+  parse: (text: string) => T,
+): T | 'request_conflict' | undefined {
   if (proof === undefined) return undefined;
   const { deviceId, request } = proof;
   const row = db.prepare(`SELECT operation, resource, body_sha256, body_size, response_body FROM proof_request_receipt
@@ -107,7 +113,7 @@ function recordedRequest<T>(db: DatabaseSync, tenant: TenantId, proof: E2eeProve
   if (row === undefined) return undefined;
   const same = row.operation === request.operation && row.resource === request.resource
     && row.body_sha256 === request.bodySha256 && row.body_size === request.bodySize;
-  return same ? JSON.parse(row.response_body) as T : 'request_conflict';
+  return same ? parse(row.response_body) : 'request_conflict';
 }
 
 function recordRequest<T>(db: DatabaseSync, tenant: TenantId, proof: E2eeProvenWrite | undefined, result: T, now: string): T {
@@ -159,7 +165,7 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
   appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult> {
     const { rows } = input;
     return this.coordinator.transaction((db): E2eeMemberChainAppendResult => {
-      const replay = recordedRequest<E2eeMemberChainAppendResult>(db, tenant, input.proof);
+      const replay = recordedRequest(db, tenant, input.proof, text => parseRecordedWriteResult('chainAppend', text));
       if (replay === 'request_conflict') return { outcome: 'request_conflict' };
       if (replay !== undefined) return replay;
       const headSeq = (db.prepare('SELECT COALESCE(MAX(seq), 0) AS head FROM e2ee_member_chain_entry WHERE tenant_id = ?')
@@ -197,7 +203,7 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
 
   putScopeKeyPackages(tenant: TenantId, { rows, proof }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult> {
     return this.coordinator.transaction((db): E2eeScopeKeyPackagePutResult => {
-      const replay = recordedRequest<E2eeScopeKeyPackagePutResult>(db, tenant, proof);
+      const replay = recordedRequest(db, tenant, proof, text => parseRecordedWriteResult('keyPackagePut', text));
       if (replay === 'request_conflict') return { outcome: 'request_conflict' };
       if (replay !== undefined) return replay;
       const shred = db.prepare('SELECT 1 FROM e2ee_scope_shred WHERE tenant_id = ? AND scope_id = ?');
@@ -241,7 +247,7 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
     const proof = { deviceId: input.deviceId, request: input.request };
     // `written` is false for a refusal and for a recorded request, so neither sets the MAC.
     const { result, written } = await this.coordinator.transaction((db): { result: E2eeMemberRegisterResult; written: boolean } => {
-      const replay = recordedRequest<E2eeMemberRegisterResult>(db, tenant, proof);
+      const replay = recordedRequest(db, tenant, proof, text => parseRecordedWriteResult('memberKeyRegister', text));
       if (replay !== undefined) return { result: replay, written: false };
       const existing = db.prepare('SELECT bundle FROM e2ee_member_key WHERE tenant_id = ? AND device_id = ?')
         .get(tenant, input.deviceId) as { bundle: string } | undefined;

@@ -13,7 +13,15 @@
   (no migration); SQLite adds that table on open. Store implementers: the
   append and put inputs take an optional `proof`, and
   `E2eeMemberRegistrationInput` takes `request`; the results can be
-  `request_conflict`.
+  `request_conflict`. A proof `requestId` that is empty or longer than 120
+  characters (`TRUTH_REQUEST_ID_MAX_LENGTH`) gets 409 `proof_request_conflict`
+  before any store call, as on the truth put. A store replays a recorded
+  result only after `parseRecordedWriteResult` accepts it; an invalid one
+  fails with `e2ee_member_state_unreadable`. Public API: the writer type
+  `E2eeMemberChainWriter` is renamed `E2eeMemberWriter`, and a device writer
+  now carries its `proof` instead of a `deviceId`;
+  `registerDeviceMemberKey(ctx, deviceId, input)` is now
+  `registerDeviceMemberKey(ctx, proof, input)`.
 
 - **Feature (protocol, server, cloud, client)** — an ordinary Agent offer can
   select `agentMemory: 'read-write-if-admitted'` (#833). It runs exactly as

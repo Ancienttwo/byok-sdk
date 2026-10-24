@@ -106,6 +106,26 @@ describeSqlite('SQLite E2EE member state', () => {
     expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID' }));
   });
 
+  it('refuses a replay whose stored result is not a valid result of that write', async () => {
+    const path = tempPath();
+    const proof = { deviceId: 'device-1', request: { requestId: 'corrupt', operation: 'e2ee-member-chain.append', resource: '/byok/e2ee/chain', bodySha256: 'sha256', bodySize: 1 } };
+    const append = { rows: [{ seq: 1, entry: '{"seq":1}' }], shreds: [], proof };
+    const first = open(path);
+    expect(await first.e2eeMember.appendChainEntries(TENANT, append)).toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
+    await first.close();
+
+    const raw = new DatabaseSync(path);
+    raw.prepare("UPDATE proof_request_receipt SET response_body = '{\"outcome\":\"stored\",\"stored\":1}' WHERE request_id = 'corrupt'").run();
+    raw.close();
+
+    const second = open(path);
+    try {
+      await expect(second.e2eeMember.appendChainEntries(TENANT, append)).rejects.toMatchObject({ code: 'e2ee_member_state_unreadable' });
+    } finally {
+      await second.close();
+    }
+  });
+
   it('deletes a device member state on revoke and on machine supersession, and keeps the rest', async () => {
     const stores = open(':memory:');
     try {
