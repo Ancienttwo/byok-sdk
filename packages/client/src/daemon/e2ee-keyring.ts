@@ -243,7 +243,10 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     const senderId = (pkg as { readonly sender?: unknown }).sender;
     const sender = typeof senderId === 'string' && this.#scopeFailure(session, scopeId, senderId) === undefined ? session.state.members.get(senderId) : undefined;
     if (sender === undefined) return { ok: false, reason: 'key_package_sender_invalid' };
-    const opened = await this.#openOwn(session, scopeId, epoch, pkg, sender.signingPublicJwk, kemKeys(session.keys));
+    // A KEM rotation may have re-wrapped the package during the read, so it opens with the keys of the session after the read.
+    const read = this.#session;
+    if (read === undefined) return { ok: false, reason: 'member_lost' };
+    const opened = await this.#openOwn(read, scopeId, epoch, pkg, sender.signingPublicJwk, kemKeys(read.keys));
     if (!opened.ok) return opened;
     // A concurrent fetch may have settled this epoch, or a catch-up moved the view, while the package was read and opened.
     const raced = this.cached(scopeId, epoch);
