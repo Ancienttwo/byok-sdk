@@ -41,6 +41,8 @@ export interface RoutineSubject {
   /** The keyless `end_routine` command of Bot `main` (§55c). */
   end(id: string): Promise<void>;
   routine(id: string): RoutineRow | undefined | Promise<RoutineRow | undefined>;
+  /** The slot times that the Host still holds to fire routine `id`: L's pending SDK wakes, H's `routine_due` scan rows. */
+  reserved(id: string): Promise<number[]>;
   /** The occurrences of a routine, by planned time. */
   occurrences(id: string): OccurrenceRow[] | Promise<OccurrenceRow[]>;
   intent(key: string): RoutineIntentRow | undefined | Promise<RoutineIntentRow | undefined>;
@@ -241,6 +243,7 @@ export function routineVectors(name: string, open: () => RoutineSubject | Promis
         state.team.bots.helper = { ...structuredClone(state.team.bots.main!), id: 'helper', name: 'Helper', mainBot: false };
       });
       const id = await subject.addRoutine('helper', daily(at)), slot = (await subject.routine(id))!.nextAt!;
+      expect(await subject.reserved(id)).toEqual([slot]);
       await subject.change(state => { archiveBot(state.team, 'helper'); });
       // The owner API completes only the Main Bot's own routines.
       await expect(subject.lifecycle(id, 'completed')).rejects.toThrow('Routine is unavailable to this Bot');
@@ -250,6 +253,8 @@ export function routineVectors(name: string, open: () => RoutineSubject | Promis
       await subject.change(state => { state.team.bots.main!.mainBot = true; });
       await subject.end(id);
       expect(await subject.routine(id)).toEqual({ id, version: 1, pending: null, lifecycle: 'completed', status: 'ok', nextAt: null, calendarErrors: 0 });
+      // No later occurrence: the Host holds no slot to fire.
+      expect(await subject.reserved(id)).toEqual([]);
       await expect(subject.end(id)).rejects.toThrow('No open Bot routine has this id');
     }, 60_000);
 

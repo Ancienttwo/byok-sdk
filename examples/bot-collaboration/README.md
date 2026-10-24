@@ -146,8 +146,8 @@ completed and stops new occurrences. Accepted work finishes with its old
 version. To stop an execution too, use K4 cancellation explicitly. Routine
 results are owner turns with source `routine`.
 
-`updateRoutine` and `setRoutineLifecycle` change only the Main Bot's own
-routines. `endRoutine(id)` runs the keyless `end_routine` command (§55c): the
+`updateRoutine` and `setRoutineLifecycle` change only the routines of this
+Host's Bot. `endRoutine(id)` runs the keyless `end_routine` command (§55c): the
 Main Bot completes any open Bot routine, an archived owner's too, as cancel
 does. Without it, the routine of an archived Bot would fire at every slot. The
 command needs the Main Bot role and gets the K4 rows through the
@@ -309,11 +309,12 @@ The keyed commands are owner input, received IM input, room input, answers,
 card decisions, team snapshots, and three K4 callbacks: a terminal outcome, an Agent message
 and a Bot routine occurrence. The keyless commands are `setMainBot`,
 `updateRoom`, `retryPersona`, `enablePushRoute`, `revokePushRoute`,
-`resendDelivery`, `cancelDelegation`, `abandonDelegation` and `cancelTurn`.
+`resendDelivery`, `cancelDelegation`, `abandonDelegation`, `cancelTurn` and `endRoutine`.
 `src/rules/commands.ts` decides all of them. The Host checks the principal
 and the channel before the commit, and it calls K4 cancel and delivers cancel
-facts after the commit. The routine owner APIs are K4 commands on K4 rows and
-do not commit here.
+facts after the commit. `updateRoutine` and `setRoutineLifecycle` are K4
+commands on K4 rows and do not commit here; `endRoutine` commits `end_routine`,
+whose port runs K4 `setLifecycle`.
 
 In this L example the scope is the ledger tenant. Owner APIs pass no expected
 revision. K4 already deduplicates terminals (`applied`) and accepted messages (the

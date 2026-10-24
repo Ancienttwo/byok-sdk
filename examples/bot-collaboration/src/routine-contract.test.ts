@@ -54,6 +54,7 @@ async function ledgerSubject(): Promise<RoutineSubject> {
     lifecycle: (id, value) => host.setRoutineLifecycle(id, value),
     end: id => host.endRoutine(id),
     routine: id => { const row = ledger().routines[hash(id)]; return row && routineView(row); },
+    reserved: async id => (await fixture.server.wakes.pending()).filter(wake => wake.dedupKey.startsWith(`${id}:`)).map(wake => wake.availableAt),
     occurrences: id => {
       const state = ledger();
       return Object.values(state.occurrences).filter(row => row.routineId === id).sort((a, b) => a.trigger.plannedAt - b.trigger.plannedAt)

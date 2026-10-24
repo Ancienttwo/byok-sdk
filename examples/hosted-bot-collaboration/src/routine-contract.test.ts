@@ -14,7 +14,7 @@ import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import type { TaskEvidence } from './reconcile';
 import { hostedRoutineCommands, loadSlice, writeSlice } from './routines';
-import { inSchema, type FinishPortsFactory } from './store';
+import { inSchema, lockScope, type FinishPortsFactory } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -64,6 +64,7 @@ async function hostedSubject(): Promise<RoutineSubject> {
     at: now => { clock = now; },
     change: edit => store().seed(scope, edit),
     addRoutine: (owner, schedule) => inSchema(opened!.pool, store().schema, async client => {
+      await lockScope(client, storedKey(scope));
       const slice = await loadSlice(client, storedKey(scope)), commands = hostedRoutineCommands(slice, clock);
       const definition = createDefinition(commands.list(), owner, taskId(`seed:${owner}`, 0), 0, { localId: 'new_routine_1', schedule, prompt: 'Daily report' }, 'bot');
       commands.create(definition);
@@ -108,6 +109,9 @@ async function hostedSubject(): Promise<RoutineSubject> {
       return row && { id, version: row.definition.version, pending: row.pending?.version ?? null, lifecycle: row.lifecycle, status: row.status,
         nextAt: row.next_at === null ? null : Number(row.next_at), calendarErrors: row.calendar_errors?.length ?? 0 };
     },
+    // The predicate of the scheduler's `routine_due` index.
+    reserved: async id => (await query<{ next_at: string }>(`SELECT next_at::text FROM ${table('routine')} WHERE scope = $1 AND id = $2
+      AND lifecycle = 'active' AND next_at IS NOT NULL`, [storedKey(scope), storedKey(id)])).map(row => Number(row.next_at)),
     occurrences: async id => (await query<{ key: string; definition_version: number; trigger_kind: OccurrenceRow['trigger']['kind']; planned_at: string;
       recorded_at: string; next_at: string | null; execution_superseded: boolean; conclusion: Conclusion | null; intent: string | null;
       intent_conclusion: Conclusion | null }>(`SELECT o.key, o.definition_version, o.trigger_kind, o.planned_at::text, o.recorded_at::text, o.next_at::text,
