@@ -277,11 +277,9 @@ describe('device member keyring sealing rules (E2d-3)', () => {
     await web.append('remove', { memberId: other.memberId });
     await keyring.catchUp();
     expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(2);
-    // A member-dropping policy makes epoch 2 stale: the device rotates to epoch 3 for the members left (E2d-4).
     await web.append('scope-policy', { scopeId: 'scope-a', categories: ['task-input', 'task-output'], members: [device.memberId] });
     await keyring.catchUp();
-    expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(3);
-    expect(server.e2ee.devicePuts.at(-1)!.map((pkg) => pkg.recipient)).toEqual([device.memberId]);
+    expect(await keyring.sealingKey('scope-a', 1)).toBeUndefined();
   });
 
   it('hands out a copy of the key, which a later purge does not zero', async () => {
@@ -388,15 +386,26 @@ describe('device member keyring rotation (E2d-4)', () => {
     expect(server.e2ee.devicePuts.at(-1)!.map((pkg) => pkg.recipient)).not.toContain(helper.member.memberId);
   });
 
-  it('does not rotate a scope it may not use', async () => {
-    const { server, web, device, keyring } = await member();
+  it('does not rotate a scope it may not use, or one whose only current member is this device', async () => {
+    const { server, web, device, logs, keyring } = await member();
     const other = await otherDevice(web);
     await web.putScope('scope-a', [device, other]);
     await web.putScope('scope-b', [device]);
     await web.append('shred', { scopeId: 'scope-b' });
+    const helper = await stranger();
+    await web.append('add', { member: helper.member });
+    // A policy update leaves only the device; another leaves the device and a member removed later.
+    await web.putScope('scope-c', [device], { categories: ['task-output'] });
+    await web.append('scope-policy', { scopeId: 'scope-c', categories: ['task-output'], members: [device.memberId] });
+    await web.putScope('scope-d', [device, helper.member], { categories: ['task-output'] });
+    await web.append('scope-policy', { scopeId: 'scope-d', categories: ['task-output'], members: [device.memberId, helper.member.memberId].sort() });
+    await web.append('remove', { memberId: helper.member.memberId });
     await keyring.catchUp();
     expect(await keyring.sealingKey('scope-a', 1)).toBeUndefined();
     expect(await keyring.sealingKey('scope-b', 1)).toBeUndefined();
+    expect(await keyring.sealingKey('scope-c', 1)).toBeUndefined();
+    expect(await keyring.sealingKey('scope-d', 1)).toBeUndefined();
+    expect(logs.join('\n')).toContain('scope "scope-d" has no current member but this device; it is not rotated');
     expect(server.e2ee.devicePuts).toHaveLength(0);
   });
 });

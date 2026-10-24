@@ -104,12 +104,9 @@ async function start(options: {
   return { server, adapter, deviceId, storeDir, member, device, cursor: () => new CursorStore(storeDir).load(server!.url, deviceId) };
 }
 
-/**
- * A policy that drops the device, and a notice that makes the device catch
- * up: the scope is no longer usable, so no rotation brings a key back.
- */
-async function dropDevice(member: ScopeMember, cursor: () => Promise<number | undefined>): Promise<void> {
-  await member.web.append('scope-policy', { scopeId: SCOPE, categories: BOTH.categories, members: [member.web.member.memberId] });
+/** A policy that drops the web client, and a notice that makes the device catch up: the epoch is stale now. */
+async function makeStale(member: ScopeMember, device: { readonly memberId: string }, cursor: () => Promise<number | undefined>): Promise<void> {
+  await member.web.append('scope-policy', { scopeId: SCOPE, categories: BOTH.categories, members: [device.memberId] });
   const notice = createEnvelope('e2ee.key_package.available', { scopeId: SCOPE, epoch: EPOCH }, { seq: server!.nextSeq() });
   server!.send(notice);
   await vi.waitFor(async () => expect(await cursor()).toBe(notice.seq), BUDGET_MS);
@@ -495,10 +492,10 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   }, 30_000);
 
   it('reports sealed_key_unavailable in plaintext when the sealing key is gone at the terminal', async () => {
-    const { server, adapter, deviceId, member, cursor } = await start();
+    const { server, adapter, deviceId, member, device, cursor } = await start();
     server.send(await sealedOffer(member, 'key-lost', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    await dropDevice(member, cursor);
+    await makeStale(member, device, cursor);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       adapter.sessions[0]!.emit({ type: 'progress', text: 'lost output' });
@@ -533,10 +530,10 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
   });
 
   it('denies locally an approval request it has no sealing key for', async () => {
-    const { server, adapter, deviceId, member, cursor } = await start();
+    const { server, adapter, deviceId, member, device, cursor } = await start();
     server.send(await sealedOffer(member, 'keyless-approval', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    await dropDevice(member, cursor);
+    await makeStale(member, device, cursor);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       adapter.sessions[0]!.emit({ type: 'needs_approval', summary: 'secret approval summary' });

@@ -278,7 +278,8 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
    * member knows (the offer's, a fresh one, or one the Host holds for it) to
    * every current member of the scope policy, and put the packages. A Host
    * that holds that epoch under another key refuses the put, and the seal
-   * fails closed. A transport failure throws.
+   * fails closed. So does a policy that leaves no current member but this
+   * one, whose output no client could open. A transport failure throws.
    */
   async #rotate(scopeId: string, minEpoch: number): Promise<void> {
     await this.catchUp();
@@ -292,6 +293,10 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     });
     const epoch = Math.max(minEpoch, ...held, ...(this.#fresh.get(scopeId)?.keys() ?? [])) + 1;
     const recipients = memberChainScopeRecipients(session.state, scopeId);
+    if (recipients.every((recipient) => recipient.memberId === session.member.memberId)) {
+      this.options.log(`scope ${JSON.stringify(scopeId)} has no current member but this device; it is not rotated`);
+      return;
+    }
     const sender = { signingPublicJwk: session.keys.signing.publicJwk, signingPrivateKey: session.keys.signing.privateKey };
     const scopeKey = generateScopeKey();
     try {
