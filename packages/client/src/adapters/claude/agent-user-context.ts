@@ -4,7 +4,8 @@ import { RuntimeExecutionFailure } from '../../runtime-failure';
 
 const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
 // Claude matches excludes with picomatch after turning `\` into `/`, so glob
-// syntax cannot be escaped; `?` stands in for it in a directory part.
+// syntax cannot be escaped; `?` stands in for it in a directory part, so a
+// directory named `**` or `(x86)` matches only itself.
 const GLOB_SYNTAX = /[()[\]{}*?!@+|^$]/g;
 
 export interface ClaudeAgentUserContextSettings {
@@ -44,8 +45,8 @@ export function claudeAgentUserContextSettings(
   const configDir = env.CLAUDE_CONFIG_DIR ?? p.join((platform === 'win32' ? env.USERPROFILE : env.HOME) || homedir(), '.claude');
   if (!p.isAbsolute(configDir)) throw refuse('claude config directory must be an absolute path');
 
-  const file = (dir: string, ...names: string[]) => p.join(dir, ...names).replaceAll('\\', '/');
-  const rules = (dir: string) => `${file(dir).replace(GLOB_SYNTAX, '?')}/**`;
+  const file = (dir: string, ...names: string[]) => p.join(dir, ...names).replaceAll('\\', '/').replace(GLOB_SYNTAX, '?');
+  const rules = (dir: string) => `${file(dir)}/**`;
   const excludes: string[] = [];
   // A config directory whose real path is inside the home holds Agent-home
   // files, which stay. Claude matches a pattern's real path, so the real path
