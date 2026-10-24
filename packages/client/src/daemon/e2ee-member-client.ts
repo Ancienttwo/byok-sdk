@@ -15,6 +15,7 @@ import { DEVICE_PROOF_HEADER } from '@byok-sdk/core';
 import type { MemberKeyBundleV1 } from '@byok-sdk/core/sealed-payload';
 import {
   BYOK_E2EE_CHAIN_PATH,
+  BYOK_E2EE_KEY_PACKAGES_PATH,
   BYOK_E2EE_MEMBER_KEY_PATH,
   BYOK_E2EE_PAIRING_MAC_PATH,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
@@ -129,6 +130,18 @@ export class E2eeMemberClient {
     }
     if (!response.ok) throw await errorOf(response, 'pairing MAC read');
     return jsonOf(response, 'pairing MAC read');
+  }
+
+  /** The key packages of one scope epoch addressed to this device's member. */
+  async readKeyPackages(scopeId: string, epoch: number): Promise<readonly unknown[]> {
+    const url = new URL(BYOK_E2EE_KEY_PACKAGES_PATH, this.#base);
+    url.searchParams.set('scopeId', scopeId);
+    url.searchParams.set('epoch', String(epoch));
+    const response = await this.#get(url);
+    if (!response.ok) throw await errorOf(response, 'key package read');
+    const { packages } = await jsonOf(response, 'key package read');
+    if (!Array.isArray(packages)) throw new E2eeMemberClientError('key package read returned no package list');
+    return packages;
   }
 
   #get(url: URL): Promise<Response> {
