@@ -448,7 +448,7 @@ export function delegationDue(state: Pick<DelegationState, 'delegations'>, timer
   return Object.values(state.delegations).flatMap(d => [
     ...(d.nextCheckAt !== undefined ? [d.nextCheckAt] : []),
     ...(!d.verdict && d.status !== 'uncertain' && d.cancel ? [d.cancel.requestedAt + timers.cancelGraceMs] : []),
-    ...(!d.verdict && d.status === 'running' && !d.cancel && d.claimed?.turnId === d.chainTurnIds.at(-1) ? [d.claimed!.at + timers.uncertainAfterMs] : []),
+    ...(!d.verdict && d.status === 'running' && !d.cancel && d.claimed && d.claimed.turnId === d.chainTurnIds.at(-1) ? [d.claimed.at + timers.uncertainAfterMs] : []),
   ]);
 }
 

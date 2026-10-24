@@ -20,4 +20,6 @@ it('lists the open batches\' seals, the pending cards\' expiries, the unreleased
     delegations: { d1: { status: 'running', cancel: { requestedAt: 100 }, chainTurnIds: ['t1'] } } } as unknown as DueState;
   expect(collaborationDue(cancelled, { cancelGraceMs: 5, uncertainAfterMs: 7 })).toEqual([105]);
   expect(collaborationDue({ cards: {}, team: { seats: {} }, delegations: {} } as unknown as DueState)).toEqual([]);
+  // A running delegation with no claim has no uncertain timer yet.
+  expect(collaborationDue({ cards: {}, team: { seats: {} }, delegations: { d1: { status: 'running', chainTurnIds: [] } } } as unknown as DueState)).toEqual([]);
 });
