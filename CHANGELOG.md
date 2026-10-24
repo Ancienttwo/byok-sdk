@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Docs (examples)** — K8 has a vendor contract, `src/VENDOR.md` (#886). It
+  lists the files to copy in three layers: `rules/`, the L Host and the shared
+  vectors. It says how to resolve K4, which SDK packages the copy needs, and
+  how to record the source commit. A test checks each list against the import
+  graph. The shared vectors need the L files and the K4 root entry, not
+  `rules/` alone. No code changes.
+
 ## 0.30.0 — 2026-10-24 (published)
 
 0.30.0 is a MINOR release under the default pre-1.0 policy, with no exception.
