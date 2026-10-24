@@ -5,7 +5,6 @@ import { canonical, FrozenOfferMismatchError, sameFrozenOffer, type Conclusion, 
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { revisionOf, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
-import { syncFacts } from './intents';
 import { commitStored } from './retention';
 import { storedKey } from './layout';
 import { loadSlice, outcomeRoutinePorts, switchDueVersions, writeSlice } from './routines';
@@ -204,12 +203,11 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
   const base = ports(state, publish), now = base.now();
   if (attempt.cancellation || envelope.type === 'task.cancelled') conclusion = 'cancelled';
   else if (envelope.type === 'task.complete') {
-    // The intent rows before this row concludes, as L reads its ledger before the terminal transaction writes.
-    const committed = await syncFacts(client, scope, Object.keys(state.turns));
+    // commitStored reads the committed intents before this row concludes, as L reads its ledger before the terminal transaction writes.
     const slice = await loadSlice(client, scopeKey), head = revisionOf(state);
     const result = await commitStored(client, scope, state, { scope, commandId: row.task_id,
       command: { kind: 'outcome', turnId, taskId: row.task_id, document: envelope.payload.document as Json } },
-    { ...base, ...(base.outcome ? { outcome: { ...base.outcome, committed, ...outcomeRoutinePorts(slice, now, row.task_id) } } : {}) });
+    { ...base, ...(base.outcome ? { outcome: { ...base.outcome, ...outcomeRoutinePorts(slice, now, row.task_id) } } : {}) });
     await writeSlice(client, scopeKey, slice);
     outbox = result.revision === head + 1 ? result.outbox : [];
     conclusion = 'succeeded';

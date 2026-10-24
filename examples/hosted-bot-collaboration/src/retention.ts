@@ -64,7 +64,8 @@ export async function retiredTurns(client: PoolClient, scopeKey: string, turnIds
 export async function commitStored(client: PoolClient, scope: string, state: CollaborationState, request: CommitRequest<Command>,
   ports: Omit<CommandPorts, 'intents'>): Promise<CommitResult> {
   const scopeKey = storedKey(scope);
-  // The intent facts come from the intent rows in this transaction, never from the caller (#793 D2f-4).
+  // The intent facts come from the intent rows in this transaction, never from the caller (#793 D2f-4). So do the committed
+  // intents of an outcome, which a Main Bot cancel reads.
   const intents = await commandIntentFacts(client, scope, Object.keys(state.turns));
   const archived = typeof request.commandId === 'string' && request.commandId
     ? await archivedRow(client, scopeKey, 'commands', request.commandId) as CommandRecord | undefined : undefined;
@@ -72,7 +73,7 @@ export async function commitStored(client: PoolClient, scope: string, state: Col
   const result = commitCommand(state, request, { scope, recordCallbacks: true,
     // As K4 `rows.get` in L: a keyed command that is not in the state checks its row id here, and an over-limit id throws.
     archived: (id: string) => { checkRow('commands', id); return id === request.commandId ? archived : undefined; },
-    admitted: ids => { admitted = ids; } }, { ...ports, intents });
+    admitted: ids => { admitted = ids; } }, { ...ports, intents, ...(ports.outcome ? { outcome: { ...ports.outcome, committed: intents } } : {}) });
   if (admitted) {
     const ids = admitted as AdmittedIds;
     const isRetired = await tombstones(client, scopeKey, (['turn', 'input', 'round'] as const).flatMap(namespace =>

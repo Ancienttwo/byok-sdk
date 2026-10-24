@@ -20,7 +20,14 @@ transaction. The transaction holds the state change, the command record and the 
   a `scope_mismatch` conflict.
 - A scope row of an unknown store version is refused before any write. `read()` refuses it too.
 - A command reads the intent facts (K8 `CommandPorts.intents`) from the intent rows, under the scope lock, as L reads its
-  K4 intents in the commit transaction. A caller's ports cannot supply them.
+  K4 intents in the commit transaction. A caller's ports cannot supply them. The committed intents of an outcome
+  (`outcome.committed`, which a Main Bot cancel reads) come from the same rows.
+- A new commit that leaves a delegation cancel fact to deliver (`cancel_turn` of an open chain Turn,
+  `cancel_delegation`, `abandon_delegation`) delivers it in the same transaction, as L `settleChain` runs
+  `deliverCancels` after its commit: the K4 cancel of the fact's frozen target, then `delivered`.
+- The other outcome ports (`createRoutine`, `updateRoutine`, `cancelRoutine`, `manage`) still come from the caller of
+  `commit()`. Only the terminal transaction builds them from the store. The command entry must not take callback
+  commands (`outcome`, `message`, `occurrence`) from a client.
 - A new `cancel_turn` of a Turn with a frozen intent runs the K4 cancel in the same transaction, in L's order (K8
   `host.ts` `cancelTurn`): the commit, then `cancel_reason = 'cancelled'` on the open intent, then the version switch
   check. An untried row also concludes `cancelled` (K4 `queuedExpiry`), because the submit claim runs under the same

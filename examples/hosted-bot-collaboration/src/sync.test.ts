@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_RETRY, enqueue, hash, HostLedger, project, taskId, type FrozenInput } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { syncTurn } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { syncTurn, type Command } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { seedCollaboration, SYNC_OPTIONS, syncVectors, type SyncIntentRecord, type SyncSubject } from '@byok-sdk/example-bot-collaboration/test-support';
 import { freezeIntent, type IntentFreeze } from './intents';
 import { storedKey } from './layout';
@@ -200,6 +200,73 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
       // With the stub, K8 would conclude the Turn itself and leave its intent running.
       expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
       expect((await h.state()).turns.q1).toMatchObject({ status: 'processing' });
+    });
+  });
+
+  describe('a delegation cancel fact is delivered in its commit, as L settleChain delivers it (#793 D2f-4)', () => {
+    /** `q1` is the current chain Turn of delegation `d1`, with a frozen intent. */
+    const chain = (status: 'running' | 'uncertain') => (state: CollaborationState) => {
+      state.turns.q1!.delegationId = 'd1';
+      state.batches.b1 = { id: 'b1', delegationIds: ['d1'], slots: [] };
+      state.delegations.d1 = { id: 'd1', root: 'q1', fromBotId: 'main', fromTurnId: 't1', fromTaskId: 'task-t1', index: 0, toBotId: 'main',
+        request: 'First', hop: 0, requestTurnId: 'q1', chainTurnIds: ['q1'], batch: 'b1', status, revision: 0 };
+    };
+    async function delegated(status: 'running' | 'uncertain', tried = false) {
+      const h = await hosted();
+      await h.change(queueTurns);
+      await h.sync();
+      await h.change(chain(status));
+      if (tried) await opened!.pool.query(`UPDATE ${table('intent')} SET tries = 1, submission = 'uncertain' WHERE scope = $1 AND key = $2`,
+        [storedKey(h.scope), storedKey('q1')]);
+      return h;
+    }
+    const commit = (h: SyncSubject, command: Command) => h.commit({ scope: h.scope, commandId: randomUUID(), command });
+
+    it('cancel_turn of an open chain Turn concludes its untried intent cancelled, and marks the fact delivered', async () => {
+      const h = await delegated('running');
+      await commit(h, { kind: 'cancel_turn', turnId: 'q1' });
+      expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
+      expect((await h.state()).delegations.d1).toMatchObject({ cancel: { targetTurnId: 'q1', delivered: true } });
+    });
+
+    it('cancel_delegation keeps a tried intent open with its cancel reason, and marks the fact delivered', async () => {
+      const h = await delegated('running', true);
+      await commit(h, { kind: 'cancel_delegation', delegationId: 'd1' });
+      expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: null });
+      expect((await h.state()).delegations.d1).toMatchObject({ cancel: { targetTurnId: 'q1', delivered: true } });
+    });
+
+    it('abandon_delegation concludes the untried intent of its open chain Turn cancelled, and marks the fact delivered', async () => {
+      const h = await delegated('uncertain');
+      await commit(h, { kind: 'abandon_delegation', delegationId: 'd1' });
+      expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
+      expect((await h.state()).delegations.d1).toMatchObject({ verdict: 'abandoned', cancel: { targetTurnId: 'q1', delivered: true } });
+    });
+
+    it('reads the committed intents of an outcome from the store, and ignores them in the caller ports', async () => {
+      const h = await hosted();
+      await inSchema(opened!.pool, store().schema, async client => {
+        await lockScope(client, storedKey(h.scope));
+        await freezeIntent(client, h.scope, { key: 'q1', source: 'user', execution: template('device'), waitUntil: Date.now() + 60_000 });
+      });
+      // The chain exists before the seed runs again, so the frozen schema of `t1` offers its Main Bot cancel.
+      await h.change(state => {
+        state.turns.q1 = { id: 'q1', root: 'q1', botId: 'main', source: 'user', request: 'First', hop: 0, status: 'processing', authority: 'owner' };
+        chain('running')(state);
+        seedCollaboration(state);
+      });
+      const stubbed = ((state, publish) => {
+        const ports = vectorPorts(state, publish);
+        return { ...ports, outcome: { ...ports.outcome!, committed: { intent: () => undefined } } };
+      }) as PortsFactory;
+      await store().commit(h.scope, { scope: h.scope, commandId: 'task-t1', command: { kind: 'outcome', turnId: 't1', taskId: 'task-t1',
+        document: { cancel_delegation: [{ delegationId: 'd1' }] } } }, stubbed);
+      // With the stub, K8 would end the chain Turn itself and resolve the delegation while its intent kept running.
+      const state = await h.state();
+      expect(state.delegations.d1).toMatchObject({ status: 'running', cancel: { targetTurnId: 'q1', delivered: false, reason: 'main_bot_cancelled' } });
+      expect(state.delegations.d1!.verdict).toBeUndefined();
+      expect(state.turns.q1).toMatchObject({ status: 'processing' });
+      expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: null, conclusion: null });
     });
   });
 
