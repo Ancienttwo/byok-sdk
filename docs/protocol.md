@@ -1393,6 +1393,22 @@ fetches the packages addressed to its member from
   daemon handles it. Otherwise a daemon that advertised the flag gets a type
   it cannot decode.
 
+**Device handling (#654 E2d-2).** The daemon consumes the notice before its
+journal, like `provider.provisioning.available`, and never journals it.
+
+- It first catches the member chain up from its verified head, and stores
+  the new head. An invalid entry, or a chain that no longer holds the device
+  as a current member, ends the member for that run.
+- It then reads the packages for `(scopeId, epoch)`. It opens one only when
+  the scope is in its verified chain state and the scope's latest
+  `scope-policy` holds both the device and the sender. The sender's signing
+  key comes from the verified chain. The opened key stays in memory.
+- It keeps the row (does not acknowledge) only while the member is still
+  resuming at start, or when a Host read fails. It acknowledges every other
+  end with a log line: no member, an unknown scope, a missing package, or a
+  package that does not open. The first open or seal at that epoch fetches
+  again on its cache miss (E2d-3).
+
 ## 3. Task state machine (M1 gap #2, #5, #6)
 
 ```mermaid

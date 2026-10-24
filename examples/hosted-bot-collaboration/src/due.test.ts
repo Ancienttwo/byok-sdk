@@ -243,6 +243,17 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
       expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [] });
     });
 
+    it('expires a due card in one scheduled sync, which clears the time (#793 S5)', async () => {
+      const scope = `tenant:${randomUUID()}`;
+      await store().seed(scope, state => { team(state); state.cards.c1!.expiresAt = VECTOR_NOW + 10; });
+      expect(await dueAt(scope)).toBe(String(VECTOR_NOW + 10));
+      clock = VECTOR_NOW + 10;
+      expect(await scheduler().run()).toEqual({ synced: 1, stalled: [], failed: [] });
+      expect((await store().read(scope)).cards.c1).toMatchObject({ state: 'expired' });
+      expect(await dueAt(scope)).toBeNull();
+      expect(await scheduler().run()).toEqual({ synced: 0, stalled: [], failed: [] });
+    });
+
     it('skips a scope of an unsupported store version', async () => {
       const scope = await stuck('a');
       await query(`UPDATE ${table('scope')} SET state_version = 99 WHERE scope = $1`, [storedKey(scope)]);

@@ -7,17 +7,17 @@ import type { ByokServer, CreateByokServerOptions, DueWake } from '@byok-sdk/ser
 import { HostExecutionCore, type ExecutionServer, type OutcomeTransaction, type MessageTransaction } from '@byok-sdk/example-host-execution-core';
 import type { HostJobHandler, Routine } from '@byok-sdk/example-host-execution-core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
-import { canonical, hash, project, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { addTurn, json, stateOf, type CollaborationState, type Turn } from './model';
 import { contextTurns, SYSTEM_PROMPT, type ContextTurn } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
-import { checkReply, collaborationDue, commitCommand, replyCheckDue, type Command, type CommandPorts, type CommandStore, type KeylessCommand,
-  type ReplyCheck } from './rules/commands';
+import { checkReply, collaborationDue, commitCommand, expireCards, replyCheckDue, reportCardDecisions, type Command, type CommandPorts,
+  type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
 import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
-import { BOT_ROUTINE, botRoutines, createDefinition, owned, routineCalendar, routineTurn,
+import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
   updateDefinition } from './routines';
 
 import { applyManagement, updateBot, writeSnapshotBot } from './team';
@@ -459,6 +459,15 @@ export class BotCollaboration {
       finally { await this.process(); }
     });
   }
+  /** Owner API (§55c): completes any open Bot routine, an archived owner's too, with this Host's Main Bot authority. */
+  async endRoutine(id: string): Promise<void> {
+    await this.exclusive(async () => {
+      try {
+        this.commitOwner(randomUUID(), { kind: 'end_routine', botId: this.options.botId, routineId: id }, s => ({ routines: {
+          end: routineId => setLifecycle(s, endable(Object.values(s.routines), routineId).definition.id, 'completed', this.now(), routineCalendar) } }));
+      } finally { await this.process(); }
+    });
+  }
   async updateRoutine(action: UpdateRoutineAction): Promise<void> {
     await this.exclusive(async () => {
       try { await this.core.updateRoutine(updateDefinition(this.routineRows(), this.options.botId, action)); }
@@ -504,9 +513,7 @@ export class BotCollaboration {
     // A batch sealed here is enqueued in this pass, before later Turns of its Bot.
     sealDueBatches(state, this.coalesce, this.now());
     // Refresh passive state before any new offer freezes its ContextPack.
-    for (const card of Object.values(state.cards)) {
-      if (card.state === 'pending' && this.now() >= card.expiresAt) card.state = 'expired';
-    }
+    expireCards(state, this.now());
     let materialized = false;
     const routines = botRoutines(Object.values(s.routines));
     // Seats never manage or delegate (§5), so no seat Turn carries owner authority.
@@ -517,20 +524,7 @@ export class BotCollaboration {
         readOnlyToolsets: this.options.readOnlyToolsets ?? [], limits, historyMode: !!this.options.history, history: injected?.get(turn.id), routines }) || materialized;
     }
     settleDelegations(s, state, this.now(), (key, value) => project(s, key, value), this.timers);
-    for (const card of Object.values(state.cards)) {
-      if (card.state !== 'pending' && (card.state !== 'confirmed' || card.result !== undefined || card.error !== undefined)) {
-        if (!card.decisionReported) {
-          project(s, `card:${card.id}:${card.state}`, json(card));
-          card.decisionReported = true;
-        }
-        // Passive expiry is visible in ContextPack. It cannot start a paid turn.
-        if (card.state === 'expired') continue;
-        const origin = state.turns[card.turnId]!;
-        addTurn(state, { id: hash(['action_result', card.id]), root: origin.root, source: 'action_result', botId: origin.botId,
-          request: JSON.stringify({ cardId: card.id, state: card.state, conclusion: card.conclusion, result: card.result, error: card.error }),
-          hop: origin.hop, authority: origin.authority ?? 'bot' });
-      }
-    }
+    reportCardDecisions(state, (key, value) => project(s, key, value));
     cleanReplyTokens(s, state, this.now());
     projectInputBatches(state, (key, value) => project(s, key, value));
     return materialized;
