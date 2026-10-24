@@ -1201,8 +1201,9 @@ cloud stores no artifact. Then no row names the object, and orphan GC deletes
 it later. `redactTasks` releases the references again after it replaces the
 bodies, so a report that adds a reference while redaction runs holds nothing
 afterwards, and orphan GC deletes its object. Tenant erasure also releases the
-reference. A terminal that loses to the first terminal releases its own
-reference. An artifact that arrives once its task is terminal changes no
+reference. A terminal that loses to the first terminal releases its
+reference only when no reference held the object before it, so one that names
+the task's offer or steer blob leaves that reference in place. An artifact that arrives once its task is terminal changes no
 reference: a new one holds nothing, and a replay keeps the reference of its
 earlier delivery. A terminal replayed after redaction is complete as received,
 so the Host does not check its blob.

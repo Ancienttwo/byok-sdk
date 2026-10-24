@@ -21,6 +21,15 @@ export async function sealedCiphertextCommitted(objects: TenantBoundObjects, ref
   return object?.state === 'committed' && object.byteSize === BigInt(ref.size) && object.contentType === ref.contentType;
 }
 
+/**
+ * Whether any reference holds the blob. A device learns the hash of an offer
+ * or steer blob only after the task retained it, so a blob with no reference
+ * is not one that another body of the task names.
+ */
+export async function sealedCiphertextHeld(objects: TenantBoundObjects, ref: BlobRef): Promise<boolean> {
+  return ((await objects.get(ref.contentHash as ContentHash))?.refCount ?? 0) > 0;
+}
+
 /** The task holds its ciphertext blob, so orphan GC keeps it while the task lives. `redactTasks` releases it. */
 export async function retainSealedCiphertext(objects: TenantBoundObjects, taskId: string, ref: BlobRef): Promise<void> {
   await objects.addReference({ hash: ref.contentHash as ContentHash, refKind: SEALED_TASK_REFERENCE_KIND, refId: taskId });
