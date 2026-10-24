@@ -1,4 +1,4 @@
-import type { Clock, TenantId } from '@byok-sdk/core';
+import { assertCanonicalTimestamp, assertCollectExpiredInput, type Clock, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
 import type {
   E2eeMemberChainAppendInput,
   E2eeMemberChainAppendResult,
@@ -11,6 +11,7 @@ import type {
   E2eeScopeKeyPackagePutInput,
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
+  ProofReceiptCollectExpiredInput,
 } from '@byok-sdk/cloud';
 import { parseRecordedWriteResult } from '@byok-sdk/cloud';
 import type { DatabaseSync } from 'node:sqlite';
@@ -74,6 +75,8 @@ CREATE TABLE IF NOT EXISTS proof_request_receipt (
   recorded_at TEXT NOT NULL,
   PRIMARY KEY (tenant_id, device_id, request_id)
 );
+CREATE INDEX IF NOT EXISTS proof_request_receipt_recorded_idx
+  ON proof_request_receipt (tenant_id, recorded_at);
 `;
 
 export const E2EE_MEMBER_PROJECTIONS = [
@@ -160,6 +163,23 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
       if (Date.parse(mac.expiresAt) <= now) this.macs.delete(stored);
     }
     this.macs.set(key, value);
+  }
+
+  /** Prunes used device-proof request ids; the server passes it as the cloud's `proofReceiptRetention.authority`. */
+  async collectExpiredProofReceipts(tenant: TenantId, input: ProofReceiptCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    assertCanonicalTimestamp(input.recordedBefore, 'recordedBefore');
+    return this.coordinator.transaction((db): CollectExpiredResult => {
+      const removed = Number(db.prepare(`DELETE FROM proof_request_receipt WHERE rowid IN (
+        SELECT rowid FROM proof_request_receipt
+        WHERE tenant_id = ? AND recorded_at < ?
+        ORDER BY recorded_at, device_id, request_id
+        LIMIT ?
+      )`).run(tenant, input.recordedBefore, input.limit).changes);
+      const more = db.prepare('SELECT 1 FROM proof_request_receipt WHERE tenant_id = ? AND recorded_at < ? LIMIT 1')
+        .get(tenant, input.recordedBefore) !== undefined;
+      return { removed, expired: 0, releasedBytes: 0n, more };
+    });
   }
 
   appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult> {

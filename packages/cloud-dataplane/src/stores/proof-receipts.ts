@@ -1,9 +1,11 @@
 import type {
+  ProofReceiptCollectExpiredInput,
+  ProofReceiptRetentionAuthority,
   ProofRequestReceipt,
   ProofRequestReceiptInput,
   ProofRequestReceiptStore,
 } from '@byok-sdk/cloud';
-import type { Clock, TenantId } from '@byok-sdk/core';
+import { assertCanonicalTimestamp, assertCollectExpiredInput, type Clock, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 
 interface ProofReceiptRow {
@@ -37,7 +39,12 @@ function toReceipt(row: ProofReceiptRow): ProofRequestReceipt {
   };
 }
 
-export class PostgresProofRequestReceiptStore implements ProofRequestReceiptStore {
+/**
+ * The `proof_request_receipt` table, which the truth put and the three E2EE
+ * member writes share. A Postgres host passes this store as the cloud's
+ * `proofReceiptRetention.authority`.
+ */
+export class PostgresProofRequestReceiptStore implements ProofRequestReceiptStore, ProofReceiptRetentionAuthority {
   readonly #pool: Pool;
   readonly #clock: Clock;
 
@@ -90,5 +97,27 @@ export class PostgresProofRequestReceiptStore implements ProofRequestReceiptStor
     );
     const row = result.rows[0];
     return row === undefined ? undefined : toReceipt(row);
+  }
+
+  async collectExpired(tenant: TenantId, input: ProofReceiptCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    assertCanonicalTimestamp(input.recordedBefore, 'recordedBefore');
+    const result = await this.#pool.query<{ removed: string; more: boolean }>(
+      `WITH candidates AS MATERIALIZED (
+         SELECT ctid FROM proof_request_receipt
+         WHERE tenant_id = $1 AND recorded_at < $2
+         ORDER BY recorded_at
+         LIMIT $3 + 1
+         FOR UPDATE SKIP LOCKED
+       ), deleted AS (
+         DELETE FROM proof_request_receipt
+         WHERE ctid IN (SELECT ctid FROM candidates LIMIT $3)
+         RETURNING 1
+       )
+       SELECT (SELECT count(*) FROM deleted)::text AS removed,
+              EXISTS (SELECT 1 FROM candidates OFFSET $3) AS more`,
+      [tenant, input.recordedBefore, input.limit],
+    );
+    return { removed: Number(result.rows[0]!.removed), expired: 0, releasedBytes: 0n, more: result.rows[0]!.more };
   }
 }

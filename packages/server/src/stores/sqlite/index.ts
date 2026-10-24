@@ -50,6 +50,7 @@ import {
   type CloudCrypto,
   type CloudStores,
   type E2eeMemberStore,
+  type ProofReceiptRetentionAuthority,
   type RequestReceipt,
   type RequestReceiptStore,
   type TaskAttempt,
@@ -191,6 +192,8 @@ export interface SqliteEmbeddedStores {
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
   readonly e2eeMember: E2eeMemberStore;
+  /** Prunes the used device-proof request ids that `e2eeMember` records. */
+  readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
   wakes(tenant: TenantId): WakeStore;
   close(): Promise<void>;
 }
@@ -1415,11 +1418,13 @@ export function createSqliteEmbeddedStores(
     cancellations,
     blobs,
   };
+  const e2eeMember = new SqliteE2eeMemberStore(coordinator, dependencies.clock);
   return {
     core,
     cloud,
     blobContentProxy,
-    e2eeMember: new SqliteE2eeMemberStore(coordinator, dependencies.clock),
+    e2eeMember,
+    proofReceiptAuthority: { collectExpired: (tenant, input) => e2eeMember.collectExpiredProofReceipts(tenant, input) },
     wakes: tenant => new SqliteWakeStore(coordinator, tenant),
     close: () => coordinator.close(),
   };

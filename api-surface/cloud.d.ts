@@ -1372,7 +1372,7 @@ export declare function fullCapabilityDeclaration(version?: number, options?: Fu
 export declare function declares(declaration: CapabilityDeclaration, capability: CloudCapability): boolean;
 // ==== @byok-sdk/cloud dist/cloud.d.ts ====
 import { type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft';
-import { type MaintenanceInput, type MaintenanceReport } from './maintenance';
+import { type MaintenanceInput, type MaintenanceReport, type ProofReceiptRetentionOptions } from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { type TaskAgentMessage } from './task-agent-message';
 import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agent-execution';
@@ -1419,6 +1419,12 @@ export declare const DEFAULT_EVENTS_PAGE_LIMIT = 50;
 export declare const AGENT_HOME_CONTRACT_CAPABILITY = "agent-home-contract";
 export interface ByokCloudOptions {
     readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
+    /**
+     * Prunes used device-proof request ids in maintenance. Absent, the
+     * `proofReceipts` step reports `not-configured` and every used `requestId`
+     * stays single-use for as long as its receipt is kept.
+     */
+    readonly proofReceiptRetention?: ProofReceiptRetentionOptions;
     readonly mailboxWake: MailboxWake;
     readonly core: CoreStores;
     readonly cloud: CloudStores;
@@ -3122,8 +3128,8 @@ export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlob
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
 export type { DeviceTerminal } from './terminal-result';
 export { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput, type SealedAgentExecutionInput, } from './agent-execution';
-export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy } from './maintenance';
-export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport } from './maintenance';
+export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy, DEFAULT_PROOF_RECEIPT_RETENTION_MS, PROOF_RECEIPT_RETENTION_FLOOR_MS, } from './maintenance';
+export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport, ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofReceiptRetentionOptions, } from './maintenance';
 export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
 export type { ReceiptRetentionClass } from './receipt-retention';
 export type { ReceiptCollectExpiredInput } from './stores/ports';
@@ -3189,7 +3195,7 @@ export interface MailboxWakeSubscription {
     close(): void;
 }
 // ==== @byok-sdk/cloud dist/maintenance.d.ts ====
-import { type CollectExpiredCounts, type CollectExpiredResult, type CoreStores, type DeviceAssertionReplayAuthority, type Clock, type TenantId } from '@byok-sdk/core';
+import { type CollectExpiredCounts, type CollectExpiredInput, type CollectExpiredResult, type CoreStores, type DeviceAssertionReplayAuthority, type Clock, type TenantId } from '@byok-sdk/core';
 import type { CloudStores } from './stores/ports';
 export interface RetentionPolicy {
     readonly mailboxAckedRetentionMs: bigint;
@@ -3199,7 +3205,33 @@ export interface RetentionPolicy {
 }
 export declare const DEFAULT_RETENTION_POLICY: RetentionPolicy;
 export declare const DEFAULT_MAINTENANCE_LIMIT = 500;
-export declare const MAINTENANCE_STEPS: readonly ["mailbox", "receipts", "nonces", "pairingCodes", "presence", "activity", "approvals", "agentMessageDraft", "deviceAssertionReplay", "quota", "objects"];
+export declare const MAINTENANCE_STEPS: readonly ["mailbox", "receipts", "nonces", "pairingCodes", "presence", "activity", "approvals", "agentMessageDraft", "deviceAssertionReplay", "quota", "objects", "proofReceipts"];
+/** Receipts of used device-proof request ids recorded before `recordedBefore` are removed. */
+export interface ProofReceiptCollectExpiredInput extends CollectExpiredInput {
+    readonly recordedBefore: string;
+}
+/** The one owner of a deployment's used device-proof request ids (`proof_request_receipt`). */
+export interface ProofReceiptRetentionAuthority {
+    collectExpired(tenant: TenantId, input: ProofReceiptCollectExpiredInput): Promise<CollectExpiredResult>;
+}
+export interface ProofReceiptRetentionOptions {
+    readonly authority: ProofReceiptRetentionAuthority;
+    /** How long a used `requestId` stays single-use. Default 24 hours; at least {@link PROOF_RECEIPT_RETENTION_FLOOR_MS}. */
+    readonly proofReceiptRetentionMs?: bigint;
+}
+/**
+ * A receipt recorded at R binds a proof issued no later than R + skew, which
+ * authenticates no later than R + 2 x skew at the largest allowed skew. Five
+ * more minutes cover clock differences between Host nodes. After that, a
+ * replay of the same proof gets 401 before any receipt is read.
+ */
+export declare const PROOF_RECEIPT_RETENTION_FLOOR_MS: bigint;
+export declare const DEFAULT_PROOF_RECEIPT_RETENTION_MS = 86400000n;
+export interface ResolvedProofReceiptRetention {
+    readonly authority: ProofReceiptRetentionAuthority;
+    readonly proofReceiptRetentionMs: bigint;
+}
+export declare function resolveProofReceiptRetention(input: ProofReceiptRetentionOptions): ResolvedProofReceiptRetention;
 export type MaintenanceStep = typeof MAINTENANCE_STEPS[number];
 export type MaintenanceStepReport = ({
     readonly step: MaintenanceStep;
@@ -3214,7 +3246,7 @@ export type MaintenanceStepReport = ({
     /** Absent when a failed remainder probe left this unknown. */
     readonly more?: boolean;
 } | {
-    readonly step: 'deviceAssertionReplay';
+    readonly step: 'deviceAssertionReplay' | 'proofReceipts';
     readonly status: 'not-configured';
 } | {
     readonly step: 'agentMessageDraft';
@@ -3240,6 +3272,7 @@ export declare function runMaintenanceSteps(ports: {
     readonly cloud: CloudStores;
     readonly clock: Clock;
     readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
+    readonly proofReceiptRetention?: ResolvedProofReceiptRetention;
 }, input: MaintenanceInput): Promise<MaintenanceReport>;
 // ==== @byok-sdk/cloud dist/receipt-retention.d.ts ====
 export type ReceiptRetentionClass = 'identity' | 'request';

@@ -1087,10 +1087,15 @@ export declare class PostgresPairingCodeStore implements PairingCodeStore {
     }): Promise<DeviceRecord | undefined>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/proof-receipts.d.ts ====
-import type { ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore } from '@byok-sdk/cloud';
-import type { Clock, TenantId } from '@byok-sdk/core';
+import type { ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore } from '@byok-sdk/cloud';
+import { type Clock, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-export declare class PostgresProofRequestReceiptStore implements ProofRequestReceiptStore {
+/**
+ * The `proof_request_receipt` table, which the truth put and the three E2EE
+ * member writes share. A Postgres host passes this store as the cloud's
+ * `proofReceiptRetention.authority`.
+ */
+export declare class PostgresProofRequestReceiptStore implements ProofRequestReceiptStore, ProofReceiptRetentionAuthority {
     #private;
     constructor(pool: Pool, clock: Clock);
     record(tenant: TenantId, input: ProofRequestReceiptInput): Promise<{
@@ -1098,6 +1103,7 @@ export declare class PostgresProofRequestReceiptStore implements ProofRequestRec
         readonly created: boolean;
     }>;
     get(tenant: TenantId, deviceId: string, requestId: string): Promise<ProofRequestReceipt | undefined>;
+    collectExpired(tenant: TenantId, input: ProofReceiptCollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/r2-blobs.d.ts ====
 /**

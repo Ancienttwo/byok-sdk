@@ -342,6 +342,14 @@ Current behavior:
 - So the mailbox copy of an acked offer goes.
   The mailbox copy of an offer that the device never acked stays as a dead letter.
   The receipt copy stays in both cases.
+- Used device-proof request ids live in `proof_request_receipt`. The `proofReceipts` step prunes them only when the Host
+  passes `proofReceiptRetention: { authority }` to `createByokCloud`; the authority is a `PostgresProofRequestReceiptStore`
+  from `@byok-sdk/cloud-dataplane/runtime`, because `createPostgresCloudStores` types `proofReceipts` as the plain port
+  (`packages/cloud/src/cloud.ts:311`, `packages/cloud-dataplane/src/stores/proof-receipts.ts:47`).
+  Without it the step reports `not-configured` and the table keeps every row.
+  With it the step deletes rows recorded more than `proofReceiptRetentionMs` before `now`: 24 hours by default,
+  at least 15 minutes, checked at construction (`packages/cloud/src/maintenance.ts:46-61`).
+  Within the retention a `requestId` stays single-use.
 
 What the kept rows hold:
 
