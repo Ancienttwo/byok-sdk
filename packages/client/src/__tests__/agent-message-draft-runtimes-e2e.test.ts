@@ -43,6 +43,8 @@ afterEach(async () => {
 
 interface RuntimeCase {
   readonly fixture: string;
+  /** The latest draft revision while the fake holds its reply. */
+  readonly held: RegExp;
   /** Each fake holds its reply until `<gate>/release`, after two streamed pieces and before the whole message. */
   readonly env: (gate: string) => Record<string, string>;
   readonly adapter: (command: string, root: string) => RuntimeAdapter;
@@ -51,21 +53,25 @@ interface RuntimeCase {
 const cases: Record<'claude' | 'codex' | 'grok' | 'hermes', RuntimeCase> = {
   claude: {
     fixture: 'fake-claude.mjs',
+    held: /^reply-1:[\s\S]*Write a reply\.$/,
     env: gate => ({ FAKE_CLAUDE_PARTIAL_MESSAGES: '1', FAKE_CLAUDE_REPLY_GATE: gate }),
     adapter: command => new ClaudeAdapter({ resolveBin: () => ({ command, source: 'path' }) }),
   },
   codex: {
     fixture: 'fake-codex.mjs',
+    held: /^hello from fake codex$/,
     env: gate => ({ FAKE_CODEX_MESSAGE_DELTAS: '1', FAKE_CODEX_REPLY_GATE: gate }),
     adapter: command => new CodexAdapter({ resolveBin: () => ({ command, source: 'path' }) }),
   },
   grok: {
     fixture: 'fake-acp-agent.mjs',
+    held: /^echo:Write a reply\.$/,
     env: gate => ({ FAKE_ACP_REPLY_GATE: gate }),
     adapter: command => new GrokAdapter({ resolveBin: () => ({ command, source: 'path' }) }),
   },
   hermes: {
     fixture: 'fake-hermes.mjs',
+    held: /^Done$/,
     env: gate => ({ FAKE_HERMES_REPLY_GATE: gate }),
     adapter: (command, dir) => new HermesAdapter({ home: path.join(dir, 'hermes-root'), resolveBin: () => ({ command: fakeHermesCommand(command, dir), source: 'path' }) }),
   },
@@ -130,8 +136,9 @@ describe('Agent message drafts from each bundled runtime through the real server
 async function runtimeCase(id: keyof typeof cases): Promise<void> {
   const f = await setup(cases[id]);
   const appends = () => f.events.filter((e): e is Extract<AgentMessageDraftEvent, { kind: 'append' }> => e.kind === 'append' && e.text !== '');
-  // Held before the whole message: these appends can only come from streamed text.
-  await vi.waitFor(() => expect(appends().length).toBeGreaterThan(0), { timeout: 15_000 });
+  const revisionText = (revision: number) => appends().filter(e => e.revision === revision).map(e => e.text).join('');
+  // Held before the whole message: the reply text so far can only come from streamed text.
+  await vi.waitFor(() => expect(revisionText(appends().at(-1)?.revision ?? 0)).toMatch(cases[id].held), { timeout: 15_000 });
   const midReply = appends().at(-1)!;
   expect(f.accepted).toEqual([]);
   await f.release();
@@ -143,7 +150,7 @@ async function runtimeCase(id: keyof typeof cases): Promise<void> {
   const body = f.accepted[0]!.body;
   expect(body).toBe(body.trim());
   const last = appends().at(-1)!.revision;
-  expect(appends().filter(e => e.revision === last).map(e => e.text).join('')).toBe(body);
+  expect(revisionText(last)).toBe(body);
   // The reply has no surrounding whitespace, so the streamed text already matched it: no reconciling revision.
   expect(last).toBe(midReply.revision);
   expect(f.events.at(-1)).toEqual({ kind: 'ended' });

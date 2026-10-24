@@ -133,8 +133,8 @@
 //                                          between, as reported downstream
 //                                          in #501. `result.result` carries
 //                                          the text once.
-//   FAKE_CLAUDE_PARTIAL_MESSAGES=1      -> `--include-partial-messages`
-//                                          frames, in the order captured
+//   FAKE_CLAUDE_PARTIAL_MESSAGES=1      -> with `--include-partial-messages`
+//                                          in argv, its frames, in the order captured
 //                                          from claude 2.1.302: one
 //                                          `message_start` per message id,
 //                                          then per content block its
@@ -440,7 +440,8 @@ function runProbeOrTurnFlow() {
 
   let streamedMessage;
   async function sendAssistant(frame) {
-    if (process.env.FAKE_CLAUDE_PARTIAL_MESSAGES !== '1') return send(frame);
+    // Real claude streams these frames only under the flag; a dropped flag must fail a test.
+    if (process.env.FAKE_CLAUDE_PARTIAL_MESSAGES !== '1' || !argv.includes('--include-partial-messages')) return send(frame);
     const message = frame.message;
     const stream = (event) => send({ type: 'stream_event', event, session_id: reportedSessionId, parent_tool_use_id: null, api_message_id: message.id });
     if (streamedMessage?.id !== message.id) {
