@@ -5,14 +5,13 @@ import { hash, MIN_TOMBSTONE_RETENTION_MS, taskId, type Json } from '@byok-sdk/e
 import { inboundKey, type ChannelPort, type Delivery, type InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
 import { enablePush, rememberInbound } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { RetentionRefused } from '@byok-sdk/example-bot-collaboration/retention';
-import type { CommandPorts } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import type { TaskEvidence } from './reconcile';
 import { HostedOutboxSender, type ProjectionPort, type SenderOptions } from './sender';
-import { HostedCollaborationStore, type PortsFactory } from './store';
+import { HostedCollaborationStore, type CommitPorts, type FinishPortsFactory } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -240,7 +239,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       expect(await row(scope, 'ghost')).toMatchObject({ settled_at: null, next_at: String(NOW + 1 + 5_000) });
     });
 
-    const ports = (extra: Partial<CommandPorts> = {}): PortsFactory => (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW, ...extra });
+    const ports = (extra: Partial<CommitPorts> = {}): FinishPortsFactory => (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW, ...extra });
     const MESSAGE: InboundMessage = { channel: 'fake', platformMessageId: 'in1', conversation: DIRECT, sender: { id: 'owner', kind: 'human' }, text: 'Do it',
       mentions: [], replyRoute: { kind: 'reply', channel: 'fake', inboundId: 'in1', token: 'secret', expiresAt: NOW + 600_000 } };
     /** A channel store whose owner message `MESSAGE` has a Turn with a frozen intent, as the K8 receive command and a sync leave it. */

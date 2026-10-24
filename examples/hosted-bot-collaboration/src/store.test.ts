@@ -4,8 +4,8 @@ import { hash } from '@byok-sdk/example-host-execution-core';
 import type { Command } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import type { CommandRecord, CommitRequest } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { commitVectors, seedCollaboration, type CommitSubject, type SeedTeam } from '@byok-sdk/example-bot-collaboration/test-support';
-import { HostedStoreVersionError } from './store';
-import { memorySubject, vectorPorts } from './memory-subject.test-support';
+import { CallbackCommandError, HostedStoreVersionError, type CommitPortsFactory } from './store';
+import { callbackPorts, memorySubject, vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
@@ -14,7 +14,7 @@ const store = () => opened!.store;
 async function hosted(team?: SeedTeam): Promise<CommitSubject> {
   const scope = `tenant:${randomUUID()}`;
   await store().seed(scope, state => seedCollaboration(state, team));
-  return { scope, commit: request => store().commit(scope, request, vectorPorts), stored: () => store().dump(scope), state: () => store().read(scope) };
+  return { scope, commit: request => store().commitIn(scope, request, callbackPorts), stored: () => store().dump(scope), state: () => store().read(scope) };
 }
 const input = (key: string, request = 'Hello'): Command => ({ kind: 'input', botId: 'main', key, request, sender: 'owner' });
 const message = (turnId: string, taskId: string, body: string): Command =>
@@ -57,6 +57,46 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
       expect(await settle(h, h.scope), commandId).toEqual(await settle(memory, memory.scope));
       expect(JSON.stringify(await h.state()), commandId).toBe(JSON.stringify(memory.state()));
     }
+  });
+
+  describe('the commit boundary (#793 D2f-6)', () => {
+    const callbacks: Array<[string, Command]> = [['outcome', outcome], ['message', message('t1', 'task-1', 'a')],
+      ['occurrence', { kind: 'occurrence', key: 'o1' }]];
+
+    it.each(callbacks)('refuses the callback command %s before any write, also on a retry', async (kind, command) => {
+      const h = await hosted(), before = await h.stored();
+      for (const attempt of [1, 2]) {
+        const refusal = await store().commit(h.scope, { scope: h.scope, commandId: `callback-${kind}`, command }, vectorPorts)
+          .then(() => undefined, (error: unknown) => error);
+        expect(refusal, `try ${attempt}`).toBeInstanceOf(CallbackCommandError);
+        expect(refusal, `try ${attempt}`).toMatchObject({ kind, message: `commit() does not take the K4 callback command ${kind}` });
+        expect(await h.stored(), `try ${attempt}`).toBe(before);
+      }
+    });
+
+    it.each(callbacks)('refuses the callback command %s for a scope with no row, and creates no scope row', async (_kind, command) => {
+      const scope = `tenant:${randomUUID()}`, before = await store().dump(scope);
+      await expect(store().commit(scope, { scope, commandId: 'c1', command }, vectorPorts)).rejects.toBeInstanceOf(CallbackCommandError);
+      expect(await store().dump(scope)).toBe(before);
+      expect((await opened!.pool.query(`SELECT 1 FROM "${store().schema}".scope WHERE scope = $1`, [JSON.stringify(scope)])).rows).toEqual([]);
+    });
+
+    it('refuses a callback command before it reads or locks the scope row: an unknown store version is not reached', async () => {
+      const h = await hosted();
+      await h.commit({ scope: h.scope, commandId: 'i1', command: input('k1') });
+      await opened!.pool.query(`UPDATE "${store().schema}".scope SET state_version = 3 WHERE scope = $1`, [JSON.stringify(h.scope)]);
+      await expect(store().commit(h.scope, { scope: h.scope, commandId: 'task-1', command: outcome }, vectorPorts)).rejects.toBeInstanceOf(CallbackCommandError);
+      await expect(store().commit(h.scope, { scope: h.scope, commandId: 'i2', command: input('k2') }, vectorPorts)).rejects.toBeInstanceOf(HostedStoreVersionError);
+    });
+
+    it('takes no outcome or occurrence port in the commit ports, by type', () => {
+      // @ts-expect-error The commit ports carry no outcome port.
+      const withOutcome: CommitPortsFactory = (state, publish) => callbackPorts(state, publish);
+      // @ts-expect-error The commit ports carry no occurrence port.
+      const withOccurrence: CommitPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), occurrence: () => {} });
+      const plain: CommitPortsFactory = vectorPorts;
+      expect([withOutcome, withOccurrence, plain].every(ports => typeof ports === 'function')).toBe(true);
+    });
   });
 
   it('refuses a scope row of an unknown store version under the lock, and writes nothing', async () => {

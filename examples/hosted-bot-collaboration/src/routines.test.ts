@@ -12,7 +12,7 @@ import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedReconciler, type TaskEvidence } from './reconcile';
 import { hostedRoutineCommands, loadSlice } from './routines';
-import { inSchema, lockScope, type PortsFactory } from './store';
+import { inSchema, lockScope, type FinishPortsFactory } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -41,7 +41,7 @@ const intentRow = async (scope: string, key: string) => (await query<{ source: s
   WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(key)]))[0];
 
 /** The command ports of the tests, on the test clock. */
-const ports: PortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW });
+const ports: FinishPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW });
 /** A device terminal that completes the task of Turn `turnId` with `document`. */
 function completed(turnId: string, document: Json): TaskEvidence {
   const task = taskId(turnId, 0);

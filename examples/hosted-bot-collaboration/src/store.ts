@@ -40,8 +40,26 @@ export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines'>
 /**
  * Builds the command ports on the state of the open commit. `publish` writes a projection in the same commit. The store
  * reads the intent facts itself, under the scope lock (#793 D2f-4), and owns the channel outbox port (#793 D2b-out-2).
+ * The message consumer and the internal `commitIn` take these ports.
  */
 export type PortsFactory = (state: CollaborationState, publish: Publish) => Omit<CommandPorts, 'intents' | 'deliver'>;
+/** The ports of `commit()`. It refuses the callback commands, so it takes no callback ports (#793 D2f-6). */
+export type CommitPorts = Omit<CommandPorts, 'intents' | 'deliver' | 'outcome' | 'occurrence'> & { outcome?: never; occurrence?: never };
+export type CommitPortsFactory = (state: CollaborationState, publish: Publish) => CommitPorts;
+/**
+ * The ports of `finish()`: the commit ports and the team management port of an outcome. The store builds the committed
+ * intents and the routine ports of the outcome itself (#793 D2f-6).
+ */
+export type FinishPortsFactory = (state: CollaborationState, publish: Publish) => CommitPorts & { manage: NonNullable<CommandPorts['outcome']>['manage'] };
+/** The K4 callback commands. Only `finish`, `consume` and `fire` build them. */
+const CALLBACK_KINDS = new Set<Command['kind']>(['outcome', 'message', 'occurrence']);
+/** `commit()` takes no K4 callback command (#793 D2f-6). Nothing was written: no scope row and no command record. */
+export class CallbackCommandError extends Error {
+  constructor(readonly kind: Command['kind']) {
+    super(`commit() does not take the K4 callback command ${kind}`);
+    this.name = 'CallbackCommandError';
+  }
+}
 export interface HostedStoreOptions {
   /** The Host has a channel: a K4 callback queues its channel deliveries, as L does with `channel` set. */
   channel?: boolean;
@@ -92,12 +110,25 @@ export class HostedCollaborationStore {
    * Runs one command through the commit contract. `scope` is the scope that the authenticated caller owns;
    * a request for another scope is a `scope_mismatch` conflict. A throw leaves every row unchanged.
    *
+   * This is the command entry's call, so it refuses the K4 callback commands (`outcome`, `message`, `occurrence`) with
+   * `CallbackCommandError` before any write (#793 D2f-6). They come only from `finish`, `consume` and `fire`, which build
+   * them from SDK evidence or a due slot.
+   *
    * A new `cancel_turn` of a Turn with a frozen intent runs the K4 cancel in the same transaction, in L's order (K8
    * host.ts `cancelTurn`): the commit, the cancel of the intent, then the version switch check (#793 D2f-4). A new commit
    * that leaves a delegation cancel fact to deliver (`cancel_turn` of an open chain, `cancel_delegation`,
    * `abandon_delegation`) delivers it in the same transaction, as L `settleChain` does after its commit.
    */
-  commit(scope: string, request: CommitRequest<Command>, ports: PortsFactory): Promise<CommitResult> {
+  commit(scope: string, request: CommitRequest<Command>, ports: CommitPortsFactory): Promise<CommitResult> {
+    if (CALLBACK_KINDS.has(request.command.kind)) return Promise.reject(new CallbackCommandError(request.command.kind));
+    return this.commitIn(scope, request, ports);
+  }
+
+  /**
+   * The commit body, which takes the callback commands too, with the caller's outcome ports. Host code only: the shared K8
+   * vectors reach it through a test subclass, as L's vector subject commits through `commitInLedger`.
+   */
+  protected commitIn(scope: string, request: CommitRequest<Command>, ports: PortsFactory): Promise<CommitResult> {
     const key = storedKey(scope);
     return this.change(scope, request.commandId, async (state, publish, client) => {
       const head = revisionOf(state), base = ports(state, publish);
@@ -294,7 +325,7 @@ export class HostedCollaborationStore {
    * projections and the intent's conclusion commit together, under the scope lock. Returns the conclusion that it wrote,
    * or nothing when the intent already had one. A throw writes nothing.
    */
-  finish(scope: string, turnId: string, evidence: TaskEvidence, ports: PortsFactory): Promise<Conclusion | undefined> {
+  finish(scope: string, turnId: string, evidence: TaskEvidence, ports: FinishPortsFactory): Promise<Conclusion | undefined> {
     return this.transaction(client => this.decideIn(client, storedKey(scope), evidence.terminal.envelope.task_id,
       (state, publish) => decideFinish(client, scope, turnId, state, publish, evidence, ports, this.channel)), false);
   }
