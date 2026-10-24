@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example compacts settled
+  intent rows on an operator call (#793 S8).
+  `HostedCollaborationStore.compactIntents(scope, { acknowledgedTurnIds })`
+  runs the K8 rule `compactVeto`, the rule that L's `botCompactVeto` now
+  runs too. Each removed row leaves a permanent `hash(['intent', turnId])`
+  row in `retired_identity` in the same transaction. `freezeIntent` then
+  refuses the Turn, and the sync fails it as `result_retired`. Routine
+  intents are refused. Nothing runs it automatically.
 - **Breaking (cloud)** — the device-proof `requestId` is single-use on the
   three E2EE member writes, as on the truth put (#654, owner batch §41a A).
   The store records the `requestId`, its binding and the result with the
