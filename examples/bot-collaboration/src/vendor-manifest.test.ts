@@ -92,9 +92,9 @@ function vendorLayers() {
 
 it('lists each layer exactly as its import graph', () => {
   const { listed, found } = vendorLayers();
-  expect([...listed.keys()]).toEqual([...LAYERS]);
+  expect([...listed.keys()], 'vendor layers in src/VENDOR.md').toEqual([...LAYERS]);
   for (const layer of ['rules', 'host', 'vectors', 'k4-test-support'] as const) {
-    expect(compare(listed.get(layer)!, found[layer]!), layer).toEqual(found[layer]);
+    expect(compare(listed.get(layer)!, found[layer]!), `${layer}: update src/VENDOR.md`).toEqual(found[layer]);
   }
 });
 
@@ -105,8 +105,8 @@ it('lists every other K8 source file as not vendored, and only those', () => {
   expect(Object.keys(unvendored.packages)).toEqual([]);
   const rest = sources(K8, 'src').filter(file => !vendored.has(file));
   const covers = (entry: string, file: string) => entry.endsWith('/') ? file.startsWith(entry) : file === entry;
-  expect(rest.filter(file => !unvendored.files.some(entry => covers(entry, file)))).toEqual([]);
-  expect(unvendored.files.filter(entry => !rest.some(file => covers(entry, file)))).toEqual([]);
+  expect(rest.filter(file => !unvendored.files.some(entry => covers(entry, file))), 'add to a layer or to unvendored in src/VENDOR.md').toEqual([]);
+  expect(unvendored.files.filter(entry => !rest.some(file => covers(entry, file))), 'stale unvendored entry in src/VENDOR.md').toEqual([]);
 });
 
 it('copies all of K4 for its root entry, and declares every K8 package', () => {
