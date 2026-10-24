@@ -57,6 +57,8 @@ interface ScopeMember {
 
 /** The Host declares the E2EE member routes, so a verified member advertises sealed-payload-v1. */
 const E2EE_DECLARATION = { schema: 'byok-capabilities-v1', version: 1, capabilities: [HOST_MCP_TASK_CONTEXT_CAPABILITY, 'e2ee.member'] };
+/** A Host without the E2EE member routes: a verified member never advertises sealed-payload-v1 to it. */
+const NO_E2EE_DECLARATION = { ...E2EE_DECLARATION, capabilities: [HOST_MCP_TASK_CONTEXT_CAPABILITY] };
 
 function advertised(envelope: Envelope): boolean {
   return envelope.type === 'conn.hello' && (envelope.payload as { capabilities: string[] }).capabilities.includes('sealed-payload-v1');
@@ -79,6 +81,8 @@ async function start(options: {
   journal?: false;
   /** The categories of the device scope's policy. */
   policy?: readonly SealedCategory[];
+  /** `false`: the Host does not declare `e2ee.member`, and start waits for the first hello only. */
+  e2ee?: false;
   beforeStart?: (storeDir: string, deviceId: string, member: ScopeMember) => Promise<void>;
 } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
@@ -93,7 +97,7 @@ async function start(options: {
     serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
     ...(options.journal === false ? {} : { hostedJournal: { mode: 'sqlite' as const } }),
   };
-  server.setCapabilityDeclaration(E2EE_DECLARATION);
+  server.setCapabilityDeclaration(options.e2ee === false ? NO_E2EE_DECLARATION : E2EE_DECLARATION);
   daemon = createDaemonWithAdapters(config, [adapter]);
   const web = await E2eeWebClient.create(server.e2ee);
   const { deviceId } = await daemon.pair('pair-code', { verificationSecret: web.verificationSecret });
@@ -101,7 +105,7 @@ async function start(options: {
   const member: ScopeMember = { web, scopeKey: await web.putScope(SCOPE, [device], { categories: options.policy ?? BOTH.categories }) };
   await options.beforeStart?.(storeDir, deviceId, member);
   await daemon.start();
-  await server.waitFor(advertised, BUDGET_MS);
+  await server.waitFor(options.e2ee === false ? (envelope) => envelope.type === 'conn.hello' : advertised, BUDGET_MS);
   return { server, adapter, deviceId, storeDir, member, device, cursor: () => new CursorStore(storeDir).load(server!.url, deviceId) };
 }
 
@@ -185,6 +189,16 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const hellos = sealed.received.filter((envelope) => envelope.type === 'conn.hello');
     expect((hellos[0]!.payload as { capabilities: string[] }).capabilities).not.toContain('sealed-payload-v1');
     expect(hellos.some(advertised)).toBe(true);
+  });
+
+  it('does not advertise sealed-payload-v1 for a verified member on a Host that does not declare e2ee.member', async () => {
+    const info = vi.spyOn(console, 'info');
+    const { server, adapter, deviceId, member } = await start({ e2ee: false });
+    await vi.waitFor(() => expect(info).toHaveBeenCalledWith(expect.stringMatching(/^\[byok\/client\] E2EE member \S+ verified/u)), BUDGET_MS);
+    // The verified member opens a sealed offer and runs it, and still no hello carries the flag.
+    server.send(await sealedOffer(member, 'undeclared', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    expect(server.received.filter(advertised)).toEqual([]);
   });
 
   it('withdraws sealed-payload-v1 when the chain removes the device', async () => {
