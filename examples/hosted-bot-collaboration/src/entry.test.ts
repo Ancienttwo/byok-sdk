@@ -6,7 +6,9 @@ import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-b
 import { DeviceBindingError } from './binding';
 import { EntryRefusedError, HostedCommandEntry, UnauthenticatedError, type EntryCaller } from './entry';
 import { storedKey } from './layout';
+import { TEST_HOST } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
+import { HostedCollaborationStore } from './store';
 
 // #793 S10: the authenticated product command entry, L's owner API for requests.
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
@@ -19,15 +21,19 @@ const seed = (state: CollaborationState) => {
   state.team.rooms.r1 = { id: 'r1', name: 'R', members: ['main'], mode: 'mention', announcement: '', admin: 'main', visibleFrom: {}, messages: [] };
 };
 
-/** A new scope, its Main Bot's device bound unless `bound` is false, and an entry whose credential is the caller itself. */
-async function scoped(bound = true) {
+/**
+ * A new scope, its Main Bot's device bound unless `bound` is false, and an entry whose credential is the caller itself. With
+ * `coalesce`, the entry's store coalesces owner inputs in a 10 s window.
+ */
+async function scoped(bound = true, coalesce = false) {
   const scope = `tenant:${randomUUID()}`, synced: string[] = [];
+  const target = coalesce ? new HostedCollaborationStore(opened!.pool, store().schema, { host: TEST_HOST, coalesce: { windowMs: 10_000, maxItems: 8, maxBytes: 8192 } }) : store();
   await store().seed(scope, seed);
   if (bound) await store().bindDevice(scope, 'device');
-  const entry = new HostedCommandEntry<EntryCaller | undefined | 'throw'>(store(), {
+  const entry = new HostedCommandEntry<EntryCaller | undefined | 'throw'>(target, {
     authenticate: async credential => { if (credential === 'throw') throw new Error('session store down'); return credential; },
     owner: () => 'owner',
-    sync: async (at, now) => { synced.push(at); return store().sync(at, { ...SYNC_OPTIONS, now, history: undefined }); },
+    sync: async (at, now) => { synced.push(at); return target.sync(at, { ...SYNC_OPTIONS, now, history: undefined }); },
     now: () => VECTOR_NOW,
   });
   const as = (principal: EntryCaller['principal'] = OWNER): EntryCaller => ({ scope, principal });
@@ -106,6 +112,27 @@ describe.skipIf(POSTGRES_URL === undefined)('H authenticated command entry on re
       expect((await store().read(scope)).revision).toBe(1);
       expect(synced).toEqual([scope]);
     });
+
+  it('refuses an input that joins an open batch of a Bot whose device was revoked, and writes nothing', async () => {
+    const { scope, entry, as } = await scoped(true, true);
+    const batch = await entry.input(as(), 'main', 'k1', 'First');
+    expect((await store().read(scope)).inputBatches?.[batch]).toMatchObject({ state: 'open', inputIds: [expect.any(String)] });
+    await store().revokeDevice(scope, 'device', VECTOR_NOW);
+    const before = await store().dump(scope);
+    await expect(entry.input(as(), 'main', 'k2', 'Second')).rejects.toMatchObject({ name: DeviceBindingError.name, reason: 'revoked' });
+    expect(await store().dump(scope)).toBe(before);
+  });
+
+  it('cancels an open batch of a Bot whose device was revoked: the Turn that the cancel seals is concluded, so it needs no device', async () => {
+    const { scope, entry, as } = await scoped(true, true);
+    const batch = await entry.input(as(), 'main', 'k1', 'First');
+    const inputId = (await store().read(scope)).inputBatches![batch]!.inputIds[0]!;
+    await store().revokeDevice(scope, 'device', VECTOR_NOW);
+    await entry.cancelTurn(as(), inputId);
+    const state = await store().read(scope);
+    expect(state.inputBatches![batch]).toMatchObject({ state: 'sealed', sealReason: 'cancel' });
+    expect(Object.values(state.turns).filter(turn => turn.id !== 't1')).toEqual([expect.objectContaining({ status: 'failed', conclusion: 'cancelled' })]);
+  });
 
   it('throws another decision for a decided card after the sync, as L', async () => {
     const { scope, entry, as, synced } = await scoped();

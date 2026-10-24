@@ -18,9 +18,9 @@
   composed `sync`. Each method checks the principal as L's R2 checks do
   (with the same audit lines), commits under L's command id, syncs the scope
   and returns L's value. It commits with the new `requireBinding` option of
-  `store.commit`: a commit that adds a Turn, room seat or input batch for a
-  Bot whose device has no active H binding throws `DeviceBindingError` and
-  rolls back. `store.audit(scope, line, clock)` appends one audit line.
+  `store.commit`: a commit that adds work for a Bot whose device has no
+  active H binding (a Turn that is not concluded, a room seat, or an input
+  batch or an input to one) throws `DeviceBindingError` and rolls back. `store.audit(scope, line, clock)` appends one audit line.
 - **Breaking (examples)** — the hosted collaboration store builds every
   command port itself, from a per-scope Host config (#793 S9).
   `new HostedCollaborationStore(pool, schema, { host })` requires

@@ -275,9 +275,10 @@ bot principal's mentions (R5); every other method needs the scope's owner. L tru
 `decide` throws a refusal or another decision for a decided card after the sync, as L. The Host's own calls
 (`personaReady` through `persona_ready`, a team snapshot, retention, compaction, device binding) stay store calls.
 
-The entry commits with `requireBinding`: under the scope lock, after the K8 rule, each Bot of a Turn, room seat or input
-batch that the commit added must run on a device with an active H binding, or the commit throws `DeviceBindingError` and
-rolls back. It reads what the rule produced, so H keeps no copy of the mention and seat selection. An error of the sync
+The entry commits with `requireBinding`: under the scope lock, after the K8 rule, each Bot of the work that the commit
+added (a Turn that is not concluded, a room seat, a new input batch or an input added to an open one) must run on a
+device with an active H binding, or the commit throws `DeviceBindingError` and rolls back. A cancel commits on a revoked
+device: the Turn that it seals from an open batch is concluded. It reads what the rule produced, so H keeps no copy of the mention and seat selection. An error of the sync
 after a commit reaches the caller, as an error of L's pass does: the commit stays.
 
 ## Message consumer
