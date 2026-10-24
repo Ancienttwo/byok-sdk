@@ -52,10 +52,26 @@ Effectful actions still use `confirmable_action` and owner confirmation.
 This is the same-device read-only toolset slice of #606; external-authority
 storage and two-process relay remain separate.
 
-The allowlist governs Bot turns only. `bot.core` is public. The rule to avoid
-direct K4 mutation calls still holds. If a Host calls `bot.core.enqueue` itself,
-that call uses the Host's own authority. It bypasses Bot policy and this
-allowlist. Never route Bot output to that call.
+`bot.core` is public, but the rule to avoid direct K4 mutation calls still
+holds. To run the Host's own work on this tenant's core, register a handler in
+`hostIntents` and call `enqueueHostIntent(input, handler)` (#882). One ledger
+transaction enqueues the K4 intent and stores the handler name, so the owner of
+the intent survives a restart. A restart refuses an open Host intent whose
+handler is not registered. At a `task.complete` terminal, the handler runs
+synchronously in the terminal transaction with the result document. Bot output
+never reaches it. The call uses the Host's own authority and bypasses Bot
+policy. Its execution still passes the read-only toolset admission, because a
+restart admits every open intent. A Host intent shares the FIFO of its Agent: on
+a Bot's agentRef, that Bot's later Turns wait until it settles. An exact replay
+returns the same intent while K4 keeps it.
+
+A K4 terminal that K8 cannot apply leaves its intent open: a key that is neither
+a Bot Turn nor a Host intent, for example from a direct `bot.core.enqueue`, or a
+Host handler that throws or returns a promise. Then `drain()` rejects with
+`IntentOutcomeError`, and so does every API that runs a pass, including `input`
+and the `wake.consume` hook. The audit gets one row for each key and reason. The
+intent stays at the head of its FIFO until its outcome applies. `BotOptions`
+passes `reconcileMs` (default 100) and `onOutbox` to the K4 core.
 
 ## Actions and context
 
