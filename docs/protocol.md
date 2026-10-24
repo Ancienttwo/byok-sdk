@@ -1174,6 +1174,12 @@ refreshed hello adds it, and removes it again when the member is lost.
   sealed input, so it gets no freshness point of its own. It runs only after
   sealed content at the same scope epoch made the epoch fresh in this run.
   Device rotation (E2d-4) is not in this release.
+- **Recovered terminals.** A terminal that the startup replay builds from the
+  journal for a task that seals output is always in a closed plaintext form:
+  `daemon_interrupted` stays as it is, and a result-reply failure becomes
+  `task.fail` with `reason` `sealed_key_unavailable`. The replay runs before
+  the member resumes, and the freshness points live in memory, so the Host
+  never learns the real failure reason.
 - A key is fetched on its first miss, so a notice that came before the
   advertisement needs no redelivery.
 
