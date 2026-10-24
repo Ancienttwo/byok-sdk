@@ -100,6 +100,14 @@ export const CLOUD_CAPABILITIES = {
    * the capability is declared only once it is completely implemented.
    */
   hostMcpTaskContext: 'host-mcp-task-context',
+  /**
+   * The E2EE member device routes (#654): register a member key bundle,
+   * append and read the member chain, put and read scope key packages, and
+   * read the relayed client pairing MAC. Composition-bound like
+   * `truth.records`: declaring it without an `e2eeMemberStore` is refused at
+   * construction.
+   */
+  e2eeMember: 'e2ee.member',
 } as const;
 
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];
@@ -134,6 +142,8 @@ export interface FullCapabilityDeclarationOptions {
    * deployment does not hold — so it is off unless a composition says otherwise.
    */
   readonly includeHostMcpTaskContext?: boolean;
+  /** `e2ee.member` is default-off: the composition must supply an `e2eeMemberStore`. */
+  readonly includeE2eeMember?: boolean;
 }
 
 /** Every capability the standard composition can serve, plus explicitly wired composition-bound ones. */
@@ -153,6 +163,7 @@ export function fullCapabilityDeclaration(
       if (capability === CLOUD_CAPABILITIES.hostMcpTaskContext) {
         return options.includeHostMcpTaskContext === true;
       }
+      if (capability === CLOUD_CAPABILITIES.e2eeMember) return options.includeE2eeMember === true;
       return true;
     }),
   };

@@ -20,6 +20,22 @@ export const E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES = 65_536;
 export const E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES = 256;
 /** The most scope key packages one put accepts. */
 export const E2EE_SCOPE_KEY_PACKAGE_PUT_MAX = 256;
+/**
+ * The longest scope id, in UTF-16 code units, as for other opaque Host ids.
+ * Core sets no maximum, so the scope key package shape (which the parity test
+ * compares with core) leaves it out, and the Host checks it on every put and
+ * read. The key package notice is Host-built wire, so its schema carries it.
+ */
+export const E2EE_SCOPE_ID_MAX_LENGTH = 512;
+
+// Device-proof operations of the three device write routes. Each route binds
+// one operation, and the proof's `resource` is the route path.
+/** Register the device's member key bundle and its device pairing MAC (§7.2 step 3). */
+export const E2EE_MEMBER_KEY_REGISTER_OPERATION = 'e2ee-member-key.register' as const;
+/** Append member chain entries. */
+export const E2EE_MEMBER_CHAIN_APPEND_OPERATION = 'e2ee-member-chain.append' as const;
+/** Put scope key packages. */
+export const E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION = 'e2ee-scope-key-package.put' as const;
 
 /**
  * Canonical unpadded base64url of exactly `bytes` bytes: the length is fixed,
@@ -98,6 +114,18 @@ export type E2eeScopeKeyPackage = z.infer<typeof E2eeScopeKeyPackageSchema>;
 /** A pairing MAC (§7.2 steps 3 and 4): HMAC-SHA-256 under `pv`, which the Host never holds. */
 export const E2eePairingMacSchema = base64UrlBytes(32);
 
+/**
+ * The device registration body. `member` is the device's own bundle, so it
+ * names the device id; `mac` is the device pairing MAC over it under `pv`.
+ */
+export const E2eeMemberKeyRegisterRequestSchema = z.strictObject({
+  member: E2eeMemberKeyBundleSchema.refine(member => member.deviceId !== undefined, {
+    message: 'a device member names its deviceId',
+  }),
+  mac: E2eePairingMacSchema,
+});
+export type E2eeMemberKeyRegisterRequest = z.infer<typeof E2eeMemberKeyRegisterRequestSchema>;
+
 /** What the client relays to the device in pairing step 4. The client member has no device id. */
 export const E2eeClientPairingMacSchema = z.strictObject({
   mac: E2eePairingMacSchema,
@@ -107,3 +135,16 @@ export const E2eeClientPairingMacSchema = z.strictObject({
   chainHead: z.strictObject({ seq: PositiveSafeIntegerSchema, hash: z.string().regex(CONTENT_HASH_RE) }),
 });
 export type E2eeClientPairingMac = z.infer<typeof E2eeClientPairingMacSchema>;
+
+/**
+ * Server -> daemon `e2ee.key_package.available` (E2c-3): the Host stored a
+ * scope key package for this device's member. The payload names only the
+ * scope epoch; the device fetches the package from its device route (§7.4,
+ * notice-and-fetch), so a mailbox row never holds key material. Gated by
+ * `sealed-payload-v1`.
+ */
+export const E2eeKeyPackageAvailablePayloadSchema = z.strictObject({
+  scopeId: z.string().min(1).max(E2EE_SCOPE_ID_MAX_LENGTH),
+  epoch: PositiveSafeIntegerSchema,
+});
+export type E2eeKeyPackageAvailablePayload = z.infer<typeof E2eeKeyPackageAvailablePayloadSchema>;

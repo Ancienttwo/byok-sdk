@@ -415,6 +415,12 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
+  it('e2ee.key_package.available', () => {
+    const type = 'e2ee.key_package.available' as const;
+    testedTypes.push(type);
+    roundTrip(type, createEnvelope(type, { scopeId: 'scope-1', epoch: 1 }, { seq: 12 }));
+  });
+
   it('task.approve', () => {
     const type = 'task.approve' as const;
     testedTypes.push(type);

@@ -1753,6 +1753,10 @@ interface EnvelopeShapeOptions {
         taskId?: never;
         seq: number;
     };
+    'e2ee.key_package.available': {
+        taskId?: never;
+        seq: number;
+    };
     'agent.content.receipt': {
         taskId?: string;
         seq?: number;
@@ -1924,6 +1928,19 @@ export declare const E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES = 65536;
 export declare const E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES = 256;
 /** The most scope key packages one put accepts. */
 export declare const E2EE_SCOPE_KEY_PACKAGE_PUT_MAX = 256;
+/**
+ * The longest scope id, in UTF-16 code units, as for other opaque Host ids.
+ * Core sets no maximum, so the scope key package shape (which the parity test
+ * compares with core) leaves it out, and the Host checks it on every put and
+ * read. The key package notice is Host-built wire, so its schema carries it.
+ */
+export declare const E2EE_SCOPE_ID_MAX_LENGTH = 512;
+/** Register the device's member key bundle and its device pairing MAC (§7.2 step 3). */
+export declare const E2EE_MEMBER_KEY_REGISTER_OPERATION: 'e2ee-member-key.register';
+/** Append member chain entries. */
+export declare const E2EE_MEMBER_CHAIN_APPEND_OPERATION: 'e2ee-member-chain.append';
+/** Put scope key packages. */
+export declare const E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION: 'e2ee-scope-key-package.put';
 /** A member's public key bundle. A device member names its SDK device id; a client member has none. */
 export declare const E2eeMemberKeyBundleSchema: z.ZodObject<{
     v: z.ZodLiteral<1>;
@@ -1983,6 +2000,33 @@ export declare const E2eeScopeKeyPackageSchema: z.ZodObject<{
 export type E2eeScopeKeyPackage = z.infer<typeof E2eeScopeKeyPackageSchema>;
 /** A pairing MAC (§7.2 steps 3 and 4): HMAC-SHA-256 under `pv`, which the Host never holds. */
 export declare const E2eePairingMacSchema: z.ZodString;
+/**
+ * The device registration body. `member` is the device's own bundle, so it
+ * names the device id; `mac` is the device pairing MAC over it under `pv`.
+ */
+export declare const E2eeMemberKeyRegisterRequestSchema: z.ZodObject<{
+    member: z.ZodObject<{
+        v: z.ZodLiteral<1>;
+        memberId: z.ZodString;
+        signingPublicJwk: z.ZodObject<{
+            kty: z.ZodLiteral<"EC">;
+            crv: z.ZodLiteral<"P-256">;
+            x: z.ZodString;
+            y: z.ZodString;
+        }, z.core.$strict>;
+        kemPublicJwk: z.ZodObject<{
+            kty: z.ZodLiteral<"EC">;
+            crv: z.ZodLiteral<"P-256">;
+            x: z.ZodString;
+            y: z.ZodString;
+        }, z.core.$strict>;
+        kemEpoch: z.ZodNumber;
+        kemSig: z.ZodString;
+        deviceId: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>;
+    mac: z.ZodString;
+}, z.core.$strict>;
+export type E2eeMemberKeyRegisterRequest = z.infer<typeof E2eeMemberKeyRegisterRequestSchema>;
 /** What the client relays to the device in pairing step 4. The client member has no device id. */
 export declare const E2eeClientPairingMacSchema: z.ZodObject<{
     mac: z.ZodString;
@@ -2011,6 +2055,18 @@ export declare const E2eeClientPairingMacSchema: z.ZodObject<{
     }, z.core.$strict>;
 }, z.core.$strict>;
 export type E2eeClientPairingMac = z.infer<typeof E2eeClientPairingMacSchema>;
+/**
+ * Server -> daemon `e2ee.key_package.available` (E2c-3): the Host stored a
+ * scope key package for this device's member. The payload names only the
+ * scope epoch; the device fetches the package from its device route (§7.4,
+ * notice-and-fetch), so a mailbox row never holds key material. Gated by
+ * `sealed-payload-v1`.
+ */
+export declare const E2eeKeyPackageAvailablePayloadSchema: z.ZodObject<{
+    scopeId: z.ZodString;
+    epoch: z.ZodNumber;
+}, z.core.$strict>;
+export type E2eeKeyPackageAvailablePayload = z.infer<typeof E2eeKeyPackageAvailablePayloadSchema>;
 // ==== @byok-sdk/protocol dist/envelope.d.ts ====
 import { z } from 'zod';
 import { MESSAGE_PAYLOAD_SCHEMAS, type MessageType } from './messages';
@@ -2045,7 +2101,7 @@ type EnvelopeShape<T extends MessageType, TaskId extends z.ZodTypeAny, Seq exten
  *   optional for daemon -> server types (M1 redelivery cursor; see
  *   `conn.hello.cursor` in `messages.ts`).
  */
-export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[EnvelopeShape<"conn.hello", z.ZodOptional<z.ZodString>, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"conn.ack", z.ZodOptional<z.ZodString>, z.ZodNumber>, EnvelopeShape<"task.offer", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_with_toolsets", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress_fresh", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_prepared", z.ZodString, z.ZodNumber>, EnvelopeShape<"agent.egress.ack", z.ZodOptional<z.ZodString>, z.ZodNumber>, EnvelopeShape<"agent.message.disposition", z.ZodString, z.ZodNumber>, EnvelopeShape<"agent.content.read", z.ZodOptional<z.ZodString>, z.ZodNumber>, EnvelopeShape<"agent.home.projection", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"agent.input.preparation", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"provider.provisioning.available", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"agent.memory.intent.available", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"task.approve", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.reject", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.cancel", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.steer", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.claim", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.started", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.decline", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.progress", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.artifact", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.await_approval", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.complete", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.fail", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.cancelled", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.approval_resolved", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.egress.reliable", z.ZodOptional<z.ZodString>, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.message.draft", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.message.publish", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.content.receipt", z.ZodOptional<z.ZodString>, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.offer_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_with_toolsets_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress_fresh_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.steer_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.complete_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.fail_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.decline_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.cancelled_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.progress_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.artifact_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.await_approval_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>], "type">;
+export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[EnvelopeShape<"conn.hello", z.ZodOptional<z.ZodString>, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"conn.ack", z.ZodOptional<z.ZodString>, z.ZodNumber>, EnvelopeShape<"task.offer", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_with_toolsets", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress_fresh", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_prepared", z.ZodString, z.ZodNumber>, EnvelopeShape<"agent.egress.ack", z.ZodOptional<z.ZodString>, z.ZodNumber>, EnvelopeShape<"agent.message.disposition", z.ZodString, z.ZodNumber>, EnvelopeShape<"agent.content.read", z.ZodOptional<z.ZodString>, z.ZodNumber>, EnvelopeShape<"agent.home.projection", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"agent.input.preparation", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"provider.provisioning.available", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"agent.memory.intent.available", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"task.approve", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.reject", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.cancel", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.steer", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.claim", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.started", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.decline", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.progress", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.artifact", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.await_approval", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.complete", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.fail", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.cancelled", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.approval_resolved", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.egress.reliable", z.ZodOptional<z.ZodString>, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.message.draft", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.message.publish", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.content.receipt", z.ZodOptional<z.ZodString>, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.offer_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_with_toolsets_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress_fresh_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.steer_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.complete_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.fail_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.decline_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.cancelled_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.progress_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.artifact_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.await_approval_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"e2ee.key_package.available", z.ZodOptional<z.ZodNever>, z.ZodNumber>], "type">;
 export type Envelope = z.infer<typeof EnvelopeSchema>;
 /** `true` for every message type the server sends to the daemon (envelope `seq` is required for these). */
 export declare function isServerToDaemonType(type: MessageType): boolean;
@@ -2797,6 +2853,14 @@ export declare const BYOK_RECORDS_PATH = "/byok/records";
 export declare const BYOK_RECORD_ROUTE = "/byok/records/:kind/:key";
 /** Client builder for a truth record path. Mirrors the `:kind/:key` template, each segment URL-encoded. */
 export declare function byokRecordPath(kind: string, key: string): string;
+/** `POST /byok/e2ee/member-key` — device proof: register the device's member key bundle and pairing MAC (#654). */
+export declare const BYOK_E2EE_MEMBER_KEY_PATH = "/byok/e2ee/member-key";
+/** `POST /byok/e2ee/chain` (device proof: append) and `GET` (device: read) — the member chain. */
+export declare const BYOK_E2EE_CHAIN_PATH = "/byok/e2ee/chain";
+/** `POST /byok/e2ee/key-packages` (device proof: put) and `GET` (device: this device's packages). */
+export declare const BYOK_E2EE_KEY_PACKAGES_PATH = "/byok/e2ee/key-packages";
+/** `GET /byok/e2ee/pairing-mac` — device: the client pairing MAC relayed to this device. */
+export declare const BYOK_E2EE_PAIRING_MAC_PATH = "/byok/e2ee/pairing-mac";
 /** `GET /byok/skill-packs` — skill-pack manifest catalogue. */
 export declare const BYOK_SKILL_PACKS_PATH = "/byok/skill-packs";
 /** Router template for a skill-pack file — `GET /byok/skill-packs/:name/files/:path`. */
@@ -2830,7 +2894,7 @@ export { WIRE_ADDITIONS, requiredReceiverCapabilities } from './wire-additions';
 export type { WireAddition } from './wire-additions';
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 export type { BlobRef } from './blob';
-export { SEALED_DECLINE_CODES, SEALED_INLINE_MAX_PADDED_LENGTH, SEALED_PAYLOAD_CATEGORIES, SEALED_PAYLOAD_MAX_CONTENT_LENGTH, SEALED_PAYLOAD_MAX_PADDED_LENGTH, SEALED_PAYLOAD_SUITE, SEALED_PAYLOAD_V1_CATEGORIES, SEALED_PAYLOAD_VERSION, SEALED_SPLIT_TABLE, SealedPayloadSchema, SealedTaskInputSchema, SealedTaskOutputSchema, TaskSealingSchema, isSealedMessageType, sealedBase64UrlByteLength, sealedPayloadPaddedLength, } from './sealed-payload';
+export { SEALED_DECLINE_CODES, SEALED_INLINE_MAX_PADDED_LENGTH, SEALED_PAYLOAD_CATEGORIES, SEALED_PAYLOAD_MAX_CONTENT_LENGTH, SEALED_PAYLOAD_MAX_PADDED_LENGTH, SEALED_PAYLOAD_SUITE, SEALED_PAYLOAD_V1_CATEGORIES, SEALED_PAYLOAD_VERSION, SEALED_SPLIT_TABLE, SEALED_TASK_PLAIN_CODES, SealedPayloadSchema, SealedTaskInputSchema, SealedTaskOutputSchema, TaskSealingSchema, isSealedMessageType, isSealedTaskPlainOutput, sealedBase64UrlByteLength, sealedPayloadPaddedLength, } from './sealed-payload';
 export type { SealedDeclineCode, SealedDigestRule, SealedMessageType, SealedPayload, SealedPayloadCategory, SealedPayloadV1Category, SealedSplitEntry, TaskSealing, } from './sealed-payload';
 export { PROVIDER_MODEL_CAPABILITIES, ProviderProfileRefSchema, ProviderProfileRevisionSchema, ProviderProfileHashSchema, ProviderModelCapabilitySchema, ProviderProfileBindingSchema, } from './provider-profile-binding';
 export type { ProviderProfileRef, ProviderProfileRevision, ProviderProfileHash, ProviderModelCapability, ProviderProfileBinding, } from './provider-profile-binding';
@@ -2861,14 +2925,14 @@ export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
 export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec';
 export type { CreateEnvelopeOptions } from './codec';
-export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, ActivityIngressSchema, MessageSendOutcomeSchema, OUTBOUND_REFUSAL_REASONS, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, } from './http-api';
+export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, ActivityIngressSchema, MessageSendOutcomeSchema, OUTBOUND_REFUSAL_REASONS, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_E2EE_MEMBER_KEY_PATH, BYOK_E2EE_CHAIN_PATH, BYOK_E2EE_KEY_PACKAGES_PATH, BYOK_E2EE_PAIRING_MAC_PATH, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, } from './http-api';
 export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, ActivityIngress, MessageSendOutcome, OutboundRefusalReason, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, InputPreparationCompletionRequest, InputPreparationStatus, InputPreparationReadback, InputPreparationStatusQuery, } from './http-api';
 export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';
 export { CUSTOM_HARNESS_CAPABILITY } from './version';
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
-export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, } from './e2ee-member';
-export type { E2eeClientPairingMac, E2eeMemberChainEntry, E2eeMemberKeyBundle, E2eeScopeKeyPackage } from './e2ee-member';
+export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_APPEND_OPERATION, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_MEMBER_KEY_REGISTER_OPERATION, E2EE_SCOPE_ID_MAX_LENGTH, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eeMemberKeyRegisterRequestSchema, E2eeKeyPackageAvailablePayloadSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, } from './e2ee-member';
+export type { E2eeClientPairingMac, E2eeKeyPackageAvailablePayload, E2eeMemberChainEntry, E2eeMemberKeyBundle, E2eeMemberKeyRegisterRequest, E2eeScopeKeyPackage, } from './e2ee-member';
 export * from './bot-turn-outcome';
 export { resultOutcomeMaxBytes } from './result-schema';
 // ==== @byok-sdk/protocol dist/input-preparation.d.ts ====
@@ -3688,6 +3752,7 @@ export type InputPreparationRejectionReason = z.infer<typeof InputPreparationRej
 // ==== @byok-sdk/protocol dist/messages.d.ts ====
 import { z } from 'zod';
 import { ProviderProvisioningAvailablePayloadSchema } from './provider-provisioning';
+import { E2eeKeyPackageAvailablePayloadSchema } from './e2ee-member';
 import { type PlainJsonCheck } from './plain-json';
 export declare const RuntimeIdSchema: z.ZodEnum<{
     claude: "claude";
@@ -5976,7 +6041,10 @@ export declare const TaskOfferForAgentWithEgressSealedPayloadSchema: z.ZodObject
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export type TaskOfferForAgentWithEgressSealedPayload = z.infer<typeof TaskOfferForAgentWithEgressSealedPayloadSchema>;
-/** server -> daemon: `task.offer_for_agent_with_egress_fresh` of a sealed task. */
+/**
+ * server -> daemon: `task.offer_for_agent_with_egress_fresh` of a sealed task.
+ * Only this type takes `routineRef`: a routine occurrence is an execution.
+ */
 export declare const TaskOfferForAgentWithEgressFreshSealedPayloadSchema: z.ZodObject<{
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
@@ -6111,6 +6179,11 @@ export declare const TaskOfferForAgentWithEgressFreshSealedPayloadSchema: z.ZodO
             size: z.ZodNumber;
             contentType: z.ZodString;
         }, z.core.$strict>>;
+    }, z.core.$strict>>;
+    routineRef: z.ZodOptional<z.ZodObject<{
+        routineId: z.ZodString;
+        definitionVersion: z.ZodNumber;
+        notAfter: z.ZodString;
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export type TaskOfferForAgentWithEgressFreshSealedPayload = z.infer<typeof TaskOfferForAgentWithEgressFreshSealedPayloadSchema>;
@@ -6572,6 +6645,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
     readonly 'task.progress_sealed': typeof TaskProgressSealedPayloadSchema;
     readonly 'task.artifact_sealed': typeof TaskArtifactSealedPayloadSchema;
     readonly 'task.await_approval_sealed': typeof TaskAwaitApprovalSealedPayloadSchema;
+    readonly 'e2ee.key_package.available': typeof E2eeKeyPackageAvailablePayloadSchema;
 };
 export type MessageType = keyof typeof MESSAGE_PAYLOAD_SCHEMAS;
 export declare const MESSAGE_TYPES: MessageType[];
@@ -6580,7 +6654,7 @@ export declare const MESSAGE_TYPES: MessageType[];
  * (`envelope.ts`) to decide which branches require envelope `seq` (M1
  * redelivery cursor).
  */
-export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "task.offer_prepared", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "provider.provisioning.available", "agent.memory.intent.available", "task.approve", "task.reject", "task.cancel", "task.steer", "task.offer_sealed", "task.offer_with_toolsets_sealed", "task.offer_for_agent_sealed", "task.offer_for_agent_with_egress_sealed", "task.offer_for_agent_with_egress_fresh_sealed", "task.steer_sealed"];
+export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "task.offer_prepared", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "provider.provisioning.available", "agent.memory.intent.available", "task.approve", "task.reject", "task.cancel", "task.steer", "task.offer_sealed", "task.offer_with_toolsets_sealed", "task.offer_for_agent_sealed", "task.offer_for_agent_with_egress_sealed", "task.offer_for_agent_with_egress_fresh_sealed", "task.steer_sealed", "e2ee.key_package.available"];
 /**
  * Message types the daemon sends to the server — the flip side of
  * {@link SERVER_TO_DAEMON_TYPES}. `conn.hello` is deliberately excluded: it's
@@ -7193,6 +7267,36 @@ export type SealedPayloadV1Category = (typeof SEALED_PAYLOAD_V1_CATEGORIES)[numb
  */
 export declare const SEALED_DECLINE_CODES: readonly ['sealed_key_unavailable', 'sealed_open_failed', 'sealed_content_mac_mismatch', 'sealing_policy_mismatch'];
 export type SealedDeclineCode = (typeof SEALED_DECLINE_CODES)[number];
+/**
+ * The closed plaintext codes of a task whose output is sealed (#654 12d).
+ * It lists each plaintext output type that has a plaintext form on such a
+ * task, with the codes that each field moved or dropped by its sealed type
+ * may hold. Such a field that is not listed here must be absent. An output
+ * type with a sealed form that is not listed has no plaintext form. An
+ * interrupted task reports `daemon_interrupted`; a device that cannot seal
+ * reports `sealed_key_unavailable`. The Host check, the daemon and the member
+ * display read this one list, and compare by exact match.
+ */
+export declare const SEALED_TASK_PLAIN_CODES: Readonly<{
+    readonly 'task.fail': {
+        readonly reason: readonly ["daemon_interrupted", "sealed_key_unavailable"];
+    };
+    readonly 'task.decline': {
+        readonly reason: readonly ["sealed_key_unavailable", "sealed_open_failed", "sealed_content_mac_mismatch", "sealing_policy_mismatch"];
+    };
+    readonly 'task.cancelled': {
+        readonly reason: readonly [];
+    };
+}>;
+/**
+ * True when `payload` is a legal plaintext `type` message of a task whose
+ * output is sealed: each field that a `task-output` sealed type of `type`
+ * moves or drops is absent or holds one of {@link SEALED_TASK_PLAIN_CODES}.
+ * A type that has a sealed output form and is not listed there is never
+ * legal. A plaintext decline also names its code as `code`. A type with no
+ * sealed output form is always legal.
+ */
+export declare function isSealedTaskPlainOutput(type: string, payload: object): boolean;
 /** Padded frames above this length travel as a ciphertext blob (§8.6). */
 export declare const SEALED_INLINE_MAX_PADDED_LENGTH: number;
 /** Plaintext limit of every v1 category, in UTF-8 bytes of canonical JSON (D8). */
@@ -7310,10 +7414,27 @@ export declare const TaskSealingSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type TaskSealing = z.infer<typeof TaskSealingSchema>;
 /**
+ * The routine template of a sealed execution (design §6.3). The offer's
+ * `sealed` member is then the template, family `routine.template`, which the
+ * member sealed once for every occurrence. The device rebuilds its binding
+ * from these fields: identity `{ routineId, definitionVersion }`, no device,
+ * the offer's `agentRef` and `sealing.categories`, and `notAfter`. They travel
+ * in plaintext because the AAD binds them. `definitionVersion` is an integer,
+ * because the binding tells `4` and `"4"` apart. The device, not the Host,
+ * checks `notAfter` against its clock.
+ */
+export declare const RoutineRefSchema: z.ZodObject<{
+    routineId: z.ZodString;
+    definitionVersion: z.ZodNumber;
+    notAfter: z.ZodString;
+}, z.core.$strict>;
+/**
  * The rule of a sealed offer, for `superRefine`: `sealed` is present exactly
  * when the task's `sealing` includes `task-input`, and then `instruction` is
  * absent and `sealed.scope` is the task's scope at the task's epoch. When the
- * task seals only its output, `instruction` is plaintext and required.
+ * task seals only its output, `instruction` is plaintext and required. A
+ * `routineRef` names a routine template, which is sealed task input, so it
+ * needs a task that seals `task-input`.
  *
  * Whether a task's later messages must be sealed is the Host's and the
  * device's check: they know the task's `sealing`, this payload does not.
@@ -7322,6 +7443,7 @@ export declare function sealedOfferRule(payload: {
     readonly instruction?: unknown;
     readonly sealing: TaskSealing;
     readonly sealed?: SealedPayload;
+    readonly routineRef?: unknown;
 }, ctx: z.RefinementCtx): void;
 // ==== @byok-sdk/protocol dist/sealed-split-table.d.ts ====
 /**
