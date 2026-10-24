@@ -69,7 +69,9 @@ function scripted(...results: Array<SendResult | Error | 'hang'>) {
   return { calls, send };
 }
 
-export function deliveryVectors(name: string, open: (port: ChannelPort) => Promise<DeliverySubject>): void {
+/** A Host verb that a subject does not have yet. Its vector is skipped, and the Host's PR says why. */
+export type PendingVerb = 'echo';
+export function deliveryVectors(name: string, open: (port: ChannelPort) => Promise<DeliverySubject>, pending: ReadonlySet<PendingVerb> = new Set()): void {
   describe(`delivery contract: ${name}`, () => {
     it('1. sends a reply-route delivery once, with the token only in the route, and settles it accepted', async () => {
       const port = scripted(accepted('p1')), subject = await open(port);
@@ -172,7 +174,7 @@ export function deliveryVectors(name: string, open: (port: ChannelPort) => Promi
       expect(port.calls).toHaveLength(1);
     }, 60_000);
 
-    it('10. accepts an unknown delivery from a verified echo', async () => {
+    it.skipIf(pending.has('echo'))('10. accepts an unknown delivery from a verified echo', async () => {
       const port = scripted(new Error('receipt lost')), subject = await open(port);
       await subject.publish('in1');
       const [row] = await subject.deliveries();

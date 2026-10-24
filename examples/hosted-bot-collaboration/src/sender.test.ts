@@ -1,10 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Json } from '@byok-sdk/example-host-execution-core';
-import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
+import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
+import { hash, MIN_TOMBSTONE_RETENTION_MS, taskId, type Json } from '@byok-sdk/example-host-execution-core';
+import { inboundKey, type ChannelPort, type Delivery, type InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
+import { enablePush, rememberInbound } from '@byok-sdk/example-bot-collaboration/delivery-routing';
+import { RetentionRefused } from '@byok-sdk/example-bot-collaboration/retention';
+import type { CommandPorts } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { storedKey } from './layout';
+import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
+import type { TaskEvidence } from './reconcile';
 import { HostedOutboxSender, type ProjectionPort, type SenderOptions } from './sender';
+import { HostedCollaborationStore, type PortsFactory } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -139,6 +147,82 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
     it('refuses a lease that is not longer than the send timeout', () => {
       expect(() => sender({ projections: receiver().port, leaseMs: 10_000 })).toThrow('The outbox lease must be longer than the send timeout');
       expect(() => sender({ projections: receiver().port, leaseMs: 10_001 })).not.toThrow();
+    });
+  });
+
+  describe('deliveries', () => {
+    const DIRECT = { kind: 'direct', id: 'main' } as const;
+    const channel = (calls: string[] = []): ChannelPort => ({ send: async input => { calls.push(input.deliveryId); return { result: 'accepted', platformMessageId: 'p' }; } });
+    /** An accepted delivery of `t1`, whose Turn has settled and left the ContextPack window, so retention can move its root. */
+    const settledDelivery = (state: Parameters<Parameters<HostedCollaborationStore['seed']>[1]>[0]) => {
+      seedCollaboration(state);
+      Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+      delete state.questions.q1; delete state.cards.c1;
+      state.turns.r3 = { id: 'r3', root: 'r3', botId: 'main', source: 'user', request: 'r3', hop: 0, status: 'succeeded', conclusion: 'succeeded', reported: true, authority: 'owner' };
+      const row: Delivery = { id: 'd1', taskId: taskId('t1', 0), turnId: 't1', messageId: 'm1', body: 'b', conversation: DIRECT, channel: 'fake',
+        route: { kind: 'push', pushRouteId: 'p' }, state: 'accepted', attempts: 1, platformMessageId: 'p1' };
+      state.channel = { inbounds: {}, pushRoutes: {}, deliveries: { d1: row } };
+    };
+    // A seed writes no outbox row, so these tests add the delivery index row by hand.
+    const indexRow = (scope: string, id: string, settledAt: number | null) => query(`INSERT INTO ${table('outbox')} (scope, key, ordinal, kind, settled_at)
+      SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'delivery', $3 FROM ${table('outbox')} WHERE scope = $1`, [storedKey(scope), storedKey(id), settledAt]);
+    const retain = (scope: string) => store().retain(scope, { acknowledgedRoots: ['t1'], now: NOW, retentionMs: MIN_TOMBSTONE_RETENTION_MS }, { contextTurnLimit: 1 });
+
+    it('refuses to retain a root while a delivery outbox row of it is unsettled (E7), and moves it once the row settled', async () => {
+      const scope = `tenant:${randomUUID()}`;
+      await store().seed(scope, settledDelivery);
+      await indexRow(scope, 'd1', null);
+      const before = await store().dump(scope);
+      const refusal = await retain(scope).then(() => undefined, (error: unknown) => error);
+      expect(refusal).toBeInstanceOf(RetentionRefused);
+      expect(refusal).toMatchObject({ code: 'protected_root', root: 't1', message: 'Retention refused: A delivery outbox row of the root is not settled' });
+      expect(await store().dump(scope)).toBe(before);
+      await query(`UPDATE ${table('outbox')} SET settled_at = $2 WHERE scope = $1`, [storedKey(scope), NOW]);
+      expect(await retain(scope)).toMatchObject({ archivedRoots: 1 });
+      expect((await store().read(scope)).channel!.deliveries.d1).toBeUndefined();
+    });
+
+    it('settles a delivery row whose entity retention archived, and fails a row with no entity anywhere', async () => {
+      const scope = `tenant:${randomUUID()}`;
+      await store().seed(scope, settledDelivery);
+      await indexRow(scope, 'd1', NOW);
+      expect(await retain(scope)).toMatchObject({ archivedRoots: 1 });
+      await query(`UPDATE ${table('outbox')} SET settled_at = NULL WHERE scope = $1`, [storedKey(scope)]);
+      await indexRow(scope, 'ghost', null);
+      const calls: string[] = [];
+      clock = NOW + 1;
+      const pass = await sender({ projections: receiver().port, channel: channel(calls) }).run();
+      expect(pass).toMatchObject({ steps: 1, failed: [{ scope, id: 'ghost', error: new Error('Delivery not found') }] });
+      expect(calls).toEqual([]);
+      expect(await row(scope, 'd1')).toMatchObject({ settled_at: String(NOW + 1) });
+      expect(await row(scope, 'ghost')).toMatchObject({ settled_at: null, next_at: String(NOW + 1 + 5_000) });
+    });
+
+    it('queues a terminal outcome delivery on the reply route of its inbound, with intent conclusions read before the terminal writes', async () => {
+      const channelStore = new HostedCollaborationStore(opened!.pool, store().schema, { channel: true });
+      const scope = `tenant:${randomUUID()}`;
+      await channelStore.seed(scope, state => seedCollaboration(state));
+      await channelStore.bindDevice(scope, 'device');
+      const ports = (extra: Partial<CommandPorts> = {}): PortsFactory => (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW, ...extra });
+      // A push route exists too: a view read after the terminal's conclusion write would see the root closed and push.
+      const unused = () => { throw new Error('Unused route port'); };
+      await channelStore.commit(scope, { scope, commandId: randomUUID(), command: { kind: 'enable_push_route', conversation: DIRECT, channel: 'fake', target: 't', owner: 'owner' } },
+        (state, publish) => ports({ routes: { enable: (conversation, name, target, owner) => enablePush(state, conversation, name, target, owner, NOW).id,
+          revoke: unused, resend: unused } })(state, publish));
+      const message: InboundMessage = { channel: 'fake', platformMessageId: 'in1', conversation: DIRECT, sender: { id: 'owner', kind: 'human' }, text: 'Do it',
+        mentions: [], replyRoute: { kind: 'reply', channel: 'fake', inboundId: 'in1', token: 'secret', expiresAt: NOW + 600_000 } };
+      const received = await channelStore.commit(scope, { scope, commandId: hash(['receive', inboundKey(message)]),
+        command: { kind: 'receive', inbound: 'owner_input', key: inboundKey(message), botId: 'main', request: message.text, sender: 'owner' } },
+      (state, publish) => ports({ remember: root => rememberInbound(state, message, root) })(state, publish));
+      const turnId = (received.disposition as { value: string }).value;
+      await channelStore.sync(scope, { ...SYNC_OPTIONS, now: NOW, history: undefined });
+      const document: Json = { confirmable_action: [{ action: 'send_message', summary: 'Send it', draft: { text: 'hi' } }] };
+      const evidence = { terminal: { envelope: { task_id: taskId(turnId, 0), type: 'task.complete', payload: { document } } } as unknown as DeviceTerminal,
+        attempt: { taskId: taskId(turnId, 0) } as unknown as TaskAttempt } satisfies TaskEvidence;
+      expect(await channelStore.finish(scope, turnId, evidence, ports())).toBe('succeeded');
+      const deliveries = Object.values((await channelStore.read(scope)).channel!.deliveries);
+      expect(deliveries).toMatchObject([{ turnId, body: 'Send it', route: { kind: 'reply', inboundId: inboundKey(message) }, state: 'pending' }]);
+      expect(await row(scope, deliveries[0]!.id)).toEqual({ next_at: '0', tries: 0, last_error: null, settled_at: null });
     });
   });
 });
