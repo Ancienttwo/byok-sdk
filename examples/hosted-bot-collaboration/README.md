@@ -341,7 +341,7 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
   `sendTimeoutMs` is missing evidence: the row stays `unknown` and waits `readbackMs`, but only while it is still
   `unknown` at that attempt. L awaits a readback with no deadline. The claim returns its lease (the `next_at` it wrote),
   and the readback's wait is written only while the row still holds that lease. So a readback that outlasted its lease
-  leaves the lease of a later readback claim alone, and two readbacks never run at once (#793 S2).
+  leaves the lease of a later readback claim alone: no sender claims a readback while a later claim's lease holds (#793 S2).
 - **The K8 delivery entity is the authority.** The outbox delivery row is a scan index that one hook in each store
   transaction writes from the entity diff: a row for each new delivery, `settled_at` once it is `accepted` or
   `rejected`, and `next_at` for a `pending` one. So the push fallback that `refuseRoute` inserts with no outbox intent

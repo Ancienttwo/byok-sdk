@@ -494,7 +494,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'unknown', attempts: 2 });
       const wait = (await row(scope, 'd1'))!.next_at;
       for (const result of [undefined, 'unsupported'] as const) {
-        await channelStore.readDelivery(scope, 'd1', 1, at, result, () => at + 3_000, TIMES.readbackMs);
+        await channelStore.readDelivery(scope, 'd1', 1, Number(wait), result, () => at + 3_000, TIMES.readbackMs);
         expect(await row(scope, 'd1')).toMatchObject({ next_at: wait });
       }
     });
