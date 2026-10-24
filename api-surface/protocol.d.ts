@@ -2287,6 +2287,8 @@ export type EventsPollResponse = z.infer<typeof EventsPollResponseSchema>;
  * hard-coded, driftable copy of it.
  */
 export declare const MAX_MESSAGES_PER_BATCH = 256;
+/** Request body ceiling for `POST /byok/messages`; the cloud answers 413 above it, so the client chunks its drain by it. */
+export declare const MESSAGES_SEND_MAX_BODY_BYTES: number;
 /** Annotated so declaration emit names `EnvelopeSchema` instead of copying it. Type-only. */
 export declare const MessagesSendRequestSchema: z.ZodObject<{
     messages: z.ZodArray<typeof EnvelopeSchema>;
@@ -2925,7 +2927,7 @@ export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
 export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec';
 export type { CreateEnvelopeOptions } from './codec';
-export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, ActivityIngressSchema, MessageSendOutcomeSchema, OUTBOUND_REFUSAL_REASONS, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_E2EE_MEMBER_KEY_PATH, BYOK_E2EE_CHAIN_PATH, BYOK_E2EE_KEY_PACKAGES_PATH, BYOK_E2EE_PAIRING_MAC_PATH, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, } from './http-api';
+export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, ActivityIngressSchema, MessageSendOutcomeSchema, OUTBOUND_REFUSAL_REASONS, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, MESSAGES_SEND_MAX_BODY_BYTES, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_E2EE_MEMBER_KEY_PATH, BYOK_E2EE_CHAIN_PATH, BYOK_E2EE_KEY_PACKAGES_PATH, BYOK_E2EE_PAIRING_MAC_PATH, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, } from './http-api';
 export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, ActivityIngress, MessageSendOutcome, OutboundRefusalReason, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, InputPreparationCompletionRequest, InputPreparationStatus, InputPreparationReadback, InputPreparationStatusQuery, } from './http-api';
 export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';
@@ -7498,6 +7500,14 @@ export interface SealedSplitEntry {
     readonly digests: {
         readonly [path: string]: SealedDigestRule;
     };
+    /**
+     * UTF-8 byte limits of moved fields that replace the plaintext type's limit
+     * of that field after the merge (decision 12b). The category limit still
+     * bounds the whole opened content.
+     */
+    readonly limits?: {
+        readonly [field: string]: number;
+    };
 }
 /**
  * The split table (design §8.3): each sealed message type, the plaintext type
@@ -7511,7 +7521,8 @@ export interface SealedSplitEntry {
  *
  * Blob bytes have no sealing rule yet, so a sealed type carries no plaintext
  * blob reference: `artifactRefs` and the artifact `blobRef` are dropped until
- * that rule exists. A sealed artifact is inline content.
+ * that rule exists. A sealed artifact is inline content, so its `inline`
+ * takes up to 2 MiB instead of the plaintext 64 KB (decision 12b).
  */
 export declare const SEALED_SPLIT_TABLE: Readonly<{
     readonly 'task.offer_sealed': SealedSplitEntry;
@@ -7594,6 +7605,9 @@ export declare const SEALED_SPLIT_TABLE: Readonly<{
         readonly forbidden: readonly ["blobRef"];
         readonly digests: {
             readonly 'blobRef.contentHash': 'forbidden';
+        };
+        readonly limits: {
+            readonly inline: number;
         };
     };
     readonly 'task.await_approval_sealed': {

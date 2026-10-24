@@ -488,6 +488,7 @@ export {
   AgentMemoryProjectionCommitRequestSchema,
   AgentMemoryProjectionCommitResponseSchema,
   MAX_MESSAGES_PER_BATCH,
+  MESSAGES_SEND_MAX_BODY_BYTES,
   BYOK_PAIR_PATH,
   BYOK_CHALLENGE_PATH,
   BYOK_TOKEN_PATH,

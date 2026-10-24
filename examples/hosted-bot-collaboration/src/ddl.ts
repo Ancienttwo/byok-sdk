@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS intent (
   ordinal        bigint  NOT NULL CHECK (ordinal >= 0),
   -- K4 agentKey(scope, execution): one FIFO for each scope, device and Agent.
   agent          text    NOT NULL,
-  -- K4 IntentInput.source, part of the intent identity. A routine occurrence is not an H intent before D2f.
+  -- K4 IntentInput.source, part of the intent identity. A promoted routine occurrence is an H intent with source 'routine'.
   source         text    NOT NULL CHECK (source IN ('user', 'bot', 'routine')),
   -- K4 Intent.retryUntil: a superseded routine version stops its intent early (K4 routines.ts:162, :177, :193).
   retry_until    bigint  CHECK (retry_until >= 0),
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS routine (
 CREATE INDEX IF NOT EXISTS routine_due ON routine (next_at) WHERE lifecycle = 'active' AND next_at IS NOT NULL;
 CREATE TABLE IF NOT EXISTS occurrence (
   scope                text    NOT NULL REFERENCES scope (scope),
-  -- K4 occurrence key, a SHA-256 hex digest. Its intent key is always \`occurrence:<key>\` (K4 routines.ts:174, :188).
+  -- The JSON text of the K4 occurrence key, a SHA-256 hex digest. Its intent key is always \`occurrence:<key>\` (K4 routines.ts:174, :188).
   key                  text    NOT NULL,
   ordinal              bigint  NOT NULL CHECK (ordinal >= 0),
   routine_id           text    NOT NULL,
