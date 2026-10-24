@@ -52,7 +52,7 @@ it('SIGKILL during wake delivery recovers the frozen input and only one executio
     daemon = createDaemonWithAdapters({ productId: 'k4-crash-test', productName: 'Crash test',
       localAgentRelease: { version: '0.0.0-test' }, serverUrl: `http://127.0.0.1:${ready.port}`,
       workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'sdk'),
-      agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy }, hostedJournal: { mode: 'sqlite' },
+      agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy },
     }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
     const { deviceId } = await daemon.pair(ready.code);
     await daemon.start(); await waitForReady(daemon);

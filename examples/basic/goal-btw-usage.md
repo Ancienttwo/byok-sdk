@@ -19,7 +19,7 @@ const bot = new GoalBtwHost(byokServer, hostState, () => Date.now(),
   async (goal, decision) => verifyProductAcceptance(goal.lastTaskId, decision));
 
 // On the device: configure the same egressPolicy selected in the target,
-// agentHome, and hostedJournal: { mode: 'sqlite' }. The runtime calls submit_result.
+// and agentHome. The runtime calls submit_result.
 const goal = bot.startGoal({
   id: hostGoalId, objective, target, maxSteps: 8, deadline: Date.now() + 600_000,
 });

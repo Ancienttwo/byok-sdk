@@ -9,6 +9,7 @@ import { runSdkReservedHelperCommand } from '../../sdk-reserved-helper-host';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type DaemonOverrides } from '../../daemon/create-daemon';
 import { SqliteLocalTaskJournal, type JournalFaultStep } from '../../daemon/journal/sqlite-journal';
+import { CursorStore } from '../../daemon/cursor-store';
 import { DeviceStore } from '../../daemon/store';
 import { createDeviceCredentialStore } from '../../daemon/device-credential-provider';
 import { waitForDaemonOpen } from './lifecycle-barrier';
@@ -35,6 +36,8 @@ interface Config {
   readonly recoveryFault?: 'terminal:before-send' | 'terminal:queued' | 'outbound:before-post' | 'outbound:after-ack';
   readonly agentHome?: boolean;
   readonly holdTerminalConfirmation?: boolean;
+  /** #924: the cursor is never saved past seq 0, as if the daemon died before the save. */
+  readonly holdCursorSave?: boolean;
   /** #384: the runtime owns a real POSIX process group with an in-group tool shell and its grandchild. */
   readonly ownedRuntimeTree?: boolean;
 }
@@ -186,7 +189,9 @@ class ControlledAdapter implements RuntimeAdapter {
   }
 }
 
-const journal = new SqliteLocalTaskJournal({
+// Only a journal fault or barrier needs an injected journal; otherwise the
+// daemon opens its own, as with the default config.
+const journal = config.journalFault === undefined && config.holdTerminalConfirmation !== true ? undefined : new SqliteLocalTaskJournal({
   storeDir: config.storeDir,
   ...(config.journalFault === undefined
     ? {}
@@ -199,7 +204,7 @@ const journal = new SqliteLocalTaskJournal({
       }),
 });
 // Test-only barrier: cloud acceptance can precede the daemon's durable confirmation.
-if (config.holdTerminalConfirmation === true) {
+if (journal !== undefined && config.holdTerminalConfirmation === true) {
   const confirmTerminal = journal.confirmTerminal.bind(journal);
   journal.confirmTerminal = async (...args: Parameters<typeof confirmTerminal>) => {
     checkpoint('terminal-confirmation');
@@ -209,8 +214,16 @@ if (config.holdTerminalConfirmation === true) {
     return confirmTerminal(...args);
   };
 }
+if (config.holdCursorSave === true) {
+  const save = CursorStore.prototype.save;
+  CursorStore.prototype.save = async function (this: CursorStore, ...args: Parameters<typeof save>) {
+    if (args[2] === 0) return save.apply(this, args);
+    checkpoint('cursor-save-held');
+    return new Promise<never>(() => {});
+  };
+}
 const overrides = {
-  hostedJournal: { journal },
+  ...(journal === undefined ? {} : { journal }),
   longPoll: { retryDelayMs: 20, idleDelayMs: 10 },
   ...(config.recoveryFault === undefined
     ? {}
@@ -229,7 +242,6 @@ const daemon = createDaemonWithAdapters(
     workspaceRoot: config.workspaceRoot,
     storage: { scratchRoot: config.scratchRoot }, storeDir: config.storeDir,
     deviceCredentials: config.deviceCredentials,
-    hostedJournal: { mode: 'sqlite' },
     sdkHelperHost: { mode: 'self-executable' },
     ...(config.agentHome === true ? { agentHome: { hostStorageRoot: path.join(config.storeDir, 'agent-home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } } : {}),
   },
@@ -243,7 +255,7 @@ daemon.subscribe((event) => {
 
 if (config.action === 'unpair') {
   await daemon.unpair();
-  await journal.close();
+  await journal?.close();
   process.stdout.write(`${JSON.stringify({ unpaired: true })}\n`);
   process.exit(0);
 }
@@ -261,7 +273,7 @@ lines.on('line', (line) => {
     const command = JSON.parse(line) as { command?: string };
     if (command.command !== 'stop') throw new Error(`unknown daemon fixture command ${command.command}`);
     await daemon.stop();
-    await journal.close();
+    await journal?.close();
     process.stdout.write(`${JSON.stringify({ stopped: true })}\n`);
     process.exit(0);
   })().catch((error) => {

@@ -25,7 +25,7 @@ async function main() {
     const storeDir = join(root, 'daemon');
     const daemon = createDaemonWithAdapters({ productId: 'sqlite-bundle', productName: 'SQLite bundle probe',
       localAgentRelease: { version: '0.0.0-test' }, serverUrl: 'http://127.0.0.1:0', storeDir, workspaceRoot: root,
-      storage: { scratchRoot: join(root, 'scratch') }, hostedJournal: { mode: 'sqlite' },
+      storage: { scratchRoot: join(root, 'scratch') },
     }, [], { deviceCredentials: new InMemoryDeviceCredentialStore() });
     try {
       // Startup opens its owned journal before reporting the empty enrollment.

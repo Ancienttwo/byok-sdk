@@ -153,7 +153,6 @@ export type {
   DaemonStatus,
   DaemonOverrides,
   DaemonBranding,
-  HostedJournalConfig,
   DeviceAssertionConfig,
   InputPreparationDaemonConfig,
   AgentEgressConfig,

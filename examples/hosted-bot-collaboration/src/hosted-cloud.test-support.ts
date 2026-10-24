@@ -64,7 +64,7 @@ export async function openHostedCloud() {
     const adapter = new BotStubAdapter();
     const daemon = createDaemonWithAdapters({ productId: PRODUCT_ID, productName: 'Hosted collaboration', localAgentRelease: { version: '0.0.0-test' },
       serverUrl: `http://127.0.0.1:${address.port}`, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'sdk'),
-      agentHome: { hostStorageRoot: path.join(root, 'homes') }, hostedJournal: { mode: 'sqlite' as const }, agentEgress: { policy },
+      agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy },
     }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
     const { code } = await cloud.createPairingCode(tenant, { productId: PRODUCT_ID });
     const { deviceId } = await daemon.pair(code);

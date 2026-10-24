@@ -123,7 +123,7 @@ it('home maintenance shares the Attempt base lease, preserves tombstones and rel
  await fs.writeFile(temp,'pending');await old(temp);const marker=path.join(directory,'.byok','agent-home.lease');await fs.writeFile(marker,'invalid');
  expect((await f.sweeper.runPass('periodic')).failures).toBeGreaterThan(0);expect(await exists(temp)).toBe(true);await fs.rm(marker);expect(await home.withIdleHomeLease('agent',async()=>{})).toBe(true);await f.sweeper.runPass('periodic');await f.sweeper.runPass('periodic');expect(await exists(temp)).toBe(false);
 });
-it('a daemon without hostedJournal runs a jittered timer and reports path-free classes in status and support bundle',async()=>{
+it('a daemon runs a jittered retention timer and reports path-free classes in status and support bundle',async()=>{
  const server=await TestServer.start();cleanups.push(()=>server.close());let handler:(()=>void)|undefined;const delays:number[]=[];
  const config={localAgentRelease:{version:'0.0.0-test'},productName:'Retention',productId:'retention',serverUrl:server.url,storeDir:testScratchRoot(),workspaceRoot:testScratchRoot(),storage:{scratchRoot:testScratchRoot()}};
  const daemon=createDaemonWithAdapters(config,[new StubRuntimeAdapter()],{retention:{timers:{setTimeout:(h,ms)=>{handler=h;delays.push(ms);return 'timer';},clearTimeout:()=>{}}}});

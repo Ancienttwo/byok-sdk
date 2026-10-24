@@ -338,10 +338,9 @@ describe('authenticated enrollment tenant projection', () => {
         storeDir,
         agentHome: { hostStorageRoot },
         agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
-        hostedJournal: { mode: 'sqlite' },
       },
       [new StubRuntimeAdapter('pi')],
-      { hostedJournal: { journal } },
+      { journal },
     );
 
     const record = await daemon.pair('daemon-code');

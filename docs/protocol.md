@@ -1403,8 +1403,7 @@ is ready in this run. Otherwise it is the closed plaintext form, `task.fail`
 with `reason` `sealed_key_unavailable`. The journal replaces the refused
 terminal in place, keeps its hash as a transition of the task, and ignores a
 late acknowledgement of the refused bytes. A refusal journaled before a restart
-is replaced after the start and the member resume. A daemon without a journal
-sends the same replacement. The replacement is inline, so a refused
+is replaced after the start and the member resume. The replacement is inline, so a refused
 replacement settles once, and a refused inline terminal is not replaced. No
 answer, or a non-2xx answer, of `POST /byok/messages` is not a refusal: the
 daemon sends the same bytes again.
@@ -3426,7 +3425,7 @@ does not add a second transport semantics.
 
 ### Durable terminal delivery and execution restart
 
-With hostedJournal enabled, canonical terminal bytes and their hash projection
+Every daemon journals (#924). Canonical terminal bytes and their hash projection
 are committed before entering ConnectionManager's existing authenticated
 `POST /byok/messages` queue. The accepted batch disposition is awaited through
 local `confirmed` persistence. A lost HTTP response or failed confirmation
@@ -3493,7 +3492,7 @@ Deploy the supporting server before using these recovery reports. Migration
 0021 remains required for custom claims; the recovery object lives in existing
 immutable terminal receipts and requires no additional database migration.
 
-For hosted journal replay, a selected but uncommitted terminal blocks admission
+For journal replay, a selected but uncommitted terminal blocks admission
 even when SQLite rolled the task row back to `received`. SDK-generated oversize
 failures project the admitted execution identity, including automatically
 selected custom adapters, through the same identity projection as other SDK
