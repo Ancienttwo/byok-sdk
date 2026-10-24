@@ -1342,6 +1342,32 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   | 413 | the body is over `maxE2eeRequestBytes` |
   | 500 | `e2ee_member_state_unreadable` |
 
+**Device enrollment (#654 E2d-1).** A device becomes a member only when it
+pairs with the pairing verification secret `pv` (design §7.2):
+`Daemon.pair(code, { verificationSecret })`, `enrollment.pair
+{ pairingCode, verificationSecret }`, or `byok-agent pair --e2ee
+<code>.<pv>`. The CLI splits on the last `.` only under `--e2ee`, because a
+Host's own pairing code may hold a `.`. `pv` never reaches the Host.
+
+- At pair time the device creates its member keys for the new enrollment,
+  stores `pv` with a 10-minute deadline and its bundle in its OS credential
+  store, and registers the bundle. A failed registration is retried at start
+  with the same bundle until the deadline.
+- The started daemon polls `GET /byok/e2ee/pairing-mac` with a backoff from
+  2 s to 15 s until the deadline. It verifies the client MAC, pins the
+  client's signing key, and walks the chain from seq 1 to the `add(device)`
+  that key signed. It stores the anchor and the verified head, then deletes
+  `pv`. A relay that does not verify only waits for the next one.
+- Each later start walks the chain from seq 1 again. The stored head must be
+  on the new walk, with the same hash at the same seq. A shorter chain or
+  another history keeps E2EE off for that run, so a Host cannot rewind the
+  chain to hide a `remove`.
+- Without `pv`, or with an expired one, the device is no member. Missing or
+  malformed member keys are never replaced: the Host keeps the first bundle
+  per device, so the recovery is a re-pair, which mints a new device id.
+- The device signs only `e2ee-member-key.register`. It appends no chain entry
+  and puts no package.
+
 ### 2.7 E2EE key package notice (#654 E2c-3)
 
 `e2ee.key_package.available` is an additive server-to-daemon message type,

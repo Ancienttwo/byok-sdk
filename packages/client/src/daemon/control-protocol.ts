@@ -466,15 +466,20 @@ export const ENROLLMENT_PAIRING_CODE_MAX_BYTES = 1024;
 
 export interface EnrollmentPairParams {
   pairingCode: string;
+  /** The base32 E2EE pairing verification secret (#654 §7.2). The daemon decodes it; it never reaches the Host. */
+  verificationSecret?: string;
 }
+
+/** A base32 `pv` is 26 characters; anything longer is not one. */
+const ENROLLMENT_VERIFICATION_SECRET_MAX_BYTES = 64;
 
 /**
  * Exact shape gate for service-identity pairing. The code is opaque server
  * authority: this only bounds transport bytes and rejects unknown fields; it
- * never parses, normalizes or logs the code.
+ * never parses, normalizes or logs the code or the verification secret.
  */
 export function parseEnrollmentPairParams(value: unknown): EnrollmentPairParams | undefined {
-  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'pairingCode')) return undefined;
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'pairingCode' && key !== 'verificationSecret')) return undefined;
   if (
     typeof value.pairingCode !== 'string' ||
     value.pairingCode.length === 0 ||
@@ -482,7 +487,16 @@ export function parseEnrollmentPairParams(value: unknown): EnrollmentPairParams 
   ) {
     return undefined;
   }
-  return { pairingCode: value.pairingCode };
+  const { verificationSecret } = value;
+  if (verificationSecret === undefined) return { pairingCode: value.pairingCode };
+  if (
+    typeof verificationSecret !== 'string' ||
+    verificationSecret.length === 0 ||
+    Buffer.byteLength(verificationSecret, 'utf8') > ENROLLMENT_VERIFICATION_SECRET_MAX_BYTES
+  ) {
+    return undefined;
+  }
+  return { pairingCode: value.pairingCode, verificationSecret };
 }
 
 /** Shape-only parser; executable definition validation remains registry-owned. */

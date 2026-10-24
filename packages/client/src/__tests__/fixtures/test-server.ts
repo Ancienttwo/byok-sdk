@@ -10,6 +10,7 @@ import {
 } from '@byok-sdk/protocol';
 import { NONCE_SIGNING_DOMAIN } from '../../daemon/device-keys';
 import { TEST_ACTIVITY_INGRESS } from './activity-ingress';
+import { E2eeTestHost } from './e2ee-test-host';
 
 interface Waiter {
   predicate: (envelope: Envelope) => boolean;
@@ -49,6 +50,14 @@ export class TestServer {
   /** Every `/byok/pair` body received, verbatim — the only place a test can assert what the client actually PUT ON THE WIRE (e.g. an optional field omitted rather than sent as undefined). */
   readonly pairRequests: Array<Record<string, unknown>> = [];
   private waiters: Waiter[] = [];
+  /** The E2EE member routes (#654 E2c-2); a test plays the web client through it. */
+  readonly e2ee = new E2eeTestHost({
+    bearerDevice: (req) => {
+      const token = bearerToken(req.headers.authorization);
+      return token === undefined ? undefined : this.deviceByToken(token);
+    },
+    device: (deviceId) => this.devicesById.get(deviceId),
+  });
 
   private readonly devicesById = new Map<string, DeviceAuthState>();
   private readonly pairingTenantIds = new Map<string, string>();
@@ -357,6 +366,7 @@ export class TestServer {
           .writeHead(200, { 'content-type': 'application/json' })
           .end(JSON.stringify(this.capabilityDeclaration));
       }
+      if (url.pathname.startsWith('/byok/e2ee/') && await this.e2ee.handle(req, res, url)) return;
       if (method === 'GET' && url.pathname === '/byok/events') return void (await this.handleEventsPoll(req, res));
       if (method === 'POST' && url.pathname === '/byok/messages') return void (await this.handleMessagesSend(req, res));
       if (method === 'PUT' && url.pathname.startsWith('/_test/blob-upload/')) {

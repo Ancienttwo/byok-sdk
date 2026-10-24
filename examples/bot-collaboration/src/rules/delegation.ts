@@ -444,11 +444,11 @@ export function abandonDelegation(state: DelegationState, facts: Pick<IntentFact
   return !!d.cancel && !d.cancel.delivered;
 }
 /** Next time a delegation timer can change state without other events. */
-export function delegationDue(state: DelegationState, timers: DelegationTimers): number[] {
+export function delegationDue(state: Pick<DelegationState, 'delegations'>, timers: DelegationTimers = DEFAULT_TIMERS): number[] {
   return Object.values(state.delegations).flatMap(d => [
     ...(d.nextCheckAt !== undefined ? [d.nextCheckAt] : []),
     ...(!d.verdict && d.status !== 'uncertain' && d.cancel ? [d.cancel.requestedAt + timers.cancelGraceMs] : []),
-    ...(!d.verdict && d.status === 'running' && !d.cancel && d.claimed?.turnId === d.chainTurnIds.at(-1) ? [d.claimed!.at + timers.uncertainAfterMs] : []),
+    ...(!d.verdict && d.status === 'running' && !d.cancel && d.claimed && d.claimed.turnId === d.chainTurnIds.at(-1) ? [d.claimed.at + timers.uncertainAfterMs] : []),
   ]);
 }
 
