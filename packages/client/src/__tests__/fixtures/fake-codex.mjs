@@ -126,6 +126,10 @@ const complete = (id, status = 'completed') => {
             error: {
               message:
                 process.env.FAKE_CODEX_FAIL_MESSAGE ?? 'fixture turn failed',
+              // JSON of the turn's `codexErrorInfo`, when set.
+              ...(process.env.FAKE_CODEX_ERROR_INFO === undefined
+                ? {}
+                : { codexErrorInfo: JSON.parse(process.env.FAKE_CODEX_ERROR_INFO) }),
             },
           }
         : {}),

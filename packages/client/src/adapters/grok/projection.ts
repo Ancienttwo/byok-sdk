@@ -1,4 +1,5 @@
-import type { AgentEvent } from '@byok-sdk/protocol';
+import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
+import { runtimeFailureClassOf } from '../../runtime-failure';
 import type { AcpRecord } from '../../runtime/acp-session-runtime';
 
 type Usage = Extract<AgentEvent, { type: 'usage' }>;
@@ -7,7 +8,7 @@ type Tokens = { input?: unknown; output?: unknown; reasoning?: unknown; cacheRea
 export type GrokTurnOutcome =
   | { readonly kind: 'completed' }
   | { readonly kind: 'aborted' }
-  | { readonly kind: 'failed'; readonly failure?: string; readonly reason: string };
+  | { readonly kind: 'failed'; readonly failure: RuntimeFailureClass; readonly reason: string };
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -86,7 +87,8 @@ export class GrokProjection {
     this.endOpenTools(emit, turn.kind === 'aborted' ? 'interrupted' : 'ended');
     this.flushUsage(emit);
     if (turn.kind === 'failed') {
-      outcome({ kind: 'failed', reason: typeof turn.reason === 'string' ? turn.reason : 'grok turn failed', ...(typeof turn.failure === 'string' ? { failure: turn.failure } : {}) });
+      // The vendored OAR outcome owns the class; the SDK adds no rule of its own.
+      outcome({ kind: 'failed', reason: typeof turn.reason === 'string' ? turn.reason : 'grok turn failed', failure: runtimeFailureClassOf(turn.failure) });
       return;
     }
     emit({ type: 'turn_end' });

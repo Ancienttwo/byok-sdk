@@ -28,6 +28,7 @@ import { createClaudeControlChannel } from './control-channel';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
 import { AssistantMessageTracker, createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './events';
+import { ClaudeFailureEvidence } from './failure-evidence';
 import { ClaudeProcessClient, type SpawnFn } from './process-client';
 
 
@@ -481,6 +482,7 @@ class ClaudeSession implements Session {
   declare readonly interactions?: NativeInteractionChannel;
   private readonly correlation: ToolUseCorrelation;
   private readonly assistantMessages = new AssistantMessageTracker();
+  private readonly failureEvidence = new ClaudeFailureEvidence();
   private closeAttempt: Promise<void> | undefined;
   /** Filled once from Claude's own `mcp_status` answer (`./mcp-identity.ts`). */
   private readonly mcpIdentities = new Map<string, McpEventIdentity>();
@@ -503,6 +505,7 @@ class ClaudeSession implements Session {
     const client = this.client;
     const correlation = this.correlation;
     const assistantMessages = this.assistantMessages;
+    const failureEvidence = this.failureEvidence;
     const workspaceDir = this.workspaceDir;
     const control = this.control;
     const toolsetServers = this.toolsetServers;
@@ -575,10 +578,12 @@ class ClaudeSession implements Session {
                   category: 'infrastructure',
                   retry: 'retryable',
                   reason: 'claude runtime process ended before a terminal result frame',
+                  failure: { class: 'runtime_exited' },
                 }, { cause: client.terminalError });
               }
 
               if (value.type === 'result') turnSettled = true;
+              failureEvidence.observe(value);
 
               if (!session.mcpStatusRequested && toolsetServers.size > 0 && callsUnresolvedMcpTool(value, correlation)) {
                 // Asked at the first MCP call, when Claude has connected its
@@ -598,7 +603,7 @@ class ClaudeSession implements Session {
                 }
               }
               assistantMessages.observe(value, mapped.events);
-              terminalFailure = mapped.terminalFailure ?? terminalFailure;
+              if (mapped.terminalFailure !== undefined) terminalFailure = failureEvidence.attach(value, mapped.terminalFailure);
               if (mapped.unmappedLabel) {
                 client.recordUnmappedFrame(mapped.unmappedLabel);
               }

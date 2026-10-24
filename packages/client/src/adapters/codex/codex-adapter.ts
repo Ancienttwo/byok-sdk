@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import type {
   AgentEvent,
+  TaskFailure,
   TaskOfferPayload,
 } from '@byok-sdk/protocol';
 import {
@@ -31,6 +32,7 @@ import {
   SessionNotFoundError,
   type RawCodexSession,
 } from '../../runtime/codex-session-runtime';
+import { codexFailure } from '../../runtime/oar-failure-runtime';
 import { CodexProjection, type CodexRecord } from './projection';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
@@ -301,12 +303,13 @@ const authority = (reason: string) =>
     retry: 'non-retryable',
     reason,
   });
-const infrastructure = (reason: string) =>
+const infrastructure = (reason: string, failure?: TaskFailure) =>
   new RuntimeExecutionFailure({
     phase: 'run',
     category: 'infrastructure',
     retry: 'non-retryable',
     reason,
+    failure,
   });
 /** An open that timed out may succeed on a fresh app-server, as before the deadline moved here. */
 const retryable = (reason: string) =>
@@ -411,7 +414,7 @@ class CodexSession implements Session {
         type?: string;
         native?: {
           threadId?: string;
-          turn?: { status?: string; error?: { message?: string } };
+          turn?: { status?: string; error?: { message?: string; codexErrorInfo?: unknown } };
         };
       };
       if (
@@ -423,15 +426,19 @@ class CodexSession implements Session {
       ) {
         this.active = false;
         for (const resolve of this.interruptWaiters) resolve();
-        if (body.native?.turn?.status === 'failed')
+        if (body.native?.turn?.status === 'failed') {
+          const reason = body.native.turn.error?.message ?? 'codex turn failed';
+          // The native frame precedes the fold, which classifies the same `turn.error`.
           this.fail(
             new RuntimeExecutionFailure({
               phase: 'run',
               category: 'semantic',
               retry: 'non-retryable',
-              reason: body.native.turn.error?.message ?? 'codex turn failed',
+              reason,
+              failure: { class: codexFailure(reason, body.native.turn.error).failure },
             }),
           );
+        }
       }
     } catch (error) {
       this.fail(error);
@@ -451,7 +458,7 @@ class CodexSession implements Session {
     void this.close().catch(() => {});
   }
   exited(): void {
-    if (!this.stopping) this.fail(infrastructure('codex app-server exited'));
+    if (!this.stopping) this.fail(infrastructure('codex app-server exited', { class: 'runtime_exited' }));
   }
   get events(): AsyncIterable<AgentEvent> {
     const self = this;

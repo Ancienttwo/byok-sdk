@@ -1,4 +1,4 @@
-import { isTaskOfferType, MAILBOX_READ_AHEAD_CAPABILITY, MAILBOX_READ_AHEAD_MAX_SEQS, SEALED_PAYLOAD_CAPABILITY } from '@byok-sdk/protocol';
+import { isTaskOfferType, MAILBOX_READ_AHEAD_CAPABILITY, MAILBOX_READ_AHEAD_MAX_SEQS, RUNTIME_FAILURE_CLASS_CAPABILITY, SEALED_PAYLOAD_CAPABILITY } from '@byok-sdk/protocol';
 /**
  * `GET /byok/events?cursor=N` — the long-poll receive half (§8).
  *
@@ -89,6 +89,9 @@ export const CLOUD_PROTOCOL_CAPABILITIES = [
   // The inbound gate accepts every sealed daemon-to-server type, and the four
   // sealed decline codes on the plaintext decline (#654 E3b-2).
   SEALED_PAYLOAD_CAPABILITY,
+  // The inbound gate parses `task.fail.failure` and `task.fail_sealed.failure`,
+  // and `projectTerminalResult` copies it (#869).
+  RUNTIME_FAILURE_CLASS_CAPABILITY,
 ];
 
 export interface EventsRouteDeps extends DeviceRouteDeps {

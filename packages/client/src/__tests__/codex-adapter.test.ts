@@ -374,6 +374,27 @@ describe('Codex persistent app-server adapter', () => {
     );
     await expect(turn(s)).rejects.toMatchObject({ category: 'infrastructure' });
   });
+  it.each([
+    ['usageLimitExceeded', '"usageLimitExceeded"', { class: 'quota' }],
+    ['rateLimitExceeded', '"rateLimitExceeded"', { class: 'rate_limited' }],
+    ['unauthorized', '"unauthorized"', { class: 'unknown' }],
+    ['a 404 transport failure', '{"responseStreamConnectionFailed":{"httpStatusCode":404}}', { class: 'model_unavailable' }],
+    ['no codexErrorInfo', undefined, { class: 'unknown' }],
+  ] as const)('classifies a failed turn with %s from codexErrorInfo, reason unchanged (#869)', async (_label, info, failure) => {
+    const s = await open(adapter(), task, await ctx({
+      FAKE_CODEX_TURN_FAILS: '1',
+      FAKE_CODEX_FAIL_MESSAGE: 'provider said no',
+      ...(info === undefined ? {} : { FAKE_CODEX_ERROR_INFO: info }),
+    }));
+    const thrown = await turn(s).then(() => undefined, (error: unknown) => error);
+    expect(thrown).toBeInstanceOf(RuntimeExecutionFailure);
+    expect((thrown as RuntimeExecutionFailure).failure).toEqual(failure);
+    expect((thrown as RuntimeExecutionFailure).message).toBe('provider said no');
+  });
+  it('marks an app-server exit before the terminal runtime_exited (#869)', async () => {
+    const s = await open(adapter(), task, await ctx({ FAKE_CODEX_EXIT_NO_TERMINAL: '1' }));
+    await expect(turn(s)).rejects.toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });
+  });
   it('file changes produce real workspace-relative artifacts', async () => {
     const resources = await ctx({
       FAKE_CODEX_ARTIFACT_NAME: 'result.md',
