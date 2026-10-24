@@ -360,6 +360,15 @@ card's expiry, each unreleased seat's deadline, and the delegation times
 these times and its own L-only ones. H stores their minimum as the scope's due
 time (#793 S4). Routine slots are K4's, so they are not in the list.
 
+`checkReply(state, d, check, now, emit, uncertainAfterMs)` in
+`src/rules/delegation.ts` decides one reply check of a `reply_pending`
+delegation: a reply body that the Host holds answers it, a failed read
+retries with backoff, and otherwise the SDK readback decides.
+`replyCheckDue(d, now)` selects the due checks. `src/rules/commands.ts`
+exports both. L's `flushReplies` runs them with its own SDK read, and H runs
+them in `HostedReplyChecker` (#793 S7). The `replyVectors` hold the decision
+for L and H.
+
 Known L limit: K4 stores the whole Host ledger, with the collaboration state,
 in one JSON row per tenant. Turns, replies, audit rows and command records
 make that row grow. Command records are dedup evidence; retention must not
