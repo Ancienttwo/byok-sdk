@@ -16,6 +16,7 @@ import { commit, type CommandRecord, type CommitRequest, type CommitResult, type
 // The sync step runs beside the commands, so it is part of this entry. A store runs it under the same scope lock as a commit.
 export { OFFER_WAIT_MS, syncTurn, type FreezeExecution, type SyncBot, type SyncFacts, type SyncOptions, type SyncState, type SyncStep } from './sync';
 export { delegationDue, settleDelegations, type DelegationTimers } from './delegation';
+export { advanceRoomSeats, seatTurn, type SeatFacts } from './rooms';
 export { collaborationDue } from './due';
 export { expireCards, reportCardDecisions } from './cards';
 

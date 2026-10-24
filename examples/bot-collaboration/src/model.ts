@@ -31,6 +31,11 @@ export interface CollaborationState {
    * `commands` holds the dedup evidence of owner commands. K4 deduplicates terminals and messages itself.
    */
   revision?: number; commands?: Record<string, CommandRecord>;
+  /**
+   * Host intents (#882): the handler name of each Host-owned K4 intent, by intent key. A record lives as long as K4
+   * keeps its intent. It appears at the first Host intent, so an older ledger reads an empty table.
+   */
+  hostIntents?: Record<string, { handler: string }>;
 }
 export function stateOf(application: Record<string, Json>): CollaborationState {
   if (application.collaboration === undefined) application.collaboration = json({
