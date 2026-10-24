@@ -411,7 +411,7 @@ describe('device member keyring sealing rules (E2d-3)', () => {
     expect(await first.sealingKey('scope-a', 1)).toBeUndefined();
     expect(carried.points.get('scope-a')?.get(1)).toEqual(web.head);
 
-    // A next run whose verified chain does not reach the point keeps nothing of it.
+    // A next run whose verified chain has no such scope yet seals nothing for it.
     const next = new DeviceMemberKeyring(session, { ...options, carried });
     expect(await next.sealingKey('scope-a', 1)).toBeUndefined();
     const resumed = new DeviceMemberKeyring(next.session!, options);
@@ -423,5 +423,35 @@ describe('device member keyring sealing rules (E2d-3)', () => {
     expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: forged }).sealingKey('scope-a', 1)).toBeUndefined();
     const otherMember = { ...carried, memberId: web.member.memberId };
     expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried: otherMember }).sealingKey('scope-a', 1)).toBeUndefined();
+  });
+
+  it('seals nothing at a carried point once a scope member is removed between the runs', async () => {
+    const { web, device, options, session } = await member();
+    const helper = await stranger();
+    await web.append('add', { member: helper.member });
+    await web.putScope('scope-a', [device, helper.member]);
+    const first = new DeviceMemberKeyring(session, options);
+    await first.catchUp();
+    expect(await first.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    const carried = first.retire()!;
+    expect(carried.points.get('scope-a')?.get(1)).toEqual(web.head);
+
+    await web.append('remove', { memberId: helper.member.memberId });
+    const resumed = new DeviceMemberKeyring(session, options);
+    await resumed.catchUp();
+    const next = new DeviceMemberKeyring(resumed.session!, { ...options, carried });
+    expect(await next.sealingKey('scope-a', 1)).toBeUndefined();
+  });
+
+  it.each(['tenantId', 'deviceId'] as const)('keeps no carried point of another %s', async (field) => {
+    const { web, device, options, session } = await member();
+    await web.putScope('scope-a', [device]);
+    const first = new DeviceMemberKeyring(session, options);
+    await first.catchUp();
+    expect(await first.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
+    const carried = { ...first.retire()!, [field]: 'other' };
+    const resumed = new DeviceMemberKeyring(session, options);
+    await resumed.catchUp();
+    expect(await new DeviceMemberKeyring(resumed.session!, { ...options, carried }).sealingKey('scope-a', 1)).toBeUndefined();
   });
 });
