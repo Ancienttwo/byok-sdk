@@ -2129,6 +2129,8 @@ export { MEMBER_CHAIN_OPS, deriveMemberId, memberChainEntryHash, signMemberChain
 export type { MemberChainEntryV1, MemberChainEntryVerifyResult, MemberChainOp, UnsignedMemberChainEntryV1, } from './member-chain';
 export { MEMBER_KEY_BUNDLE_VERSION, createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem } from './member-bundle';
 export type { CreateMemberKeyBundleInput, MemberKeyBundleV1 } from './member-bundle';
+export { generateMemberKeyRecord, openMemberKeyRecord } from './member-key-record';
+export type { MemberKeyBinding, MemberKeyStore, MemberKeys } from './member-key-record';
 export { MEMBER_FINGERPRINT_DOMAIN, memberApprovalCode, memberFingerprint } from './member-fingerprint';
 export type { MemberFingerprintInput } from './member-fingerprint';
 export { CLIENT_PAIRING_MAC_DOMAIN, DEVICE_PAIRING_MAC_DOMAIN, PAIRING_VERIFICATION_SECRET_BYTES, computeClientPairingMac, computeDevicePairingMac, decodePairingVerificationSecret, encodePairingVerificationSecret, formatPairingInput, generatePairingVerificationSecret, parsePairingInput, verifyClientPairingMac, verifyDevicePairingMac, } from './pairing-verification';
@@ -2352,6 +2354,51 @@ export declare function memberFingerprint(input: MemberFingerprintInput): Promis
  * single spaces. The order of the arguments does not matter.
  */
 export declare function memberApprovalCode(tenantId: string, first: P256PublicJwk, second: P256PublicJwk): Promise<string>;
+// ==== @byok-sdk/core dist/sealed-payload/member-key-record.d.ts ====
+import { type WebCryptoKey } from '../webcrypto';
+import { type P256PublicJwk } from './primitives';
+export declare const MEMBER_KEY_RECORD_VERSION = 1;
+/**
+ * Whose keys a store holds. A device member's binding names its SDK device
+ * id; a client member's has none, as in its bundle.
+ */
+export interface MemberKeyBinding {
+    readonly tenantId: string;
+    readonly deviceId?: string;
+}
+export interface MemberKeys {
+    readonly binding: MemberKeyBinding;
+    /** Signs chain entries and key packages. The private key is not extractable. */
+    readonly signing: {
+        readonly publicJwk: P256PublicJwk;
+        readonly privateKey: WebCryptoKey;
+    };
+    /** Opens key packages. The private key is not extractable. `epoch` starts at 1. */
+    readonly kem: {
+        readonly epoch: number;
+        readonly publicJwk: P256PublicJwk;
+        readonly privateKey: WebCryptoKey;
+    };
+}
+/** The custody port of one member's keys. Each store expects one writer. */
+export interface MemberKeyStore {
+    /** The keys bound to `binding`, or `undefined` when the store holds none for it. A malformed record throws. */
+    load(binding: MemberKeyBinding): Promise<MemberKeys | undefined>;
+    /** The keys bound to `binding`. A store that holds none for it creates new ones, which replace any other binding's keys. */
+    loadOrCreate(binding: MemberKeyBinding): Promise<MemberKeys>;
+}
+/**
+ * A new member's record for `binding`: a fresh signing key and a fresh KEM
+ * key at epoch 1, as one canonical JSON text. The text holds both private
+ * scalars; only the member's own custody stores it.
+ */
+export declare function generateMemberKeyRecord(binding: MemberKeyBinding): Promise<string>;
+/**
+ * The keys of a stored record, imported non-extractable, or `undefined` when
+ * the text is not a canonical v1 record, or a private scalar does not match
+ * its public point. Never throws for hostile input.
+ */
+export declare function openMemberKeyRecord(text: unknown): Promise<MemberKeys | undefined>;
 // ==== @byok-sdk/core dist/sealed-payload/pairing-verification.d.ts ====
 import type { MemberKeyBundleV1 } from './member-bundle';
 import { type Bytes } from './primitives';

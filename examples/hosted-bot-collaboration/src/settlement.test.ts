@@ -11,7 +11,7 @@ import type { FrozenInput } from '@byok-sdk/example-host-execution-core';
 import { frozenIntent, settleFacts } from './intents';
 import { storedKey } from './layout';
 import { callbackPorts, vectorPorts } from './memory-subject.test-support';
-import { openStore, POSTGRES_URL } from './postgres.test-support';
+import { openStore, POSTGRES_URL, VectorStore } from './postgres.test-support';
 import { HostedReconciler, type HostedTaskPort, type TaskEvidence } from './reconcile';
 import { inSchema, lockScope } from './store';
 
@@ -19,6 +19,8 @@ import { inSchema, lockScope } from './store';
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
 const table = (name: string) => `"${store().schema}".${name}`;
+/** The test store, or a store over the same schema with these delegation timers, which are a store option (#793 S4). */
+const timed = (timers?: DelegationTimers) => timers ? new VectorStore(opened!.pool, store().schema, { timers }) : store();
 
 /** Bot `b` beside the seeded Main Bot, on the same bound device, with its persona applied. `t1` has ended. */
 function team(state: CollaborationState): void {
@@ -41,7 +43,7 @@ async function delegated() {
     if (result.disposition.outcome !== 'accepted') throw new Error(`Refused ${command.kind}: ${JSON.stringify(result.disposition)}`);
     return result.disposition.value;
   };
-  const sync = (now = VECTOR_NOW, timers?: DelegationTimers) => store().sync(scope, { ...SYNC_OPTIONS, now, history: undefined, ...(timers ? { timers } : {}) });
+  const sync = (now = VECTOR_NOW, timers?: DelegationTimers) => timed(timers).sync(scope, { ...SYNC_OPTIONS, now, history: undefined });
   const finish = (turnId: string, type: string, payload: Json = {}) => store().finish(scope, turnId, evidence(taskId(turnId, 0), type, payload), vectorPorts);
   const root = await commit({ kind: 'input', botId: 'main', key: 'r1', request: 'Ask b', sender: 'owner' }) as string;
   await sync();
@@ -74,8 +76,8 @@ async function settlementSubject(): Promise<SettlementSubject> {
     stored: () => store().dump(scope),
     state: () => store().read(scope),
     change: edit => store().seed(scope, edit),
-    sync: () => store().sync(scope, { ...SYNC_OPTIONS, history: undefined }),
-    settle: (now, timers) => store().sync(scope, { ...SYNC_OPTIONS, now, history: undefined, ...(timers ? { timers } : {}) }),
+    sync: async () => { await store().sync(scope, { ...SYNC_OPTIONS, history: undefined }); },
+    settle: async (now, timers) => { await timed(timers).sync(scope, { ...SYNC_OPTIONS, now, history: undefined }); },
     intent: async turnId => {
       const row = (await pool.query<{ key: string; source: SyncIntentRecord['source']; input: FrozenInput; wait_until: string }>(
         `SELECT key, source, input, wait_until::text FROM ${table('intent')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turnId)])).rows[0];
@@ -190,7 +192,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
     await settled(h);
   });
 
-  it('shows a delivered cancel with no conclusion as uncertain once the cancel grace passed, with the timers of the sync options', async () => {
+  it('shows a delivered cancel with no conclusion as uncertain once the cancel grace passed, with the timers of the store', async () => {
     const h = await delegated();
     await h.set(h.id, `submission = 'uncertain', tries = 1`);
     await store().seed(h.scope, state => { state.team.bots.b!.archived = true; });
@@ -269,15 +271,13 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
     });
   });
 
-  it('refuses delegation timers that L refuses, before it reads or writes', async () => {
-    const h = await delegated(), before = await h.stored();
+  it('refuses delegation timers that L refuses, when the store is built', () => {
     for (const [timers, message] of [[{ cancelGraceMs: 0, uncertainAfterMs: 5_000 }, 'Invalid delegation timers'],
       [{ cancelGraceMs: 1_000, uncertainAfterMs: 0 }, 'Invalid delegation timers'], [{ cancelGraceMs: -1, uncertainAfterMs: 5_000 }, 'Time must be'],
       [{ cancelGraceMs: 1_000, uncertainAfterMs: Number.NaN }, 'Time must be'], [{ cancelGraceMs: 1.5, uncertainAfterMs: 5_000 }, 'Time must be']] as const) {
-      await expect(h.sync(VECTOR_NOW, timers), JSON.stringify(timers)).rejects.toThrow(message);
+      expect(() => timed(timers), JSON.stringify(timers)).toThrow(message);
     }
-    expect(await h.stored()).toBe(before);
-    await expect(h.sync(VECTOR_NOW, { cancelGraceMs: 1, uncertainAfterMs: 1 })).resolves.toBeUndefined();
+    expect(() => timed({ cancelGraceMs: 1, uncertainAfterMs: 1 })).not.toThrow();
   });
 
   it('writes nothing when the settlement throws', async () => {
