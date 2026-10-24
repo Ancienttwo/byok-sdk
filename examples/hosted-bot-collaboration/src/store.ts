@@ -9,7 +9,7 @@ import { commitCommand, syncTurn, type Command, type CommandPorts, type SyncOpti
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, bindDevice, revokeDevice } from './binding';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
-import { syncFacts, writeSyncStep } from './intents';
+import { cancelIntent, deliverCancels, syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
 import { decideFinish, type TaskEvidence } from './reconcile';
 import { commitStored, decideRetention } from './retention';
@@ -30,8 +30,11 @@ type TurnHistory = NonNullable<SyncOptions<never>['history']>;
  * The store reads the routines itself (#793 D2f).
  */
 export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines'> & { history?: ReadonlyMap<string, TurnHistory> };
-/** Builds the command ports on the state of the open commit. `publish` writes a projection in the same commit. */
-export type PortsFactory = (state: CollaborationState, publish: Publish) => CommandPorts;
+/**
+ * Builds the command ports on the state of the open commit. `publish` writes a projection in the same commit. The store
+ * reads the intent facts itself, under the scope lock (#793 D2f-4).
+ */
+export type PortsFactory = (state: CollaborationState, publish: Publish) => Omit<CommandPorts, 'intents'>;
 
 const SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
 const EMPTY_FRAME = split(stateOf({})).frame;
@@ -58,13 +61,27 @@ export class HostedCollaborationStore {
   /**
    * Runs one command through the commit contract. `scope` is the scope that the authenticated caller owns;
    * a request for another scope is a `scope_mismatch` conflict. A throw leaves every row unchanged.
+   *
+   * A new `cancel_turn` of a Turn with a frozen intent runs the K4 cancel in the same transaction, in L's order (K8
+   * host.ts `cancelTurn`): the commit, the cancel of the intent, then the version switch check (#793 D2f-4). A new commit
+   * that leaves a delegation cancel fact to deliver (`cancel_turn` of an open chain, `cancel_delegation`,
+   * `abandon_delegation`) delivers it in the same transaction, as L `settleChain` does after its commit.
    */
   commit(scope: string, request: CommitRequest<Command>, ports: PortsFactory): Promise<CommitResult> {
+    const key = storedKey(scope);
     return this.change(scope, request.commandId, async (state, publish, client) => {
-      const head = revisionOf(state);
-      const result = await commitStored(client, scope, state, request, ports(state, publish));
+      const head = revisionOf(state), base = ports(state, publish);
+      const result = await commitStored(client, scope, state, request, base);
       // A new commit moves the head by 1. A replay returns its first result and writes nothing.
-      return { value: result, outbox: result.revision === head + 1 ? result.outbox : [] };
+      if (result.revision !== head + 1) return { value: result, outbox: [] };
+      const value = result.disposition.outcome === 'accepted'
+        ? result.disposition.value as { target?: string; admitted?: boolean; deliver?: boolean } | undefined : undefined;
+      if (request.command.kind === 'cancel_turn' && value?.admitted && value.target !== undefined) {
+        const now = base.now();
+        await cancelIntent(client, scope, value.target, now);
+        await switchDueVersions(client, key, now);
+      } else if (value?.deliver) await deliverCancels(client, scope, state, base.now());
+      return { value: result, outbox: result.outbox };
     });
   }
 
@@ -134,7 +151,7 @@ export class HostedCollaborationStore {
           if (step) steps.push([turn, step]);
         }
         more = false;
-        for (const [turn, step] of steps) more = await writeSyncStep(client, scope, turn, step, slice) || more;
+        for (const [turn, step] of steps) more = await writeSyncStep(client, scope, turn, step, slice, options.now) || more;
       }
       await writeSlice(client, key, slice);
       await switchDueVersions(client, key, options.now);

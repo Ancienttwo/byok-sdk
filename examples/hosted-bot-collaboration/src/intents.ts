@@ -1,7 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 import { agentKey, canonical, fifoHeads, promoteOccurrence, queuedExpiry, submitFrozen, taskId,
   type Conclusion, type ExecutionTemplate, type FrozenInput, type FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
-import type { Turn } from '@byok-sdk/example-bot-collaboration/model';
+import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { activeBinding, DeviceBindingError } from './binding';
@@ -52,22 +52,64 @@ export async function frozenIntent(client: PoolClient, scope: string, task: stri
 }
 
 type IntentFact = NonNullable<ReturnType<SyncFacts['intent']>>;
-/**
- * The sync rule facts of these Turns, read in the sync transaction. `started` is the reconciliation's attempt fact
- * (D2d). `retired` reads the Turn tombstones of retention (D2g).
- */
-export async function syncFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<SyncFacts> {
+/** The intent facts of these Turns, read from the intent rows in the caller's transaction, and the keys of the started rows. */
+async function loadIntentFacts(client: PoolClient, scope: string, turnIds: readonly string[]) {
   const found = await client.query<{ key: string; task_id: string; conclusion: IntentFact['conclusion'] | null;
     cancel_reason: IntentFact['cancelReason'] | null; started: boolean }>(
     'SELECT key, task_id, conclusion, cancel_reason, started FROM intent WHERE scope = $1 AND key = ANY($2::text[])',
     [storedKey(scope), turnIds.map(storedKey)]);
   const facts = new Map(found.rows.map(row => [row.key, { taskId: row.task_id, ...(row.conclusion ? { conclusion: row.conclusion } : {}),
     ...(row.cancel_reason ? { cancelReason: row.cancel_reason } : {}) } satisfies IntentFact]));
-  const started = new Set(found.rows.filter(row => row.started).map(row => row.key));
+  return { intent: (turnId: string) => facts.get(storedKey(turnId)), started: new Set(found.rows.filter(row => row.started).map(row => row.key)) };
+}
+/**
+ * The intent facts that a command reads (K8 `CommandPorts.intents`), as L reads its K4 intents in the commit transaction.
+ * The caller holds the scope lock.
+ */
+export async function commandIntentFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<Pick<SyncFacts, 'intent'>> {
+  const { intent } = await loadIntentFacts(client, scope, turnIds);
+  return { intent };
+}
+/**
+ * The sync rule facts of these Turns, read in the sync transaction. `started` is the reconciliation's attempt fact
+ * (D2d). `retired` reads the Turn tombstones of retention (D2g).
+ */
+export async function syncFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<SyncFacts> {
+  const { intent, started } = await loadIntentFacts(client, scope, turnIds);
   // H keeps every intent row, so no intent result is retired before it is seen. Retention retires Turn ids (#793 D2g).
   const retired = await retiredTurns(client, storedKey(scope), turnIds);
-  return { intent: turnId => facts.get(storedKey(turnId)), executionStarted: turnId => started.has(storedKey(turnId)),
+  return { intent, executionStarted: turnId => started.has(storedKey(turnId)),
     retired: turnId => retired.has(turnId) ? 'turn_retired' : undefined };
+}
+
+/**
+ * K4 `cancel` of the open intent of Turn `turnId`, then the K4 drain's `queuedExpiry` for a row that no submit tried: the
+ * claim runs under the same scope lock, so that row has no SDK call. A tried row keeps its cancel reason and waits for the
+ * reconciliation to check its attempt. Returns true when the row concluded. The caller holds the scope lock.
+ */
+export async function cancelIntent(client: PoolClient, scope: string, turnId: string, now: number): Promise<boolean> {
+  const [scopeKey, key] = [storedKey(scope), storedKey(turnId)];
+  const found = await client.query<{ tries: number; wait_until: string; retry_until: string | null }>(`UPDATE intent SET cancel_reason = 'cancelled'
+    WHERE scope = $1 AND key = $2 AND conclusion IS NULL RETURNING tries, wait_until::text, retry_until::text`, [scopeKey, key]);
+  const row = found.rows[0];
+  if (!row || row.tries > 0) return false;
+  const conclusion = queuedExpiry({ cancelReason: 'cancelled', waitUntil: Number(row.wait_until),
+    ...(row.retry_until === null ? {} : { retryUntil: Number(row.retry_until) }) }, now);
+  await client.query('UPDATE intent SET conclusion = $3 WHERE scope = $1 AND key = $2', [scopeKey, key, conclusion]);
+  return true;
+}
+
+/**
+ * K8 `deliverCancels` (host.ts): the K4 cancel of the frozen target of each committed delegation cancel fact, then
+ * `delivered`. L marks a fact delivered whatever K4 finds, and so does H. The caller holds the scope lock and writes
+ * `state` in the same transaction.
+ */
+export async function deliverCancels(client: PoolClient, scope: string, state: CollaborationState, now: number): Promise<void> {
+  for (const d of Object.values(state.delegations)) {
+    if (!d.cancel || d.cancel.delivered) continue;
+    await cancelIntent(client, scope, d.cancel.targetTurnId, now);
+    d.cancel.delivered = true;
+  }
 }
 
 /**
@@ -75,7 +117,8 @@ export async function syncFacts(client: PoolClient, scope: string, turnIds: read
  * step run the K4 rules on `slice`, which the caller writes back after the last step. The caller holds the scope lock.
  * Returns true when the step changed an intent fact or an occurrence, so the sync runs its Turns again, as L drains again.
  */
-export async function writeSyncStep(client: PoolClient, scope: string, turn: Turn, step: SyncStep<ExecutionTemplate>, slice: RoutineSlice): Promise<boolean> {
+export async function writeSyncStep(client: PoolClient, scope: string, turn: Turn, step: SyncStep<ExecutionTemplate>, slice: RoutineSlice,
+  now: number): Promise<boolean> {
   if (step.kind === 'freeze') {
     await freezeIntent(client, scope, step.input);
     return true;
@@ -90,14 +133,8 @@ export async function writeSyncStep(client: PoolClient, scope: string, turn: Tur
   }
   // A concluded occurrence can make a staged version due (K8 commit.ts:54).
   if (step.kind === 'ended') return turn.source === 'routine' && concludeRoutineTurn(slice.state, turn);
-  if (step.kind === 'cancel') {
-    // A row that was never tried has no SDK call, because the claim runs under this lock. It concludes now, as K4
-    // queuedExpiry concludes a cancelled queued intent, and L drains again for it. A tried row waits for the reconciliation
-    // to check its attempt.
-    const concluded = await client.query(`UPDATE intent SET cancel_reason = 'cancelled', conclusion = CASE WHEN tries = 0 THEN 'cancelled' ELSE conclusion END
-      WHERE scope = $1 AND key = $2 AND conclusion IS NULL RETURNING conclusion`, [storedKey(scope), storedKey(turn.id)]);
-    return concluded.rows[0]?.conclusion != null;
-  }
+  // An untried row concludes now, and L drains again for it.
+  if (step.kind === 'cancel') return cancelIntent(client, scope, turn.id, now);
   return false;
 }
 
