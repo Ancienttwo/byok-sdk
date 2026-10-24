@@ -2481,6 +2481,7 @@ export function buildDaemonWithAdapters(
     helloCapabilities = capabilities;
 
     const commitTerminal = (taskId: string, terminal: Envelope | (() => Promise<Envelope | undefined>)): void => {
+      const ownerIdentity = sealIdentityOf(record, sealedMember);
       const plainBytes = typeof terminal === 'function' ? undefined : encodeEnvelope(terminal);
       // A sealed terminal is sealed once and its bytes are journaled; a retry
       // of the commit reuses them and never seals or uploads again (§9.2).
@@ -2527,7 +2528,9 @@ export function buildDaemonWithAdapters(
             reason: 'terminal_result_too_large', retryable: false,
             ...terminalIdentity(task.claimedRuntime, offerPayload.agentRef),
           }, { taskId });
-          const failure = await latestSealedTasks!.sealRecovered(offer, plainFailure);
+          // Only the owner run's tenant, device and member seal this failure.
+          const sameIdentity = ownerIdentity !== undefined && ownerIdentity === latestSealIdentity?.();
+          const failure = await latestSealedTasks!.sealRecovered(offer, plainFailure, sameIdentity);
           const failureBytes = encodeEnvelope(failure);
           await activeJournal.recordTerminal({ taskId, terminalType: 'failed', bytes: failureBytes,
             payloadHash: journalHash(failureBytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });

@@ -265,13 +265,15 @@ export class SealedTasks {
    * A terminal the daemon builds from a journaled offer (recovery, or a
    * result over the journal bound), sealed with that offer's context when it
    * seals output. A closed plaintext form, such as `daemon_interrupted`,
-   * stays plaintext.
+   * stays plaintext. With `sealable` false (the keyring is another member's),
+   * a terminal that seals output takes its closed plaintext form.
    */
-  async sealRecovered(offer: Envelope, terminal: Envelope): Promise<Envelope> {
+  async sealRecovered(offer: Envelope, terminal: Envelope, sealable = true): Promise<Envelope> {
     const { sealing, agentRef } = offer.payload as { sealing?: TaskSealing; agentRef?: AgentRef };
     if (!isSealedMessageType(offer.type) || sealing === undefined || !sealing.categories.includes('task-output') || isSealedTaskPlainOutput(terminal.type, terminal.payload)) {
       return terminal;
     }
+    if (!sealable) return this.unsealable(terminal)!;
     const task: SealedTask = { sealing, agentRef: agentRef ?? null, steerIds: new Set(), tail: Promise.resolve() };
     return (await this.#sealOutbound(task, terminal))!;
   }
