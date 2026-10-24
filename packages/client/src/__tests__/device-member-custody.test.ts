@@ -160,6 +160,97 @@ describe('DeviceMemberKeyStore', () => {
   });
 });
 
+describe('DeviceMemberKeyStore KEM rotation (E2d-5, the keys tests that #841 removed)', () => {
+  it('begins a KEM rotation beside the current key and keeps the member id (§7.5)', async () => {
+    const records = new DeviceMemberRecords(new InMemoryDeviceMemberCustody());
+    const created = await records.keys.loadOrCreate(DEVICE);
+    expect(created.nextKem).toBeUndefined();
+    const begun = await records.keys.beginKemRotation(DEVICE);
+    expect(begun.kem).toMatchObject({ epoch: 1, publicJwk: created.kem.publicJwk });
+    expect(begun.nextKem?.epoch).toBe(2);
+    expect(begun.nextKem?.publicJwk).not.toEqual(created.kem.publicJwk);
+    expect(await deriveMemberId(begun.signing.publicJwk)).toBe(await deriveMemberId(created.signing.publicJwk));
+  });
+
+  it('resumes a pending rotation after a restart and generates no other key', async () => {
+    const custody = new InMemoryDeviceMemberCustody();
+    await new DeviceMemberRecords(custody).keys.loadOrCreate(DEVICE);
+    const begun = await new DeviceMemberRecords(custody).keys.beginKemRotation(DEVICE);
+    const stored = custody.entries.get('member-keys');
+    const resumed = new DeviceMemberRecords(custody);
+    expect((await resumed.keys.load(DEVICE))?.nextKem?.publicJwk).toEqual(begun.nextKem!.publicJwk);
+    expect((await resumed.keys.beginKemRotation(DEVICE)).nextKem?.publicJwk).toEqual(begun.nextKem!.publicJwk);
+    expect(custody.entries.get('member-keys')).toBe(stored);
+  });
+
+  it('finishes a rotation: the next key becomes current, the old private key is gone, and a repeat changes nothing', async () => {
+    const custody = new InMemoryDeviceMemberCustody();
+    const records = new DeviceMemberRecords(custody);
+    await records.keys.loadOrCreate(DEVICE);
+    const oldScalar = (JSON.parse(custody.entries.get('member-keys')!) as { kemJwk: { d: string } }).kemJwk.d;
+    const begun = await records.keys.beginKemRotation(DEVICE);
+    const finished = await records.keys.finishKemRotation(DEVICE, 2);
+    expect(finished.nextKem).toBeUndefined();
+    expect(finished.kem).toMatchObject({ epoch: 2, publicJwk: begun.nextKem!.publicJwk });
+    expect(custody.entries.get('member-keys')).not.toContain(oldScalar);
+    const stored = custody.entries.get('member-keys');
+    expect((await records.keys.finishKemRotation(DEVICE, 2)).kem.epoch).toBe(2);
+    expect(custody.entries.get('member-keys')).toBe(stored);
+    expect((await records.keys.beginKemRotation(DEVICE)).nextKem?.epoch).toBe(3);
+  });
+
+  it('refuses to finish a rotation that is not pending and changes nothing', async () => {
+    const custody = new InMemoryDeviceMemberCustody();
+    const records = new DeviceMemberRecords(custody);
+    await expect(records.keys.finishKemRotation(DEVICE, 2)).rejects.toBeInstanceOf(DeviceMemberCustodyError);
+    expect(custody.entries.has('member-keys')).toBe(false);
+    await records.keys.loadOrCreate(DEVICE);
+    const unrotated = custody.entries.get('member-keys');
+    await expect(records.keys.finishKemRotation(DEVICE, 2)).rejects.toThrow(/cannot finish a KEM rotation to epoch 2/u);
+    expect(custody.entries.get('member-keys')).toBe(unrotated);
+    await records.keys.beginKemRotation(DEVICE);
+    const pending = custody.entries.get('member-keys');
+    await expect(records.keys.finishKemRotation(DEVICE, 3)).rejects.toBeInstanceOf(DeviceMemberCustodyError);
+    await expect(records.keys.finishKemRotation({ tenantId: 'tenant-a', deviceId: 'device-2' }, 2)).rejects.toThrow(/no device member keys of this enrollment/u);
+    await expect(records.keys.beginKemRotation({ tenantId: 'tenant-a', deviceId: 'device-2' })).rejects.toBeInstanceOf(DeviceMemberCustodyError);
+    expect(custody.entries.get('member-keys')).toBe(pending);
+  });
+
+  it('refuses a record whose pending key was tampered with, and never replaces it', async () => {
+    const custody = new InMemoryDeviceMemberCustody();
+    const records = new DeviceMemberRecords(custody);
+    await records.keys.loadOrCreate(DEVICE);
+    await records.keys.beginKemRotation(DEVICE);
+    const record = JSON.parse(custody.entries.get('member-keys')!) as { kemJwk: { d: string }; nextKem: { jwk: { d: string } } };
+    const tampered = custody.entries.get('member-keys')!.replace(record.nextKem.jwk.d, record.kemJwk.d);
+    custody.entries.set('member-keys', tampered);
+    await expect(records.keys.load(DEVICE)).rejects.toBeInstanceOf(DeviceMemberCustodyError);
+    await expect(records.keys.beginKemRotation(DEVICE)).rejects.toBeInstanceOf(DeviceMemberCustodyError);
+    await expect(records.keys.finishKemRotation(DEVICE, 2)).rejects.toBeInstanceOf(DeviceMemberCustodyError);
+    expect(custody.entries.get('member-keys')).toBe(tampered);
+  });
+
+  it('keeps the last write of two concurrent writers, and every later begin resumes it', async () => {
+    const custody = new InMemoryDeviceMemberCustody();
+    const records = new DeviceMemberRecords(custody);
+    await records.keys.loadOrCreate(DEVICE);
+    const begun = await Promise.all([records.keys.beginKemRotation(DEVICE), new DeviceMemberRecords(custody).keys.beginKemRotation(DEVICE)]);
+    const stored = (await records.keys.load(DEVICE))!.nextKem!.publicJwk;
+    expect(begun.map((keys) => keys.nextKem!.publicJwk)).toContainEqual(stored);
+    expect((await records.keys.beginKemRotation(DEVICE)).nextKem!.publicJwk).toEqual(stored);
+  });
+
+  it('fits a pending rotation in the OS entry bound', async () => {
+    const memory = new InMemoryDeviceMemberCustody();
+    const records = new DeviceMemberRecords(memory);
+    await records.keys.loadOrCreate({ tenantId: 't'.repeat(64), deviceId: 'd'.repeat(64) });
+    await records.keys.beginKemRotation({ tenantId: 't'.repeat(64), deviceId: 'd'.repeat(64) });
+    const { custody } = linuxProvider();
+    await custody.replace('member-keys', memory.entries.get('member-keys')!);
+    expect(await custody.read('member-keys')).toBe(memory.entries.get('member-keys'));
+  });
+});
+
 describe('DeviceMemberRecords', () => {
   it('round-trips the pending pv and refuses a malformed one', async () => {
     const custody = new InMemoryDeviceMemberCustody();

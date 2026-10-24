@@ -2129,8 +2129,8 @@ export { MEMBER_CHAIN_OPS, deriveMemberId, memberChainEntryHash, signMemberChain
 export type { MemberChainEntryV1, MemberChainEntryVerifyResult, MemberChainOp, UnsignedMemberChainEntryV1, } from './member-chain';
 export { MEMBER_KEY_BUNDLE_VERSION, createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem } from './member-bundle';
 export type { CreateMemberKeyBundleInput, MemberKeyBundleV1 } from './member-bundle';
-export { generateMemberKeyRecord, openMemberKeyRecord } from './member-key-record';
-export type { MemberKeyBinding, MemberKeyStore, MemberKeys } from './member-key-record';
+export { beginMemberKemRotation, finishMemberKemRotation, generateMemberKeyRecord, openMemberKeyRecord, } from './member-key-record';
+export type { MemberKemKey, MemberKeyBinding, MemberKeyStore, MemberKeys } from './member-key-record';
 export { MEMBER_FINGERPRINT_DOMAIN, memberApprovalCode, memberFingerprint } from './member-fingerprint';
 export type { MemberFingerprintInput } from './member-fingerprint';
 export { CLIENT_PAIRING_MAC_DOMAIN, DEVICE_PAIRING_MAC_DOMAIN, PAIRING_VERIFICATION_SECRET_BYTES, computeClientPairingMac, computeDevicePairingMac, decodePairingVerificationSecret, encodePairingVerificationSecret, formatPairingInput, generatePairingVerificationSecret, parsePairingInput, verifyClientPairingMac, verifyDevicePairingMac, } from './pairing-verification';
@@ -2374,11 +2374,14 @@ export interface MemberKeys {
         readonly privateKey: WebCryptoKey;
     };
     /** Opens key packages. The private key is not extractable. `epoch` starts at 1. */
-    readonly kem: {
-        readonly epoch: number;
-        readonly publicJwk: P256PublicJwk;
-        readonly privateKey: WebCryptoKey;
-    };
+    readonly kem: MemberKemKey;
+    /** The KEM key of a rotation that has begun and not finished, at `kem.epoch + 1`. */
+    readonly nextKem?: MemberKemKey;
+}
+export interface MemberKemKey {
+    readonly epoch: number;
+    readonly publicJwk: P256PublicJwk;
+    readonly privateKey: WebCryptoKey;
 }
 /** The custody port of one member's keys. Each store expects one writer. */
 export interface MemberKeyStore {
@@ -2399,6 +2402,20 @@ export declare function generateMemberKeyRecord(binding: MemberKeyBinding): Prom
  * its public point. Never throws for hostile input.
  */
 export declare function openMemberKeyRecord(text: unknown): Promise<MemberKeys | undefined>;
+/**
+ * Begin a KEM rotation: the record with a new KEM key at `kemEpoch + 1`
+ * beside the current one. A record whose rotation has begun comes back
+ * unchanged, so a resumed rotation keeps its key. A record that is not
+ * canonical v1 text throws.
+ */
+export declare function beginMemberKemRotation(text: string): Promise<string>;
+/**
+ * Finish the KEM rotation to `epoch`: the next key becomes current, and the
+ * old private key is gone from the record. A repeat after the rotation
+ * finished comes back unchanged. Any other `epoch` returns `undefined`. A
+ * record that is not canonical v1 text throws.
+ */
+export declare function finishMemberKemRotation(text: string, epoch: number): string | undefined;
 // ==== @byok-sdk/core dist/sealed-payload/pairing-verification.d.ts ====
 import type { MemberKeyBundleV1 } from './member-bundle';
 import { type Bytes } from './primitives';

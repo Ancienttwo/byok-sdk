@@ -205,7 +205,9 @@ export async function resumeDeviceMember(options: ResumeDeviceMemberOptions): Pr
   const state = await records.readState();
   if (state === undefined || state.tenantId !== tenantId || state.deviceId !== deviceId) return undefined;
   const keys = await records.keys.load({ tenantId, deviceId });
-  if (keys === undefined || !samePublicKey(keys.signing.publicJwk, state.member.signingPublicJwk) || !samePublicKey(keys.kem.publicJwk, state.member.kemPublicJwk)) {
+  // A KEM rotation (E2d-5) moves the KEM key away from the registered bundle, so after pairing the chain names it (see `session`).
+  if (keys === undefined || !samePublicKey(keys.signing.publicJwk, state.member.signingPublicJwk)
+    || (state.anchor === undefined && !samePublicKey(keys.kem.publicJwk, state.member.kemPublicJwk))) {
     log('E2EE member keys are missing or do not match the registered bundle; re-pair the device to enable E2EE');
     return undefined;
   }
@@ -315,8 +317,14 @@ async function session(
   entries: readonly unknown[],
   log: DeviceMemberLog,
 ): Promise<DeviceMemberSession | undefined> {
-  if (!state.members.has(member.memberId)) {
+  const current = state.members.get(member.memberId);
+  if (current === undefined) {
     log('this device is no longer a current member of the chain; E2EE stays off');
+    return undefined;
+  }
+  // The chain's KEM key of this member is the current key, or the next one of a rotation whose `rotate` entry is on the chain.
+  if (![keys.kem, keys.nextKem].some((kem) => kem !== undefined && samePublicKey(kem.publicJwk, current.kemPublicJwk))) {
+    log('E2EE member keys do not hold the KEM key the member chain names for this device; re-pair the device to enable E2EE');
     return undefined;
   }
   // The walk verified every entry, so each one parses.

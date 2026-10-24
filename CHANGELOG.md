@@ -18,7 +18,30 @@
   A class the vendored OAR derives from error text, such as Grok's "Internal
   error" or Anthropic limit wording in a Codex `other` error, is sent as
   `unknown`; Grok's `retry` still follows OAR's class.
-
+- **Feature (client)** — the device member can rotate its own KEM key
+  (#654 E2d-5, design §7.5); no daemon path starts a rotation yet. The device
+  keeps the next key beside the current one, appends its `rotate` entry,
+  re-wraps its own packages to the next key, and drops the old key only
+  after every re-wrap reads back. It reads its packages one epoch at a time,
+  four at a time, from epoch 1 to 256 in every scope it may use: up to 64
+  batches of 4 reads per scope per pass, three passes per rotation, and up
+  to five when a scope starts again after the chain moved. A
+  package at epoch 256, a known epoch past it, or an epoch whose key it
+  holds or that has a freshness point but reads no package stops the
+  rotation and keeps the old key. Just before the old key goes, it catches
+  up and reads back every scope it may use then, including one created
+  during the rotation; any epoch that opens only with the old key, or a
+  re-wrapped epoch that no longer reads back, stops the rotation and is
+  logged with its scope and epoch. Every Host request of the rotation is
+  cut off after the member request timeout. That final read-back is an
+  interim measure: a late put of a package wrapped to the old key can still
+  land after it; the recipient `kemEpoch` in the signed package and the Host
+  row closes it and must land before a production trigger (E5b-2). The
+  device does not see packages above epoch 256: when all its packages of a
+  scope are above 256 and none is at 256, it loses those epochs. A scope it
+  may not use during the rotation is not re-wrapped, and its packages
+  wrapped to the old key do not open if it becomes usable again. Core
+  adds `beginMemberKemRotation` and `finishMemberKemRotation`.
 - **Fixed (client)** — a terminal whose journal commit failed during a
   `stop()` is sent after the next `start()` in the same process. Startup
   recovery no longer replaces it with `task.fail` `daemon_interrupted`.
@@ -72,15 +95,29 @@
   on the verified chain and its `sender` a member of the scope policy at that
   head, or the offer gets `sealed_open_failed` and a steer is dropped. Output
   is sealed at the newest epoch with no scope member `remove` and no
-  member-dropping `scope-policy` after its freshness point. An output-only
-  task with no freshness point from this run, or carried from the previous run
-  of the same process, gets `sealed_key_unavailable`. A
+  member-dropping `scope-policy` after its freshness point. A
   terminal that a failed `stop()` left queued is sealed by the next run in the
   same process when that run has the same tenant, device and member, and is
   otherwise in the closed form; the next run keeps the freshness points that
   are on its verified chain. A terminal that the startup replay builds from the journal is in the
   closed form. The internal `sealedPayload` test parameter of
   `buildDaemonWithAdapters` is removed.
+- **Feature (client)** — a daemon paired as an E2EE member rotates a scope
+  epoch when no epoch is fresh (#654 E2d-4). It wraps a new scope key to every
+  current member of the scope policy, signed by the device member, and puts
+  the packages through the device-proof `POST /byok/e2ee/key-packages` write
+  (operation `e2ee-scope-key-package.put`), in batches of at most 256. This
+  replaces the E2d-3 decline: an output-only task with no freshness point now
+  gets a rotated epoch instead of `sealed_key_unavailable`. Host operators
+  see the device send this signed write. The device reads its package of the
+  4 epochs above the newest one it knows and rotates above the newest held;
+  when the fourth is held, the seal fails with `sealed_key_unavailable`. A
+  Host that holds the epoch under another key answers 409, and the next
+  rotation starts above it. A Host request that hangs is cut off at its
+  timeout. A scope whose only current member is the device is not rotated.
+  A rotated epoch goes stale after a `remove` or a member-dropping policy
+  after its freshness point, or after a member add or KEM rotation after the
+  chain seq it was wrapped at (within one process).
 - **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is
   burned: start a new registration at the Host, do not retry it (#654 E2d).
 - **Breaking (cloud)** — the device-proof `requestId` is single-use on the
