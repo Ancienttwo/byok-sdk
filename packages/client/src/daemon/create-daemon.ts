@@ -2277,6 +2277,11 @@ export function buildDaemonWithAdapters(
           || payload.terminalProjection?.mode !== 'result-document' || typeof payload.terminalProjection.contract !== 'string')) {
           throw new Error('durable result-reply failure does not match its original offer');
         }
+        // A start after a failed stop in this process: the commit queue still
+        // holds this task's real terminal and `resume()` above retries it. The
+        // journal keeps the first terminal it records, so a recovery terminal
+        // here would replace that result.
+        if (terminalCommits.hasPending(task.taskId)) continue;
         if (resultFailure) { resultReplyRecoveryTasks.set(task.taskId, { agentRef: payload.agentRef!, contract: payload.messageEgress!.contract! }); continue; }
         await recordRecoveryFailure(task, 'daemon_interrupted', true);
       }

@@ -15,6 +15,9 @@
   required member `objects`, the tenant-bound `get`, `addReference` and
   `removeReference` of the core `ObjectStore`. `tenantStoresFor` builds it, so
   only code that builds a `TenantStores` literal needs to add it.
+- **Fixed (client)** — a terminal whose journal commit failed during a
+  `stop()` is sent after the next `start()` in the same process. Startup
+  recovery no longer replaces it with `task.fail` `daemon_interrupted`.
 - **Feature (client)** — when the server advertises
   `sealed-output-ciphertext-ref`, the daemon uploads a sealed task output
   over the inline frame as a ciphertext blob and sends the terminal or
