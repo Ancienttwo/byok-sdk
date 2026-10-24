@@ -130,11 +130,11 @@ export function systemPrompt(actions?: readonly string[]): string {
 }
 export const SYSTEM_PROMPT = systemPrompt();
 /**
- * The actions that a Bot Turn prompt names (#881). In external team mode, when the offer narrows the Turn actions, the
- * prompt names only the actions of the Turn's frozen schema. Otherwise it is `SYSTEM_PROMPT`.
+ * The actions that a Bot Turn prompt names (#881). When the offer narrows the Turn actions, the prompt names only the
+ * actions of the Turn's frozen schema, in both team modes. Otherwise it is `SYSTEM_PROMPT`.
  */
-export function promptActions(state: ContextState, schema: ResultSchema, offer?: CheckedOffer): readonly string[] | undefined {
-  return state.team.external && offer?.actions?.turn ? Object.keys(schema.properties ?? {}) : undefined;
+export function promptActions(schema: ResultSchema, offer?: CheckedOffer): readonly string[] | undefined {
+  return offer?.actions?.turn ? Object.keys(schema.properties ?? {}) : undefined;
 }
 
 export const ROOM_SYSTEM_PROMPT = `You are a room member. Use submit_result for this seat.

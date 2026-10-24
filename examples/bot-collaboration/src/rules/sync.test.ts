@@ -85,7 +85,7 @@ describe('syncTurn', () => {
     expect([waiting.status, ready.schemas.t1]).toEqual(['queued', undefined]);
   });
 
-  it('#881: freezes a prompt with only the offered actions in external team mode, and the full prompt otherwise', () => {
+  it('#881: freezes a prompt with only the offered actions in both team modes, and the full prompt otherwise', () => {
     const prompt = (external: boolean, offer?: CheckedOffer) => {
       const s = state();
       if (external) Object.assign(s.team, { external: { revision: 1 } });
@@ -96,9 +96,11 @@ describe('syncTurn', () => {
     const delegateOnly = outcomeOffer({ actions: { turn: ['delegate'] } });
     expect(prompt(true, delegateOnly)).toBe(systemPrompt(['delegate']));
     expect(prompt(true, delegateOnly)).not.toContain('ask_user');
-    // Local team mode, no offer, or an offer that does not narrow the Turn actions: the prompt is unchanged.
-    expect(prompt(false, delegateOnly)).toBe(SYSTEM_PROMPT);
-    expect(prompt(true)).toBe(SYSTEM_PROMPT);
-    expect(prompt(true, outcomeOffer({ timeZones: ['Asia/Shanghai'] }))).toBe(SYSTEM_PROMPT);
+    expect(prompt(false, delegateOnly)).toBe(systemPrompt(['delegate']));
+    // No offer, or an offer that does not narrow the Turn actions: the prompt is unchanged.
+    for (const external of [true, false]) {
+      expect(prompt(external)).toBe(SYSTEM_PROMPT);
+      expect(prompt(external, outcomeOffer({ timeZones: ['Asia/Shanghai'] }))).toBe(SYSTEM_PROMPT);
+    }
   });
 });

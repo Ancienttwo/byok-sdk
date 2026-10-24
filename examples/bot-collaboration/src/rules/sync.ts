@@ -141,7 +141,7 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   let schema: ResultSchema, frozen: ReturnType<typeof botTurnInstruction>;
   try {
     schema = outcomeSchema(turn.botId, state, turn, options.models, options.routines, options.offer);
-    frozen = botTurnInstruction(state, turn, options.limits, options.routines, history?.rows, room?.rows, promptActions(state, schema, options.offer));
+    frozen = botTurnInstruction(state, turn, options.limits, options.routines, history?.rows, room?.rows, promptActions(schema, options.offer));
   } catch (error) {
     if (error instanceof BotTurnOutcomeSchemaError && error.code === 'schema-over-budget') {
       blockTurn(state, turn, `Outcome schema over budget after flat fallback: ${error.message}`, publish);

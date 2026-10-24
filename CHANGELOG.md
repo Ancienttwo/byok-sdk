@@ -248,13 +248,13 @@
   handler runs, and `drain()` then moves past the intent. The call refuses an
   unknown key, a settled intent and an intent whose terminal K8 did not
   refuse. K4 now exports its `settle` transition for this.
-- **Feature (examples)** — in K8 external team mode, an outcome offer with
+- **Feature (examples)** — in K8, an outcome offer with
   `actions.turn` narrows the system prompt of new Bot Turns too (#881). The
   prompt keeps only the sentences for every Bot Turn and for the actions of
   the Turn's frozen schema, so an offer of only `delegate` names no
   `ask_user`, `confirmable_action` or routine, and a narrowed prompt names no
-  `speech` or `room_call`. Local team mode, and an offer without
-  `actions.turn`, keep `SYSTEM_PROMPT`, which is the same text as before.
+  `speech` or `room_call`. An offer without
+  `actions.turn` keeps `SYSTEM_PROMPT`, which is the same text as before.
 - **Fixed (examples)** — K8 `outcomeOffer` refuses more than 16
   `confirmable` actions (#881). Before, the list had no count limit, and a
   list that put the schema over budget blocked every Turn. Sixteen branches

@@ -119,12 +119,12 @@ The constructor checks the offer and composes one schema with it. Turns that
 froze before keep their schema. A room seat always gets `speech`. A schema
 that is over budget even in the flat shape blocks its Turn, as before. The H
 sync takes the same offer as `SyncOptions.offer`, a value from `outcomeOffer`.
-In external team mode, an offer with `actions.turn` also narrows the system
+An offer with `actions.turn` also narrows the system
 prompt of a Bot Turn: it keeps only the sentences for every Bot Turn and for the
 actions in that Turn's frozen schema (`systemPrompt`, `promptActions`). With only
 `delegate`, the prompt names no `ask_user`, `confirmable_action` or routine.
 A narrowed prompt never names `speech` or `room_call`, which only a room seat
-gets. Local team mode, and an offer without `actions.turn`, keep
+gets. An offer without `actions.turn` keeps
 `SYSTEM_PROMPT`. A narrowed prompt is shorter, so the
 `minimumInstructionBytes(SYSTEM_PROMPT)` check still bounds it.
 
