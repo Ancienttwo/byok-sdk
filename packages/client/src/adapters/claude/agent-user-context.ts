@@ -4,7 +4,8 @@ import { RuntimeExecutionFailure } from '../../runtime-failure';
 
 const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
 // Claude matches excludes with picomatch after turning `\` into `/`, so glob
-// syntax cannot be escaped; `?` stands in for it in a directory part.
+// syntax cannot be escaped; `?` stands in for it in a directory part, so a
+// directory named `**` or `(x86)` matches only itself.
 const GLOB_SYNTAX = /[()[\]{}*?!@+|^$]/g;
 
 export interface ClaudeAgentUserContextSettings {
@@ -44,12 +45,13 @@ export function claudeAgentUserContextSettings(
   const configDir = env.CLAUDE_CONFIG_DIR ?? p.join((platform === 'win32' ? env.USERPROFILE : env.HOME) || homedir(), '.claude');
   if (!p.isAbsolute(configDir)) throw refuse('claude config directory must be an absolute path');
 
-  const file = (dir: string, ...names: string[]) => p.join(dir, ...names).replaceAll('\\', '/');
-  const rules = (dir: string) => `${file(dir).replace(GLOB_SYNTAX, '?')}/**`;
+  const file = (dir: string, ...names: string[]) => p.join(dir, ...names).replaceAll('\\', '/').replace(GLOB_SYNTAX, '?');
+  const rules = (dir: string) => `${file(dir)}/**`;
   const excludes: string[] = [];
-  // A config directory inside the home holds Agent-home files, which stay.
-  // Claude also matches a pattern's real path, so an alias into the home counts.
-  if (!within(configDir) && !within(realpath(configDir))) excludes.push(file(configDir, 'CLAUDE.md'), rules(p.join(configDir, 'rules')));
+  // A config directory whose real path is inside the home holds Agent-home
+  // files, which stay. Claude matches a pattern's real path, so the real path
+  // decides: an alias into the home counts, a link out of it does not.
+  if (!within(realpath(configDir))) excludes.push(file(configDir, 'CLAUDE.md'), rules(p.join(configDir, 'rules')));
   for (let dir = p.dirname(home); p.dirname(dir) !== dir; dir = p.dirname(dir)) {
     excludes.push(file(dir, 'CLAUDE.md'), file(dir, 'CLAUDE.local.md'), file(dir, '.claude', 'CLAUDE.md'), rules(p.join(dir, '.claude', 'rules')));
   }
