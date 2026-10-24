@@ -77,6 +77,11 @@ Keep one FIFO per `(tenant, deviceId, agentId)`. Profile changes do not create a
 Use the embedded wake queue for execution deadlines and backoff.
 An out-of-horizon routine candidate uses process-local backoff until K2 can accept it.
 Keep outcome semantics in a synchronous injected callback. K8 actions are outside K4.
+A callback that throws rolls the terminal transaction back. The intent stays open at the head
+of its FIFO, its outbox row keeps `lastError`, and each scan applies the terminal again. To end
+such an intent without its outcome, the Host calls the exported `settle(state, intent, conclusion)`
+transition inside `ledger.transaction`. The settled intent records no terminal; the server task
+keeps it. K8 `failStuckIntent` does this.
 
 The owner resolved the initial expiry blocker on 2026-10-18.
 The allowed readbacks now include `tasks.attempt` and `tasks.get`.

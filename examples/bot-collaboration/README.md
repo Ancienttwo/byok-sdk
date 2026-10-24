@@ -72,8 +72,24 @@ a Bot Turn nor a Host intent, for example from a direct `bot.core.enqueue`, or a
 Host handler that throws or returns a promise. Then `drain()` rejects with
 `IntentOutcomeError`, and so does every API that runs a pass, including `input`
 and the `wake.consume` hook. The audit gets one row for each key and reason. The
-intent stays at the head of its FIFO until its outcome applies. `BotOptions`
-passes `reconcileMs` (default 100) and `onOutbox` to the K4 core.
+intent stays at the head of its FIFO until its outcome applies, for example
+after a restart with a fixed handler, or until the owner calls
+`failStuckIntent(key)`. That call runs a K4 drain first, so it also works right
+after a restart. If that drain refuses the intent's terminal again, one
+transaction settles the intent as `failed` with the K4 `settle` transition and
+adds the audit row `Intent failed by owner <code>: <key> <reason>`. The settle
+runs no handler, and the intent records no terminal; the server task keeps it.
+The drain before the settle applies the terminal once more, so a `handler_failed`
+handler runs once inside the call. If that drain applies the outcome, the call
+refuses with `Intent already settled`. If that drain rejects and the intent has
+no refusal of its own, the call throws the drain error. Later drains move past
+the intent. The call settles the key first. Its closing pass, like every API
+that runs a pass, rejects if another intent is stuck, and a retry for this key
+then says `Intent already settled`. A Host intent keeps its `hostIntents` record until K4 compacts it,
+so an exact replay of `enqueueHostIntent` returns the failed intent. The call
+refuses an unknown key, a settled intent, and an intent whose terminal K8 did not
+refuse, such as one still running. `BotOptions` passes `reconcileMs` (default
+100) and `onOutbox` to the K4 core.
 
 ## Actions and context
 
@@ -99,14 +115,24 @@ extra actions of an owner Main Bot Turn, from the Bot and room management
 actions, `team_note` and `cancel_delegation`. A list only removes actions, and
 an empty list removes all of that kind. `timeZones` holds 1 to 8 IANA zones for
 `create_routine` and `update_routine`, checked by the `@byok-sdk/core` routine
-calendar. The default is `UTC` and `America/New_York`. `confirmable` holds the
-`confirmable_action` branches, each an action name and its draft schema. The
+calendar. The default is `UTC` and `America/New_York`. `confirmable` holds 1 to
+16 `confirmable_action` branches, each an action name and its draft schema. The
 default is `send_message`, and the connector receives only the offered names.
+Sixteen branches with the `send_message` draft and 64-byte names fit both
+bounds with eight long time zones at the eight-routine limit, with room for
+heavier drafts (`CONFIRMABLE_MAX`).
 The constructor checks the offer and composes one schema with it. Turns that
 froze before keep their schema. A room seat always gets `speech`. A schema
 that is over budget even in the flat shape blocks its Turn, as before. The H
 sync takes the same offer as `SyncOptions.offer`, a value from `outcomeOffer`.
-The system prompt does not change with the offer.
+An offer with `actions.turn` also narrows the system
+prompt of a Bot Turn: it keeps only the sentences for every Bot Turn and for the
+actions in that Turn's frozen schema (`systemPrompt`, `promptActions`). With only
+`delegate`, the prompt names no `ask_user`, `confirmable_action` or routine.
+A narrowed prompt never names `speech` or `room_call`, which only a room seat
+gets. An offer without `actions.turn` keeps
+`SYSTEM_PROMPT`. A narrowed prompt is shorter, so the
+`minimumInstructionBytes(SYSTEM_PROMPT)` check still bounds it.
 
 Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same

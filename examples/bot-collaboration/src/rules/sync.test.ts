@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { syncTurn, type FreezeExecution, type SyncFacts, type SyncOptions, type SyncState } from './sync';
 import type { Json, Rejection, Turn } from './turn';
 import type { IntentFact } from './delegation';
+import { outcomeOffer, SYSTEM_PROMPT, systemPrompt, type CheckedOffer } from './schema';
 
 const OPTIONS: SyncOptions<never> = { now: 1000, models: ['default'], readOnlyToolsets: [],
   limits: { turnLimit: 12, contextMaxBytes: 32_768, instructionMaxBytes: 65_536 }, historyMode: false, routines: [] };
@@ -82,5 +83,24 @@ describe('syncTurn', () => {
     const ready = state(), waiting = turn(ready, { status: 'queued' });
     expect(syncTurn(ready, waiting, facts(), { ...OPTIONS, historyMode: true }, () => {})).toBeUndefined();
     expect([waiting.status, ready.schemas.t1]).toEqual(['queued', undefined]);
+  });
+
+  it('#881: freezes a prompt with only the offered actions in both team modes, and the full prompt otherwise', () => {
+    const prompt = (external: boolean, offer?: CheckedOffer) => {
+      const s = state();
+      if (external) Object.assign(s.team, { external: { revision: 1 } });
+      const step = syncTurn(s, turn(s, { status: 'queued' }), facts(), { ...OPTIONS, ...(offer ? { offer } : {}) }, () => {});
+      if (step?.kind !== 'freeze') throw new Error('The Turn did not freeze');
+      return (step.input.execution as { payload: { instruction: string } }).payload.instruction.split('\n\nRequest:\n')[0];
+    };
+    const delegateOnly = outcomeOffer({ actions: { turn: ['delegate'] } });
+    expect(prompt(true, delegateOnly)).toBe(systemPrompt(['delegate']));
+    expect(prompt(true, delegateOnly)).not.toContain('ask_user');
+    expect(prompt(false, delegateOnly)).toBe(systemPrompt(['delegate']));
+    // No offer, or an offer that does not narrow the Turn actions: the prompt is unchanged.
+    for (const external of [true, false]) {
+      expect(prompt(external)).toBe(SYSTEM_PROMPT);
+      expect(prompt(external, outcomeOffer({ timeZones: ['Asia/Shanghai'] }))).toBe(SYSTEM_PROMPT);
+    }
   });
 });

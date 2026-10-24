@@ -209,7 +209,16 @@
   Host intent, or its Host handler throws or is async. Before, an intent from a
   direct `bot.core.enqueue` stayed in flight with only a K4 `lastError`. Every
   API that runs a pass rejects until the outcome applies, and the audit gets
-  one row for each key and reason.
+  one row for each key and reason. The owner call `failStuckIntent(key)` ends
+  such an intent. It runs a K4 drain first. If that drain refuses the terminal
+  again, one transaction settles the intent as `failed` and writes the audit
+  row `Intent failed by owner <code>: <key> <reason>`, and `drain()` then moves
+  past it. The settle runs no handler; the drain before it applies the terminal
+  once more, and if that drain applies the outcome, the call refuses with
+  `Intent already settled`. The call also refuses an unknown key, a settled
+  intent and an intent whose terminal K8 did not refuse, and it throws the
+  drain error when the scan stopped before it reached the key. K4 now exports
+  its `settle` transition for this.
 - **Breaking (cloud)** — the Host shreds a sealed scope when the member chain
   appends a `shred` (#654 E5b-1, design §11.2). A `shred` subject must now be
   exactly `{ scopeId }`; another subject gets `coordination_input_invalid`.
@@ -259,9 +268,13 @@
 - **Feature (examples)** — K8 `BotOptions.outcome` narrows the outcome offer
   of new Turns (#881). `actions.turn` and `actions.main` are allowlists for a
   Bot Turn and for the extra actions of an owner Main Bot Turn. `timeZones`
-  sets 1 to 8 IANA zones for the routine actions. `confirmable` sets the
+  sets 1 to 8 IANA zones for the routine actions. `confirmable` holds 1 to 16
   `confirmable_action` branches. Without the option, every schema is the same
-  as before. `outcomeOffer` checks an offer, and `SyncOptions.offer` takes its
+  as before. An offer with `actions.turn` also narrows the Bot Turn prompt to
+  the sentences for every Turn and for the actions in the Turn's frozen
+  schema, so an offer of only `delegate` names no `ask_user`,
+  `confirmable_action` or routine. Without `actions.turn`, the prompt is
+  unchanged. `outcomeOffer` checks an offer, and `SyncOptions.offer` takes its
   result, so the H sync uses the same rule. Turns frozen before keep their
   schema.
 
