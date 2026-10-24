@@ -510,7 +510,7 @@ const __executionScratch = await testExecutionScratch();
   ])('reports unknown for a provider failure Pi gives only as text, reason unchanged (#869): %s', async (finalError) => {
     const session = await startAdapter(fakePiAdapter(), baseTask, await makeCtx({ ...process.env, FAKE_PI_AUTO_RETRY_FAIL: '1', FAKE_PI_AUTO_RETRY_FINAL_ERROR: finalError }));
     openSessions.push(session);
-    const events: AgentEvent[] = [];
+    const events: Array<AgentEvent | MessageDraftDelta> = [];
     const failure = await (async () => { for await (const event of session.events) events.push(event); })().then(() => undefined, (error: unknown) => error);
     expect(events).toContainEqual({ type: 'error', message: finalError });
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);

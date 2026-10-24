@@ -157,7 +157,7 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
 
 describe('the failure class of a sealed task (#869)', () => {
   const sealedTasks = async (keyring: SealedScopeKeyring, taskId: string) => {
-    const tasks = new SealedTasks({ keyring, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); } } });
+    const tasks = new SealedTasks({ keyring, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } }, serverCapabilities: () => [] });
     await tasks.openOffer(createEnvelope('task.offer_sealed', {
       instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
     } as never, { taskId, seq: 1 }));
