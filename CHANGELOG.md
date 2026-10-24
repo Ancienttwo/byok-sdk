@@ -2,17 +2,21 @@
 
 ## Unreleased
 
-## 0.30.0 — source candidate
+## 0.30.0 — 2026-10-24 (published)
 
 0.30.0 is a MINOR release under the default pre-1.0 policy, with no exception.
 It adds public API, gated wire types and behavior, and it has breaking changes
 in protocol, server, cloud and client. The owner confirmed the breaking labels
 of #783, #784, #831 and #834. The examples changes of #820, #823 and #852 are
-also breaking for a Host that copies the K8 example. This candidate is not
-published. A default 0.30.0 daemon does not advertise `sealed-payload-v1`. See
-the [release notes](docs/releases/v0.30.0.md) for scope, the release rule of
-`sealed-payload-v1` and the upgrade notes. All nine public manifests and their
-lock records move to 0.30.0.
+also breaking for a Host that copies the K8 example. The npm registry lists
+all nine public packages at 0.30.0. The registry publication times fall on
+2026-10-24 (UTC). The registry read on 2026-10-24 at 07:39 UTC reports 0.30.0
+as `latest` for all nine. The tag `v0.30.0` and its GitHub Release point to
+`6b779cff`. A default 0.30.0 daemon does not advertise `sealed-payload-v1`.
+See the [release notes](docs/releases/v0.30.0.md) for scope, the release rule
+of `sealed-payload-v1`, the upgrade notes and the qualification limits that
+were recorded at preparation. All nine public manifests and their lock
+records move to 0.30.0.
 
 - **Feature (protocol, cloud)** — a sealed
   `task.offer_for_agent_with_egress_fresh_sealed` can carry a plaintext
@@ -416,14 +420,15 @@ lock records move to 0.30.0.
   vectors run on H. H has no migrations while it is unreleased, and
   `STORE_VERSION` stays 2. After these DDL changes, recreate the H schema.
 
-## 0.29.0 — 2026-10-23 (published)
+## 0.29.0 — 2026-10-23 (published; superseded by 0.30.0)
 
 0.29.0 is a MINOR release under the default pre-1.0 policy, with no
 exception. It adds public API and behavior, and it has breaking changes in
 client and keys. The owner labelled #723, #744, #751 and #767 as breaking.
 The npm registry lists all nine public packages at 0.29.0. The registry
 publication times fall on 2026-10-23 (UTC). The registry read on 2026-10-23
-at 10:20 UTC reports 0.29.0 as `latest` for all nine. The tag `v0.29.0` and
+at 10:20 UTC reported 0.29.0 as `latest` for all nine. The read on 2026-10-24
+at 07:39 UTC reports 0.30.0 as `latest`. The tag `v0.29.0` and
 its GitHub Release point to `df0c91d2`. See the
 [release notes](docs/releases/v0.29.0.md) for scope and the qualification
 limits that were recorded at preparation. All nine public manifests and their
@@ -688,7 +693,7 @@ field on durable Pi tool events and `HermesAdapter.prepare()` on Windows. The
 npm registry lists all nine public packages at 0.28.3. The registry
 publication times fall on 2026-10-22 (UTC). The registry read on 2026-10-23
 at 02:58 UTC reported 0.28.3 as `latest` for all nine. The read on 2026-10-23
-at 10:20 UTC reports 0.29.0 as `latest`. The tag `v0.28.3` and
+at 10:20 UTC reported 0.29.0 as `latest`. The tag `v0.28.3` and
 its GitHub Release point to `9ca1f3ea`. See the
 [release notes](docs/releases/v0.28.3.md) for scope and the qualification
 limits that were recorded at preparation. All nine public manifests and their
