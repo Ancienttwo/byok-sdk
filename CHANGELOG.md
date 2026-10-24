@@ -68,6 +68,10 @@
   applied, so that scope keeps its packages and accepts new puts. A stored
   `shred` entry whose subject is not `{ scopeId }` makes every chain read that
   includes it fail with `e2ee_member_state_unreadable`.
+- **Fixed (client)** — under load, a Grok failure whose cause comes in a
+  `retry_state` notification (a rate limit, for example) could be classified
+  from the error text instead (#869). The vendored OAR now records that
+  notification before the failed turn reads its frames.
 
 ## 0.30.0 — 2026-10-24 (published)
 
