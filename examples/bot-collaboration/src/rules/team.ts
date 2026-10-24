@@ -1,4 +1,4 @@
-import { AgentHomeProjectionAgentRefSchema, AgentHomeProjectionValueSchema } from '@byok-sdk/protocol';
+import { AgentHomeProjectionAgentRefSchema, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionValueSchema } from '@byok-sdk/protocol';
 import type { Room } from './rooms';
 /** Team role checks as pure rules (#739 D1). They read only the Bot rows that the caller gives. */
 export function activeBot<B extends { readonly archived: boolean }>(team: { readonly bots: Readonly<Record<string, B>> }, id: string): B {
@@ -39,11 +39,11 @@ export function refuseExternalTeam(team: { readonly external?: ExternalTeam }, a
   if (team.external) throw new TeamModeError('external_team', `external_team: ${action} is owned by the team authority`);
 }
 const text = (value: unknown): value is string => typeof value === 'string';
-const PROFILE_REVISION_MAX = 9223372036854775807n;
-/** A profile revision is a canonical decimal string, at most the largest signed 64-bit integer, as K8 counts its own. */
+/** A Host profile revision must be one that an Agent home projection can apply, so the protocol schema decides. */
 export function profileRevision(value: unknown): string {
-  if (!text(value) || !/^(?:0|[1-9][0-9]*)$/.test(value) || BigInt(value) > PROFILE_REVISION_MAX) throw new Error('Invalid profile revision');
-  return value;
+  const parsed = AgentHomeProjectionProfileRevisionSchema.safeParse(value);
+  if (!parsed.success) throw new Error('Invalid profile revision');
+  return parsed.data;
 }
 /** The persona projection value of a Bot profile. `update_bot` and a team snapshot write the same value. */
 export function profileProjection(bot: { readonly name: string; readonly role: string; readonly persona: string; readonly model: string }) {

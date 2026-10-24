@@ -19,7 +19,8 @@
 - **Feature (examples)** — K8 has a Host persona mode for an external team
   (#879). With `persona: 'external'`, each snapshot Bot carries the Host's
   `profileRevision`, which K8 uses as the agentRef revision, and K8 queues no
-  persona projection. `personaReady(botId, revision)` readies the Bot's
+  persona projection. The revision has the protocol's Agent home revision
+  format, a canonical positive decimal string, so `'0'` is refused. `personaReady(botId, revision)` readies the Bot's
   current revision. `retryPersona` refuses with `external_persona`. The ledger
   stores the mode. `TeamSnapshotBot` gets the optional `profileRevision`, and
   `ExternalTeam` the optional `persona`. Without the option nothing changes,
