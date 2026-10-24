@@ -828,6 +828,7 @@ What the Host does (#654 E5b-1):
 - Later key package puts for the scope get 409 `e2ee_scope_shredded`.
   In Postgres, the shred and each put take a transaction advisory lock on `(tenant, scope)` first, so a put of a new epoch cannot land after the shred.
 - A replayed append stores nothing new and shreds nothing. A second shred of the scope keeps the first receipt.
+- A shred of a scope id over 512 UTF-16 code units records nothing. Every put and read refuses such an id, so the Host never holds that scope.
 
 What stays after a Host shred:
 
