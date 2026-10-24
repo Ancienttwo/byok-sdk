@@ -310,9 +310,12 @@ export async function appendMemberChainEntries(
       throw invalid(`Member chain entry ${index} exceeds ${E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES} bytes`);
     }
     if (value.tenantId !== ctx.tenant) throw invalid(`Member chain entry ${index} names another tenant`);
-    if (value.op === 'shred') {
-      // The entry schema has checked that a shred subject is exactly { scopeId }.
-      const { scopeId } = value.subject as { readonly scopeId: string };
+    // The entry schema has checked that a shred subject is exactly { scopeId }.
+    const scopeId = value.op === 'shred' ? (value.subject as { readonly scopeId: string }).scopeId : undefined;
+    // A scope id over the Host limit gets no shred record: every put and read
+    // refuses that id, so it has no packages or epochs. It would also not fit
+    // a Postgres index entry.
+    if (scopeId !== undefined && scopeIdValid(scopeId)) {
       shreds.push({
         seq: value.seq,
         scopeId,

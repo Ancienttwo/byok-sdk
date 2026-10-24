@@ -5,6 +5,7 @@
 import { fileURLToPath } from 'node:url';
 import { createMutableClock, tenantId, type TenantId } from '@byok-sdk/core';
 import { runE2eeMemberStoreConformance } from '@byok-sdk/conformance';
+import { E2EE_SCOPE_ID_MAX_LENGTH } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import type { Pool } from 'pg';
 import { migrate } from '../migrate';
@@ -185,6 +186,23 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres shred serializes with package puts of 
       expect(left.rows[0]).toEqual({ packages: 0 });
     } finally {
       holder.release();
+      await scope.dispose();
+    }
+  });
+
+  it('records a shred of the longest Host scope id, with an incompressible id', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const store = new PostgresE2eeMemberStore(scope.pool, createMutableClock());
+      // 512 random code points of three UTF-8 bytes each: 1536 bytes that do not compress.
+      const scopeId = String.fromCodePoint(...Array.from({ length: E2EE_SCOPE_ID_MAX_LENGTH }, () => 0x4e00 + Math.floor(Math.random() * 0x5000)));
+      const receipt = { key: `e2ee-scope-shred:${scopeId}`, body: '{"chainSeq":1}' };
+      await expect(store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{"op":"shred"}' }], shreds: [{ seq: 1, scopeId, receipt }] }))
+        .resolves.toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
+      await expect(new PostgresRequestReceiptStore(scope.pool, createMutableClock()).get(TENANT_A, receipt.key)).resolves.toMatchObject({ body: receipt.body });
+      await expect(store.putScopeKeyPackages(TENANT_A, { rows: [{ ...row(1, 'k1'), scopeId }] })).resolves.toEqual({ outcome: 'scope_shredded', scopeId });
+    } finally {
       await scope.dispose();
     }
   });
