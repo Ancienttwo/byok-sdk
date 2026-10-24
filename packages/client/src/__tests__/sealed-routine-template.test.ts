@@ -96,7 +96,8 @@ async function device(keyring: SealedScopeKeyring = new GoldenKeyring()) {
     agentMessageMcpPreflight: async () => {},
     sealedTasks: new SealedTasks({
       keyring, tenantId: GOLDEN_TENANT, deviceId: 'device-golden-1',
-      blobs: { download: async () => { throw new Error('unused'); } },
+      blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
+      serverCapabilities: () => [],
     }),
   });
   runners.push(runner);

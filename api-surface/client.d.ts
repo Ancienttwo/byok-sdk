@@ -8238,20 +8238,23 @@ export interface SealedScopeKeyring {
     /** The newest key of the scope at `minEpoch` or later, to seal output. */
     sealingKey(scopeId: string, minEpoch: number): Promise<SealingKey | undefined>;
 }
-/**
- * Ciphertext blobs of sealed input: a padded frame above the inline maximum
- * travels as a blob (§8.6). Sealed output is inline only (§2.5), so the
- * device never uploads one.
- */
+/** Ciphertext blobs: a padded frame above the inline maximum travels as a blob (§8.6). */
 export interface SealedCiphertextBlobs {
     /** The blob's bytes after the SHA-256 and size check. */
     download(ref: BlobRef): Promise<Uint8Array>;
+    upload(ciphertext: Uint8Array): Promise<BlobRef>;
 }
 export interface SealedTasksOptions {
     readonly keyring: SealedScopeKeyring;
     readonly tenantId: string;
     readonly deviceId: string;
     readonly blobs: SealedCiphertextBlobs;
+    /**
+     * The flags the current session's server advertised, which decide whether
+     * an output may name its ciphertext blob. `undefined` while the connection
+     * is between sessions: the next session's flags are not known yet.
+     */
+    readonly serverCapabilities: () => readonly string[] | undefined;
 }
 export type SealedOfferOpenResult = {
     readonly ok: true;
