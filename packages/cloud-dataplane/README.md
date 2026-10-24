@@ -303,6 +303,13 @@ Device revocation and machine supersession delete the device's registration,
 MACs and the packages addressed to its member in the device transaction.
 Tenant erasure deletes all five tables.
 
+Migration `0029_e2ee_member_kem_floor.sql` adds `e2ee_member_kem_floor`: an
+append that stores a `rotate` entry raises its member's KEM floor, and a
+package put refuses a package below its recipient's floor with
+`e2ee_scope_key_package_stale`. Both take the member's transaction lock after
+the scope locks. It also adds the index of the device's paged read of its own
+packages. Tenant erasure deletes the floor table too.
+
 ## Task redaction
 
 `createPostgresTaskRedactionStore` is the store behind `ByokCloud.redactTasks`

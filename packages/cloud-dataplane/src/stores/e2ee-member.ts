@@ -64,21 +64,23 @@ async function recordRequest<T>(client: PoolClient, tenant: TenantId, proof: E2e
 }
 
 /**
- * Take the transaction lock of each `(tenant, scope)` before any other e2ee
- * statement of the transaction, and after the request lock, in one sorted
- * order so two lockers cannot deadlock. A shred and a package put of one
- * scope then run one after the other, also for a new scope or a new epoch,
- * which has no row to lock yet (owner batch §50h A).
+ * Take the transaction lock of each `(tenant, id)` of one kind, in one sorted
+ * order so two lockers cannot deadlock. The order across kinds is fixed: the
+ * request lock, then `e2ee-scope` before any other e2ee statement, then
+ * `e2ee-member-kem`. A shred and a package put of one scope then run one
+ * after the other, also for a new scope or a new epoch, which has no row to
+ * lock yet (owner batch §50h A). A `rotate` and a package put to its member
+ * do the same, also before the member has a floor row (§77a).
  */
-async function lockScopes(client: PoolClient, tenant: TenantId, scopeIds: Iterable<string>): Promise<void> {
-  for (const scopeId of [...new Set(scopeIds)].sort()) {
-    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify(['e2ee-scope', tenant, scopeId])]);
+async function lockEach(client: PoolClient, kind: 'e2ee-scope' | 'e2ee-member-kem', tenant: TenantId, ids: Iterable<string>): Promise<void> {
+  for (const id of [...new Set(ids)].sort()) {
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify([kind, tenant, id])]);
   }
 }
 
 /**
  * Postgres E2EE member store (`deploy/sql/0027_e2ee_member.sql`,
- * `0028_e2ee_scope_shred.sql`). Device revocation and machine supersession
+ * `0028_e2ee_scope_shred.sql`, `0029_e2ee_member_kem_floor.sql`). Device revocation and machine supersession
  * delete a device's rows in the device transaction (`DEVICE_STATE_DELETES`
  * in `devices.ts`). A shred receipt goes to `device_request_receipts`, the
  * request receipt store, in the append transaction.
@@ -112,7 +114,9 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
         return undefined;
       }
       if (replay !== undefined) return replay;
-      await lockScopes(client, tenant, input.shreds.map(shred => shred.scopeId));
+      await lockEach(client, 'e2ee-scope', tenant, input.shreds.map(shred => shred.scopeId));
+      // Every rotation's member, as every shred's scope: which ones are new is known only after the head read.
+      await lockEach(client, 'e2ee-member-kem', tenant, input.rotations.map(rotation => rotation.memberId));
       // READ COMMITTED is enough: the head read sees only committed rows, and
       // the primary key decides between two writers of one seq.
       const head = await client.query<{ head: string }>(
@@ -169,6 +173,13 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
           `INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at) VALUES ($1, $2, $3, $4)
            ON CONFLICT (tenant_id, key) DO NOTHING`, [tenant, shred.receipt.key, shred.receipt.body, now]);
       }
+      for (const rotation of input.rotations) {
+        if (rotation.seq <= headSeq) continue;
+        await client.query(
+          `INSERT INTO e2ee_member_kem_floor (tenant_id, member_id, kem_epoch, chain_seq) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (tenant_id, member_id) DO UPDATE SET kem_epoch = EXCLUDED.kem_epoch, chain_seq = EXCLUDED.chain_seq
+           WHERE e2ee_member_kem_floor.kem_epoch < EXCLUDED.kem_epoch`, [tenant, rotation.memberId, rotation.kemEpoch, rotation.seq]);
+      }
       return recordRequest<E2eeMemberChainAppendResult>(client, tenant, input.proof, { outcome: 'appended', appended, replayed }, now);
     });
     return refusal ?? result;
@@ -192,12 +203,24 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
       }
       if (replay !== undefined) return replay;
       const scopeIds = [...new Set(rows.map(row => row.scopeId))];
-      await lockScopes(client, tenant, scopeIds);
+      await lockEach(client, 'e2ee-scope', tenant, scopeIds);
       const shredded = await client.query<{ scope_id: string }>(
         'SELECT scope_id FROM e2ee_scope_shred WHERE tenant_id = $1 AND scope_id = ANY($2::text[]) ORDER BY scope_id COLLATE "C" LIMIT 1',
         [tenant, scopeIds]);
       if (shredded.rows[0] !== undefined) {
         refusal = { outcome: 'scope_shredded', scopeId: shredded.rows[0].scope_id };
+        return undefined;
+      }
+      const recipients = [...new Set(rows.map(row => row.recipient))];
+      await lockEach(client, 'e2ee-member-kem', tenant, recipients);
+      const floors = await client.query<{ member_id: string; kem_epoch: string }>(
+        `SELECT member_id, kem_epoch FROM e2ee_member_kem_floor
+          WHERE tenant_id = $1 AND member_id = ANY($2::text[])
+          ORDER BY member_id COLLATE "C"`, [tenant, recipients]);
+      const floor = new Map(floors.rows.map(row => [row.member_id, Number(row.kem_epoch)]));
+      const stale = rows.find(row => row.recipientKemEpoch < (floor.get(row.recipient) ?? 0));
+      if (stale !== undefined) {
+        refusal = { outcome: 'kem_epoch_stale', recipient: stale.recipient, kemEpoch: stale.recipientKemEpoch, floor: floor.get(stale.recipient)! };
         return undefined;
       }
       for (const row of rows) {
@@ -224,6 +247,23 @@ export class PostgresE2eeMemberStore implements E2eeMemberStore {
       return recordRequest<E2eeScopeKeyPackagePutResult>(client, tenant, proof, { outcome: 'stored', stored: rows.length }, updatedAt);
     });
     return refusal ?? result;
+  }
+
+  async readOwnScopeKeyPackages(
+    tenant: TenantId,
+    input: { readonly scopeId: string; readonly recipient: string; readonly afterEpoch: number; readonly limit: number },
+  ): Promise<{ readonly rows: readonly E2eeScopeKeyPackageRow[]; readonly scopeHeadEpoch: number | undefined }> {
+    // Two reads, no snapshot: a head newer than the page only feeds the next
+    // epoch choice, and a put of a taken epoch is refused by its keyId.
+    const rows = await this.pool.query<PackageRow>(
+      `SELECT scope_id, epoch, recipient, key_id, sender, package FROM e2ee_scope_key_package
+        WHERE tenant_id = $1 AND scope_id = $2 AND recipient = $3 AND epoch > $4
+        ORDER BY epoch LIMIT $5`,
+      [tenant, input.scopeId, input.recipient, input.afterEpoch, input.limit]);
+    const head = await this.pool.query<{ head: string | null }>(
+      'SELECT MAX(epoch)::text AS head FROM e2ee_scope_epoch WHERE tenant_id = $1 AND scope_id = $2', [tenant, input.scopeId]);
+    const scopeHeadEpoch = head.rows[0]!.head;
+    return { rows: rows.rows.map(decodePackage), scopeHeadEpoch: scopeHeadEpoch === null ? undefined : Number(scopeHeadEpoch) };
   }
 
   async readScopeKeyPackages(
