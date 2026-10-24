@@ -6,15 +6,26 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { canonicalizeJsonBytes } from '../attestation';
 import { ByokCoreError } from '../errors';
+import { hpkeSealBase } from '../hpke';
 import {
   deriveMemberId,
   signMemberChainEntry,
   verifyMemberChainEntry,
   type UnsignedMemberChainEntryV1,
 } from '../sealed-payload/member-chain';
-import type { P256PublicJwk } from '../sealed-payload/primitives';
-import { deriveSealedContentKey, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from '../sealed-payload/scope-key';
+import { concat, ecdsaSign, encodeBase64Url, p256PublicKeyBytes, utf8, type P256PublicJwk } from '../sealed-payload/primitives';
+import {
+  SCOPE_KEY_HPKE_INFO,
+  SCOPE_KEY_PACKAGE_DOMAIN_PREFIX,
+  deriveScopeKeyId,
+  deriveSealedContentKey,
+  generateScopeKey,
+  openScopeKeyPackage,
+  sealScopeKeyPackage,
+  type ScopeKeyPackageV1,
+} from '../sealed-payload/scope-key';
 import {
   decodeSealedFrame,
   encodeSealedFrame,
@@ -271,6 +282,51 @@ describe('member chain entries', () => {
   });
 });
 
+/** A sender, a recipient whose KEM key has `kemEpoch`, and a version 2 package of a fresh scope key between them. */
+async function packageParties(kemEpoch: number) {
+  const senderSigning = await p256Pair('sign');
+  const recipientKem = await p256Pair('kem');
+  const recipientId = await deriveMemberId((await p256Pair('sign')).publicJwk);
+  const scopeKey = generateScopeKey();
+  const pkg = await sealScopeKeyPackage({
+    scopeKey,
+    tenantId: 'tenant-1',
+    scopeId: 'scope-1',
+    epoch: 1,
+    recipient: { memberId: recipientId, kemPublicJwk: recipientKem.publicJwk, kemEpoch },
+    sender: { signingPublicJwk: senderSigning.publicJwk, signingPrivateKey: senderSigning.privateKey },
+  });
+  const open = (candidate: unknown, openerKemEpoch: number) => openScopeKeyPackage({
+    package: candidate,
+    expected: { tenantId: 'tenant-1', scopeId: 'scope-1', epoch: 1 },
+    recipient: { memberId: recipientId, kemPublicJwk: recipientKem.publicJwk, kemPrivateKey: recipientKem.privateKey, kemEpoch: openerKemEpoch },
+    senderSigningPublicJwk: senderSigning.publicJwk,
+  });
+  return { senderSigning, recipientKem, recipientId, scopeKey, pkg, open };
+}
+
+/** A version 1 package as members sealed it before #654 E5b-2: v1 info, v1 AAD and the v1 signing prefix. */
+async function sealV1Package({ senderSigning, recipientKem, recipientId, scopeKey }: Awaited<ReturnType<typeof packageParties>>): Promise<ScopeKeyPackageV1> {
+  const identity = {
+    v: 1 as const,
+    tenantId: 'tenant-1',
+    scopeId: 'scope-1',
+    epoch: 1,
+    keyId: await deriveScopeKeyId(scopeKey),
+    recipient: recipientId,
+    sender: await deriveMemberId(senderSigning.publicJwk),
+  };
+  const { enc, ciphertext } = await hpkeSealBase({
+    recipientPublicKey: await p256PublicKeyBytes(recipientKem.publicJwk),
+    info: utf8(SCOPE_KEY_HPKE_INFO),
+    aad: canonicalizeJsonBytes(identity),
+    plaintext: scopeKey,
+  });
+  const unsigned = { ...identity, enc: encodeBase64Url(enc), ciphertext: encodeBase64Url(ciphertext) };
+  const signingInput = concat(utf8(SCOPE_KEY_PACKAGE_DOMAIN_PREFIX), canonicalizeJsonBytes(unsigned));
+  return { ...unsigned, sig: await ecdsaSign(senderSigning.publicJwk, senderSigning.privateKey, signingInput) };
+}
+
 describe('scope key packages', () => {
   it('round-trips a fresh scope key between fresh members', async () => {
     const senderSigning = await p256Pair('sign');
@@ -300,6 +356,34 @@ describe('scope key packages', () => {
     })).toEqual({ ok: false, reason: 'key_package_invalid' });
   });
 
+  it('seals version 2 packages that name the recipient KEM epoch, signed and bound into the AAD', async () => {
+    const { pkg, open } = await packageParties(3);
+    expect(pkg.v).toBe(2);
+    expect(pkg.recipientKemEpoch).toBe(3);
+    expect((await open(pkg, 3)).ok).toBe(true);
+    expect(await open(pkg, 2)).toEqual({ ok: false, reason: 'key_package_invalid' });
+    // The epoch is under the sender signature: an edited epoch that matches the opener still fails.
+    expect(await open({ ...pkg, recipientKemEpoch: 2 }, 2)).toEqual({ ok: false, reason: 'key_package_signature_invalid' });
+  });
+
+  it('still opens a version 1 package, which names no KEM epoch', async () => {
+    const parties = await packageParties(1);
+    const v1 = await sealV1Package(parties);
+    expect(v1.v).toBe(1);
+    for (const kemEpoch of [1, 2]) {
+      const opened = await parties.open(v1, kemEpoch);
+      expect(opened.ok && Array.from(opened.scopeKey)).toEqual(Array.from(parties.scopeKey));
+    }
+  });
+
+  it('refuses a package whose KEM epoch field does not match its version', async () => {
+    const parties = await packageParties(1);
+    const { recipientKemEpoch: _recipientKemEpoch, ...noEpoch } = parties.pkg;
+    expect(await parties.open(noEpoch, 1)).toEqual({ ok: false, reason: 'key_package_invalid' });
+    expect(await parties.open({ ...parties.pkg, v: 1 }, 1)).toEqual({ ok: false, reason: 'key_package_invalid' });
+    expect(await parties.open({ ...(await sealV1Package(parties)), recipientKemEpoch: 1 }, 1)).toEqual({ ok: false, reason: 'key_package_invalid' });
+  });
+
   it('rejects package input that has no v1 meaning before it seals anything', async () => {
     const senderSigning = await p256Pair('sign');
     const recipientKem = await p256Pair('kem');
@@ -316,6 +400,7 @@ describe('scope key packages', () => {
     await expectInvalid(sealScopeKeyPackage({ ...base, scopeKey: new Uint8Array(31) }));
     await expectInvalid(sealScopeKeyPackage({ ...base, recipient: { ...base.recipient, memberId: 'short' } }));
     await expectInvalid(sealScopeKeyPackage({ ...base, recipient: { ...base.recipient, kemPublicJwk: OFF_CURVE_JWK } }));
+    await expectInvalid(sealScopeKeyPackage({ ...base, recipient: { ...base.recipient, kemEpoch: 0 } }));
   });
 
   it('refuses a signing private key that does not pair with the sender public key', async () => {
