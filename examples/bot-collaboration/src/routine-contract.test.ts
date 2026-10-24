@@ -1,9 +1,10 @@
 import { afterEach, expect, vi } from 'vitest';
-import { hash } from '@byok-sdk/example-host-execution-core';
+import { hash, taskId } from '@byok-sdk/example-host-execution-core';
 import { openHost, template, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration } from './host';
 import { botCompactVeto } from './compaction';
 import { stateOf } from './model';
+import { createDefinition } from './routines';
 import { occurrenceView, routineVectors, routineView, type RoutineSubject } from './routine-vectors.test-support';
 
 // #793 D2f-1: the routine vectors on the K8 L Host. Only the Bot Host and its K4 core read the test clock.
@@ -24,6 +25,12 @@ async function ledgerSubject(): Promise<RoutineSubject> {
     now: () => clock,
     at: now => { clock = now; },
     change: edit => { fixture.ledger.transaction(s => { edit(stateOf(s.application)); }); },
+    addRoutine: async (owner, schedule) => {
+      const definition = createDefinition(Object.values(ledger().routines), owner, taskId(`seed:${owner}`, 0), 0,
+        { localId: 'new_routine_1', schedule, prompt: 'Daily report' }, 'bot');
+      await host.core.addRoutine(definition);
+      return definition.id;
+    },
     input: (key, request) => host.input(key, request),
     start: async turnId => {
       // K4 must see the device claim before the clock moves, or the wait limit expires the Turn.
@@ -45,6 +52,7 @@ async function ledgerSubject(): Promise<RoutineSubject> {
     cancelTurn: turnId => host.cancelTurn(turnId),
     update: action => host.updateRoutine(action),
     lifecycle: (id, value) => host.setRoutineLifecycle(id, value),
+    end: id => host.endRoutine(id),
     routine: id => { const row = ledger().routines[hash(id)]; return row && routineView(row); },
     occurrences: id => {
       const state = ledger();

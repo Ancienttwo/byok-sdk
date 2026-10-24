@@ -12,7 +12,7 @@ import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedReconciler, type TaskEvidence } from './reconcile';
 import { hostedRoutineCommands, loadSlice } from './routines';
-import { inSchema, lockScope, type FinishPortsFactory } from './store';
+import { inSchema, lockScope, type CommitPortsFactory, type FinishPortsFactory } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -294,6 +294,21 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
       expect(await store().finish(scope, turn, completed(turn, {}), ports)).toBe('succeeded');
       await switched(scope, id, NOW);
     });
+  });
+
+  it('owns the routines port of end_routine: a refusal writes nothing, a caller port is never called, and none type-checks (§55c)', async () => {
+    const scope = await scoped(), id = await created(scope), before = await store().dump(scope);
+    await expect(store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'end_routine', botId: 'main', routineId: 'missing' } }, ports))
+      .rejects.toThrow('No open Bot routine has this id');
+    expect(await store().dump(scope)).toBe(before);
+    let called = 0;
+    const slipped = ((...args: Parameters<CommitPortsFactory>) => ({ ...ports(...args), routines: { end: () => { called++; } } })) as unknown as CommitPortsFactory;
+    await store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'end_routine', botId: 'main', routineId: id } }, slipped);
+    expect(called).toBe(0);
+    expect(await routineRow(scope, id)).toMatchObject({ lifecycle: 'completed', next_at: null, pending: null });
+    // @ts-expect-error The commit ports carry no routines port.
+    const withRoutines: CommitPortsFactory = (state, publish) => ({ ...ports(state, publish), routines: { end: () => {} } });
+    expect(typeof withRoutines).toBe('function');
   });
 
   it('refuses a routine that is not a bot-routine, on the store\'s routine port, and changes nothing', async () => {

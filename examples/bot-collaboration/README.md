@@ -24,7 +24,7 @@ connector. Route the embedded server's `wake.consume` to `bot.consume`.
 Route its `agentMessage.consume` to `bot.consumeMessage`.
 Call `bot.recover()` after startup. Call `bot.close()` before closing the SDK
 server or the ledger. Do not call the K4 core's mutation methods directly.
-Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, `setRoutineLifecycle`, `cancelDelegation`, and `abandonDelegation`.
+Use `input`, `answer`, `decide`, `cancelTurn`, `updateRoutine`, `setRoutineLifecycle`, `endRoutine`, `cancelDelegation`, and `abandonDelegation`.
 Use `receive` for IM messages ([IM channel input](#im-channel-input)).
 Read `snapshot` or upload K4 projections with `core.flushProjections`.
 
@@ -145,6 +145,13 @@ keeps the current version while work is unsettled. Cancel marks the routine
 completed and stops new occurrences. Accepted work finishes with its old
 version. To stop an execution too, use K4 cancellation explicitly. Routine
 results are owner turns with source `routine`.
+
+`updateRoutine` and `setRoutineLifecycle` change only the Main Bot's own
+routines. `endRoutine(id)` runs the keyless `end_routine` command (§55c): the
+Main Bot completes any open Bot routine, an archived owner's too, as cancel
+does. Without it, the routine of an archived Bot would fire at every slot. The
+command needs the Main Bot role and gets the K4 rows through the
+`CommandPorts.routines` port.
 
 `compact` removes settled routine rows: a promoted
 occurrence through its intent key, and a concluded occurrence through its

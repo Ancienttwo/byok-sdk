@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { canonical, hash, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
-import { botRoutines, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
+import { botRoutines, endable, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
 import { requireMain } from '@byok-sdk/example-bot-collaboration/team';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
@@ -46,10 +46,10 @@ export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines'>
 export type PortsFactory = (state: CollaborationState, publish: Publish) => Omit<CommandPorts, 'intents' | 'deliver'>;
 /**
  * The ports of `commit()`. It refuses the callback commands, so it takes no callback ports (#793 D2f-6). The store owns the
- * inbound `remember` port, which only `receive()` gives (#793 D2b-out-3).
+ * inbound `remember` port, which only `receive()` gives (#793 D2b-out-3), and the `routines` port of `end_routine` (§55c).
  */
-export type CommitPorts = Omit<CommandPorts, 'intents' | 'deliver' | 'outcome' | 'occurrence' | 'remember'>
-  & { outcome?: never; occurrence?: never; remember?: never };
+export type CommitPorts = Omit<CommandPorts, 'intents' | 'deliver' | 'outcome' | 'occurrence' | 'remember' | 'routines'>
+  & { outcome?: never; occurrence?: never; remember?: never; routines?: never };
 export type CommitPortsFactory = (state: CollaborationState, publish: Publish) => CommitPorts;
 /**
  * The ports of `finish()`: the commit ports and the team management port of an outcome. The store builds the committed
@@ -136,6 +136,9 @@ export class HostedCollaborationStore {
    * host.ts `cancelTurn`): the commit, the cancel of the intent, then the version switch check (#793 D2f-4). A new commit
    * that leaves a delegation cancel fact to deliver (`cancel_turn` of an open chain, `cancel_delegation`,
    * `abandon_delegation`) delivers it in the same transaction, as L `settleChain` does after its commit.
+   *
+   * `end_routine` (§55c) runs on the routine slice of the scope, as L `endRoutine` runs K4 `setLifecycle` in its commit: the store
+   * gives the K8 rule its `routines` port, and a new acceptance writes the slice back.
    */
   commit(scope: string, request: CommitRequest<Command>, ports: CommitPortsFactory): Promise<CommitResult> {
     if (CALLBACK_KINDS.has(request.command.kind)) return Promise.reject(new CallbackCommandError(request.command.kind));
@@ -203,7 +206,11 @@ export class HostedCollaborationStore {
   protected commitIn(scope: string, request: CommitRequest<Command>, ports: PortsFactory): Promise<CommitResult> {
     const key = storedKey(scope);
     return this.change(scope, request.commandId, async (state, publish, client) => {
-      const head = revisionOf(state), base = ports(state, publish);
+      const head = revisionOf(state), own = ports(state, publish);
+      const slice = request.command.kind === 'end_routine' ? await loadSlice(client, key) : undefined;
+      const commands = slice && hostedRoutineCommands(slice, own.now());
+      // The key is always set, so a caller's port never reaches the command, even through a cast.
+      const base = { ...own, routines: commands && { end: (id: string) => commands.lifecycle(endable(commands.list(), id).definition.id, 'completed') } };
       const result = await commitStored(client, scope, state, request, base, this.channel);
       // A new commit moves the head by 1. A replay returns its first result and writes nothing.
       if (result.revision !== head + 1) return { value: result, outbox: [] };
@@ -214,6 +221,10 @@ export class HostedCollaborationStore {
         await cancelIntent(client, scope, value.target, now);
         await switchDueVersions(client, key, now);
       } else if (value?.deliver) await deliverCancels(client, scope, state, base.now());
+      if (slice && result.disposition.outcome === 'accepted') {
+        await writeSlice(client, key, slice);
+        await switchDueVersions(client, key, base.now());
+      }
       return { value: result, outbox: result.outbox, now: base.now() };
     });
   }
