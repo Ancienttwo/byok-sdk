@@ -16,7 +16,8 @@
  *
  * Each later start re-walks the chain from seq 1 and requires the stored
  * head on the new walk (same hash at the same seq), so a Host that rewinds
- * the chain to hide a `remove` fails closed (E2d-e7).
+ * the chain to hide a `remove` fails closed (E2d-e7). It retries the read for
+ * {@link MEMBER_REWALK_TIMEOUT_MS}, then leaves E2EE off for the run.
  *
  * Without `pv` the device pairs as before and is no member. A member key
  * loss before step 5 needs a re-pair: the Host keeps the first bundle per
@@ -47,6 +48,8 @@ export const MEMBER_POLL_MIN_DELAY_MS = 2_000;
 export const MEMBER_POLL_MAX_DELAY_MS = 15_000;
 /** The longest one member request may take; a slower one is cut off and retried. */
 export const MEMBER_REQUEST_TIMEOUT_MS = 60_000;
+/** How long a restart re-walk retries the chain read; then E2EE is off for the run, so a Host outage cannot hold the member at resuming. */
+export const MEMBER_REWALK_TIMEOUT_MS = 10 * 60_000;
 
 /** A verified member of the tenant's chain, held in memory for one daemon run. */
 export interface DeviceMemberSession {
@@ -269,10 +272,16 @@ async function checkRelay(relayed: unknown, pv: string, log: DeviceMemberLog): P
  * apply forward, and the new head is stored.
  */
 async function rewalk(options: ResumeDeviceMemberOptions, state: DeviceMemberState, keys: MemberKeys): Promise<DeviceMemberSession | undefined> {
-  const { records, client, tenantId, deviceId, log } = options;
+  const { records, client, tenantId, deviceId, log, signal } = options;
+  const now = options.now ?? Date.now;
   const { member, anchor, head } = state as Required<DeviceMemberState>;
-  const entries = await poll(options, Number.POSITIVE_INFINITY, (attempt) => client.readChainFrom(0, attempt));
-  if (entries === undefined) return undefined;
+  // Pairing stored the anchor before it deleted `pv`; a failed delete there leaves `pv`, and no later start pairs again.
+  await records.deletePending();
+  const entries = await poll(options, now() + MEMBER_REWALK_TIMEOUT_MS, (attempt) => client.readChainFrom(0, attempt));
+  if (entries === undefined) {
+    if (!signal.aborted) log(`the member chain could not be read within ${MEMBER_REWALK_TIMEOUT_MS / 60_000} minutes of start; E2EE stays off until the next start`);
+    return undefined;
+  }
   if (entries.length < head.seq) {
     log(`the member chain is shorter than the verified head seq ${head.seq}; E2EE stays off`);
     return undefined;
