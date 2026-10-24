@@ -10,6 +10,7 @@ import { BOT_TURN_OUTCOME_CONTRACT } from '@byok-sdk/protocol';
 import { OFFER_WAIT_MS, syncTurn, type SyncFacts, type SyncOptions, type SyncStep } from './rules/sync';
 import type { Conclusion, DelegationTimers } from './rules/delegation';
 import type { Json } from './rules/turn';
+import type { CoalescePolicy } from './rules/coalesce';
 
 /**
  * #739 D1 commit contract vectors. Each store runs the same cases: the K8 L ledger now, and the H adapter in D2.
@@ -230,9 +231,13 @@ export type SyncIntentRecord = Extract<SyncStep<unknown>, { kind: 'freeze' }>['i
 /** The sync options of the vectors. A Bot with an undeclared connector toolset cannot freeze. */
 export const SYNC_OPTIONS: SyncOptions<never> = { now: VECTOR_NOW, models: ['default'], readOnlyToolsets: [],
   limits: { turnLimit: 12, contextMaxBytes: 32_768, instructionMaxBytes: 65_536 }, historyMode: false, routines: [] };
-/** `t1` is concluded and reported. `q1` (a user Turn) and `q2` (a continuation) wait for an offer. */
+/**
+ * `t1` is concluded and reported. `q1` (a user Turn) and `q2` (a continuation) wait for an offer. Card `c1` stays pending,
+ * so a store that runs the card steps in its sync (`cardVectors`) changes nothing these vectors read.
+ */
 function seedSync(state: CollaborationState): void {
   Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+  state.cards.c1!.expiresAt = Number.MAX_SAFE_INTEGER;
   state.turns.q1 = { id: 'q1', root: 'q1', botId: 'main', source: 'user', request: 'First', hop: 0, status: 'queued', authority: 'owner' };
   state.turns.q2 = { id: 'q2', root: 'q1', botId: 'main', source: 'continuation', request: 'Next', hop: 0, status: 'queued', authority: 'owner' };
 }
@@ -477,5 +482,179 @@ export function settlementVectors(name: string, open: () => SettlementSubject | 
         expect(await delegation()).toMatchObject({ verdict: 'cancelled', reason: 'main_bot_cancelled', status: 'resolved' });
       });
     }
+  });
+}
+
+/**
+ * #793 H batch seal: input coalescing in the Host sync. `open(policy)` opens a store whose input admission uses `policy`, or
+ * no coalescing without one. `sync(now)` is one Host sync at `now`: K8 `sealDueBatches` first, then the Turn steps, then
+ * `projectInputBatches` last, as L's sync runs them. A store may run more rounds in one sync.
+ */
+export interface CoalesceSubject extends Omit<SyncSubject, 'sync'> {
+  sync(now: number): void | Promise<void>;
+}
+/** The policy of the vectors: a 1 s window and two inputs a batch. */
+const COALESCE_POLICY: CoalescePolicy = { windowMs: 1000, maxItems: 2, maxBytes: 8192 };
+export function coalesceVectors(name: string, open: (policy?: CoalescePolicy) => CoalesceSubject | Promise<CoalesceSubject>): void {
+  describe(`coalesce contract: ${name}`, () => {
+    const user = (key: string) => hash(['user', 'main', key]);
+    /** `t1` is concluded and `q1` holds the Bot: it freezes at the first sync and stays open. */
+    const busy = async (policy: CoalescePolicy | undefined) => {
+      const subject = await open(policy);
+      await subject.change(state => {
+        Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+        state.turns.q1 = { id: 'q1', root: 'q1', botId: 'main', source: 'user', request: 'First', hop: 0, status: 'queued', authority: 'owner' };
+      });
+      await subject.sync(VECTOR_NOW);
+      return subject;
+    };
+    const send = async (subject: CoalesceSubject, key: string) => {
+      const result = await subject.commit({ scope: subject.scope, commandId: key, command: input(key, `Say ${key}`) });
+      expect(result.disposition.outcome).toBe('accepted');
+      return (result.disposition as { value: string }).value;
+    };
+    const projected = (subject: CoalesceSubject, batch: string, revision: 1 | 2) => subject.projection(`input-batch:${batch}:${revision}`);
+
+    it('answers inputs to a busy Bot with one open batch, and projects its revision 1 at the next sync', async () => {
+      const subject = await busy(COALESCE_POLICY), batch = user('k1');
+      expect([await send(subject, 'k1'), await send(subject, 'k2')]).toEqual([batch, batch]);
+      const state = await subject.state();
+      expect(state.turns[batch]).toBeUndefined();
+      expect(state.inputBatches?.[batch]).toMatchObject({ state: 'open', inputIds: [batch, user('k2')], openedAt: VECTOR_NOW,
+        sealAt: VECTOR_NOW + COALESCE_POLICY.windowMs });
+      expect(await projected(subject, batch, 1)).toEqual([]);
+      await subject.sync(VECTOR_NOW);
+      expect(await projected(subject, batch, 1)).toEqual([expect.objectContaining({ owner: 'main', id: batch, revision: 1, state: 'open',
+        inputIds: [batch, user('k2')], sealAt: VECTOR_NOW + COALESCE_POLICY.windowMs })]);
+      expect(await projected(subject, batch, 2)).toEqual([]);
+    });
+
+    it('seals the batch at the first sync at or after its window ends, and freezes its Turn in that sync', async () => {
+      const subject = await busy(COALESCE_POLICY), batch = user('k1');
+      await send(subject, 'k1');
+      await send(subject, 'k2');
+      const request = (await subject.state()).inputBatches![batch]!.request;
+      await subject.sync(VECTOR_NOW + COALESCE_POLICY.windowMs - 1);
+      expect((await subject.state()).inputBatches![batch]!.state).toBe('open');
+      await subject.sync(VECTOR_NOW + COALESCE_POLICY.windowMs);
+      const state = await subject.state();
+      expect(state.inputBatches![batch]).toMatchObject({ state: 'sealed', sealReason: 'window' });
+      expect(state.turns[batch]).toMatchObject({ source: 'user', request, authority: 'owner', inputIds: [batch, user('k2')] });
+      expect(await subject.intent(batch)).toMatchObject({ key: batch, source: 'user' });
+      expect(await projected(subject, batch, 2)).toEqual([expect.objectContaining({ id: batch, revision: 2, state: 'sealed', sealReason: 'window' })]);
+      const stored = await subject.stored();
+      await subject.sync(VECTOR_NOW + COALESCE_POLICY.windowMs);
+      expect(await subject.stored()).toBe(stored);
+    });
+
+    it('seals a full batch at the next input, so a batch sealed before any sync projects only revision 2', async () => {
+      const subject = await busy(COALESCE_POLICY), batch = user('k1');
+      await send(subject, 'k1');
+      await send(subject, 'k2');
+      // The third input opens the next batch and seals the full one at its admission.
+      expect(await send(subject, 'k3')).toBe(user('k3'));
+      expect((await subject.state()).inputBatches![batch]).toMatchObject({ state: 'sealed', sealReason: 'items' });
+      await subject.sync(VECTOR_NOW);
+      expect(await projected(subject, batch, 1)).toEqual([]);
+      expect(await projected(subject, batch, 2)).toEqual([expect.objectContaining({ id: batch, revision: 2, sealReason: 'items' })]);
+      expect(await projected(subject, user('k3'), 1)).toEqual([expect.objectContaining({ id: user('k3'), revision: 1, state: 'open' })]);
+    });
+
+    it('seals an open batch as idle once its Bot has no open Turn', async () => {
+      const subject = await busy(COALESCE_POLICY), batch = user('k1');
+      await send(subject, 'k1');
+      await subject.concludeIntent('q1', 'succeeded');
+      // L's sync seals before the Turn steps, so the seal comes at the sync after the one that concludes q1.
+      await subject.sync(VECTOR_NOW);
+      await subject.sync(VECTOR_NOW);
+      const state = await subject.state();
+      expect(state.turns.q1).toMatchObject({ conclusion: 'succeeded' });
+      expect(state.inputBatches![batch]).toMatchObject({ state: 'sealed', sealReason: 'idle' });
+      expect(await subject.intent(batch)).toMatchObject({ key: batch, source: 'user' });
+    });
+
+    it('keeps one Turn for each input without a policy', async () => {
+      const subject = await busy(undefined);
+      expect(await send(subject, 'k1')).toBe(user('k1'));
+      const state = await subject.state();
+      expect(state.turns[user('k1')]).toMatchObject({ source: 'user', request: 'Say k1' });
+      expect(state.inputBatches).toBeUndefined();
+    });
+  });
+}
+
+/**
+ * #793 S5: the card steps of the Host sync. `sync(now)` is one Host sync at `now`, in L's order: K8 `expireCards`, the Turn
+ * steps of the sync contract, then K8 `reportCardDecisions`. A store may run more rounds in one sync.
+ */
+export interface CardSubject extends Omit<SyncSubject, 'sync'> {
+  sync(now: number): void | Promise<void>;
+}
+export function cardVectors(name: string, open: () => CardSubject | Promise<CardSubject>): void {
+  describe(`card contract: ${name}`, () => {
+    const result = hash(['action_result', 'c1']);
+    /** `t1` is concluded and reported, so Bot `main` is idle. Card `c1` of `t1` expires at `expiresAt`. */
+    const opened = async (expiresAt: number) => {
+      const subject = await open();
+      await subject.change(state => {
+        Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+        state.cards.c1!.expiresAt = expiresAt;
+      });
+      return subject;
+    };
+    const decide = async (subject: CardSubject, decision: 'confirmed' | 'rejected') => {
+      const done = await subject.commit({ scope: subject.scope, commandId: `decide-${decision}`, command: { kind: 'decide', cardId: 'c1', decision } });
+      expect(done.disposition).toEqual({ outcome: 'accepted' });
+    };
+
+    it('expires a pending card before the Turn steps, projects it once, and starts no Turn for it', async () => {
+      const subject = await opened(VECTOR_NOW + 10);
+      await subject.sync(VECTOR_NOW + 9);
+      expect((await subject.state()).cards.c1).toMatchObject({ state: 'pending' });
+      expect(await subject.projection('card:c1:expired')).toEqual([]);
+      await subject.change(state => {
+        state.turns.q1 = { id: 'q1', root: 'q1', botId: 'main', source: 'user', request: 'First', hop: 0, status: 'queued', authority: 'owner' };
+      });
+      await subject.sync(VECTOR_NOW + 10);
+      const state = await subject.state();
+      expect(state.cards.c1).toMatchObject({ state: 'expired', decisionReported: true });
+      expect(await subject.projection('card:c1:expired')).toEqual([expect.objectContaining({ id: 'c1', state: 'expired' })]);
+      expect(state.turns[result]).toBeUndefined();
+      // The Turn that froze in the same sync sees the expiry in its ContextPack.
+      const instruction = String(((await subject.intent('q1'))!.execution as { payload: { instruction: unknown } }).payload.instruction);
+      expect(instruction).toContain(`"id":"c1","turnId":"t1",`);
+      expect(instruction).toContain(`"state":"expired","expiresAt":${VECTOR_NOW + 10}`);
+      const before = await subject.stored();
+      await subject.sync(VECTOR_NOW + 10);
+      expect(await subject.stored()).toBe(before);
+    });
+
+    it('reports a rejected card once, and runs its action_result Turn under the root of the card\'s Turn', async () => {
+      const subject = await opened(VECTOR_NOW + 60_000);
+      await decide(subject, 'rejected');
+      await subject.sync(VECTOR_NOW);
+      await subject.sync(VECTOR_NOW);
+      const state = await subject.state();
+      expect(await subject.projection('card:c1:rejected')).toEqual([expect.objectContaining({ id: 'c1', state: 'rejected' })]);
+      expect(state.turns[result]).toMatchObject({ id: result, root: 't1', source: 'action_result', botId: 'main', hop: 0, authority: 'owner',
+        request: JSON.stringify({ cardId: 'c1', state: 'rejected' }) });
+      expect(await subject.intent(result)).toMatchObject({ key: result });
+      const before = await subject.stored();
+      await subject.sync(VECTOR_NOW);
+      expect(await subject.stored()).toBe(before);
+    });
+
+    it('holds a confirmed card until its action has a result, then reports it with the result', async () => {
+      const subject = await opened(VECTOR_NOW + 60_000);
+      await decide(subject, 'confirmed');
+      await subject.sync(VECTOR_NOW);
+      expect(await subject.projection('card:c1:confirmed')).toEqual([]);
+      expect((await subject.state()).turns[result]).toBeUndefined();
+      await subject.change(state => { Object.assign(state.cards.c1!, { result: { sent: true }, conclusion: 'succeeded' }); });
+      await subject.sync(VECTOR_NOW);
+      expect(await subject.projection('card:c1:confirmed')).toEqual([expect.objectContaining({ id: 'c1', state: 'confirmed', result: { sent: true } })]);
+      expect((await subject.state()).turns[result]).toMatchObject({ source: 'action_result',
+        request: JSON.stringify({ cardId: 'c1', state: 'confirmed', conclusion: 'succeeded', result: { sent: true } }) });
+    });
   });
 }
