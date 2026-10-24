@@ -4,7 +4,7 @@ import {
   type ApprovalTimelineStore,
 } from '@byok-sdk/cloud';
 import { describe, expect, it } from 'vitest';
-import { TENANT_A, TENANT_B } from './fixtures';
+import { TENANT_A, TENANT_B, sealedOutputMember } from './fixtures';
 
 export interface ApprovalTimelineCompositionHandle {
   readonly store: ApprovalTimelineStore;
@@ -144,6 +144,51 @@ export function runApprovalTimelineConformance(
           at: '2026-09-05T00:00:00.000Z',
         }).success,
       ).toBe(false);
+    });
+
+    it('keeps a sealed request, replays a reseal by its projection and resolves it while pending (#654 12e)', async () => {
+      await withComposition(factory, async ({ store }) => {
+        const sealedRequest = (fill: number, mac = 'a') => ({
+          taskId: 'task-sealed-approval',
+          sourceEnvelopeId: 'request-sealed',
+          event: { type: 'approval_requested' as const, approvalId: 'approval-sealed', sealed: sealedOutputMember(fill, mac) },
+        });
+        const first = await store.append(TENANT_A, sealedRequest(1));
+        expect(first.entries[0]?.event).toEqual(sealedRequest(1).event);
+        await expect(store.append(TENANT_A, sealedRequest(2))).resolves.toEqual(first);
+        await expect(store.append(TENANT_A, sealedRequest(1, 'c'))).rejects.toThrow();
+        await expect(
+          store.resolvePending(TENANT_A, {
+            taskId: 'task-sealed-approval',
+            expectedSourceEnvelopeId: 'request-sealed',
+            expectedRevision: first.cursor!,
+            sourceEnvelopeId: '10000000-0000-8000-8000-000000000654',
+            event: {
+              type: 'approval_resolved',
+              approvalId: 'approval-sealed',
+              decision: 'approve',
+              resolvedBy: 'host',
+              at: '2026-10-24T00:00:00.000Z',
+            },
+          }),
+        ).resolves.toMatchObject({ status: 'applied' });
+        expect((await store.read(TENANT_A, 'task-sealed-approval'))?.entries.map((entry) => entry.event.type)).toEqual([
+          'approval_requested',
+          'approval_resolved',
+        ]);
+      });
+    });
+
+    it('refuses a sealed request without native approval identity', async () => {
+      await withComposition(factory, async ({ store }) => {
+        await expect(
+          store.append(TENANT_A, {
+            taskId: 'task-sealed-no-identity',
+            sourceEnvelopeId: 'request-sealed-no-identity',
+            event: { type: 'approval_requested', sealed: sealedOutputMember() } as never,
+          }),
+        ).rejects.toThrow();
+      });
     });
 
     it('refuses a stale expected request after the daemon superseded it', async () => {

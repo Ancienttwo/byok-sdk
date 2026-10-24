@@ -69,7 +69,7 @@ describe('S20-F2: in-place redaction preserves original authority', () => {
     const before = structuredClone(raw);
     const redact = async (entry: TimelineEvent) => { mutate(entry); return entry; };
     // The mutation is schema-valid, so rejection must come from authority comparison.
-    const changed = structuredClone(raw.entries[0]!);
+    const changed = structuredClone(raw.entries[0]!) as TimelineEvent;
     mutate(changed);
     expect(() => TimelineEventSchema.parse(changed)).not.toThrow();
     await expect(redactActivityTail(raw, 'user-1', redact)).rejects.toMatchObject(failure);
@@ -106,8 +106,8 @@ describe('S20-F2: in-place redaction preserves original authority', () => {
       return entry;
     };
     const redactApproval = (entry: ApprovalObservation) => { Object.assign(entry.event, { summary: '[redacted-summary]' }); return entry; };
-    expect((await redactActivityTail(raw, 'user-1', redact)).entries[0]?.event).toEqual({ ...use, input: '[redacted-input]' });
-    expect((await redactActivityTail(activity(), 'user-1', redact)).entries[0]?.event).toEqual({ ...result, output: '[redacted-output]' });
+    expect(((await redactActivityTail(raw, 'user-1', redact)).entries[0] as TimelineEvent | undefined)?.event).toEqual({ ...use, input: '[redacted-input]' });
+    expect(((await redactActivityTail(activity(), 'user-1', redact)).entries[0] as TimelineEvent | undefined)?.event).toEqual({ ...result, output: '[redacted-output]' });
     expect((await redactApprovalTail(rawApprovals, 'user-1', redactApproval)).entries[0]?.event).toEqual({ ...requested, summary: '[redacted-summary]' });
     const response = await createLiveActivityHost(options({ readActivity: () => raw, readApprovals: () => rawApprovals, redact, redactApproval })).fetch(request());
     expect(response.status).toBe(200);

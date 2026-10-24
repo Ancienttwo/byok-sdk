@@ -35,7 +35,7 @@ type Json = { [key: string]: unknown };
 const corpus = readFileSync(new URL('golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
-  .map((raw) => JSON.parse(raw) as { type: MessageType; payload: Json });
+  .map((raw) => JSON.parse(raw) as { type: MessageType; ts: string; payload: Json });
 const sealedLines = corpus.filter((line) => line.payload.sealed !== undefined);
 const SEALED_TYPES = Object.keys(SEALED_SPLIT_TABLE) as SealedMessageType[];
 const SEALED_OFFERS = [
@@ -196,6 +196,56 @@ describe('sealed payload v1: the sealed offer types', () => {
 
   it('are offer types', () => {
     for (const type of SEALED_OFFERS) expect(isTaskOfferType(type), type).toBe(true);
+  });
+});
+
+describe('sealed payload v1: the routine template reference (#654 E3d)', () => {
+  const FRESH = 'task.offer_for_agent_with_egress_fresh_sealed';
+  const routineLines = corpus.filter((line) => line.payload.routineRef !== undefined);
+  const routinePayload = () => structuredClone(routineLines[0]!.payload);
+  const routineRef = () => routinePayload().routineRef as Json;
+
+  it('travels only on the fresh sealed execution offer, with a sealed task input', () => {
+    expect(new Set(routineLines.map((line) => line.type))).toEqual(new Set([FRESH]));
+    for (const { payload } of routineLines) {
+      expect(parse(FRESH, payload)).toBe(true);
+      expect((payload.sealing as Json).categories, 'the template seals task output too').toEqual(['task-input', 'task-output']);
+    }
+    for (const type of SEALED_OFFERS.filter((candidate) => candidate !== FRESH)) {
+      expect(parse(type, { ...sealedLine(type), routineRef: routineRef() }), type).toBe(false);
+    }
+  });
+
+  it('needs a task that seals task-input', () => {
+    const outputOnly = corpus.find((line) => line.type === FRESH && line.payload.sealed === undefined)!;
+    expect(parse(FRESH, outputOnly.payload)).toBe(true);
+    expect(parse(FRESH, { ...outputOnly.payload, routineRef: routineRef() })).toBe(false);
+  });
+
+  it('pins definitionVersion to an integer and notAfter to the canonical instant core binds', () => {
+    const payload = routinePayload();
+    const ref = routineRef();
+    for (const [name, value] of [
+      ['string version', { ...ref, definitionVersion: '4' }],
+      ['negative version', { ...ref, definitionVersion: -1 }],
+      ['fractional version', { ...ref, definitionVersion: 1.5 }],
+      ['unsafe version', { ...ref, definitionVersion: Number.MAX_SAFE_INTEGER + 1 }],
+      ['empty routine id', { ...ref, routineId: '' }],
+      ['no milliseconds', { ...ref, notAfter: '2026-12-31T00:00:00Z' }],
+      ['offset', { ...ref, notAfter: '2026-12-31T00:00:00.000+00:00' }],
+      ['not a calendar day', { ...ref, notAfter: '2026-02-30T00:00:00.000Z' }],
+      ['unknown key', { ...ref, categories: ['task-input'] }],
+      ['missing notAfter', { routineId: ref.routineId, definitionVersion: ref.definitionVersion }],
+    ] as const) {
+      expect(parse(FRESH, { ...payload, routineRef: value }), name).toBe(false);
+    }
+    expect(parse(FRESH, { ...payload, routineRef: { ...ref, definitionVersion: 0 } })).toBe(true);
+  });
+
+  it('leaves the expiry to the device: an expired notAfter is still a valid offer', () => {
+    const expired = routineLines.find((line) => Date.parse((line.payload.routineRef as Json).notAfter as string) < Date.parse(line.ts))!;
+    expect(expired).toBeDefined();
+    expect(parse(FRESH, expired.payload)).toBe(true);
   });
 });
 
