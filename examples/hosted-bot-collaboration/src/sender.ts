@@ -125,11 +125,12 @@ export class HostedOutboxSender {
     if (claim.kind === 'moved') return true;
     if (claim.kind === 'readback') {
       // Missing readback evidence leaves the row unknown, as in L. A readback that outlasts the send deadline is missing
-      // evidence too, so one hung readback cannot stop the rest of the pass. Its wait is fenced by the attempt it read back.
+      // evidence too, so one hung readback cannot stop the rest of the pass. Its wait is fenced by the attempt it read back,
+      // and by its claim's lease, so a later readback claim keeps the row.
       let result: Awaited<ReturnType<NonNullable<ChannelPort['readback']>>> | undefined, failure: { error: unknown } | undefined;
       try { result = await this.deadline(() => port.readback!(id)); }
       catch (error) { failure = { error }; }
-      await this.store.readDelivery(scope, id, claim.attempt, result, this.now, this.times.readbackMs);
+      await this.store.readDelivery(scope, id, claim.attempt, claim.lease, result, this.now, this.times.readbackMs);
       return failure ?? true;
     }
     let outcome: Parameters<HostedCollaborationStore['finishDelivery']>[3];

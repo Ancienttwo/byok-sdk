@@ -84,9 +84,9 @@ export interface HostedStoreOptions {
 /**
  * The sender's view of one delivery step (#793 D2b-out-2). `none`: the claim changed nothing. `moved`: it changed the entity
  * or its wait, and there is nothing to call. `send`: the claim committed; send `body` on `route` now. `readback`: read back
- * the row's `unknown` attempt `attempt`, and give its result with that attempt.
+ * the row's `unknown` attempt `attempt`, and give its result with that attempt and `lease`, the `next_at` that the claim wrote.
  */
-export type DeliveryClaim = { kind: 'none' } | { kind: 'moved' } | { kind: 'readback'; attempt: number }
+export type DeliveryClaim = { kind: 'none' } | { kind: 'moved' } | { kind: 'readback'; attempt: number; lease: number }
   | { kind: 'send'; attempt: number; route: ReplyRoute | PushRoute; body: string };
 /** The outbox index times of a delivery that the sender owns: its lease, and the wait of an `unknown` row. */
 export interface DeliveryTimes {
@@ -482,7 +482,7 @@ export class HostedCollaborationStore {
           if (Number(index.next_at) > now) return done({ kind: 'none' });
           if (times.readback) {
             nextAt = now + times.leaseMs;
-            return done({ kind: 'readback', attempt: row.attempts });
+            return done({ kind: 'readback', attempt: row.attempts, lease: nextAt });
           }
           nextAt = now + UNKNOWN_WAIT_MS;
           return done({ kind: 'moved' });
@@ -518,13 +518,15 @@ export class HostedCollaborationStore {
    * D2 of one delivery (#793 D2b-out-2): the K8 readback rule, fenced by the attempt that the readback observed. A row that
    * stays `unknown` at that attempt is read back again after `readbackMs`. A result for an earlier attempt changes nothing.
    * `undefined` is missing evidence (the readback threw or passed its deadline): it changes only the wait, with the same fence.
+   * The wait is also fenced by `lease`, the `next_at` of the readback claim: a readback that outlasted its lease leaves the
+   * lease of a later readback claim alone, so that claim keeps the row (#793 S2).
    */
-  readDelivery(scope: string, id: string, attempt: number, result: ReadbackResult | undefined, clock: () => number,
+  readDelivery(scope: string, id: string, attempt: number, lease: number, result: ReadbackResult | undefined, clock: () => number,
     readbackMs: number): Promise<void> {
     return this.deliveryStep(scope, id, clock, async (row, _state, _client, now) => {
       if (result !== undefined) readbackDelivery(row, attempt, result, now);
       return row.state === 'unknown' && row.attempts === attempt ? now + readbackMs : undefined;
-    });
+    }, lease);
   }
 
   /**
@@ -542,10 +544,10 @@ export class HostedCollaborationStore {
 
   /**
    * One K8 rule on the delivery entity `id`, then the `next_at` that `step` returns, in one transaction under the scope lock.
-   * `clock` is read once, after the lock.
+   * `clock` is read once, after the lock. With `lease`, the `next_at` is written only while the row still holds that lease.
    */
   private deliveryStep(scope: string, id: string, clock: () => number,
-    step: (row: Delivery, state: CollaborationState, client: PoolClient, now: number) => Promise<number | undefined>): Promise<void> {
+    step: (row: Delivery, state: CollaborationState, client: PoolClient, now: number) => Promise<number | undefined>, lease?: number): Promise<void> {
     const key = storedKey(scope);
     return this.transaction(async client => {
       const nextAt = await this.decideIn(client, key, undefined, async (state, _publish, tx) => {
@@ -554,7 +556,9 @@ export class HostedCollaborationStore {
         if (!deliveries || !Object.hasOwn(deliveries, id)) throw new Error('Delivery not found');
         return { value: await step(deliveries[id]!, state, tx, now), outbox: [], now };
       });
-      if (nextAt !== undefined) await client.query('UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2', [key, storedKey(id), nextAt]);
+      if (nextAt === undefined) return;
+      if (lease === undefined) await client.query('UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2', [key, storedKey(id), nextAt]);
+      else await client.query('UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2 AND next_at = $4', [key, storedKey(id), nextAt, lease]);
     }, false);
   }
 

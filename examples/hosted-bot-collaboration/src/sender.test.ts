@@ -405,18 +405,38 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       const { channelStore, scope, turnId } = await received();
       clock = await unknownAt(channelStore, scope, turnId);
       const at = clock;
-      await underLock(scope, 5_000, () => channelStore.readDelivery(scope, 'd1', 1, undefined, () => clock, TIMES.readbackMs));
+      await underLock(scope, 5_000, () => channelStore.readDelivery(scope, 'd1', 1, at, undefined, () => clock, TIMES.readbackMs));
       expect(await row(scope, 'd1')).toMatchObject({ next_at: String(at + 5_000 + TIMES.readbackMs) });
     });
 
     it('holds an unknown delivery for one readback at a time: the readback claim takes a lease', async () => {
       const { channelStore, scope, turnId } = await received();
       const at = await unknownAt(channelStore, scope, turnId), times = { ...TIMES, readback: true };
-      expect(await channelStore.claimDelivery(scope, 'd1', () => at, times)).toEqual({ kind: 'readback', attempt: 1 });
+      expect(await channelStore.claimDelivery(scope, 'd1', () => at, times)).toEqual({ kind: 'readback', attempt: 1, lease: at + TIMES.leaseMs });
       expect(await row(scope, 'd1')).toMatchObject({ next_at: String(at + TIMES.leaseMs) });
       // A sender whose scan saw the row due before that claim gets nothing until the lease passes.
       expect(await channelStore.claimDelivery(scope, 'd1', () => at + TIMES.leaseMs - 1, times)).toEqual({ kind: 'none' });
-      expect(await channelStore.claimDelivery(scope, 'd1', () => at + TIMES.leaseMs, times)).toEqual({ kind: 'readback', attempt: 1 });
+      expect(await channelStore.claimDelivery(scope, 'd1', () => at + TIMES.leaseMs, times)).toEqual({ kind: 'readback', attempt: 1,
+        lease: at + 2 * TIMES.leaseMs });
+    });
+
+    it('fences a readback wait by its claim\'s lease: a readback that outlasted it leaves a later readback claim\'s lease alone', async () => {
+      const { channelStore, scope, turnId } = await received();
+      const at = await unknownAt(channelStore, scope, turnId), times = { ...TIMES, readback: true };
+      const first = await channelStore.claimDelivery(scope, 'd1', () => at, times);
+      expect(first).toEqual({ kind: 'readback', attempt: 1, lease: at + TIMES.leaseMs });
+      // The first readback outlasts its lease, and another sender claims the row again.
+      const second = await channelStore.claimDelivery(scope, 'd1', () => at + TIMES.leaseMs, times);
+      expect(second).toEqual({ kind: 'readback', attempt: 1, lease: at + 2 * TIMES.leaseMs });
+      for (const result of [undefined, 'unsupported'] as const) {
+        await channelStore.readDelivery(scope, 'd1', 1, at + TIMES.leaseMs, result, () => at + TIMES.leaseMs + 1, TIMES.readbackMs);
+        expect(await row(scope, 'd1')).toMatchObject({ next_at: String(at + 2 * TIMES.leaseMs) });
+      }
+      expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'unknown', attempts: 1 });
+      expect(await channelStore.claimDelivery(scope, 'd1', () => at + 2 * TIMES.leaseMs - 1, times)).toEqual({ kind: 'none' });
+      // The readback that holds the lease sets the next wait.
+      await channelStore.readDelivery(scope, 'd1', 1, at + 2 * TIMES.leaseMs, undefined, () => at + TIMES.leaseMs + 2, TIMES.readbackMs);
+      expect(await row(scope, 'd1')).toMatchObject({ next_at: String(at + TIMES.leaseMs + 2 + TIMES.readbackMs) });
     });
 
     it('fences a failed readback by its attempt: it leaves the lease of a later attempt alone', async () => {
@@ -430,7 +450,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       await started;
       // Another sender reads attempt 1 back as absent, and sends attempt 2 once its retry wait passed.
       const at = clock;
-      await channelStore.readDelivery(scope, 'd1', 1, 'absent', () => at, TIMES.readbackMs);
+      await channelStore.readDelivery(scope, 'd1', 1, at, 'absent', () => at, TIMES.readbackMs);
       expect(await channelStore.claimDelivery(scope, 'd1', () => at + 1_000, TIMES)).toMatchObject({ kind: 'send', attempt: 2 });
       fail();
       expect(await pass).toEqual({ steps: 1, failed: [{ scope, id: 'd1', error: new Error('readback down') }] });
@@ -468,13 +488,13 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       const { channelStore, scope, turnId } = await received();
       const at = await unknownAt(channelStore, scope, turnId);
       // Attempt 1 reads back absent, attempt 2 is sent, and its send fails: it is unknown at attempt 2.
-      await channelStore.readDelivery(scope, 'd1', 1, 'absent', () => at, TIMES.readbackMs);
+      await channelStore.readDelivery(scope, 'd1', 1, at, 'absent', () => at, TIMES.readbackMs);
       expect(await channelStore.claimDelivery(scope, 'd1', () => at + 1_000, TIMES)).toMatchObject({ kind: 'send', attempt: 2 });
       await channelStore.finishDelivery(scope, 'd1', 2, { code: 'send_failed' }, () => at + 2_000, TIMES);
       expect((await channelStore.read(scope)).channel!.deliveries.d1).toMatchObject({ state: 'unknown', attempts: 2 });
       const wait = (await row(scope, 'd1'))!.next_at;
       for (const result of [undefined, 'unsupported'] as const) {
-        await channelStore.readDelivery(scope, 'd1', 1, result, () => at + 3_000, TIMES.readbackMs);
+        await channelStore.readDelivery(scope, 'd1', 1, at, result, () => at + 3_000, TIMES.readbackMs);
         expect(await row(scope, 'd1')).toMatchObject({ next_at: wait });
       }
     });
