@@ -4,7 +4,7 @@ import { agentKey, canonical, fifoHeads, hash, promoteOccurrence, queuedExpiry, 
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';
-import type { SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import type { settleDelegations, SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { activeBinding, DeviceBindingError } from './binding';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { idOf, storedKey } from './layout';
@@ -53,15 +53,20 @@ export async function frozenIntent(client: PoolClient, scope: string, task: stri
 }
 
 type IntentFact = NonNullable<ReturnType<SyncFacts['intent']>>;
-/** The intent facts of these Turns, read from the intent rows in the caller's transaction, and the keys of the started rows. */
+/**
+ * The intent facts of these Turns, read from the intent rows in the caller's transaction, the keys of the started rows, and
+ * the envelope type and decline code of each row's terminal.
+ */
 async function loadIntentFacts(client: PoolClient, scope: string, turnIds: readonly string[]) {
   const found = await client.query<{ key: string; task_id: string; conclusion: IntentFact['conclusion'] | null;
-    cancel_reason: IntentFact['cancelReason'] | null; started: boolean }>(
-    'SELECT key, task_id, conclusion, cancel_reason, started FROM intent WHERE scope = $1 AND key = ANY($2::text[])',
+    cancel_reason: IntentFact['cancelReason'] | null; started: boolean; terminal_type: string | null; decline_code: string | null }>(
+    `SELECT key, task_id, conclusion, cancel_reason, started, terminal->'envelope'->>'type' AS terminal_type,
+      terminal->'envelope'->'payload'->>'code' AS decline_code FROM intent WHERE scope = $1 AND key = ANY($2::text[])`,
     [storedKey(scope), turnIds.map(storedKey)]);
   const facts = new Map(found.rows.map(row => [row.key, { taskId: row.task_id, ...(row.conclusion ? { conclusion: row.conclusion } : {}),
     ...(row.cancel_reason ? { cancelReason: row.cancel_reason } : {}) } satisfies IntentFact]));
-  return { intent: (turnId: string) => facts.get(storedKey(turnId)), started: new Set(found.rows.filter(row => row.started).map(row => row.key)) };
+  return { intent: (turnId: string) => facts.get(storedKey(turnId)), started: new Set(found.rows.filter(row => row.started).map(row => row.key)),
+    terminals: new Map(found.rows.flatMap(row => row.terminal_type === null ? [] : [[row.key, { type: row.terminal_type, code: row.decline_code }] as const])) };
 }
 /**
  * The intent facts that a command reads (K8 `CommandPorts.intents`), as L reads its K4 intents in the commit transaction.
@@ -112,15 +117,41 @@ export async function intentConclusions(client: PoolClient, scope: string): Prom
 /**
  * K8 `deliverCancels` (host.ts): the K4 cancel of the frozen target of each committed delegation cancel fact, then
  * `delivered`. L marks a fact delivered whatever K4 finds, and so does H. The caller holds the scope lock and writes
- * `state` in the same transaction.
+ * `state` in the same transaction. Returns true when it delivered a fact.
  */
-export async function deliverCancels(client: PoolClient, scope: string, state: CollaborationState, now: number): Promise<void> {
+export async function deliverCancels(client: PoolClient, scope: string, state: CollaborationState, now: number): Promise<boolean> {
+  let delivered = false;
   for (const d of Object.values(state.delegations)) {
     if (!d.cancel || d.cancel.delivered) continue;
     await cancelIntent(client, scope, d.cancel.targetTurnId, now);
     d.cancel.delivered = true;
+    delivered = true;
   }
+  return delivered;
 }
+
+/**
+ * The K4 facts that K8 `settleDelegations` reads (#793 D2f-5), from the intent rows of these Turns, as K8 `intentFacts`
+ * reads them from L's ledger. H keeps generation 0 only, so "any generation" is this row: it started when the
+ * reconciliation saw a claim (`started`) or it has a terminal that is not a decline. The caller holds the scope lock.
+ */
+export async function settleFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<SettleFacts> {
+  const { intent, started, terminals } = await loadIntentFacts(client, scope, turnIds);
+  return {
+    intent,
+    started: turnId => {
+      const terminal = terminals.get(storedKey(turnId));
+      return started.has(storedKey(turnId)) || terminal !== undefined && terminal.type !== 'task.decline';
+    },
+    declineCode: turnId => {
+      const terminal = terminals.get(storedKey(turnId));
+      return terminal?.type === 'task.decline' ? terminal.code ?? undefined : undefined;
+    },
+    // Settlement never reads it: only the device observation does, and H has no such step.
+    offeredTo: () => { throw new Error('offeredTo is not a settlement fact'); },
+  };
+}
+type SettleFacts = Parameters<typeof settleDelegations>[1];
 
 /**
  * Writes the intent side of one sync step, as L writes it to K4 (K8 commit.ts). A routine step and a routine Turn's `ended`

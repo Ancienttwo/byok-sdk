@@ -14,6 +14,7 @@ import { commit, type CommandRecord, type CommitRequest, type CommitResult, type
 // The Host gives ports for its own helpers. A port that a command needs and that is absent is a Host error.
 // The sync step runs beside the commands, so it is part of this entry. A store runs it under the same scope lock as a commit.
 export { OFFER_WAIT_MS, syncTurn, type FreezeExecution, type SyncBot, type SyncFacts, type SyncOptions, type SyncState, type SyncStep } from './sync';
+export { delegationDue, settleDelegations, type DelegationTimers } from './delegation';
 
 /** Commands with a caller key or a K4 key. The store records them, so a retry replays the first result. */
 export type KeyedCommand =

@@ -5,6 +5,7 @@ import { canonical, FrozenOfferMismatchError, sameFrozenOffer, type Conclusion, 
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { revisionOf, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
+import { deliverCancels } from './intents';
 import { commitStored } from './retention';
 import { storedKey } from './layout';
 import { loadSlice, outcomeRoutinePorts, switchDueVersions, writeSlice } from './routines';
@@ -214,6 +215,9 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
   } else conclusion = envelope.type === 'task.decline' ? 'declined' : 'failed';
   await client.query('UPDATE intent SET terminal = $3::json, attempt = $4::json, conclusion = $5 WHERE scope = $1 AND key = $2',
     [scopeKey, key, JSON.stringify(terminal), JSON.stringify(attempt), conclusion]);
+  // The Main Bot cancel that the outcome froze, delivered after this row concluded, as L runs core.cancel after its terminal
+  // transaction (K8 host.ts pass). The version switch then sees a target that the delivery concluded (#793 D2f-5).
+  await deliverCancels(client, scope, state, now);
   await switchDueVersions(client, scopeKey, now);
   return { value: conclusion, outbox, now };
 }
