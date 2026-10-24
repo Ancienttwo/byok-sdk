@@ -161,12 +161,16 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     return session.state.scopes.get(scopeId)!.categories;
   }
 
-  /** The cached key, or else a fetch on the miss (E2d-e3). */
+  /**
+   * A copy of the cached key, or else of a key fetched on the miss
+   * (E2d-e3). A catch-up zeroes the cached bytes, so an open or seal in
+   * flight keeps its own.
+   */
   async openingKey(scope: { readonly id: string; readonly epoch: number }): Promise<Uint8Array | undefined> {
     const known = this.cached(scope.id, scope.epoch);
-    if (known !== undefined) return known.scopeKey;
+    if (known !== undefined) return known.scopeKey.slice();
     const result = await this.fetch(scope.id, scope.epoch);
-    if (result.ok) return result.key.scopeKey;
+    if (result.ok) return result.key.scopeKey.slice();
     this.options.log(`no scope key for epoch ${scope.epoch} of scope ${JSON.stringify(scope.id)} (${result.reason})`);
     return undefined;
   }

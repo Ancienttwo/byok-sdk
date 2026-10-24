@@ -282,6 +282,16 @@ describe('device member keyring sealing rules (E2d-3)', () => {
     expect(await keyring.sealingKey('scope-a', 1)).toBeUndefined();
   });
 
+  it('hands out a copy of the key, which a later purge does not zero', async () => {
+    const { web, device, keyring } = await member();
+    const scopeKey = await web.putScope('scope-a', [device]);
+    const opening = (await keyring.openingKey({ id: 'scope-a', epoch: 1 }))!;
+    await web.append('shred', { scopeId: 'scope-a' });
+    await keyring.catchUp();
+    expect(keyring.cached('scope-a', 1)).toBeUndefined();
+    expect(opening).toEqual(scopeKey);
+  });
+
   it('makes an epoch stale when a scope member is removed after its point', async () => {
     const { web, device, keyring } = await member();
     const helper = await stranger();
