@@ -89,9 +89,26 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
       await expect(store().commit(h.scope, { scope: h.scope, commandId: 'i2', command: input('k2') }, vectorPorts)).rejects.toBeInstanceOf(HostedStoreVersionError);
     });
 
+    // Each owner kind reaches the K8 rules: a commit result, or the rule's own refusal for a seed that lacks its row.
+    const owners: Array<[Command['kind'], Command, SeedTeam, string?]> = [
+      ['decide', { kind: 'decide', cardId: 'c1', decision: 'confirmed' }, 'local'],
+      ['answer', { kind: 'answer', questionId: 'q1', answer: 'Yes' }, 'local'],
+      ['team_snapshot', { kind: 'team_snapshot', snapshot: { revision: 2, bots: [{ id: 'main', name: 'main', role: 'Team owner', persona: '', model: 'default', mainBot: true }] } }, 'external'],
+      ['set_main_bot', { kind: 'set_main_bot', botId: 'main', mainBot: true }, 'local'],
+      ['update_room', { kind: 'update_room', roomId: 'none', update: {} }, 'local', 'Room not found'],
+      ['retry_persona', { kind: 'retry_persona', botId: 'main' }, 'local', 'No failed persona delivery'],
+    ];
+    it.each(owners)('takes the owner command %s through commit()', async (_kind, command, team, refusal) => {
+      const h = await hosted(team);
+      const result = await store().commit(h.scope, { scope: h.scope, commandId: randomUUID(), command }, vectorPorts).then(value => value, (error: unknown) => error);
+      expect(result).not.toBeInstanceOf(CallbackCommandError);
+      if (refusal) expect((result as Error).message).toContain(refusal);
+      else expect(result).toHaveProperty('disposition');
+    });
+
     it('takes no outcome or occurrence port in the commit ports, by type', () => {
       // @ts-expect-error The commit ports carry no outcome port.
-      const withOutcome: CommitPortsFactory = (state, publish) => callbackPorts(state, publish);
+      const withOutcome: CommitPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), outcome: callbackPorts(state, publish).outcome });
       // @ts-expect-error The commit ports carry no occurrence port.
       const withOccurrence: CommitPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), occurrence: () => {} });
       const plain: CommitPortsFactory = vectorPorts;
