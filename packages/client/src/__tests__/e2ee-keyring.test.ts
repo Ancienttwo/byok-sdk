@@ -565,6 +565,44 @@ describe('device member KEM rotation (E2d-5)', () => {
     expect(await (await restart()).fetch('scope-a', 1)).toMatchObject({ ok: true, key: { scopeKey } });
   });
 
+  it('keeps the old key when the Host acknowledges a re-wrap and then reads back no package', async () => {
+    const { server, web, device, custody, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    const original = server.e2ee.handle.bind(server.e2ee);
+    server.e2ee.handle = async (req, res, url) => {
+      if (req.method === 'POST' && url.pathname.endsWith('/key-packages')) {
+        server.e2ee.packageResponse = [];
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ stored: 1, skippedDeviceIds: [] }));
+        return true;
+      }
+      return original(req, res, url);
+    };
+    expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'rewrap_unverified' });
+    expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+  });
+
+  it('does not re-sign a package whose sender a catch-up removed while the packages were read', async () => {
+    const { server, web, device, keyring } = await member();
+    const helper = await stranger();
+    await web.append('add', { member: helper.member });
+    await web.putScope('scope-a', [device, helper.member]);
+    const removed = await helper.sealPackage('scope-a', device, new Uint8Array(32).fill(6), 2);
+    server.e2ee.clientPutPackages(removed);
+    await keyring.catchUp();
+    let release!: () => void;
+    server.e2ee.holdPackageReads = new Promise<void>((resolve) => { release = resolve; });
+    const reads = server.e2ee.packageReads;
+    const rotating = keyring.rotateKem();
+    while (server.e2ee.packageReads === reads) await new Promise((resolve) => setTimeout(resolve, 5));
+    await web.follow();
+    await web.append('remove', { memberId: helper.member.memberId });
+    await keyring.catchUp();
+    release();
+    expect(await rotating).toEqual({ ok: true, epoch: 2 });
+    expect(server.e2ee.packages).toContainEqual(removed);
+    expect(server.e2ee.devicePuts.flat().map((pkg) => pkg.epoch)).toEqual([1]);
+  });
+
   it('starts no run whose custody lacks the KEM key the chain names for this device', async () => {
     const { web, device, custody, logs, keyring, resume } = await member();
     await web.putScope('scope-a', [device]);

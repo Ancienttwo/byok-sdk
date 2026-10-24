@@ -88,8 +88,10 @@ export type KemRotationFailure =
   | 'kem_epoch_unknown'
   /** The `rotate` entry does not walk on the verified chain, or the Host did not keep it. */
   | 'rotate_entry_invalid'
-  /** A package still opens only with the old key after the re-wrap. */
-  | 'rewrap_unverified';
+  /** A re-wrapped package does not read back with the next key, or a package still opens only with the old key. */
+  | 'rewrap_unverified'
+  /** The verified chain moved during each try of a scope's re-wrap. */
+  | 'chain_moved';
 
 export type KemRotationResult =
   | { readonly ok: true; readonly epoch: number }
@@ -408,48 +410,71 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     await Promise.allSettled([...this.#rotations.values()]);
     const session = this.#session;
     if (session === undefined) return 'member_lost';
-    const self = session.member.memberId;
-    const old = session.keys.kem;
-    const { signing } = session.keys;
     for (const scopeId of session.state.scopes.keys()) {
-      if (this.#scopeFailure(session, scopeId) !== undefined) continue;
-      const opened = async (pkg: unknown, kem: MemberKemKey) => {
-        const { epoch, sender } = fieldsOf(pkg);
-        if (epoch === undefined || sender === undefined || this.#scopeFailure(session, scopeId, sender) !== undefined) return undefined;
-        const result = await this.#openOwn(session, scopeId, epoch, pkg, session.state.members.get(sender)!.signingPublicJwk, [kem]);
-        return result.ok ? { epoch, scopeKey: result.scopeKey } : undefined;
-      };
+      const failure = await this.#rewrapScope(scopeId, next);
+      if (failure !== undefined) return failure;
+    }
+    return undefined;
+  }
+
+  /**
+   * One scope's re-wrap. Its senders are checked against the verified view
+   * of one try; when a catch-up moves the view during the try, it starts
+   * again, at most three times. Every re-wrapped package must then read back
+   * and open with `next` under its `keyId`, and no package that `fetch`
+   * accepts may still open only with the old key.
+   */
+  async #rewrapScope(scopeId: string, next: MemberKemKey): Promise<KemRotationFailure | undefined> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const view = this.#session;
+      if (view === undefined) return 'member_lost';
+      if (this.#scopeFailure(view, scopeId) !== undefined) return undefined;
+      const { kem: old, signing } = view.keys;
       const rewrapped: ScopeKeyPackageV1[] = [];
       for (const pkg of await this.options.client.readKeyPackages(scopeId)) {
-        const current = await opened(pkg, next);
-        if (current !== undefined) {
-          current.scopeKey.fill(0);
-          continue;
-        }
-        const held = await opened(pkg, old);
+        const current = await this.#openAccepted(view, scopeId, pkg, next);
+        current?.scopeKey.fill(0);
+        if (current !== undefined) continue;
+        const held = await this.#openAccepted(view, scopeId, pkg, old);
         if (held === undefined) {
           this.options.log(`a key package of scope ${JSON.stringify(scopeId)} is not re-wrapped: its sender is not a current member of the scope policy, or no member KEM key opens it`);
           continue;
         }
         rewrapped.push(await sealScopeKeyPackage({
           scopeKey: held.scopeKey, tenantId: this.options.tenantId, scopeId, epoch: held.epoch,
-          recipient: { memberId: self, kemPublicJwk: next.publicJwk }, sender: { signingPublicJwk: signing.publicJwk, signingPrivateKey: signing.privateKey },
+          recipient: { memberId: view.member.memberId, kemPublicJwk: next.publicJwk },
+          sender: { signingPublicJwk: signing.publicJwk, signingPrivateKey: signing.privateKey },
         }));
         held.scopeKey.fill(0);
       }
+      if (this.#session !== view) continue;
       for (let at = 0; at < rewrapped.length; at += E2EE_SCOPE_KEY_PACKAGE_PUT_MAX) {
         await this.options.client.putKeyPackages(rewrapped.slice(at, at + E2EE_SCOPE_KEY_PACKAGE_PUT_MAX));
       }
+      const unconfirmed = new Map(rewrapped.map((pkg) => [pkg.epoch, pkg.keyId]));
+      const back = this.#session ?? view;
       for (const pkg of await this.options.client.readKeyPackages(scopeId)) {
-        const current = await opened(pkg, next);
+        const current = await this.#openAccepted(back, scopeId, pkg, next);
         current?.scopeKey.fill(0);
-        if (current !== undefined) continue;
-        const held = await opened(pkg, old);
+        if (current !== undefined) {
+          if (unconfirmed.get(current.epoch) === current.keyId) unconfirmed.delete(current.epoch);
+          continue;
+        }
+        const held = await this.#openAccepted(back, scopeId, pkg, old);
         held?.scopeKey.fill(0);
         if (held !== undefined) return 'rewrap_unverified';
       }
+      return unconfirmed.size === 0 ? undefined : 'rewrap_unverified';
     }
-    return undefined;
+    return 'chain_moved';
+  }
+
+  /** Open an own package with `kem`, when `fetch` would accept its sender in `view`. */
+  async #openAccepted(view: DeviceMemberSession, scopeId: string, pkg: unknown, kem: MemberKemKey) {
+    const { epoch, sender } = fieldsOf(pkg);
+    if (epoch === undefined || sender === undefined || this.#scopeFailure(view, scopeId, sender) !== undefined) return undefined;
+    const result = await this.#openOwn(view, scopeId, epoch, pkg, view.state.members.get(sender)!.signingPublicJwk, [kem]);
+    return result.ok ? { epoch, keyId: result.keyId, scopeKey: result.scopeKey } : undefined;
   }
 
   /** Open a package addressed to this member with the first of `kems` that opens it. */

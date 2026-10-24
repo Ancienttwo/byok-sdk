@@ -1420,9 +1420,13 @@ rotation yet. The steps:
    device as the sender, and puts them. A package from a removed member or
    another sender, or one that opens with neither key, stays as it is, so it
    never gains the device's signature. After step 5 the device no longer
-   opens it.
-4. It reads the packages back. If one still opens only with the old key, the
-   rotation stops and keeps the old key.
+   opens it. The senders are checked against one verified view; when a
+   catch-up moves the view before the put, the scope starts again, at most
+   three times.
+4. It reads the packages back. Each re-wrapped package must open with the
+   next key under its `keyId`, and no package from an accepted sender may
+   still open only with the old key. Otherwise the rotation stops and keeps
+   the old key.
 5. Only then does it drop the old private key from the record.
 
 Until step 5, a package opens with either key, so a client that already
