@@ -9,6 +9,7 @@ import {
   type RuntimeDetectResult,
   type RuntimeOperationStartInput,
   type RuntimePreparedLaunchV1,
+  type MessageDraftDelta,
   type Session,
   type SessionEvidence,
 } from '../../types';
@@ -16,7 +17,7 @@ import { AsyncQueue } from '../../util/async-queue';
 
 /** In-memory Session double: tests push AgentEvents and record interrupt/steer/close/resolveApproval calls. */
 export class StubSession implements Session {
-  readonly queue = new AsyncQueue<AgentEvent>();
+  readonly queue = new AsyncQueue<AgentEvent | MessageDraftDelta>();
   interruptCalled = false;
   closeCalled = false;
   readonly steerCalls: string[] = [];
@@ -87,14 +88,14 @@ export class StubSession implements Session {
     return release;
   }
 
-  get events(): AsyncIterable<AgentEvent> {
+  get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
     const queue = this.queue;
     const session = this;
     return {
-      [Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
+      [Symbol.asyncIterator](): AsyncIterator<AgentEvent | MessageDraftDelta> {
         const inner = queue[Symbol.asyncIterator]();
         return {
-          async next(): Promise<IteratorResult<AgentEvent>> {
+          async next(): Promise<IteratorResult<AgentEvent | MessageDraftDelta>> {
             const result = await inner.next();
             if (result.done && session.terminalFailure) throw session.terminalFailure;
             return result;
@@ -142,7 +143,7 @@ export class StubSession implements Session {
   }
 
   /** Test helper: push a normalized event as if the runtime produced it. */
-  emit(event: AgentEvent): void {
+  emit(event: AgentEvent | MessageDraftDelta): void {
     this.queue.push(event);
   }
 

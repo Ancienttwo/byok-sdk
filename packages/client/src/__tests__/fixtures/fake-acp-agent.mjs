@@ -8,7 +8,10 @@
 // The prompt text selects the scenario (see `prompt` below).
 // FAKE_ACP_LOG, when set in the child env, receives one JSON line per
 // observed fact (argv, env, cwd, requests) so a test can assert the wire.
-import { appendFileSync } from 'node:fs';
+// FAKE_ACP_REPLY_GATE=<dir>: the default reply waits for `<dir>/release`
+// after its two chunks and before the prompt answer.
+import { appendFileSync, existsSync } from 'node:fs';
+import path from 'node:path';
 import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
@@ -132,6 +135,8 @@ async function prompt(message) {
   }
   text('echo:');
   text(input);
+  const gate = process.env.FAKE_ACP_REPLY_GATE;
+  while (gate && !existsSync(path.join(gate, 'release'))) await new Promise((resolve) => setTimeout(resolve, 10));
   result(message.id, answer());
 }
 

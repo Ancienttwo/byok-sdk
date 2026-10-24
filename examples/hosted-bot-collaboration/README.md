@@ -388,19 +388,23 @@ did not change, so a step that keeps it does not rewrite the scope row. A sync r
 
 `HostedDueScheduler.run()` is one pass over the scopes whose time has come (`scope_due`), in due order, in keyset pages.
 It calls the deployment's `sync(scope, now)`, which runs `store.sync` with the deployment's sync options, and reads the
-clock for each sync; the pass time only selects the scopes. Only syncs count against `batch` (default 100).
+clock for each sync; the pass time only selects the scopes. Only syncs that resolve count against `batch` (default 100).
 
 - A sync that leaves the scope due is reported in `stalled`, for example a reply check time when the deployment's
   `sync` does not run `HostedReplyChecker` first. A sync that
-  throws is reported in `failed` and wrote nothing. Either scope waits `backoffMs` (default 60 s, in memory only)
+  throws is reported in `failed`. With the composed `sync` (the reply checker, then `store.sync`), each reply settle
+  commits in its own transaction: if a later settle or `store.sync` throws, the earlier settles of that pass stay
+  committed, and one settle never writes partly. Either scope waits `backoffMs` (default 60 s, in memory only)
   before its next sync, so it is synced at most once per backoff, and each pass reports it again when it is retried.
 - H has no timer. The deployment runs `run()` on its own interval, which bounds how late a due step runs in a scope that
   is not stalled. A stalled scope keeps the due time that H cannot clear, so each of its other due times can run up to
   `backoffMs` late.
-- Stalled scopes sort first, because their due time has passed. Once there are about `batch × backoffMs / interval` of
-  them (1,200 with the defaults and a 5 s interval), each pass spends its whole batch on them, and a fresh due scope
-  waits. Each pass also reads every backed-off due row. So H must run every step that clears a due time before it
-  deploys.
+- Stalled and failed scopes sort first, because their due time has passed. Only a stalled scope uses up the batch: its
+  sync resolves, so it counts. Once there are about `batch × backoffMs / interval` of them (1,200 with the defaults and
+  a 5 s interval), each pass spends its whole batch on them, and a fresh due scope waits. A failed scope (a sync that
+  throws, for example a settle that keeps throwing) does not count, so the pass pages on to the fresh due scopes. It is
+  retried once per `backoffMs`, and each retry adds the time of a failing sync to the pass. Each pass also reads every
+  backed-off due row. So H must run every step that clears a due time before it deploys.
 
 ## Outbox sender
 
@@ -508,6 +512,10 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   } });
   ```
   `hostedMessageConsumer(store, …)` is the `agentMessage` option of `createByokCloud`.
+  The checker reads one due check at a time, each with a `timeoutMs` limit (default 10 s), and the due scheduler syncs
+  scopes one at a time. During an SDK outage one pass can take up to the number of due checks in its batch times the
+  timeout, which delays the due steps of other scopes. A timed-out read is not cancelled. A failed read backs off, so
+  there is no hot loop.
 
 ## Tests
 
