@@ -657,9 +657,9 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     expect(await openOutput(keyring, complete!, deviceId)).toMatchObject({ summary });
   });
 
-  it('retries a failed terminal upload, and never replaces the result with a sealed failure', async () => {
+  it.each(['with', 'without'] as const)('retries a failed terminal upload %s a journal, and never replaces the result with a sealed failure', async (journal) => {
     const keyring = new TestKeyring();
-    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
+    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true, ...(journal === 'without' ? { journal: false as const } : {}) });
     server.send(await sealedOffer(keyring, 'upload-retry', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);

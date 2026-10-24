@@ -2458,13 +2458,23 @@ export function buildDaemonWithAdapters(
           commitTerminal(envelope.task_id!, () => sealedTaskOutput.sealOutbound(envelope));
           return;
         }
-        void sealedTaskOutput.sealOutbound(envelope).then(
+        // Without a journal no commit queue holds a terminal, so a terminal
+        // whose seal fails (its ciphertext upload) is sealed again each second
+        // here, as the queue would, until shutdown aborts the uploads.
+        const uploads = sealedUploadAbort?.signal;
+        const retries = terminalKindOf(envelope.type) !== undefined && uploads !== undefined;
+        const send = (): void => void sealedTaskOutput.sealOutbound(envelope).then(
           (sealed) => { if (sealed !== undefined) connection?.send(sealed); else denyUnsentApproval(envelope); },
           (error: unknown) => {
             console.error(`[byok/client] ${envelope.type} for sealed task ${envelope.task_id} not sent`, error);
+            if (retries && !uploads.aborted) {
+              setTimeout(() => { if (!uploads.aborted) send(); }, 1_000).unref?.();
+              return;
+            }
             denyUnsentApproval(envelope);
           },
         );
+        send();
         return;
       }
       if (!terminal) {
