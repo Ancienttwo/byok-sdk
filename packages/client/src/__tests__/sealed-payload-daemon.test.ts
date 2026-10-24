@@ -93,8 +93,6 @@ async function start(options: {
   failureClass?: boolean;
   /** `false` runs the daemon without a hosted journal. */
   journal?: false;
-  /** `DaemonConfig.shutdownGraceMs`. */
-  shutdownGraceMs?: number;
   /** The categories of the device scope's policy. */
   policy?: readonly SealedCategory[];
   /** `false`: the Host does not declare `e2ee.member`, and start waits for the first hello only. */
@@ -114,7 +112,6 @@ async function start(options: {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed daemon test', productId: 'sealed-daemon-test',
     serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
     ...(options.journal === false ? {} : { hostedJournal: { mode: 'sqlite' as const } }),
-    ...(options.shutdownGraceMs === undefined ? {} : { shutdownGraceMs: options.shutdownGraceMs }),
   };
   server.setCapabilityDeclaration(options.e2ee === false ? NO_E2EE_DECLARATION : E2EE_DECLARATION);
   daemon = createDaemonWithAdapters(config, [adapter]);
