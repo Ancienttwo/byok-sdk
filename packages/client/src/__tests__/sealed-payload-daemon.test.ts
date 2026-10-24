@@ -20,6 +20,7 @@ import {
   SEALED_SPLIT_TABLE,
   createEnvelope,
   encodeEnvelope,
+  isSealedTaskPlainOutput,
   type Envelope,
   type MessageType,
   type SealedMessageType,
@@ -593,6 +594,32 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     });
     const fail = await server!.waitFor((envelope) => envelope.type === 'task.fail' && envelope.task_id === 'interrupted', BUDGET_MS);
     expect(fail.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false, recovery: { kind: 'daemon_interrupted', offerId: offer!.id } });
+  });
+
+  it('reports a recovered result-reply failure of a sealed task only in a closed plaintext form (decision 74e)', async () => {
+    const taskId = 'result-reply-recovered';
+    const golden = corpus.find((line) => line.type === 'task.offer_for_agent_with_egress_sealed'
+      && (line.payload.terminalProjection as { mode?: string } | undefined)?.mode === 'result-document')!;
+    const plain = Object.fromEntries(Object.entries(golden.payload).filter(([field]) => field !== 'sealed'));
+    await start({
+      // A crash image: the turn ended without the required result, after the Host accepted the Agent message.
+      // The restart replays this terminal before the member is verified.
+      beforeStart: async (storeDir, deviceId) => {
+        const offer = createEnvelope('task.offer_for_agent_with_egress_sealed', { ...plain, instruction: 'run', sealing: OUTPUT_ONLY } as never, { taskId, seq: 1 });
+        const journal = new SqliteLocalTaskJournal({ storeDir });
+        const bytes = encodeEnvelope(offer);
+        await journal.appendEnvelope({ identity: { tenantId: TENANT, productId: 'sealed-daemon-test', deviceId },
+          taskId, envelopeId: offer.id, seq: 1, bytes, bytesHash: journalHash(bytes),
+          opensTask: true, receivedAt: new Date().toISOString() });
+        await journal.recordAdmission({ taskId, admitted: true, claimedRuntime: 'pi', decidedAt: new Date().toISOString() });
+        await journal.recordTransition({ transitionId: randomUUID(), taskId, to: 'required-reply-result-missing-accepted', occurredAt: new Date().toISOString() });
+        await journal.close();
+      },
+    });
+    const fail = await server!.waitFor((envelope) => envelope.type === 'task.fail' && envelope.task_id === taskId, BUDGET_MS);
+    expect(fail.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
+    expect(isSealedTaskPlainOutput(fail.type, fail.payload)).toBe(true);
+    expect(JSON.stringify(taskEnvelopes(taskId))).not.toContain('result_not_submitted');
   });
 
   it('sends a sealed artifact inline with a fresh artifactId, above the plaintext 64 KB limit', async () => {

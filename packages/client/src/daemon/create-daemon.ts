@@ -1635,7 +1635,7 @@ export function buildDaemonWithAdapters(
   /** This run's verified member, once the background resume finds one. */
   let deviceMember: DeviceMemberKeyring | undefined;
   let memberResuming = false;
-  /** Set by each start: builds that run's sealed tasks for a ready member. */
+  /** Set by each start: binds that run's sealed tasks to a ready member. */
   let activateSealedTasks: ((keyring: DeviceMemberKeyring) => void) | undefined;
   const memberStatus = (): DeviceMemberStatus => deviceMember ?? (memberResuming ? 'resuming' : 'none');
   let memberAbort: AbortController | undefined;
@@ -2200,6 +2200,8 @@ export function buildDaemonWithAdapters(
     // Assigned once the blob client exists. Startup recovery before that
     // writes only `daemon_interrupted`, which stays plaintext (decision 12d).
     let sealedTasks: SealedTasks | undefined;
+    /** This run's verified member, bound when it is first ready; a loss leaves it bound and keyless. */
+    let sealedMember: DeviceMemberKeyring | undefined;
     const recordRecoveryFailure = async (task: import('./journal/journal').RecoverableTask, reason: string, interrupted = false) => {
       const offer = decodeEnvelope(task.envelopeBytes);
       const { agentRef } = offer.payload as { agentRef?: AgentRef };
@@ -2380,19 +2382,24 @@ export function buildDaemonWithAdapters(
 
     capabilities.push('custom-harness');
     // #654 E2d-3: sealed task content needs this run's verified member. The
-    // object is built when the member is first ready and then stays, also
+    // object exists before the restart replay, and its keyring holds no key
+    // until the member is ready, so a recovered sealed terminal is sealed or
+    // one of the closed plaintext forms (decision 74e). The member stays bound
     // after a loss: a sealed task must never fall back to plaintext output.
-    activateSealedTasks = (keyring) => {
-      if (sealedTasks !== undefined) return;
-      const opened = new SealedTasks({
-        keyring,
-        tenantId: record.tenantId,
-        deviceId: record.deviceId,
-        blobs: { download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }) },
-      });
-      sealedTasks = opened;
-      sealedOutputSettled = () => opened.settled();
-    };
+    const opened = new SealedTasks({
+      keyring: {
+        scopeCategories: async (scopeId) => sealedMember?.scopeCategories(scopeId),
+        openingKey: async (scope) => sealedMember?.openingKey(scope),
+        acceptHeader: async (header) => await sealedMember?.acceptHeader(header) === true,
+        sealingKey: async (scopeId, minEpoch) => sealedMember?.sealingKey(scopeId, minEpoch),
+      },
+      tenantId: record.tenantId,
+      deviceId: record.deviceId,
+      blobs: { download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }) },
+    });
+    sealedTasks = opened;
+    sealedOutputSettled = () => opened.settled();
+    activateSealedTasks = (keyring) => { sealedMember ??= keyring; };
     // Contract §8.1 / §8.3: the device-level capability string is NOT computed
     // here. It is the one flag whose answer depends on a deployment fact this
     // daemon has not read yet at this point in `start()`, so it is added (and
@@ -2520,7 +2527,7 @@ export function buildDaemonWithAdapters(
       // A sealed offer this device cannot hold is one it cannot open; a device
       // with no keyring declines every sealed offer for want of a key. The
       // closed code is a value gate on the server's `sealed-payload-v1`.
-      const code = sealedTasks === undefined ? 'sealed_key_unavailable' : 'sealed_open_failed';
+      const code = sealedMember === undefined ? 'sealed_key_unavailable' : 'sealed_open_failed';
       const serverCapabilities = connection?.getServerCapabilities() ?? [];
       const closedCode = isSealedMessageType(envelope.type)
         && requiredReceiverCapabilities('task.decline', { reason: code, code }).every((flag) => serverCapabilities.includes(flag));
