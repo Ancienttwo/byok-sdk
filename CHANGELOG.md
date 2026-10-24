@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fix (examples)** — in external team mode, the K8 `create_room` and
+  `update_room` schemas offer only current Bots as members and admin (#881).
+  Before, they also offered `new_bot_1` to `new_bot_3`, which only
+  `create_bot` can create, and external mode offers no `create_bot`. A room
+  action that named one was always refused. Local mode is unchanged. A Host
+  that copies K8 in external mode freezes a different schema for new owner
+  Main Bot Turns.
+
 ## 0.30.0 — 2026-10-24 (published)
 
 0.30.0 is a MINOR release under the default pre-1.0 policy, with no exception.
