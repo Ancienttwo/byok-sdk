@@ -12,7 +12,7 @@ import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import type { TaskEvidence } from './reconcile';
-import type { PortsFactory } from './store';
+import type { FinishPortsFactory } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -46,7 +46,7 @@ async function hostedSubject(): Promise<RoutineSubject> {
   });
   await store().bindDevice(scope, 'device');
   const submitter = new HostedSubmitter(opened!.pool, store().schema, { port: () => fakePort(), now: () => clock, leaseMs: 60_000, backoffMs: 1000 });
-  const ports: PortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => clock,
+  const ports: FinishPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => clock,
     admitInput: fields => admitUserInput(state, fields, undefined, clock) });
   /** Runs the Host as the L pass does: the sync, then the submit of each FIFO head, then the sync again. */
   const run = async () => {

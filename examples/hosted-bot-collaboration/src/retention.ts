@@ -63,8 +63,9 @@ export async function retiredTurns(client: PoolClient, scopeKey: string, turnIds
  * retention moved still answers a replay, and an id that retention retired is refused at admission. A throw rolls back.
  */
 export async function commitStored(client: PoolClient, scope: string, state: CollaborationState, request: CommitRequest<Command>,
-  ports: Omit<CommandPorts, 'intents' | 'deliver'>, channel: boolean): Promise<CommitResult> {
-  const scopeKey = storedKey(scope), command = request.command;
+  ports: Omit<CommandPorts, 'intents' | 'deliver' | 'outcome'> & { outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
+  channel: boolean): Promise<CommitResult> {
+  const scopeKey = storedKey(scope), command = request.command, { outcome, ...rest } = ports;
   // The channel outbox port of a K4 callback, as L's (K8 host.ts `deliverPort`). The delivery rules read the intent
   // conclusions committed before this command, so the view is read here, before any write of this transaction (#793 D2b-out-2).
   const taskId = command.kind === 'message' ? command.message.taskId : command.kind === 'outcome' ? command.taskId : undefined;
@@ -80,7 +81,7 @@ export async function commitStored(client: PoolClient, scope: string, state: Col
   const result = commitCommand(state, request, { scope, recordCallbacks: true,
     // As K4 `rows.get` in L: a keyed command that is not in the state checks its row id here, and an over-limit id throws.
     archived: (id: string) => { checkRow('commands', id); return id === request.commandId ? archived : undefined; },
-    admitted: ids => { admitted = ids; } }, { ...ports, ...deliver, intents, ...(ports.outcome ? { outcome: { ...ports.outcome, committed: intents } } : {}) });
+    admitted: ids => { admitted = ids; } }, { ...rest, ...deliver, intents, ...(outcome ? { outcome: { ...outcome, committed: intents } } : {}) });
   if (admitted) {
     const ids = admitted as AdmittedIds;
     const isRetired = await tombstones(client, scopeKey, (['turn', 'input', 'round'] as const).flatMap(namespace =>

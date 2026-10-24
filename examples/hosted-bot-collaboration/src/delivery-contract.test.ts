@@ -5,7 +5,7 @@ import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { inboundKey, type ChannelPort, type Delivery, type InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
 import { enablePush, rememberInbound, resendUnknown, revokePush } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { FINAL_BODY, deliveryVectors, replyToken, type DeliverySubject } from '@byok-sdk/example-bot-collaboration/delivery-vectors';
-import type { CommandPorts, KeylessCommand } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import type { KeylessCommand } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { frozenIntent } from './intents';
 import { storedKey } from './layout';
@@ -13,7 +13,7 @@ import { vectorPorts } from './memory-subject.test-support';
 import { hostedMessageConsumer, type AgentMessageInput } from './messages';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedOutboxSender } from './sender';
-import { HostedCollaborationStore, inSchema, type PortsFactory } from './store';
+import { HostedCollaborationStore, inSchema, type CommitPorts, type CommitPortsFactory } from './store';
 
 // #793 D2b-out-2: the K8 delivery vectors on H, with the outbox sender on real Postgres.
 const DIRECT = { kind: 'direct', id: 'main' } as const;
@@ -67,7 +67,7 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
   await store.seed(scope, state => { seedCollaboration(state); state.team.bots.main!.execution = execution; });
   await store.bindDevice(scope, 'device');
 
-  const ports = (extra: Partial<CommandPorts> = {}): PortsFactory => (state, publish) => ({ ...vectorPorts(state, publish), now: () => now,
+  const ports = (extra: Partial<CommitPorts> = {}): CommitPortsFactory => (state, publish) => ({ ...vectorPorts(state, publish), now: () => now,
     routes: {
       enable: (conversation, channel, target, owner) => enablePush(state, conversation, channel, target, owner, now).id,
       revoke: routeId => revokePush(state, routeId, now),

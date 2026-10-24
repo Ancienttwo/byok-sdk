@@ -25,9 +25,14 @@ transaction. The transaction holds the state change, the command record and the 
 - A new commit that leaves a delegation cancel fact to deliver (`cancel_turn` of an open chain Turn,
   `cancel_delegation`, `abandon_delegation`) delivers it in the same transaction, as L `settleChain` runs
   `deliverCancels` after its commit: the K4 cancel of the fact's frozen target, then `delivered`.
-- The other outcome ports (`createRoutine`, `updateRoutine`, `cancelRoutine`, `manage`) still come from the caller of
-  `commit()`. Only the terminal transaction builds them from the store. The command entry must not take callback
-  commands (`outcome`, `message`, `occurrence`) from a client.
+- `commit()` is the command entry's call, so it refuses the K4 callback commands (`outcome`, `message`, `occurrence`)
+  with `CallbackCommandError`, before it reads or writes anything: no scope row and no command record, so a retry gets
+  the same refusal (#793 D2f-6). They come only from `finish`, `consume` and `fire`. Its ports (`CommitPortsFactory`)
+  carry no outcome or occurrence port. `finish` takes the commit ports and `manage` (`FinishPortsFactory`); the store
+  builds the committed intents and the routine ports of the outcome.
+- The shared K8 commit vectors send an `outcome`. H runs them through the protected `commitIn`, which a test subclass
+  (`VectorStore`) exposes, as L's vector subject commits through `commitInLedger`. Host code is trusted: the boundary is
+  that the command entry calls `commit()`.
 - A new `cancel_turn` of a Turn with a frozen intent runs the K4 cancel in the same transaction, in L's order (K8
   `host.ts` `cancelTurn`): the commit, then `cancel_reason = 'cancelled'` on the open intent, then the version switch
   check. An untried row also concludes `cancelled` (K4 `queuedExpiry`), because the submit claim runs under the same
@@ -367,7 +372,8 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
 - **Host auth.** The Host resolves each request to the product user that owns it, and passes that user's scope. One
   scope belongs to one SDK tenant: the submitter's and reconciler's `port(scope)` and the message consumer's
   `scopeOf(tenant)` are inverse maps, and that map is the tenant check (see Message consumer). A command for another
-  scope is a `scope_mismatch` conflict. The command entry comes in a later slice of #793.
+  scope is a `scope_mismatch` conflict. A K4 callback command from the entry is a `CallbackCommandError` (see Commit
+  store). The command entry comes in a later slice of #793.
 - **Enrollment.** A device pairs with the SDK through a pairing code (`cloud.createPairingCode(tenant, { productId })`).
   The Host then binds it to H with `bindDevice(scope, deviceId)`, and `revokeDevice` ends that binding for good (see
   Device binding). Each tenant needs a storage entitlement (`core.quota.writeEntitlement`) before a mailbox append.

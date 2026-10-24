@@ -10,9 +10,9 @@ import { syncTurn, type Command } from '@byok-sdk/example-bot-collaboration/rule
 import { seedCollaboration, SYNC_OPTIONS, syncVectors, type SyncIntentRecord, type SyncSubject } from '@byok-sdk/example-bot-collaboration/test-support';
 import { freezeIntent, type IntentFreeze } from './intents';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
+import { callbackPorts, vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { inSchema, lockScope, type PortsFactory } from './store';
+import { inSchema, lockScope, type CommitPortsFactory, type PortsFactory } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -164,7 +164,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
   });
 
   describe('cancel_turn of a Turn with a frozen intent runs the K4 cancel in its commit, as L does (#793 D2f-4)', () => {
-    const cancel = (h: SyncSubject, turnId: string, ports?: PortsFactory) => ports
+    const cancel = (h: SyncSubject, turnId: string, ports?: CommitPortsFactory) => ports
       ? store().commit(h.scope, { scope: h.scope, commandId: `cancel-${turnId}`, command: { kind: 'cancel_turn', turnId } }, ports)
       : h.commit({ scope: h.scope, commandId: `cancel-${turnId}`, command: { kind: 'cancel_turn', turnId } });
     async function frozen() {
@@ -195,7 +195,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
 
     it('reads the intent facts from the store, and ignores intent facts in the caller ports', async () => {
       const h = await frozen();
-      const stubbed = ((state, publish) => ({ ...vectorPorts(state, publish), intents: { intent: () => undefined } })) as PortsFactory;
+      const stubbed = ((state, publish) => ({ ...vectorPorts(state, publish), intents: { intent: () => undefined } })) as CommitPortsFactory;
       await cancel(h, 'q1', stubbed);
       // With the stub, K8 would conclude the Turn itself and leave its intent running.
       expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
@@ -256,10 +256,10 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
         seedCollaboration(state);
       });
       const stubbed = ((state, publish) => {
-        const ports = vectorPorts(state, publish);
+        const ports = callbackPorts(state, publish);
         return { ...ports, outcome: { ...ports.outcome!, committed: { intent: () => undefined } } };
       }) as PortsFactory;
-      await store().commit(h.scope, { scope: h.scope, commandId: 'task-t1', command: { kind: 'outcome', turnId: 't1', taskId: 'task-t1',
+      await store().commitIn(h.scope, { scope: h.scope, commandId: 'task-t1', command: { kind: 'outcome', turnId: 't1', taskId: 'task-t1',
         document: { cancel_delegation: [{ delegationId: 'd1' }] } } }, stubbed);
       // With the stub, K8 would end the chain Turn itself and resolve the delegation while its intent kept running.
       const state = await h.state();
