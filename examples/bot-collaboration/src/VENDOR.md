@@ -35,8 +35,9 @@ git diff <recorded-commit>..<new-commit> -- examples/bot-collaboration examples/
 ## Published SDK packages
 
 The copy imports `@byok-sdk/protocol`, `@byok-sdk/core`, `@byok-sdk/server` and
-`@byok-sdk/client` from npm. These packages are released together under one
-version. Use exactly the version of the tag you copied. A commit between tags
+`@byok-sdk/client` from npm. Every layer needs all four, because every layer
+needs the K4 root entry (see the [K4](#k4) list). These packages are released
+together under one version. Use exactly the version of the tag you copied. A commit between tags
 can use package changes that are not on npm yet. K4 needs Node 24.15 or later,
 because its ledger uses `node:sqlite`.
 
@@ -74,9 +75,8 @@ src/rules/turn.ts
 
 The roots are `src/host.ts` (`BotCollaboration`) and `src/index.ts`. The package
 entries other than the vectors are in this layer too. `src/persona.ts` is the
-daemon side of the persona projection. It is the only file that imports
-`@byok-sdk/client`, so a Host installs the client package only where it runs
-that consumer.
+daemon side of the persona projection. It is the only K8 file that imports
+`@byok-sdk/client` directly. The K4 root entry needs that package too.
 
 ```vendor host
 src/channel.ts
@@ -148,7 +148,30 @@ root entry (`.`, `src/index.ts`) reaches every non-test file of K4 `src/`, excep
 Copy them, and resolve the package name to the copy. Use a workspace package
 with the same name and `exports` table, or an alias such as tsconfig `paths`
 with the same alias in your bundler and test runner. Keep the name: the copied
-imports and `src/rules-boundary.test.ts` use it.
+imports and `src/rules-boundary.test.ts` use it. The root entry imports these
+files and packages:
+
+```vendor k4
+src/core.ts
+src/index.ts
+src/ledger.ts
+src/memory-restore.ts
+src/memory.ts
+src/model.ts
+src/routines.ts
+src/schedule.ts
+src/submit.ts
+src/transitions.ts
+@byok-sdk/client
+@byok-sdk/client/agent-memory
+@byok-sdk/core
+@byok-sdk/protocol
+@byok-sdk/protocol/constants
+@byok-sdk/server
+node:async_hooks
+node:crypto
+node:sqlite
+```
 
 ### K4 test-support
 

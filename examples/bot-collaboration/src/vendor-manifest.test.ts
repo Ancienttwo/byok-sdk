@@ -11,7 +11,7 @@ import { imports } from './import-scan.test-support';
  */
 const K8 = fileURLToPath(new URL('..', import.meta.url));
 const K4 = join(K8, '../host-execution-core');
-const LAYERS = ['rules', 'host', 'vectors', 'k4-test-support', 'unvendored'] as const;
+const LAYERS = ['rules', 'host', 'vectors', 'k4', 'k4-test-support', 'unvendored'] as const;
 type Layer = typeof LAYERS[number];
 interface Listed { files: string[]; packages: Record<string, string[] | undefined> }
 interface Graph { files: string[]; packages: Record<string, string[]> }
@@ -75,7 +75,7 @@ const packageName = (spec: string) => spec.startsWith('@') ? spec.split('/').sli
 function vendorLayers() {
   const listed = manifest(readFileSync(join(K8, 'src/VENDOR.md'), 'utf8'));
   const k8 = packageJson(K8);
-  const roots: Record<Exclude<Layer, 'unvendored' | 'k4-test-support'>, string[]> = {
+  const roots: Record<'rules' | 'host' | 'vectors', string[]> = {
     rules: readdirSync(join(K8, 'src/rules')).filter(name => name.endsWith('.ts') && !name.endsWith('.test.ts')).map(name => `src/rules/${name}`),
     host: ['src/host.ts', 'src/index.ts'],
     vectors: Object.values(k8.exports).filter(target => target.endsWith('.test-support.ts')).map(target => target.replace(/^\.\//, '')),
@@ -85,15 +85,15 @@ function vendorLayers() {
     found[layer] = graph(K8, roots[layer], below);
     for (const file of found[layer].files) below.add(join(K8, file));
   }
-  const k4Root = graph(K4, ['src/index.ts'], new Set());
-  found['k4-test-support'] = graph(K4, ['src/test-support.ts'], new Set(k4Root.files.map(file => join(K4, file))));
-  return { listed, found, k8, k4Root };
+  found.k4 = graph(K4, ['src/index.ts'], new Set());
+  found['k4-test-support'] = graph(K4, ['src/test-support.ts'], new Set(found.k4.files.map(file => join(K4, file))));
+  return { listed, found, k8 };
 }
 
 it('lists each layer exactly as its import graph', () => {
   const { listed, found } = vendorLayers();
   expect([...listed.keys()], 'vendor layers in src/VENDOR.md').toEqual([...LAYERS]);
-  for (const layer of ['rules', 'host', 'vectors', 'k4-test-support'] as const) {
+  for (const layer of ['rules', 'host', 'vectors', 'k4', 'k4-test-support'] as const) {
     expect(compare(listed.get(layer)!, found[layer]!), `${layer}: update src/VENDOR.md`).toEqual(found[layer]);
   }
 });
@@ -110,8 +110,8 @@ it('lists every other K8 source file as not vendored, and only those', () => {
 });
 
 it('copies all of K4 for its root entry, and declares every K8 package', () => {
-  const { listed, k8, k4Root } = vendorLayers();
-  expect(k4Root.files).toEqual(sources(K4, 'src').filter(file => file !== 'src/test-support.ts' && !file.startsWith('src/fixtures/')).sort());
+  const { listed, found, k8 } = vendorLayers();
+  expect(found.k4!.files).toEqual(sources(K4, 'src').filter(file => file !== 'src/test-support.ts' && !file.startsWith('src/fixtures/')).sort());
   const declared = new Set(Object.keys({ ...k8.dependencies, ...k8.devDependencies }));
   const used = (['rules', 'host', 'vectors'] as const).flatMap(layer => Object.keys(listed.get(layer)!.packages));
   expect(used.filter(spec => !spec.startsWith('node:') && !declared.has(packageName(spec)))).toEqual([]);
