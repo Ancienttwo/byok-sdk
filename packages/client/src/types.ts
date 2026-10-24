@@ -163,6 +163,18 @@ export interface ApprovalChannel {
 }
 
 /**
+ * Display-only text for the daemon's Agent message draft lane. It is not an
+ * `AgentEvent`: the daemon never batches, records or replies with it. The
+ * adapter's own message tracker sets `startsMessage` on the first non-blank
+ * delta of a new message, and each later `progress` event reconciles the draft.
+ */
+export interface MessageDraftDelta {
+  type: 'message_draft_delta';
+  text: string;
+  startsMessage: boolean;
+}
+
+/**
  * A running (or resumable) unit of work on a runtime. One `Session` maps to
  * one underlying runtime process/session for the lifetime of a task.
  */
@@ -171,8 +183,8 @@ export interface Session {
   readonly interactions?: NativeInteractionChannel;
   /** Opaque runtime session id, reported back to the server via `task.complete.sessionRef`. */
   sessionRef: string;
-  /** Normalized events for this session; the daemon batches these into `task.progress`. */
-  events: AsyncIterable<AgentEvent>;
+  /** Normalized events for this session; the daemon batches these into `task.progress`. A `MessageDraftDelta` only feeds the display-only draft. */
+  events: AsyncIterable<AgentEvent | MessageDraftDelta>;
   /**
    * For an adapter whose descriptor sets `progressEventsAreMessages` but
    * emits one assistant message as several `progress` events. Return false
