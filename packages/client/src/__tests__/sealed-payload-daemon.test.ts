@@ -741,7 +741,8 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     server.send(await sealedOffer(keyring, 'upload-restart', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);
-    adapter.sessions[0]!.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
+    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
+    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(server.blobUploadsFailed).toBeGreaterThan(0), BUDGET_MS);
 
@@ -755,9 +756,50 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     await vi.waitFor(() => expect(server.blobUploadsFailed).toBeGreaterThan(failedBeforeRestart), BUDGET_MS);
     server.setFailBlobUploads(false);
     await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0), BUDGET_MS);
-    await server.waitFor((envelope) => envelope.task_id === 'upload-restart'
+    const terminal = await server.waitFor((envelope) => envelope.task_id === 'upload-restart'
       && ['task.complete_sealed', 'task.fail_sealed', 'task.fail'].includes(envelope.type), BUDGET_MS);
+    expect(terminal.type).toBe('task.complete_sealed');
+    expect((terminal.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
+    expect(await openOutput(keyring, terminal, deviceId)).toMatchObject({ summary });
+    expect(taskEnvelopes('upload-restart').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
   });
+
+  it('keeps a terminal that a failed shutdown left queued until the next start reaches its session', async () => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
+    server.send(await sealedOffer(keyring, 'upload-slow-restart', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    server.setFailBlobUploads(true);
+    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
+    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(server.blobUploadsFailed).toBeGreaterThan(0), BUDGET_MS);
+    const stopErrors = await daemon!.stop().then(() => [], (error: unknown) => (error instanceof AggregateError ? error.errors : [error]).map(String));
+    expect(stopErrors).toContainEqual(expect.stringContaining('ciphertext upload failed'));
+    server.setFailBlobUploads(false);
+
+    // Runtime detection runs before the connection starts. Holding it keeps
+    // the restart short of a session for longer than the 1 s commit retry.
+    let releaseDetect!: () => void;
+    const detectHeld = new Promise<void>((resolve) => { releaseDetect = resolve; });
+    const detect = adapter.detect.bind(adapter);
+    vi.spyOn(adapter, 'detect').mockImplementation(async () => { await detectHeld; return detect(); });
+    const started = daemon!.start();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      expect(daemon!.status().lifecycle).toMatchObject({ phase: 'stopped' });
+    } finally {
+      releaseDetect();
+    }
+    await started;
+
+    const terminal = await server.waitFor((envelope) => (envelope.type === 'task.complete_sealed' || envelope.type === 'task.fail_sealed')
+      && envelope.task_id === 'upload-slow-restart', BUDGET_MS);
+    expect(terminal.type).toBe('task.complete_sealed');
+    expect((terminal.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
+    expect(await openOutput(keyring, terminal, deviceId)).toMatchObject({ summary });
+    expect(taskEnvelopes('upload-slow-restart').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
+  }, 15_000);
 
   it('uploads an artifact over the inline frame as an octet-stream ciphertext blob', async () => {
     const keyring = new TestKeyring();
