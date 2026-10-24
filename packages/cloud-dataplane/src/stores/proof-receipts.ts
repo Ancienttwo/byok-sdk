@@ -39,12 +39,7 @@ function toReceipt(row: ProofReceiptRow): ProofRequestReceipt {
   };
 }
 
-/**
- * The `proof_request_receipt` table, which the truth put and the three E2EE
- * member writes share. A Postgres host passes this store as the cloud's
- * `proofReceiptRetention.authority`.
- */
-export class PostgresProofRequestReceiptStore implements ProofRequestReceiptStore, ProofReceiptRetentionAuthority {
+export class PostgresProofRequestReceiptStore implements ProofRequestReceiptStore {
   readonly #pool: Pool;
   readonly #clock: Clock;
 
@@ -97,6 +92,20 @@ export class PostgresProofRequestReceiptStore implements ProofRequestReceiptStor
     );
     const row = result.rows[0];
     return row === undefined ? undefined : toReceipt(row);
+  }
+}
+
+/**
+ * Prunes `proof_request_receipt`, which the truth put and the three E2EE member
+ * writes share. A Postgres host passes it as the cloud's
+ * `proofReceiptRetention.authority`. It is separate from the `proofReceipts`
+ * port, which keeps exactly the methods the cloud contract declares.
+ */
+export class PostgresProofReceiptRetentionAuthority implements ProofReceiptRetentionAuthority {
+  readonly #pool: Pool;
+
+  constructor(pool: Pool) {
+    this.#pool = pool;
   }
 
   async collectExpired(tenant: TenantId, input: ProofReceiptCollectExpiredInput): Promise<CollectExpiredResult> {

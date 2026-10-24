@@ -44,7 +44,7 @@ createByokCloud({
   truthObjectDownloads: stores.blobs,
   // From '@byok-sdk/cloud-dataplane/runtime'. Without it, maintenance keeps
   // every used device-proof requestId in proof_request_receipt.
-  proofReceiptRetention: { authority: new PostgresProofRequestReceiptStore(pool, clock) },
+  proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) },
 });
 ```
 

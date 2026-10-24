@@ -35,6 +35,7 @@ export {
   PostgresInboundDedupStore,
   PostgresNonceStore,
   PostgresPairingCodeStore,
+  PostgresProofReceiptRetentionAuthority,
   PostgresProofRequestReceiptStore,
   PostgresRequestReceiptStore,
   PostgresTaskAttemptStore,

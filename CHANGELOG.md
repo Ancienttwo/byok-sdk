@@ -10,9 +10,10 @@
   refuses a value below `PROOF_RECEIPT_RETENTION_FLOOR_MS` (15 minutes) with
   `maintenance_invalid_input`: past it, the verifier refuses every proof the
   receipt can bind. Within the retention a `requestId` is single-use; after it
-  the same `requestId` is no longer recorded. cloud-dataplane's
-  `PostgresProofRequestReceiptStore` is the Postgres authority; a hosted Host
-  passes it as `proofReceiptRetention.authority`, otherwise the step reports
+  the same `requestId` is no longer recorded. cloud-dataplane adds
+  `PostgresProofReceiptRetentionAuthority(pool)` from `./runtime`, the
+  Postgres authority over `proof_request_receipt`; a hosted Host passes it as
+  `proofReceiptRetention.authority`, otherwise the step reports
   `not-configured`. The SQLite composition of the server wires its own store
   and adds the index `proof_request_receipt_recorded_idx`, which an existing
   database gains when it opens. The memory composition does not prune: the

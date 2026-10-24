@@ -20,7 +20,7 @@ import { migrate } from '../migrate';
 import { PostgresObjectStore } from '../stores/core/objects';
 import { PostgresQuotaStore } from '../stores/core/quota';
 import { PostgresTruthCommitter } from '../truth-committer';
-import { PostgresProofRequestReceiptStore } from '../stores/proof-receipts';
+import { PostgresProofReceiptRetentionAuthority } from '../stores/proof-receipts';
 import { createDataplaneScope, SKIP_DATAPLANE } from './support/dataplane';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
@@ -385,7 +385,7 @@ describe.skipIf(SKIP_DATAPLANE)('atomic truth commit authority', () => {
   // A used request id is dropped only after its proof can no longer authenticate.
   it('prunes proof receipts recorded before the cutoff and keeps later ones replayable', async () => {
     const harness = await createHarness();
-    const receipts = new PostgresProofRequestReceiptStore(harness.scope.pool, harness.clock);
+    const receipts = new PostgresProofReceiptRetentionAuthority(harness.scope.pool);
     try {
       const oldInput = commitInput('old-1', [await inlineWrite('memory', 'old-1', 0, 'one')]);
       await harness.committer.commit(TENANT, oldInput);
