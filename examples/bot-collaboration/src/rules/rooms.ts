@@ -1,6 +1,7 @@
 import type { BotTurnOutcome, RoomFields } from '@byok-sdk/protocol';
 import { canonical, hash } from '@byok-sdk/example-host-execution-core';
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS, historyWindow } from './history';
+import type { TurnFields, TurnsState } from './turn';
 
 /**
  * Room seat arbitration as pure rules (#606 R1). Each function changes only the room slice that the
@@ -198,6 +199,27 @@ export function advanceRooms(team: RoomsState, facts: Readonly<Record<string, Se
       request: JSON.stringify({ roomId: round.roomId, roundId: round.id, request: message?.text, requestFrom: message?.from }) });
   }
   return result;
+}
+/** The fields of a seat Turn. Seats never manage or delegate (§5), so no seat Turn carries owner authority. */
+export function seatTurn(id: string, botId: string, request: string): TurnFields {
+  return { id, root: id, source: 'room_slot', request, botId, hop: 0, authority: 'bot' };
+}
+/**
+ * The room step of a Host sync (#793 S6): `advanceRooms` on the seat facts, then its results. A seat Turn whose work was not
+ * admitted fails with the seat's conclusion; `add` queues each new seat Turn. Returns the seats whose admitted work the Host
+ * must cancel, as K4 `cancel` of their intents.
+ */
+export function advanceRoomSeats(state: { team: RoomsState } & Pick<TurnsState, 'turns'>, facts: Readonly<Record<string, SeatFacts>>,
+  now: number, add: (id: string, botId: string, request: string) => void): string[] {
+  const { cancel, turns } = advanceRooms(state.team, facts, now);
+  const admitted: string[] = [];
+  for (const { seatId, conclusion } of cancel) {
+    const turn = state.turns[seatId];
+    if (facts[seatId]?.admitted) admitted.push(seatId);
+    else if (turn) { turn.status = 'failed'; turn.conclusion = conclusion; }
+  }
+  for (const turn of turns) add(turn.id, turn.botId, turn.request);
+  return admitted;
 }
 /** The room view of a seat Turn's ContextPack: the messages that the seat Bot can see, newest last. */
 export function roomContext(team: Pick<RoomsState, 'rooms' | 'rounds' | 'seats'>, turn: { id: string }, turnLimit = ROOM_CONTEXT_MESSAGES) {

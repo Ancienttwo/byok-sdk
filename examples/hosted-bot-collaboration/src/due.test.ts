@@ -5,7 +5,7 @@ import { hash, taskId, type Json } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { collaborationDue, type Command, type DelegationTimers } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
+import { ROOM_GRACE_MS, seedCollaboration, seedRoom, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
 import { HostedDueScheduler, type DueSchedulerOptions } from './due';
 import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
@@ -74,13 +74,10 @@ async function delegated(step: () => Promise<void> = async () => {}) {
   return { scope, id, commit, sync, claim, delegation: async () => (await store().read(scope)).delegations[id]! };
 }
 
-/** A seeded scope whose seat `s1` has a passed deadline. No H step releases a seat yet (`advanceRooms`, S6), so it stays due. */
-async function stuck(prefix: string): Promise<string> {
+/** A seeded scope that is due at `at`: its card `c1` expires then. */
+async function stuck(prefix: string, at = VECTOR_NOW): Promise<string> {
   const scope = `tenant:${prefix}-${randomUUID()}`;
-  await store().seed(scope, state => {
-    team(state);
-    state.team.seats.s1 = { id: 's1', roundId: 'r1', botId: 'main', status: 'running', released: false, late: false, deadline: VECTOR_NOW };
-  });
+  await store().seed(scope, state => { team(state); state.cards.c1!.expiresAt = at; });
   return scope;
 }
 
@@ -96,6 +93,11 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
   const sync: DueSchedulerOptions['sync'] = (scope, now) => {
     synced.push({ scope, now });
     return store().sync(scope, { ...SYNC_OPTIONS, now, history: undefined });
+  };
+  /** A deployment sync that leaves the scope as it is: it returns the stored due time, as a sync whose step H does not run. */
+  const unchanged: DueSchedulerOptions['sync'] = async (scope, now) => {
+    synced.push({ scope, now });
+    return { dueAt: Number(await dueAt(scope)) };
   };
   const scheduler = (options: Partial<DueSchedulerOptions> = {}) =>
     new HostedDueScheduler(opened!.pool, store(), { now: () => clock, sync, backoffMs: 10_000, ...options });
@@ -174,7 +176,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
     });
 
     it('reports a scope that its sync leaves due as stalled, and syncs it again only after the backoff', async () => {
-      const scope = await stuck('a'), pass = scheduler();
+      const scope = await stuck('a'), pass = scheduler({ sync: unchanged });
       expect(await pass.run()).toEqual({ synced: 1, stalled: [scope], failed: [] });
       expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [] });
       clock += 10_000 - 1;
@@ -187,7 +189,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
     it('reports a sync that throws as failed, does not count it, and tries it again after the backoff', async () => {
       const scope = await stuck('a'), error = new Error('boom');
       let fail = true;
-      const pass = scheduler({ sync: async (at, now) => { if (fail) throw error; return sync(at, now); } });
+      const pass = scheduler({ sync: async (at, now) => { if (fail) throw error; return unchanged(at, now); } });
       expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [{ scope, error }] });
       expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [] });
       fail = false;
@@ -196,10 +198,9 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
     });
 
     it('syncs at most a batch in due order, and backed-off scopes do not fill the next batch', async () => {
-      const [a, b, c] = [await stuck('a'), await stuck('b'), await stuck('c')];
       // `c` is due first.
-      await store().seed(c, state => { state.team.seats.s1!.deadline = VECTOR_NOW - 1; });
-      const pass = scheduler({ batch: 2 });
+      const [a, b, c] = [await stuck('a'), await stuck('b'), await stuck('c', VECTOR_NOW - 1)];
+      const pass = scheduler({ batch: 2, sync: unchanged });
       expect(await pass.run()).toEqual({ synced: 2, stalled: [c, a], failed: [] });
       expect(await pass.run()).toEqual({ synced: 1, stalled: [b], failed: [] });
       expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [] });
@@ -241,6 +242,20 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
       expect(await h.delegation()).toMatchObject({ status: 'reply_held' });
       expect(await dueAt(h.scope)).toBe(String(LATER));
       expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [] });
+    });
+
+    it('advances a room at a seat deadline in one scheduled sync, and the time moves to the next seat (#793 S6)', async () => {
+      const scope = `tenant:${randomUUID()}`, deadline = VECTOR_NOW + ROOM_GRACE_MS;
+      await store().seed(scope, state => { seedCollaboration(state); seedRoom(state); });
+      await store().bindDevice(scope, 'device');
+      await store().sync(scope, { ...SYNC_OPTIONS, history: undefined });
+      expect(await dueAt(scope)).toBe(String(deadline));
+      clock = deadline;
+      expect(await scheduler().run()).toEqual({ synced: 1, stalled: [], failed: [] });
+      const team = (await store().read(scope)).team, round = Object.values(team.rounds)[0]!;
+      expect(round.seats.map(id => team.seats[id]!.status)).toEqual(['busy', 'queued']);
+      expect(await dueAt(scope)).toBe(String(deadline + ROOM_GRACE_MS));
+      expect(await scheduler().run()).toEqual({ synced: 0, stalled: [], failed: [] });
     });
 
     it('expires a due card in one scheduled sync, which clears the time (#793 S5)', async () => {
