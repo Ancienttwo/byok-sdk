@@ -212,7 +212,7 @@ export class GrokAdapter implements RuntimeAdapter {
         category: isRuntimeExecutionFailure(error) ? error.category : 'infrastructure',
         retry: isRuntimeExecutionFailure(error) ? error.retry : 'retryable',
         reason: error instanceof Error ? error.message : 'grok open failed',
-        failure: isRuntimeExecutionFailure(error) ? error.failure : { class: 'unknown' },
+        failure: isRuntimeExecutionFailure(error) ? error.failure : { class: session.exitedOnItsOwn ? 'runtime_exited' : 'unknown' },
       });
     }
   }
@@ -234,6 +234,7 @@ class GrokSession implements Session {
   sessionRef = '';
   private raw?: RawAcpSession;
   private child?: { dispose(): Promise<void>; kill(): void };
+  private exit?: { readonly exitedOnItsOwn: boolean };
   private projection?: GrokProjection;
   private readonly queue = new AsyncQueue<AgentEvent | MessageDraftDelta>();
   private failure?: RuntimeExecutionFailure;
@@ -253,8 +254,12 @@ class GrokSession implements Session {
     private readonly expectedSessionRef?: string,
   ) {}
 
-  own(child: { dispose(): Promise<void>; kill(): void }): void {
+  own(child: { dispose(): Promise<void>; kill(): void; readonly exitedOnItsOwn: boolean }): void {
     this.child = child;
+    this.exit = child;
+  }
+  get exitedOnItsOwn(): boolean {
+    return this.exit?.exitedOnItsOwn === true;
   }
   /** The agent's lines stop at the transport once the record stream halted. */
   gate<T extends { onLine(handler: (line: string) => void): void }>(child: T): T {

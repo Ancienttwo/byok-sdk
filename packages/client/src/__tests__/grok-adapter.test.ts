@@ -239,6 +239,16 @@ describe('GrokAdapter sessions', () => {
     expect(refusedModel).toMatchObject({ phase: 'start', failure: { class: 'model_unavailable' } });
   });
 
+  it('marks an agent exit during the open runtime_exited, and an open it did not end unknown (#869)', async () => {
+    await expect(startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_INITIALIZE: 'exit' }))).rejects.toMatchObject({
+      phase: 'start', category: 'infrastructure', failure: { class: 'runtime_exited' },
+    });
+    // The kernel kills the agent itself after the refused initialize.
+    await expect(startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_INITIALIZE: 'error' }))).rejects.toMatchObject({
+      phase: 'start', message: 'Internal error', failure: { class: 'unknown' },
+    });
+  });
+
   it('sends unknown for a class OAR took from error text, keeping the retry it derives (#869)', async () => {
     const failed = await failureOf(await open(adapter(), { instruction: 'fail-text:429 rate limit' }, await ctx()));
     expect(failed).toBeInstanceOf(RuntimeExecutionFailure);

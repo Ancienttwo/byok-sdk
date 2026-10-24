@@ -10,6 +10,8 @@
 // observed fact (argv, env, cwd, requests) so a test can assert the wire.
 // FAKE_ACP_REPLY_GATE=<dir>: the default reply waits for `<dir>/release`
 // after its two chunks and before the prompt answer.
+// FAKE_ACP_INITIALIZE=exit ends the agent on `initialize`; =error answers it
+// with an internal error.
 import { appendFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -150,6 +152,8 @@ function request(message) {
   switch (message.method) {
     case 'initialize':
       log({ kind: 'initialize', params: message.params });
+      if (process.env.FAKE_ACP_INITIALIZE === 'exit') process.exit(1);
+      if (process.env.FAKE_ACP_INITIALIZE === 'error') { error(message.id, -32603, 'Internal error'); return; }
       result(message.id, {
         protocolVersion: 1,
         agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {}, close: {} }, promptCapabilities: { image: false }, mcpCapabilities: { http: true } },
