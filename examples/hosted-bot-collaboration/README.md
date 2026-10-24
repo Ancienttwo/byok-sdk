@@ -339,7 +339,9 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
   A readback claim takes the same lease, so one sender reads a row back at a time. A readback result counts only for the
   attempt that it read back (K8 `readbackDelivery` takes that attempt). A readback that throws or outlasts
   `sendTimeoutMs` is missing evidence: the row stays `unknown` and waits `readbackMs`, but only while it is still
-  `unknown` at that attempt. L awaits a readback with no deadline.
+  `unknown` at that attempt. L awaits a readback with no deadline. The claim returns its lease (the `next_at` it wrote),
+  and the readback's wait is written only while the row still holds that lease. So a readback that outlasted its lease
+  leaves the lease of a later readback claim alone: no sender claims a readback while a later claim's lease holds (#793 S2).
 - **The K8 delivery entity is the authority.** The outbox delivery row is a scan index that one hook in each store
   transaction writes from the entity diff: a row for each new delivery, `settled_at` once it is `accepted` or
   `rejected`, and `next_at` for a `pending` one. So the push fallback that `refuseRoute` inserts with no outbox intent
@@ -430,8 +432,9 @@ three and runs these suites.
 - The K8 delivery vectors (`deliveryVectors`) run on the store, its inbound entry and the outbox sender, all 21. After each Host step, the delivery outbox index matches the K8 entities. The
   sender tests cover the projection claim, lease, fence, backoff, race, order and version filter, the archived and
   missing delivery entity, the retention refusal of an unsettled delivery row, a terminal delivery on the reply route,
-  a hung readback, the clock read after the scope lock, the readback lease, a failed readback fenced by its attempt, a
-  wait that never moves `next_at` earlier, the option checks, and a wait that cannot be written.
+  a hung readback, the clock read after the scope lock, the readback lease, a readback wait fenced by that lease, a failed
+  readback fenced by its attempt, a wait that never moves `next_at` earlier, the option checks, and a wait that cannot be
+  written.
 - The inbound tests cover owner input with and without a channel and its replay, room input and bot background, the
   audit kinds, an echo that names one delivery, none or two, and the refusal of `receive` in `commit()`.
 - The scheduler tests cover on-time and late fires, the supersede in the fire, the device fence and its paging, two
