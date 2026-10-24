@@ -970,28 +970,38 @@ describe('device member KEM rotation (E2d-5)', () => {
     expect(logs.at(-1)).toContain('do not hold the KEM key the member chain names for this device');
   });
 
-  it('reads each epoch up to four above the newest one it knows, and keeps the old key when the top one holds a package', async () => {
+  it('reads every epoch up to 256, and keeps the old key when the top one holds a package', async () => {
     const { server, web, device, custody, logs, keyring } = await member();
     await web.putScope('scope-a', [device]);
     await keyring.catchUp();
     const reads = server.e2ee.packageReads;
     server.e2ee.packageResponse = [{}];
     expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'scope_epochs_exceeded' });
-    expect(server.e2ee.packageReads - reads).toBe(4);
-    expect(logs.join('\n')).toContain('the Host holds epoch 4 of scope "scope-a", beyond the epochs a KEM rotation reads');
+    expect(server.e2ee.packageReads - reads).toBe(256);
+    expect(logs.join('\n')).toContain('the Host holds epoch 256 of scope "scope-a", beyond the epochs a KEM rotation reads');
     expect(server.e2ee.devicePuts).toHaveLength(0);
     expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
   });
 
-  it('keeps the old key without a read when a scope epoch it knows is too close to the 256 epochs it reads', async () => {
+  it('keeps the old key without a read when a scope epoch it knows is past the 256 epochs it reads', async () => {
     const { server, web, device, custody, logs, keyring } = await member();
-    await web.putScope('scope-a', [device], { epoch: 253 });
-    expect((await keyring.fetch('scope-a', 253)).ok).toBe(true);
+    await web.putScope('scope-a', [device], { epoch: 257 });
+    expect((await keyring.fetch('scope-a', 257)).ok).toBe(true);
     const reads = server.e2ee.packageReads;
     expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'scope_epochs_exceeded' });
     expect(server.e2ee.packageReads).toBe(reads);
     expect(logs.join('\n')).toContain('scope "scope-a" has epochs past the 256 a KEM rotation reads');
     expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+  });
+
+  it('after a restart, re-wraps own packages that start above the epochs the run knows', async () => {
+    const { server, web, device, custody, restart } = await member();
+    const scopeKey = await web.putScope('scope-a', [device], { epoch: 7 });
+    const keyring = await restart();
+    expect(await keyring.rotateKem()).toEqual({ ok: true, epoch: 2 });
+    expect(server.e2ee.devicePuts.flat().map((pkg) => pkg.epoch)).toEqual([7]);
+    expect(stored(custody).nextKem).toBeUndefined();
+    expect(await (await restart()).fetch('scope-a', 7)).toMatchObject({ ok: true, key: { scopeKey, sender: device.memberId } });
   });
 
   it('cuts off a hung rotate append, and keeps the old key', async () => {

@@ -79,8 +79,9 @@ const MAX_ROTATION_ROUNDS = 3;
 const ROTATION_EPOCH_READS = 4;
 
 /**
- * The most epochs of one scope a KEM rotation reads, from epoch 1. A scope
- * that needs more stops the rotation, and the old key stays.
+ * The epochs of one scope a KEM rotation reads in each pass, from epoch 1:
+ * 64 batches of {@link ROTATION_EPOCH_READS}. A scope that needs more stops
+ * the rotation, and the old key stays.
  */
 const KEM_REWRAP_MAX_EPOCHS = 256;
 
@@ -642,15 +643,17 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
 
   /**
    * The key package of each epoch of a scope from 1 up to
-   * {@link ROTATION_EPOCH_READS} above the newest one this run knows, read
-   * that many at a time. `undefined` when that passes
-   * {@link KEM_REWRAP_MAX_EPOCHS}, or the top epoch holds a package: the
-   * scope is further ahead than the device can see.
+   * {@link KEM_REWRAP_MAX_EPOCHS}, {@link ROTATION_EPOCH_READS} at a time.
+   * The verified chain holds no scope epochs, so no read stops early: the
+   * device's packages may start above the epochs this run knows, after a
+   * restart or past a gap. `undefined` when an epoch this run knows passes
+   * the bound, or the top epoch holds a package: the scope is further ahead
+   * than the device can see.
    */
   async #readEpochs(scopeId: string): Promise<Map<number, unknown> | undefined> {
-    const top = Math.max(...this.#knownEpochs(scopeId)) + ROTATION_EPOCH_READS;
-    if (top > KEM_REWRAP_MAX_EPOCHS) {
-      this.options.log(`scope ${JSON.stringify(scopeId)} has epochs past the ${KEM_REWRAP_MAX_EPOCHS} a KEM rotation reads`);
+    const top = KEM_REWRAP_MAX_EPOCHS;
+    if (Math.max(...this.#knownEpochs(scopeId)) > top) {
+      this.options.log(`scope ${JSON.stringify(scopeId)} has epochs past the ${top} a KEM rotation reads`);
       return undefined;
     }
     const found = new Map<number, unknown>();
