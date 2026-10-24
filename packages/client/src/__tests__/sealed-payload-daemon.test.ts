@@ -93,6 +93,8 @@ async function start(options: {
   failureClass?: boolean;
   /** `false` runs the daemon without a hosted journal. */
   journal?: false;
+  /** A short shutdown: the grace deadline, and how long a task's interrupt may take. */
+  shutdown?: { readonly graceMs: number; readonly taskInterruptTimeoutMs: number };
   /** The categories of the device scope's policy. */
   policy?: readonly SealedCategory[];
   /** `false`: the Host does not declare `e2ee.member`, and start waits for the first hello only. */
@@ -112,9 +114,11 @@ async function start(options: {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed daemon test', productId: 'sealed-daemon-test',
     serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
     ...(options.journal === false ? {} : { hostedJournal: { mode: 'sqlite' as const } }),
+    ...(options.shutdown === undefined ? {} : { shutdownGraceMs: options.shutdown.graceMs }),
   };
   server.setCapabilityDeclaration(options.e2ee === false ? NO_E2EE_DECLARATION : E2EE_DECLARATION);
-  daemon = createDaemonWithAdapters(config, [adapter]);
+  daemon = createDaemonWithAdapters(config, [adapter],
+    options.shutdown === undefined ? {} : { shutdown: { taskInterruptTimeoutMs: options.shutdown.taskInterruptTimeoutMs } });
   const web = await E2eeWebClient.create(server.e2ee);
   const { deviceId } = await daemon.pair('pair-code', { verificationSecret: web.verificationSecret });
   const device = await web.approve(deviceId);
@@ -1081,6 +1085,67 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     expect(JSON.stringify(sent)).not.toContain('sealed_key_unavailable');
     expect(JSON.stringify(sent)).not.toContain('large summary');
   }, 15_000);
+
+  it('settles a terminal that a failed shutdown left queued in the closed form when the next run has another member', async () => {
+    const { server, adapter, deviceId, member, device } = await start({ ciphertextRef: true });
+    server.send(await sealedOffer(member, 'restart-other-member', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    server.setFailBlobUploads(true);
+    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
+    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(server.blobUploadsFailed).toBeGreaterThan(0), BUDGET_MS);
+    const stopErrors = await daemon!.stop().then(() => [], (error: unknown) => (error instanceof AggregateError ? error.errors : [error]).map(String));
+    expect(stopErrors).toContainEqual(expect.stringContaining('ciphertext upload failed'));
+
+    // The chain removes the device's member between the runs, so the next run
+    // is not the owner run's (tenant, device, member).
+    await member.web.append('remove', { memberId: device.memberId });
+    server.setFailBlobUploads(false);
+    await daemon!.start();
+
+    const terminal = await server.waitFor((envelope) => envelope.task_id === 'restart-other-member'
+      && ['task.complete_sealed', 'task.fail_sealed', 'task.fail', 'task.complete'].includes(envelope.type), BUDGET_MS);
+    expect(terminal.type).toBe('task.fail');
+    expect(terminal.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
+    expect(isSealedTaskPlainOutput(terminal.type, terminal.payload)).toBe(true);
+    await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0), BUDGET_MS);
+    expect(JSON.stringify(taskEnvelopes('restart-other-member'))).not.toContain('large summary');
+    expect(taskEnvelopes('restart-other-member').map((envelope) => envelope.type)).not.toContain('task.complete_sealed');
+  }, 15_000);
+
+  it('seals a terminal made after the owner run retired its member with the next run\'s same member', async () => {
+    // The stop's grace deadline passes while the task's interrupt hangs, so
+    // the run retires its member before the task's failure is made.
+    const { server, adapter, deviceId, member } = await start({ shutdown: { graceMs: 50, taskInterruptTimeoutMs: 10_000 } });
+    server.send(await sealedOffer(member, 'after-retire', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    let releaseInterrupt!: () => void;
+    vi.spyOn(adapter.sessions[0]!, 'interrupt').mockImplementation(() => new Promise<void>((resolve) => { releaseInterrupt = resolve; }));
+    const stopErrors = await daemon!.stop().then(() => [], (error: unknown) => (error instanceof AggregateError ? error.errors : [error]).map(String));
+    expect(stopErrors).toContainEqual(expect.stringContaining('active task teardown did not settle'));
+
+    // The failure is made once the next start is under way, before its
+    // recovery step (which follows the cursor read), so the commit queue
+    // holds it and recovery leaves the task to it.
+    const load = CursorStore.prototype.load;
+    let released = false;
+    vi.spyOn(CursorStore.prototype, 'load').mockImplementation(async function (this: CursorStore, ...args: Parameters<CursorStore['load']>) {
+      if (!released) {
+        released = true;
+        releaseInterrupt();
+        await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(1), BUDGET_MS);
+      }
+      return load.apply(this, args);
+    });
+    await daemon!.start();
+
+    const terminal = await server.waitFor((envelope) => envelope.task_id === 'after-retire'
+      && ['task.fail_sealed', 'task.fail'].includes(envelope.type), BUDGET_MS);
+    expect(terminal.type).toBe('task.fail_sealed');
+    await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0), BUDGET_MS);
+    expect(taskEnvelopes('after-retire').map((envelope) => envelope.type)).not.toContain('task.fail');
+  }, 20_000);
 
   it('uploads an artifact over the inline frame as an octet-stream ciphertext blob', async () => {
     const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
