@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fixed (client)** — the last read-back of a member KEM rotation (#654
+  E2d-5) now also requires each epoch whose key the run holds, and each
+  epoch with a freshness point, to read back, including a key the run opened
+  or a point it gained during the rotation. A Host that withholds such a row
+  now stops the rotation with `key_package_missing`, and the old key stays.
+  Before, the rotation finished and dropped that epoch. The rotation still
+  has no production caller.
+
 ## 0.30.1 — source candidate
 
 0.30.1 is a PATCH release under a one-release exception to the pre-1.0
