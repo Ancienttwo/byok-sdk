@@ -235,9 +235,9 @@ and `@byok-sdk/keys`. Before 1.0, PATCH is limited to corrections with no new
 public behavior, API, persistence, or security authority; MINOR covers additive
 public API/features, new forward migrations/authority, and any pre-1.0
 breaking cut. A version bump does not authorize publish. The current
-aligned release is `0.30.0`; publication requires separate release
+aligned release is `0.30.1`; publication requires separate release
 authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current release, `0.30.0`, proven from
+`@byok-sdk/core` edge must be the exact current release, `0.30.1`, proven from
 an isolated standard npm install rather than the workspace graph.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -248,9 +248,16 @@ in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
-0.30.0 is a MINOR under the general policy above, with no exception. It adds gated wire types
-and public API, and it has pre-1.0 breaking cuts in protocol, server, cloud and
-client. See the [0.30.0 release notes](releases/v0.30.0.md).
+0.30.1 uses a one-release exception. The owner's 2026-10-24 instruction
+selected PATCH (0.30.x instead of 0.31.0) despite the new public API, the
+gated wire field, Postgres migration 0028 and the pre-1.0 breaking changes in
+cloud, client and cloud-do. This explicit exception does not change the
+general policy above or waive validation, publication authorization, or
+registry readback. See the [0.30.1 candidate notes](releases/v0.30.1.md).
+
+0.30.0 was a MINOR under the general policy above, with no exception. It added
+gated wire types and public API, and it had pre-1.0 breaking cuts in protocol,
+server, cloud and client. See the [0.30.0 release notes](releases/v0.30.0.md).
 
 0.29.0 was a MINOR under the general policy above, with no exception. It added
 public API and behavior and had pre-1.0 breaking cuts in client and keys. See
@@ -1354,7 +1361,7 @@ makes itself `unknown`. The class never changes `retry`.
 |---|---|
 | Claude | the turn's last `assistant.error`; a `rate_limit` with a `rejected` `rate_limit_event` is `quota` with its `resetsAt`, otherwise `rate_limited`; else `result.api_error_status` |
 | Codex | `turn.error.codexErrorInfo`, through the vendored OAR table; `unauthorized` stays `unknown`, and an `other` class OAR takes from Anthropic's error wording is sent as `unknown` |
-| Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a -32603 with no ended `retry_state`, or an unmapped `error_type`) is sent as `unknown` |
+| Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
 | Pi, Hermes | no structured field: `unknown` |
 
 Claude, Codex, Grok, Pi (the rpc and prepared lanes) and Hermes report a runtime
@@ -3154,6 +3161,8 @@ draft frames.
 
 The daemon reconciles the draft to the published body with a final revision
 before `agent.message.publish` when the text differs.
+The draft and the closing reply share one message-boundary decision for each
+progress event.
 An adapter may also stream text for the draft only. The adapter's own message
 tracker sets those boundaries, and each later progress event is the authority
 that reconciles the draft.

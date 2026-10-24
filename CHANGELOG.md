@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.30.1 — source candidate
+
+0.30.1 is a PATCH release under a one-release exception to the pre-1.0
+policy. On 2026-10-24 the owner chose 0.30.x instead of 0.31.0 (issue #872),
+although it adds public API, gated wire additions and Postgres migration
+0028, and it has breaking changes. #857, #859 and #860 are breaking in
+cloud. The pi-durable SQLite migration of #909 is breaking in client and
+cloud-do: a migrated store cannot go back to Pi 1.3.0. The examples changes
+of #882 and #884 are also breaking for a Host that copies the K8 example.
+This candidate is not published. A 0.30.1 daemon paired as an E2EE member
+advertises `sealed-payload-v1` while its member is verified and the
+deployment declares `e2ee.member`. See the
+[release notes](docs/releases/v0.30.1.md) for scope, the release rule of
+`sealed-payload-v1` and the upgrade notes. All nine public manifests and
+their lock records move to 0.30.1.
+
 - **Changed (client, cloud-do, keys)** — pin the nine official Pi packages to
   exactly 1.4.0 (closureDigest `79c414be`). A preparation compiled for 1.3.0
   declines with `preparation_runtime_identity_mismatch`; prepare it again.
@@ -177,12 +193,10 @@
   stores the mode. `TeamSnapshotBot` gets the optional `profileRevision`, and
   `ExternalTeam` the optional `persona`. Without the option nothing changes,
   except that a snapshot with `profileRevision` is refused.
-
 - **Fixed (examples)** — K8 validates `profileRevision` with the protocol
   `AgentHomeProjectionProfileRevisionSchema` (#879). Before, its own copy of
   the rule accepted `0`, so a snapshot with `profileRevision: '0'` and
   `personaReady(botId, '0')` passed. Both are refused now.
-
 - **Feature (examples)** — K8 `BotOptions.roomHistory` reads the room
   messages of a seat ContextPack from an external authority (#883). The
   authority selects the messages for the seat's Bot. The seat Turn stores only
