@@ -173,7 +173,9 @@ export class BotCollaboration {
     }
     this.hostIntentHandlers = new Map(Object.entries(options.hostIntents ?? {}));
     for (const [key, { handler }] of Object.entries(stateOf(persisted.application).hostIntents ?? {})) {
-      if (persisted.intents[hash(key)]?.conclusion === undefined && !this.hostIntentHandlers.has(handler)) {
+      // A record whose intent K4 compacted is stale until the next pass. It needs no handler.
+      const intent = persisted.intents[hash(key)];
+      if (intent && intent.conclusion === undefined && !this.hostIntentHandlers.has(handler)) {
         throw new Error(`An open Host intent needs the handler ${handler}`);
       }
     }
@@ -336,8 +338,11 @@ export class BotCollaboration {
     try { result = this.hostIntentHandlers.get(handler)!(document, tx); } catch (cause) {
       throw this.intentFailure(key, 'handler_failed', cause instanceof Error ? cause.message : String(cause));
     }
-    // K4 checks only what K8 returns, so K8 checks the handler.
-    if (result && typeof (result as { then?: unknown }).then === 'function') throw this.intentFailure(key, 'handler_failed', 'Host intent handler must be synchronous');
+    // K4 checks only what K8 returns, so K8 checks the handler. Its promise must not reject unhandled.
+    if (result && typeof (result as { then?: unknown }).then === 'function') {
+      void Promise.resolve(result).catch(() => {});
+      throw this.intentFailure(key, 'handler_failed', 'Host intent handler must be synchronous');
+    }
   }
   private intentFailure(key: string, code: IntentOutcomeError['code'], message: string): IntentOutcomeError {
     const error = new IntentOutcomeError(key, code, message);

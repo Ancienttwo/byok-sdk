@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, type ExecutionServer, type IntentInput } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration, IntentOutcomeError, type BotOptions, type HostIntentHandler } from './host';
@@ -114,10 +114,15 @@ it('keeps a failed handler intent open across a restart, and a fixed handler set
   expect({ conclusion: bot.core.intent(KEY)?.conclusion, seen }).toEqual({ conclusion: 'succeeded', seen: [{ summary: 'host research done' }] });
 });
 
-it('refuses an async handler', async () => {
-  bot = openBot({ research: async () => {} });
+it('refuses an async handler, and consumes its rejection', async () => {
+  const unhandled: unknown[] = [], record = (reason: unknown) => { unhandled.push(reason); };
+  process.on('unhandledRejection', record);
+  onTestFinished(() => { process.off('unhandledRejection', record); });
+  bot = openBot({ research: async () => { throw new Error('async research failed'); } });
   await expect(bot.enqueueHostIntent(input(), 'research')).rejects.toMatchObject({ code: 'handler_failed', message: 'Host intent handler must be synchronous' });
   expect(bot.core.intent(KEY)?.conclusion).toBeUndefined();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(unhandled).toEqual([]);
 });
 
 it('holds the Main Bot FIFO only until its Host intent settles', async () => {
@@ -138,6 +143,19 @@ it('removes the ownership record once K4 compacts the intent', async () => {
   await bot.enqueueHostIntent(input(), 'research');
   await bot.core.flushProjections(async () => {});
   expect(ledger!.compact({ acknowledgedIntentKeys: [KEY], now: Date.now(), tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS })).toMatchObject({ compactedIntents: 1 });
+  await bot.drain();
+  expect(bot.snapshot().hostIntents).toEqual({});
+});
+
+it('opens without the handler of a Host intent that K4 compacted before the next pass', async () => {
+  bot = openBot({ research: () => {} });
+  await bot.enqueueHostIntent(input(), 'research');
+  await bot.core.flushProjections(async () => {});
+  await bot.close(); bot = undefined;
+  // No pass runs between this compaction and the restart, so the ownership record is still stored.
+  ledger!.compact({ acknowledgedIntentKeys: [KEY], now: Date.now(), tombstoneRetentionMs: MIN_TOMBSTONE_RETENTION_MS });
+  bot = openBot({});
+  expect(bot.snapshot().hostIntents).toEqual({ [KEY]: { handler: 'research' } });
   await bot.drain();
   expect(bot.snapshot().hostIntents).toEqual({});
 });
