@@ -3245,8 +3245,8 @@ The durable pre-claim admission boundary precedes runtime execution. Startup
 leaves unacknowledged/uncommitted offers for cloud mailbox redelivery, so host
 cancellation can suppress them. An acknowledged or committed unfinished task
 produces `task.fail` with `reason: daemon_interrupted`, `retryable: false`, and
-its original exact AgentRef, unless a start after a failed stop in the same
-process still holds that task's terminal for commit, which then keeps it. The
+its original exact AgentRef, unless the same process still holds that task's
+terminal for commit after a failed stop; that terminal is sent instead. The
 interruption marker and report bytes commit atomically. Startup never automatically repeats runtime side effects. The
 existing tenant/task_id remains an immutable execution identity; dispatch with
 an already delivered identity is refused even after mailbox retention.
