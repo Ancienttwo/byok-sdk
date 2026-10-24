@@ -675,12 +675,12 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     expect(taskEnvelopes('upload-retry').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
   });
 
-  it('settles a terminal with a small sealed failure, without a retry, when the server refuses its ciphertext blob for good', async () => {
+  it.each([409, 413, 422])('settles a terminal with a small sealed failure, without a retry, when the server refuses its ciphertext blob for good with %i', async (status) => {
     const keyring = new TestKeyring();
     const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
     server.send(await sealedOffer(keyring, 'upload-refused', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    server.refuseBlobCreates(413);
+    server.refuseBlobCreates(status);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       adapter.sessions[0]!.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
@@ -692,6 +692,33 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     }
     expect(server.blobCreatesRefused).toBe(1);
     expect(taskEnvelopes('upload-refused').map((envelope) => envelope.type)).not.toContain('task.complete_sealed');
+  });
+
+  it.each([
+    { step: 'create', status: 408 },
+    { step: 'create', status: 429 },
+    { step: 'create', status: 503 },
+    // The signed content URL answers 401 once its `sig`/`exp` pair expired.
+    { step: 'content', status: 401 },
+  ] as const)('retries a terminal whose ciphertext blob $step answers $status, and never replaces the result with a sealed failure', async ({ step, status }) => {
+    const keyring = new TestKeyring();
+    const { server, adapter, deviceId } = await start({ keyring, ciphertextRef: true });
+    server.send(await sealedOffer(keyring, 'upload-refused-retry', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    const refuse = (value: number | undefined): void => (step === 'create' ? server.refuseBlobCreates(value) : server.refuseBlobUploads(value));
+    const refused = (): number => (step === 'create' ? server.blobCreatesRefused : server.blobUploadsRefused);
+    refuse(status);
+    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
+    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(refused()).toBeGreaterThan(1), BUDGET_MS);
+    expect(taskEnvelopes('upload-refused-retry').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
+    refuse(undefined);
+
+    const complete = await server.waitFor((envelope) => envelope.type === 'task.complete_sealed' && envelope.task_id === 'upload-refused-retry', BUDGET_MS);
+    expect((complete.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
+    expect(await openOutput(keyring, complete, deviceId)).toMatchObject({ summary });
+    expect(taskEnvelopes('upload-refused-retry').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
   });
 
   it.each(['with', 'without'] as const)('waits for the next session to read the server flags before it seals a large terminal %s a journal', async (journal) => {
