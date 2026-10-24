@@ -21,8 +21,10 @@
  * authenticated chain head h shows that an honest sender rotated past every
  * `remove` up to h. The device keeps the newest such h per (scope, e), and
  * seals at e only while no `remove` of a scope member and no member-dropping
- * `scope-policy` lies after h. The points are rebuilt from opened content
- * after a restart.
+ * `scope-policy` lies after h. A retired keyring hands its points to the
+ * next run's keyring in the same process, which keeps each point that is on
+ * its own verified chain and judges staleness at its own head. After a
+ * process restart the points are rebuilt from opened content.
  */
 import {
   applyMemberChainEntries,
@@ -57,6 +59,14 @@ export type ScopeKeyFetchResult =
   | { readonly ok: true; readonly key: ScopeKey }
   | { readonly ok: false; readonly reason: ScopeKeyFetchFailure };
 
+/** The freshness points of a retired keyring, for the next run of the same process. Memory only. */
+export interface MemberFreshness {
+  readonly tenantId: string;
+  readonly deviceId: string;
+  readonly memberId: string;
+  readonly points: ReadonlyMap<string, ReadonlyMap<number, MemberChainPoint>>;
+}
+
 export interface DeviceMemberKeyringOptions {
   readonly records: DeviceMemberRecords;
   readonly client: E2eeMemberClient;
@@ -69,6 +79,8 @@ export interface DeviceMemberKeyringOptions {
   readonly requestTimeoutMs?: number;
   /** Called once when this run loses the member. */
   readonly onLost?: () => void;
+  /** The points the previous run of this process left; only the same member's points on this chain are kept. */
+  readonly carried?: MemberFreshness;
 }
 
 /** One `scope-policy` of a scope, at its chain seq. */
@@ -93,6 +105,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   constructor(session: DeviceMemberSession, private readonly options: DeviceMemberKeyringOptions) {
     this.#session = session;
     this.#record(session.entries);
+    this.#carry(session, options.carried);
   }
 
   /** The verified member, or `undefined` once this run lost it. */
@@ -247,13 +260,32 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   /**
    * Ends this keyring with its daemon run, without `onLost`: the cached keys
    * are zeroed and the chain view and freshness points are dropped, so a
-   * seal or open that still holds this keyring finds no key.
+   * seal or open that still holds this keyring finds no key. Returns the
+   * points for the next run's keyring; a lost member leaves none.
    */
-  retire(): void {
+  retire(): MemberFreshness | undefined {
+    const session = this.#session;
+    const points = new Map([...this.#fresh].map(([scopeId, epochs]) => [scopeId, new Map(epochs)] as const));
     this.#session = undefined;
     for (const key of this.#keys.values()) key.scopeKey.fill(0);
     this.#keys.clear();
     this.#fresh.clear();
+    if (session === undefined) return undefined;
+    return { tenantId: this.options.tenantId, deviceId: this.options.deviceId, memberId: session.member.memberId, points };
+  }
+
+  /** Keep each carried point of this member whose chain head is on this run's verified chain. */
+  #carry(session: DeviceMemberSession, carried: MemberFreshness | undefined): void {
+    if (carried === undefined || carried.tenantId !== this.options.tenantId || carried.deviceId !== this.options.deviceId
+      || carried.memberId !== session.member.memberId) return;
+    for (const [scopeId, epochs] of carried.points) {
+      for (const [epoch, point] of epochs) {
+        if (session.hashes[point.seq - 1] !== point.hash) continue;
+        const points = this.#fresh.get(scopeId) ?? new Map<number, MemberChainPoint>();
+        this.#fresh.set(scopeId, points);
+        points.set(epoch, point);
+      }
+    }
   }
 
   async #advance(): Promise<void> {

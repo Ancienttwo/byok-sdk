@@ -166,7 +166,7 @@ import { DeviceMemberRecords } from './device-member-custody';
 import { checkVerificationSecret, enrollDeviceMember, resumeDeviceMember } from './device-member';
 import { StoredDeviceProofSigner } from './device-proof-signer';
 import { processE2eeKeyPackageNotice, type DeviceMemberStatus } from './e2ee-key-package-notice';
-import { DeviceMemberKeyring } from './e2ee-keyring';
+import { DeviceMemberKeyring, type MemberFreshness } from './e2ee-keyring';
 import { E2eeMemberClient } from './e2ee-member-client';
 import { JournalRecordTooLargeError, JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord } from './journal/journal';
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
@@ -1649,6 +1649,8 @@ export function buildDaemonWithAdapters(
   let memberResuming = false;
   /** Set by each start: binds that run's sealed tasks to a ready member. */
   let activateSealedTasks: ((keyring: DeviceMemberKeyring) => void) | undefined;
+  /** The freshness points a retired keyring left for the next run's member (§50d); a new enrollment voids them. */
+  let carriedFreshness: MemberFreshness | undefined;
   const memberStatus = (): DeviceMemberStatus => deviceMember ?? (memberResuming ? 'resuming' : 'none');
   let memberAbort: AbortController | undefined;
   let memberResume: Promise<void> | undefined;
@@ -2019,6 +2021,7 @@ export function buildDaemonWithAdapters(
       }
       observer.notePaired(record.deviceId);
       // A new enrollment is a new member (§7.5); the previous one's entries are void (10b).
+      carriedFreshness = undefined;
       try {
         await memberRecords?.clear();
       } catch (error) {
@@ -2457,7 +2460,7 @@ export function buildDaemonWithAdapters(
     latestSealedTasks = opened;
     sealedOutputSettled = () => opened.settled();
     activateSealedTasks = (keyring) => { sealedMember ??= keyring; };
-    retireSealedMember = () => sealedMember?.retire();
+    retireSealedMember = () => { if (sealedMember !== undefined) carriedFreshness = sealedMember.retire(); };
     // Contract §8.1 / §8.3: the device-level capability string is NOT computed
     // here. It is the one flag whose answer depends on a deployment fact this
     // daemon has not read yet at this point in `start()`, so it is added (and
@@ -3497,10 +3500,12 @@ export function buildDaemonWithAdapters(
       if (session === undefined) return;
       const member = new DeviceMemberKeyring(session, {
         ...options,
+        carried: carriedFreshness,
         onLost: () => {
           if (deviceMember === member) applyCapabilityDeclaration(deploymentDeclaration);
         },
       });
+      carriedFreshness = undefined;
       deviceMember = member;
       activateSealedTasks?.(member);
       applyCapabilityDeclaration(deploymentDeclaration);
@@ -3810,6 +3815,7 @@ export function buildDaemonWithAdapters(
       }
       // The member entries go first: if their deletion fails, the device
       // stays paired, and the unpair reports the failure.
+      carriedFreshness = undefined;
       await memberRecords?.clear();
       try {
         await store.credentials.clear();

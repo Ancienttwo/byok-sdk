@@ -1168,8 +1168,9 @@ refreshed hello adds it, and removes it again when the member is lost.
   `remove` of a scope member and no member-dropping `scope-policy` after it.
   It checks this before the task runs; without such an epoch the offer is
   declined with `sealed_key_unavailable`. Its header names the device member
-  and its verified head. The points live in memory, so after a restart they
-  come back from the next opened content.
+  and its verified head. The points live in memory. A start after a stop in
+  the same process keeps each point that is on the new run's verified chain;
+  after a process restart they come back from the next opened content.
 - **Output-only tasks.** A task with `categories: ['task-output']` carries no
   sealed input, so it gets no freshness point of its own. It runs only after
   sealed content at the same scope epoch made the epoch fresh in this run.
@@ -1179,7 +1180,9 @@ refreshed hello adds it, and removes it again when the member is lost.
   `daemon_interrupted` stays as it is, and a result-reply failure becomes
   `task.fail` with `reason` `sealed_key_unavailable`. The replay runs before
   the member resumes, and the freshness points live in memory, so the Host
-  never learns the real failure reason.
+  never learns the real failure reason. A terminal that the same process
+  still holds for commit after a failed stop seals with the next run's
+  member, once that run's start and member resume are over.
 - A key is fetched on its first miss, so a notice that came before the
   advertisement needs no redelivery.
 

@@ -934,6 +934,40 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     expect(taskEnvelopes('upload-slow-restart').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
   }, 15_000);
 
+  it('seals a terminal that a failed shutdown left queued with the next run\'s member, at that run\'s chain head', async () => {
+    const { server, adapter, deviceId, member, device } = await start({ ciphertextRef: true });
+    server.send(await sealedOffer(member, 'restart-member', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    server.setFailBlobUploads(true);
+    const summary = `large summary ${'s'.repeat(300 * 1024)}`;
+    adapter.sessions[0]!.emit({ type: 'progress', text: summary });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(server.blobUploadsFailed).toBeGreaterThan(0), BUDGET_MS);
+    const stopErrors = await daemon!.stop().then(() => [], (error: unknown) => (error instanceof AggregateError ? error.errors : [error]).map(String));
+    expect(stopErrors).toContainEqual(expect.stringContaining('ciphertext upload failed'));
+
+    // The chain moves between the runs, and the epoch stays fresh: the policy keeps its members.
+    const stoppedHead = member.web.head!;
+    await member.web.append('scope-policy', { scopeId: SCOPE, categories: BOTH.categories, members: [member.web.member.memberId, device.memberId].sort() });
+    expect(member.web.head!.seq).toBeGreaterThan(stoppedHead.seq);
+    server.setFailBlobUploads(false);
+    await daemon!.start();
+
+    const terminal = await server.waitFor((envelope) => ['task.complete_sealed', 'task.fail_sealed', 'task.fail', 'task.complete'].includes(envelope.type)
+      && envelope.task_id === 'restart-member', BUDGET_MS);
+    expect(terminal.type).toBe('task.complete_sealed');
+    const sealed = (terminal.payload as { sealed: { chainHead: { seq: number; hash: string }; ciphertextRef?: unknown } }).sealed;
+    expect(sealed.chainHead).toEqual(member.web.head);
+    expect(sealed.ciphertextRef).toBeDefined();
+    expect(await openOutput(member, terminal, deviceId)).toMatchObject({ summary });
+    await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0), BUDGET_MS);
+    const sent = taskEnvelopes('restart-member');
+    expect(sent.map((envelope) => envelope.type)).not.toEqual(expect.arrayContaining(['task.complete']));
+    expect(sent.map((envelope) => envelope.type)).not.toEqual(expect.arrayContaining(['task.fail']));
+    expect(JSON.stringify(sent)).not.toContain('sealed_key_unavailable');
+    expect(JSON.stringify(sent)).not.toContain('large summary');
+  }, 15_000);
+
   it('uploads an artifact over the inline frame as an octet-stream ciphertext blob', async () => {
     const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
     server.send(await sealedOffer(member, 'large', server.nextSeq(), deviceId, 'run'));
