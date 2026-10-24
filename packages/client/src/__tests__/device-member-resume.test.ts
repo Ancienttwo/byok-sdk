@@ -11,7 +11,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { AuthManager } from '../daemon/auth-manager';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { DeviceMemberRecords } from '../daemon/device-member-custody';
-import { PAIRING_VERIFICATION_TTL_MS, enrollDeviceMember, resumeDeviceMember, type ResumeDeviceMemberOptions } from '../daemon/device-member';
+import {
+  MEMBER_REWALK_TIMEOUT_MS, PAIRING_VERIFICATION_TTL_MS, enrollDeviceMember, resumeDeviceMember, type ResumeDeviceMemberOptions,
+} from '../daemon/device-member';
 import { MEMBER_CHAIN_MAX_ENTRIES } from '../daemon/e2ee-member-client';
 import { StoredDeviceProofSigner } from '../daemon/device-proof-signer';
 import { E2eeMemberClient } from '../daemon/e2ee-member-client';
@@ -285,6 +287,24 @@ describe('device member resume (E2d-1)', () => {
       const { server, resume } = await anchored();
       server.e2ee.chainResponse = Array.from({ length: 256 }, () => ({}));
       await expect(resume()).rejects.toThrow(`the member chain is longer than ${MEMBER_CHAIN_MAX_ENTRIES} entries`);
+    });
+
+    it('gives up failing re-walk chain reads at the re-walk deadline, so the member ends as none (#863 M2)', async () => {
+      const { server, clock, resume, logs } = await anchored();
+      server.e2ee.failChainReads = Number.MAX_SAFE_INTEGER;
+      const resumed = resume();
+      await until(() => logs.some((line) => line.includes('HTTP 503')));
+      clock.now += MEMBER_REWALK_TIMEOUT_MS;
+      expect(await resumed).toBeUndefined();
+      expect(logs.at(-1)).toBe(`the member chain could not be read within ${MEMBER_REWALK_TIMEOUT_MS / 60_000} minutes of start; E2EE stays off until the next start`);
+    });
+
+    it('deletes a pv left over after the anchor was stored (#890 LOW)', async () => {
+      const { web, records, custody, clock, resume, deviceId } = await anchored();
+      const { tenantId } = (await records.readState())!;
+      await records.savePending({ tenantId, deviceId, pv: web.verificationSecret, deadline: clock.now + PAIRING_VERIFICATION_TTL_MS });
+      expect((await resume())?.state.head).toEqual(web.head);
+      expect(custody.entries.has('pairing-verification')).toBe(false);
     });
 
     it('is no member after its own removal', async () => {

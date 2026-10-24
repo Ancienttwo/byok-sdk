@@ -71,6 +71,8 @@ export class E2eeTestHost {
   readonly packages: ScopeKeyPackageV1[] = [];
   /** Answer this many key package reads with 503 first. */
   failPackageReads = 0;
+  /** When set, every key package read answers with this status. */
+  rejectPackageReads: number | undefined;
   packageReads = 0;
   /** When set, every key package read answers with this list as it is. */
   packageResponse: unknown[] | undefined;
@@ -130,6 +132,10 @@ export class E2eeTestHost {
       if (this.failPackageReads > 0) {
         this.failPackageReads -= 1;
         respond(res, 503, { error: 'unavailable' });
+        return true;
+      }
+      if (this.rejectPackageReads !== undefined) {
+        respond(res, this.rejectPackageReads, { error: 'forbidden' });
         return true;
       }
       this.packageReads += 1;
