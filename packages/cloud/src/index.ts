@@ -204,6 +204,7 @@ export type {
   TenantBoundDedup,
   TenantBoundDevices,
   TenantBoundMailbox,
+  TenantBoundObjects,
   TenantBoundPresence,
   TenantBoundQuota,
   TenantBoundRateLimiter,

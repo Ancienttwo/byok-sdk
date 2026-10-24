@@ -92,6 +92,22 @@ continuation keeps the hop, authority, and open delegation of its parent.
 It does not consume the Bot budget. A refused action
 enters only its originating Bot's `ContextPack.rejectedActions`. Other accepted actions still apply.
 
+`BotOptions.outcome` narrows that offer (#881). `actions.turn` lists the
+actions of a Bot Turn outside a room, from `delegate`, `ask_user`,
+`confirmable_action` and the three routine actions. `actions.main` lists the
+extra actions of an owner Main Bot Turn, from the Bot and room management
+actions, `team_note` and `cancel_delegation`. A list only removes actions, and
+an empty list removes all of that kind. `timeZones` holds 1 to 8 IANA zones for
+`create_routine` and `update_routine`, checked by the `@byok-sdk/core` routine
+calendar. The default is `UTC` and `America/New_York`. `confirmable` holds the
+`confirmable_action` branches, each an action name and its draft schema. The
+default is `send_message`, and the connector receives only the offered names.
+The constructor checks the offer and composes one schema with it. Turns that
+froze before keep their schema. A room seat always gets `speech`. A schema
+that is over budget even in the flat shape blocks its Turn, as before. The H
+sync takes the same offer as `SyncOptions.offer`, a value from `outcomeOffer`.
+The system prompt does not change with the offer.
+
 Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same
 answer does not reset that budget. Empty updates and duplicate targets or
@@ -507,10 +523,12 @@ there is one projection writer and one revision for each agentRef.
   The current revision readies the Bot, an older one changes nothing, and a
   newer one refuses. A Bot's Turns freeze their offers only when it is ready,
   as before. After a newer revision, the Bot keeps its last ready revision, so
-  it stays a delegate target while its Turns wait.
+  it stays a delegate target while its Turns wait. The Host reports
+  `personaReady` only after the snapshot that introduces that revision
+  resolves: an earlier report is refused, not stored.
 - `retryPersona` refuses with `external_persona`.
-- The ledger stores this mode too, so a restart cannot change it. The option
-  needs `team: 'external'`.
+- The ledger stores this mode too, so a restart cannot change it. The mode is
+  fixed once stored, with no migration. The option needs `team: 'external'`.
 
 With `history` and `team: 'external'` together, the device ledger holds
 neither the history nor the team authority.

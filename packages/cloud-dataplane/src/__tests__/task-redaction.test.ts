@@ -13,10 +13,11 @@ import { format } from 'node:util';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { isCloudError } from '@byok-sdk/cloud';
-import { tenantId, type ContentHash } from '@byok-sdk/core';
+import { createMutableClock, tenantId, type ContentHash } from '@byok-sdk/core';
 import { sealContent } from '@byok-sdk/core/sealed-payload';
 import { byokBlobUrlPath, createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { migrate } from '../migrate';
+import { createPostgresTaskRedactionStore } from '../stores';
 import { createDataplaneScope, createObjectStorageScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
 import { readObjects, readTenantRows, record, scanObjects, scanPostgres, type Hits } from './support/plaintext-scan';
 import {
@@ -106,6 +107,52 @@ async function sendAll(device: Awaited<ReturnType<typeof pairDevice>>, envelopes
     const sent = await device.send(envelope);
     expect(sent, JSON.stringify(sent.body)).toMatchObject({ status: 200, body: { accepted: 1 } });
   }
+}
+
+/**
+ * A claimed task whose offer seals its output, and its `task.complete_sealed`
+ * by `ciphertextRef`. The blob is uploaded, and the terminal is not sent yet.
+ */
+async function sealedTerminalByReference(
+  host: Awaited<ReturnType<typeof composeRedactionHost>>,
+  device: Awaited<ReturnType<typeof pairDevice>>,
+): Promise<{ taskId: string; hash: ContentHash; key: string; terminal: () => Envelope }> {
+  const taskId = `task-sealed-terminal-${randomUUID()}`;
+  const sealing = { ...SEALING, categories: ['task-output'] } as const;
+  await host.cloud.enqueueSealedOffer(TENANT_1, device.deviceId, {
+    taskId,
+    payload: { instruction: 'answer at length', runtime: 'pi', sealing } as never,
+  });
+  expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.offer_sealed', taskId]]);
+  await sendAll(device, [
+    createEnvelope('task.claim', { deviceId: device.deviceId, runtime: 'pi' }, { taskId }),
+    createEnvelope('task.started', {}, { taskId }),
+  ]);
+
+  const content = await sealContent({
+    scopeKey: new Uint8Array(32).fill(7),
+    scope: { id: sealing.scopeId, epoch: sealing.epoch },
+    chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+    sender: 'A'.repeat(43),
+    category: 'task-output',
+    binding: {
+      tenantId: TENANT_1, family: 'task.complete', direction: 'daemon-to-server', identity: { taskId },
+      deviceId: device.deviceId, agentRef: null, categories: [...sealing.categories], notAfter: null,
+    },
+    plaintext: { summary: BY_REFERENCE_TEXT },
+    maxContentLength: 2 * 1024 * 1024,
+  });
+  const blob = await uploadObject(device, content.ciphertext, 'application/octet-stream');
+  const terminal = () => createEnvelope('task.complete_sealed', {
+    sessionRef: 'session-sealed-terminal',
+    sealed: { ...content.header, ciphertextRef: blob.ref },
+  } as never, { taskId });
+  return {
+    taskId,
+    hash: (blob.ref as { contentHash: ContentHash }).contentHash,
+    key: `tenants/${TENANT_1}/objects/sha256/${blob.hex}`,
+    terminal,
+  };
 }
 
 async function errorCode(promise: Promise<unknown>): Promise<string | undefined> {
@@ -348,6 +395,80 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
         .toMatchObject([{ taskId, outcome: 'redacted', counts: { objectsDeleted: 1 } }]);
       expect((await readObjects(storage)).has(key)).toBe(false);
       expect(await host.core.objects.get(TENANT_1, hash)).toMatchObject({ refCount: 0, state: 'deleted' });
+    } finally {
+      await scope.dispose();
+    }
+  }, 120_000);
+
+  it('releases the reference that a sealed terminal holds to its ciphertext blob, and deletes that blob (#654 §58a)', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const storage = await createObjectStorageScope();
+      const host = await composeRedactionHost(scope.pool, storage);
+      const device = await pairDevice(host, TENANT_1, ['sealed-payload-v1']);
+      const { taskId, hash, key, terminal } = await sealedTerminalByReference(host, device);
+      await sendAll(device, [terminal()]);
+      await device.poll();
+      expect((await host.core.objects.get(TENANT_1, hash))?.refCount).toBe(1);
+      expect((await readObjects(storage)).has(key)).toBe(true);
+
+      expect((await host.cloud.redactTasks(TENANT_1, { taskIds: [taskId] })).tasks)
+        .toMatchObject([{ taskId, outcome: 'redacted', counts: { objectsDeleted: 1 } }]);
+      expect((await readObjects(storage)).has(key)).toBe(false);
+      expect(await host.core.objects.get(TENANT_1, hash)).toMatchObject({ refCount: 0, state: 'deleted' });
+    } finally {
+      await scope.dispose();
+    }
+  }, 120_000);
+
+  it('releases the reference of a terminal replay that lands while redaction runs (#654 §58a)', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const storage = await createObjectStorageScope();
+      // The redaction store reads its receipts without a lock right after it
+      // releases the task's references. A replay that runs there passes the
+      // redaction check and adds its reference again.
+      let replay: (() => Promise<void>) | undefined;
+      const pool = new Proxy(scope.pool, {
+        get(target, property) {
+          if (property !== 'query') {
+            const value: unknown = Reflect.get(target, property, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+          }
+          return async (text: unknown, values?: unknown) => {
+            if (replay !== undefined && typeof text === 'string'
+              && text.startsWith('SELECT key, body FROM device_request_receipts') && !text.includes('FOR UPDATE')) {
+              const run = replay;
+              replay = undefined;
+              await run();
+            }
+            return target.query(text as string, values as unknown[]);
+          };
+        },
+      });
+      const host = await composeRedactionHost(scope.pool, storage, () => createPostgresTaskRedactionStore({
+        pool, clock: createMutableClock(), objectStorage: storage.config,
+      }));
+      const device = await pairDevice(host, TENANT_1, ['sealed-payload-v1']);
+      const { taskId, hash, terminal } = await sealedTerminalByReference(host, device);
+      await sendAll(device, [terminal()]);
+      await device.poll();
+      expect((await host.core.objects.get(TENANT_1, hash))?.refCount).toBe(1);
+
+      let heldDuringRedaction: number | undefined;
+      replay = async () => {
+        expect((await host.core.objects.get(TENANT_1, hash))?.refCount).toBe(0);
+        await sendAll(device, [terminal()]);
+        heldDuringRedaction = (await host.core.objects.get(TENANT_1, hash))?.refCount;
+      };
+      expect((await host.cloud.redactTasks(TENANT_1, { taskIds: [taskId] })).tasks)
+        .toMatchObject([{ taskId, outcome: 'redacted', counts: { objectsDeleted: 0 } }]);
+      expect(replay).toBeUndefined();
+      expect(heldDuringRedaction).toBe(1);
+      // Nothing names the blob now, so orphan GC can delete it.
+      expect(await host.core.objects.get(TENANT_1, hash)).toMatchObject({ refCount: 0, state: 'committed' });
     } finally {
       await scope.dispose();
     }
