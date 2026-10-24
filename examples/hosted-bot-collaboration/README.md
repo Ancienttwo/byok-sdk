@@ -270,7 +270,7 @@ interval every slot would fire as `catch_up`, and its occurrence key would diffe
 ## Deployment config
 
 H is not deployed yet (see Status). A deployment composes these parts. For the tests, `hosted-cloud.test-support.ts`
-composes the SDK side (the Postgres and object stores, the token signer and a paired daemon) and the submit port; the
+composes the SDK side (the Postgres and object stores, the token signer and a paired daemon) and the SDK task port (submit, readbacks, cancel); the
 message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMessageConsumer` themselves.
 
 - **Database.** One Postgres database. The store takes its own `pg.Pool` and its own schema
