@@ -864,6 +864,26 @@ The backup gap:
   The SDK does not run that rotation after a shred yet; that is E5b-2.
 - Until each member of the scope has rotated, treat the shred as complete only for the live Host store.
 
+### Member KEM floor
+
+Key packages are version 2 (#654 E5b-2, owner batch §77a). Each one signs the KEM epoch of its recipient as `recipientKemEpoch`, and it opens only with the KEM key of that epoch.
+
+What the Host does:
+
+- It reads the strict `{ memberId, kemPublicJwk, kemEpoch, kemSig }` subject of a `rotate` entry in the append that stores the entry, and raises that member's KEM floor to `kemEpoch` in the same transaction. The floor never falls.
+- A package put whose `recipientKemEpoch` is below its recipient's floor gets 409 `e2ee_scope_key_package_stale`, and nothing of that put is stored.
+  In Postgres, the put and the append take a transaction advisory lock per member after the scope locks, so a put cannot land a package wrapped to an old KEM key after the `rotate` commits.
+- It takes version 2 puts only. Stored version 1 rows still read, and core still opens them.
+
+So once a member's `rotate` is on the Host, no put can store a package wrapped to its old KEM key: a held-back or retried put, a put that lands after the writer timed out, or a new epoch from a client that has not walked the `rotate`.
+
+Limits:
+
+- The Host never verifies member signatures (design §7.3). Any paired device of the tenant can append a well-shaped `rotate` for any member with a higher `kemEpoch`. The Host then refuses every package wrapped to that member's real KEM key, until the member rotates past the fake epoch. The fake entry breaks the chain walk for every member, so members refuse that chain. This is the same class of risk as a device appending a `shred` (above).
+- A Host rolled back to 0.30.1 reads version 1 packages only. Any read that meets a stored version 2 package fails closed with `e2ee_member_state_unreadable` until the Host is upgraded again. While rolled back, it takes version 1 puts again, which can replace a version 2 row; after the upgrade those rows open as version 1. The floor table stays and is not raised. A 0.30.2 daemon does not rotate on a Host that does not declare `e2ee.member.kem-epoch`, but a `rotate` that the Host product's own client appends during the rollback is not in the floor after the upgrade.
+- Upgrade the Host first, then daemons and web clients. A 0.30.1 Host refuses version 2 puts, and a 0.30.2 Host refuses version 1 puts, so in between some writers cannot put packages. This fails closed; nothing leaks.
+- The version 1 open code stays until no Host holds a version 1 row. Check with `SELECT count(*) FROM e2ee_scope_key_package WHERE (package::jsonb)->>'v' = '1'` on Postgres, or `SELECT count(*) FROM e2ee_scope_key_package WHERE json_extract(package, '$.v') = 1` on SQLite. Remove it only when the count is 0 on every Host.
+
 ### Measured inventory
 
 `packages/cloud-dataplane/src/__tests__/hosted-plaintext-inventory.test.ts` checks the table below on real Postgres and S3.
