@@ -4,14 +4,14 @@ import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { hash, MIN_TOMBSTONE_RETENTION_MS, taskId, type FrozenSubmitPort, type Json, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { ROUTINE_WAIT_MS, routineCalendar, routineTurn } from '@byok-sdk/example-bot-collaboration/routines';
+import { createDefinition, ROUTINE_WAIT_MS, routineCalendar, routineTurn } from '@byok-sdk/example-bot-collaboration/routines';
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { freezeIntent, HostedSubmitter } from './intents';
 import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedReconciler, type TaskEvidence } from './reconcile';
-import { hostedRoutineCommands, loadSlice } from './routines';
+import { hostedRoutineCommands, loadSlice, writeSlice } from './routines';
 import { inSchema, lockScope, type CommitPortsFactory, type FinishPortsFactory } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
@@ -292,6 +292,22 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
     it('the terminal transaction', async () => {
       const { scope, id, turn } = await staged();
       expect(await store().finish(scope, turn, completed(turn, {}), ports)).toBe('succeeded');
+      await switched(scope, id, NOW);
+    });
+    it('the end_routine commit of another routine (§55c)', async () => {
+      const { scope, id, turn } = await staged();
+      // The occurrence intent concludes outside any writer, so only the next writer can switch version 2.
+      await query(`UPDATE ${table('intent')} SET conclusion = 'cancelled' WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(turn)]);
+      const other = await locked(scope, async client => {
+        const slice = await loadSlice(client, storedKey(scope)), commands = hostedRoutineCommands(slice, NOW);
+        const definition = createDefinition(commands.list(), 'main', taskId('t2', 0), 0, { localId: 'new_routine_1', schedule: DAILY, prompt: PROMPT }, 'bot');
+        commands.create(definition);
+        await writeSlice(client, storedKey(scope), slice);
+        return definition.id;
+      });
+      expect(await routineRow(scope, id)).toMatchObject({ pending: { version: 2 } });
+      await store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'end_routine', botId: 'main', routineId: other } }, ports);
+      expect(await routineRow(scope, other)).toMatchObject({ lifecycle: 'completed' });
       await switched(scope, id, NOW);
     });
   });

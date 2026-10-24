@@ -221,8 +221,10 @@ export class HostedCollaborationStore {
         await cancelIntent(client, scope, value.target, now);
         await switchDueVersions(client, key, now);
       } else if (value?.deliver) await deliverCancels(client, scope, state, base.now());
-      // Completion drops a staged version, so no version switch follows.
-      if (slice && result.disposition.outcome === 'accepted') await writeSlice(client, key, slice);
+      if (slice && result.disposition.outcome === 'accepted') {
+        await writeSlice(client, key, slice);
+        await switchDueVersions(client, key, base.now());
+      }
       return { value: result, outbox: result.outbox, now: base.now() };
     });
   }

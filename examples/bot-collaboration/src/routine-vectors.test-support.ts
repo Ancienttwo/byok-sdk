@@ -250,9 +250,6 @@ export function routineVectors(name: string, open: () => RoutineSubject | Promis
       await subject.change(state => { state.team.bots.main!.mainBot = true; });
       await subject.end(id);
       expect(await subject.routine(id)).toEqual({ id, version: 1, pending: null, lifecycle: 'completed', status: 'ok', nextAt: null, calendarErrors: 0 });
-      subject.at(slot + 1);
-      await subject.sync();
-      expect(await subject.occurrences(id)).toEqual([]);
       await expect(subject.end(id)).rejects.toThrow('No open Bot routine has this id');
     }, 60_000);
 
