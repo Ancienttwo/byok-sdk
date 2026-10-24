@@ -1,4 +1,4 @@
-export { CallbackCommandError, HostedCollaborationStore, HostedStoreVersionError, InboundBackgroundError, InboundCommandError, type CommitPorts, type CommitPortsFactory,
+export { CallbackCommandError, HostedCollaborationStore, HostedStoreVersionError, InboundCommandError, type CommitPorts, type CommitPortsFactory,
   type FinishPortsFactory, type HostedSyncOptions, type InboundIdentity, type PortsFactory, type Publish } from './store';
 export { DDL, STORE_VERSION } from './ddl';
 export { hostedMessageConsumer, type AgentMessageConsumer, type AgentMessageInput, type MessageConsumerOptions, type MessageDecision } from './messages';

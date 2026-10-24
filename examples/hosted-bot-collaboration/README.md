@@ -358,8 +358,7 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
   - `owner_input` and `room_input` run the K8 `receive` command under the command id `hash(['receive', inboundKey])`, so
     a redelivered event replays. With `{ channel: true }`, the store keeps the inbound and its reply route (K8
     `rememberInbound`);
-  - `bot_background` (a bot's room message) is not in this slice: it throws `InboundBackgroundError` before it reads or
-    writes. Room input from a bot comes later;
+  - `bot_background` runs the K8 `room_input` command of a bot with no mention, as L `roomInput` does for a bot;
   - any other kind writes only an audit line, one for each delivery, as L.
   The store owns the `remember` port: `commit()` refuses the `receive` command with `InboundCommandError`, and its ports
   carry no `remember` port.

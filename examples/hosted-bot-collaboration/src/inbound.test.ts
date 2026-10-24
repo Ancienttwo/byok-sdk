@@ -7,7 +7,7 @@ import { seedCollaboration, VECTOR_NOW } from '@byok-sdk/example-bot-collaborati
 import { storedKey } from './layout';
 import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { HostedCollaborationStore, InboundBackgroundError, InboundCommandError, type CommitPortsFactory, type InboundIdentity } from './store';
+import { HostedCollaborationStore, InboundCommandError, type CommitPortsFactory, type InboundIdentity } from './store';
 
 // #793 D2b-out-3: the H inbound channel entry, as L `receive()`.
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
@@ -65,10 +65,16 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
     expect(await on.dump(scope)).toBe(before);
   });
 
-  it('refuses a bot message in a room, the background kind, before it reads or writes', async () => {
-    const { on, scope } = await scoped(true, room), before = await on.dump(scope);
-    const bot = message({ conversation: GROUP, sender: { id: 'other-bot', kind: 'bot' }, mentions: ['main'], text: 'Hi' });
-    await expect(on.receive(scope, bot, IDENTITY, vectorPorts)).rejects.toBeInstanceOf(InboundBackgroundError);
+  it('takes a bot message in a room as background with no mention, as L roomInput, and replays a redelivery', async () => {
+    const { on, scope } = await scoped(true, room);
+    const bot = message({ conversation: GROUP, platformMessageId: 'in2', sender: { id: 'other-bot', kind: 'bot' }, mentions: ['main'], text: 'Hi' });
+    const first = await on.receive(scope, bot, IDENTITY, vectorPorts);
+    expect(first).toEqual({ kind: 'bot_background', id: hash(['room-input', 'r1', inboundKey(bot)]) });
+    const state = await on.read(scope);
+    expect(state.team.rooms.r1!.messages).toEqual([expect.objectContaining({ from: 'other-bot', text: 'Hi' })]);
+    expect(JSON.parse(state.team.rounds[first.id!]!.input)).toMatchObject({ mentions: [] });
+    const before = await on.dump(scope);
+    expect(await on.receive(scope, bot, IDENTITY, vectorPorts)).toEqual(first);
     expect(await on.dump(scope)).toBe(before);
   });
 
