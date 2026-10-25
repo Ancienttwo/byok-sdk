@@ -2060,6 +2060,10 @@ durable execution identity. The embedding host supplies one absolute
 `hostStorageRoot`; the client SDK exclusively composes
 `<hostStorageRoot>/agents/<agentId>` after validating `agentId` as one bounded
 path segment. No host resolver or `workspaceHint` participates in this path.
+The filesystem under `hostStorageRoot` must support hard links: each home's
+writer lease marker is published by linking a complete temp file onto
+`.byok/agent-home.lease`, and a root without hard links fails at its first
+acquire with an error that names the directory.
 
 The client validates existing-ancestor and realpath containment, rejects
 symlink and cross-Agent collisions, creates missing Agent home, `MEMORY.md`,
