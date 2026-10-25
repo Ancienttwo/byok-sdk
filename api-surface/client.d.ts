@@ -410,6 +410,21 @@ export interface CodexAdapterOptions {
     operationTimeoutMs?: number;
     /** Opt-in local Host UI; independent of the remote boolean approval lane. */
     nativeInteractions?: NativeInteractionHostOptions;
+    /**
+     * For an Agent task (`task.offer_for_agent`), `excluded` gives the Codex
+     * thread only the task's and the SDK's MCP servers. Before the thread
+     * opens, the adapter reads Codex's effective configuration for the task cwd
+     * (`config/read`), sets `enabled = false` on every other `mcp_servers`
+     * entry, and turns off the `apps` (connectors) and `plugins` features for
+     * the thread. The thread then has no plugins at all, not only no plugin
+     * MCP servers. After the open it reads the thread's MCP server status
+     * back, and the start fails if any other server is not disabled, or if a
+     * user server has the name of a task or SDK server. The user's
+     * `AGENTS.md`, login, model, sandbox setting and other configuration still
+     * apply. It covers new and resumed threads. Other tasks are unchanged.
+     * Default `inherit`.
+     */
+    agentUserMcpServers?: 'inherit' | 'excluded';
 }
 /** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export declare class CodexAdapter implements RuntimeAdapter {
