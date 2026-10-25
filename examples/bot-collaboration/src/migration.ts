@@ -179,7 +179,10 @@ export function verifySwitchExport(document: SwitchExport): SwitchManifest {
 function manifestOf(content: SwitchContent): SwitchManifest {
   const counts = {} as Record<SwitchSection, number>, digests = {} as Record<SwitchSection, string>;
   counts.collaboration = 1;
-  digests.collaboration = hash(content.collaboration);
+  // The insertion order of the state's maps is state: K8 reads Turns in that order for context (`rules/context.ts`) and
+  // retention (`retention.ts`), and H keeps it as each row's `ordinal`. `canonical` sorts keys, so the digest covers the
+  // JSON text, which keeps it.
+  digests.collaboration = hash(JSON.stringify(content.collaboration));
   for (const section of LISTS) {
     counts[section] = content[section].length;
     digests[section] = hash(content[section]);

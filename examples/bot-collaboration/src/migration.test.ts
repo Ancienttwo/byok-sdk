@@ -104,6 +104,13 @@ describe('switch export format (#975)', () => {
     refused(() => verifySwitchExport({ ...sealed, exportedAt: 1_001 }), 'manifest');
     refused(() => verifySwitchExport({ ...sealed, devices: [{ deviceId: 'd1', frozenRevision: 4 }, sealed.devices[1]!] }), 'manifest');
     refused(() => verifySwitchExport({ ...sealed, tombstones: sealed.tombstones.slice(1) }), 'manifest');
+    // The same Turns in another insertion order: K8 reads them in that order, so the state differs.
+    const turns = content(state => { state.turns.a = { id: 'a', conclusion: 'answered' } as CollaborationState['turns'][string];
+      state.turns.b = { id: 'b', conclusion: 'answered' } as CollaborationState['turns'][string]; });
+    const reordered = structuredClone(turns.collaboration);
+    reordered.turns = { b: reordered.turns.b!, a: reordered.turns.a! };
+    const ordered = sealSwitchExport(turns);
+    refused(() => verifySwitchExport({ ...ordered, collaboration: reordered }), 'manifest');
     refused(() => verifySwitchExport({ ...sealed, routines: [{ ...sealed.routines[0]!, ordinal: 7 }, sealed.routines[1]!] }), 'manifest');
   });
 

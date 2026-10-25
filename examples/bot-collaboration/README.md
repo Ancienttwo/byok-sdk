@@ -1038,8 +1038,10 @@ Neither Host's storage is the format. The old owner builds a `SwitchContent`
 once every device of the domain is frozen and drained, and
 `sealSwitchExport` checks it, orders each section by its identity and adds a
 manifest. The manifest has the count and the `hash(canonical(section))` of
-each section, and one digest over them and the header (source, domain, frozen
-device revisions, export time). The new owner runs `verifySwitchExport` on
+each list section, and one digest over them and the header (source, domain,
+frozen device revisions, export time). The collaboration digest is the hash
+of its JSON text, because the insertion order of its maps is state: K8 reads
+Turns in that order for context and retention, so a target must keep it. The new owner runs `verifySwitchExport` on
 the document before it writes anything, and again on its own rows read back
 into this form, so the digest it records in its receipt is the source's. The
 digest covers the header, and `domain` is the source's tenant or scope id (a
