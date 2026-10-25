@@ -603,8 +603,12 @@ Platform notes:
   not put it where other users can write.
 - Windows custody: the launcher cannot replace itself, so it starts Hermes as
   a child and stays alive until Hermes exits (see the client README).
-- Windows executable: give `resolveBin` the venv `hermes.exe`. Node does not
-  start a `hermes.cmd` shim without a shell.
+- Windows executable: give `resolveBin` the `hermes.exe` that Hermes's
+  installer publishes (`<Hermes home>\bin\hermes.exe`, a console-script
+  launcher). Node does not start a `hermes.cmd` shim without a shell.
+- Windows root: the user's Hermes home there is `%LOCALAPPDATA%\hermes`, so
+  the adapter refuses that path and anything below it as `home`, as it
+  refuses `~/.hermes`.
 
 Evidence: `hermes-adapter.test.ts` and `hermes-custody.test.ts` (synthetic
 `fake-hermes.mjs`, offline), `hermes-gateway-control.test.ts` (pipe name
@@ -613,12 +617,15 @@ against Hermes's own hash, ownership walk), and the
 `0.22.2+2364.g0b10b9f` turn with a fake model endpoint on macOS. On Windows
 the fake suites run behind a compiled `hermes.exe` that starts Node as a child,
 the same process shape as a venv console script; the
-[Windows note](notes/2026-10-22-608-hermes-windows.md) records the runs. No
-live-provider run, Linux run or real Hermes run on Windows is part of this
-evidence.
-The descriptor still declares `platforms: ['darwin', 'linux']`, so a daemon
-refuses Hermes detection on Windows with `platform_unsupported` before any
-probe. `prepare()` itself works on Windows when a Host constructs the adapter.
+[Windows note](notes/2026-10-22-608-hermes-windows.md) records the runs.
+`hermes-real.test.ts` runs the adapter against the real qualified Hermes on
+`windows-latest` (CI job `hermes-real-windows`), with a fake model endpoint
+and the custody launcher: `detect()`, `prepare()`, one turn through the owned
+gateway to `turn_end`, the pipe client against the real Hermes pipe server,
+and the key only in the Hermes child; the
+[real-run note](notes/2026-10-26-608-hermes-windows-real.md) records it. No
+live-provider run or Linux run is part of this evidence.
+The descriptor declares `platforms: ['darwin', 'linux', 'win32']`.
 
 ## Selection and platforms
 
@@ -626,7 +633,7 @@ A Host reads the adapter list, not a table of its own. `taskRuntimeTarget(descri
 from `@byok-sdk/client/adapters` returns `{ runtime }` for a frozen wire runtime
 id (`RUNTIME_IDS` in `@byok-sdk/protocol/constants`) and `{ harnessId }` for any
 other id. `descriptor.platforms` lists the supported `process.platform` values:
-Claude, Codex and Pi declare macOS, Linux and Windows; Grok, Hermes and durable
+Claude, Codex, Pi and Hermes declare macOS, Linux and Windows; Grok and durable
 Pi declare macOS and Linux. A descriptor without `platforms` has no platform
 restriction. `observeRuntimeDetection` refuses an unsupported platform with
 `platform_unsupported` before `detect()` runs, and `projectRuntimeObservation`

@@ -62,7 +62,8 @@ export interface HermesAdapterOptions {
   /**
    * Absolute path of the Hermes root that this SDK owns, for example under the
    * Host's store directory. Each execution runs in a fresh profile home below
-   * it (`hermes-home.ts`). It must not be the user's `~/.hermes`. Give each
+   * it (`hermes-home.ts`). It must not be the user's Hermes home: `~/.hermes`,
+   * or on Windows Hermes's default `%LOCALAPPDATA%\hermes`. Give each
    * Host process its own root. The first `detect()` on a new root waits while
    * Hermes builds its environment there.
    */
@@ -196,8 +197,7 @@ export class HermesAdapter implements RuntimeAdapter {
     return freezeRuntimeAdapterDescriptor({
       id: 'hermes',
       supportsDispatchSelection: false,
-      // The gateway control channel is a named pipe on Windows. It has no evidence yet.
-      platforms: ['darwin', 'linux'],
+      platforms: ['darwin', 'linux', 'win32'],
       capabilities: { steer: false, resume: false, approvalInteractive: false, mcpToolsets: true, messageDraft: true },
     });
   }
@@ -206,8 +206,10 @@ export class HermesAdapter implements RuntimeAdapter {
     if (typeof options?.home !== 'string' || !path.isAbsolute(options.home)) throw new TypeError('HermesAdapterOptions.home must be an absolute path');
     const root = path.resolve(options.home);
     const candidate = canonicalPath(root);
-    const userHome = canonicalPath(path.join(os.homedir(), '.hermes'));
-    if (candidate === userHome || candidate.startsWith(`${userHome}${path.sep}`)) throw new TypeError('HermesAdapterOptions.home must not be the user\'s ~/.hermes');
+    const userHomes = [path.join(os.homedir(), '.hermes'), ...(process.platform === 'win32' ? [path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'hermes')] : [])];
+    for (const userHome of userHomes.map(canonicalPath)) {
+      if (candidate === userHome || candidate.startsWith(`${userHome}${path.sep}`)) throw new TypeError('HermesAdapterOptions.home must not be the user\'s Hermes home (~/.hermes, %LOCALAPPDATA%\\hermes)');
+    }
     if (options.byokLauncher !== undefined && options.model !== undefined) throw new TypeError('Hermes model and byokLauncher are mutually exclusive');
     if (options.model !== undefined) assertHermesModelSelection(options.model, 'HermesAdapterOptions.model');
     assertDeadline(options.probeTimeoutMs, 'Hermes probe timeout');

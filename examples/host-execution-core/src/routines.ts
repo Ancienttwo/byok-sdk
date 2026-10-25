@@ -71,10 +71,15 @@ export function applyPlan(state: LedgerState, routine: Routine, plan: WakePlan, 
   scheduleNext(state, routine, now);
 }
 
-/** The Host time, and the registered handlers a definition may name: Host job types and occurrence hook types, each mapped to its function. */
-export interface RoutineValidation { now: number; hostJobs: ReadonlyMap<string, unknown>; occurrenceHooks: ReadonlyMap<string, unknown> }
+/**
+ * The Host time, and the registered handlers a definition may name: Host job types and occurrence hook types, each mapped to its
+ * function. `executionRoutines: 'refuse'` refuses an `execution` definition, for a Host with no owner for its occurrence intent.
+ */
+export interface RoutineValidation {
+  now: number; hostJobs: ReadonlyMap<string, unknown>; occurrenceHooks: ReadonlyMap<string, unknown>; executionRoutines?: 'allow' | 'refuse';
+}
 /** Refuses a routine definition that the Host cannot run at `now`. Pure: it reads no ledger. */
-export function validateRoutineDefinition(definition: RoutineDefinition, { now, hostJobs, occurrenceHooks }: RoutineValidation): void {
+export function validateRoutineDefinition(definition: RoutineDefinition, { now, hostJobs, occurrenceHooks, executionRoutines }: RoutineValidation): void {
   if (!definition.id.trim() || definition.id.startsWith('host-scan:') || !Number.isSafeInteger(definition.version) || definition.version < 1
     || definition.waitMs < 1) throw new Error('Invalid routine definition');
   time(definition.waitMs); time(definition.lateAfterMs);
@@ -93,6 +98,7 @@ export function validateRoutineDefinition(definition: RoutineDefinition, { now, 
     }
     validateJson(definition.hostOccurrence.input);
   } else {
+    if (executionRoutines === 'refuse') throw new Error('Execution routines are refused by this Host');
     validateInput({ key: definition.id, source: 'routine', execution: definition.execution!, waitUntil: now + definition.waitMs, retry: definition.retry });
     routineRefOf(definition.execution!, definition.id, definition.version);
   }
@@ -115,7 +121,7 @@ export interface RoutineCommandOptions extends Omit<RoutineValidation, 'now'> { 
 export function routineCommands(state: LedgerState, options: RoutineCommandOptions): RoutineCommands {
   const { now, nextTime } = options;
   const validate = (definition: RoutineDefinition) => validateRoutineDefinition(definition,
-    { now: now(), hostJobs: options.hostJobs, occurrenceHooks: options.occurrenceHooks });
+    { now: now(), hostJobs: options.hostJobs, occurrenceHooks: options.occurrenceHooks, executionRoutines: options.executionRoutines });
   return {
     create: definition => {
       validate(definition);

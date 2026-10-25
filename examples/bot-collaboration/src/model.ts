@@ -6,6 +6,7 @@ import type { InputBatch, UserInput } from './rules/coalesce';
 import { json, type Budget, type Card, type Question, type Rejection, type Turn } from './rules/turn';
 import type { AcceptedReply, Batch, Delegation, Unit } from './rules/delegation';
 import type { CommandRecord } from './rules/commit';
+import type { DeviceTopology } from './topology';
 
 export type { Authority, InputBatch, SealReason, UserInput } from './rules/coalesce';
 export { addBatchTurns, addTurn, json } from './rules/turn';
@@ -41,6 +42,11 @@ export interface CollaborationState {
    * it. It appears at the first claim, so an older ledger reads an empty table. Never in ContextPack or projections.
    */
   cardCalls?: Record<string, true>;
+  /**
+   * L owner records by device id (#957, §4.1), from `topology.ts`. A device appears at its first switch step, so an older
+   * ledger reads every device as L at revision 0. Never in ContextPack or projections.
+   */
+  topology?: Record<string, DeviceTopology>;
 }
 export function stateOf(application: Record<string, Json>): CollaborationState {
   if (application.collaboration === undefined) application.collaboration = json({

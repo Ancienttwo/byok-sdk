@@ -123,6 +123,20 @@ describe('HermesAdapter construction and descriptor', () => {
     expect(() => new HermesAdapter({ home: '/tmp/x', model: { provider: 'custom', model: 'm', baseUrl: 'https://user:secret@example.test/v1' } })).toThrow(/credentials/);
   });
 
+  // Hermes's Windows default home is %LOCALAPPDATA%\hermes, not ~/.hermes.
+  it.runIf(windows)('refuses the user\'s %LOCALAPPDATA%\\hermes root on Windows', async () => {
+    const localAppData = await tempDir('bla-');
+    const previous = process.env.LOCALAPPDATA;
+    process.env.LOCALAPPDATA = localAppData;
+    try {
+      expect(() => new HermesAdapter({ home: path.join(localAppData, 'hermes') })).toThrow(/LOCALAPPDATA/);
+      expect(() => new HermesAdapter({ home: path.join(localAppData, 'HERMES', 'profiles', 'x') })).toThrow(/LOCALAPPDATA/);
+      expect(() => new HermesAdapter({ home: path.join(localAppData, 'hermes-sdk') })).not.toThrow();
+    } finally {
+      if (previous === undefined) delete process.env.LOCALAPPDATA; else process.env.LOCALAPPDATA = previous;
+    }
+  });
+
   it('refuses a root that reaches ~/.hermes through a symlink', async () => {
     const fakeUserHome = await tempDir('bu-');
     await fs.mkdir(path.join(fakeUserHome, '.hermes'));
@@ -148,7 +162,7 @@ describe('HermesAdapter construction and descriptor', () => {
       id: 'hermes',
       supportsDispatchSelection: false,
       requiresMcpToolsetToolObservation: false,
-      platforms: ['darwin', 'linux'],
+      platforms: ['darwin', 'linux', 'win32'],
       capabilities: { steer: false, resume: false, approvalInteractive: false, mcpToolsets: true, messageDraft: true },
     });
     expect(Object.isFrozen(descriptor)).toBe(true);

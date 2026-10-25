@@ -39,8 +39,15 @@ export interface SyncState<E extends FreezeExecution> extends ContextState, BotH
  * `DeviceBindingError`, so a reader matches one string.
  */
 export const DEVICE_NOT_BOUND = 'device_not_bound';
-/** Why a Host refuses a Bot's device: never bound, revoked, or bound to another mode. */
+/** The code of a Turn that the sync holds because its Bot's device is frozen for an owner switch (#957, §4.1). */
+export const DEVICE_SWITCHING = 'device_switching';
+/** Why a Host refuses a Bot's device binding: never bound, revoked, or bound to another mode. */
 export type DeviceRefusal = 'unbound' | 'revoked' | 'mode';
+/** A sync refusal: a binding refusal, or `switching` while the device is frozen for an owner switch (#957). */
+export type SyncRefusal = DeviceRefusal | 'switching';
+/** The hold code of each refusal, and the projection id prefix of each hold code. */
+const HOLD_CODE = { unbound: DEVICE_NOT_BOUND, revoked: DEVICE_NOT_BOUND, mode: DEVICE_NOT_BOUND, switching: DEVICE_SWITCHING } as const;
+const HOLD_PROJECTION = { [DEVICE_NOT_BOUND]: 'held', [DEVICE_SWITCHING]: 'held-switching' } as const;
 export interface SyncFacts extends Pick<IntentFacts, 'intent'> {
   /**
    * The current execution of the Turn's intent started. This is not `IntentFacts.started`, which counts every generation.
@@ -56,7 +63,7 @@ export interface SyncFacts extends Pick<IntentFacts, 'intent'> {
    * The Host's binding check of the device of the Bot's current execution template, which a freeze would use (#956).
    * A refusal holds that Bot's Turns that have no intent, and the rest of the scope syncs. Absent: no check.
    */
-  deviceRefusal?(botId: string): DeviceRefusal | undefined;
+  deviceRefusal?(botId: string): SyncRefusal | undefined;
 }
 export interface SyncOptions<R extends ContextRoutine> {
   now: number;
@@ -134,13 +141,15 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   if (turn.conclusion) return { kind: 'ended' };
   if (turn.source === 'room_slot' && state.team.seats[turn.id]?.status === 'blocked') return undefined;
   // #956: a Turn whose Bot's device is refused waits, before the profile check, since a refused device may never apply a
-  // profile. It is published once per hold with a fixed body, so a projection id never changes value. The reason is audited.
+  // profile. Each hold code has its own projection id with a fixed body, so a projection id never changes value (#957: a
+  // switch hold is `held-switching:<turnId>`). It is published when the code changes. The reason is audited.
   const refusal = bot && facts.deviceRefusal?.(turn.botId);
   if (refusal) {
-    if (!turn.held) {
-      turn.held = DEVICE_NOT_BOUND;
-      state.audit.push(`Turn held ${DEVICE_NOT_BOUND} ${refusal}: ${turn.id}`);
-      publish(`held:${turn.id}`, { owner: turn.botId, turnId: turn.id, code: DEVICE_NOT_BOUND });
+    const code = HOLD_CODE[refusal];
+    if (turn.held !== code) {
+      turn.held = code;
+      state.audit.push(`Turn held ${code} ${refusal}: ${turn.id}`);
+      publish(`${HOLD_PROJECTION[code]}:${turn.id}`, { owner: turn.botId, turnId: turn.id, code });
     }
     return undefined;
   }

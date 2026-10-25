@@ -71,9 +71,9 @@ test('a deploy/sql migration selects cloud-dataplane, its Postgres suites and th
     assert.match(readFileSync(new URL(reader, root), 'utf8'), /deploy\/sql/, reader);
   }
   for (const path of ['deploy/sql/0026_agent_message_draft.sql', 'deploy/sql/0027_e2ee_member.sql']) {
-    // The hosted example depends on cloud-dataplane (#793 D2b-1), so the graph also selects it.
+    // The hosted example (#793 D2b-1) and its Worker composition (#794 D3) depend on cloud-dataplane, so the graph also selects them.
     assert.deepEqual(selectImpact([path]), {
-      dirs: ['examples/hosted-bot-collaboration', 'packages/cloud-dataplane'], files: [path], families: ['dataplane', 'release-pack-migrate'], reason: 'impacted',
+      dirs: ['examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker', 'packages/cloud-dataplane'], files: [path], families: ['dataplane', 'release-pack-migrate'], reason: 'impacted',
     });
   }
   for (const path of ['deploy/sql/README.md', 'deploy/sql/0027.sql', 'deploy/sql/0027_e2ee.sh', 'deploy/sql/sub/0027_e2ee.sql']) {
@@ -84,9 +84,9 @@ test('a deploy/sql migration selects cloud-dataplane, its Postgres suites and th
 test('the control-plane SQL invariants select the cloud-dataplane suites that run them (#654)', () => {
   const path = 'tests/sql/control_plane_invariants.sql';
   assert.match(readFileSync(new URL('packages/cloud-dataplane/src/__tests__/invariants.test.ts', root), 'utf8'), /tests\/sql\/control_plane_invariants\.sql/);
-  // The hosted example depends on cloud-dataplane (#793 D2b-1), so the graph also selects it.
+  // The hosted example (#793 D2b-1) and its Worker composition (#794 D3) depend on cloud-dataplane, so the graph also selects them.
   assert.deepEqual(selectImpact([path]), {
-    dirs: ['examples/hosted-bot-collaboration', 'packages/cloud-dataplane'], files: [path], families: ['dataplane'], reason: 'impacted',
+    dirs: ['examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker', 'packages/cloud-dataplane'], files: [path], families: ['dataplane'], reason: 'impacted',
   });
   assert.throws(() => selectImpact(['tests/sql/other.sql']), /reviewed CI mapping required/i);
 });
@@ -112,6 +112,7 @@ test('a platform family is selected only by a path it owns', () => {
     'windows-service-smoke': 'packages/client/src/lifecycle/winsw.ts',
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
     'credential-isolation-audit': 'packages/keys/src/index.ts',
+    'hermes-real-windows': 'packages/client/src/__tests__/hermes-real.test.ts',
   };
   assert.deepEqual(Object.keys(owned).sort(), Object.keys(familyOwners).sort());
   const tracked = new Set(spawnSync('git', ['ls-files'], { cwd: fileURLToPath(root), encoding: 'utf8' }).stdout.split('\n').filter(Boolean));
@@ -143,6 +144,20 @@ test('Hermes adapter, fake and custody launcher paths select the Windows Hermes 
   // The job does not run these, so a change to them does not select it.
   for (const path of ['packages/client/src/adapters/codex/codex-adapter.ts', 'packages/keys/src/pi-provider-launcher.ts', 'packages/client/src/__tests__/hermes-pipe-open-errors.test.ts']) {
     assert.ok(!selectImpact([path]).families.includes('windows-git-workspace'), path);
+  }
+});
+
+test('Hermes adapter, real run and custody launcher paths select the real Hermes Windows job (#608)', () => {
+  for (const path of [
+    'packages/client/src/adapters/hermes/gateway-pipe-win32.ts',
+    'packages/client/src/adapters/hermes/hermes-adapter.ts',
+    'packages/client/src/__tests__/hermes-real.test.ts',
+    'packages/client/src/__tests__/fixtures/hermes-fake-model.ts',
+    'packages/keys/src/hermes-provider-launcher.ts',
+  ]) assert.ok(selectImpact([path]).families.includes('hermes-real-windows'), path);
+  // The fake Hermes suites do not run real Hermes, so they do not select it.
+  for (const path of ['packages/client/src/__tests__/hermes-custody.test.ts', 'packages/client/src/__tests__/fixtures/fake-hermes.mjs', 'packages/keys/src/__tests__/hermes-provider-launcher.test.ts']) {
+    assert.ok(!selectImpact([path]).families.includes('hermes-real-windows'), path);
   }
 });
 
@@ -282,7 +297,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 14);
+  assert.equal(knownFamilies.length, 15);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {
@@ -306,8 +321,8 @@ test('actual exported migration runner selects installed-tarball upgrade validat
   });
   assert.equal(result.status, 0, result.stderr);
   const plan = JSON.parse(result.stdout);
-  // The hosted example depends on cloud-dataplane (#793 D2b-1), so the graph also selects it.
-  assert.deepEqual(plan.dirs, ['examples/hosted-bot-collaboration', 'packages/cloud-dataplane']);
+  // The hosted example (#793 D2b-1) and its Worker composition (#794 D3) depend on cloud-dataplane, so the graph also selects them.
+  assert.deepEqual(plan.dirs, ['examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker', 'packages/cloud-dataplane']);
   assert.deepEqual(plan.families, ['dataplane', 'release-pack-migrate']);
 });
 
@@ -350,8 +365,17 @@ test('vendored pi-subagents 0.60.0 factory files select only the client closure 
   }
 });
 
-test('#793 O5: a direct hosted example path selects only that example and the dataplane family', () => {
+test('#793 O5: a direct hosted example path selects that example, its Worker composition (#794 D3) and the dataplane family', () => {
   for (const path of ['examples/hosted-bot-collaboration/src/k8-entry.test.ts', 'examples/hosted-bot-collaboration/vitest.config.ts']) {
-    assert.deepEqual(selectImpact([path]), { dirs: ['examples/hosted-bot-collaboration'], files: [path], families: ['dataplane'], reason: 'impacted' });
+    assert.deepEqual(selectImpact([path]), { dirs: ['examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker'], files: [path],
+      families: ['dataplane'], reason: 'impacted' });
   }
+});
+
+test('#794 D3: a direct Worker example path selects only that example and the dataplane family', () => {
+  for (const path of ['examples/hosted-bot-collaboration-worker/src/worker.ts', 'examples/hosted-bot-collaboration-worker/src/wrangler.json',
+    'examples/hosted-bot-collaboration-worker/vitest.config.ts']) {
+    assert.deepEqual(selectImpact([path]), { dirs: ['examples/hosted-bot-collaboration-worker'], files: [path], families: ['dataplane'], reason: 'impacted' });
+  }
+  assert.throws(() => selectImpact(['examples/hosted-bot-collaboration-worker/wrangler.json']), /reviewed CI mapping required/i);
 });

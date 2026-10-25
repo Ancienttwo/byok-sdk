@@ -62,6 +62,17 @@ export const workspaceGraph = {
       "@byok-sdk/example-host-execution-core"
     ]
   },
+  "examples/hosted-bot-collaboration-worker": {
+    "name": "@byok-sdk/example-hosted-bot-collaboration-worker",
+    "dependencies": [
+      "@byok-sdk/client",
+      "@byok-sdk/cloud",
+      "@byok-sdk/cloud-dataplane",
+      "@byok-sdk/example-bot-collaboration",
+      "@byok-sdk/example-host-execution-core",
+      "@byok-sdk/example-hosted-bot-collaboration"
+    ]
+  },
   "examples/live-activity-host": {
     "name": "@byok-sdk/example-live-activity-host",
     "dependencies": [
@@ -167,6 +178,7 @@ export const knownFamilies = Object.freeze([
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-git-workspace', 'packageability-smoke', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
+  'hermes-real-windows',
 ]);
 // A routine PR selects a platform family only when it changes a path that the
 // family owns: its tests, smoke scripts and the source they qualify. Package
@@ -222,6 +234,12 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/adapters\/hermes\//,
     /^packages\/client\/src\/__tests__\/(?:hermes-(?:adapter|custody|gateway-control|home)\.test\.ts|fixtures\/fake-hermes(?:\.mjs|-command\.ts))$/,
     /^packages\/keys\/src\/(?:hermes-provider-launcher\.ts|__tests__\/hermes-provider-launcher\.test\.ts)$/,
+  ],
+  // #608: the real Hermes run on Windows, its fake model endpoint and the code it qualifies.
+  'hermes-real-windows': [
+    /^packages\/client\/src\/adapters\/hermes\//,
+    /^packages\/client\/src\/__tests__\/(?:hermes-real\.test\.ts|fixtures\/hermes-fake-model\.ts)$/,
+    /^packages\/keys\/src\/hermes-provider-launcher\.ts$/,
   ],
   'packageability-smoke': [
     /^examples\/packaging\//,
@@ -361,6 +379,11 @@ export function selectImpact(paths, context = {}) {
     if (path === 'examples/hosted-bot-collaboration/package.json') {
       verifyReviewedContent(path, context);
       dirs.add('examples/hosted-bot-collaboration'); continue;
+    }
+    // #794 D3: the private Worker composition of H, checked by the same reviewed shape.
+    if (path === 'examples/hosted-bot-collaboration-worker/package.json') {
+      verifyReviewedContent(path, context);
+      dirs.add('examples/hosted-bot-collaboration-worker'); continue;
     }
     // These root-level fixtures are executed by the relocated native SEA smoke.
     if (path === 'examples/packaging/native-assets-fixture.ts' || path === 'examples/packaging/native-assets-smoke.mjs') {
@@ -527,7 +550,9 @@ export function selectImpact(paths, context = {}) {
   }
   for (const dir of leafDirs) dirs.add(dir);
   // #793 O5: the hosted example also runs in the dataplane job, the only job with a real Postgres.
-  if (dirs.has('packages/cloud-dataplane') || dirs.has('packages/conformance') || dirs.has('examples/hosted-bot-collaboration')) families.add('dataplane');
+  // #794 D3: so does its Worker composition, which needs that Postgres and wrangler.
+  if (dirs.has('packages/cloud-dataplane') || dirs.has('packages/conformance') || dirs.has('examples/hosted-bot-collaboration')
+    || dirs.has('examples/hosted-bot-collaboration-worker')) families.add('dataplane');
   return { dirs: sorted(dirs), files: sorted(files), families: sorted(families),
     reason: dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only' };
 }

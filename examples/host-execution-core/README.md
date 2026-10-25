@@ -196,6 +196,15 @@ such an intent sets `hostJobExecution: 'fail'`: a result with `execution` then s
 its summary and concludes the occurrence `failed`, with no promotion and no retry, and
 the drain rejects with `host_job_execution_unsupported`. K8's L and H Hosts do not promote.
 
+`executionRoutines` is the same choice for `execution` routines. `allow` is the default.
+A Host with no owner for an occurrence intent sets `executionRoutines: 'refuse'`. Then
+`addRoutine`, `updateRoutine` and `OutcomeTransaction.routines` refuse an `execution`
+definition, and no routine row is written. The constructor also refuses a ledger with
+a routine that is not completed and whose current or pending version is `execution`;
+the error names the routine. To open such a ledger, complete the routine first, on a
+core without the option. An intent that an earlier slot already enqueued stays as it is.
+K8's L Host sets `refuse`.
+
 Committed results are never rerun on wake replay or `recover()`. On handler failure
 or invalid output, the pending outbox retains `lastError`, `job.attempts` increases,
 and the drain rejects after processing other work. SDK wake redelivery, `recover()`
@@ -411,6 +420,17 @@ its wake retention; never delete SDK rows directly. Custom `events.subscribe()`
 iterators must implement `return()` that releases a pending `next()`; otherwise
 omit `events` and use durable reconciliation. The embedded server supports this
 cancellation without closing other subscribers.
+
+`HostOptions.admitSubmit(intent, state)` (#957) lets the Host hold a submit. The
+core asks it in the transaction that begins a submit and again in the readback
+right before the SDK call, with the intent and the ledger state. `false` holds
+the intent: a queued or `backoff` intent keeps its phase and generation, so it
+gets no new task id, and a begun intent is not sent. A held queued or `backoff`
+intent arms the scan only for its expiry, so the Host calls `drain()` after it
+admits again. A cancel still settles a held intent. It covers every submit of the core:
+the timer drain, `recover()`, and direct `enqueue` calls. It must return a
+boolean synchronously; any other value is a drain error on the intent's outbox
+row. Without it, every submit is admitted.
 
 `HostOptions.onOutbox(signal)` is a coalesced, serialized post-commit hint that a
 result projection is available, including conclusions produced by internal drains.

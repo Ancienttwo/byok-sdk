@@ -357,6 +357,58 @@
   `create-daemon.d.ts` are unchanged. The `@byok-sdk/client` closure grows by
   20609 B and `bin:byok-agent` by 20582 B, for the scope prologues, the bound
   function wrappers and the stage hand-offs.
+- **Feature (client)** — `HermesAdapter` declares Windows (#608):
+  `descriptor.platforms` is `['darwin', 'linux', 'win32']`, so a daemon on
+  Windows detects and advertises Hermes. The evidence is a real run of the
+  qualified Hermes `0.22.2+2364.g0b10b9f` on `windows-latest` with a fake
+  model endpoint (new CI job `hermes-real-windows`, test `hermes-real.test.ts`):
+  `detect()`, `prepare()`, one custody turn through the owned gateway to
+  `turn_end`, the provider key only in the Hermes child, and the synchronous
+  pipe `WriteFile` against the real Hermes pipe server (0.29 ms at most). On
+  Windows the constructor also refuses `%LOCALAPPDATA%\hermes`, Hermes's
+  default home there, as `home`.
+- **Feature (examples)** — K8 L can be the old owner of a §4.1 device switch
+  (#957). It keeps one owner record per device and runs four steps, each on
+  the revision it expects: `freezeForSwitch` (read back from the ledger),
+  `drainForSwitch` (lists the device's open intents, Turns, input batches and
+  sent Agent home writes; with `cancel` it cancels the intents, Turns and
+  batches), and then `commitSwitch` or `abortSwitch`. While the device is
+  frozen, `input`, `receive`, `roomInput`, `answer`, `decide` and
+  `enqueueHostIntent` throw `DeviceSwitchingError` (`device_switching`) for it,
+  after the replay lookup, so an exact replay keeps its first result. A routine
+  slot on the device is refused, so the SDK delivers its wake again, the sync
+  holds any other new Turn on it under `held-switching:<turnId>`, and no new
+  Agent home write is sent. After the commit, every one of these refuses for
+  good with `DeviceModeError`. The L root exports `DeviceSwitchingError`,
+  `DeviceModeError`, `DeviceTopology` and `SwitchWork`. `./rules/commands`
+  adds `DEVICE_SWITCHING`, the `SyncRefusal` type (`DeviceRefusal` or
+  `switching`) that `SyncFacts.deviceRefusal` now returns, and the optional
+  `CommandPorts.admit` port. K4 gets `HostOptions.admitSubmit(intent, state)`,
+  asked when a submit begins and again right before the SDK call; `false`
+  holds the intent with its phase and generation. L wires it to its owner
+  records, so K4 sends nothing to a frozen device, the timer drain and direct
+  `bot.core` calls included.
+- **Feature (examples)** — a private example composes the hosted (H) Bot
+  collaboration Host as one Cloudflare Worker and runs it on local workerd
+  (#794 D3). Each invocation builds and ends its own pools over the Hyperdrive
+  binding, the SDK stores, `createByokCloud` and the H store; a device
+  response keeps its pools until its body ends, so the board SSE stream works.
+  Host passes run from cron and an operator route, and a notification only
+  schedules one more pass. Tests cover lost and duplicate notifications, an
+  instance killed mid-request, and two device processes running a delegation
+  and reply with a synthetic runtime. The CI `dataplane` job runs them. No H,
+  SDK, wire or SQL change; there is no deployment, physical-device or
+  real-runtime evidence yet.
+- **Fix (examples)** — K8 L refuses `execution` routines at creation, as H
+  does (#954). K8 owns only Turn and Host intents, so no K8 owner could settle
+  such a routine's occurrence intent. K4 gets `HostOptions.executionRoutines`
+  (`allow` by default, or `refuse`) and the optional
+  `RoutineValidation.executionRoutines`. Under `refuse`, `addRoutine`,
+  `updateRoutine` and `OutcomeTransaction.routines` refuse an `execution`
+  definition with no row written, and the constructor refuses a ledger with a
+  routine that is not completed and whose current or pending version is
+  `execution`. L now always sets `hostJobExecution: 'fail'` and
+  `executionRoutines: 'refuse'`.
 
 ## 0.30.1 — 2026-10-24 (published)
 
