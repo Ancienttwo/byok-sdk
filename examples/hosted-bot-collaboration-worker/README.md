@@ -154,9 +154,9 @@ Proposed text for lane K8 or the coordinator to apply. The status stays OPEN:
 - R2: the SDK object path is the S3 API (`R2CloudBlobStore`, presigned URLs that the device uploads to). Miniflare's R2
   is a binding with no S3 endpoint, so the tests use the compose S3 endpoint, as `packages/cloud-dataplane/worker-smoke/`
   does. No scenario here stores an object.
-- H keeps the due scheduler's and the routine scheduler's backoff in memory. Each invocation starts with an empty map, so
-  a failing scope or routine is retried on every pass (`faults.test.ts` shows it). Correctness does not depend on it;
-  load does. A durable backoff is an H change.
+- A failing scope or routine waits out H's backoff (`scope.retry_at`, `routine.retry_at`), which every invocation reads
+  from Postgres. The Worker uses H's default of 60 s; `faults.test.ts` shows that the next pass does not retry a failed
+  scope. H's own tests cover the retry after the wait.
 - One clock for the whole deployment. Each alarm pass reads every scope's due rows: at most 100 routine fires and 100 due
   syncs a pass, so about 10 of each a second at the default 10 s. A slot or due step is late by up to `H_CLOCK_MS` plus
   the time of the pass before it. At 10x scopes the pass grows (the `host_scope` read below, the due scan, one sync per

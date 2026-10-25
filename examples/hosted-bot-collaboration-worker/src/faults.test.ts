@@ -6,6 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout';
+import type { PassReport } from './worker';
 import { alarmReports, openHome, RUN, until, type Home } from './worker.test-support';
 
 /** A wait long enough for any notified pass of a local instance to have run. Nothing may change in it. */
@@ -103,14 +104,18 @@ describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
     expect((await h.commands()).filter(id => id === task)).toHaveLength(1);
   });
 
-  it('keeps no backoff between invocations: a scope whose sync throws is retried on every pass, and the others go on (H1)', async () => {
+  it('keeps the backoff between invocations: a scope whose sync throws is not retried by the next pass, and the others go on (H1)', async () => {
     const worker = await h.restart();
     // A scope row with no product row: its config read throws in every sync. Its due time stays in Postgres.
     const broken = `worker-broken-${Date.now()}`;
     await h.substrate.store.seed(broken, () => {});
     await h.substrate.pool.query(`UPDATE "${h.substrate.hSchema}".scope SET due_at = 1 WHERE scope = $1`, [storedKey(broken)]);
-    const first = await worker.passes(), second = await worker.passes();
-    for (const pass of [first, second]) expect(pass.due.failed.map(failure => failure.scope)).toContain(broken);
+    // The first pass to reach it, an alarm pass or this one, reports it failed and writes its backoff to Postgres.
+    const failedIn = (pass: PassReport) => pass.due.failed.some(failure => failure.scope === broken);
+    const first = await worker.passes();
+    expect([first, ...alarmReports(worker)].some(failedIn)).toBe(true);
+    // The next invocation reads that backoff, so it does not try the scope again.
+    expect(failedIn(await worker.passes())).toBe(false);
     // A healthy scope still runs a Turn through the same passes.
     const { token } = await h.bot();
     const { turnId, task } = await h.input(token);
