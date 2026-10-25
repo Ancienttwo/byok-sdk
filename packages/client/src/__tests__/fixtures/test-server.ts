@@ -92,6 +92,7 @@ export class TestServer {
   private failEventsPolls = false;
   private failMessagesSends = false;
   private rejectHello = false;
+  private outboundRefusal: ((envelope: Envelope) => string | undefined) | undefined;
   private failBlobUploads = false;
   private blobUploadHold: Promise<void> | undefined;
   /** Blob content PUTs that reached a hold (see {@link holdBlobUploads}). */
@@ -189,6 +190,11 @@ export class TestServer {
   /** Answer every `conn.hello` with `rejected` (and record it), as a server refusing this device's handshake would. */
   setRejectHello(reject: boolean): void {
     this.rejectHello = reject;
+  }
+
+  /** Answer each outbound for which `refuse` returns a reason with `rejected` and that reason (and record it), until `undefined`. */
+  setOutboundRefusal(refuse: ((envelope: Envelope) => string | undefined) | undefined): void {
+    this.outboundRefusal = refuse;
   }
 
   /** Make every blob content PUT fail with a 500 while `true` — used to test the client's handling of an upload failure (finding F7). */
@@ -679,6 +685,12 @@ export class TestServer {
       if (envelope.type === 'conn.hello' && this.rejectHello) {
         rejected += 1;
         outcomes.push({ id: envelope.id, outcome: 'rejected', reason: 'not_permitted' });
+        continue;
+      }
+      const refusal = this.outboundRefusal?.(envelope);
+      if (refusal !== undefined) {
+        rejected += 1;
+        outcomes.push({ id: envelope.id, outcome: 'rejected', reason: refusal });
         continue;
       }
       accepted += 1;
