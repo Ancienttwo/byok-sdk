@@ -12,6 +12,8 @@ import type { Conclusion, DelegationTimers, ReplyReadback } from './rules/delega
 import type { Json } from './rules/turn';
 import type { CoalescePolicy } from './rules/coalesce';
 import { ROOM_GRACE_MS, roomFields, roomInput, type Seat } from './rules/rooms';
+import { projectionRequestId, type HomeReadback } from './team';
+import type { HomeOperation } from './team-model';
 
 /**
  * #739 D1 commit contract vectors. Each store runs the same cases: the K8 L ledger now, and the H adapter in D2.
@@ -761,8 +763,8 @@ export function cardVectors(name: string, open: () => CardSubject | Promise<Card
 
 /**
  * #793 S6: the room step of the Host sync. `sync(now)` is one Host sync at `now`, in L's order: the room step (K8
- * `advanceRoomSeats` on the seat facts of the K4 intents), then the Turn steps of the sync contract. A store may run more
- * rounds in one sync. `claim` is a test edit: a device claimed the first attempt of the Turn's intent (K4 `Execution.started`).
+ * `advanceRoomSeats` on the seat facts of the K4 intents), then the Turn steps of the sync contract. When a Turn step releases
+ * a seat, the sync runs the room step and the Turn steps again. A store may run more rounds in one sync. `claim` is a test edit: a device claimed the first attempt of the Turn's intent (K4 `Execution.started`).
  * `cancelReason` reads the K4 cancel reason of the Turn's intent.
  */
 export interface RoomSubject extends Omit<SyncSubject, 'sync'> {
@@ -849,6 +851,15 @@ export function roomVectors(name: string, open: () => RoomSubject | Promise<Room
       expect((await subject.state()).turns[second]).toMatchObject({ source: 'room_slot', botId: 'main' });
     });
 
+    it('runs the room step again when a Turn step releases a seat, so the next seat gets its Turn in the same sync', async () => {
+      const { subject, round, seats } = await opened();
+      // A room request over the current-request limit blocks each seat Turn in its Turn step, which releases the seat.
+      await subject.change(state => { state.team.rooms.r!.messages[0]!.text = 'x'.repeat(70_000); });
+      await subject.sync(VECTOR_NOW);
+      expect(await seats()).toMatchObject([{ status: 'blocked', released: true }, { status: 'blocked', released: true }]);
+      expect((await subject.state()).team.rounds[round.id]).toMatchObject({ closed: true });
+    });
+
     it('fails the unadmitted seat Turn of a Bot that left the room with cancelled', async () => {
       const { subject, second, seats } = await opened();
       // The second seat Turn exists without an intent: the room step has not queued it, so nothing froze it.
@@ -860,6 +871,319 @@ export function roomVectors(name: string, open: () => RoomSubject | Promise<Room
       expect((await seats())[1]).toMatchObject({ status: 'removed', released: true });
       expect((await subject.state()).turns[second]).toMatchObject({ status: 'failed', conclusion: 'cancelled' });
       expect(await subject.intent(second)).toBeUndefined();
+    });
+  });
+}
+
+/**
+ * #793 S11 device observation. `observeDevices(devices)` is the Host's device step, as L's `refreshDevices` runs it after its
+ * discovery read: K8 `observeDevices` on the store's intent facts, in one transaction. `devices` maps a device id to its
+ * `connected` fact; a device that the map lacks gives no fact. Presence is display only: the step changes a delegation's
+ * status between `queued` and `waiting_device`, and nothing else.
+ */
+export interface DeviceSubject extends SettlementSubject {
+  observeDevices(devices: ReadonlyMap<string, boolean>): void | Promise<void>;
+  /**
+   * A test edit: the first attempt of the Turn's intent was delivered, and the SDK attempt of that delivery has `status`
+   * (`offered` until a device claims it). With no `status`, the Host has read no attempt yet.
+   */
+  deliver(turnId: string, status?: 'offered' | 'running'): void | Promise<void>;
+}
+export function deviceVectors(name: string, open: () => DeviceSubject | Promise<DeviceSubject>): void {
+  describe(`device observation contract: ${name}`, () => {
+    const { settled, commit, delegated } = settlementSteps(open);
+    const offline = new Map([['device', false]]), online = new Map([['device', true]]);
+    /** A delegation to `b`, whose chain end froze on device `device`, with the subject's device step. */
+    const opened = async () => {
+      const h = await delegated();
+      const subject = h.subject as DeviceSubject;
+      const projected = async () => subject.projection(`delegation:${h.id}:${(await h.delegation()).revision}`);
+      /** Observes `devices` and expects that the step wrote nothing. */
+      const unchanged = async (devices: ReadonlyMap<string, boolean>) => {
+        const before = await subject.stored();
+        await subject.observeDevices(devices);
+        expect(await subject.stored()).toBe(before);
+      };
+      return { ...h, subject, projected, unchanged };
+    };
+
+    it('shows a delivered offer that no device claimed as waiting_device while its device is offline, and queued again once it connects', async () => {
+      const h = await opened();
+      expect((await h.delegation()).status).toBe('queued');
+      await h.subject.deliver(h.id, 'offered');
+      await h.subject.observeDevices(offline);
+      expect((await h.delegation()).status).toBe('waiting_device');
+      expect(await h.projected()).toEqual([expect.objectContaining({ status: 'waiting_device' })]);
+      // The same observation again is no new fact, and a device that the read lacks gives no fact.
+      await h.unchanged(offline);
+      await h.unchanged(new Map());
+      await h.unchanged(new Map([['other', true]]));
+      await h.subject.observeDevices(online);
+      expect((await h.delegation()).status).toBe('queued');
+      expect(await h.projected()).toEqual([expect.objectContaining({ status: 'queued' })]);
+    });
+
+    it('changes nothing before the offer is delivered: no submit, an uncertain submit, or a delivery with no attempt read', async () => {
+      const h = await opened();
+      await h.unchanged(offline);
+      await h.subject.submit(h.id);
+      await h.unchanged(offline);
+      await h.subject.deliver(h.id);
+      await h.unchanged(offline);
+    });
+
+    it('changes nothing once a device claimed the offer, by its attempt or by the claim fact', async () => {
+      const h = await opened();
+      await h.subject.deliver(h.id, 'running');
+      await h.unchanged(offline);
+      await h.subject.deliver(h.id, 'offered');
+      await h.subject.claim(h.id);
+      await settled(h.subject);
+      expect((await h.delegation()).status).toBe('running');
+      await h.unchanged(offline);
+    });
+
+    it('changes nothing for a delegation with a cancel or a verdict', async () => {
+      const cancelled = await opened();
+      await cancelled.subject.deliver(cancelled.id, 'offered');
+      await commit(cancelled.subject, { kind: 'cancel_delegation', delegationId: cancelled.id });
+      expect((await cancelled.delegation()).cancel).toBeDefined();
+      await cancelled.unchanged(offline);
+
+      const failed = await opened();
+      await failed.subject.deliver(failed.id, 'offered');
+      await failed.subject.observeDevices(offline);
+      await failed.subject.conclude(failed.id, 'failed');
+      await settled(failed.subject);
+      expect(await failed.delegation()).toMatchObject({ verdict: 'failed' });
+      await failed.unchanged(online);
+    });
+  });
+}
+
+/** The Host connector of a confirmed card, as L's `HostOptions.connector`. */
+export type CardConnector = (id: string, action: string, draft: Json, signal: AbortSignal) => Promise<unknown>;
+/**
+ * #793 S12 card calls. `callCards(connector)` is the Host's card call step, as L's `flushCards` runs it: for each card that K8
+ * `cardCallDue` selects, one call of `connector` outside any transaction, then K8 `settleCardCall` with its result or its
+ * error. It runs no sync: the next `sync` reports the card and adds its `action_result` Turn.
+ */
+export interface CardCallSubject extends CardSubject {
+  callCards(connector: CardConnector): void | Promise<void>;
+}
+export function cardCallVectors(name: string, open: () => CardCallSubject | Promise<CardCallSubject>): void {
+  describe(`card call contract: ${name}`, () => {
+    const result = hash(['action_result', 'c1']);
+    /** `t1` is concluded and reported, card `c1` is pending until a minute after `VECTOR_NOW`, and `decide` decides it. */
+    const opened = async () => {
+      const subject = await open();
+      await subject.change(state => {
+        Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+        state.cards.c1!.expiresAt = VECTOR_NOW + 60_000;
+      });
+      const decide = async (decision: 'confirmed' | 'rejected') => {
+        const done = await subject.commit({ scope: subject.scope, commandId: `decide-${decision}`, command: { kind: 'decide', cardId: 'c1', decision } });
+        expect(done.disposition).toEqual({ outcome: 'accepted' });
+        await subject.sync(VECTOR_NOW);
+      };
+      const calls: unknown[][] = [];
+      /** A connector that records its arguments, then returns `value`, or throws it when it is an Error. */
+      const connector = (value: unknown): CardConnector => async (id, action, draft) => {
+        calls.push([id, action, draft]);
+        if (value instanceof Error) throw value;
+        return value;
+      };
+      /** Runs the call step and expects that it wrote nothing. */
+      const unchanged = async (step: CardConnector) => {
+        const before = await subject.stored();
+        await subject.callCards(step);
+        expect(await subject.stored()).toBe(before);
+      };
+      return { subject, decide, calls, connector, unchanged };
+    };
+
+    it('calls the connector once for a confirmed card, writes its result, and the next sync reports it with its action_result Turn', async () => {
+      const h = await opened();
+      await h.decide('confirmed');
+      await h.subject.callCards(h.connector({ sent: true }));
+      expect(h.calls).toEqual([['c1', 'send_message', { text: 'hi' }]]);
+      expect((await h.subject.state()).cards.c1).toMatchObject({ state: 'confirmed', result: { sent: true }, conclusion: 'succeeded' });
+      // A settled card is never called again.
+      await h.unchanged(h.connector({ sent: false }));
+      expect(h.calls).toHaveLength(1);
+      await h.subject.sync(VECTOR_NOW);
+      expect(await h.subject.projection('card:c1:confirmed')).toEqual([expect.objectContaining({ id: 'c1', result: { sent: true } })]);
+      expect((await h.subject.state()).turns[result]).toMatchObject({ source: 'action_result',
+        request: JSON.stringify({ cardId: 'c1', state: 'confirmed', conclusion: 'succeeded', result: { sent: true } }) });
+    });
+
+    it('writes a connector error, cut to 1024 characters, with a failed conclusion', async () => {
+      const h = await opened();
+      await h.decide('confirmed');
+      await h.subject.callCards(h.connector(new Error('x'.repeat(2000))));
+      expect((await h.subject.state()).cards.c1).toMatchObject({ error: 'x'.repeat(1024), conclusion: 'failed' });
+      expect((await h.subject.state()).cards.c1).not.toHaveProperty('result');
+      await h.subject.sync(VECTOR_NOW);
+      expect((await h.subject.state()).turns[result]).toMatchObject({ source: 'action_result',
+        request: JSON.stringify({ cardId: 'c1', state: 'confirmed', conclusion: 'failed', error: 'x'.repeat(1024) }) });
+    });
+
+    it('writes a result that is not JSON as an error', async () => {
+      const h = await opened();
+      await h.decide('confirmed');
+      await h.subject.callCards(h.connector(undefined));
+      expect((await h.subject.state()).cards.c1).toMatchObject({ error: expect.any(String), conclusion: 'failed' });
+    });
+
+    it('calls nothing for a pending or a rejected card', async () => {
+      const h = await opened();
+      await h.unchanged(h.connector({ sent: true }));
+      await h.decide('rejected');
+      await h.unchanged(h.connector({ sent: true }));
+      expect(h.calls).toEqual([]);
+    });
+  });
+}
+
+/** The SDK Agent home calls of a Host flush, as L binds `readAgentHomeProjection` and `enqueueAgentHomeProjection`. */
+export interface HomeCalls {
+  read(request: HomeOperation['request']): Promise<HomeReadback | undefined>;
+  enqueue(request: HomeOperation['request']): Promise<unknown>;
+}
+/**
+ * #793 S13 Agent home flush. `flushHomes(now, calls)` is the Host's home flush at `now`, as L's `flushHomes` runs it: for
+ * each Bot's oldest pending operation, while that Bot has no intent with no conclusion, the readback of each request in
+ * order through `calls.read` (K8 `checkHomeReadback`), then K8 `applyHomeTerminal`, or `planHomeRetry`, the enqueue of the
+ * latest request through `calls.enqueue` and `homeEnqueued`; a step that throws runs `failHomeFlush`. A Host may skip an
+ * idempotent enqueue before `retryAt` (L enqueues at each pass), and may wait before it looks at a Bot that was busy, so
+ * these vectors flush an hour later after such a wait.
+ */
+export interface HomeSubject extends SyncSubject {
+  flushHomes(now: number, calls: HomeCalls): void | Promise<void>;
+}
+export function homeVectors(name: string, open: () => HomeSubject | Promise<HomeSubject>): void {
+  describe(`Agent home flush contract: ${name}`, () => {
+    const HOUR = 3_600_000;
+    /** Bot `bot` at profile revision 2, ready at 1, with a pending home operation for revision 2. Returns its sequence. */
+    const pendingBot = (state: CollaborationState, bot: string): number => {
+      state.team.bots[bot] = { ...state.team.bots.main!, id: bot, name: bot, mainBot: false, revision: '2', readyRevision: '1', execution: template('device', bot) };
+      const sequence = ++state.sequence;
+      state.team.homeOperations.push({ sequence, botId: bot, status: 'pending', retries: [], request: { deviceId: 'device', payload: {
+        requestId: projectionRequestId([bot, '2']), agentRef: { agentId: bot, profileRevision: '2' }, projectionHash: `sha256:${bot}`,
+        projection: { schemaVersion: 'bot-profile.v1', name: bot, role: 'Member', persona: '', model: 'default' } } } as HomeOperation['request'] });
+      return sequence;
+    };
+    /** `t1` is concluded and reported, and Bots `b` and `c` each wait for one home operation. */
+    const opened = async () => {
+      const subject = await open();
+      const sequences: Record<string, number> = {};
+      await subject.change(state => {
+        Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+        for (const bot of ['b', 'c']) sequences[bot] = pendingBot(state, bot);
+      });
+      const operation = async (bot: string, index = 0) => (await subject.state()).team.homeOperations.filter(op => op.botId === bot)[index]!;
+      const reads: string[] = [], enqueued: string[] = [];
+      /** Home calls that log each request id and answer a read with `answer(request)`. */
+      const calls = (answer: (request: HomeOperation['request']) => HomeReadback | undefined | Error = () => undefined): HomeCalls => ({
+        read: async request => {
+          reads.push(request.payload.requestId);
+          const value = answer(request);
+          if (value instanceof Error) throw value;
+          return value;
+        },
+        enqueue: async request => { enqueued.push(request.payload.requestId); },
+      });
+      /** The readback of `request` with `status`. */
+      const readback = (request: HomeOperation['request'], status: HomeReadback['status']): HomeReadback =>
+        ({ deviceId: request.deviceId, agentRef: request.payload.agentRef, requestId: request.payload.requestId, projectionHash: request.payload.projectionHash, status });
+      return { subject, sequences, operation, reads, enqueued, calls, readback };
+    };
+
+    for (const status of ['applied', 'idempotent'] as const) {
+      it(`applies an operation whose readback is ${status}, readies its Bot at that revision, and reads it no more`, async () => {
+        const h = await opened();
+        await h.subject.flushHomes(VECTOR_NOW, h.calls(request => h.readback(request, status)));
+        expect(await h.operation('b')).toMatchObject({ status: 'applied' });
+        expect((await h.subject.state()).team.bots.b).toMatchObject({ revision: '2', readyRevision: '2' });
+        expect(h.enqueued).toEqual([]);
+        const reads = h.reads.length, before = await h.subject.stored();
+        await h.subject.flushHomes(VECTOR_NOW + HOUR, h.calls(request => h.readback(request, status)));
+        expect(h.reads).toHaveLength(reads);
+        expect(await h.subject.stored()).toBe(before);
+      });
+    }
+
+    it('fails an operation whose readback is terminal and not applied, and publishes persona-failed', async () => {
+      const h = await opened();
+      await h.subject.flushHomes(VECTOR_NOW, h.calls(request => h.readback(request, 'conflict')));
+      expect(await h.operation('b')).toMatchObject({ status: 'failed', error: 'conflict' });
+      expect((await h.subject.state()).team.bots.b).toMatchObject({ readyRevision: '1' });
+      expect(await h.subject.projection(`persona-failed:${h.sequences.b}`)).toEqual([{ owner: 'b', revision: '2', reason: 'conflict', recoverable: true }]);
+    });
+
+    it('keeps an operation pending with the error when a readback is for another request, and enqueues nothing', async () => {
+      const h = await opened();
+      await h.subject.flushHomes(VECTOR_NOW, h.calls(request => ({ ...h.readback(request, 'applied'), projectionHash: 'sha256:other' })));
+      expect(await h.operation('b')).toMatchObject({ status: 'pending', error: 'Home readback identity conflict' });
+      expect(h.enqueued).toEqual([]);
+    });
+
+    it('enqueues the first request with no terminal, then once retryAt has passed a retry with the next request id and a backoff', async () => {
+      const h = await opened();
+      const first = (await h.operation('b')).request.payload.requestId;
+      await h.subject.flushHomes(VECTOR_NOW, h.calls());
+      expect(h.enqueued).toContain(first);
+      expect(await h.operation('b')).toMatchObject({ status: 'pending', retries: [], retryAt: VECTOR_NOW + 1000 });
+      h.reads.length = 0; h.enqueued.length = 0;
+      await h.subject.flushHomes(VECTOR_NOW + 1000, h.calls());
+      const retry = projectionRequestId([first, 1]);
+      expect(await h.operation('b')).toMatchObject({ retries: [{ payload: { requestId: retry } }], retryAt: VECTOR_NOW + 3000 });
+      // Every request is read back, in order, before the retry is enqueued.
+      expect(h.reads.filter(id => id === first || id === retry)).toEqual([first]);
+      expect(h.enqueued.filter(id => id === first || id === retry)).toEqual([retry]);
+      // A terminal readback of the first request still settles the operation.
+      await h.subject.flushHomes(VECTOR_NOW + HOUR, h.calls(request => request.payload.requestId === first ? h.readback(request, 'applied') : undefined));
+      expect(await h.operation('b')).toMatchObject({ status: 'applied' });
+    });
+
+    it('keeps an operation pending with the error when a read throws', async () => {
+      const h = await opened();
+      await h.subject.flushHomes(VECTOR_NOW, h.calls(() => new Error('home read down')));
+      expect(await h.operation('b')).toMatchObject({ status: 'pending', error: 'home read down' });
+    });
+
+    it('waits while a Bot has an intent with no conclusion, without blocking another Bot, and flushes it after the intent concludes', async () => {
+      const h = await opened();
+      // Bot `b` runs at revision 2 already, so its Turn freezes; its operation for revision 2 is still pending.
+      await h.subject.change(state => { state.team.bots.b!.readyRevision = '2'; });
+      const turn = await h.subject.commit({ scope: h.subject.scope, commandId: 'busy-b', command: { kind: 'input', botId: 'b', key: 'busy', request: 'Work', sender: 'owner' } });
+      const turnId = (turn.disposition as { value: string }).value;
+      await h.subject.sync();
+      expect(await h.subject.intent(turnId)).toBeDefined();
+      await h.subject.flushHomes(VECTOR_NOW, h.calls(request => h.readback(request, 'applied')));
+      expect(await h.operation('b')).toMatchObject({ status: 'pending' });
+      expect(await h.operation('c')).toMatchObject({ status: 'applied' });
+      expect(h.reads.filter(id => id === projectionRequestId(['b', '2']))).toEqual([]);
+      await h.subject.concludeIntent(turnId, 'succeeded');
+      await h.subject.flushHomes(VECTOR_NOW + HOUR, h.calls(request => h.readback(request, 'applied')));
+      expect(await h.operation('b')).toMatchObject({ status: 'applied' });
+    });
+
+    it('reads no later operation of a Bot while its oldest pending one is not settled, and flushes it once that one settles', async () => {
+      const h = await opened();
+      const second = projectionRequestId(['b', '3']);
+      await h.subject.change(state => { pendingBot(state, 'b'); state.team.homeOperations.at(-1)!.request.payload.requestId = second; });
+      const first = (await h.operation('b', 0)).request.payload.requestId;
+      // The first operation has no terminal yet: it stays pending, so the second is never read.
+      await h.subject.flushHomes(VECTOR_NOW, h.calls(request => request.payload.requestId === second ? h.readback(request, 'applied') : undefined));
+      expect(await h.operation('b', 0)).toMatchObject({ status: 'pending' });
+      expect(await h.operation('b', 1)).toMatchObject({ status: 'pending' });
+      expect(h.reads).not.toContain(second);
+      await h.subject.flushHomes(VECTOR_NOW + HOUR, h.calls(request => request.payload.requestId === first || request.payload.requestId === second
+        ? h.readback(request, 'applied') : undefined));
+      expect(await h.operation('b', 0)).toMatchObject({ status: 'applied' });
+      await h.subject.flushHomes(VECTOR_NOW + 2 * HOUR, h.calls(request => h.readback(request, 'applied')));
+      expect(await h.operation('b', 1)).toMatchObject({ status: 'applied' });
     });
   });
 }

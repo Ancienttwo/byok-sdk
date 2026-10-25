@@ -5,24 +5,23 @@ import { stateOf, type CollaborationState } from '@byok-sdk/example-bot-collabor
 import { commitCommand, type CommandPorts } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { writeSnapshotBot } from '@byok-sdk/example-bot-collaboration/team';
 import { seedCollaboration, VECTOR_NOW, type CommitSubject, type SeedTeam } from '@byok-sdk/example-bot-collaboration/test-support';
-import type { FinishPortsFactory } from './store';
+import type { HostConfig, OutcomeRoutinePorts } from './store';
 
+/** The Host config of every test scope: the snapshot Bot template of the K8 vector subject (K8 commit-contract.test.ts). */
+export const TEST_HOST = (): HostConfig => ({ models: { default: template('device', 'main') }, readOnlyToolsets: [] });
+/** The vector clock, as the Host clock of a commit or a terminal transaction. */
+export const vectorClock = (): number => VECTOR_NOW;
 /**
- * The test ports of a commit and a terminal transaction: the vector clock, the snapshot Bot template and a team management
- * port that does nothing. The H store admits inputs itself.
- */
-export function vectorPorts(state: CollaborationState, publish: CommandPorts['publish']): ReturnType<FinishPortsFactory> {
-  return { now: () => VECTOR_NOW, publish,
-    teamBot: row => writeSnapshotBot(state, row, { default: template('device', 'main') }), manage: () => {} };
-}
-/**
- * The vector ports with the outcome ports of a callback command, for the internal commit entry (#793 D2f-6), and the input
- * admission with no coalescing, for the memory subject. The H store replaces the admission with its own.
+ * The ports of the memory subject: the vector clock, the snapshot Bot template, the input admission with no coalescing and
+ * the outcome ports of a callback command, with a team management port that does nothing.
  */
 export function callbackPorts(state: CollaborationState, publish: CommandPorts['publish']): CommandPorts {
-  const { manage, ...ports } = vectorPorts(state, publish);
-  return { ...ports, admitInput: fields => admitUserInput(state, fields, undefined, VECTOR_NOW), outcome: { committed: { intent: () => undefined }, manage, createRoutine: () => {}, updateRoutine: () => {}, cancelRoutine: () => {} } };
+  return { now: vectorClock, publish, teamBot: row => writeSnapshotBot(state, row, TEST_HOST().models),
+    admitInput: fields => admitUserInput(state, fields, undefined, VECTOR_NOW),
+    outcome: { committed: { intent: () => undefined }, manage: () => {}, ...VECTOR_ROUTINES } };
 }
+/** The outcome routine ports of the K8 commit vectors, which run no routine action. */
+export const VECTOR_ROUTINES: OutcomeRoutinePorts = { createRoutine: () => {}, updateRoutine: () => {}, cancelRoutine: () => {} };
 /**
  * The reference subject for H: the pure rules on a plain object, with callback records as in H.
  * A commit works on a copy and keeps it only when it returns.

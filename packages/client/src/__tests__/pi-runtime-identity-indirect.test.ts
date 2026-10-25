@@ -12,7 +12,7 @@ import { preparedCompileRequest } from './fixtures/prepared-compile-snapshot';
  * synthetic: it only has to be newer than the official pin.
  */
 const INDIRECT_PI_PACKAGES = ['pi-telemetry', 'pi-tui', 'pi-codemode', 'pi-mcp'];
-const NEWER_INDIRECT_VERSION = '1.4.0';
+const NEWER_INDIRECT_VERSION = '1.5.0';
 const INDIRECT_MANIFEST = new RegExp(`[\\\\/]@earendil-works[\\\\/](?:${INDIRECT_PI_PACKAGES.join('|')})[\\\\/]package\\.json$`, 'u');
 
 // Every module in this graph that reads an installed indirect manifest sees the

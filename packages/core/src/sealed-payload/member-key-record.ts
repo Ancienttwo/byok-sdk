@@ -15,6 +15,13 @@
  * `openMemberKeyRecord` proves each private scalar against its stored public
  * point (an ECDSA sign and verify, an ECDH round trip), so a record whose
  * scalar was swapped opens nothing. It never throws for hostile input.
+ *
+ * KEM rotation has two steps, in the order of §7.5 (#654 E2d-5).
+ * `beginMemberKemRotation` stores the next KEM key at `kemEpoch + 1` beside
+ * the current one. The member registers its public key and re-wraps its scope
+ * keys to it, and only then does `finishMemberKemRotation` make it current
+ * and drop the old private key. A crash in between loses nothing, and the
+ * next process resumes the same rotation.
  */
 import { z } from 'zod';
 
@@ -39,7 +46,15 @@ export interface MemberKeys {
   /** Signs chain entries and key packages. The private key is not extractable. */
   readonly signing: { readonly publicJwk: P256PublicJwk; readonly privateKey: WebCryptoKey };
   /** Opens key packages. The private key is not extractable. `epoch` starts at 1. */
-  readonly kem: { readonly epoch: number; readonly publicJwk: P256PublicJwk; readonly privateKey: WebCryptoKey };
+  readonly kem: MemberKemKey;
+  /** The KEM key of a rotation that has begun and not finished, at `kem.epoch + 1`. */
+  readonly nextKem?: MemberKemKey;
+}
+
+export interface MemberKemKey {
+  readonly epoch: number;
+  readonly publicJwk: P256PublicJwk;
+  readonly privateKey: WebCryptoKey;
 }
 
 /** The custody port of one member's keys. Each store expects one writer. */
@@ -59,14 +74,20 @@ const PrivateJwkSchema = z.strictObject({
 });
 type PrivateJwk = z.infer<typeof PrivateJwkSchema>;
 
-const MemberKeyRecordV1Schema = z.strictObject({
-  v: z.literal(MEMBER_KEY_RECORD_VERSION),
-  tenantId: z.string().min(1),
-  deviceId: z.string().min(1).optional(),
-  signingJwk: PrivateJwkSchema,
-  kemEpoch: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  kemJwk: PrivateJwkSchema,
-});
+const KemEpochSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+
+const MemberKeyRecordV1Schema = z
+  .strictObject({
+    v: z.literal(MEMBER_KEY_RECORD_VERSION),
+    tenantId: z.string().min(1),
+    deviceId: z.string().min(1).optional(),
+    signingJwk: PrivateJwkSchema,
+    kemEpoch: KemEpochSchema,
+    kemJwk: PrivateJwkSchema,
+    nextKem: z.strictObject({ epoch: KemEpochSchema, jwk: PrivateJwkSchema }).optional(),
+  })
+  .refine((record) => record.nextKem === undefined || record.nextKem.epoch === record.kemEpoch + 1);
+type MemberKeyRecordV1 = z.infer<typeof MemberKeyRecordV1Schema>;
 
 const BindingSchema = z.object({ tenantId: z.string().min(1), deviceId: z.string().min(1).optional() });
 
@@ -135,7 +156,7 @@ async function importSigningKey(jwk: PrivateJwk): Promise<MemberKeys['signing']>
   return { publicJwk, privateKey };
 }
 
-async function importKemKey(jwk: PrivateJwk): Promise<Omit<MemberKeys['kem'], 'epoch'>> {
+async function importKemKey(jwk: PrivateJwk): Promise<Omit<MemberKemKey, 'epoch'>> {
   const subtle = keySubtle();
   const publicJwk = publicJwkOf(jwk);
   const privateKey = await subtle.importKey('jwk', { ...jwk, ext: false }, ECDH_P256, false, ['deriveBits']);
@@ -153,20 +174,53 @@ async function importKemKey(jwk: PrivateJwk): Promise<Omit<MemberKeys['kem'], 'e
  * its public point. Never throws for hostile input.
  */
 export async function openMemberKeyRecord(text: unknown): Promise<MemberKeys | undefined> {
-  if (typeof text !== 'string') return undefined;
-  let record: z.infer<typeof MemberKeyRecordV1Schema>;
-  try {
-    const parsed = safeParseTotal(MemberKeyRecordV1Schema, JSON.parse(text));
-    if (!parsed.success || canonicalizeJson(parsed.data) !== text) return undefined;
-    record = parsed.data;
-  } catch {
-    return undefined;
-  }
+  const record = parseRecord(text);
+  if (record === undefined) return undefined;
   try {
     const signing = await importSigningKey(record.signingJwk);
     const kem = { epoch: record.kemEpoch, ...(await importKemKey(record.kemJwk)) };
     const binding = record.deviceId === undefined ? { tenantId: record.tenantId } : { tenantId: record.tenantId, deviceId: record.deviceId };
-    return { binding, signing, kem };
+    if (record.nextKem === undefined) return { binding, signing, kem };
+    return { binding, signing, kem, nextKem: { epoch: record.nextKem.epoch, ...(await importKemKey(record.nextKem.jwk)) } };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Begin a KEM rotation: the record with a new KEM key at `kemEpoch + 1`
+ * beside the current one. A record whose rotation has begun comes back
+ * unchanged, so a resumed rotation keeps its key. A record that is not
+ * canonical v1 text throws.
+ */
+export async function beginMemberKemRotation(text: string): Promise<string> {
+  const record = parseRecord(text);
+  if (record === undefined) throw invalidInput('Member key record is invalid');
+  if (record.nextKem !== undefined) return text;
+  return canonicalizeJson({ ...record, nextKem: { epoch: record.kemEpoch + 1, jwk: await generatePrivateJwk(ECDH_P256, ['deriveBits']) } });
+}
+
+/**
+ * Finish the KEM rotation to `epoch`: the next key becomes current, and the
+ * old private key is gone from the record. A repeat after the rotation
+ * finished comes back unchanged. Any other `epoch` returns `undefined`. A
+ * record that is not canonical v1 text throws.
+ */
+export function finishMemberKemRotation(text: string, epoch: number): string | undefined {
+  const record = parseRecord(text);
+  if (record === undefined) throw invalidInput('Member key record is invalid');
+  if (record.nextKem === undefined) return record.kemEpoch === epoch ? text : undefined;
+  if (record.nextKem.epoch !== epoch) return undefined;
+  const { nextKem, ...rest } = record;
+  return canonicalizeJson({ ...rest, kemEpoch: nextKem.epoch, kemJwk: nextKem.jwk });
+}
+
+/** The record of canonical v1 text, or `undefined`. Never throws. */
+function parseRecord(text: unknown): MemberKeyRecordV1 | undefined {
+  if (typeof text !== 'string') return undefined;
+  try {
+    const parsed = safeParseTotal(MemberKeyRecordV1Schema, JSON.parse(text));
+    return parsed.success && canonicalizeJson(parsed.data) === text ? parsed.data : undefined;
   } catch {
     return undefined;
   }

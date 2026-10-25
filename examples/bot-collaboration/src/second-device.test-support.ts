@@ -11,7 +11,7 @@ export async function enrollSecondDevice(serverUrl: string, code: string, root: 
   const config = { productId: 'k8b-test', productName: 'K8b second device', localAgentRelease: { version: '0.0.0-test' },
     machineId: async () => createHash('sha256').update(root).digest('hex'), serverUrl, workspaceRoot: join(root, 'workspace'), storeDir: join(root, 'sdk'),
     agentHome: { hostStorageRoot: join(root, 'homes'), projection: createBotPersonaProjection() },
-    hostedJournal: { mode: 'sqlite' as const }, agentEgress: { policy } };
+    agentEgress: { policy } };
   const credentials = new InMemoryDeviceCredentialStore();
   let daemon = createDaemonWithAdapters(config, [adapter], { deviceCredentials: credentials });
   const { deviceId } = await daemon.pair(code);

@@ -1,13 +1,13 @@
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/44d7d61/runtimes/codex/session';
-import * as projection from '../../vendor/oar/44d7d61/runtimes/codex/projection';
-import * as rpc from '../../vendor/oar/44d7d61/runtimes/codex/rpc-control';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/44d7d61/runtimes/codex/app-server-client';
-import { SessionNotFoundError } from '../../vendor/oar/44d7d61/contracts/session-not-found-error';
-import { SessionUnavailableError } from '../../vendor/oar/44d7d61/contracts/session-unavailable-error';
-import { UnsupportedOptionError } from '../../vendor/oar/44d7d61/contracts/errors';
-import { inputImagesRefusal } from '../../vendor/oar/44d7d61/shared/input-images';
+import { codexSession } from '../../vendor/oar/c88a514/runtimes/codex/session';
+import * as projection from '../../vendor/oar/c88a514/runtimes/codex/projection';
+import * as rpc from '../../vendor/oar/c88a514/runtimes/codex/rpc-control';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/c88a514/runtimes/codex/app-server-client';
+import { SessionNotFoundError } from '../../vendor/oar/c88a514/contracts/session-not-found-error';
+import { SessionUnavailableError } from '../../vendor/oar/c88a514/contracts/session-unavailable-error';
+import { UnsupportedOptionError } from '../../vendor/oar/c88a514/contracts/errors';
+import { inputImagesRefusal } from '../../vendor/oar/c88a514/shared/input-images';
 
 function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;
@@ -34,7 +34,12 @@ function fakeServer(openReply: Record<string, unknown> = {}) {
   };
   const spawn = vi.fn<SpawnLineProcess>(() => child);
   const open = () => codexSession(spawn, { kind: 'available', via: 'executable', command: 'fake' }, { cwd: '/workspace', env: { HOME: '/home' } });
-  return { child, spawn, writes, open, frame: (value: unknown) => receive(JSON.stringify(value)) };
+  // An exit nothing asked for: the app-server ends on its own.
+  const exit = (code: number | null): void => {
+    if (ended) return; ended = true;
+    exitHandlers.forEach(fn => fn(code)); resolveExit(code);
+  };
+  return { child, spawn, writes, open, exit, frame: (value: unknown) => receive(JSON.stringify(value)) };
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 
@@ -418,6 +423,19 @@ describe('unconnected OAR Codex adapter', () => {
     expect(session.records().some(record => record.kind === 'frame' && record.body.type === 'item/agentMessage/delta' && JSON.stringify(record.body.native) === JSON.stringify(params))).toBe(true);
     expect(fake.child.kill).toHaveBeenCalledTimes(1);
     expect((await session.prompt('after failure')).response.body).toMatchObject({ kind: 'rejected', code: 'runtime_exited' });
+  });
+
+  it('drops a frame that arrives after the app-server exited on its own, so the required fold never runs', async () => {
+    const fake = fakeServer(); const session = await fake.open();
+    const fold = vi.spyOn(projection, 'foldCodexNotification').mockImplementation(() => { throw new Error('projection failed'); });
+    fake.exit(1);
+    const params = { threadId: 'thread-root', delta: 'after the exit' };
+    expect(() => fake.frame({ method: 'item/agentMessage/delta', params })).not.toThrow();
+    expect(fold).not.toHaveBeenCalled();
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    expect(session.records().some(record => record.kind === 'frame' && record.body.type === 'item/agentMessage/delta')).toBe(false);
+    expect(session.records().some(record => record.kind === 'response' && record.body.kind === 'exited')).toBe(true);
+    expect((await session.prompt('after exit')).response.body).toMatchObject({ kind: 'rejected', code: 'runtime_exited' });
   });
 
   it('answers every server request with its schema-specific refusal and preserves original wire ids', async () => {

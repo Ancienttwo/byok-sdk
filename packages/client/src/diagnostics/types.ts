@@ -20,7 +20,6 @@ export interface DiagnosticsSnapshot {
   config: {
     serverProtocol: 'http' | 'https' | 'ws' | 'wss' | 'invalid' | 'unsupported';
     customStoreDir: boolean;
-    hostedJournal: boolean;
     runtimeAllowlistCount?: number;
   };
   device: { status: 'paired' | 'unpaired' | 'unavailable'; deviceIdHash?: string };

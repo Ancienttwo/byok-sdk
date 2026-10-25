@@ -233,7 +233,8 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
     }
 
     private exited(which: string): void {
-      if (!this.stopping) this.fail(infrastructure('run', `hermes ${which} exited`));
+      if (!this.stopping) this.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'non-retryable',
+        reason: `hermes ${which} exited`, failure: { class: 'runtime_exited' } }));
     }
 
     async close(): Promise<void> {
@@ -241,7 +242,7 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
       if (!this.closeAttempt) {
         const attempt = (async () => {
           try {
-            this.connection?.close(infrastructure('run', 'hermes session closed'));
+            this.connection?.close(this.failure ?? infrastructure('run', 'hermes session closed'));
             try {
               try {
                 await this.viewer?.dispose();

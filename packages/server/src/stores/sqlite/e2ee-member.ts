@@ -1,4 +1,4 @@
-import type { Clock, TenantId } from '@byok-sdk/core';
+import { assertCanonicalTimestamp, assertCollectExpiredInput, type Clock, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
 import type {
   E2eeMemberChainAppendInput,
   E2eeMemberChainAppendResult,
@@ -11,6 +11,7 @@ import type {
   E2eeScopeKeyPackagePutInput,
   E2eeScopeKeyPackagePutResult,
   E2eeScopeKeyPackageRow,
+  ProofReceiptCollectExpiredInput,
 } from '@byok-sdk/cloud';
 import { parseRecordedWriteResult } from '@byok-sdk/cloud';
 import type { DatabaseSync } from 'node:sqlite';
@@ -20,6 +21,7 @@ import type { DatabaseSync } from 'node:sqlite';
  * schema version gate, so no embedded user runs a migration for a feature
  * only hosted devices use. Each table is then checked by projection, so a
  * same-named table of another shape fails closed.
+ * Outside the version gate only additive DDL runs: tables and indexes.
  */
 export const E2EE_MEMBER_SCHEMA = `
 CREATE TABLE IF NOT EXISTS e2ee_member_chain_entry (
@@ -74,6 +76,17 @@ CREATE TABLE IF NOT EXISTS proof_request_receipt (
   recorded_at TEXT NOT NULL,
   PRIMARY KEY (tenant_id, device_id, request_id)
 );
+CREATE TABLE IF NOT EXISTS e2ee_member_kem_floor (
+  tenant_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  kem_epoch INTEGER NOT NULL CHECK (kem_epoch > 0),
+  chain_seq INTEGER NOT NULL CHECK (chain_seq > 0),
+  PRIMARY KEY (tenant_id, member_id)
+);
+CREATE INDEX IF NOT EXISTS e2ee_scope_key_package_own_epoch
+  ON e2ee_scope_key_package (tenant_id, scope_id, recipient, epoch);
+CREATE INDEX IF NOT EXISTS proof_request_receipt_recorded_idx
+  ON proof_request_receipt (tenant_id, recorded_at);
 `;
 
 export const E2EE_MEMBER_PROJECTIONS = [
@@ -83,6 +96,7 @@ export const E2EE_MEMBER_PROJECTIONS = [
   'tenant_id, scope_id, epoch, recipient, key_id, sender, package FROM e2ee_scope_key_package',
   'tenant_id, scope_id, chain_seq FROM e2ee_scope_shred',
   'tenant_id, device_id, request_id, operation, resource, body_sha256, body_size, response_status, response_body, recorded_at FROM proof_request_receipt',
+  'tenant_id, member_id, kem_epoch, chain_seq FROM e2ee_member_kem_floor',
 ] as const;
 
 /** The device's member state, deleted in the device directory's own transaction on revoke and supersession. */
@@ -139,6 +153,10 @@ type PackageRow = Record<string, unknown> & {
   scope_id: string; epoch: number; recipient: string; key_id: string; sender: string; package: string;
 };
 
+function decodePackage(row: PackageRow): E2eeScopeKeyPackageRow {
+  return { scopeId: row.scope_id, epoch: row.epoch, recipient: row.recipient, keyId: row.key_id, sender: row.sender, package: row.package };
+}
+
 /**
  * SQLite E2EE member store. The coordinator runs one call at a time, so each
  * transaction checks every row before it writes any. Pairing MACs live for
@@ -160,6 +178,23 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
       if (Date.parse(mac.expiresAt) <= now) this.macs.delete(stored);
     }
     this.macs.set(key, value);
+  }
+
+  /** Prunes used device-proof request ids; the server passes it as the cloud's `proofReceiptRetention.authority`. */
+  async collectExpiredProofReceipts(tenant: TenantId, input: ProofReceiptCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    assertCanonicalTimestamp(input.recordedBefore, 'recordedBefore');
+    return this.coordinator.transaction((db): CollectExpiredResult => {
+      const removed = Number(db.prepare(`DELETE FROM proof_request_receipt WHERE rowid IN (
+        SELECT rowid FROM proof_request_receipt
+        WHERE tenant_id = ? AND recorded_at < ?
+        ORDER BY recorded_at, device_id, request_id
+        LIMIT ?
+      )`).run(tenant, input.recordedBefore, input.limit).changes);
+      const more = db.prepare('SELECT 1 FROM proof_request_receipt WHERE tenant_id = ? AND recorded_at < ? LIMIT 1')
+        .get(tenant, input.recordedBefore) !== undefined;
+      return { removed, expired: 0, releasedBytes: 0n, more };
+    });
   }
 
   appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult> {
@@ -189,6 +224,12 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
         db.prepare('INSERT INTO request_receipt (tenant_id, key, body, recorded_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING')
           .run(tenant, shred.receipt.key, shred.receipt.body, recordedAt);
       }
+      for (const rotation of input.rotations) {
+        if (rotation.seq <= headSeq) continue;
+        db.prepare(`INSERT INTO e2ee_member_kem_floor (tenant_id, member_id, kem_epoch, chain_seq) VALUES (?, ?, ?, ?)
+          ON CONFLICT (tenant_id, member_id) DO UPDATE SET kem_epoch = excluded.kem_epoch, chain_seq = excluded.chain_seq
+          WHERE e2ee_member_kem_floor.kem_epoch < excluded.kem_epoch`).run(tenant, rotation.memberId, rotation.kemEpoch, rotation.seq);
+      }
       return recordRequest<E2eeMemberChainAppendResult>(db, tenant, input.proof,
         { outcome: 'appended', appended: fresh.length, replayed: rows.length - fresh.length }, recordedAt);
     });
@@ -209,6 +250,11 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
       const shred = db.prepare('SELECT 1 FROM e2ee_scope_shred WHERE tenant_id = ? AND scope_id = ?');
       const shredded = rows.find(row => shred.get(tenant, row.scopeId) !== undefined);
       if (shredded !== undefined) return { outcome: 'scope_shredded', scopeId: shredded.scopeId };
+      const floorOf = db.prepare('SELECT kem_epoch FROM e2ee_member_kem_floor WHERE tenant_id = ? AND member_id = ?');
+      for (const { recipient, recipientKemEpoch } of rows) {
+        const floor = (floorOf.get(tenant, recipient) as { kem_epoch: number } | undefined)?.kem_epoch;
+        if (floor !== undefined && recipientKemEpoch < floor) return { outcome: 'kem_epoch_stale', recipient, kemEpoch: recipientKemEpoch, floor };
+      }
       const stored = db.prepare('SELECT key_id FROM e2ee_scope_epoch WHERE tenant_id = ? AND scope_id = ? AND epoch = ?');
       // The first row of a new scope epoch fixes its keyId for the rest of the call.
       const fixed = new Map<string, string>();
@@ -232,6 +278,20 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
     });
   }
 
+  readOwnScopeKeyPackages(
+    tenant: TenantId,
+    input: { readonly scopeId: string; readonly recipient: string; readonly afterEpoch: number; readonly limit: number },
+  ): Promise<{ readonly rows: readonly E2eeScopeKeyPackageRow[]; readonly scopeHeadEpoch: number | undefined }> {
+    return this.coordinator.run(db => {
+      const rows = (db.prepare(`SELECT scope_id, epoch, recipient, key_id, sender, package FROM e2ee_scope_key_package
+          WHERE tenant_id = ? AND scope_id = ? AND recipient = ? AND epoch > ? ORDER BY epoch LIMIT ?`)
+        .all(tenant, input.scopeId, input.recipient, input.afterEpoch, input.limit) as PackageRow[]).map(decodePackage);
+      const { head } = db.prepare('SELECT MAX(epoch) AS head FROM e2ee_scope_epoch WHERE tenant_id = ? AND scope_id = ?')
+        .get(tenant, input.scopeId) as { head: number | null };
+      return { rows, scopeHeadEpoch: head ?? undefined };
+    });
+  }
+
   readScopeKeyPackages(
     tenant: TenantId,
     input: { readonly scopeId: string; readonly epoch?: number; readonly recipient?: string },
@@ -240,7 +300,7 @@ export class SqliteE2eeMemberStore implements E2eeMemberStore {
         WHERE tenant_id = ? AND scope_id = ? AND (? IS NULL OR epoch = ?) AND (? IS NULL OR recipient = ?)
         ORDER BY epoch, recipient`)
       .all(tenant, input.scopeId, input.epoch ?? null, input.epoch ?? null, input.recipient ?? null, input.recipient ?? null) as PackageRow[])
-      .map(row => ({ scopeId: row.scope_id, epoch: row.epoch, recipient: row.recipient, keyId: row.key_id, sender: row.sender, package: row.package })));
+      .map(decodePackage));
   }
 
   async registerMember(tenant: TenantId, input: E2eeMemberRegistrationInput): Promise<E2eeMemberRegisterResult> {

@@ -1,10 +1,10 @@
 import type { BotTurnOutcome } from '@byok-sdk/protocol';
 import { hash, type LedgerState } from '@byok-sdk/example-host-execution-core';
-import type { CollaborationState, Turn } from './model';
+import { addTurn, type CollaborationState, type Turn } from './model';
 import * as rules from './rules/rooms';
 
 // K8 adapter for the pure room rules in `rules/rooms.ts`.
-export { ROOM_GRACE_MS, memberPresent, roomContext, roomMessages, roomVisibility, type Mentions, type RoomMessage } from './rules/rooms';
+export { ROOM_GRACE_MS, memberPresent, roomContext, roomMessageProjection, roomMessages, roomVisibility, type Mentions, type RoomMessage } from './rules/rooms';
 export { ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES } from './rules/rooms';
 export function roomInput(state: CollaborationState, key: string, roomId: string, text: string, mentions: rules.Mentions, from?: string): string {
   return rules.roomInput(state.team, key, roomId, text, mentions, from);
@@ -25,4 +25,20 @@ export function advanceRooms(s: LedgerState, state: CollaborationState, now: num
     facts[id] = { admitted: !!intent, started: !!execution?.started, conclusion: intent?.conclusion };
   }
   for (const seatId of rules.advanceRoomSeats(state, facts, now, add)) s.intents[hash(seatId)]!.cancelReason = 'cancelled';
+}
+/**
+ * The room step and the Turn steps of L's sync (K8 host.ts `sync`). A Turn step can release a seat (a blocked or retired seat
+ * Turn), so the room step then runs again and the next seat gets its Turn in this sync, as H's sync does (#876). Only
+ * `reserve` sets `released = false`, and a sync never reserves, so each seat adds at most one more round. Returns whether any
+ * Turn step returned true.
+ */
+export function advanceRoomsAndTurns(s: LedgerState, state: CollaborationState, now: number, step: (turn: Turn) => boolean): boolean {
+  const released = () => Object.values(state.team.seats).filter(seat => seat.released).length;
+  let changed = false, before: number;
+  do {
+    advanceRooms(s, state, now, (id, botId, request) => addTurn(state, rules.seatTurn(id, botId, request)));
+    before = released();
+    for (const turn of Object.values(state.turns)) changed = step(turn) || changed;
+  } while (released() > before);
+  return changed;
 }

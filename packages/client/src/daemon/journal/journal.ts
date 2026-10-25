@@ -155,8 +155,10 @@ export interface LocalTransitionRecord {
 export type TerminalTruthState = 'pending' | 'confirmed' | 'failed';
 
 /**
- * One immutable canonical terminal and its delivery projection. Bytes are the
- * replay authority; the hash is checked against them, never used as a substitute.
+ * One canonical terminal and its delivery projection. Bytes are the replay
+ * authority; the hash is checked against them, never used as a substitute.
+ * The bytes change only when the cloud refused them
+ * ({@link LocalTaskJournal.replaceRefusedTerminal}).
  */
 export interface LocalTerminalRecord {
   readonly taskId: string;
@@ -274,9 +276,24 @@ export interface LocalTaskJournal {
   recordTerminal(record: LocalTerminalRecord): Promise<void>;
   /** Exact original terminal bytes, including rejected records, until acknowledged. */
   listPendingTerminals(identity: JournalIdentity): Promise<LocalTerminalRecord[]>;
-  /** A successful authenticated transport disposition, bound to the original bytes. */
+  /**
+   * A successful authenticated transport disposition, bound to the original
+   * bytes. A disposition of bytes that {@link replaceRefusedTerminal} replaced
+   * changes nothing and must not throw: the daemon keeps the batch of a failed
+   * disposition and posts it again.
+   */
   confirmTerminal(taskId: string, payloadHash: string): Promise<void>;
+  /** A refusal of the original bytes; the same rule as {@link confirmTerminal} for replaced bytes. */
   rejectTerminal(taskId: string, payloadHash: string, reason: string): Promise<void>;
+  /**
+   * Replace a terminal the cloud refused ({@link rejectTerminal}) with another
+   * one, which becomes the pending terminal (#654 §77b). The cloud records
+   * nothing for a refused terminal, so the replacement is the first terminal
+   * it receives. Refuses a row that is not refused or names another hash.
+   * Idempotent: a repeat whose bytes are already current changes nothing. The
+   * replaced hash is kept as a transition of the task.
+   */
+  replaceRefusedTerminal(taskId: string, refusedPayloadHash: string, record: LocalTerminalRecord): Promise<void>;
   /** Includes old interruption markers without reports; they must not hide pending work. */
   listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]>;
   readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined>;
@@ -315,10 +332,9 @@ export interface LocalTaskJournal {
 export class JournalUnavailableError extends Error {
   constructor(reason: string, options?: { cause?: unknown }) {
     super(
-      `hosted journal mode requires a runtime with a working node:sqlite (Node 22.5+); refusing to start: ${reason}. ` +
+      `the daemon journal requires a runtime with a working node:sqlite (Node 22.5+); refusing to start: ${reason}. ` +
         'A plain-file journal is not an acceptable substitute — it cannot honour the fsync-before-ack ordering the ' +
-        'hosted mailbox cursor depends on (architecture §12.7.2). Upgrade Node, or run this daemon in its default ' +
-        'self-hosted mode with no hostedJournal configured.',
+        'mailbox cursor depends on (architecture §12.7.2). Upgrade Node.',
     );
     this.name = 'JournalUnavailableError';
     if (options?.cause !== undefined) this.cause = options.cause;

@@ -36,7 +36,7 @@ async function seed(stores: SqliteEmbeddedStores, deviceId: string, machineId?: 
   expect(await stores.e2eeMember.registerMember(TENANT, { deviceId, memberId, bundle: `{"m":"${memberId}"}`, deviceMac: 'mac', macExpiresAt: EXPIRES, request: freshRequest() }))
     .toBe('registered');
   expect(await stores.e2eeMember.putClientPairingMac(TENANT, { deviceId, body: '{"mac":"client"}', expiresAt: EXPIRES })).toBe('stored');
-  expect(await stores.e2eeMember.putScopeKeyPackages(TENANT, { rows: [{ scopeId: 'scope', epoch: 1, recipient: memberId, keyId: 'key', sender: memberId, package: '{}' }] }))
+  expect(await stores.e2eeMember.putScopeKeyPackages(TENANT, { rows: [{ scopeId: 'scope', epoch: 1, recipient: memberId, keyId: 'key', sender: memberId, package: '{}', recipientKemEpoch: 1 }] }))
     .toEqual({ outcome: 'stored', stored: 1 });
   return memberId;
 }
@@ -64,7 +64,7 @@ describeSqlite('SQLite E2EE member state', () => {
     const path = tempPath();
     const first = open(path);
     const memberId = await seed(first, 'device-1');
-    expect(await first.e2eeMember.appendChainEntries(TENANT, { rows: [{ seq: 1, entry: '{"seq":1}' }], shreds: [] })).toMatchObject({ outcome: 'appended' });
+    expect(await first.e2eeMember.appendChainEntries(TENANT, { rows: [{ seq: 1, entry: '{"seq":1}' }], rotations: [], shreds: [] })).toMatchObject({ outcome: 'appended' });
     await first.close();
 
     const second = open(path);
@@ -87,13 +87,64 @@ describeSqlite('SQLite E2EE member state', () => {
 
     const reopened = open(path);
     try {
-      expect(await reopened.e2eeMember.appendChainEntries(TENANT, { rows: [{ seq: 1, entry: '{}' }], shreds: [] })).toMatchObject({ outcome: 'appended' });
+      expect(await reopened.e2eeMember.appendChainEntries(TENANT, { rows: [{ seq: 1, entry: '{}' }], rotations: [], shreds: [] })).toMatchObject({ outcome: 'appended' });
     } finally {
       await reopened.close();
     }
     const check = new DatabaseSync(path);
     expect(check.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual(version);
     check.close();
+  });
+
+  it('adds the KEM floor table and the own-epoch index to a database that has the other E2EE tables', async () => {
+    const path = tempPath();
+    await open(path).close();
+    const raw = new DatabaseSync(path);
+    raw.exec('DROP INDEX e2ee_scope_key_package_own_epoch');
+    raw.exec('DROP TABLE e2ee_member_kem_floor');
+    const version = raw.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get();
+    raw.close();
+
+    const reopened = open(path);
+    try {
+      expect(await reopened.e2eeMember.appendChainEntries(TENANT, { rows: [{ seq: 1, entry: '{}' }], rotations: [{ seq: 1, memberId: 'member', kemEpoch: 2 }], shreds: [] }))
+        .toMatchObject({ outcome: 'appended' });
+      expect(await reopened.e2eeMember.putScopeKeyPackages(TENANT, {
+        rows: [{ scopeId: 'scope', epoch: 1, recipient: 'member', keyId: 'key', sender: 'member', package: '{}', recipientKemEpoch: 1 }],
+      })).toEqual({ outcome: 'kem_epoch_stale', recipient: 'member', kemEpoch: 1, floor: 2 });
+    } finally {
+      await reopened.close();
+    }
+    const check = new DatabaseSync(path);
+    expect(check.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual(version);
+    expect(check.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'e2ee_scope_key_package_own_epoch'").get())
+      .toEqual({ name: 'e2ee_scope_key_package_own_epoch' });
+    check.close();
+  });
+
+  it.each([
+    ['refuses', '{"op":"rotate"}'],
+    ['opens', '{"op":"add"}'],
+  ] as const)('%s a chain stored before the KEM floor that holds %s', async (outcome, entry) => {
+    const path = tempPath();
+    await open(path).close();
+    const raw = new DatabaseSync(path);
+    raw.exec('DROP TABLE e2ee_member_kem_floor');
+    raw.prepare('INSERT INTO e2ee_member_chain_entry (tenant_id, seq, entry) VALUES (?, 1, ?)').run(TENANT, entry);
+    raw.close();
+    if (outcome === 'refuses') {
+      expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_MIGRATION_REFUSED', message: expect.stringContaining('rotate entries predate the KEM floor') }));
+      const check = new DatabaseSync(path);
+      expect(check.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'e2ee_member_kem_floor'").get()).toBeUndefined();
+      check.close();
+      return;
+    }
+    const reopened = open(path);
+    try {
+      expect(await reopened.e2eeMember.readChainEntries(TENANT, { afterSeq: 0, limit: 256 })).toEqual([{ seq: 1, entry }]);
+    } finally {
+      await reopened.close();
+    }
   });
 
   it('refuses a same-named table of another shape', async () => {
@@ -106,10 +157,55 @@ describeSqlite('SQLite E2EE member state', () => {
     expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID' }));
   });
 
+  // Used device-proof request ids are pruned once their proof can no longer authenticate.
+  it('prunes proof receipts recorded before the cutoff, per tenant and within the limit, and keeps later ones replayable', async () => {
+    const path = tempPath();
+    const clock = createMutableClock(new Date('2026-10-25T00:00:00.000Z'));
+    const stores = createSqliteEmbeddedStores({ path }, { clock, crypto: createWebCrypto() });
+    const OTHER = tenantId('sqlite-e2ee-other');
+    const append = (tenant: typeof TENANT, requestId: string, seq: number) => stores.e2eeMember.appendChainEntries(tenant, {
+      rows: [{ seq, entry: `{"seq":${seq}}` }], rotations: [], shreds: [],
+      proof: { deviceId: 'device-1', request: { requestId, operation: 'e2ee-member-chain.append', resource: '/byok/e2ee/chain', bodySha256: 'sha256', bodySize: 1 } },
+    });
+    const appended = { outcome: 'appended', appended: 1, replayed: 0 };
+    try {
+      expect(await append(TENANT, 'old-1', 1)).toEqual(appended);
+      expect(await append(TENANT, 'old-2', 2)).toEqual(appended);
+      expect(await append(OTHER, 'other-old', 1)).toEqual(appended);
+      const cutoff = '2026-10-25T00:15:00.000Z';
+      clock.set(new Date(cutoff));
+      expect(await append(TENANT, 'at-cutoff', 3)).toEqual(appended);
+
+      const prune = (limit: number) => stores.proofReceiptAuthority.collectExpired(TENANT, { now: cutoff, limit, recordedBefore: cutoff });
+      expect(await prune(1)).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: true });
+      expect(await prune(5)).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: false });
+      expect(await prune(5)).toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
+
+      // The receipt recorded at the cutoff stays: the same request gets its recorded result.
+      expect(await append(TENANT, 'at-cutoff', 3)).toEqual(appended);
+      // A pruned request id is no longer recorded: the same rows replay through the chain instead.
+      expect(await append(TENANT, 'old-1', 1)).toEqual({ outcome: 'appended', appended: 0, replayed: 1 });
+      // Another tenant's receipt is untouched.
+      expect(await stores.proofReceiptAuthority.collectExpired(OTHER, { now: cutoff, limit: 5, recordedBefore: cutoff }))
+        .toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: false });
+      await expect(stores.proofReceiptAuthority.collectExpired(TENANT, { now: cutoff, limit: 5, recordedBefore: 'yesterday' }))
+        .rejects.toThrow();
+    } finally {
+      await stores.close();
+    }
+    const raw = new DatabaseSync(path);
+    try {
+      expect(raw.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'proof_request_receipt_recorded_idx'").get())
+        .toEqual({ sql: expect.stringContaining('ON proof_request_receipt (tenant_id, recorded_at)') });
+    } finally {
+      raw.close();
+    }
+  });
+
   it('refuses a replay whose stored result is not a valid result of that write', async () => {
     const path = tempPath();
     const proof = { deviceId: 'device-1', request: { requestId: 'corrupt', operation: 'e2ee-member-chain.append', resource: '/byok/e2ee/chain', bodySha256: 'sha256', bodySize: 1 } };
-    const append = { rows: [{ seq: 1, entry: '{"seq":1}' }], shreds: [], proof };
+    const append = { rows: [{ seq: 1, entry: '{"seq":1}' }], rotations: [], shreds: [], proof };
     const first = open(path);
     expect(await first.e2eeMember.appendChainEntries(TENANT, append)).toEqual({ outcome: 'appended', appended: 1, replayed: 0 });
     await first.close();
@@ -129,7 +225,7 @@ describeSqlite('SQLite E2EE member state', () => {
   it('refuses a replay of a key package put whose stored result is not a valid result of that write', async () => {
     const path = tempPath();
     const proof = { deviceId: 'device-1', request: { requestId: 'corrupt-put', operation: 'e2ee-scope-key-package.put', resource: '/byok/e2ee/key-packages', bodySha256: 'sha256', bodySize: 1 } };
-    const put = { rows: [{ scopeId: 'scope', epoch: 1, recipient: 'member-1', keyId: 'key', sender: 'member-1', package: '{}' }], proof };
+    const put = { rows: [{ scopeId: 'scope', epoch: 1, recipient: 'member-1', keyId: 'key', sender: 'member-1', package: '{}', recipientKemEpoch: 1 }], proof };
     const first = open(path);
     expect(await first.e2eeMember.putScopeKeyPackages(TENANT, put)).toEqual({ outcome: 'stored', stored: 1 });
     await first.close();

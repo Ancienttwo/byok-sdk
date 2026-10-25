@@ -40,7 +40,7 @@ import {
   DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
   type JournalFaultStep,
 } from '../daemon/journal/sqlite-journal';
-import { isSqliteAvailable, openJournalDatabase } from '../daemon/journal/sqlite-support';
+import { openJournalDatabase } from '../daemon/journal/sqlite-support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startRealCloud, type RealCloudHandle } from './fixtures/real-cloud';
 
@@ -89,7 +89,7 @@ function faultOnce(step: JournalFaultStep): { onStep(current: JournalFaultStep):
   };
 }
 
-describe.skipIf(!isSqliteAvailable())('S3.4 crash matrix, points 1-6', () => {
+describe('S3.4 crash matrix, points 1-6', () => {
   const dirs: string[] = [];
 
   async function store(prefix: string): Promise<string> {
@@ -290,11 +290,10 @@ describe.skipIf(!isSqliteAvailable())('S3.4 crash matrix, points 1-6', () => {
           serverUrl: cloud.url,
           workspaceRoot,
           storeDir,
-          hostedJournal: { mode: 'sqlite' },
         },
         [adapter],
         {
-          hostedJournal: { journal },
+          journal,
           longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
         },
       );

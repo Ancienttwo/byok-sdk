@@ -138,4 +138,51 @@ describe('TaskRunner typed runtime failure projection', () => {
     expect(diagnostic).toHaveBeenCalledOnce();
     diagnostic.mockRestore();
   });
+
+  describe('the runtime failure class (#869)', () => {
+    it('sends the adapter\'s class and resetsAt to a server that advertises runtime-failure-class', async () => {
+      server.setAckCapabilities(['runtime-failure-class']);
+      const adapter = new StubRuntimeAdapter('pi');
+      await start(adapter);
+      await offer('class-run');
+      await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'class-run');
+      adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
+        phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'usage limit',
+        failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' },
+      }));
+      const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'class-run');
+      expect(failed.payload).toEqual({ reason: 'usage limit', retryable: false, failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' } });
+    });
+
+    it('sends unknown for a start failure with no class and for a failure the daemon makes', async () => {
+      server.setAckCapabilities(['runtime-failure-class']);
+      const adapter = new StubRuntimeAdapter('pi');
+      adapter.startError = new RuntimeExecutionFailure({ phase: 'start', category: 'infrastructure', retry: 'retryable', reason: 'spawn failed' });
+      const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      await start(adapter);
+      await offer('class-start');
+      const started = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'class-start');
+      expect(started.payload).toEqual({ reason: 'spawn failed', retryable: true, failure: { class: 'unknown' } });
+
+      adapter.startError = undefined;
+      await offer('class-contract');
+      await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'class-contract');
+      adapter.sessions.at(-1)!.endAbruptly();
+      const violated = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'class-contract');
+      expect(violated.payload).toEqual({ reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.run, retryable: false, failure: { class: 'unknown' } });
+      diagnostic.mockRestore();
+    });
+
+    it('sends no class to a server that does not advertise the flag', async () => {
+      const adapter = new StubRuntimeAdapter('pi');
+      await start(adapter);
+      await offer('class-old-server');
+      await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'class-old-server');
+      adapter.sessions[0]!.fail(new RuntimeExecutionFailure({
+        phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'login expired', failure: { class: 'auth' },
+      }));
+      const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'class-old-server');
+      expect(failed.payload).toEqual({ reason: 'login expired', retryable: false });
+    });
+  });
 });

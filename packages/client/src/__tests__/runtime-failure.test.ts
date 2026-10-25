@@ -29,6 +29,7 @@ describe('RuntimeExecutionFailure', () => {
     expect(projectRuntimeExecutionFailure(failure)).toEqual({
       reason: 'temporary network words are diagnostic text only',
       retryable: false,
+      failure: { class: 'unknown' },
     });
   });
 
@@ -37,6 +38,7 @@ describe('RuntimeExecutionFailure', () => {
     expect(projection).toEqual({
       reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.start,
       retryable: false,
+      failure: { class: 'unknown' },
       contractViolation: true,
     });
   });
@@ -51,6 +53,7 @@ describe('RuntimeExecutionFailure', () => {
     expect(projectRuntimeBoundaryFailure(failure, 'run')).toEqual({
       reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.run,
       retryable: false,
+      failure: { class: 'unknown' },
       contractViolation: true,
     });
   });
@@ -70,6 +73,27 @@ describe('RuntimeExecutionFailure', () => {
       reason: 'manifest mismatch',
     });
     expect(Object.isFrozen(failure)).toBe(true);
+  });
+
+  it('carries a runtime failure class verbatim and rejects one the wire would refuse (#869)', () => {
+    const base = { phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'quota' } as const;
+    const quota = new RuntimeExecutionFailure({ ...base, failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' } });
+    expect(projectRuntimeExecutionFailure(quota).failure).toEqual({ class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' });
+    expect(Object.isFrozen(quota.failure)).toBe(true);
+    expect(isRuntimeExecutionFailure(quota)).toBe(true);
+    expect(projectRuntimeBoundaryFailure(new RuntimeExecutionFailure({ ...base, failure: { class: 'auth' } }), 'run').failure).toEqual({ class: 'auth' });
+
+    for (const failure of [
+      { class: 'logged_out' },
+      { class: 'rate_limited', resetsAt: '2026-10-24T05:00:00.000Z' },
+      { class: 'quota', resetsAt: '2026-10-24T05:00:00Z' },
+      { class: 'quota', resetsAt: 'tomorrow' },
+      { class: 'quota', resetsAt: '+055840-11-08T22:13:20.000Z' },
+      { class: 'quota', resetsAt: '-000001-01-01T00:00:00.000Z' },
+      { class: 'unknown', status: 401 },
+    ]) {
+      expect(() => new RuntimeExecutionFailure({ ...base, failure: failure as never }), JSON.stringify(failure)).toThrow(/invalid RuntimeExecutionFailure input/);
+    }
   });
 
   it('statically guards TaskRunner against message parsing and catch-all retry defaults', async () => {

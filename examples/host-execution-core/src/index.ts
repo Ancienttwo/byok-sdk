@@ -11,9 +11,9 @@ export type { IntentInput, Intent, ExecutionTemplate, RetryPolicy, AgentRoutineD
 
 export { HostMemoryPage, memoryRevision, EMPTY_MEMORY_REVISION, RESIDENT_MEMORY_MAX_BYTES } from './memory';
 export type { MemoryApproval, MemoryBinding, MemoryOptions, MemoryContextPack } from './memory';
-export { hash, canonical, project, time } from './model';
+export { hash, canonical, project, time, validateJson } from './model';
 export type { LedgerState, IgnoredWakeAudit } from './model';
-export { enqueue, agentKey, fifoHeads, queuedExpiry } from './transitions';
+export { enqueue, agentKey, fifoHeads, queuedExpiry, settle } from './transitions';
 export { FrozenOfferMismatchError, sameFrozenOffer, submitFrozen } from './submit';
 export type { FrozenSubmitPort, FrozenInput, FrozenOffer } from './submit';
 export { WAKE_HORIZON_MS, IGNORED_WAKE_AUDIT_LIMIT, parseRoutineWakeKey, versionSwitchDue, promoteOccurrence, concludeOccurrence, recordOccurrence, createRoutine,

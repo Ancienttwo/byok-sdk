@@ -1,26 +1,29 @@
 /**
  * The device side of the Host's E2EE member routes (#654 E2c-2, E2d-1).
  *
- * The registration is a device-proof write: the device signs the exact body
- * with its enrollment key, for the one operation `e2ee-member-key.register`,
- * and sends no bearer token. The reads use the bearer token. The device
- * appends no chain entry and puts no key package in E2d, so it signs no
- * other E2EE operation.
+ * The registration and the key package put are device-proof writes: the
+ * device signs the exact body with its enrollment key, for the route's one
+ * operation, and sends no bearer token. The reads use the bearer token. The
+ * device puts key packages when it rotates a scope epoch (E2d-4) or re-wraps
+ * its own packages, and appends only the `rotate` entry of its own KEM
+ * rotation (E2d-5).
  *
  * The Host checks shapes only. Every value read here is untrusted: core
  * verifies the pairing MAC, the chain walk and each key package.
  */
 import { randomUUID } from 'node:crypto';
 import { DEVICE_PROOF_HEADER } from '@byok-sdk/core';
-import type { MemberKeyBundleV1 } from '@byok-sdk/core/sealed-payload';
+import type { MemberChainEntryV1, MemberKeyBundleV1, ScopeKeyPackageV2 } from '@byok-sdk/core/sealed-payload';
 import {
   BYOK_E2EE_CHAIN_PATH,
   BYOK_E2EE_KEY_PACKAGES_PATH,
   BYOK_E2EE_MEMBER_KEY_PATH,
   BYOK_E2EE_PAIRING_MAC_PATH,
+  E2EE_MEMBER_CHAIN_APPEND_OPERATION,
   E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
   E2EE_MEMBER_KEY_REGISTER_OPERATION,
+  E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
 } from '@byok-sdk/protocol';
 import type { AuthManager } from './auth-manager';
 import type { DeviceProofSigner } from './device-proof-signer';
@@ -134,20 +137,28 @@ export class E2eeMemberClient {
    * same bundle replaces only the MAC and its expiry.
    */
   async register(member: MemberKeyBundleV1, mac: string, signal?: AbortSignal): Promise<void> {
-    const path = BYOK_E2EE_MEMBER_KEY_PATH;
-    const body = new TextEncoder().encode(JSON.stringify({ member, mac }));
-    const proof = await this.options.signer.sign({
-      method: 'POST', path, operation: E2EE_MEMBER_KEY_REGISTER_OPERATION, resource: path, requestId: randomUUID(), body,
-    });
-    const response = await fetch(new URL(path, this.#base), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', [DEVICE_PROOF_HEADER]: Buffer.from(JSON.stringify(proof), 'utf8').toString('base64url') },
-      body,
-      ...this.#signal(signal),
-    });
-    if (!response.ok) throw await errorOf(response, 'member key registration');
+    const response = await this.#proofPost(BYOK_E2EE_MEMBER_KEY_PATH, E2EE_MEMBER_KEY_REGISTER_OPERATION, { member, mac }, 'member key registration', signal);
     const result = await jsonOf(response, 'member key registration', MEMBER_OBJECT_MAX_BYTES);
     if (result.memberId !== member.memberId) throw new E2eeMemberClientError('member key registration named another member');
+  }
+
+  /**
+   * Put the key packages of one new scope epoch (E2d-4). A Host that holds
+   * the epoch under another `keyId` answers 409 `e2ee_scope_key_conflict`.
+   */
+  async putKeyPackages(packages: readonly ScopeKeyPackageV2[], signal?: AbortSignal): Promise<void> {
+    const response = await this.#proofPost(BYOK_E2EE_KEY_PACKAGES_PATH, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, { packages }, 'key package put', signal);
+    // The device does not use the result; a 2xx is the Host's acknowledgement, so the body is not read.
+    await response.body?.cancel();
+  }
+
+  /**
+   * Append signed chain entries (E2d-5). A Host that holds another entry at
+   * one of their seqs answers 409 `e2ee_member_chain_conflict`.
+   */
+  async appendChain(entries: readonly MemberChainEntryV1[], signal?: AbortSignal): Promise<void> {
+    const response = await this.#proofPost(BYOK_E2EE_CHAIN_PATH, E2EE_MEMBER_CHAIN_APPEND_OPERATION, { entries }, 'member chain append', signal);
+    await response.body?.cancel();
   }
 
   /** One page of the member chain after `afterSeq`. */
@@ -205,6 +216,20 @@ export class E2eeMemberClient {
     if (!Array.isArray(packages)) throw new E2eeMemberClientError('key package read returned no package list');
     if (packages.length > 1) throw new E2eeMemberClientError('key package read returned more than one package', undefined, undefined, true);
     return packages;
+  }
+
+  /** A device-proof POST of `payload`; a status other than 2xx throws. */
+  async #proofPost(path: string, operation: string, payload: object, what: string, signal?: AbortSignal): Promise<Response> {
+    const body = new TextEncoder().encode(JSON.stringify(payload));
+    const proof = await this.options.signer.sign({ method: 'POST', path, operation, resource: path, requestId: randomUUID(), body });
+    const response = await fetch(new URL(path, this.#base), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', [DEVICE_PROOF_HEADER]: Buffer.from(JSON.stringify(proof), 'utf8').toString('base64url') },
+      body,
+      ...this.#signal(signal),
+    });
+    if (!response.ok) throw await errorOf(response, what);
+    return response;
   }
 
   #get(url: URL, signal?: AbortSignal): Promise<Response> {

@@ -5,8 +5,9 @@ commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
 Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c), result
 reconciliation (D2d), the device binding (D2e), retention (D2g), routines (D2f-2), their scheduler (D2f-3), the outbox
-sender (D2b-out-2), delegation settlement (D2f-5), the inbound channel entry (D2b-out-3) and the batch seal. The command
-entry comes in a later slice of #793.
+sender (D2b-out-2), delegation settlement (D2f-5), the inbound channel entry (D2b-out-3), the batch seal, the
+authenticated command entry (S10), the device observation (S11), the connector card calls (S12), the Agent home
+flush (S13) and summary-only Host job routines (S14).
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -20,17 +21,21 @@ transaction. The transaction holds the state change, the command record and the 
 - The caller passes the scope that the authenticated product user owns. A request for another scope is
   a `scope_mismatch` conflict.
 - A scope row of an unknown store version is refused before any write. `read()` refuses it too.
+- The store builds every command port itself, from the scope's Host config (`host(scope)`: the model templates and the
+  read-only toolsets, L's `models` and `readOnlyToolsets`), as L `commitOwner` and `applyOutcome` build them (#793 S9):
+  `updatePersona`, `teamBot`, the outcome's `manage`, and the push route ports with `{ channel: true }`. A model template
+  carries the device that a new Bot runs on, so each scope has its own config. `commit`, `receive`, `consume` and `finish`
+  take the Host clock, not ports. The sync reads its model names and read-only toolsets from the same config.
 - A command reads the intent facts (K8 `CommandPorts.intents`) from the intent rows, under the scope lock, as L reads its
-  K4 intents in the commit transaction. A caller's ports cannot supply them. The committed intents of an outcome
+  K4 intents in the commit transaction. The committed intents of an outcome
   (`outcome.committed`, which a Main Bot cancel reads) come from the same rows.
 - A new commit that leaves a delegation cancel fact to deliver (`cancel_turn` of an open chain Turn,
   `cancel_delegation`, `abandon_delegation`) delivers it in the same transaction, as L `settleChain` runs
   `deliverCancels` after its commit: the K4 cancel of the fact's frozen target, then `delivered`.
 - `commit()` is the command entry's call, so it refuses the K4 callback commands (`outcome`, `message`, `occurrence`)
   with `CallbackCommandError`, before it reads or writes anything: no scope row and no command record, so a retry gets
-  the same refusal (#793 D2f-6). They come only from `finish`, `consume` and `fire`. Its ports (`CommitPortsFactory`)
-  carry no outcome or occurrence port. `finish` takes the commit ports and `manage` (`FinishPortsFactory`); the store
-  builds the committed intents and the routine ports of the outcome.
+  the same refusal (#793 D2f-6). They come only from `finish`, `consume` and `fire`. The store builds the committed
+  intents, `manage` and the routine ports of an outcome.
 - The shared K8 commit vectors send an `outcome`. H runs them through the protected `commitIn`, which a test subclass
   (`VectorStore`) exposes, as L's vector subject commits through `commitInLedger`. Host code is trusted: the boundary is
   that the command entry calls `commit()`.
@@ -78,13 +83,13 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `entity` | map entry of the state (Turn, card, Bot, room, delivery, ...), keyed by its id |
 | `entry` | element of a list (audit, rejected, team note, home operation, room message), keyed by position |
 | `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
-| `outbox` | projection or delivery to send: a projection's value and send state, or a delivery's scan index (owner §54a, signed) |
+| `outbox` | work for the sender: a projection's value and send state, a delivery's scan index (owner §54a, signed), a card's connector call claim, an Agent home operation's scan index, or a Host job's claim (#793 §6, signed) |
 | `intent` | Turn intent: the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
 | `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision and its revoke time |
 | `retired_identity` | K8 identity that retention retired for good, `hash([namespace, id])`, or a compacted intent, `hash(['intent', turnId])` |
 | `archived_row` | row that retention moved out of the state, by namespace and id; a command record has an expiry |
 | `routine` | K4 routine of a Bot: its definition, staged version, lifecycle, status and next slot |
-| `occurrence` | K4 occurrence of a routine slot; its conclusion only when it has no intent |
+| `occurrence` | K4 occurrence of a routine slot; its conclusion only when it has no intent, and a Host job's state (`job`) |
 
 Each scope and each key is stored as `JSON.stringify(value)`, so two values that UTF-8 would merge stay
 apart, and a NUL is safe. Each body is `json` text, so the stored bytes keep their key order. `ordinal`
@@ -149,7 +154,7 @@ sync of every scope throws and no Turn freezes. L checks the budget once, when i
 H takes the budget in each sync's `limits`, so give the store a policy built for the smallest budget that its syncs use.
 
 - The store admits each input itself (K8 `admitUserInput`), with its own policy, as L's owner commands do. So the
-  admission and the seal use one policy. `CommitPorts` carries no `admitInput`, and the store sets the port on every commit.
+  admission and the seal use one policy. No caller supplies a port, and the store sets the admission on every commit.
 - Each sync round first runs K8 `sealDueBatches`, as L's sync does, so a sealed batch's Turn gets its step in that round.
   A later round of the same sync seals again, so a Bot that an earlier round made idle gets its batch sealed in that sync.
 - The sync runs K8 `projectInputBatches` last, after the reply token cleanup, as L's sync does.
@@ -181,8 +186,8 @@ Each sync round runs the K8 card rule (`rules/cards.ts`, through `./rules/comman
 `expireCards` before the Turn steps, so a ContextPack frozen in that round shows each expiry, and `reportCardDecisions`
 after the settlement. A decided card is projected once as `card:<id>:<state>`; a confirmed card waits for its result or
 error. A confirmed or rejected card then adds its `action_result` Turn, so the round runs again and freezes it. An expired
-card starts no Turn. The due scheduler syncs a scope when a card's `expiresAt` is reached. H has no connector step (L's
-`flushCards`), so in H a confirmed card never gets its result: it is not reported and gets no `action_result` Turn.
+card starts no Turn. The due scheduler syncs a scope when a card's `expiresAt` is reached. A confirmed card gets its result
+or error from the outbox sender's card call (see Outbox sender); the sync after it reports the card.
 
 ### Room step
 
@@ -210,22 +215,77 @@ A chain end that succeeded with no Host reply record leaves its delegation `repl
   the delegation is gone, is no longer due at that time (it runs `replyCheckDue` again, so a verdict or a later check time
   stops it), or no longer matches the fence. A throw writes nothing and propagates.
 
+`agentMessage` is on `HostedReplyPort`, not on `HostedTaskPort`. The submitter and the reconciler use `HostedTaskPort`. So a
+deployment wires one more scope-bound port, `port(scope)` of the reply checker, to the same SDK tenant (see Deployment config).
+
+`replyChecks` selects the due checks from a snapshot without the scope lock, so a selection can be stale. The settle reads
+the delegation again under the lock and checks the fence. A stale selection costs at most one extra SDK read, and its
+settle writes nothing.
+
 Two checkers may both read the same delegation; only the first settle applies. The SDK read is read only: the SDK
 `readTaskAgentMessage` (`@byok-sdk/cloud` `task-agent-message.ts`) runs SELECTs on the task, its admission and its
 offer receipt, and writes nothing. K8 `delegationDue` puts each check time into `scope.due_at`, so the deployment runs
 the checker from its due scheduler `sync`, before `store.sync`, as L's pass syncs after its reply checks (see
 Deployment config).
 
-H does not yet run these L pass steps: the device observation (`observeDevices`), and the card and Agent home flushes.
+### Device observation
+
+A delegation whose chain end has a delivered offer that no device has claimed shows whether that device is connected:
+`waiting_device` while it is not, `queued` again once it is. `HostedDeviceObserver.observe(scope)` runs L's
+`refreshDevices` step (#793 S11) on the shared K8 rule `observeDevices`:
+- `store.awaitsDevice(scope)` reads in one snapshot, with no lock, whether a delegation can change: no verdict, no
+  cancel, and `queued` or `waiting_device`, as L checks before its read. With none, the observer reads nothing.
+- The observer reads the SDK readiness of the scope's tenant through the port's `readiness` (the SDK
+  `readTenantReadiness`, the read behind L's `machines.list`), outside any transaction. `connectedDevices` gives each
+  device's `connected` fact as the server gives it to L: connected when it has unexpired presence. A device that the
+  read lacks gives no fact. A read that throws or takes longer than `timeoutMs` (default 1 s, as L) writes nothing.
+- `store.observeDevices(scope, devices, clock)` runs the rule in one transaction under the scope lock, and the changed
+  delegations' projections reach the outbox in it. A store error propagates.
+
+The rule reads K8's `offeredTo` fact from the chain end's intent row: no conclusion, `submission = 'delivered'`, not
+`started`, and the stored SDK attempt still `offered`; the device is the frozen input's `deviceId`. The reconciliation
+writes that attempt, so the display can lag the SDK by up to its `pollMs`. Presence is display only: the rule never
+changes a submit, an expiry or a verdict.
+
+The step has no due time of its own. The deployment runs it from its due scheduler `sync`, after the reply checker and
+before `store.sync`, so a waiting delegation's display can lag until its scope's next sync. L polls on every pass.
+
+H runs each L pass step: the device observation and reply checks from the deployment's composed `sync`, and the card
+calls and the Agent home flush in the outbox sender.
 The due scheduler syncs a scope when one of the due times is reached (see Due scheduler).
 
 The projections that the rule publishes reach the outbox in the same transaction. A sync writes no command
 record and keeps the revision. A throw writes nothing. The rule's `executionStarted` fact is the intent's `started`
 column, which the reconciliation sets. H retires no Turn id before D2g.
 
+## Command entry
+
+`HostedCommandEntry` is the authenticated product command entry (#793 S10): L's owner API (K8 `host.ts`) for requests. It is
+a TypeScript API; the deployment mounts it on its own HTTP framework. It takes:
+
+- `authenticate(credential)`: the product's session check, which returns the scope that the caller owns and the principal of
+  the request. A throw or no result is an `UnauthenticatedError`, with nothing written. H never reads a token itself;
+- `owner(scope)`: the owner principal id of the scope, the value that the inbound entry's `InboundIdentity.owner` gives;
+- `sync(scope, now)`: the deployment's composed sync, the function that the due scheduler runs.
+
+Each method checks the principal as L's R2 checks do, commits under L's command id (`hash(['input', botId, key])`,
+`['room_input', roomId, key]`, `['answer', id]`, `['decide', id]`, a new id for each keyless command), then runs `sync`, as
+L runs its pass, and returns L's value. A refusal writes its audit line first (`Action refused not_owner: …`,
+`Action refused unverified_sender: …`) and throws `EntryRefusedError`. `roomInput` takes any verified principal and drops a
+bot principal's mentions (R5); every other method needs the scope's owner. L trusts the caller of `setMainBot`,
+`updateRoom`, `retryPersona` and its routine API; here every call comes from a request, so they need the owner too.
+`decide` throws a refusal or another decision for a decided card after the sync, as L. The Host's own calls
+(`personaReady` through `persona_ready`, a team snapshot, retention, compaction, device binding) stay store calls.
+
+The entry commits with `requireBinding`: under the scope lock, after the K8 rule, each Bot of the work that the commit
+added (a Turn that is not concluded, a room seat, a new input batch or an input added to an open one) must run on a
+device with an active H binding, or the commit throws `DeviceBindingError` and rolls back. A cancel commits on a revoked
+device: the Turn that it seals from an open batch is concluded. It reads what the rule produced, so H keeps no copy of the mention and seat selection. An error of the sync
+after a commit reaches the caller, as an error of L's pass does: the commit stays.
+
 ## Message consumer
 
-`hostedMessageConsumer(store, { scopeOf, ports })` is the `agentMessage` option of `createByokCloud`. Its
+`hostedMessageConsumer(store, { scopeOf, now })` is the `agentMessage` option of `createByokCloud`. Its
 `consume` decides each Agent message in one transaction under the scope lock, in the order of K4
 `consumeMessage`:
 
@@ -288,9 +348,9 @@ mode revision in one write, and keeps the row as the tombstone.
   transaction, and a freeze for that device throws, so no Turn, cancel or projection of the scope is written. An
   accepted delegation to a Bot on an unbound or revoked device triggers it too. The owner recovers with a command that
   does not check the binding: `cancel_turn` for the Turn, `abandon_delegation` for the delegation, or a `team_snapshot`
-  that moves the Bot to a bound device. A per-device refusal (a K8 sync fact per Turn, plus a refusal at the command
-  entry) waits for owner question §55a.
-- The routine scheduler checks it before a fire (see Routines). The command entry takes the same check when it is built.
+  that moves the Bot to a bound device. The command entry refuses a commit that adds work for such a device (see Command
+  entry); the per-Turn K8 sync refusal, which would also cover an Agent's delegation, is a later issue (§55a).
+- The routine scheduler checks it before a fire (see Routines).
 
 ## Retention
 
@@ -349,7 +409,8 @@ occurrences (D2f-3).
   owner's too, as L `endRoutine` does (§55c). The store loads the slice for it and owns its `routines` port, so a caller's
   port never reaches the command. A new acceptance writes the slice back and switches each due version of the scope, as
   the owner API does.
-- H runs only `bot-routine` routines. A Host-job or execution-template routine is refused.
+- A Bot and the owner add only `bot-routine` routines. Host code adds summary-only Host job routines (#793 S14, see Host
+  jobs). An execution-template routine is refused: no K8 Turn could settle its intent.
 - Each transaction that can conclude routine work then switches a staged version that is due: the claim expiry, the
   sync, the reconciliation conclude, the terminal transaction and the owner API. K4 does this after each drain; H has
   no drain.
@@ -410,9 +471,9 @@ clock for each sync; the pass time only selects the scopes. Only syncs that reso
 
 - A sync that leaves the scope due is reported in `stalled`, for example a reply check time when the deployment's
   `sync` does not run `HostedReplyChecker` first. A sync that
-  throws is reported in `failed`. With the composed `sync` (the reply checker, then `store.sync`), each reply settle
-  commits in its own transaction: if a later settle or `store.sync` throws, the earlier settles of that pass stay
-  committed, and one settle never writes partly. Either scope waits `backoffMs` (default 60 s, in memory only)
+  throws is reported in `failed`. With the composed `sync` (the reply checker, the device observer, then
+  `store.sync`), each reply settle and the device observation commit in their own transactions: if a later step or
+  `store.sync` throws, the earlier steps of that pass stay committed, and one step never writes partly. Either scope waits `backoffMs` (default 60 s, in memory only)
   before its next sync, so it is synced at most once per backoff, and each pass reports it again when it is retried.
 - H has no timer. The deployment runs `run()` on its own interval, which bounds how late a due step runs in a scope that
   is not stalled. A stalled scope keeps the due time that H cannot clear, so each of its other due times can run up to
@@ -428,7 +489,8 @@ clock for each sync; the pass time only selects the scopes. Only syncs that reso
 
 `HostedOutboxSender.run()` is one pass over the unsettled outbox rows that are due, across scopes (`outbox_due`). Each row
 runs in its own steps, and a failed row does not stop the later rows. A scope of an unknown store version is left out
-before the limit. The outbox DDL is the D2b-out plan text, signed by the owner (§54a). Each claim and settle reads the clock after
+before the limit. The outbox DDL is the D2b-out plan text, signed by the owner (§54a), widened for card, home and Host
+job rows by the #793 plan §6 text, signed too. Each claim and settle reads the clock after
 the scope lock. After a step that threw, the row waits `backoffMs`. That wait never moves `next_at` earlier, so it cannot
 shorten the lease of a newer claim. If the wait cannot be written, `run()` rejects and that pass's result is lost.
 
@@ -461,11 +523,11 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
   gets its row too. A seed writes no outbox row.
 - **The store owns the channel outbox port.** With `{ channel: true }`, a K4 callback (an Agent message or an outcome)
   queues its deliveries with K8 `queueDelivery`, which reads the intent conclusions of the scope as they were before
-  the transaction wrote, as L reads its committed ledger. A caller's ports cannot supply `deliver`.
+  the transaction wrote, as L reads its committed ledger. No caller supplies `deliver`.
 - The sync and each delivery settle drop expired or unneeded reply tokens (`cleanReplyTokens`). L's sync does it too;
   L's call in each flush pass is a call in each delivery settle here. H drops an expired token at the next sync or settle
   of its scope.
-- **Inbound** (`receive(scope, message, identity, ports)`, #793 D2b-out-3) is L `receive()`. K8 `classifyInbound` sorts
+- **Inbound** (`receive(scope, message, identity, clock)`, #793 D2b-out-3) is L `receive()`. K8 `classifyInbound` sorts
   the message by the Host's channel identity (`owner`, and the Host's own bot ids by channel in `self`). The identity is
   Host configuration from verified identity, never a field of the message:
   - an `echo` settles the one delivery it names, by `deliveryId` or by platform message id (K8 `echoCandidates` and
@@ -476,15 +538,91 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
     `rememberInbound`);
   - `bot_background` runs the K8 `room_input` command of a bot with no mention, as L `roomInput` does for a bot;
   - any other kind writes only an audit line, one for each delivery, as L.
-  The store owns the `remember` port: `commit()` refuses the `receive` command with `InboundCommandError`, and its ports
-  carry no `remember` port.
+  The store owns the `remember` port: `commit()` refuses the `receive` command with `InboundCommandError`.
 - An unsettled delivery row whose entity is not in the state fails as drift (`Delivery outbox row unsettled for an
   archived entity`) and waits `backoffMs`, as a row with no entity anywhere does (`Delivery not found`). Nothing is
   settled for it.
 - Retention refuses a root while an outbox row of one of its deliveries is unsettled. It is a drift guard: the
   transaction that settles a delivery entity settles its row too, so no product path reaches it. Projection rows are left
   out: a projection row carries its own value and belongs to no root.
-- Reply readback, Agent home projections and connector card calls are not in the sender (§54c A).
+- **Card calls** (#793 S12) run L's `flushCards` on the K8 card rule (`cardCallDue`, `settleCardCall`), with the outbox
+  claim, lease and fence of §54c A. The K8 card is the authority; its outbox row (`kind = 'card'`, key
+  `["card", cardId]`) is a claim index that the same entity-diff hook as the delivery index writes: a row, due at once,
+  when a card starts to wait for its call (it was confirmed), and `settled_at` when the call has an outcome.
+  - `store.claimCard` takes a try and a lease (`next_at = now + leaseMs`) under the scope lock, while the card still
+    waits. The connector runs with no lock, with an abort signal and `connectorTimeoutMs` (default 30 s, as L), and
+    `store.settleCard` writes its result or error (cut to 1024 characters) and conclusion, fenced by that try and by the
+    card still waiting. A connector error or timeout is the card's outcome, as in L, not a failed step. A settle that
+    finds another claim's try changes nothing.
+  - **H calls a connector at most once per card; L may call it twice.** A row that already had a try belongs to a claim
+    whose lease passed with no settle (the sender stopped after the call, or its settle failed). The call may have run,
+    so the next claim ends the card with L's timeout error, `Connector timed out; external outcome is unknown`, and
+    never calls again (owner Q3 A). L records nothing before its call, so after a crash L calls the connector again at
+    its next pass.
+  - **With a connector, the lease must be longer than `connectorTimeoutMs`** (the constructor refuses it otherwise). A
+    Host with no connector fails a card row and waits `backoffMs`. A row whose card is gone settles with no call.
+  - Each settle, and each claim that ends a card, reports its scope once per pass through the `changed` option, so the
+    deployment syncs it: that sync reports the card and freezes its `action_result` Turn.
+- **Agent home operations** (#793 S13) run L's `flushHomes` on the K8 home rules (`team.ts`: `homeHead`,
+  `checkHomeReadback`, `planHomeRetry`, `homeEnqueued`, `applyHomeTerminal`, `failHomeFlush`). The K8 operation is the
+  authority and the fence; its outbox row (`kind = 'home'`, key `["home", sequence]`, `tries` always 0) is a scan index
+  that the same entity-diff hook writes: a row for each new pending operation, due at its `retryAt` (at once when unset),
+  `next_at` again whenever `retryAt` changes, and `settled_at` once the operation is `applied` or `failed`.
+  - `store.claimHome` checks, under the scope lock, that the operation is its Bot's oldest pending one and that the Bot
+    has no intent row with no conclusion (K8 `homeHead`, as L). Otherwise the row waits `backoffMs`. A head takes a lease.
+  - With no lock, the sender reads back every request of the operation in order through the scope's `homes(scope)` port
+    (the SDK `getAgentHomeProjectionStatus`) and checks each with `checkHomeReadback`; a mismatch is `Home readback
+    identity conflict`. `store.settleHome`, fenced by the operation still pending with the claim's retry count, then
+    applies a terminal (`applied` or `idempotent` readies the Bot; any other status fails the operation and publishes
+    `persona-failed:<sequence>`), or plans the retry (`planHomeRetry`, a new durable request id once `retryAt` passed). The
+    sender then enqueues the latest request (the SDK `enqueueAgentHomeProjection`) and runs `homeEnqueued`. The claim's
+    lease holds the row through that enqueue: the settle that plans a retry keeps it, and `homeEnqueued` moves the row to
+    the operation's `retryAt`, so no other sender enqueues the same operation meanwhile.
+  - Each read and the enqueue get `sendTimeoutMs` or the time left on the claim's lease, whichever is shorter, and no call
+    is made once the lease has passed (`Home flush outlasted its lease`). So every call of a flush ends within its lease.
+    A read or enqueue that throws, outlasts its deadline or is not made is the operation's error (`failHomeFlush`): it
+    stays pending and is looked at again when its lease passes. L awaits these calls with no deadline.
+  - **H enqueues at `retryAt`; L enqueues again at each pass.** The enqueue is idempotent by request id, so H skips L's
+    repeats before `retryAt`. A Bot whose intent kept it waiting is looked at again `backoffMs` after the last look; L
+    looks at its next pass. In one H pass a Bot's next operation can be flushed right after the one before it settles;
+    L flushes at most one operation per Bot in a pass.
+  - A terminal reports its scope through the `changed` option, so the deployment syncs it and the Bot's waiting Turns
+    freeze. A Host with no home port fails a home row and waits `backoffMs`.
+- **Host jobs** (#793 S14) run K4 `runHostJobs` for one occurrence, with the claim, lease and fence of a card call. The
+  handlers are the store's `hostJobs` option, by type, as L's `hostJobs`: the store checks a Host job routine against them
+  and the sender runs them, so a deployment registers each type once. See Host jobs.
+- Reply readback is not in the sender (§54c A).
+
+### Host jobs
+
+L runs a Bot routine and a summary-only Host job on one K4 core (K8 `routines.test.ts`). H runs both, in the store and
+the outbox sender; there is no separate job runner.
+
+- **Host code owns the routine.** `addHostJobRoutine(scope, definition, now)`, `updateHostJobRoutine` and
+  `setHostJobLifecycle(scope, id, lifecycle, now)` are L's `core.addRoutine`, `updateRoutine` and `lifecycle` for a Host
+  job, through K4 `routineCommands` with the store's handlers and the K8 calendar. No Bot command or entry reaches them.
+  They take only Host job routines; the Bot and owner paths take only `bot-routine` routines, so a Host job stays out of
+  the Bot policy (`owned`, `endable`, the ContextPack routine views).
+- **The scheduler fires it.** A due slot records its K4 occurrence (`recordOccurrence`), with no K8 command and no device
+  fence: a Host job creates no execution. The occurrence row gets `job = {}`, and an outbox row (`kind = 'host_job'`, key
+  `["host_job", occurrenceKey]`, due at once) takes the place of K4's `host-job:<key>` row. A later slot of the routine
+  marks a pending job `execution_superseded`, as K4 does.
+- **The sender runs it.** `store.claimHostJob` takes a try and a lease under the scope lock while the occurrence is open;
+  the try is the K4 `attempt`. The handler runs with no lock, with an abort signal and `hostJobTimeoutMs` (default 30 s;
+  L has no deadline). The sender then checks the result as K4 does (a summary is required and must be JSON), and
+  `store.settleHostJob`, fenced by that try, writes it:
+  - a summary is stored (`job = { summary }`) and concludes the occurrence `succeeded`;
+  - **a result that carries `execution` stores its summary and concludes the occurrence `failed`**, with
+    `host_job_execution_unsupported` as the row's `last_error`, and the pass reports it as the row's failure. Nothing is
+    promoted, whether the occurrence was superseded or not (owner Q4 A). L concludes it the same way through K4
+    `hostJobExecution: 'fail'` (K5); K4 alone promotes it by default;
+  - a handler that throws, times out or returns no JSON summary keeps the occurrence pending: the row keeps the error in
+    `last_error` and waits `backoffMs`, as K4 keeps the row for its next pass. A later success clears `last_error`.
+  A settle that concludes switches a staged version that is due. A settle that finds another claim's try changes nothing.
+- **A handler runs at least once.** A claim whose lease passed with no settle runs the job again with the next attempt,
+  as K4 retries pending work after a restart. A handler must tolerate a second run of one occurrence.
+- **With Host job handlers, the lease must be longer than `hostJobTimeoutMs`** (the sender refuses it otherwise). A store
+  with no handler for the type fails the row with `Host job handler not registered` and keeps the occurrence pending.
 
 ## Deployment config
 
@@ -493,9 +631,11 @@ composes the SDK side (the Postgres and object stores, the token signer and a pa
 message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMessageConsumer` themselves.
 
 - **Database.** One Postgres database. The store takes its own `pg.Pool` and its own schema
-  (`new HostedCollaborationStore(pool, schema)`), and `migrate()` creates the H tables there. The SDK tables come from
+  (`new HostedCollaborationStore(pool, schema, { host })`), and `migrate()` creates the H tables there. The SDK tables come from
   the `@byok-sdk/cloud-dataplane` migrations (`migrate(pool, migrationsDir())`), in the same database or another one.
   No path assumes one atomic commit across the two (see Database). A scope row of an unknown store version is refused.
+- **Host config.** `host(scope)` returns the scope's model templates (each with the user's own device) and read-only
+  toolsets, as L's `models` and `readOnlyToolsets`. Every store over one schema must be built with the same `host`.
 - **Object storage.** The SDK stores need an S3-compatible endpoint: `objectStorage` with `endpoint`, `bucket`,
   `accessKeyId`, `secretAccessKey`, `region` and a `signingClock`, passed to `createPostgresCoreStores` and
   `createPostgresCloudStores`. H stores no objects itself.
@@ -503,7 +643,7 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   scope belongs to one SDK tenant: the submitter's, reconciler's and reply checker's `port(scope)` and the message
   consumer's `scopeOf(tenant)` are inverse maps, and that map is the tenant check (see Message consumer). A command for another
   scope is a `scope_mismatch` conflict. A K4 callback command from the entry is a `CallbackCommandError` (see Commit
-  store). The command entry comes in a later slice of #793.
+  store). `HostedCommandEntry` takes the Host's session check as `authenticate` (see Command entry).
 - **Enrollment.** A device pairs with the SDK through a pairing code (`cloud.createPairingCode(tenant, { productId })`).
   The Host then binds it to H with `bindDevice(scope, deviceId)`, and `revokeDevice` ends that binding for good (see
   Device binding). Each tenant needs a storage entitlement (`core.quota.writeEntitlement`) before a mailbox append.
@@ -516,7 +656,8 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
 - **Workers.** The Host runs, each on its own interval: `HostedSubmitter.run()`, `HostedReconciler.run()`,
   `store.sync(scope, …)` for each scope that changed (the `changed` option of `HostedReconciler`, for a conclusion or
   a first claim, and of `HostedRoutineScheduler`, for a fire, and the scope of each commit and consume),
-  `HostedDueScheduler.run()` for the due scopes, `HostedOutboxSender.run()` with the projection receiver and the channel,
+  `HostedDueScheduler.run()` for the due scopes, `HostedOutboxSender.run()` with the projection receiver, the channel, the
+  connector and the home port (and `store.sync(scope, …)` for each scope of its `changed` option),
   and `HostedRoutineScheduler.run()` every `intervalMs` after one `start()`. A Host with a channel opens its store with
   `{ channel: true }`, a Host that coalesces inputs with `{ coalesce }`, and a Host with its own delegation timers with
   `{ timers }`. Every store over one schema must be built with the same `timers`, because each writes `due_at` with its
@@ -526,8 +667,10 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   ```ts
   const checker = new HostedReplyChecker(store, { port: scope => ({
     agentMessage: (taskId, deviceId, agentRef) => cloud.readTaskAgentMessage(tenantOf(scope), deviceId, taskId, agentRef) }) });
+  const devices = new HostedDeviceObserver(store, { port: scope => ({ readiness: () => cloud.readTenantReadiness(tenantOf(scope)) }) });
   const due = new HostedDueScheduler(pool, store, { sync: async (scope, now) => {
     await checker.check(scope, now);
+    await devices.observe(scope);
     return store.sync(scope, { ...syncOptions, now });
   } });
   ```
@@ -536,6 +679,22 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   scopes one at a time. During an SDK outage one pass can take up to the number of due checks in its batch times the
   timeout, which delays the due steps of other scopes. A timed-out read is not cancelled. A failed read backs off, so
   there is no hot loop.
+- **Outbox sender ports.** The card connector is the Host's own (as L's `connector`). The home port binds the tenant's SDK
+  Agent home calls for the request's device:
+  ```ts
+  const sender = new HostedOutboxSender(pool, store, { projections, channel, connector,
+    homes: scope => ({
+      read: request => cloud.getAgentHomeProjectionStatus(tenantOf(scope), request.deviceId, { requestId: request.payload.requestId,
+        agentRef: request.payload.agentRef, projectionHash: request.payload.projectionHash }),
+      enqueue: request => cloud.enqueueAgentHomeProjection(tenantOf(scope), request.deviceId, request.payload),
+    }),
+    changed: scope => { void syncScope(scope); } });
+  ```
+  The device must install the Host's persona hook as its Agent home projection consumer, or it does not advertise
+  `agent-home-projection` and the SDK refuses the enqueue (the operation keeps the error).
+- **Host jobs.** The store takes the Host job handlers (`{ host, hostJobs: { watchlist } }`), and the sender takes their
+  deadline (`hostJobTimeoutMs`). Host code adds each routine once with `addHostJobRoutine`. Every store over one schema
+  that a sender or the scheduler uses must have the same handlers.
 
 ## Tests
 
@@ -558,8 +717,8 @@ three and runs these suites.
 - The compaction tests cover a settled intent and its tombstone, a repeated call, a refused freeze of a retired Turn, a
   K8 veto, an unsettled row, an unknown Turn id, a routine intent, and the sync's `result_retired`.
 - The routine tests seed each occurrence as the scheduler records it. They cover the outcome actions, the owner API,
-  promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, and the
-  `bot-routine` refusal.
+  promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, and the refusal of
+  an execution routine on the Bot path.
 - The D2f-1 routine vectors (`routineVectors`) run on the store, with the scheduler fire and a submitter pass on an SDK
   tenant in memory. The `end_routine` tests cover a refusal that writes nothing and a caller's `routines` port.
 - The K8 delivery vectors (`deliveryVectors`) run on the store, its inbound entry and the outbox sender, all 21. After each Host step, the delivery outbox index matches the K8 entities. The
@@ -595,11 +754,40 @@ three and runs these suites.
   `uncertainAfterMs`; a read that throws and an accepted message with no Host record check again. H tests add the due
   check selection, the settle that writes nothing (a stale fence, after the delegation was answered, before the check
   time), two checkers on one delegation, a chain end with no intent row, a read timeout, and a settle that throws.
+- The K8 device vectors (`deviceVectors`) run on the store, as on L: a delivered offer on an offline device waits and
+  is queued again once the device connects, with one projection each; the same observation again and a device that
+  the read lacks change nothing; nothing changes before delivery (no submit, an uncertain submit, no attempt read),
+  after a claim (by the attempt or the claim fact), or for a cancel or a verdict. H tests add the `offeredTo` fact of
+  the intent row, the readiness read of the scope, no read when no delegation can change, a read that throws or times
+  out, and the presence mapping.
+- The K8 card call vectors (`cardCallVectors`) run through the sender, as L's `flushCards`: one call for a confirmed card
+  with its result, reported with its `action_result` Turn at the next sync and never called again; a connector error cut
+  to 1024 characters; a result that is not JSON; no call for a pending or rejected card. H tests (`cards.test.ts`) add
+  the card row and its claim before the call, no row for a rejected card, two senders on one card, a connector timeout
+  with its aborted signal, the expired lease that ends the card with no call (owner Q3 A), a stale settle, a Host with no
+  connector, a card that is gone, and the option check. The outbox DDL test covers the card, home and Host job kinds.
+- The K8 home vectors (`homeVectors`) run through the sender, as L's `flushHomes`: an `applied` or `idempotent` readback
+  readies the Bot and is read no more; another terminal status fails the operation with `persona-failed`; an identity
+  conflict and a read that throws keep it pending with the error; with no terminal the first request is enqueued, and
+  once `retryAt` has passed a retry with the next request id and a backoff; a Bot with an open intent waits without
+  blocking another Bot; a Bot's later operation is not read while its oldest one is pending. H tests (`homes.test.ts`) add
+  the home row of a committed operation (`retry_persona`) with its lease and settle, the row at `retryAt` after an
+  enqueue, the lease kept through a retry enqueue, no call after the lease has passed, two senders on one operation, the wait of a busy Bot, a read timeout, a Host with no home port, and, on the
+  hosted SDK with a paired daemon, a Bot readied through the real `enqueueAgentHomeProjection` whose Turn then freezes.
+- The Host job tests (`host-jobs.test.ts`) port the cases of K4 `host-jobs.test.ts` through the scheduler and the sender:
+  a summary stored once with a settled row and no intent; the Bot policy kept apart from Host code, and the definition
+  checks; a handler throw with its backoff and a retry with the same occurrence key; a missing and a non-JSON summary;
+  a result with `execution` concluded `failed`, superseded or not; a timeout with its aborted signal; two senders on one
+  row; an expired lease that runs the job again with a stale settle ignored; a missing handler after a restart; a version
+  switch after the job; pause, completion and no resume; and the option check.
 - The due tests check the stored due time against the K8 rule after each seed, commit, sync and finish, a cancel commit
   with the store's timers, a command that throws, a step that keeps the time, and the DDL check. The due scheduler tests
   cover a due scope whose sync clears it, the clock read for each sync, a stalled scope and a failed sync with their
   backoff, the batch in due order, the version filter, and a reply check in the deployment's `sync` that clears its
   check time.
+- The command entry tests cover L's command ids and a replay, a sync after each commit, a missing session and a session
+  check that throws, the R2 refusals with their audit lines, room input from a human and from a bot, the binding refusal
+  (unbound and revoked) that rolls back, a decision conflict after the sync, and keyless commands.
 - The sync test freezes the same Turns in an L ledger with K4 `enqueue`. Each H input is byte-equal to the K4
   execution input, and the H state bytes equal the L state bytes.
 - The submitter tests use the hosted SDK composition (`createByokCloud` over `createPostgresCloudStores`, with

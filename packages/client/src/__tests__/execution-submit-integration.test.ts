@@ -97,7 +97,6 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir,
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     // A result-document offer is admitted only by a daemon that journals its terminals.
-    hostedJournal: { mode: 'sqlite' },
   }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
   /** The route the SDK result helper's submit_result forwards to. */
   const submit = async (index: number, value: unknown): Promise<unknown> => {

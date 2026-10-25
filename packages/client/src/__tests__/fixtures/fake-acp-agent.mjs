@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fake ACP agent over stdio for offline adapter tests. It calls no model and
-// reads no login. Frame shapes follow OAR 44d7d61 tests/fixtures
+// reads no login. Frame shapes follow OAR c88a514 tests/fixtures
 // (fake-acp-agent.mjs, fake-acp-grok.mjs: Grok 1.0.25 wire, Apache-2.0).
 //
 // argv: `--version` prints a version; `agent stdio --help` prints help;
@@ -10,6 +10,10 @@
 // observed fact (argv, env, cwd, requests) so a test can assert the wire.
 // FAKE_ACP_REPLY_GATE=<dir>: the default reply waits for `<dir>/release`
 // after its two chunks and before the prompt answer.
+// FAKE_ACP_INITIALIZE=exit ends the agent on `initialize`; =error answers it
+// with an internal error.
+// `inspect --json` logs an `inspect` fact and prints FAKE_ACP_INSPECT (default:
+// no servers and no plugins); FAKE_ACP_INSPECT=fail exits 1 instead.
 import { appendFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -22,6 +26,12 @@ if (args[0] === '--version') {
 if (args.includes('--help')) {
   if (process.env.FAKE_ACP_NO_STDIO === '1') { process.stderr.write("error: unrecognized subcommand 'stdio'\n"); process.exit(2); }
   process.stdout.write('Run the agent over stdio\n');
+  process.exit(0);
+}
+if (args[0] === 'inspect') {
+  if (process.env.FAKE_ACP_LOG) appendFileSync(process.env.FAKE_ACP_LOG, `${JSON.stringify({ kind: 'inspect', argv: args, cwd: process.cwd(), env: process.env })}\n`);
+  if (process.env.FAKE_ACP_INSPECT === 'fail') { process.stderr.write('inspect failed\n'); process.exit(1); }
+  process.stdout.write(`${process.env.FAKE_ACP_INSPECT ?? '{"mcpServers":[],"plugins":[]}'}\n`);
   process.exit(0);
 }
 if (args.at(-1) !== 'stdio') { process.stderr.write(`unexpected argv ${JSON.stringify(args)}\n`); process.exit(64); }
@@ -67,11 +77,17 @@ async function prompt(message) {
   if (input === 'hold' || process.env.FAKE_ACP_HANG === '1') { pending.set(message.id, 'hold'); return; }
   if (input === 'hold-silent') { pending.set(message.id, 'silent'); return; }
   if (input === 'exit') { process.exit(9); }
-  if (input === 'fail') { error(message.id, -32603, 'model provider failed'); return; }
+  // Grok's own words for a -32603; `fail-text:` adds the provider's answer as `data`.
+  if (input === 'fail') { error(message.id, -32603, 'Internal error'); return; }
+  if (input.startsWith('fail-text:')) { error(message.id, -32603, 'Internal error', input.slice('fail-text:'.length)); return; }
   if (input === 'rate-limited') { error(message.id, -32003, 'Rate limited'); return; }
-  // Grok names the cause of a -32603 in the retry_state that ended its
-  // retries. Both lines go out in one write, so the client reads them in one
-  // pipe chunk, as it does under load.
+  // Grok names the cause of a -32603 in the retry_state that ended its retries.
+  if (input.startsWith('retry-failed:')) {
+    vendor({ sessionUpdate: 'retry_state', type: 'failed', error_type: input.slice('retry-failed:'.length) });
+    error(message.id, -32603, 'Internal error');
+    return;
+  }
+  // The same two lines in one write: the client reads them in one pipe chunk, as it does under load.
   if (input.startsWith('retry-failed-one-write:')) {
     const retry = { method: '_x.ai/session_notification', params: { sessionId: SESSION, update: { sessionUpdate: 'retry_state', type: 'failed', error_type: input.slice('retry-failed-one-write:'.length) } } };
     const failed = { id: message.id, error: { code: -32603, message: 'Internal error' } };
@@ -144,6 +160,8 @@ function request(message) {
   switch (message.method) {
     case 'initialize':
       log({ kind: 'initialize', params: message.params });
+      if (process.env.FAKE_ACP_INITIALIZE === 'exit') process.exit(1);
+      if (process.env.FAKE_ACP_INITIALIZE === 'error') { error(message.id, -32603, 'Internal error'); return; }
       result(message.id, {
         protocolVersion: 1,
         agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {}, close: {} }, promptCapabilities: { image: false }, mcpCapabilities: { http: true } },

@@ -10,7 +10,6 @@ import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../dae
 import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../daemon/daemon-owner';
 import { controlSocketPath, controlTokenPath } from '../daemon/control-protocol';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
-import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { OperationalHealthTracker } from '../daemon/operational-health';
 import { connectControlClient, isControlDaemonGone } from '../bin/control-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -259,7 +258,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     expect(allFails).toHaveLength(1);
   }, 10000);
 
-  it.skipIf(!isSqliteAvailable())('retains the mutation lease when a writer teardown barrier fails, then releases it after a clean retry', async () => {
+  it('retains the mutation lease when a writer teardown barrier fails, then releases it after a clean retry', async () => {
     const workspaceRoot = await tmpDir('byok-stop-barrier-ws-');
     const storeDir = await tmpDir('byok-stop-barrier-store-');
     const config: DaemonConfig = {
@@ -268,9 +267,6 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
       serverUrl: server.url,
       workspaceRoot,
       storeDir,
-      hostedJournal: {
-        mode: 'sqlite',
-      },
     };
     daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } }, ...(config) }, [new StubRuntimeAdapter('pi')]);
     await daemon.pair('pairing-code');

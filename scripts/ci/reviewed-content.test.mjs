@@ -8,7 +8,7 @@ import test from 'node:test';
 import { selectImpact, knownFamilies, reviewedScripts } from './select-impact.mjs';
 import { planCi } from './plan-ci.mjs';
 import { requireCiPlan } from './require-ci-plan.mjs';
-import { publicManifests } from './reviewed-content.mjs';
+import { publicManifests, PI_LOCK, PI_PACKAGES } from './reviewed-content.mjs';
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-reviewed-content-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -55,14 +55,15 @@ test('a bin API entry selects the package that declares the bin; an undeclared b
   const f = fixture(t);
   f.write('packages/client/package.json', { ...f.manifest, bin: { 'byok-agent-memory-mcp': './dist/bin/byok-agent-memory-mcp.js' } });
   f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 1 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } }, 'bin:byok-agent-memory-mcp': { policy: { budgetBytes: 2 } } });
-  assert.deepEqual(selectImpact(['api-surface/entries.json'], f).dirs.filter(dir => dir.startsWith('packages/')), ['packages/client']);
+  // The owner, then its one package dependent: cloud-do tests import client source (#927).
+  assert.deepEqual(selectImpact(['api-surface/entries.json'], f).dirs.filter(dir => dir.startsWith('packages/')), ['packages/client', 'packages/cloud-do']);
   f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 1 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } }, 'bin:byok-unknown': {} });
   assert.throws(() => selectImpact(['api-surface/entries.json'], f), /unmapped API entry bin:byok-unknown/);
 });
 test('reviewed vendor and registry paths map explicitly, siblings still refuse', () => {
-  assert.ok(selectImpact(['packages/client/vendor/oar/44d7d61/runtimes/grok/session.ts']).dirs.includes('packages/client'));
+  assert.ok(selectImpact(['packages/client/vendor/oar/c88a514/runtimes/grok/session.ts']).dirs.includes('packages/client'));
   assert.deepEqual(selectImpact(['scripts/release/registry-contract.test.mjs', 'scripts/release/registry-expectations.json']).dirs, []);
-  assert.throws(() => selectImpact(['packages/client/vendor/oar/44d7d61/unreviewed.ts']));
+  assert.throws(() => selectImpact(['packages/client/vendor/oar/c88a514/unreviewed.ts']));
   assert.throws(() => selectImpact(['scripts/release/registry-contract.mjs']));
 });
 test('CLI and aggregate revalidate content against the same trusted comparison base', t => {
@@ -352,6 +353,64 @@ test('reviewed undici security move admits only the exact pins and their lock en
   }
 });
 
+test('reviewed Pi 1.4.0 move admits only all nine exact pins and the reviewed lock rows', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-pi-move-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const write = (path, value) => { mkdirSync(dirname(join(cwd, path)), { recursive: true }); writeFileSync(join(cwd, path), JSON.stringify(value)); };
+  const CLIENT = ['pi-coding-agent', 'pi-ai', 'pi-agent-core', 'pi-durable', 'chord'].map(name => `@earendil-works/${name}`);
+  const CLOUD_DO = ['pi-durable', 'pi-ai', 'chord'].map(name => `@earendil-works/${name}`);
+  const pins = (names, pin) => Object.fromEntries(names.map(name => [name, pin]));
+  const rows = pin => pin === '1.4.0'
+    ? Object.fromEntries([...PI_PACKAGES, 'marked-cjk-friendly'].map(name => [name, PI_LOCK[name]]))
+    : Object.fromEntries(PI_PACKAGES.map(name => [name, [`${name}@${pin}`, '', {}, `sha512-${name}`]]));
+  const state = pin => ({
+    root: { name: 'workspace', scripts: { 'test:scripts': 'node --test --test-concurrency=1 scripts/ci/a.test.mjs' }, overrides: pins(PI_PACKAGES, pin) },
+    client: { name: '@byok-sdk/client', version: '0.30.0', byok: { piRuntimePin: pin }, dependencies: { ...pins(CLIENT, pin), x: '1.0.0' } },
+    cloudDo: { name: '@byok-sdk/cloud-do', version: '0.30.0', dependencies: pins(CLOUD_DO, pin) },
+    lock: { lockfileVersion: 1, workspaces: { '': { name: 'workspace' },
+      'packages/client': { name: '@byok-sdk/client', version: '0.30.0', dependencies: { ...pins(CLIENT, pin), x: '1.0.0' } },
+      'packages/cloud-do': { name: '@byok-sdk/cloud-do', version: '0.30.0', dependencies: pins(CLOUD_DO, pin) } },
+    overrides: pins(PI_PACKAGES, pin), packages: { ...rows(pin), x: ['x@1.0.0'] } },
+  });
+  const apply = ({ root, client, cloudDo, lock }) => {
+    write('package.json', root); write('packages/client/package.json', client); write('packages/cloud-do/package.json', cloudDo); write('bun.lock', lock);
+  };
+  apply(state('1.3.0'));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
+  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
+  apply(state('1.4.0'));
+  const plan = selectImpact(['package.json', 'bun.lock', 'packages/client/package.json', 'packages/cloud-do/package.json'], context);
+  assert.ok(plan.dirs.includes('packages/client') && plan.dirs.includes('packages/cloud-do'));
+  assert.ok(plan.families.includes('npm-release-pack'));
+  const moved = mutate => { const s = state('1.4.0'); mutate(s); return s; };
+  const refused = { root: /package\.json changes more than/, client: /packages\/client\/package\.json changes more than/,
+    cloudDo: /packages\/cloud-do\/package\.json changes more than/, lock: /bun\.lock changes more than/,
+    together: /bun\.lock must move every Pi pin, the overrides and the reviewed Pi lock rows together/ };
+  for (const [reason, candidate, path, pattern] of [
+    ['one override left behind', moved(s => { s.root.overrides['@earendil-works/pi-tui'] = '1.3.0'; }), 'package.json', refused.root],
+    ['client range pin', moved(s => { s.client.dependencies['@earendil-works/pi-ai'] = '^1.4.0'; }), 'packages/client/package.json', refused.client],
+    ['partial client move', moved(s => { s.client.dependencies['@earendil-works/chord'] = '1.3.0'; }), 'packages/client/package.json', refused.client],
+    ['another dependency next to Pi', moved(s => { s.client.dependencies.x = '2.0.0'; }), 'packages/client/package.json', refused.client],
+    ['runtime pin left behind', moved(s => { s.client.byok.piRuntimePin = '1.3.0'; }), 'packages/client/package.json', /must move byok\.piRuntimePin with the Pi pins/],
+    ['another Pi version', state('1.4.1'), 'packages/cloud-do/package.json', refused.cloudDo],
+    ['another lock dependency next to Pi', moved(s => { s.lock.workspaces['packages/client'].dependencies.x = '2.0.0'; s.lock.packages.x = ['x@2.0.0']; }), 'bun.lock', refused.lock],
+    ['another integrity', moved(s => { s.lock.packages['@earendil-works/pi-ai'] = [...PI_LOCK['@earendil-works/pi-ai'].slice(0, 3), 'sha512-other']; }), 'bun.lock', refused.together],
+    ['new dependency row missing', moved(s => { delete s.lock.packages['marked-cjk-friendly']; }), 'bun.lock', refused.together],
+    ['overrides left behind', moved(s => { s.lock.overrides = pins(PI_PACKAGES, '1.3.0'); }), 'bun.lock', refused.together],
+    ['partial workspace move', moved(s => { s.lock.workspaces['packages/cloud-do'].dependencies = pins(CLOUD_DO, '1.3.0'); }), 'bun.lock', refused.together],
+    ['rows without a pin move', (s => { s.lock.packages = { ...rows('1.4.0'), x: ['x@1.0.0'] }; return s; })(state('1.3.0')), 'bun.lock', refused.lock],
+  ]) {
+    apply(candidate);
+    assert.throws(() => selectImpact([path], context), pattern, reason);
+  }
+});
+
+test('the client vendor notice inventory selects the client and the release pack', () => {
+  const plan = selectImpact(['packages/client/vendor/third-party-manifest.json']);
+  assert.ok(plan.dirs.includes('packages/client') && plan.families.includes('npm-release-pack'));
+});
+
 test('#793: the hosted example manifest and lock rows are admitted only with the reviewed shape and reused specs', t => {
   const f = fixture(t);
   const dir = 'examples/hosted-bot-collaboration', path = `${dir}/package.json`;
@@ -542,4 +601,72 @@ test('#884: the K4 manifest admits only the I/O-free ./canonical entry', t => {
   }
   f.write(path, { ...manifest, private: false, exports: { ...exports, './canonical': './src/canonical.ts' } });
   assert.throws(() => selectImpact([path], f), /must stay private/);
+});
+
+function rebase(f, message) {
+  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', message);
+  f.base = git('rev-parse', 'HEAD').trim();
+}
+
+test('#927: the root manifest drops only the three retired repo-harness scripts', t => {
+  const f = fixture(t);
+  const retired = {
+    'check:brain-manifest': 'repo-harness run check-brain-manifest',
+    'check:architecture-sync': 'repo-harness run check-architecture-sync',
+    'sync:brain-docs': 'repo-harness run sync-brain-docs --all',
+  };
+  const kept = { 'check:task-sync': 'repo-harness run check-task-sync' };
+  const scripts = { ...f.rootManifest.scripts, ...retired, ...kept };
+  f.write('package.json', { scripts }); rebase(f, 'root with the retired scripts');
+  f.write('package.json', { scripts: { ...f.rootManifest.scripts, ...kept } });
+  assert.equal(selectImpact(['package.json'], f).reason, 'root-ci-scripts');
+  for (const [candidate, reason] of [
+    [{ ...f.rootManifest.scripts }, 'a kept script removed too'],
+    [{ ...f.rootManifest.scripts, ...kept, 'check:brain-manifest': 'true' }, 'a retired script rewritten instead of removed'],
+  ]) {
+    f.write('package.json', { scripts: candidate });
+    assert.throws(() => selectImpact(['package.json'], f), /more than/, reason);
+  }
+});
+
+test('#927: the server manifest admits only the reviewed description without a protocol version', t => {
+  const f = fixture(t);
+  const path = 'packages/server/package.json';
+  const from = 'BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, protocol v2, memory or single-process SQLite storage.';
+  const manifest = { name: '@byok-sdk/server', version: '0.30.1', description: from };
+  f.write(path, manifest); rebase(f, 'server with the v2 description');
+  f.write(path, { ...manifest, description: from.replace('protocol v2, ', '') });
+  assert.deepEqual(selectImpact([path], f).families, ['npm-release-pack']);
+  for (const description of [from.replace('protocol v2', 'protocol v3'), 'BYOK SDK server']) {
+    f.write(path, { ...manifest, description });
+    assert.throws(() => selectImpact([path], f), /more than/, description);
+  }
+});
+
+test('#927: the cloud-do client test edge is admitted only as a workspace spec, in manifest and lock', t => {
+  const f = fixture(t);
+  const path = 'packages/cloud-do/package.json';
+  const manifest = { name: '@byok-sdk/cloud-do', version: '0.30.1', devDependencies: { '@byok-sdk/keys': 'workspace:*' } };
+  f.write(path, manifest);
+  f.lock.workspaces['packages/cloud-do'] = { name: manifest.name, version: manifest.version, devDependencies: { '@byok-sdk/keys': 'workspace:*' } };
+  f.write('bun.lock', f.lock); rebase(f, 'cloud-do without the client edge');
+  const edge = { '@byok-sdk/client': 'workspace:*', '@byok-sdk/keys': 'workspace:*' };
+  f.write(path, { ...manifest, devDependencies: edge });
+  f.lock.workspaces['packages/cloud-do'].devDependencies = edge; f.write('bun.lock', f.lock);
+  const plan = selectImpact([path, 'bun.lock'], f);
+  assert.ok(plan.dirs.includes('packages/cloud-do')); assert.deepEqual(plan.families, ['npm-release-pack']);
+  for (const spec of ['^0.30.1', 'workspace:^']) {
+    f.write(path, { ...manifest, devDependencies: { ...edge, '@byok-sdk/client': spec } });
+    assert.throws(() => selectImpact([path], f), /more than/, spec);
+  }
+  f.write(path, { ...manifest, dependencies: { '@byok-sdk/client': 'workspace:*' } });
+  assert.throws(() => selectImpact([path], f), /more than/, 'a runtime edge');
+  // The lock row must match the manifest: a reviewed manifest does not admit another lock spec.
+  f.write(path, { ...manifest, devDependencies: edge });
+  f.lock.workspaces['packages/cloud-do'].devDependencies = { ...edge, '@byok-sdk/client': '^0.30.1' }; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /more than/, 'a lock range under a workspace manifest');
+  f.write(path, manifest);
+  f.lock.workspaces['packages/cloud-do'].devDependencies = edge; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /more than/, 'a lock edge the manifest does not declare');
 });

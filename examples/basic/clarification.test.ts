@@ -58,7 +58,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     }); closeHttp = listening.close; fixtureUrl = listening.url;
     adapter = new BotStubAdapter();
     daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-example-stub' },productName: 'Example Bot',productId: 'clarification-test',serverUrl: listening.url,
-      workspaceRoot: path.join(root,'ws'),storeDir: path.join(root,'sdk'),agentHome: { hostStorageRoot: path.join(root,'homes') },agentEgress: { policy },hostedJournal: { mode: 'sqlite' },
+      workspaceRoot: path.join(root,'ws'),storeDir: path.join(root,'sdk'),agentHome: { hostStorageRoot: path.join(root,'homes') },agentEgress: { policy },
     },[adapter],{ deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
     const pair = await byok.pairing.createPairingCode({ productId: 'clarification-test' }); deviceId = (await daemon.pair(pair.code)).deviceId;
     await daemon.start(); await waitForReady(daemon);
@@ -270,11 +270,10 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     await first(); adapter.sessions.get('step-1')!.finish(result('needs_input',{ question: 'missing fields' })); await terminal('step-1');
     expect((await host.reconcile('run',row().revision)).value.status).toBe('blocked'); expect(row().value.tickets).toHaveLength(0);
   });
-  it.each(['missing','empty','unchecked','capability'] as const)('result channel %s fails closed with zero tickets', async mode => {
+  it.each(['empty','unchecked','capability'] as const)('result channel %s fails closed with zero tickets', async mode => {
     await daemon.stop();
     const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-example-stub' },productName: 'Example Bot',productId: 'clarification-test',serverUrl: fixtureUrl,
       workspaceRoot: path.join(root,'second-ws'),storeDir: path.join(root,'second-sdk'),...(mode !== 'capability' ? { agentHome: { hostStorageRoot: path.join(root,'second-homes') },agentEgress: { policy } } : {}),
-      ...(mode === 'missing' ? {} : { hostedJournal: { mode: 'sqlite' } }),
     };
     daemon = createDaemonWithAdapters(config,[adapter],{ deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
     const code = await byok.pairing.createPairingCode({ productId: 'clarification-test' }); deviceId = (await daemon.pair(code.code)).deviceId;
@@ -285,10 +284,9 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
       expect(await byok.tasks.offer('step-1')).toBeUndefined(); expect(adapter.starts).toHaveLength(0);
     } else {
       await host.send('run',row().revision);
-      if (mode !== 'missing') { await running('step-1'); adapter.sessions.get('step-1')!.finish(mode === 'unchecked' ? { ...question(), options: [{ id: 'same', label: 'one' }, { id: 'same', label: 'two' }] } : question(), mode !== 'empty'); }
+      await running('step-1'); adapter.sessions.get('step-1')!.finish(mode === 'unchecked' ? { ...question(), options: [{ id: 'same', label: 'one' }, { id: 'same', label: 'two' }] } : question(), mode !== 'empty');
       await terminal('step-1');
       if (mode !== 'unchecked') expect((await byok.tasks.deviceTerminal('step-1'))?.envelope.type).not.toBe('task.complete');
-      if (mode === 'missing') expect(adapter.starts).toHaveLength(0);
       expect((await host.reconcile('run',row().revision)).value.status).toBe('blocked');
       if (mode === 'unchecked') expect(row().value.reason).toBe('invalid_clarification_result');
     }

@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { spawn, type SpawnOptions } from 'node:child_process';
 import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -214,9 +215,47 @@ describe('GrokAdapter sessions', () => {
 
   it('maps prompt errors to semantic failures, retryable only when rate limited', async () => {
     const failed = await failureOf(await open(adapter(), { instruction: 'fail' }, await ctx()));
-    expect(failed).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', message: 'model provider failed' });
+    expect(failed).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', message: 'Internal error' });
     const limited = await failureOf(await open(adapter(), { instruction: 'rate-limited' }, await ctx()));
     expect(limited).toMatchObject({ phase: 'run', category: 'semantic', retry: 'retryable' });
+  });
+
+  it('passes the vendored OAR failure class through, with the reason unchanged (#869)', async () => {
+    const classOf = async (instruction: string) => {
+      const failed = await failureOf(await open(adapter(), { instruction }, await ctx()));
+      return { failure: (failed as RuntimeExecutionFailure).failure, message: (failed as RuntimeExecutionFailure).message };
+    };
+    // -32003 covers every 429, a usage limit included: Grok cannot show quota.
+    expect(await classOf('rate-limited')).toEqual({ failure: { class: 'rate_limited' }, message: 'Rate limited' });
+    expect(await classOf('retry-failed:auth')).toEqual({ failure: { class: 'auth' }, message: 'Internal error' });
+    expect(await classOf('retry-failed:context_length')).toEqual({ failure: { class: 'input_too_large' }, message: 'Internal error' });
+    // A failed prompt that is not a process exit, -32000 or -32003, and whose last ended retry_state is missing or
+    // has an error_type outside Grok's table, names no cause: OAR's text rule reads "Internal error" as `provider`,
+    // which is not structured evidence.
+    expect(await classOf('fail')).toEqual({ failure: { class: 'unknown' }, message: 'Internal error' });
+    expect(await classOf('retry-failed:network')).toEqual({ failure: { class: 'unknown' }, message: 'Internal error' });
+    expect((await failureOf(await open(adapter(), { instruction: 'exit' }, await ctx())) as RuntimeExecutionFailure).failure).toEqual({ class: 'runtime_exited' });
+    const refusedLogin = await startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_AUTH: 'refuse' })).catch(error => error);
+    expect(refusedLogin).toMatchObject({ phase: 'start', failure: { class: 'auth' } });
+    const refusedModel = await startPreparedOperation(adapter({ model: 'no-such-model' }), { instruction: 'x' }, await ctx()).catch(error => error);
+    expect(refusedModel).toMatchObject({ phase: 'start', failure: { class: 'model_unavailable' } });
+  });
+
+  it('marks an agent exit during the open runtime_exited, and an open it did not end unknown (#869)', async () => {
+    await expect(startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_INITIALIZE: 'exit' }))).rejects.toMatchObject({
+      phase: 'start', category: 'infrastructure', failure: { class: 'runtime_exited' },
+    });
+    // The kernel kills the agent itself after the refused initialize.
+    await expect(startPreparedOperation(adapter(), { instruction: 'x' }, await ctx({ FAKE_ACP_INITIALIZE: 'error' }))).rejects.toMatchObject({
+      phase: 'start', message: 'Internal error', failure: { class: 'unknown' },
+    });
+  });
+
+  it('sends unknown for a class OAR took from error text, keeping the retry it derives (#869)', async () => {
+    const failed = await failureOf(await open(adapter(), { instruction: 'fail-text:429 rate limit' }, await ctx()));
+    expect(failed).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failed).toMatchObject({ phase: 'run', category: 'semantic', retry: 'retryable', message: 'Internal error: 429 rate limit' });
+    expect((failed as RuntimeExecutionFailure).failure).toEqual({ class: 'unknown' });
   });
 
   it('fails the session and ends the agent when retained records exceed the byte budget', async () => {
@@ -277,5 +316,76 @@ describe('GrokAdapter sessions', () => {
     await s.close();
     const [started] = facts(resources.log).filter(fact => fact.kind === 'start');
     if (process.platform !== 'win32') expect(() => process.kill(started!.pid, 0)).toThrow();
+  });
+});
+
+describe('GrokAdapter agentUserMcpServers (#935)', () => {
+  const MCP_OFF = { GROK_CLAUDE_MCPS_ENABLED: '0', GROK_CURSOR_MCPS_ENABLED: '0', GROK_MANAGED_MCPS_ENABLED: '0' };
+  /** An Agent writer task: the cwd is the sealed home, by its real path. */
+  async function agentCtx(env: NodeJS.ProcessEnv = {}): Promise<PreparedOperationResources & { log: string }> {
+    const resources = await ctx(env);
+    const home = await fs.realpath(resources.workspaceDir);
+    return { ...resources, workspaceDir: home, agentHome: home };
+  }
+  const kinds = (log: string) => facts(log).map(fact => fact.kind).filter(kind => kind === 'inspect' || kind === 'start');
+
+  it('validates the option', () => {
+    expect(() => adapter({ agentUserMcpServers: 'strict' as never })).toThrow(new TypeError('GrokAdapterOptions.agentUserMcpServers must be inherit or excluded'));
+  });
+
+  it('inspects with the agent cwd and env, then starts the agent with the three variables', async () => {
+    const resources = await agentCtx();
+    const s = await open(adapter({ agentUserMcpServers: 'excluded', compatInstructions: 'disabled' }), { instruction: 'hello' }, resources);
+    expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, usage, { type: 'turn_end' }]);
+    expect(kinds(resources.log)).toEqual(['inspect', 'start']);
+    const [inspect, started] = [facts(resources.log).find(fact => fact.kind === 'inspect')!, facts(resources.log).find(fact => fact.kind === 'start')!];
+    expect(inspect.argv).toEqual(['inspect', '--json']);
+    expect(await fs.realpath(inspect.cwd)).toBe(resources.workspaceDir);
+    for (const env of [inspect.env, started.env]) {
+      expect(env).toMatchObject({ ...MCP_OFF, GROK_CLAUDE_RULES_ENABLED: '0', FAKE_ACP_LOG: resources.log });
+    }
+  });
+
+  it('runs inspect through a custom spawnFn with the command, cwd and env of the agent', async () => {
+    const resources = await agentCtx();
+    const calls: { command: string; args: readonly string[]; cwd: unknown; env: unknown }[] = [];
+    const spawnFn: typeof spawn = ((command: string, args: readonly string[], options: SpawnOptions) => {
+      calls.push({ command, args, cwd: options.cwd, env: options.env });
+      return spawn(command, args, options);
+    }) as typeof spawn;
+    await turn(await open(adapter({ agentUserMcpServers: 'excluded', spawnFn }), { instruction: 'hello' }, resources));
+    const [inspect, agent] = [calls.find(call => call.args[0] === 'inspect')!, calls.find(call => call.args[0] === 'agent')!];
+    expect(calls.indexOf(inspect)).toBeLessThan(calls.indexOf(agent));
+    expect(inspect).toEqual({ command: agent.command, args: ['inspect', '--json'], cwd: agent.cwd, env: agent.env });
+    expect(inspect.env).toMatchObject(MCP_OFF);
+  });
+
+  it('fails before the agent starts when inspect lists a server outside the task, or fails', async () => {
+    const listed = JSON.stringify({
+      mcpServers: [
+        { name: 'gmail', transport: 'stdio', target: 'gmail-mcp', source: { type: 'configToml', path: '/home/user/.grok/config.toml' } },
+        { name: 'claude_notes', transport: 'stdio', target: 'n', source: { type: 'claudeJson', path: '/home/user/.claude.json' }, disabled: true, compatibilityStatus: 'disabled', vendor: 'claude' },
+      ],
+      plugins: [],
+    });
+    for (const [inspect, reason] of [
+      [listed, 'grok Agent user MCP server exclusion refused: Grok still loads MCP servers outside the task: gmail (configToml)'],
+      ['fail', 'grok Agent user MCP server exclusion refused: grok inspect failed'],
+    ] as const) {
+      const resources = await agentCtx({ FAKE_ACP_INSPECT: inspect });
+      const error = await startPreparedOperation(adapter({ agentUserMcpServers: 'excluded' }), { instruction: 'hello' }, resources).catch(e => e);
+      expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+      expect(error).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', message: reason, failure: { class: 'unknown' } });
+      expect(kinds(resources.log)).toEqual(['inspect']);
+    }
+  });
+
+  it('changes nothing under inherit or for a task that is not an Agent task', async () => {
+    for (const [options, agent] of [[{}, true], [{ agentUserMcpServers: 'inherit' as const }, true], [{ agentUserMcpServers: 'excluded' as const }, false]] as const) {
+      const resources = agent ? await agentCtx() : await ctx();
+      await turn(await open(adapter(options), { instruction: 'hello' }, resources));
+      expect(kinds(resources.log)).toEqual(['start']);
+      expect(Object.keys(facts(resources.log).find(fact => fact.kind === 'start')!.env).filter(name => name.startsWith('GROK_'))).toEqual([]);
+    }
   });
 });

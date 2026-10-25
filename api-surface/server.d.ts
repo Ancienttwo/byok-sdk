@@ -699,7 +699,7 @@ export interface TaskHandleDeps {
 export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHandle;
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclinePayload, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
+import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclinePayload, TaskFailure, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types';
@@ -939,6 +939,14 @@ export interface TaskResult {
      */
     code?: TaskDeclinePayload['code'];
     retryable?: boolean;
+    /**
+     * The machine-readable runtime failure class of a failed task, verbatim
+     * `task.fail.failure`: `class` (a closed {@link TaskFailure} value, `unknown`
+     * when the runtime gave no structured evidence) and, on `quota`,
+     * `resetsAt` when the runtime reported it. Classify failures by this field;
+     * `reason` is display text only. Absent when the daemon predates the field.
+     */
+    failure?: TaskFailure;
     /**
      * The task's structured terminal result, projected verbatim from
      * `task.complete.document` (`@byok-sdk/protocol`'s `messages.ts`) — the

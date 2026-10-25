@@ -60,7 +60,7 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
     serverUrl: `http://127.0.0.1:${address.port}`, workspaceRoot: join(root, 'workspace'), storeDir: join(root, 'sdk'),
     agentHome: { hostStorageRoot: join(root, 'homes'), projection: {
       ...projection, apply: async input => { await options.holdProjection?.(); return projection.apply!(input); },
-    } }, hostedJournal: { mode: 'sqlite' }, agentEgress: { policy },
+    } }, agentEgress: { policy },
   }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
   const pairing = await server.pairing.createPairingCode({ productId });
   const { deviceId } = await daemon.pair(pairing.code);

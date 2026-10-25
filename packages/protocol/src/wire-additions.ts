@@ -151,6 +151,7 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   // Daemon to server.
   { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
   { kind: 'envelope', rule: 'gated', surface: 'task.approval_resolved', capability: 'approval_resolved', advertisedBy: 'server' },
+  { kind: 'envelope', rule: 'gated', surface: 'task.fail', field: 'failure', capability: 'runtime-failure-class', advertisedBy: 'server' },
 ];
 
 export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([

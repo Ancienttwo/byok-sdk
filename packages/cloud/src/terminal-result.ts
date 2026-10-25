@@ -8,6 +8,7 @@ import {
   type TerminalAgentHomeProjection,
   type TerminalAgentHomeMemoryChange,
   type TaskFailPayload,
+  type TaskFailure,
   type TaskDeclinePayload,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from './errors';
@@ -108,6 +109,13 @@ export interface TerminalResult {
   /** Terminal cause projection; currently the protocol's terminal reason. */
   readonly terminalCause?: string;
   readonly retryable?: boolean;
+  /**
+   * The machine-readable runtime failure class, verbatim `task.fail.failure`
+   * (plaintext on `task.fail_sealed` too). Read the class here, never from
+   * `reason`. Absent when the daemon or the server predates the field, or the
+   * daemon built the terminal while it had no live connection.
+   */
+  readonly failure?: TaskFailure;
   /** When the receipt store wrote the terminal fact — the first one, by its own first-write-wins rule. */
   readonly recordedAt: string;
 }
@@ -171,6 +179,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.retryable !== undefined
           ? { retryable: envelope.payload.retryable }
           : {}),
+        ...(envelope.payload.failure === undefined ? {} : { failure: envelope.payload.failure }),
         ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         ...(envelope.payload.preparedObservation === undefined
@@ -216,6 +225,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
         ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
         ...(envelope.payload.retryable !== undefined ? { retryable: envelope.payload.retryable } : {}),
+        ...(envelope.payload.failure === undefined ? {} : { failure: envelope.payload.failure }),
         ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         recordedAt: receipt.recordedAt,

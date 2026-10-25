@@ -37,6 +37,7 @@
 //                                    start(), which must now fail closed
 //                                    (finding F8) instead of falling back to
 //                                    a locally-generated UUID.
+//   FAKE_PI_GET_STATE_EXIT=1     -> exit 1 on get_state, before answering it.
 //   FAKE_PI_CRASH_WITH_STDERR=<msg> -> write <msg> to stderr and exit 1
 //                                    immediately, before reading any stdin —
 //                                    simulates finding #1's "bad flag ->
@@ -86,6 +87,7 @@
 //                                    path to complete correctly.
 //   FAKE_PI_AUTO_RETRY_FAIL=1    -> emit an exhausted native retry terminal
 //                                    instead of agent_settled.
+//   FAKE_PI_AUTO_RETRY_FINAL_ERROR=<text> -> that terminal's `finalError`.
 //   FAKE_PI_TRAJECTORY=<gap>     -> one trajectory gap for the execution
 //                                    record (Octop T1); the rest of the
 //                                    sequence is unchanged:
@@ -232,6 +234,7 @@ async function handleCommand(msg) {
       send({ type: 'response', command: 'get_session_stats', id: msg.id, success: true, data: { contextUsage: JSON.parse(process.env.FAKE_PI_CONTEXT_USAGE ?? '{"tokens":0,"contextWindow":1000000,"percent":0}') } });
       break;
     case 'get_state':
+      if (process.env.FAKE_PI_GET_STATE_EXIT === '1') process.exit(1);
       if (process.env.FAKE_PI_GET_STATE_FAIL === '1') {
         // Simulates get_state failing/omitting sessionId (finding F8) —
         // start() must fail closed here, not mint a fabricated session id.
@@ -322,7 +325,7 @@ async function handleCommand(msg) {
         break; // stay Running indefinitely — see FAKE_PI_HANG_AFTER_TOOL above
       }
       if (process.env.FAKE_PI_AUTO_RETRY_FAIL === '1') {
-        send({ type: 'auto_retry_end', success: false, attempt: 3, finalError: 'provider still unavailable' });
+        send({ type: 'auto_retry_end', success: false, attempt: 3, finalError: process.env.FAKE_PI_AUTO_RETRY_FINAL_ERROR ?? 'provider still unavailable' });
         break;
       }
 

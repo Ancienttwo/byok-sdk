@@ -53,6 +53,7 @@ class CapturingJournal implements LocalTaskJournal {
   async listPendingTerminals(): Promise<[]> { return []; }
   async confirmTerminal(): Promise<void> {}
   async rejectTerminal(): Promise<void> {}
+  async replaceRefusedTerminal(): Promise<void> {}
   async listRecoveryTasks(): Promise<[]> { return []; }
   async readTask(): Promise<undefined> { return undefined; }
   async listRecoverable(): Promise<[]> { return []; }
@@ -337,10 +338,9 @@ describe('authenticated enrollment tenant projection', () => {
         storeDir,
         agentHome: { hostStorageRoot },
         agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
-        hostedJournal: { mode: 'sqlite' },
       },
       [new StubRuntimeAdapter('pi')],
-      { hostedJournal: { journal } },
+      { journal },
     );
 
     const record = await daemon.pair('daemon-code');

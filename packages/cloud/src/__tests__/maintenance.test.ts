@@ -1,8 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CollectExpiredFailure, createMutableClock, tenantId } from '@byok-sdk/core';
 import { createInMemoryByokCloud } from '../composition/in-memory';
+import { createHmacTokenSigner } from '../auth/tokens';
+import { fullCapabilityDeclaration } from '../capabilities';
+import { createByokCloud, type ByokCloudOptions } from '../cloud';
 import { ByokCloudError } from '../errors';
-import { DEFAULT_RETENTION_POLICY, MAINTENANCE_STEPS, resolveRetentionPolicy } from '../maintenance';
+import {
+  DEFAULT_PROOF_RECEIPT_RETENTION_MS, DEFAULT_RETENTION_POLICY, MAINTENANCE_STEPS, PROOF_RECEIPT_RETENTION_FLOOR_MS,
+  resolveRetentionPolicy, type ProofReceiptRetentionAuthority,
+} from '../maintenance';
 import { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from '../receipt-retention';
 
 const tenant = tenantId('maintenance-test');
@@ -22,8 +28,9 @@ describe('cloud maintenance', () => {
     vi.spyOn(composition.stores.agentMessageDraft, 'sweepExpired').mockImplementation(async () => { order.push('agentMessageDraft'); });
     const report = await composition.cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy: DEFAULT_RETENTION_POLICY, limit: 3 });
     expect(report.steps.map(step => step.step)).toEqual(MAINTENANCE_STEPS);
-    expect(order).toEqual(MAINTENANCE_STEPS.filter(step => step !== 'deviceAssertionReplay'));
+    expect(order).toEqual(MAINTENANCE_STEPS.filter(step => step !== 'deviceAssertionReplay' && step !== 'proofReceipts'));
     expect(report.steps[8]).toEqual({ step: 'deviceAssertionReplay', status: 'not-configured' });
+    expect(report.steps[11]).toEqual({ step: 'proofReceipts', status: 'not-configured' });
     expect(composition.observed()).toBe(report);
   });
   it('commits other steps after one port fails and rejects malformed result counts', async () => {
@@ -31,7 +38,7 @@ describe('cloud maintenance', () => {
     vi.spyOn(composition.stores.receipts, 'collectExpired').mockRejectedValue(new Error('receipt outage'));
     vi.spyOn(composition.core.presence, 'collectExpired').mockResolvedValue({ removed: 3, expired: 0, releasedBytes: 0n, more: false });
     const report = await composition.cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy: DEFAULT_RETENTION_POLICY, limit: 2 });
-    expect(report.steps).toHaveLength(11);
+    expect(report.steps).toHaveLength(12);
     expect(report.steps[1]).toEqual({ step: 'receipts', status: 'failed', errorCode: 'maintenance_step_failed', failedRows: 0 });
     expect(report.steps[4]).toEqual({ step: 'presence', status: 'failed', errorCode: 'maintenance_result_invalid', failedRows: 0 });
     expect(report.steps[10]).toMatchObject({ step: 'objects', status: 'ok' });
@@ -88,5 +95,48 @@ describe('cloud maintenance', () => {
     expect(REQUEST_RECEIPT_PREFIXES).toEqual([]);
     expect(Object.isFrozen(RECEIPT_RETENTION)).toBe(true);
     for (const key of keys) { expect(receiptRetentionClass(key)).toBe('identity'); expect(await composition.stores.receipts.get(tenant, key)).toMatchObject({ body: key }); }
+  });
+});
+
+// Used device-proof request ids are pruned once their proof can no longer authenticate.
+describe('proof receipt retention', () => {
+  const NOW = '2026-10-25T12:00:00.000Z';
+  function cloudWith(proofReceiptRetention: ByokCloudOptions['proofReceiptRetention']) {
+    const clock = createMutableClock(new Date(NOW));
+    const base = createInMemoryByokCloud({ clock });
+    return createByokCloud({
+      core: base.core, cloud: base.stores, mailboxWake: base.mailboxWake, blobContentProxy: base.blobContentProxy,
+      crypto: base.crypto, tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(7), clock), clock,
+      capabilities: fullCapabilityDeclaration(), proofReceiptRetention,
+    });
+  }
+  const authority = () => ({ collectExpired: vi.fn<ProofReceiptRetentionAuthority['collectExpired']>(async () => ({ removed: 2, expired: 0, releasedBytes: 0n, more: false })) });
+
+  it('keeps 24 hours by default and passes the cutoff to the one authority as the last step', async () => {
+    const pruner = authority();
+    const report = await cloudWith({ authority: pruner }).runMaintenance({ tenant, now: NOW, policy: DEFAULT_RETENTION_POLICY, limit: 3 });
+    expect(DEFAULT_PROOF_RECEIPT_RETENTION_MS).toBe(86_400_000n);
+    expect(pruner.collectExpired).toHaveBeenCalledOnce();
+    expect(pruner.collectExpired).toHaveBeenCalledWith(tenant, { now: NOW, limit: 3, recordedBefore: '2026-10-24T12:00:00.000Z' });
+    expect(report.steps[11]).toEqual({ step: 'proofReceipts', status: 'ok', removed: 2, expired: 0, releasedBytes: 0n, more: false });
+  });
+
+  it('accepts the 15 minute floor and refuses less at construction', async () => {
+    expect(PROOF_RECEIPT_RETENTION_FLOOR_MS).toBe(15n * 60_000n);
+    const pruner = authority();
+    await cloudWith({ authority: pruner, proofReceiptRetentionMs: PROOF_RECEIPT_RETENTION_FLOOR_MS })
+      .runMaintenance({ tenant, now: NOW, policy: DEFAULT_RETENTION_POLICY });
+    expect(pruner.collectExpired).toHaveBeenCalledWith(tenant, expect.objectContaining({ recordedBefore: '2026-10-25T11:45:00.000Z' }));
+    for (const proofReceiptRetentionMs of [PROOF_RECEIPT_RETENTION_FLOOR_MS - 1n, 0n, -1n]) {
+      expect(() => cloudWith({ authority: authority(), proofReceiptRetentionMs })).toThrow(expect.objectContaining({ code: 'maintenance_invalid_input' }));
+    }
+    expect(() => cloudWith({ authority: {} as ProofReceiptRetentionAuthority })).toThrow(expect.objectContaining({ code: 'maintenance_invalid_input' }));
+  });
+
+  it('reports a failed prune without stopping earlier steps', async () => {
+    const pruner = { collectExpired: vi.fn(async () => { throw new Error('receipt outage'); }) };
+    const report = await cloudWith({ authority: pruner }).runMaintenance({ tenant, now: NOW, policy: DEFAULT_RETENTION_POLICY });
+    expect(report.steps[10]).toMatchObject({ step: 'objects', status: 'ok' });
+    expect(report.steps[11]).toEqual({ step: 'proofReceipts', status: 'failed', errorCode: 'maintenance_step_failed', failedRows: 0 });
   });
 });

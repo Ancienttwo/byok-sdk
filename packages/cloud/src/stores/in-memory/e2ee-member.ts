@@ -32,6 +32,8 @@ interface TenantState {
   readonly clientMacs: Map<string, Expiring>;
   /** scopeId -> seq of its first shred. */
   readonly shredded: Map<string, number>;
+  /** memberId -> KEM floor, raised by `rotate` entries. */
+  readonly kemFloors: Map<string, number>;
   /** `[deviceId, requestId]` JSON -> the proof binding and the JSON result of the write. */
   readonly requests: Map<string, { readonly binding: string; readonly result: string }>;
 }
@@ -78,6 +80,7 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
         deviceMacs: new Map(),
         clientMacs: new Map(),
         shredded: new Map(),
+        kemFloors: new Map(),
         requests: new Map(),
       };
       this.#tenants.set(tenant, state);
@@ -114,6 +117,9 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
       for (const key of state.epochKeyIds.keys()) if ((JSON.parse(key) as [string, number])[0] === scopeId) state.epochKeyIds.delete(key);
       if (!state.shredded.has(scopeId)) state.shredded.set(scopeId, seq);
     }
+    for (const { seq, memberId, kemEpoch } of input.rotations) {
+      if (seq > headSeq && kemEpoch > (state.kemFloors.get(memberId) ?? 0)) state.kemFloors.set(memberId, kemEpoch);
+    }
     const result = record<E2eeMemberChainAppendResult>(state, input.proof, { outcome: 'appended', appended: fresh.length, replayed });
     for (const { receipt } of shreds) await this.#receipts.record(tenant, receipt);
     return result;
@@ -135,6 +141,10 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
     if (replay !== undefined) return replay;
     const shredded = rows.find(row => state.shredded.has(row.scopeId));
     if (shredded !== undefined) return { outcome: 'scope_shredded', scopeId: shredded.scopeId };
+    for (const { recipient, recipientKemEpoch } of rows) {
+      const floor = state.kemFloors.get(recipient);
+      if (floor !== undefined && recipientKemEpoch < floor) return { outcome: 'kem_epoch_stale', recipient, kemEpoch: recipientKemEpoch, floor };
+    }
     // The first row of a new scope epoch fixes its keyId for the rest of the call.
     const fixed = new Map<string, string>();
     for (const row of rows) {
@@ -145,11 +155,29 @@ export class InMemoryE2eeMemberStore implements E2eeMemberStore {
       }
       fixed.set(epochKey, row.keyId);
     }
-    for (const row of rows) {
+    for (const { recipientKemEpoch: _, ...row } of rows) {
       state.epochKeyIds.set(JSON.stringify([row.scopeId, row.epoch]), row.keyId);
-      state.packages.set(JSON.stringify([row.scopeId, row.epoch, row.recipient]), { ...row });
+      state.packages.set(JSON.stringify([row.scopeId, row.epoch, row.recipient]), row);
     }
     return record<E2eeScopeKeyPackagePutResult>(state, proof, { outcome: 'stored', stored: rows.length });
+  }
+
+  async readOwnScopeKeyPackages(
+    tenant: TenantId,
+    input: { readonly scopeId: string; readonly recipient: string; readonly afterEpoch: number; readonly limit: number },
+  ): Promise<{ readonly rows: readonly E2eeScopeKeyPackageRow[]; readonly scopeHeadEpoch: number | undefined }> {
+    const state = this.#state(tenant);
+    const rows = [...state.packages.values()]
+      .filter(row => row.scopeId === input.scopeId && row.recipient === input.recipient && row.epoch > input.afterEpoch)
+      .sort((a, b) => a.epoch - b.epoch)
+      .slice(0, input.limit)
+      .map(row => ({ ...row }));
+    let scopeHeadEpoch: number | undefined;
+    for (const key of state.epochKeyIds.keys()) {
+      const [scopeId, epoch] = JSON.parse(key) as [string, number];
+      if (scopeId === input.scopeId && epoch > (scopeHeadEpoch ?? 0)) scopeHeadEpoch = epoch;
+    }
+    return { rows, scopeHeadEpoch };
   }
 
   async readScopeKeyPackages(

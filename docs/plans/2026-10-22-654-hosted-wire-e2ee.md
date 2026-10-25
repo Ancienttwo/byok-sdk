@@ -326,6 +326,7 @@ AiphaBee 自研的配对和 device grant，在 SDK 里对应 `/byok/pair` 和 `/
 - scope epoch 在以下情况前进：成员被移除；scope 成员减少；达到 owner 定的周期或条数上限；怀疑泄露。
 - 由下一个发送方轮换。成员在封装前检查链。当前 epoch 包含已移除成员时，它先建 `e+1`，只为剩余成员生成 key package，然后封装。没有成员在线时，没有新内容产生。
 - 成员 KEM 密钥轮换：成员登记新公钥（`rotate` 条目），把自己持有的 scope key 重新包装到新公钥，再删除旧私钥。旧 key package 随之打不开。
+- 重新包装只处理发送方仍是 scope 策略成员的 key package，发送方换成这台设备。发送方已被移除的 package 保持原样，不带设备的签名（E2d-5）。因此轮换之后，原发送方再被 `remove`，设备缓存的这个 epoch 的 key 不再因此失效。owner 接受这一点：被移除的成员本来就持有这个 epoch 的 key。之后的内容用新 epoch 隔开，`remove` 之后下一个发送方会先轮换 scope epoch（E2d-4）。
 - Ed25519 设备身份不轮换（`plane.ts:32` 固定 epoch 0）。重新配对得到新 deviceId，在链上是新成员。旧成员要显式 `remove`。
 
 ### 7.6 撤销设备与客户端

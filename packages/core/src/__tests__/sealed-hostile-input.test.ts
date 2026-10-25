@@ -124,7 +124,7 @@ const ENTRY_POINTS: Record<string, (hostile: object) => unknown> = {
   'openSealedBlob header': (h) => openSealedBlob({ header: h as never, binding: BINDING, scopeKey: SCOPE_KEY, fieldPath: '/instruction/blobRef', params: {}, ciphertext: new Uint8Array(272), maxContentLength: 1024 }),
   'openSealedBlob binding': (h) => openSealedBlob({ header: HEADER, binding: h as never, scopeKey: SCOPE_KEY, fieldPath: '/instruction/blobRef', params: {}, ciphertext: new Uint8Array(272), maxContentLength: 1024 }),
   'openSealedBlob params': (h) => openSealedBlob({ header: HEADER, binding: BINDING, scopeKey: SCOPE_KEY, fieldPath: '/instruction/blobRef', params: h, ciphertext: new Uint8Array(272), maxContentLength: 1024 }),
-  'openScopeKeyPackage package': (h) => openScopeKeyPackage({ package: h, expected: { tenantId: 'tenant-1', scopeId: 'scope-1', epoch: 1 }, recipient: { memberId: 'M'.repeat(43), kemPublicJwk: JWK, kemPrivateKey: {} as never }, senderSigningPublicJwk: JWK }),
+  'openScopeKeyPackage package': (h) => openScopeKeyPackage({ package: h, expected: { tenantId: 'tenant-1', scopeId: 'scope-1', epoch: 1 }, recipient: { memberId: 'M'.repeat(43), kemPublicJwk: JWK, kemPrivateKey: {} as never, kemEpoch: 1 }, senderSigningPublicJwk: JWK }),
   'verifyMemberChainEntry entry': (h) => verifyMemberChainEntry(h, JWK),
   'verifyMemberChainEntry subject': (h) => verifyMemberChainEntry({ ...ENTRY, subject: h, sig: 'A'.repeat(86) }, JWK),
   'sealContent binding': (h) => sealContent({ ...SEAL, binding: h as never, plaintext: { input: 'hello' }, maxContentLength: 1024 }),

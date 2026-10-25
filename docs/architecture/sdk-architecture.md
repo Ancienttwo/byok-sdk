@@ -134,6 +134,8 @@ flowchart LR
 
   Server --> Protocol
   Server --> Cloud
+  Server --> Core
+  Keys --> Core
   Client --> Protocol
   Client --> Core
   Cloud --> Core
@@ -149,6 +151,7 @@ flowchart LR
   Testkit --> Protocol
   Client -.->|"devDependency<br/>integration tests only"| Server
   CloudDo -.->|"devDependency<br/>type-compat tests only"| Keys
+  CloudDo -.->|"devDependency<br/>tests import client source"| Client
   Basic --> Server
   Packaging --> Client
 
@@ -166,7 +169,7 @@ flowchart LR
 | core | 23 / 3,467 | 5 / 1,019 | S2 契约层；InMemory 参考实现，consumer 是 `cloud` 与 `client`；共享 conformance 已移到独立 package |
 | cloud | 42 / 5,045 | 10 / 3,003 | async domain kernel + stateless hosted surface；device/board/truth handlers + InMemory 组合，消费 `core` 与 `protocol` |
 | cloud-dataplane | 22 / 6,309 | 14 / 3,533 | production Postgres + R2 composition；事务、quota、GC 与 reconciliation authority |
-| cloud-do | 19 / 3,849 | 0 / 0（测试在包根 `test/`：34 files / 6,772 LOC） | 只在 Cloudflare workerd 运行的 Durable Object session host；只用平台 key；runtime 不依赖其他 workspace package，`@byok-sdk/keys` 只作为 test-only devDependency（ADR-036、ADR-038 决策 4） |
+| cloud-do | 19 / 3,849 | 0 / 0（测试在包根 `test/`：34 files / 6,772 LOC） | 只在 Cloudflare workerd 运行的 Durable Object session host；只用平台 key；runtime 不依赖其他 workspace package；`@byok-sdk/keys` 与 `@byok-sdk/client` 只作为 test-only devDependency（ADR-036、ADR-038 决策 4） |
 | ui-runtime | 5 / 930 | 4 / 559 | React-free 的确定性 Live Activity Timeline 投影；消费 `cloud` 与 `protocol` |
 | conformance | 26 / 2,842 | 2 / 84 | private shared assertion authority；不得进入发布依赖树 |
 
@@ -180,11 +183,12 @@ find "$SDK_SRC" -type f \( -name '*.test.ts' -o -name '*.spec.ts' -o -path '*/__
 
 对两组结果分别执行 `wc -l` 得 file count，执行 `xargs wc -l` 取合计 LOC；替换 `SDK_SRC` 即可复算其余 package。
 
-强依赖是 `server → cloud/core/protocol`、`client → protocol/core`、`cloud → core/protocol`、`cloud-dataplane → cloud/core`、`ui-runtime → cloud/protocol`；`cloud-do` 的 runtime 依赖只有 pinned pi-durable / pi-ai / chord，没有 workspace edge；弱依赖是 `client -dev→ server`、`cloud-do -dev→ keys`（结构类型兼容测试）与 production packages 对 private conformance 的 test-only edge。当前的依赖 invariant 清单：
+强依赖是 `server → cloud/core/protocol`、`client → protocol/core`、`keys → core`、`cloud → core/protocol`、`cloud-dataplane → cloud/core`、`ui-runtime → cloud/protocol`；`cloud-do` 的 runtime 依赖只有 pinned pi-durable / pi-ai / chord，没有 workspace edge；弱依赖是 `client -dev→ server`、`cloud-do -dev→ keys`（结构类型兼容测试）、`cloud-do -dev→ client`（测试直接 import client 的 pi-durable storage 源码）与 production packages 对 private conformance 的 test-only edge。当前的依赖 invariant 清单：
 
 - `core !→ protocol`、`core !→ node`：core 必须保持 protocol-free、Node-free，由包内 constraint test 执行（ADR-003）。
 - `client → core`（S6-c 当前事实）：只消费 proof canonicalizer 与 truth selector contracts，不依赖 cloud implementation。
-- `server/keys !→ core`（当前事实）：尚未接线，不是永久禁令，其目标边见 §12.1。
+- `server → core`（当前事实）：server 运行时 import core 的 store 契约与 InMemory 实现（`packages/server/src/stores.ts`）。
+- `keys → core`（当前事实）：keys 只 import core 的 provider provisioning 与 sealing 契约（如 `packages/keys/src/custody.ts`）；`check:release-graph` 要求 core 是 keys 唯一的 workspace 依赖，keys 不得到达 protocol。
 - `cloud → core`、`cloud → protocol`（当前事实）：`packages/cloud/src/**` 真实 import 这两个包。
 - `keys` 与 dispatch 三包之间的零边是安全 invariant，不是尚未整理的偶然状态。
 - 任何 aligned train package `!→ keys`：keys 是 secret-plane package，必须由 consumer 显式单独安装。
@@ -241,7 +245,7 @@ flowchart TB
 | 文件 | 主要 exports / 功能 |
 | --- | --- |
 | `version.ts` | `PROTOCOL_VERSION = 3`、`CAPABILITY_FLAGS` |
-| `messages.ts` | runtime info、18 个 payload schemas、direction type lists、`MESSAGE_PAYLOAD_SCHEMAS` 单一来源 |
+| `messages.ts` | runtime info、每个消息类型的 payload schema、direction type lists、`MESSAGE_PAYLOAD_SCHEMAS` 单一来源 |
 | `envelope.ts` | discriminated union；所有 `task.*` 必须有 `task_id`，server→daemon 必须有 envelope `seq` |
 | `codec.ts` | `parseMessage`、`decodeEnvelope`、`encodeEnvelope`、`createEnvelope` |
 | `agent-event.ts` | 8 个已知 event、unknown wrapper、`isKnownAgentEvent`、`partitionAgentEvents` |
@@ -250,14 +254,22 @@ flowchart TB
 | `http-api.ts` | pair/challenge/token/blob/events/messages DTO；消息 POST batch 上限 256 |
 | `errors.ts` | parse、unknown type、validation 三类错误 |
 
-### 2.2 18 个消息类型
+### 2.2 消息类型
 
-| 分组 | 类型 |
-| --- | --- |
-| connection | `conn.hello`、`conn.ack` |
-| server → daemon | `task.offer`、`task.offer_with_toolsets`、`task.approve`、`task.reject`、`task.cancel`、`task.steer` |
-| daemon → server lifecycle | `task.claim`、`task.started`、`task.decline`、`task.await_approval`、`task.complete`、`task.fail`、`task.cancelled` |
-| daemon → server data | `task.progress`、`task.artifact`、`task.approval_resolved` |
+消息类型的唯一权威是 `packages/protocol/src/envelope.ts` 的 `EnvelopeSchema`（判别联合）；payload schema 在 `messages.ts` 的 `MESSAGE_PAYLOAD_SCHEMAS`。本节只写分组，不列数量，新增或删除类型以 `EnvelopeSchema` 为准。
+
+| 分组 | 方向 | 内容 |
+| --- | --- | --- |
+| connection | daemon → server | `conn.hello`：每次连接先发的设备快照（runtimes、capabilities、cursor）。schema 中还有 server → daemon 的 `conn.ack`，没有发送方，删除要等下一次 wire major（#925） |
+| offer | server → daemon | Agent 执行用 `task.offer_for_agent_with_egress_fresh`；另有 `task.offer_for_agent`、`task.offer_for_agent_with_egress`、`task.offer_prepared`，以及 legacy 的 `task.offer`、`task.offer_with_toolsets`（ADR-034 的删除尚未执行，见附录 A） |
+| task control | server → daemon | `task.approve`、`task.reject`、`task.cancel`、`task.steer` |
+| Agent / device control | server → daemon | `agent.*` 的 egress ack、message disposition、content read、home projection、input preparation，`provider.provisioning.available`，`agent.memory.intent.available`，`e2ee.key_package.available` |
+| task lifecycle | daemon → server | `task.claim`、`task.started`、`task.decline`、`task.await_approval`、`task.complete`、`task.fail`、`task.cancelled` |
+| task data | daemon → server | `task.progress`、`task.artifact`、`task.approval_resolved` |
+| Agent data | daemon → server | `agent.egress.reliable`、`agent.message.draft`、`agent.message.publish`、`agent.content.receipt` |
+| sealed（#654） | 两个方向 | 有内容的类型各有一个 `*_sealed` 孪生类型（offer、`task.steer`、终态、进度、artifact 与审批）；`task.offer_prepared` 没有 sealed 类型 |
+
+server → daemon 的类型都带 envelope `seq`，所有 `task.*` 都带 `task_id`（`envelope.ts`）。
 
 `task.offer.workspaceHint` 是**已实现、保留字段**：protocol schema 已有，但 public `DispatchInput`、TaskRunner 与 adapters 都没有消费它，不能把它描述成工作区选择能力。S0 已就此做出决策——维持 reserved，wire 上保留（删除是 breaking 的 v1 变更，留着的成本只是一个被忽略的 optional key），并禁止任何文档、SDK surface 或 UI 声称它能选工作区。接线需要另立 ADR 先定 resolver 设计：与 `sessionRef` 派生映射的优先级、路径校验与 confinement、设备无法满足 hint 时的行为（附录 A 的 ADR-023）。
 
@@ -310,7 +322,7 @@ stateDiagram-v2
 - 当前 wire 是 `v3`：K7（#468）把 `PROTOCOL_VERSION` 由 2 升到 3，v3 端点拒绝 v2 对端，设备与 Host 须先排空再一起升级。v2 由 ADR-037 从 1 升到 2（删除 offer 的 `PermissionPolicy`、runtime capability `permissionModes` 与 input-preparation `permissionMode`），没有 v1 reader；v2 corpus 与 registry 只读，只作负向 oracle。
 - 规则只写在 [protocol.md "Freeze rule"](../protocol.md#freeze-rule)：每个 v3 变更走 version bump、gated addition、strip-safe addition 三条路之一。后两条在 `packages/protocol/src/wire-additions.ts` 的 `WIRE_ADDITIONS` 里声明，cloud admission 读同一张表；`compat.test.ts` 用 npm 上已发布的 floor 与 previous decoder 证明这些声明。
 - observability unknown 可忽略；control/security unknown 必须 fail-closed。
-- server 只接受当前 major（v2）。v1 envelope 被拒绝；没有 N-1 reader，所以 server 与 client 必须一起升级。
+- server 只接受当前 major（v3，`PROTOCOL_VERSION = 3`，`packages/protocol/src/version.ts`）。v2 envelope 被拒绝；没有 N-1 reader，所以 server 与 client 必须一起升级。
 
 ## 3. `@byok-sdk/server`：`@byok-sdk/cloud` domain kernel 的 self-hosted façade
 
@@ -484,7 +496,8 @@ flowchart TB
     Pi(["PiAdapter<br/>RPC session"]):::adapter
     Claude(["ClaudeAdapter<br/>stream-json + control_request"]):::adapter
     Codex(["CodexAdapter<br/>app-server + OAR kernel"]):::adapter
-    Hermes(["HermesAdapter<br/>ACP viewer + owned gateway"]):::adapter
+    Hermes(["HermesAdapter<br/>ACP viewer + owned gateway<br/>Host-injected"]):::adapter
+    Grok(["GrokAdapter<br/>ACP via OAR Grok profile<br/>Host-injected"]):::adapter
   end
 
   subgraph Local["Local state and OS integration"]
@@ -510,6 +523,7 @@ flowchart TB
   Runner --> Claude
   Runner --> Codex
   Runner --> Hermes
+  Runner --> Grok
   Auth --> Stores
   Conn --> Stores
   Runner --> Git
@@ -523,6 +537,8 @@ flowchart TB
   style Local fill:none,stroke:#fb923c,stroke-width:2px,color:#fb923c
 ```
 
+`createDaemon()` 只内置 Pi、Claude 与 Codex 三个 adapter（`create-daemon.ts` 的 `ALL_RUNTIME_IDS` 与 `buildAdapter`），再按 `runtimeAllowlist` 过滤。`HermesAdapter` 与 `GrokAdapter` 从 package 导出，由 Host 构造后经 `createDaemonWithAdapters(config, adapters)` 注入；`hermes` 与 `grok` 不是 frozen wire runtime id，task 以 custom-harness identity（`harnessId`）路由到它们。
+
 ### 4.2 Public surface 与 CLI
 
 Library exports 分成六组：
@@ -531,7 +547,7 @@ Library exports 分成六组：
 | --- | --- |
 | daemon | `createDaemon`、`createDaemonWithAdapters`、`Daemon*`、credential-blind `readDeviceEnrollmentStatus` / `readDeviceEnrollmentIdentity` / `DeviceEnrollment*`、按 operation allowlist 限定的 `createStoredDeviceProofSigner`（不外泄私钥）、`retireInputPreparation`、`BlobClient`；`AuthManager`、secret-bearing local record/store、`StoredDeviceProofSigner` 均为 package-internal |
 | adapter contract | `RuntimeAdapter`、`RuntimeAdapterDescriptor`、`PreparedRuntimeOperation`、`RuntimeOperationManifest`、`RuntimeOperationStartInput`、`Session`、`RuntimeCapabilities`、`RuntimeExecutionFailure` 及其 closed phase/category/retry types、`RuntimeDisposalFailure` 及 stage、`PolicyUnsupportedError` |
-| bundled adapters | `PiAdapter`、`ClaudeAdapter`、`CodexAdapter`、`HermesAdapter`（custom harness，Host 显式加入）与 options |
+| bundled adapters | `PiAdapter`、`ClaudeAdapter`、`CodexAdapter`、`HermesAdapter` 与 `GrokAdapter`（后两者是 custom harness，Host 显式加入）与 options |
 | observability | `DaemonObserver`、event/task projection types |
 | Git workspace | `GitWorkspaceManager`、`GitWorkspaceStore`、ledger/lease/observation types |
 | OS integration | service lifecycle factories/generators、`ensureSecureDir`、Windows DACL error |
@@ -617,6 +633,8 @@ adapter-only build/import surface。
 | confirm/approval | no | no；native-interaction opt-in 是独立的本地 seam | no；native-interaction opt-in 是独立的本地 seam |
 | task-scoped host MCP toolsets | yes，daemon 观测 `tools/list` 后注册 | yes，task `--mcp-config`；用户 MCP 配置同时加载 | yes，`thread/start` config 的 `mcp_servers`；用户 `config.toml` 同时生效 |
 | usage event | provider counters + estimate context | provider counters + modelUsage window | cumulative cost deltas + last context |
+
+上表只列 `createDaemon()` 内置的三个 adapter。Host 注入的 adapter 各自在 frozen descriptor 中声明 capability：`GrokAdapter` 为 steer no、resume yes、MCP toolsets yes（ACP `mcpServers`），以 `grok agent --always-approve` 运行；`HermesAdapter` 为 steer no、resume no、MCP toolsets yes。两者的 confirm/approval 都是 no。逐项证据与 qualification 状态见 [`docs/adapter-capabilities.md`](../adapter-capabilities.md)。
 
 SDK 不再向 adapter 下发 permission policy（ADR-037）。各 runtime 的 guardrail 由用户自己的 agent 配置决定。adapter 仍然拒绝它无法执行的 offer 字段（例如 `limits.maxTokens`），不丢弃，也不近似。
 
@@ -803,17 +821,22 @@ sequenceDiagram
   Cloud-->>Server: single-use code plus expiry
   D->>D: generate Ed25519 keypair
   D->>Cloud: POST /byok/pair with code and public key
-  Cloud-->>D: deviceId and initial access token
-  D->>Cloud: POST /byok/challenge with deviceId
-  Cloud-->>D: single-use nonce
-  D->>D: sign nonce with private key
-  D->>Cloud: POST /byok/token with signature
-  Cloud-->>D: renewed bearer token
-  D->>Cloud: POST /byok/messages with conn.hello snapshot
-  D->>Cloud: GET /byok/events?cursor=N
+  Cloud-->>D: deviceId, tenantId and access token
+  opt renewal: before the token expires, or after a 401
+    D->>Cloud: POST /byok/challenge with deviceId
+    Cloud-->>D: single-use nonce
+    D->>D: sign domain-separated nonce with private key
+    D->>Cloud: POST /byok/token with signature
+    Cloud-->>D: new access token
+  end
+  D->>Cloud: POST /byok/messages with a lone conn.hello snapshot
   Cloud->>Cloud: verify bearer, product, device and protocol
+  Cloud-->>D: outcome, capabilities and ingress limits
+  D->>Cloud: GET /byok/events?cursor=N
   Cloud-->>D: capabilities and task envelopes after cursor
 ```
+
+配对本身就签发 access token（`packages/cloud/src/handlers/auth.ts` 的 pair handler 直接 `mintAccessToken`）；challenge/token 只用于续期：daemon 在 token 到期前主动续期，收到 401 时立即续期（`packages/client/src/daemon/auth-manager.ts`）。每次连接先用单独一次 `POST /byok/messages` 发 `conn.hello`，它的应答带回 server capabilities 与 activity ingress 限额；`conn.hello` 被拒绝时 daemon 停机（`handshake_rejected`）。之后才开始 long-poll 与 outbox drain（`connection-manager.ts`）。
 
 认证错误路径：无效/过期 pairing code、nonce replay、签名不符、token claims 不符都拒绝。device revoke 后 challenge/token/authed HTTP 与 long-poll 返回 401；daemon 清理本地身份并进入 `revoked`，不会无限重试。
 
@@ -827,6 +850,7 @@ sequenceDiagram
   participant Cloud as cloud kernel
   participant Store as TaskAttemptStore
   participant CM as ConnectionManager
+  participant J as Local journal
   participant TR as TaskRunner
   participant AD as RuntimeAdapter
   participant Proc as Runtime process
@@ -834,40 +858,54 @@ sequenceDiagram
   App->>Server: dispatch input
   Server->>Cloud: reserve offer and mailbox row
   Cloud->>Store: create Offered attempt
-  Cloud-->>CM: task.offer with device seq
+  Note over CM,Cloud: conn.hello was accepted first (§8.1)
+  CM->>Cloud: GET /byok/events?cursor=N, held while the mailbox is empty
+  Cloud-->>CM: page of events, task.offer_* with device seq
+  CM->>J: append inbound envelope bytes
   CM->>TR: handle envelope FIFO
   TR->>TR: dedup, limits, frozen descriptor, toolset preflight
   TR->>AD: prepare offer with frozen descriptor (no side effects)
   alt pre-claim incompatibility
-    TR-->>Cloud: task.decline retryable or not
+    TR->>J: record task.decline before the ack
+    TR-->>Cloud: POST /byok/messages task.decline
     Cloud->>Store: Offered to Failed
   else accepted
     TR->>TR: seal credential-free operation manifest
-    TR-->>Cloud: task.claim with manifest runtime/capabilities
+    TR-->>Cloud: POST /byok/messages task.claim with manifest runtime/capabilities
     Cloud->>Store: Offered to Claimed
     TR->>AD: start prepared operation with manifest + runtime resources
     AD->>Proc: spawn official CLI
     TR-->>Cloud: task.started
     Cloud->>Store: Claimed to Running
+    TR-->>CM: handler resolves once the task is registered
+    CM->>Cloud: next GET carries the saved cursor and acks the offer row
     loop Session events AsyncIterable
       Proc-->>AD: runtime-specific frames
       AD-->>TR: normalized AgentEvent
       TR-->>Cloud: batched task.progress
     end
     alt turn_end
+      TR->>J: record terminal bytes as pending
       TR-->>Cloud: task.complete
       Cloud->>Store: Running to Complete
     else typed runtime execution failure
       AD-->>TR: RuntimeExecutionFailure phase/category/retry
+      TR->>J: record terminal bytes as pending
       TR-->>Cloud: task.fail
       Cloud->>Store: non-terminal to Failed
     else cancel
+      TR->>J: record terminal bytes as pending
       TR-->>Cloud: task.cancelled
       Cloud->>Store: non-terminal to Cancelled
     end
+    TR->>AD: Session.close() after the terminal is sent
+    Cloud-->>CM: per-envelope outcome of the terminal POST
+    CM->>J: confirm or reject the terminal
     Server-->>App: TaskHandle events and result readback
   end
 ```
+
+offer 不是推送：daemon 用 held `GET /byok/events` 拉取，offer 是应答中一页 events 的一项。每个 daemon 都打开本机 journal（`SqliteLocalTaskJournal`）：inbound envelope 先写进 journal，handler 才继续；handler resolve 后 cursor 才保存，下一次 GET 带上它，才算 ack 这条 mailbox row（`create-daemon.ts` 的 `onEnvelope`、`connection-manager.ts`）。offer handler 在任务注册后就 resolve，不等终态。终态先以 pending 写进 journal 再发送，cloud 的 per-envelope outcome 回来后确认或标记拒绝；daemon 重启时，已认领但没有终态的任务由 journal 恢复为不可重试的 `task.fail`（`daemon_interrupted`）。终态发出后，`TaskRunner` 等待 `Session.close()` 的 receipt 与终态的 journal 提交，再释放 task 的本地 ownership（`task-runner.ts` 的 `settleSemanticTerminal` 与 `finishOnce`）。
 
 关键 ownership 变化：SaaS 通过 server façade 创建 task；cloud kernel 持有
 durable attempt、mailbox 与 terminal authority；TaskRunner 决定是否能安全执行；
@@ -885,7 +923,7 @@ flowchart LR
   classDef gate fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
 
   Outbox[("Client single outbox")]:::store
-  Poll(["GET /events<br/>POST /messages frozen wire counts"]):::primary
+  Poll(["GET /events<br/>POST /messages per-envelope outcomes"]):::primary
   Cloud(["Same cloud-kernel inbound gate"]):::gate
   Cursor[("Persisted task-envelope cursor")]:::store
   Dedup[("Completed-envelope dedup<br/>plus resumable semantic writes")]:::store
@@ -899,13 +937,15 @@ flowchart LR
 long-poll 是唯一的完整双向 transport：`GET /byok/events` 读取 mailbox，
 `POST /byok/messages` 发送 `conn.hello` 与 daemon→server envelopes。cursor 只在
 handler 成功且同一 cursor 已成功落盘后才对下一次 GET 可见；save 失败或未完成时
-wire acknowledgement 保持旧值。POST 200 保留 frozen wire（v2）的 `accepted/rejected`
-counts；mixed rejection 由 client 对 immutable envelope ids 做 bounded binary
-isolation，重复提交以 cloud dedup 收敛，最终只有 rejected singleton 进入 bounded
-observable quarantine，不阻塞后续 valid envelope。unknown `task.*`
-只在 safe、non-negative、page-bounded 且有序的 seq 上 forward-skip，malformed page
-不推进 cursor。失败时 watermark 冻结并 backoff，后续重放依靠 TaskRunner 与 cloud
-kernel 的 idempotency。旧版本曾有第二种 socket
+wire acknowledgement 保持旧值。v3 的 POST 200 为每个 envelope 返回一条
+`outcomes`（`accepted`、`duplicate` 或带 reason 的 `rejected`，
+`MessagesSendResponseSchema`），`accepted/rejected` 计数只作核对；client 按 id
+逐条结算，不再做 binary isolation。被拒绝的 envelope 不再重发；没有应答或应答不可用
+时，outbox 保留原样的整批，按原字节重发，由 cloud dedup 收敛
+（`connection-manager.ts` 的 `drainOutbox`）。一页 events 中无法解析的可执行消息
+（未知类型或校验失败）会停住游标，不跳过：cursor 不越过它的 seq，transport 进入
+stalled backoff（`long-poll-transport.ts`，#137）；malformed page 也不推进 cursor。
+后续重放依靠 TaskRunner、journal 与 cloud kernel 的 idempotency。旧版本曾有第二种 socket
 transport 及其互斥/接管规则；该规则已随 WP3B Step 4b 删除，本段不再定义任何
 alternate transport mode。
 
@@ -1053,14 +1093,14 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4
 
 | ID | 缺口 | 优先级 | 落点 |
 | --- | --- | --- | --- |
-| GAP-006 | **已收口（S3b，2026-08-08）**：hosted mailbox 的无状态 device 面与 InMemory 组合（S3a，既有 daemon long-poll 零改动跑通）＋本机 durable journal（S3b，`SqliteLocalTaskJournal` 与 append-then-ack 顺序）合并闭环 | Pri-0（平台线） | S3a + S3b |
+| GAP-006 | **已收口（S3b，2026-08-08）**：hosted mailbox 的无状态 device 面与 InMemory 组合（S3a，既有 daemon long-poll 零改动跑通）＋本机 durable journal（S3b，`SqliteLocalTaskJournal` 与 append-then-ack 顺序）合并闭环；journal 现在是每个 daemon 的唯一模式，不再是 hosted 开关（#924） | Pri-0（平台线） | S3a + S3b |
 | GAP-008 | **已收口（S5）**：board / presence / activity 与 SSE/poll reconciliation 已实现 | Pri-1 | S5 |
 | GAP-009 | **已收口（S6-a/S6-b/S6-c + S7 RC）**：device proof row authority/verifier、proof-only truth routes、Postgres atomic commit、daemon signer 与 selector/fetch/rehash/filter 均已实现；独立 security acceptance 与 RC gate 已通过 | 已收口 | S6/S7 |
 | GAP-011 | **已收口（S7-a/S7-b）**：deterministic health/crash authority、read-only doctor、evidence-preserving quarantine 与 bounded/redacted support bundle 已实现 | Pri-1 | S7 |
 | GAP-012 | **已收口（K4/K4.1）**：AiphaBee 已切到 registry `@byok-sdk/keys@0.1.0`，golden expectations unchanged，PR #7 merge `390307a` | 已收口 | K4/K4.1 |
 | GAP-013 | **已裁定并收口（K4/K4.1）**：platform-selecting secret-store factory 与 data-scope manifest 归 host；narrative `testConnection()` 留在 AiphaBee adapter，不扩 generic registry API | 已收口 | K4/K4.1 |
 | GAP-014 | **已收口（S7-b）**：hosted/self-hosted operations 与 host-owned signing/channel/updater/rollback responsibility runbook 已实现 | Pri-1 | S7 |
-| GAP-015 | **已收口（S3b，2026-08-08）**：`SqliteLocalTaskJournal` 为 hosted canonical（单库 `daemon.db`、八表、`BEGIN IMMEDIATE`）、`LocalStoragePolicy` 水位状态机与型别级 never-delete 的分类 GC 均已落地 | Pri-0（平台可靠性） | S3b |
+| GAP-015 | **已收口（S3b，2026-08-08）**：`SqliteLocalTaskJournal` 为本机 journal 的 canonical 实现，每个 daemon 都打开它（#924；S3b 时只在 hosted 模式开启）（单库 `daemon.db`、八表、`BEGIN IMMEDIATE`）、`LocalStoragePolicy` 水位状态机与型别级 never-delete 的分类 GC 均已落地 | Pri-0（平台可靠性） | S3b |
 | GAP-016 | **已收口（S4A/S4B）**：Postgres + R2 entitlement/usage/reservation/quota/GC 与 reconciliation 已实现 | Pri-0（hosted storage） | S4A/S4B |
 
 ## 12. 平台架构（S0–S7 与 release/registry closeout 已落地）
@@ -1229,7 +1269,7 @@ flowchart LR
   Presence[("presence + activity TTL<br/>lossy, dropped explicit")]:::ephemeral
 
   Board -->|"claim creates offer"| Mailbox
-  Mailbox -->|"poll v2 envelope"| Daemon
+  Mailbox -->|"poll v3 envelope"| Daemon
   Daemon -->|"ack only after durable local append"| Mailbox
   Daemon -->|"reserve bytes before durable write"| Quota
   Daemon -->|"signed terminal / profile / memory"| Truth
@@ -1254,21 +1294,26 @@ sequenceDiagram
   participant D as Local daemon
   participant J as Durable local journal
   participant R as Runtime
-  participant T as TruthStore plus ObjectStore
+  participant T as ReceiptStore plus TaskAttemptStore
 
   SaaS->>Cloud: claim or enqueue work
-  Cloud->>Mail: append frozen-v2 task.offer bytes with tenant device seq
+  Cloud->>Mail: append v3 task.offer_* bytes with tenant device seq
   D->>Cloud: poll after cursor
   Cloud->>Mail: read without ack
-  Mail-->>D: task.offer
+  Mail-->>D: task.offer_*
   D->>J: durable append local task record and bytes
   D->>Cloud: next cursor acknowledges prior mailbox rows
   D->>R: run local state machine and context filtering
   R-->>D: progress, artifacts, terminal
   D->>Cloud: bounded lossy hints
-  D->>T: device-signed terminal or truth record with expectedRev
-  T-->>SaaS: immutable result or 409 conflict
+  D->>J: record terminal bytes as pending
+  D->>Cloud: POST /byok/messages terminal envelope
+  Cloud->>T: recordTerminal: first terminal receipt, then attempt status
+  Cloud-->>D: per-envelope outcome
+  T-->>SaaS: result readback
 ```
+
+终态经 `POST /byok/messages` 进入 cloud 的 inbound gate，由 `recordTerminal`（`packages/cloud/src/inbound.ts`）写入：先记下 task 的第一份终态 receipt，再推进 attempt 状态；同一 task 之后的另一份终态不覆盖第一份。§12.6.4 的 proof-bound truth record 路由（client `writeTerminal`）是另一条独立的写入面，daemon 的 task loop 不调用它。
 
 load-bearing 顺序是 durable local append 后才 ack mailbox。append 前 crash 由 redelivery 恢复；append 后 crash 由 local journal 恢复。cloud 不需要持有 Running record 才能保证任务不丢。
 
@@ -1374,7 +1419,7 @@ canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规�
 
 S6-c client 先取得 metadata-only manifest，本地 `MemorySelector` 只返回 `(kind, recordKey)`；client 只 fetch 这些 key，并要求 GET metadata 与 selector 所见 manifest 完全一致，再对 inline/object bytes 验 byte size 与 SHA-256。object grant 只能访问 host 显式配置的 credential-free HTTP(S) origin，redirect 固定为 `manual`，未列入 allowlist 的 relative/absolute URL 在网络访问前拒绝。任何 list/get race、同 size 字节替换或 grant URL confusion 都在 local filter 之前 fail-closed。>1 MiB snapshot 只发 metric，不拒绝、不切 delta。filter 的泛型返回值是唯一对外 context，runtime prompt shape 继续由 host 决定。
 
-`terminal` body 对 cloud 是 opaque bytes/object ref；client 提供 proof-bound `writeTerminal`，caller/journal 负责选择要提交的 frozen-v2 terminal 来源，cloud 不做第二套 envelope 语义解析，S6-c 也不猜现有 task loop 的 prompt/flush policy。client 将成功 receipt 的 primary 与 ordered snapshots 逐项绑定到请求的 selector、next revision、content hash 与 byte size，结构合法但属于另一请求的 response 不能冒充提交成功。相同 `requestId + bodyHash` 重送回原结果；同 `taskId` 不同 terminal hash 回 `409 terminal_conflict`，不覆写第一份真相。
+`terminal` body 对 cloud 是 opaque bytes/object ref；client 提供 proof-bound `writeTerminal`，caller/journal 负责选择要提交的 v3 terminal 来源，cloud 不做第二套 envelope 语义解析，S6-c 也不猜现有 task loop 的 prompt/flush policy。client 将成功 receipt 的 primary 与 ordered snapshots 逐项绑定到请求的 selector、next revision、content hash 与 byte size，结构合法但属于另一请求的 response 不能冒充提交成功。相同 `requestId + bodyHash` 重送回原结果；同 `taskId` 不同 terminal hash 回 `409 terminal_conflict`，不覆写第一份真相。
 
 #### 12.6.5 Key rotation
 
@@ -1412,7 +1457,7 @@ lifecycle。下面四个概念不得互换：
 未来 fleet slice 必须另设 `AgentObservation` 作为非权威运行态投影，并以
 generation/lease 拒绝 stale lifecycle command。显式 placement 不可用时禁止
 回退到 `pickFirstConnectedDevice()`；runtime discovery 也不得创建或迁移
-Agent。当前 wire（Protocol v2）保持冻结，Agent lifecycle 只能进入新 control-plane/API
+Agent。当前 wire（Protocol v3）保持冻结，Agent lifecycle 只能进入新 control-plane/API
 或明确批准的 versioned surface。完整裁定见 ADR-025。
 
 Agent local/cloud projection 使用 additive capability 和 distinct wire
@@ -1457,7 +1502,7 @@ Datum authority 必须保持单一且可追溯：
 | Egress policy/capability | host 选择的 typed policy + device 的 durable declaration | server/cloud 只按 capability admission；不由 presence 或 runtime guess |
 | Reliable event identity | public publisher 读取的 exact handoff + stable event/cursor | publisher 证明 Agent/task/session/runtime/cwd 后才 append/send；cloud receipt/ack 不 mint session |
 
-修复当时保持 Protocol v1 frozen（当前 wire 是 v2，ADR-037），采用两个 additive facts：
+修复当时保持 Protocol v1 frozen（当前 wire 是 v3，K7），采用两个 additive facts：
 
 - `task.offer_for_agent_with_egress_fresh` 是 fresh-only message，明确不带
   `sessionRef`；目标设备必须持久声明 `agent-egress-fresh-session`，旧 daemon
@@ -1563,7 +1608,7 @@ compaction hook。本节只陈述 `codex/agent-memory-phase2` 的 source 与本�
 
 | 类别 | 典型内容 | 存储 | 生命周期 |
 | --- | --- | --- | --- |
-| mailbox | server→daemon 的 frozen wire（v2）envelope | Postgres | ack 且过 retention 后删除 |
+| mailbox | server→daemon 的 frozen wire（v3）envelope | Postgres | ack 且过 retention 后删除 |
 | board | title/channel/status/assignee/`board_seq` | Postgres | 长期，或宿主配置的 archive policy |
 | truth | terminal/profile/memory 的 metadata、hash、rev、proof | Postgres + R2 | durable；只按显式删除或 retention policy 回收 |
 | hints | presence/activity/dropped | TTL Postgres 或 KV | 分钟级 |
@@ -1574,7 +1619,7 @@ compaction hook。本节只陈述 `codex/agent-memory-phase2` 的 source 与本�
 
 #### 12.7.2 Durable local journal：SQLite 为生产 canonical（已实现 S3b）
 
-**#399 source contract**：client 的 `daemon/retention/` 统一拥有 scratch、封闭类别表、用量与 sweeper。每个 daemon 在 store owner lease 和 owned-process reconciliation 后、capability publication 前执行启动清扫；默认每 15 分钟按既有 maintenance jitter 算法运行，pressure 每 5 分钟。等待 enrollment 的服务也运行文件维护，但不提前打开 hosted journal writer。配置是 `DaemonConfig.storage`，budget 可选；无 budget 仍维护、测量并上报。
+**#399 source contract**：client 的 `daemon/retention/` 统一拥有 scratch、封闭类别表、用量与 sweeper。每个 daemon 在 store owner lease 和 owned-process reconciliation 后、capability publication 前执行启动清扫；默认每 15 分钟按既有 maintenance jitter 算法运行，pressure 每 5 分钟。等待 enrollment 的服务也运行文件维护，但不提前打开 journal writer。配置是 `DaemonConfig.storage`，budget 可选；无 budget 仍维护、测量并上报。
 
 **#493 默认 scratch**：先用 canonical store 路径判断 `<store>/tmp` 是否满足 Unix socket 长度限制。超限时，macOS 使用 `/private/tmp/byok-scratch-<hash>`，Linux 使用 `/tmp/byok-scratch-<hash>`。hash 是 canonical store 路径的 SHA-256 前 16 个十六进制字符。未超限时保留 lexical `<storeDir>/tmp`，并检查其长度，以保持 retention 分类。显式 root 仍须通过路径检查。root 归属检查先于 `chmod`；拒绝其他用户拥有的 root 时不改变其权限。
 
@@ -1619,7 +1664,7 @@ sequenceDiagram
 
 “领走即弃”是**游标推过即删**，不是**读到即删**。读到即删会直接打断已冻结的 at-least-once 语义：client 的整套 stall 机制建立在“未 ack 的 seq 会被反复重投”之上（§8.3）。删除的触发器是 client 下次带上来的 cursor，那才是它的持久化 ack。
 
-对 `task.offer` 而言，“成功处理到可 ack”= wire bytes（当前 v2）与本机 task record 已在同一个**本机** transaction durable append，且工作已交给本机 scheduler；**不是**等 agent 跑到终态。cursor 不承担 running-state recovery。
+对 `task.offer` 而言，“成功处理到可 ack”= wire bytes（当前 v3）与本机 task record 已在同一个**本机** transaction durable append，且工作已交给本机 scheduler；**不是**等 agent 跑到终态。cursor 不承担 running-state recovery。
 
 | Crash 位置 | 结果 |
 | --- | --- |
@@ -1860,7 +1905,7 @@ flowchart LR
 
 SaaS 侧策划的声明式内容（agentskills.io 兼容的 `SKILL.md` + 静态资源）经 hosted HTTP 下发到已配对 device。拆解证据见 `docs/researches/2026-08-12_hermes-buzz-extraction-assessment.md` §3（#390 后不再跟踪）。
 
-**wire 边界。** 走 hosted HTTP + ADR-010 声明，不进 frozen wire envelope（交付时为 v1，当前为 v2），不新增 `MESSAGE_TYPES`——技能包是 device 读到声明后主动拉取的内容，不是 server 推进 task 流的消息。`packages/protocol` 零 diff 是本次交付的硬验收。
+**wire 边界。** 走 hosted HTTP + ADR-010 声明，不进 frozen wire envelope（交付时为 v1，当前为 v3），不新增 `MESSAGE_TYPES`——技能包是 device 读到声明后主动拉取的内容，不是 server 推进 task 流的消息。`packages/protocol` 零 diff 是本次交付的硬验收。
 
 | 路由 | class | 职责 |
 | --- | --- | --- |
@@ -1952,7 +1997,7 @@ RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组�
 #### 14.3.1 At-least-once 的完整链条
 
 - server/cloud 可以重投；
-- client cursor 只在 handler 成功、且 hosted 模式下本机 journal 已 durable 之后才推进；
+- client cursor 只在 handler 成功、且本机 journal 已 durable 之后才推进；每个 daemon 都有 journal；
 - envelope id dedup 与语义幂等两者同时存在，不能只留一个；
 - terminal 与 truth 写入必须幂等；
 - long-poll 的 inbound 与 outbound 都共用同一个 cloud-kernel gate；
@@ -1981,7 +2026,7 @@ S7-a 落 operational health/crash authority；S7-b 已把它与 runtime/control/
 - start 写入 atomic+fsync run marker（temp file 先同步再 atomic rename；POSIX 随后同步 published target + parent directory；Windows 随后以 writable handle 同步 published target，因为 Node/libuv 不提供 directory flush），clean shutdown 在完整 teardown 后清除；下次启动只把遗留 marker 记为 unclean crash，clean stop 不计 crash；
 - corrupt health JSON/shape 作为 typed `unavailable` 投影到 daemon/control/CLI status，原文件不删除、不覆写、不伪造 healthy；
 - `byok-agent doctor` 默认只读，汇总 config protocol、bounded runtime detection、authenticated control reachability、health、workspace accessibility 与 bounded quarantine inventory；health 的 daemon loader 与 doctor 共用 closed、pathname-bound、1 MiB bounded read authority，超限只报 unavailable、不得冒充 confirmed corruption；POSIX additionally uses no-follow/non-blocking flags，Windows 则在读取任何 byte 前以 pre-open `lstat` 和 post-open handle/path identity binding 拒绝 static/raced reparse point；SQLite `quick_check` 只对复制到 OS temp 的 bounded DB/WAL/SHM snapshot 执行，绝不直接打开 store 内数据库，因此 report-only 不会创建 `-wal`/`-shm` sidecar；snapshot 期间源 identity/size/mtime/ctime 漂移则诚实报告 unavailable；`--json` 只改变渲染，不改变 authority；
-- malformed/corrupt health state 在 ordinary status/doctor 下保持 byte-identical；read/open/permission/oversize/race failure 单独投影为 `unavailable`，不得冒充 confirmed corruption；configured `storeDir` 在 daemon/CLI/diagnostics 入口一次性解析为 absolute path，后续 cwd-pinned publication 不得重新解释相对路径；pair/start/auth renewal/unpair cleanup 到完整 writer teardown 受同一 cross-process store mutation lease 约束，process-local lifecycle queue 串行 pair/start/stop/control shutdown/unpair，pair/renewal 另由同一 credential mutation queue 串行；hosted SQLite 的 module capability 可在构造期无副作用检查，但 DB open、PRAGMA、schema、corruption quarantine 与 pressure engine 必须在 `start()` 成功取得 lease 后才构造，owned journal/maintenance 完整停止并 close 后才能释放 lease；failed start、并发 stop 或 late writer barrier 未闭合时继续 fail-closed 持有；`device.json` 的读/移除使用 bounded pathname-bound handle 与同 inode hard-link guard；owner/reclaim 只接受 bounded pathname-bound v2 record 中完整的 PID、process-start identity 与 kernel-owned loopback liveness port，不接受 bare PID/missing-token compatibility authority，并可在 grace 后回收 malformed stale reclaim；self start identity 只由 Node process lifetime 计算，不依赖 `ps`/PowerShell，foreign PID 是否仍是 owner 由 PID-liveness 与该 lease 独占 listener 共同裁定，因此 PID reuse 不会永久阻塞 recovery；ordinary quarantine inventory 先 pin real directory inode，再以最多 200 entries / 128 MiB cumulative reads 的 hard bounds 验证 pathname-bound manifest 与 evidence，health evidence 必须重算匹配 size/SHA-256，journal evidence 必须与 manifest 内同目录 files binding 匹配，invalid/unbound/symlink state 报 `unavailable`；只有 operator 明确给出 `doctor --fix --yes`、成功取得同一 lease，且由 pathname-bound handle 重新确认 bounded JSON/shape corruption 时才可搬进 quarantine；fix 以 cwd-pinned checked quarantine directory inode 同步复核 source 的 inode/size/mtime/ctime、复制 bounded bytes 到独立 evidence inode、按该 copy 计算 digest、exclusive 发布 source path/reason/size/digest manifest，最后才移除未漂移的 source name；pre-unlink failure 回滚 publication，crash 最坏保留 source 与 valid evidence duplicate，不创建伪造 healthy replacement；
+- malformed/corrupt health state 在 ordinary status/doctor 下保持 byte-identical；read/open/permission/oversize/race failure 单独投影为 `unavailable`，不得冒充 confirmed corruption；configured `storeDir` 在 daemon/CLI/diagnostics 入口一次性解析为 absolute path，后续 cwd-pinned publication 不得重新解释相对路径；pair/start/auth renewal/unpair cleanup 到完整 writer teardown 受同一 cross-process store mutation lease 约束，process-local lifecycle queue 串行 pair/start/stop/control shutdown/unpair，pair/renewal 另由同一 credential mutation queue 串行；journal 的 DB open、PRAGMA、schema、corruption quarantine 与 pressure engine 必须在 `start()` 成功取得 lease 后才构造，owned journal/maintenance 完整停止并 close 后才能释放 lease；failed start、并发 stop 或 late writer barrier 未闭合时继续 fail-closed 持有；`device.json` 的读/移除使用 bounded pathname-bound handle 与同 inode hard-link guard；owner/reclaim 只接受 bounded pathname-bound v2 record 中完整的 PID、process-start identity 与 kernel-owned loopback liveness port，不接受 bare PID/missing-token compatibility authority，并可在 grace 后回收 malformed stale reclaim；self start identity 只由 Node process lifetime 计算，不依赖 `ps`/PowerShell，foreign PID 是否仍是 owner 由 PID-liveness 与该 lease 独占 listener 共同裁定，因此 PID reuse 不会永久阻塞 recovery；ordinary quarantine inventory 先 pin real directory inode，再以最多 200 entries / 128 MiB cumulative reads 的 hard bounds 验证 pathname-bound manifest 与 evidence，health evidence 必须重算匹配 size/SHA-256，journal evidence 必须与 manifest 内同目录 files binding 匹配，invalid/unbound/symlink state 报 `unavailable`；只有 operator 明确给出 `doctor --fix --yes`、成功取得同一 lease，且由 pathname-bound handle 重新确认 bounded JSON/shape corruption 时才可搬进 quarantine；fix 以 cwd-pinned checked quarantine directory inode 同步复核 source 的 inode/size/mtime/ctime、复制 bounded bytes 到独立 evidence inode、按该 copy 计算 digest、exclusive 发布 source path/reason/size/digest manifest，最后才移除未漂移的 source name；pre-unlink failure 回滚 publication，crash 最坏保留 source 与 valid evidence duplicate，不创建伪造 healthy replacement；
 - stale owner/reclaim 的 check-remove-publish 另受 canonical-realpath-derived kernel-exclusive loopback mutex 串行，symlink/junction alias 必须落到同一 mutex，消除两个 reclaimer 互删 marker/owner 的 TOCTOU；listener 以 canonical hash 自证 identity，同 store hash 立即拒绝，不同且格式有效的 BYOK store identity 才可进入下一个 deterministic candidate；无 identity 且持续不响应的 listener（可能是 event-loop starvation 下的同 store holder）保持 fail-closed，只有明确关闭/reset 的 foreign listener 可跳过。因此未知的本机 listener collision 可能拒绝本次启动但绝不放进第二 writer；20,000-port deterministic window 与 32 candidates 只降低 availability collision，不把安全判定交给概率。owner record 仍使用独立 random liveness listener裁定 PID reuse。`device.json`、`control.token` 与 audit tail 都在任何 byte 读取前后完成 bounded pathname/handle identity binding；`control.token` 超限、FIFO、symlink 或 race 统一投影为 offline/unavailable，不得阻塞 doctor/support-bundle。POSIX evidence/manifest link 后先 fsync quarantine directory，才 unlink source 并 fsync source parent；Windows 保留 file fsync + ordered link/unlink，因为 Node/libuv 没有 directory flush surface；
 - corrupt journal 继续由既有 `JournalCorruptError` 路径 quarantine；doctor 只做 read-only detection，不提供 rebuild、plain-file fallback 或自动清理；
 - `byok-agent support-bundle --output <new-path>` 以 exclusive atomic publish 写 bounded JSON，POSIX 为 0600；Windows 先对同 filesystem 的空 private directory 施加 restrictive inherited DACL，敏感 bytes 只在该目录内产生，再对 inode 复核 DACL并 hard-link 到目标名；已存在路径拒绝覆盖；它复用同一 typed collector，不另造诊断真相；
@@ -2004,7 +2049,7 @@ S7-a 落 operational health/crash authority；S7-b 已把它与 runtime/control/
 
 ### 14.4 必须保持的不变量
 
-1. protocol freeze 按 [protocol.md "Freeze rule"](../protocol.md#freeze-rule) 的三条路执行，由 `compat.test.ts` 对已发布 decoder 机检；`golden/v2.envelopes.ndjson` 只追加，已发布前缀由 `golden/releases.json` 的 sha256 钉住。breaking shape 必须升 major（ADR-037 的 v1 → v2 即是一例）。
+1. protocol freeze 按 [protocol.md "Freeze rule"](../protocol.md#freeze-rule) 的三条路执行，由 `compat.test.ts` 对已发布 decoder 机检；`golden/v3.envelopes.ndjson` 与 `golden/v3.http.ndjson` 只追加，已发布前缀由 `golden/v3.releases.json` 钉住；v2 corpus 只读，只作负向 oracle。breaking shape 必须升 major（ADR-037 的 v1 → v2、K7 的 v2 → v3 都是例子）。
 2. `keys` 与 dispatch/platform dependency graph 保持所规定的零边。
 3. unknown observability 可忽略；unknown control/security fail-closed。
 4. device/server/task ownership 每次 crossing 都验证，不靠调用者自律。
@@ -2014,7 +2059,7 @@ S7-a 落 operational health/crash authority；S7-b 已把它与 runtime/control/
 8. board claim/status 使用 CAS；不做 silent last-write-wins。
 9. workspace/Git state 不驱动 protocol task transition。
 10. runtime adapter 拒绝它无法执行的 offer 字段，不丢弃也不近似；offer 不再携带 permission policy（ADR-037）。
-11. hosted production 的 mailbox ack authority 使用 SQLite（或同等 contract），不能退回未证明 durable 的普通文件。（已实现 S3b：`node:sqlite` 缺席时构造抛 `JournalUnavailableError`，不降级）
+11. 每个 daemon 的 mailbox ack authority 都是本机 SQLite journal（或同等 contract），不能退回未证明 durable 的普通文件，也没有不带 journal 的模式。（S3b 实现；#924 起对每个 daemon 生效，不降级）
 12. `committedBytes + reservedBytes` 不得超过有效 entitlement；所有直接上传先做 reservation。
 13. quota 满只拒绝新的 durable write，不自动删除用户 durable truth。
 14. R2 删除必须经过 Postgres tombstone / grace / reconcile，不能先删 bytes 再猜引用。

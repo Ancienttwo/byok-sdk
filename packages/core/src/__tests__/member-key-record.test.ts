@@ -1,13 +1,21 @@
 /**
  * E2d-1 member key record (#654 design §7.1, §7.7; owner §50a D): the stored
- * form of a device member's two private keys, and its tamper proofs.
+ * form of a device member's two private keys, and its tamper proofs. E2d-5:
+ * its KEM rotation (§7.5).
  */
 import { describe, expect, it } from 'vitest';
 
 import { canonicalizeJson, type JsonObject } from '../attestation';
 import { createMemberKeyBundle } from '../sealed-payload/member-bundle';
 import { deriveMemberId, signMemberChainEntry, verifyMemberChainEntry } from '../sealed-payload/member-chain';
-import { generateMemberKeyRecord, openMemberKeyRecord } from '../sealed-payload/member-key-record';
+import {
+  beginMemberKemRotation,
+  finishMemberKemRotation,
+  generateMemberKeyRecord,
+  openMemberKeyRecord,
+  type MemberKemKey,
+  type MemberKeys,
+} from '../sealed-payload/member-key-record';
 import { generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from '../sealed-payload/scope-key';
 
 const DEVICE = { tenantId: 'tenant-a', deviceId: 'device-1' };
@@ -65,13 +73,13 @@ describe('member key record', () => {
     const scopeKey = generateScopeKey();
     const pkg = await sealScopeKeyPackage({
       scopeKey, tenantId: DEVICE.tenantId, scopeId: 'scope-a', epoch: 1,
-      recipient: { memberId: member.memberId, kemPublicJwk: keys.kem.publicJwk },
+      recipient: { memberId: member.memberId, kemPublicJwk: keys.kem.publicJwk, kemEpoch: keys.kem.epoch },
       sender: { signingPublicJwk: keys.signing.publicJwk, signingPrivateKey: keys.signing.privateKey },
     });
     const opened = await openScopeKeyPackage({
       package: pkg,
       expected: { tenantId: DEVICE.tenantId, scopeId: 'scope-a', epoch: 1 },
-      recipient: { memberId: member.memberId, kemPublicJwk: keys.kem.publicJwk, kemPrivateKey: keys.kem.privateKey },
+      recipient: { memberId: member.memberId, kemPublicJwk: keys.kem.publicJwk, kemPrivateKey: keys.kem.privateKey, kemEpoch: keys.kem.epoch },
       senderSigningPublicJwk: keys.signing.publicJwk,
     });
     expect(opened.ok && Buffer.from(opened.scopeKey).equals(Buffer.from(scopeKey))).toBe(true);
@@ -94,5 +102,80 @@ describe('member key record', () => {
     expect(await openMemberKeyRecord(edit(text, (value) => { (value.kemJwk as { d: string }).d = 'AAAA'; }))).toBeUndefined();
     expect(await openMemberKeyRecord('not json')).toBeUndefined();
     expect(await openMemberKeyRecord(undefined)).toBeUndefined();
+  });
+});
+
+/** A package of `scopeKey` from the member `keys` to itself, wrapped to `kem`. */
+async function selfPackage(keys: MemberKeys, kem: MemberKemKey, scopeKey: Uint8Array) {
+  return sealScopeKeyPackage({
+    scopeKey, tenantId: DEVICE.tenantId, scopeId: 'scope-a', epoch: 1,
+    recipient: { memberId: await deriveMemberId(keys.signing.publicJwk), kemPublicJwk: kem.publicJwk, kemEpoch: kem.epoch },
+    sender: { signingPublicJwk: keys.signing.publicJwk, signingPrivateKey: keys.signing.privateKey },
+  });
+}
+
+async function openSelf(keys: MemberKeys, kem: MemberKemKey, pkg: unknown) {
+  return openScopeKeyPackage({
+    package: pkg, expected: { tenantId: DEVICE.tenantId, scopeId: 'scope-a', epoch: 1 },
+    recipient: { memberId: await deriveMemberId(keys.signing.publicJwk), kemPublicJwk: kem.publicJwk, kemPrivateKey: kem.privateKey, kemEpoch: kem.epoch },
+    senderSigningPublicJwk: keys.signing.publicJwk,
+  });
+}
+
+describe('member key record KEM rotation (E2d-5)', () => {
+  it('begins a rotation beside the current key, keeps the member, and resumes it unchanged', async () => {
+    const text = await generateMemberKeyRecord(DEVICE);
+    const before = (await openMemberKeyRecord(text))!;
+    expect(before.nextKem).toBeUndefined();
+    const begun = await beginMemberKemRotation(text);
+    expect(canonicalizeJson(JSON.parse(begun) as JsonObject)).toBe(begun);
+    const keys = (await openMemberKeyRecord(begun))!;
+    expect(keys.signing.publicJwk).toEqual(before.signing.publicJwk);
+    expect(keys.kem).toMatchObject({ epoch: 1, publicJwk: before.kem.publicJwk });
+    expect(keys.nextKem?.epoch).toBe(2);
+    expect(keys.nextKem?.publicJwk).not.toEqual(before.kem.publicJwk);
+    expect(keys.nextKem?.privateKey.extractable).toBe(false);
+    expect(await beginMemberKemRotation(begun)).toBe(begun);
+  });
+
+  it('opens a package of the old key until the rotation finishes, then only one of the new key', async () => {
+    const begun = await beginMemberKemRotation(await generateMemberKeyRecord(DEVICE));
+    const keys = (await openMemberKeyRecord(begun))!;
+    const scopeKey = generateScopeKey();
+    const old = await selfPackage(keys, keys.kem, scopeKey);
+    const next = await selfPackage(keys, keys.nextKem!, scopeKey);
+    expect((await openSelf(keys, keys.kem, old)).ok).toBe(true);
+    expect((await openSelf(keys, keys.nextKem!, next)).ok).toBe(true);
+
+    const finished = finishMemberKemRotation(begun, 2)!;
+    const after = (await openMemberKeyRecord(finished))!;
+    expect(after.nextKem).toBeUndefined();
+    expect(after.kem).toMatchObject({ epoch: 2, publicJwk: keys.nextKem!.publicJwk });
+    expect(finished).not.toContain((JSON.parse(begun) as { kemJwk: { d: string } }).kemJwk.d);
+    expect((await openSelf(after, after.kem, next)).ok).toBe(true);
+    expect(await openSelf(after, after.kem, old)).toEqual({ ok: false, reason: 'key_package_invalid' });
+    // Even when the opener claims the old epoch, the new key cannot decrypt a package wrapped to the old one.
+    expect(await openSelf(after, { ...after.kem, epoch: 1 }, old)).toEqual({ ok: false, reason: 'key_package_open_failed' });
+    // A repeat finish changes nothing, and the next rotation goes from 2 to 3.
+    expect(finishMemberKemRotation(finished, 2)).toBe(finished);
+    expect((await openMemberKeyRecord(await beginMemberKemRotation(finished)))?.nextKem?.epoch).toBe(3);
+  });
+
+  it('refuses to finish a rotation that is not pending, and any record that is not canonical v1 text', async () => {
+    const text = await generateMemberKeyRecord(DEVICE);
+    expect(finishMemberKemRotation(text, 2)).toBeUndefined();
+    const begun = await beginMemberKemRotation(text);
+    expect(finishMemberKemRotation(begun, 1)).toBeUndefined();
+    expect(finishMemberKemRotation(begun, 3)).toBeUndefined();
+    expect(() => finishMemberKemRotation('not json', 2)).toThrow(expect.objectContaining({ code: 'sealed_secret_invalid' }));
+    await expect(beginMemberKemRotation(`${text} `)).rejects.toMatchObject({ code: 'sealed_secret_invalid' });
+  });
+
+  it('opens nothing for a pending key at another epoch, or whose scalar does not match its public point', async () => {
+    const begun = await beginMemberKemRotation(await generateMemberKeyRecord(DEVICE));
+    const other = JSON.parse(await generateMemberKeyRecord(DEVICE)) as { kemJwk: { d: string } };
+    expect(await openMemberKeyRecord(edit(begun, (record) => { (record.nextKem as { epoch: number }).epoch = 3; }))).toBeUndefined();
+    expect(await openMemberKeyRecord(edit(begun, (record) => { ((record.nextKem as { jwk: { d: string } }).jwk).d = other.kemJwk.d; }))).toBeUndefined();
+    expect(await openMemberKeyRecord(edit(begun, (record) => { (record.nextKem as Record<string, unknown>).extra = 1; }))).toBeUndefined();
   });
 });

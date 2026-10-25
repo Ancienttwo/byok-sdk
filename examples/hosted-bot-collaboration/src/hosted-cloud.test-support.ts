@@ -7,7 +7,7 @@ import pg from 'pg';
 import { createByokCloud, createHmacTokenSigner, createInProcessMailboxWake, createWebCrypto, fullCapabilityDeclaration, tenantId,
   type ByokCloud } from '@byok-sdk/cloud';
 import { createPostgresCloudStores, createPostgresCoreStores, migrate, migrationsDir } from '@byok-sdk/cloud-dataplane';
-import { createDaemonWithAdapters } from '@byok-sdk/client';
+import { createAgentHomeProjectionConsumer, createDaemonWithAdapters } from '@byok-sdk/client';
 import type { FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
 import { policy } from '@byok-sdk/example-host-execution-core/test-support';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
@@ -64,7 +64,12 @@ export async function openHostedCloud() {
     const adapter = new BotStubAdapter();
     const daemon = createDaemonWithAdapters({ productId: PRODUCT_ID, productName: 'Hosted collaboration', localAgentRelease: { version: '0.0.0-test' },
       serverUrl: `http://127.0.0.1:${address.port}`, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'sdk'),
-      agentHome: { hostStorageRoot: path.join(root, 'homes') }, hostedJournal: { mode: 'sqlite' as const }, agentEgress: { policy },
+      // The Host's persona hook (#793 S13): it writes the Bot persona of a home projection, so the device applies a task-free
+      // projection and advertises `agent-home-projection`.
+      agentHome: { hostStorageRoot: path.join(root, 'homes'), projection: createAgentHomeProjectionConsumer(async ({ projection, writeHomeFile }) => {
+        await writeHomeFile('AGENTS.md', String((projection as { persona?: unknown }).persona ?? ''));
+      }) },
+      agentEgress: { policy },
     }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
     const { code } = await cloud.createPairingCode(tenant, { productId: PRODUCT_ID });
     const { deviceId } = await daemon.pair(code);

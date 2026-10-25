@@ -2,6 +2,363 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example runs
+  summary-only Host job routines (#793 S14), as L's `hostJobs`. Host code
+  adds them with `addHostJobRoutine`, `updateHostJobRoutine` and
+  `setHostJobLifecycle`, checked against the store's new `hostJobs` option;
+  the scheduler records each due occurrence with a `host_job` outbox row;
+  the outbox sender claims it (a try and a lease), runs the handler with
+  `hostJobTimeoutMs` (default 30 s), and settles it fenced by that try. A
+  summary concludes the occurrence `succeeded`; a handler throw keeps it
+  pending with a backoff; a result that carries `execution` stores its
+  summary and concludes it `failed` with `host_job_execution_unsupported`,
+  with no promotion (owner Q4 A). K4 exports `validateJson`, and its
+  Host job runner takes `hostJobExecution` (`promote` by default, as
+  before, or `fail`); L sets `fail`, so it concludes such a result the
+  same way.
+- **Feature (examples)** — the hosted collaboration example flushes Agent
+  home operations (#793 S13), as L's `flushHomes`, through the outbox
+  sender: a `home` outbox row indexes each pending operation at its
+  `retryAt`, the claim checks that it is its Bot's head with no open
+  intent, the readbacks and the enqueue run through the new `homes(scope)`
+  port, and each settle is fenced by the operation's retry count. K8 moves
+  the decisions of L's `flushHomes` into `team.ts` (`homeHead`,
+  `checkHomeReadback`, `planHomeRetry`, `homeEnqueued`, `applyHomeTerminal`,
+  `failHomeFlush`), and its shared `homeVectors` run on L and H.
+- **Feature (examples)** — the hosted collaboration example calls the
+  connector of a confirmed card (#793 S12), as L's `flushCards`, through
+  the outbox sender: a `card` outbox row claims the call (a try and a lease)
+  before it, and the settle is fenced by that try. H calls a connector at
+  most once per card: a claim whose lease passed with no settle ends the
+  card as a timeout, where L calls again after a crash. The sender takes
+  `connector`, `connectorTimeoutMs` (default 30 s) and `changed`. The outbox
+  takes the kinds `card`, `home` and `host_job`, and `occurrence` gains
+  `job`. K8 moves L's card call decision into `cardCallDue` and
+  `settleCardCall`, and its shared `cardCallVectors` run on L and H.
+- **Feature (examples)** — the hosted collaboration example observes devices
+  (#793 S11), as L's `refreshDevices`. `HostedDeviceObserver.observe(scope)`
+  reads the SDK readiness of the scope's tenant (1 s timeout) when a
+  delegation can change, then `store.observeDevices` runs the K8
+  `observeDevices` rule under the scope lock: a delegation whose delivered,
+  unclaimed offer is on a disconnected device shows `waiting_device`, and
+  `queued` again once it connects. The deployment's composed `sync` runs it
+  before `store.sync`. K8 re-exports `observeDevices` from `rules/commands`,
+  and its shared `deviceVectors` run on L and H.
+- **Feature (examples)** — the hosted collaboration example has its
+  authenticated product command entry (#793 S10). `HostedCommandEntry` is L's
+  owner API for requests: it takes the product's session check
+  (`authenticate`), the scope's owner principal id and the deployment's
+  composed `sync`. Each method checks the principal as L's R2 checks do
+  (with the same audit lines), commits under L's command id, syncs the scope
+  and returns L's value. It commits with the new `requireBinding` option of
+  `store.commit`: a commit that adds work for a Bot whose device has no
+  active H binding (a Turn that is not concluded, a room seat, or an input
+  batch or an input to one) throws `DeviceBindingError` and rolls back. `store.audit(scope, line, clock)` appends one audit line.
+- **Breaking (examples)** — the hosted collaboration store builds every
+  command port itself, from a per-scope Host config (#793 S9).
+  `new HostedCollaborationStore(pool, schema, { host })` requires
+  `host(scope) → { models, readOnlyToolsets }`, L's `models` and
+  `readOnlyToolsets`; a model template carries the device that a new Bot runs
+  on, so each scope has its own. The store builds `updatePersona`, `teamBot`,
+  the outcome's `manage` and, with `{ channel: true }`, the push route ports,
+  as L's owner commands and outcomes do. `commit`, `receive`, `consume` and
+  `finish` take the Host clock in place of a ports factory;
+  `hostedMessageConsumer` takes `now` and `HostedReconciler` no longer takes
+  `ports`. `HostedSyncOptions` drops `models` and `readOnlyToolsets`: the sync
+  reads them from the same config. `CommitPorts`, `CommitPortsFactory`,
+  `FinishPortsFactory` and `PortsFactory` are gone.
+- **Fixed (client)** — the last read-back of a member KEM rotation (#654
+  E2d-5) now also requires each epoch whose key the run holds, and each
+  epoch with a freshness point, to read back, including a key the run opened
+  or a point it gained during the rotation. A Host that withholds such a row
+  now stops the rotation with `key_package_missing`, and the old key stays.
+  Before, the rotation finished and dropped that epoch. The rotation still
+  has no production caller.
+- **Fixed (examples)** — K8 counts a Bot Turn whose outcome commit throws as a
+  stuck intent, with the new `IntentOutcomeError` code `outcome_failed`.
+  `drain()` and every API that runs a pass reject with it, the audit gets one
+  row, and `failStuckIntent(key)` ends it: the intent settles `failed`, the
+  next sync fails the Turn and reports it, and the Bot's FIFO moves on. Before,
+  K4 kept the error only as the outbox row's `lastError`, `drain()` resolved,
+  the FIFO stayed blocked and the owner call refused the key as not stuck. A
+  Host that switches exhaustively on `IntentOutcomeError.code` must add the
+  `outcome_failed` case.
+- **Feature (examples)** — with `roomHistory`, K8 publishes each accepted seat
+  post as the projection `room-message:<roomId>:<messageId>` with
+  `{ roomId, id, from, text, late }`, and does not read the next seat of a room
+  while that room has an undelivered post (#883 acceptance 2). The Host's
+  `deliver` must resolve only after the write can be read back. A projection
+  that never delivers releases each later seat of its room as `busy` at its
+  deadline. The rule's new optional `OutcomePorts.roomPosts` stays unset in H,
+  so H and every Host without the option are unchanged.
+- **Fixed (examples)** — K8 L no longer leaves a room seat waiting when a Turn
+  step releases the seat before it (a blocked or retired seat Turn). The L
+  sync runs the room step and the Turn steps again, as H's sync does since
+  #876, so the next seat gets its Turn in the same sync. Before, a round whose
+  seat Turns all blocked stopped after four seats, with no timer for the next.
+  A shared room vector holds both Hosts to this.
+- **Fixed (examples)** — K8 bounds the `history` and `roomHistory` reads with
+  the new `historyTimeoutMs` option (default 10 seconds). A read still open
+  after it counts as failed: the Turn stays queued and the timer reads again.
+  Before, a stalled `history` authority held the Host queue with no bound.
+- **Fixed (client)** — the #866 review of a sealed terminal that the commit
+  queue holds past a failed stop (#654). When the next run has another
+  tenant, device or member, a terminal that already is a closed plaintext
+  form keeps its fields, such as `recovery` on a `daemon_interrupted`
+  `task.fail` or the code of a sealed decline. Before, it was rewritten to
+  `sealed_key_unavailable`. The owning run is now the one whose member was
+  bound when it became ready, so a terminal made after that member retired
+  at shutdown seals with a next run of the same member instead of taking the
+  closed form.
+
+- **Fixed (client)** — when a Codex app-server ends on its own and the
+  adapter's record consumer then fails on a record that exit produced (the
+  exit record, or a control settled as exited), the task now fails as
+  `runtime_exited` with the consumer's reason, instead of `unknown` (#869).
+- **Added (client)** — `agentUserMcpServers?: 'inherit' | 'excluded'` on
+  `CodexAdapterOptions` and `GrokAdapterOptions` (#935). It applies to Agent
+  tasks only, and the default `'inherit'` changes nothing. Under `'excluded'`
+  a Codex thread gets only the task's and the SDK's MCP servers: the adapter
+  reads Codex's effective config, disables every other configured server and
+  turns off apps (connectors) and plugins for the thread, then reads the
+  thread's servers back and fails the start if another one is not disabled
+  or a user server shares a task server's name. Grok has no per-process
+  switch for its native MCP sources, so the adapter turns off the Claude,
+  Cursor and managed MCP cells and fails the start before the agent starts
+  while `grok inspect --json` still lists an enabled server or a plugin that
+  provides one. A Grok server turned on mid-session and administrator-pinned
+  managed MCP are not detected. Both refusals are non-retryable `authority`
+  start failures. `isReservedMcpServerName` is now exported, so a Host can
+  tell the SDK's own servers in `event.mcp.server`. The vendored Codex
+  session gains optional `beforeOpen` and `afterOpen` steps.
+
+- **Fixed (client)** — Pi's durable lane now follows the #869 contract. A
+  start failure is a typed, non-retryable `RuntimeExecutionFailure` with a
+  fixed reason, instead of being reported as "runtime adapter contract
+  violation during start"; a worker that ends on its own before its start
+  receipt is `runtime_exited`. A run whose worker ended on its own and could
+  not be recovered, or whose respawned worker ended on its own before its
+  start receipt, fails as `runtime_exited` instead of `unknown` (#869).
+
+- **Breaking (client)** — a sealed terminal that the daemon sent by
+  `ciphertextRef` and that the Host refused now reaches the Host as one
+  replacement terminal (#654, owner batch §77b). The Host refuses one when it
+  no longer declares `sealed-output-ciphertext-ref`, or when orphan GC deleted
+  the blob. Before, the daemon recorded the refusal and sent nothing else, so
+  the Host got no terminal for the task. The replacement is the sealed
+  `task.fail` with `reason: 'terminal_result_unsealable'` when the member that
+  sealed the refused terminal is ready, and the plaintext `task.fail` with
+  `reason: 'sealed_key_unavailable'` otherwise. A refusal that an earlier run,
+  or a 0.30.1 daemon, left in the journal is replaced at the next start, after
+  the member resumes. A refused inline terminal is not replaced. The journal
+  replaces the refused row in place and keeps the refused hash as a task
+  transition; it adds no table or column. Compatibility: `LocalTaskJournal`
+  gets the required method `replaceRefusedTerminal`, and its `confirmTerminal`
+  and `rejectTerminal` must accept the hash of replaced bytes as a no-op. A
+  Host that injects its own journal must implement both.
+- **Breaking (core)** — scope key packages are version 2 (#654 E5b-2, owner
+  batch §77a): they sign the recipient's KEM epoch as `recipientKemEpoch`.
+  `sealScopeKeyPackage` and `openScopeKeyPackage` take `recipient.kemEpoch`,
+  and `sealScopeKeyPackage` returns `ScopeKeyPackageV2`. `openScopeKeyPackage`
+  still opens version 1 packages. Remove that code only once this check
+  returns 0 on every Host: Postgres
+  `SELECT count(*) FROM e2ee_scope_key_package WHERE (package::jsonb)->>'v' = '1'`,
+  SQLite
+  `SELECT count(*) FROM e2ee_scope_key_package WHERE json_extract(package, '$.v') = 1`.
+- **Breaking (cloud)** — the Host takes version 2 package puts only; a
+  version 1 package gets 400 `coordination_input_invalid`. A put of a package
+  below its recipient's KEM floor gets 409 `e2ee_scope_key_package_stale` and
+  stores nothing; read the chain and seal again. The device package read
+  needs exactly one of `epoch` and `afterEpoch`, so the read without `epoch`
+  now gets 400. Store implementers: `E2eeMemberStore` gains the required
+  `readOwnScopeKeyPackages`, `E2eeMemberChainAppendInput` gains `rotations`,
+  the put rows carry `recipientKemEpoch`, and the put can return
+  `kem_epoch_stale`. Upgrade the Host first, then daemons and web clients: a
+  0.30.1 Host refuses v2 puts. A Host rolled back to 0.30.1 fails closed with
+  `e2ee_member_state_unreadable` on any read that meets a stored v2 package.
+  Migration 0029, and the first 0.30.2 open of a SQLite store, refuse a
+  member chain that already holds a `rotate` entry. A Host that finds one
+  stays on 0.30.1 and opens an issue, because the SDK has no automatic way to
+  set those floors (`docs/security.md`).
+- **Breaking (protocol)** — `E2eeScopeKeyPackage` is version 1 or 2, and
+  `E2eeScopeKeyPackageV2Schema` is the put shape. `E2eeMemberChainEntrySchema`
+  refuses a `rotate` whose subject is not exactly
+  `{ memberId, kemPublicJwk, kemEpoch, kemSig }`.
+- **Feature (cloud, cloud-dataplane, server)** — an append that stores a
+  `rotate` raises its member's KEM floor, which never falls.
+  `GET /byok/e2ee/key-packages?scopeId=&afterEpoch=` returns this member's
+  packages after `afterEpoch`, by epoch, 16 per page, with `scopeHeadEpoch`
+  (`null` without an epoch). The Host declares `e2ee.member.kem-epoch` exactly
+  with `e2ee.member`. Postgres needs migration
+  `0029_e2ee_member_kem_floor.sql`; SQLite adds the table and index on open,
+  with no schema version change.
+
+- **Breaking (client)** — `byok-agent doctor` no longer scans `os.tmpdir()`
+  for the temporary directories that releases before 0.27.0 left there (#938).
+  `doctor --json` drops its `legacyTemp` field, so a script that parses it
+  must stop reading it, and the text output drops its `legacy-temp:` line.
+  `doctor --fix` no longer deletes those directories; any left on a machine
+  have to be removed by hand.
+
+- **Added (client)** — `ClaudeAdapterOptions.agentSessionPersistence`
+  (#936). With `'disabled'`, an Agent task (`task.offer_for_agent`) starts
+  Claude with `--no-session-persistence`, so Claude does not save the session
+  transcript under `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/`, outside the
+  Agent home. Such a session cannot be resumed: an Agent task that carries a
+  `sessionRef` (a resume, an Agent handoff or a memory-reader resume) fails
+  before Claude starts, as a non-retryable `authority` failure with the
+  reason `claude Agent session persistence is disabled, so the task cannot
+  resume a session`. Follow-ups in the same task still work. Other tasks and
+  the default, `'enabled'`, are unchanged. Auto memory, which also writes
+  under `projects/`, stays on unless `agentUserContext: 'excluded'` is set
+  too. `docs/adapter-capabilities.md` lists where each adapter keeps Agent
+  task session records.
+
+- **Feature (cloud, cloud-dataplane, server)** — maintenance prunes the
+  receipts of used device-proof request ids in a new twelfth step,
+  `proofReceipts`. `ByokCloudOptions.proofReceiptRetention` takes an
+  `authority` and an optional deployment-level `proofReceiptRetentionMs`
+  (default 24 hours, `DEFAULT_PROOF_RECEIPT_RETENTION_MS`). `createByokCloud`
+  refuses a value below `PROOF_RECEIPT_RETENTION_FLOOR_MS` (15 minutes) with
+  `maintenance_invalid_input`: past it, the verifier refuses every proof the
+  receipt can bind. Within the retention a `requestId` is single-use; after it
+  the same `requestId` is no longer recorded. cloud-dataplane adds
+  `PostgresProofReceiptRetentionAuthority(pool)` from `./runtime`, the
+  Postgres authority over `proof_request_receipt`; a hosted Host passes it as
+  `proofReceiptRetention.authority`, otherwise the step reports
+  `not-configured`. The SQLite composition of the server wires its own store
+  and adds the index `proof_request_receipt_recorded_idx`, which an existing
+  database gains when it opens. The memory composition does not prune: the
+  step reports `not-configured` and keeps every used `requestId` for the life
+  of the process. `MAINTENANCE_STEPS` and the `not-configured` report variant
+  gain `proofReceipts`, so a pass returns twelve step results.
+
+- **Breaking (client)** — every daemon journals its tasks (#924).
+  `DaemonConfig.hostedJournal` and `HostedJournalConfig` are removed, and a
+  config or overrides object that still has `hostedJournal` is refused with
+  `DaemonConfigFieldRemovedError`. Before, a daemon without `hostedJournal`
+  forgot the tasks it had claimed when it restarted, so they stayed `claimed`
+  or `running` in the cloud, and a `cancelTask` stayed `cancel_requested`.
+  Now a restarted daemon ends each claimed task it had not finished with
+  `task.fail` (`reason: 'daemon_interrupted'`, `retryable: false`) and never
+  runs it again. `busyTimeoutMs` and `maxRecordBytes` move to
+  `DaemonConfig.storage.journal` with the same defaults, an injected journal
+  moves to `DaemonOverrides.journal`, and the diagnostics and support bundle
+  drop their `config.hostedJournal` field. Migration: delete `hostedJournal`
+  from the config. `<storeDir>/daemon.db` is created at the first start after
+  the upgrade; tasks in flight before the upgrade have no record, so the Host
+  still ends those itself. A daemon that had no journal now also declines an
+  inbound offer above the journal record bound
+  (`inbound_envelope_too_large`) and drops any other envelope above it (#826),
+  and it admits result-document offers.
+
+- **Docs** — `docs/architecture/sdk-architecture.md` matches the source again
+  (#927): the `server → core` and `keys → core` edges, message types grouped by
+  `EnvelopeSchema` with no count, wire v3, Grok and the built-in versus
+  Host-injected adapters, pairing that returns the access token, offers read
+  from a held long-poll page, per-envelope `outcomes` with a stalled cursor for
+  an unknown executable message, and terminals recorded by the cloud inbound
+  gate. The journal is described as the one mode of every daemon (#924).
+- **Docs (protocol)** — the `CAPABILITY_FLAGS` comment says the daemon sends its
+  flags in `conn.hello` and the server sends its own on every long-poll
+  response; it no longer describes a `conn.ack` handshake (#925, phase 0). No
+  wire change.
+- **Changed (server)** — the package description no longer names a protocol
+  version (#927).
+- **Changed (cloud-do)** — `@byok-sdk/client` is a declared devDependency. The
+  cloud-do tests import client source, so a client change now also runs the
+  cloud-do suite in CI (#927).
+- **Removed (repo)** — the root scripts `check:brain-manifest`,
+  `check:architecture-sync` and `sync:brain-docs`. They called repo-harness
+  helpers that no longer exist, and `repo-harness run` exits 0 on an unknown
+  helper, so they passed without checking anything (#927).
+
+## 0.30.1 — 2026-10-24 (published)
+
+0.30.1 is a PATCH release under a one-release exception to the pre-1.0
+policy. On 2026-10-24 the owner chose 0.30.x instead of 0.31.0 (issue #872),
+although it adds public API, gated wire additions and Postgres migration
+0028, and it has breaking changes. #857, #859 and #860 are breaking in
+cloud. #870 and #909 are breaking in client, and #909 also in cloud-do.
+#870 adds `message_draft_delta` items to `Session.events`. The pi-durable
+SQLite migration of #909 means that a migrated store cannot go back to Pi
+1.3.0. The examples changes of #882 and #884 are also breaking for a Host
+that copies the K8 example. The npm registry lists all nine public packages
+at 0.30.1. The registry publication times fall on 2026-10-24 (UTC). The
+registry read on 2026-10-24 at 19:19 UTC reports 0.30.1 as `latest` for all
+nine. The tag `v0.30.1` and its GitHub Release point to
+`142acbe2`. A 0.30.1 daemon paired as an E2EE member advertises
+`sealed-payload-v1` while its member is verified and the deployment declares
+`e2ee.member`. See the [release notes](docs/releases/v0.30.1.md) for scope,
+the release rule of `sealed-payload-v1`, the upgrade notes and the
+qualification limits that were recorded at preparation. All nine public
+manifests and their lock records move to 0.30.1.
+
+- **Changed (client, cloud-do, keys)** — pin the nine official Pi packages to
+  exactly 1.4.0 (closureDigest `79c414be`). A preparation compiled for 1.3.0
+  declines with `preparation_runtime_identity_mismatch`; prepare it again.
+  `copyPiRuntimeAssets` copies the new `vendor/marked-cjk-friendly.min.js`
+  export asset. The pinned pi-ai catalog table follows the 1.4.0 catalog, and
+  `PI_MODEL_CATALOG_PI_AI_VERSION` is `"1.4.0"`. `piModelConfigFromPinnedCatalog`
+  now returns `not_in_catalog` for 11 entries it admitted before: together
+  `Qwen/Qwen2.5-7B-Instruct-Turbo` and `meta-llama/Llama-3.3-70B-Instruct-Turbo`;
+  xiaomi `mimo-v2.5`, `mimo-v2.5-pro` and `mimo-v2.5-pro-ultraspeed`; and
+  `mimo-v2.5` and `mimo-v2.5-pro` on each of `xiaomi-token-plan-ams`,
+  `xiaomi-token-plan-cn` and `xiaomi-token-plan-sgp`. Together
+  `Qwen/Qwen3.7-Max` now returns `unrepresentable` (`thinkingLevelMap`).
+  Saved profiles keep their own `pi_model` config. pi-durable 1.4.0 migrates
+  SQLite stores to schema version 2 (see the breaking entry below). The client
+  durable lane passes `identity: { attribution: null }`, and both Harness lanes
+  set `restartLimit: Infinity` (the exported `CLOUD_HARNESS_SETTINGS` gains
+  the field), so provider headers and restart handling stay as on 1.3.0. See
+  `docs/notes/2026-10-24-pi-1.4.0-oar-0.71.0-upgrade.md`.
+- **Breaking (client, cloud-do)** — pi-durable 1.4.0 migrates a SQLite store
+  to schema version 2 when it opens. A migrated store cannot be opened by a
+  build on Pi 1.3.0, so there is no rollback to 1.3.0 past this release.
+- **Changed (client)** — update the private OAR source to 0.71.0 (`c88a514`).
+  No selected upstream file changed; the thirteen BYOK-maintained files keep
+  their deltas.
+- **Feature (client, protocol, server, cloud)** — a failed task now carries
+  `failure.class`, a closed runtime failure class (the vendored OAR
+  `FailureClass` values, `unknown` included), and `failure.resetsAt` when the
+  runtime reported when a quota resets (#869). Read it from `task.fail`,
+  `TaskResult.failure` (`tasks.get()`) and `TerminalResult.failure`; `reason`
+  stays display text. Claude reads its assistant error, result status and
+  `rate_limit_event`; Codex reads `codexErrorInfo`; Grok passes its OAR
+  outcome through; Pi and Hermes report `unknown`. A runtime process that ends
+  on its own before its terminal is `runtime_exited` (not Pi's durable lane, which
+  reports `unknown`, nor an exit the SDK asked for), and a failure the daemon makes
+  itself is `unknown`. The field is gated on the new server flag
+  `runtime-failure-class` (`RUNTIME_FAILURE_CLASS_CAPABILITY`), which the
+  reference server and the hosted cloud advertise. It stays plaintext on
+  `task.fail_sealed`. `RuntimeExecutionFailure` takes an optional `failure`.
+  A class the vendored OAR derives from error text, such as Grok's "Internal
+  error" or Anthropic limit wording in a Codex `other` error, is sent as
+  `unknown`; Grok's `retry` still follows OAR's class.
+- **Feature (client)** — the device member can rotate its own KEM key
+  (#654 E2d-5, design §7.5); no daemon path starts a rotation yet. The device
+  keeps the next key beside the current one, appends its `rotate` entry,
+  re-wraps its own packages to the next key, and drops the old key only
+  after every re-wrap reads back. It reads its packages one epoch at a time,
+  four at a time, from epoch 1 to 256 in every scope it may use: up to 64
+  batches of 4 reads per scope per pass, three passes per rotation, and up
+  to five when a scope starts again after the chain moved. A
+  package at epoch 256, a known epoch past it, or an epoch whose key it
+  holds or that has a freshness point but reads no package stops the
+  rotation and keeps the old key. Just before the old key goes, it catches
+  up and reads back every scope it may use then, including one created
+  during the rotation; any epoch that opens only with the old key, or a
+  re-wrapped epoch that no longer reads back, stops the rotation and is
+  logged with its scope and epoch. Every Host request of the rotation is
+  cut off after the member request timeout. That final read-back is an
+  interim measure: a late put of a package wrapped to the old key can still
+  land after it; the recipient `kemEpoch` in the signed package and the Host
+  row closes it and must land before a production trigger (E5b-2). The
+  device does not see packages above epoch 256: when all its packages of a
+  scope are above 256 and none is at 256, it loses those epochs. A scope it
+  may not use during the rotation is not re-wrapped, and its packages
+  wrapped to the old key do not open if it becomes usable again. Core
+  adds `beginMemberKemRotation` and `finishMemberKemRotation`.
 - **Fixed (client)** — a terminal whose journal commit failed during a
   `stop()` is sent after the next `start()` in the same process. Startup
   recovery no longer replaces it with `task.fail` `daemon_interrupted`.
@@ -20,6 +377,46 @@
   refuses the Turn, and a sync that has not seen the Turn's result fails it
   as `result_retired`, as L does. Routine intents are refused. Nothing runs
   it automatically.
+- **Feature (examples)** — the Main Bot ends any open Bot routine with the
+  keyless K8 command `end_routine` (#793 S3, owner batch §55c). It completes
+  the routine of any owner, an archived Bot's too, with K4
+  `setLifecycle('completed')`, so the routine of an archived Bot no longer
+  fires at every slot. The rule checks the Main Bot role and reaches the K4
+  rows through the new optional `CommandPorts.routines` port. L adds the owner
+  API `endRoutine(id)`, which commits; H runs the command in its commit.
+  A shared routine vector runs on L and H and checks that no Host still holds
+  a slot to fire the routine.
+- **Feature (examples)** — the hosted collaboration example H runs more of
+  L's sync steps (#793 S1, S4, S5). The coalesce policy is store
+  configuration, `new HostedCollaborationStore(pool, schema, { coalesce })`
+  (`HostedStoreOptions`), checked with K8 `coalescePolicy`; the store admits
+  each input with K8 `admitUserInput`, and `CommitPorts` declares
+  `admitInput?: never`. Each sync round starts with K8 `sealDueBatches` and
+  ends with `projectInputBatches`, in L's order, and runs the K8 card steps
+  `expireCards` and `reportCardDecisions` at L's positions. Each store
+  transaction writes the new column `scope.due_at`, the earliest time that
+  the new K8 rule `collaborationDue` gives for the state it commits, indexed
+  by the new partial index `scope_due`. `HostedDueScheduler` syncs each due
+  scope in due order, so a batch seal, a card expiry or a delegation timer
+  runs without new input; a scope still due after its sync is reported as
+  `stalled`, and a stalled or failed scope backs off. H has no migrations
+  while it is unreleased, and `STORE_VERSION` stays 2: recreate the H schema.
+- **Feature (examples)** — H runs the K8 room step and the reply checks in
+  its sync (#793 S6, S7). The room step runs K8 `advanceRoomSeats` before the
+  Turn steps, with seat facts from the intent rows, and cancels the admitted
+  work of a seat with the K4 cancel; a released seat runs the room step again.
+  `HostedReplyChecker` runs L's reply check for each due check of a scope: the
+  SDK readback of the chain end, read outside any transaction with a
+  `timeoutMs` limit (default 10 s), then the new K8 rule `checkReply`, settled
+  under the scope lock and fenced, so a second checker applies nothing. The
+  deployment runs it from its due scheduler `sync`, before `store.sync`. The
+  H README describes the reply-check failure and outage limits (#897).
+- **Fixed (examples)** — H fences a delivery readback wait by its claim's
+  lease (#793 S2). `store.readDelivery` takes the `lease` that the readback
+  claim returned, so a readback that outlasted its lease no longer overwrites
+  a later readback claim's lease, and two readbacks never run at once. H also
+  loads entities and entries in integer order: the queries sorted by the text
+  form of `ordinal` and `position`, so position 10 came before 2 (#878).
 - **Breaking (cloud)** — a sealed terminal (`task.complete_sealed`,
   `task.fail_sealed`, `task.decline_sealed`, `task.cancelled_sealed`) or
   `task.artifact_sealed` may carry `ciphertextRef` above the 256 KiB inline
@@ -43,6 +440,54 @@
   for good, and an artifact becomes a sealed error event.
   Known limit: a terminal sent by reference and refused for good by the Host
   reaches the Host as no terminal (`docs/protocol.md` §2.5).
+- **Feature (client, core)** — a device can pair as an E2EE member (#654
+  E2d-1). `byok-agent pair <code> --server <url> --e2ee` takes the
+  `<pairing code>.<verification secret>` that the web client shows and splits
+  it on the last dot; without the flag the whole input is the code.
+  `pair(code, { verificationSecret })` and the control request
+  `enrollment.pair` take the secret. The secret (`pv`) never reaches the Host.
+  Pairing creates the member keys and stores them, `pv` with its deadline and
+  the member state as three new entries of the device's OS credential
+  provider, each apart from the enrollment entry. It stores them before it
+  registers the member bundle, so a lost registration is retried at start with
+  the same bundle. The started daemon polls the client MAC with a 2 s to 15 s
+  backoff until the `pv` deadline, verifies it, walks the chain to the `add`
+  of the device that the client signed, and stores the anchor and head. Each
+  start walks the chain from seq 1 again; a stored head that is not on the new
+  walk keeps E2EE off for that run. A daemon with an injected enrollment
+  backend (`DaemonOverrides.deviceCredentials`) refuses an E2EE pairing. A
+  re-pair and `unpair` clear the member entries. The device signs only
+  `e2ee-member-key.register`. `@byok-sdk/core/sealed-payload` adds
+  `generateMemberKeyRecord`, which creates a member at KEM epoch 1 as one
+  canonical JSON text, `openMemberKeyRecord`, which imports both keys
+  non-extractable and proves each private scalar against its public point,
+  and `MemberKeyStore`, the custody port each member implements.
+- **Feature (client)** — a daemon paired as an E2EE member handles the
+  `e2ee.key_package.available` notice (#654 E2d-2). It consumes the notice
+  before its journal, like the provisioning notice. It catches the member
+  chain up from its verified head, then reads and opens the package of that
+  scope epoch with the sender key from the verified chain, and keeps the
+  scope key in memory. A scope key is usable only while the latest scope
+  policy holds this device and the package sender, and the sender is a
+  current member; a catch-up that shreds the scope or drops the device zeroes
+  and drops its keys. The notice row stays only while the member resumes or a
+  Host read fails; every other end is acknowledged with a log line. The
+  member resume starts before the connection, so a notice in the first poll
+  waits for it.
+- **Fixed (client)** — every daemon request for E2EE membership is bounded
+  (#654 E2d-1b). Each member request has a 60 s timeout and, during pairing,
+  ends at the `pv` deadline; an answer at or after the deadline is not used.
+  The chain read is capped at 16384 entries, and each answer body is read
+  through a byte cap (a chain page at 256 times the largest valid entry plus
+  1 KiB; a key package list, pairing MAC or registration answer at 8 KiB; an
+  error body at 1 KiB). A key package read refuses more than one package. The
+  keyring's chain and key package reads get the request timeout. A key
+  package notice whose fetch fails with a final error is acknowledged, with
+  one log line that has no scope id; other errors keep the notice row. A
+  restart re-walk stops after 10 minutes and ends with no member instead of
+  staying in "resuming". `docs/protocol.md` states the timeouts, caps, the
+  re-walk deadline and the notice ack rule. No wire, route or public type
+  change.
 - **Feature (client)** — a daemon paired as an E2EE member (`byok-agent pair
   --e2ee`) opens and seals sealed task content with its own member keyring
   (#654 E2d-3). It advertises `sealed-payload-v1` only while the member is
@@ -53,17 +498,33 @@
   `sealing.categories` must include every category of the scope policy, or
   the offer gets `sealing_policy_mismatch`. The header's `chainHead` must be
   on the verified chain and its `sender` a member of the scope policy at that
-  head, or the offer gets `sealed_open_failed` and a steer is dropped. Output
-  is sealed at the newest epoch with no scope member `remove` and no
-  member-dropping `scope-policy` after its freshness point. An output-only
-  task with no freshness point from this run, or carried from the previous run
-  of the same process, gets `sealed_key_unavailable`. A
+  head, or the offer gets `sealed_open_failed` and a steer is dropped. The
+  scope and category checks run again against the view the open caught up
+  to, and a steer that fails them is dropped. Output is sealed at the newest
+  epoch with no scope member `remove` and no
+  member-dropping `scope-policy` after its freshness point. A
   terminal that a failed `stop()` left queued is sealed by the next run in the
   same process when that run has the same tenant, device and member, and is
   otherwise in the closed form; the next run keeps the freshness points that
   are on its verified chain. A terminal that the startup replay builds from the journal is in the
   closed form. The internal `sealedPayload` test parameter of
   `buildDaemonWithAdapters` is removed.
+- **Feature (client)** — a daemon paired as an E2EE member rotates a scope
+  epoch when no epoch is fresh (#654 E2d-4). It wraps a new scope key to every
+  current member of the scope policy, signed by the device member, and puts
+  the packages through the device-proof `POST /byok/e2ee/key-packages` write
+  (operation `e2ee-scope-key-package.put`), in batches of at most 256. This
+  replaces the E2d-3 decline: an output-only task with no freshness point now
+  gets a rotated epoch instead of `sealed_key_unavailable`. Host operators
+  see the device send this signed write. The device reads its package of the
+  4 epochs above the newest one it knows and rotates above the newest held;
+  when the fourth is held, the seal fails with `sealed_key_unavailable`. A
+  Host that holds the epoch under another key answers 409, and the next
+  rotation starts above it. A Host request that hangs is cut off at its
+  timeout. A scope whose only current member is the device is not rotated.
+  A rotated epoch goes stale after a `remove` or a member-dropping policy
+  after its freshness point, or after a member add or KEM rotation after the
+  chain seq it was wrapped at (within one process).
 - **Docs** — a pairing string `<code>.<pv>` used once without `--e2ee` is
   burned: start a new registration at the Host, do not retry it (#654 E2d).
 - **Breaking (cloud)** — the device-proof `requestId` is single-use on the
@@ -96,12 +557,10 @@
   stores the mode. `TeamSnapshotBot` gets the optional `profileRevision`, and
   `ExternalTeam` the optional `persona`. Without the option nothing changes,
   except that a snapshot with `profileRevision` is refused.
-
 - **Fixed (examples)** — K8 validates `profileRevision` with the protocol
   `AgentHomeProjectionProfileRevisionSchema` (#879). Before, its own copy of
   the rule accepted `0`, so a snapshot with `profileRevision: '0'` and
   `personaReady(botId, '0')` passed. Both are refused now.
-
 - **Feature (examples)** — K8 `BotOptions.roomHistory` reads the room
   messages of a seat ContextPack from an external authority (#883). The
   authority selects the messages for the seat's Bot. The seat Turn stores only
@@ -133,12 +592,15 @@
   the only authority: each later `progress` event reconciles the draft, and
   `progress`, the closing reply and the published body are unchanged. There
   is no protocol or wire change.
-- **Type change (client)** — `Session.events` is now
+- **Breaking (client)** — `Session.events` is now
   `AsyncIterable<AgentEvent | MessageDraftDelta>`, and `MessageDraftDelta`
   is exported from `@byok-sdk/client`. Code that iterates `Session.events`
   and types each item as `AgentEvent` no longer compiles. It must widen the
   type or skip items of type `message_draft_delta`. An adapter whose
-  `events` yields only `AgentEvent` still compiles.
+  `events` yields only `AgentEvent` still compiles. The Claude, Codex and
+  Grok adapters now always yield `message_draft_delta` items. A consumer
+  that checks `event.type` against a list and rejects unknown types still
+  compiles, and then fails at run time. Accept or skip these items.
 - **Feature (client)** — an opt-in Claude option for Agent tasks (#871,
   #873). `ClaudeAdapterOptions.agentUserContext: 'excluded'` starts a
   `task.offer_for_agent` task with `--strict-mcp-config`, so only the task's
@@ -171,7 +633,16 @@
   Host intent, or its Host handler throws or is async. Before, an intent from a
   direct `bot.core.enqueue` stayed in flight with only a K4 `lastError`. Every
   API that runs a pass rejects until the outcome applies, and the audit gets
-  one row for each key and reason.
+  one row for each key and reason. The owner call `failStuckIntent(key)` ends
+  such an intent. It runs a K4 drain first. If that drain refuses the terminal
+  again, one transaction settles the intent as `failed` and writes the audit
+  row `Intent failed by owner <code>: <key> <reason>`, and `drain()` then moves
+  past it. The settle runs no handler; the drain before it applies the terminal
+  once more, and if that drain applies the outcome, the call refuses with
+  `Intent already settled`. The call also refuses an unknown key, a settled
+  intent and an intent whose terminal K8 did not refuse, and it throws the
+  drain error when the scan stopped before it reached the key. K4 now exports
+  its `settle` transition for this.
 - **Breaking (cloud)** — the Host shreds a sealed scope when the member chain
   appends a `shred` (#654 E5b-1, design §11.2). A `shred` subject must now be
   exactly `{ scopeId }`; another subject gets `coordination_input_invalid`.
@@ -221,13 +692,17 @@
 - **Feature (examples)** — K8 `BotOptions.outcome` narrows the outcome offer
   of new Turns (#881). `actions.turn` and `actions.main` are allowlists for a
   Bot Turn and for the extra actions of an owner Main Bot Turn. `timeZones`
-  sets 1 to 8 IANA zones for the routine actions. `confirmable` sets the
+  sets 1 to 8 IANA zones for the routine actions. `confirmable` holds 1 to 16
   `confirmable_action` branches. Without the option, every schema is the same
-  as before. `outcomeOffer` checks an offer, and `SyncOptions.offer` takes its
+  as before. An offer with `actions.turn` also narrows the Bot Turn prompt to
+  the sentences for every Turn and for the actions in the Turn's frozen
+  schema, so an offer of only `delegate` names no `ask_user`,
+  `confirmable_action` or routine. Without `actions.turn`, the prompt is
+  unchanged. `outcomeOffer` checks an offer, and `SyncOptions.offer` takes its
   result, so the H sync uses the same rule. Turns frozen before keep their
   schema.
 
-## 0.30.0 — 2026-10-24 (published)
+## 0.30.0 — 2026-10-24 (published; superseded by 0.30.1)
 
 0.30.0 is a MINOR release under the default pre-1.0 policy, with no exception.
 It adds public API, gated wire types and behavior, and it has breaking changes
@@ -235,8 +710,9 @@ in protocol, server, cloud and client. The owner confirmed the breaking labels
 of #783, #784, #831 and #834. The examples changes of #820, #823 and #852 are
 also breaking for a Host that copies the K8 example. The npm registry lists
 all nine public packages at 0.30.0. The registry publication times fall on
-2026-10-24 (UTC). The registry read on 2026-10-24 at 07:39 UTC reports 0.30.0
-as `latest` for all nine. The tag `v0.30.0` and its GitHub Release point to
+2026-10-24 (UTC). The registry read on 2026-10-24 at 07:39 UTC reported
+0.30.0 as `latest` for all nine. The read on 2026-10-24 at 19:19 UTC reports
+0.30.1 as `latest`. The tag `v0.30.0` and its GitHub Release point to
 `6b779cff`. A default 0.30.0 daemon does not advertise `sealed-payload-v1`.
 See the [release notes](docs/releases/v0.30.0.md) for scope, the release rule
 of `sealed-payload-v1`, the upgrade notes and the qualification limits that
@@ -653,7 +1129,7 @@ client and keys. The owner labelled #723, #744, #751 and #767 as breaking.
 The npm registry lists all nine public packages at 0.29.0. The registry
 publication times fall on 2026-10-23 (UTC). The registry read on 2026-10-23
 at 10:20 UTC reported 0.29.0 as `latest` for all nine. The read on 2026-10-24
-at 07:39 UTC reports 0.30.0 as `latest`. The tag `v0.29.0` and
+at 07:39 UTC reported 0.30.0 as `latest`. The tag `v0.29.0` and
 its GitHub Release point to `df0c91d2`. See the
 [release notes](docs/releases/v0.29.0.md) for scope and the qualification
 limits that were recorded at preparation. All nine public manifests and their

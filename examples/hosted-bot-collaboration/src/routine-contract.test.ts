@@ -9,11 +9,10 @@ import { createDefinition } from '@byok-sdk/example-bot-collaboration/routines';
 import { SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { HostedSubmitter } from './intents';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import type { TaskEvidence } from './reconcile';
 import { hostedRoutineCommands, loadSlice, writeSlice } from './routines';
-import { inSchema, lockScope, type FinishPortsFactory } from './store';
+import { inSchema, lockScope } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -47,7 +46,7 @@ async function hostedSubject(): Promise<RoutineSubject> {
   });
   await store().bindDevice(scope, 'device');
   const submitter = new HostedSubmitter(opened!.pool, store().schema, { port: () => fakePort(), now: () => clock, leaseMs: 60_000, backoffMs: 1000 });
-  const ports: FinishPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => clock });
+  const hostClock = () => clock;
   /** Runs the Host as the L pass does: the sync, then the submit of each FIFO head, then the sync again. */
   const run = async () => {
     await store().sync(scope, { ...SYNC_OPTIONS, now: clock, history: undefined });
@@ -71,7 +70,7 @@ async function hostedSubject(): Promise<RoutineSubject> {
     }),
     input: async (key, request) => {
       const result = await store().commit(scope, { scope, commandId: hash(['input', 'main', key]),
-        command: { kind: 'input', botId: 'main', key, request, sender: 'owner' } }, ports);
+        command: { kind: 'input', botId: 'main', key, request, sender: 'owner' } }, hostClock);
       await run();
       return turnOf(result);
     },
@@ -83,21 +82,21 @@ async function hostedSubject(): Promise<RoutineSubject> {
       const task = taskId(turnId, 0);
       const evidence = { terminal: { envelope: { task_id: task, type: 'task.complete', payload: { document } } } as unknown as DeviceTerminal,
         attempt: { taskId: task } as unknown as TaskAttempt } satisfies TaskEvidence;
-      await store().finish(scope, turnId, evidence, ports);
+      await store().finish(scope, turnId, evidence, hostClock);
       await run();
     },
     fire: async id => { await store().fire(scope, id, clock); await run(); },
     sync: run,
     // A keyless owner command, as L `cancelTurn`: its id is new at each call.
     cancelTurn: async turnId => {
-      await store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_turn', turnId } }, ports);
+      await store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_turn', turnId } }, hostClock);
       await run();
     },
     update: async action => { await store().updateRoutine(scope, 'main', action, clock); await run(); },
     lifecycle: async (id, value) => { await store().setRoutineLifecycle(scope, 'main', id, value, clock); await run(); },
     // A keyless owner command, as L `endRoutine`, by the Main Bot.
     end: async id => {
-      await store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'end_routine', botId: 'main', routineId: id } }, ports);
+      await store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'end_routine', botId: 'main', routineId: id } }, hostClock);
       await run();
     },
     routine: async id => {

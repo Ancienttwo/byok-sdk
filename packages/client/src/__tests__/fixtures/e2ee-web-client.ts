@@ -12,6 +12,7 @@ import {
   generateScopeKey,
   memberChainEntryHash,
   openMemberKeyRecord,
+  openScopeKeyPackage,
   parseMemberKeyBundle,
   sealScopeKeyPackage,
   signMemberChainEntry,
@@ -20,7 +21,7 @@ import {
   type MemberChainOp,
   type MemberKeyBundleV1,
   type MemberKeys,
-  type ScopeKeyPackageV1,
+  type ScopeKeyPackageV2,
   type SealedCategory,
 } from '@byok-sdk/core/sealed-payload';
 import type { E2eeTestHost } from './e2ee-test-host';
@@ -47,6 +48,12 @@ export class E2eeWebClient {
   /** The base32 `pv` the device is given after the pairing code. */
   get verificationSecret(): string {
     return encodePairingVerificationSecret(this.pv);
+  }
+
+  /** Take the host chain's last entry as the head, after another member appended. */
+  async follow(): Promise<void> {
+    const { sig: _sig, ...unsigned } = this.host.chain.at(-1) as MemberChainEntryV1;
+    this.head = { seq: unsigned.seq, hash: await memberChainEntryHash(unsigned) };
   }
 
   /** Sign the next chain entry and append it. */
@@ -97,12 +104,25 @@ export class E2eeWebClient {
   }
 
   /** One key package of `scopeKey`, from this client to `recipient`. */
-  sealPackage(scopeId: string, recipient: MemberKeyBundleV1, scopeKey: Uint8Array, epoch = 1): Promise<ScopeKeyPackageV1> {
+  sealPackage(scopeId: string, recipient: MemberKeyBundleV1, scopeKey: Uint8Array, epoch = 1): Promise<ScopeKeyPackageV2> {
     return sealScopeKeyPackage({
       scopeKey, tenantId: this.tenantId, scopeId, epoch,
-      recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk },
+      recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk, kemEpoch: recipient.kemEpoch },
       sender: { signingPublicJwk: this.keys.signing.publicJwk, signingPrivateKey: this.keys.signing.privateKey },
     });
+  }
+
+  /** Open this client's package of one scope epoch, sealed by `sender`; it throws when there is none or it does not open. */
+  async openPackage(scopeId: string, epoch: number, sender: MemberKeyBundleV1): Promise<Uint8Array> {
+    const pkg = this.host.packages.find((stored) => stored.scopeId === scopeId && stored.epoch === epoch && stored.recipient === this.member.memberId);
+    const opened = await openScopeKeyPackage({
+      package: pkg,
+      expected: { tenantId: this.tenantId, scopeId, epoch },
+      recipient: { memberId: this.member.memberId, kemPublicJwk: this.keys.kem.publicJwk, kemPrivateKey: this.keys.kem.privateKey, kemEpoch: this.keys.kem.epoch },
+      senderSigningPublicJwk: sender.signingPublicJwk,
+    });
+    if (!opened.ok) throw new Error(`the package of epoch ${epoch} does not open: ${opened.reason}`);
+    return opened.scopeKey;
   }
 
   /** Relay the client MAC over the current head. */

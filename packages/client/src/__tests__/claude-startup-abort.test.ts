@@ -61,6 +61,33 @@ const __executionScratch = withMcp ? inertScratch('/inert-config') : inertScratc
 beforeEach(() => vi.resetAllMocks());
 afterEach(() => { for (const child of children.splice(0)) child.emit('close', 1, null); vi.restoreAllMocks(); });
 
+describe('Claude startup exit class (#869)', () => {
+  it('marks an exit while the initial instruction write is pending runtime_exited', async () => {
+    const fake = fixture(true);
+    const op = await operation(fake.spawnFn);
+    const result = observe(op.start()); await flush();
+    fake.child.emit('close', 1, null); await flush();
+    expect(result.error).toMatchObject({ phase: 'start', message: 'claude initial instruction transport failed', failure: { class: 'runtime_exited' } });
+  });
+
+  it('keeps a transport failure on the initial write unknown', async () => {
+    const fake = fixture();
+    fake.write.mockImplementationOnce((_chunk, _encoding, callback: (error?: Error | null) => void) => callback(new Error('write EPIPE')));
+    const op = await operation(fake.spawnFn);
+    const result = observe(op.start()); await flush();
+    fake.child.emit('close', 1, null); await flush();
+    expect(result.error).toMatchObject({ phase: 'start', message: 'claude initial instruction transport failed', failure: { class: 'unknown' } });
+  });
+
+  it('keeps a startup cancelled before init unknown when the process then closes', async () => {
+    const controller = new AbortController(); const fake = fixture();
+    const op = await operation(fake.spawnFn, controller.signal);
+    const result = observe(op.start()); await flush();
+    controller.abort(); fake.child.emit('close', 1, null); await flush();
+    expect((result.error as RuntimeStartupDisposalFailure).cause).toMatchObject({ phase: 'start', failure: { class: 'unknown' } });
+  });
+});
+
 describe('Claude startup cancellation ownership', () => {
   it('refuses an already-aborted startup without spawning', async () => {
     const controller = new AbortController(); controller.abort();
