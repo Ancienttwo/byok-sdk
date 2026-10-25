@@ -112,6 +112,7 @@ test('a platform family is selected only by a path it owns', () => {
     'windows-service-smoke': 'packages/client/src/lifecycle/winsw.ts',
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
     'credential-isolation-audit': 'packages/keys/src/index.ts',
+    'hermes-real-windows': 'packages/client/src/__tests__/hermes-real.test.ts',
   };
   assert.deepEqual(Object.keys(owned).sort(), Object.keys(familyOwners).sort());
   const tracked = new Set(spawnSync('git', ['ls-files'], { cwd: fileURLToPath(root), encoding: 'utf8' }).stdout.split('\n').filter(Boolean));
@@ -143,6 +144,20 @@ test('Hermes adapter, fake and custody launcher paths select the Windows Hermes 
   // The job does not run these, so a change to them does not select it.
   for (const path of ['packages/client/src/adapters/codex/codex-adapter.ts', 'packages/keys/src/pi-provider-launcher.ts', 'packages/client/src/__tests__/hermes-pipe-open-errors.test.ts']) {
     assert.ok(!selectImpact([path]).families.includes('windows-git-workspace'), path);
+  }
+});
+
+test('Hermes adapter, real run and custody launcher paths select the real Hermes Windows job (#608)', () => {
+  for (const path of [
+    'packages/client/src/adapters/hermes/gateway-pipe-win32.ts',
+    'packages/client/src/adapters/hermes/hermes-adapter.ts',
+    'packages/client/src/__tests__/hermes-real.test.ts',
+    'packages/client/src/__tests__/fixtures/hermes-fake-model.ts',
+    'packages/keys/src/hermes-provider-launcher.ts',
+  ]) assert.ok(selectImpact([path]).families.includes('hermes-real-windows'), path);
+  // The fake Hermes suites do not run real Hermes, so they do not select it.
+  for (const path of ['packages/client/src/__tests__/hermes-custody.test.ts', 'packages/client/src/__tests__/fixtures/fake-hermes.mjs', 'packages/keys/src/__tests__/hermes-provider-launcher.test.ts']) {
+    assert.ok(!selectImpact([path]).families.includes('hermes-real-windows'), path);
   }
 });
 
@@ -276,7 +291,7 @@ test('selection is deterministic, deduplicated, and uses only known family IDs',
   const selection = selectImpact(paths);
   assert.deepEqual(selection, selectImpact([...paths].reverse().concat(paths)));
   assert.ok(selection.families.every(id => knownFamilies.includes(id)));
-  assert.equal(knownFamilies.length, 14);
+  assert.equal(knownFamilies.length, 15);
 });
 
 test('CLI accepts JSON stdin and fails closed without an output selection on bad JSON', () => {
