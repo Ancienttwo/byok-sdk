@@ -317,6 +317,15 @@
   entry option, composed from `HostedReconciler.failStuckIntent`)
   reconciles that row once more and settles it `failed` with an audit
   line, so its FIFO moves on.
+- **Feature (examples)** — the hosted collaboration example adopts K8's
+  `deviceRefusal` sync fact (#956). Each sync round reads the binding of
+  each Bot's device once, so a Turn whose Bot device has no active H
+  binding is held (`held: 'device_not_bound'`) instead of stalling the
+  sync of its whole scope. The scope's due time is 0 while a held Turn's
+  device is bound again or its Bot is archived, so the due scheduler
+  releases it at once; `bindDevice` and `revokeDevice` now write the due
+  time in their transaction. H's card claim uses K8's
+  `CONNECTOR_OUTCOME_UNKNOWN` in place of its own copy of the text.
 
 ## 0.30.1 — 2026-10-24 (published)
 
