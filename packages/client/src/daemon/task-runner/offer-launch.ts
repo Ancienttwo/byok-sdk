@@ -415,7 +415,7 @@ export interface OfferStartInput
   readonly startupDeadline: number;
 }
 
-/** Starts the runtime session; a start that fails or races a cancel hands its resources to startup ownership. */
+/** Starts the runtime session and hands it, or a start that failed or raced a cancel, to startup ownership. */
 export async function startOfferRuntime(this: TaskRunner, phase: OfferPhaseContext, held: OfferHeld, input: OfferStartInput) {
   const { taskId } = phase;
   const {
@@ -555,5 +555,17 @@ export async function startOfferRuntime(this: TaskRunner, phase: OfferPhaseConte
     }
     return;
   }
+
+  const ownedBinding = agentBinding;
+  this['startupOwnership'].register(taskId, {
+    runtimeId: pick.descriptor.id,
+    dispose: async () => { await session.close(); await scratch.release(); },
+    release: async () => {
+      await ownedBinding?.lease.release();
+      gitLease?.release();
+      await this['releasePreparationPin'](taskId);
+    },
+  });
+  held.owner = 'startup';
   return session;
 }

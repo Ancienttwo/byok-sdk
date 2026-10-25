@@ -37,17 +37,6 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     agentBinding, gitLease, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
     workspaceDir, gitWorkspaceId, gitBaseline, blobAbort, payload, session, messageRequirement, terminalProjection,
   } = input;
-  const ownedBinding = agentBinding;
-  this['startupOwnership'].register(taskId, {
-    runtimeId: pick.descriptor.id,
-    dispose: async () => { await session.close(); await scratch.release(); },
-    release: async () => {
-      await ownedBinding?.lease.release();
-      gitLease?.release();
-      await this['releasePreparationPin'](taskId);
-    },
-  });
-  held.owner = 'startup';
   try {
   if (agentBinding !== undefined) {
     try {
