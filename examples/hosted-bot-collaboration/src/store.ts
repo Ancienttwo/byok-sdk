@@ -264,7 +264,7 @@ export class HostedCollaborationStore {
   protected commitIn(scope: string, request: CommitRequest<Command>, clock: () => number, outcome?: OutcomeRoutinePorts): Promise<CommitResult> {
     const command = request.command;
     return this.commitWith(scope, request, clock, (_state, ports) => outcome && command.kind === 'outcome'
-      ? { outcome: { manage: ports.manage(command.taskId), ...outcome } } : {});
+      ? { outcome: { ...outcome, manage: ports.manage(command.taskId) } } : {});
   }
 
   /** One commit with the store's ports and `extra`, the ports that only the store's own entries add. */
