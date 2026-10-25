@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, truncateSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -192,15 +192,50 @@ const BUN_BIN = resolveBunBin();
 const BACKEND = process.platform === 'linux' || builtAgentMemoryFilesystemHelperBin() !== undefined;
 const CLI = fileURLToPath(new URL('./agent-memory-powercut/cli.ts', import.meta.url));
 
+/**
+ * Runs one experiment and always ends what it started. A run that throws
+ * reports the device's stderr, and a device process that outlives the run
+ * fails it too.
+ */
+async function closing<T>(driver: PowerCutDriver, stderr: readonly string[], run: () => Promise<T>): Promise<T> {
+  let result: T;
+  try {
+    result = await run();
+  } catch (error) {
+    const closeError = await driver.close().then(() => undefined, (failure: unknown) => failure);
+    const lines = [String(error), ...(closeError === undefined ? [] : [`close: ${String(closeError)}`]), 'device stderr:', ...stderr];
+    throw new Error(lines.join('\n'), { cause: error });
+  }
+  await driver.close();
+  return result;
+}
+
+/** A device program that reports its store, then exits on its first notice. */
+function fakeDevice(dir: string, exitAt: 'start' | 'notice'): string {
+  const file = path.join(dir, 'fake-device.ts');
+  const module = (name: string) => JSON.stringify(fileURLToPath(new URL(`./agent-memory-powercut/${name}.ts`, import.meta.url)));
+  writeFileSync(file, [
+    `import { readMessages, writeMessage } from ${module('protocol')};`,
+    `import { takeDeviceSnapshot } from ${module('snapshot')};`,
+    exitAt === 'start' ? `console.error('fake device: no snapshot'); process.exit(7);` : '',
+    `writeMessage(process.stdout, { type: 'snapshot', snapshot: await takeDeviceSnapshot(process.argv[2]!) });`,
+    `writeMessage(process.stdout, { type: 'ready' });`,
+    `for await (const message of readMessages<{ type: string }>(process.stdin)) if (message.type === 'notice') process.exit(3);`,
+  ].join('\n'));
+  return file;
+}
+
 describe('W5 process-crash run', () => {
   it.skipIf(BUN_BIN === undefined || !BACKEND)('kills the device tree at Host points and random times; every invariant holds', async () => {
     const store = scratch();
     const journal = new HostJournal(path.join(scratch(), 'journal.jsonl'));
     const driver = new ProcessKillDriver({ command: BUN_BIN!, args: [CLI, 'device', '--store', store] });
     try {
-      const report = await runExperiment({
+      const report = await closing(driver, driver.stderr, () => runExperiment({
         driver, host: new PowercutHost({ seed: 11, intentsPerHome: 3, journal }), triggers: powercutTriggers(14, 11, 600),
-      });
+      }));
+      // Which windows the cuts landed in depends on timing; it is reported, not asserted.
+      console.log(`W5 ${process.platform} cut windows: ${JSON.stringify(report.windows)}`);
       const failures = report.cuts.flatMap((cut) => [...cut.invariants, cut.recovery!]
         .filter((entry) => entry.status !== 'held').map((entry) => `${cut.trigger} ${entry.id}: ${entry.details.join('; ')}`));
       expect({ failures, stoppedEarly: report.stoppedEarly, stderr: failures.length === 0 ? [] : driver.stderr }).toEqual({ failures: [], stoppedEarly: undefined, stderr: [] });
@@ -239,9 +274,9 @@ describe('W5 process-crash run', () => {
       }
     }
     const driver = new ProcessKillDriver({ command: BUN_BIN!, args: [CLI, 'device', '--store', store] });
-    const report = await runExperiment({
+    const report = await closing(driver, driver.stderr, () => runExperiment({
       driver, host: new SlowHost({ seed: 11, intentsPerHome: 3, journal: new HostJournal() }), triggers: [{ kind: 'delay', ms: 20 }],
-    });
+    }));
     expect(report.stoppedEarly).toBeUndefined();
     expect(report.cuts.map((cut) => [cut.intentsBeforeCut, cut.window, cut.recovery?.status])).toEqual([[1, 'no-record', 'held']]);
     expect(report.violations).toBe(0);
@@ -259,19 +294,49 @@ describe('W5 process-crash run', () => {
       storageProfile: { id: 'test-tears-ledger', dropsUnflushedWrites: true, description: 'tears the first ledger at each cut' },
       start: () => inner.start(),
       stop: () => inner.stop(),
+      close: () => inner.close(),
       cut: async () => {
         await inner.cut();
         truncateSync(ledger, Math.floor(statSync(ledger).size / 2));
       },
     };
-    const report = await runExperiment({
+    const report = await closing(driver, inner.stderr, () => runExperiment({
       driver, host: new PowercutHost({ seed: 11, intentsPerHome: 3, journal }), triggers: [{ kind: 'host', on: 'complete', intent: 1 }],
-    });
+    }));
     const cut = report.cuts[0]!;
     expect(cut.invariants.filter((entry) => entry.status === 'violated').map((entry) => entry.id)).toEqual(['I1', 'I2', 'I4']);
     expect(cut.recovery).toEqual({ id: 'I6', status: 'violated', details: [expect.stringContaining('notice failed with ledger_invalid'), expect.stringContaining('still open after recovery')] });
     expect(report.stoppedEarly).toMatch(/did not settle/u);
   }, 60_000);
+
+  // A device that exits on its own in a delay round is not a cut. The run
+  // stops there, and the delay never signals a process that is gone.
+  it.skipIf(BUN_BIN === undefined)('stops when the device exits before a delay cut, and sends no signal', async () => {
+    const dir = scratch();
+    const inner = new ProcessKillDriver({ command: BUN_BIN!, args: [fakeDevice(dir, 'notice'), scratch()] });
+    let cuts = 0;
+    const driver: PowerCutDriver = {
+      fault: inner.fault, storageProfile: inner.storageProfile,
+      start: () => inner.start(), stop: () => inner.stop(), close: () => inner.close(),
+      cut: () => { cuts += 1; return inner.cut(); },
+    };
+    const report = await closing(driver, inner.stderr, () => runExperiment({
+      driver, host: new PowercutHost({ seed: 11, intentsPerHome: 3, journal: new HostJournal() }), triggers: [{ kind: 'delay', ms: 1_000 }],
+    }));
+    expect(report.stoppedEarly).toBe('round 0: the device exited before the cut');
+    expect(report.cuts).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(cuts).toBe(0);
+  }, 20_000);
+
+  it.skipIf(BUN_BIN === undefined)('fails at once, with its stderr, when the device dies before its snapshot', async () => {
+    const driver = new ProcessKillDriver({ command: BUN_BIN!, args: [fakeDevice(scratch(), 'start'), scratch()] });
+    const started = Date.now();
+    await expect(closing(driver, driver.stderr, () => runExperiment({
+      driver, host: new PowercutHost({ seed: 11, intentsPerHome: 3, journal: new HostJournal() }), triggers: [{ kind: 'delay', ms: 100 }],
+    }))).rejects.toThrow(/ended before it sent its snapshot[\s\S]*fake device: no snapshot/u);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, 20_000);
 });
 
 const FAKE_QEMU = `
@@ -305,8 +370,12 @@ async function freePort(): Promise<number> {
   return port;
 }
 
+const LOOP_DEADLINE_MS = 10_000;
+
 async function guestConnects(port: number): Promise<net.Socket> {
+  const deadline = Date.now() + LOOP_DEADLINE_MS;
   for (;;) {
+    if (Date.now() > deadline) throw new Error(`no guest connection to port ${port}`);
     const socket = net.connect({ host: '127.0.0.1', port });
     const outcome = await Promise.race([once(socket, 'connect').then(() => 'up'), once(socket, 'error').then(() => 'down')]);
     if (outcome === 'up') return socket;
@@ -315,7 +384,9 @@ async function guestConnects(port: number): Promise<net.Socket> {
 }
 
 async function qmpReady(socketPath: string): Promise<void> {
+  const deadline = Date.now() + LOOP_DEADLINE_MS;
   for (;;) {
+    if (Date.now() > deadline) throw new Error(`no QMP monitor at ${socketPath}`);
     try {
       await qmpExecute(socketPath, 'query-status');
       return;
@@ -396,22 +467,26 @@ describe.skipIf(process.platform === 'win32')('W5 QEMU driver against a fake QEM
         },
         bootTimeoutMs: 10_000,
       });
-      expect(driver.storageProfile).toBe(DROPS);
-      const first = driver.start();
-      const guest = await guestConnects(listenPort);
-      const run = await first;
-      await qmpReady(qmp);
-      await driver.cut();
-      await run.ended;
-      expect(layer).toEqual(fault === 'power-loss' ? ['cut qemu-alive=true', 'prepare-boot'] : []);
-      guest.destroy();
-      // The next boot: os-crash reuses the running QEMU, power-loss starts a new one.
-      const second = driver.start();
-      const rebooted = await guestConnects(listenPort);
-      await second;
-      await qmpReady(qmp);
-      await driver.stop();
-      rebooted.destroy();
+      try {
+        expect(driver.storageProfile).toBe(DROPS);
+        const first = driver.start();
+        const guest = await guestConnects(listenPort);
+        const run = await first;
+        await qmpReady(qmp);
+        await driver.cut();
+        await run.ended;
+        expect(layer).toEqual(fault === 'power-loss' ? ['cut qemu-alive=true', 'prepare-boot'] : []);
+        guest.destroy();
+        // The next boot: os-crash reuses the running QEMU, power-loss starts a new one.
+        const second = driver.start();
+        const rebooted = await guestConnects(listenPort);
+        await second;
+        await qmpReady(qmp);
+        await driver.stop();
+        rebooted.destroy();
+      } finally {
+        await driver.close();
+      }
       // Power loss never asks QEMU to quit: a clean quit flushes its block devices.
       expect(commands(log)).toEqual(fault === 'os-crash' ? ['inject-nmi', 'quit'] : ['quit']);
     }

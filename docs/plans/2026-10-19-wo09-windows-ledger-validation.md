@@ -317,7 +317,9 @@ The three platform-refusal files are byte-identical to `f11fe428`.
 ## W5: power-cut harness and VM evaluation (2026-10-26)
 
 Owner decision of 2026-10-26: build the experiment harness first and
-evaluate the environment. Add no CI. This section does not change B,
+evaluate the environment, with no new CI workflow. A6 below later wired
+the harness into the existing `agent-memory-helper` job (see Sign-off).
+This section does not change B,
 `strictLedgerBarrier` or any admission gate. Windows admission stays
 closed. W2 and W6 still wait for W5 power-loss evidence.
 
@@ -393,7 +395,7 @@ Drivers:
 
 | Driver | Fault | Storage profile | Cut |
 |---|---|---|---|
-| `ProcessKillDriver` | process-crash | `os-cache-keeps-writes` | SIGKILL of the process group, then wait until the group is empty. On Windows: `start` records the device with its creation time; the cut runs `taskkill /T /F` at once, reads the tree at that moment from its output, and requires that none of those processes and nothing they started is alive; creation times rule out a reused PID, and the taskkill exit code is kept as evidence, not trusted. The helper is spawned without `detached` (`agent-memory-fs-helper.ts`), so it is in the group and dies with the device; a helper left alive would see end of input and finish its write. |
+| `ProcessKillDriver` | process-crash | `os-cache-keeps-writes` | SIGKILL of the process group, then wait until the group is empty. On Windows: `start` records the device with its creation time; the cut runs `taskkill /T /F` at once, reads the tree at that moment from its output, and requires that none of those processes and nothing they started is alive. Creation times rule out a reused PID only in that survivor scan after the kill. Before any signal, `cut` refuses a device child that has already exited; until Node sees the exit it holds the child (unreaped on POSIX, an open process handle on Windows), so the PID still names that child. The taskkill exit code is kept as evidence, not trusted. The helper is spawned without `detached` (`agent-memory-fs-helper.ts`), so it is in the group and dies with the device; a helper left alive would see end of input and finish its write. |
 | `QemuDriver` | os-crash | the configured layer | QMP `inject-nmi`. Windows 8 and later bugcheck on an NMI. The guest must reboot automatically and write no crash dump to the disk under test. QEMU keeps running. |
 | `QemuDriver` | power-loss | the configured layer | `StorageLayer.cut` while QEMU is alive, SIGKILL of QEMU, `StorageLayer.prepareBoot`, a new boot. Never QMP `quit`, `stop` or a pause before the cut: each flushes the block devices. |
 
@@ -414,7 +416,8 @@ matched two independent source builds, and `helperAgentMemoryIntentBackend`
 verified the darwin pin.
 
 - `bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-powercut.test.ts`:
-  16 passed. The process-crash case runs 14 cuts (6 Host points, 8 random
+  all passed. The file had 16 tests at this run; it now has 21, and
+  Windows skips the 2 fake-QEMU cases. The process-crash case runs 14 cuts (6 Host points, 8 random
   delays up to 600 ms) and requires every invariant held and the exact
   window of each Host point. A negative control tears the ledger after the
   cut; the same loop reports I1, I2 and I4 violated, and I6 violated with
@@ -468,7 +471,8 @@ runs `taskkill /T /F` at the trigger, with no snapshot first. taskkill names
 every process of the tree at that moment, including the ones it reports as
 not terminable. The cut then requires, within 10 s, that none of those
 processes and nothing they started is alive, using creation times to rule
-out a reused PID; a survivor fails the cut. Each kill record lists the named
+out a reused PID in that scan; a survivor fails the cut. Before signalling,
+the cut only checks that the device child has not exited. Each kill record lists the named
 processes by role (device, helper, helper child) and whether a helper was
 alive. The test prints how many cuts hit a live helper and does not assert
 it, because that depends on timing. A Host-point cut never hits a helper:
@@ -507,10 +511,11 @@ fails. After one process crash in that window, the home can no longer be
 written. The 120-cut run above did not hit this window, most likely
 (inferred) because its CPU was not throttled.
 
-Not fixed here. `agent-home.ts` is product code outside this lane, and how
-a restart should treat an empty or unparseable marker is an owner decision.
-The process-crash case keeps its assertion. Until this is decided, it fails
-whenever a cut lands in that window.
+Owner decision: a separate PR publishes the marker atomically, so the
+window disappears. It writes and fsyncs a temp file, then links it to the
+lease path. How a restart treats an empty or unparseable marker is not
+changed. This change merges after that PR. The process-crash case keeps
+its assertion.
 
 ### macOS CI hang (2026-10-26)
 
@@ -543,6 +548,24 @@ a closed session forever. The run now rechecks the cut after issuing, and
 Inferred, not verified: this path would end as a test timeout after
 180 s, not as the wedged VM seen on CI, so it is probably not the whole
 cause.
+
+A second review found more harness paths, also fixed:
+
+- A delay timer was still armed after a round ended because the device
+  closed. Every way out of a round now clears it.
+- `cut` refuses a device that already exited and sends no signal, so a late
+  timer cannot reach a reused PID.
+- A device that exits on its own ends the run with `stoppedEarly`; it is not
+  recorded as a cut.
+- A device that dies before its snapshot fails the run at once, with its
+  stderr.
+- Each driver has `close`, which the tests call on every path. It ends what a
+  failed run left running, and fails if a device process outlives the device.
+- The process-crash case prints its cut windows on every platform.
+
+New tests cover the device that exits before a delay cut, and the device
+that dies before its snapshot. Both failed before the fix: the first
+threw, the second timed out.
 
 The cause of the CI hang is unknown. Splitting W5 into its own step is not a fix; it only
 avoids running W5 in the same vitest run as the other helper files. W5 now

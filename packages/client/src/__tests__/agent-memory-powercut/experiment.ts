@@ -52,16 +52,24 @@ class HostSession {
   constructor(private readonly run: DeviceRun, private readonly host: PowercutHost) {
     let snapshot!: (value: DeviceSnapshot) => void;
     let ready!: () => void;
-    this.snapshot = new Promise((resolve) => { snapshot = resolve; });
-    this.ready = new Promise((resolve) => { ready = resolve; });
+    let early!: (error: Error) => void;
+    let gotSnapshot = false;
+    let gotReady = false;
+    this.snapshot = new Promise((resolve, reject) => { snapshot = resolve; early = reject; });
+    let earlyReady!: (error: Error) => void;
+    this.ready = new Promise((resolve, reject) => { ready = resolve; earlyReady = reject; });
+    // A device that dies before it is ready fails the run at once. Whichever
+    // promise the run is not awaiting yet must not count as unhandled.
+    this.snapshot.catch(() => {});
+    this.ready.catch(() => {});
     // A cut can land while the Host writes. That message is lost, as at a
     // real power cut; the Host acts on the end of the device's input instead.
     run.link.output.on('error', () => {});
     this.closed = (async () => {
       for await (const message of readMessages<DeviceMessage>(run.link.input)) {
         switch (message.type) {
-          case 'snapshot': snapshot(message.snapshot); break;
-          case 'ready': ready(); break;
+          case 'snapshot': gotSnapshot = true; snapshot(message.snapshot); break;
+          case 'ready': gotReady = true; ready(); break;
           case 'fetch': this.#answer(message.id, message.request.intentId, 'fetch', () => this.host.fetch(message.request)); break;
           case 'complete': this.#answer(message.id, message.completion.intentId, 'complete', () => this.host.complete(message.completion)); break;
           case 'acked':
@@ -75,6 +83,8 @@ class HostSession {
         }
       }
       this.#ended = true;
+      if (!gotSnapshot) early(new Error('the device ended before it sent its snapshot'));
+      if (!gotReady) earlyReady(new Error('the device ended before it was ready'));
       const waiter = this.#waiter;
       this.#waiter = undefined;
       waiter?.resolve('closed');
@@ -190,10 +200,10 @@ export async function runExperiment(options: ExperimentOptions): Promise<Experim
     const cut = (): void => { cutting ??= driver.cut(); };
     const timer = trigger.kind === 'delay' ? setTimeout(cut, trigger.ms) : undefined;
     let issued = 0;
+    let exitedBeforeCut = false;
     for (;;) {
       if (cutting !== undefined) break;
       if (issued >= maxIntents) {
-        clearTimeout(timer);
         cut();
         stoppedEarly = `round ${round} reached ${maxIntents} intents without a cut`;
         break;
@@ -205,16 +215,25 @@ export async function runExperiment(options: ExperimentOptions): Promise<Experim
       if (trigger.kind === 'host' && trigger.intent === issued) session.arm(trigger.on, intent.intentId, cut);
       const outcome = await session.deliver(intent);
       if (outcome === 'failed') {
-        clearTimeout(timer);
         cut();
         stoppedEarly = `round ${round}: a notice failed before any cut`;
         break;
       }
-      if (outcome === 'closed') break;
+      if (outcome === 'closed') {
+        exitedBeforeCut = cutting === undefined;
+        break;
+      }
     }
+    // Every way out of the round disarms the delay: a late timer would
+    // signal a device that is gone, and its PID may be another process.
+    clearTimeout(timer);
     await cutting;
     await run.ended;
     await session.closed;
+    if (exitedBeforeCut) {
+      stoppedEarly = `round ${round}: the device exited before the cut`;
+      break;
+    }
     journal.append({ kind: 'cut', round, trigger: describeTrigger(trigger) });
     lastCut = { round, trigger: describeTrigger(trigger), journalLength: journal.entries.length, intentsBeforeCut: issued };
     if (stoppedEarly !== undefined) break;

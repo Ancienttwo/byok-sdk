@@ -40,7 +40,10 @@ export interface DeviceRun {
 /**
  * A pluggable fault. `start` runs or boots the device program and resolves
  * once it is connected. `cut` injects the fault and resolves only when no
- * device process can write any more. `stop` ends a run that finished cleanly.
+ * device process can write any more; it refuses a device that already
+ * exited, since its PID may name another process by then. `stop` ends a run
+ * that finished cleanly. `close` ends whatever a failed run left running and
+ * throws if a device process survives it.
  */
 export interface PowerCutDriver {
   readonly fault: FaultKind;
@@ -48,12 +51,17 @@ export interface PowerCutDriver {
   start(): Promise<DeviceRun>;
   cut(): Promise<void>;
   stop(): Promise<void>;
+  close(): Promise<void>;
 }
 
 const execFileAsync = promisify(execFile);
 
+function hasExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
 function exited(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  if (hasExited(child)) return Promise.resolve();
   return once(child, 'close').then(() => undefined);
 }
 
@@ -190,15 +198,45 @@ export class ProcessKillDriver implements PowerCutDriver {
 
   async cut(): Promise<void> {
     const child = this.#take();
+    if (hasExited(child)) {
+      this.#windowsDevice = undefined;
+      throw new Error(`device ${child.pid} exited before the cut (${child.exitCode ?? child.signalCode})`);
+    }
     if (process.platform === 'win32') {
       await this.#cutWindows(child);
       return;
     }
     process.kill(-child.pid!, 'SIGKILL');
     await exited(child);
+    await this.#posixGroupGone(child.pid!, 'survived SIGKILL');
+  }
+
+  async close(): Promise<void> {
+    const child = this.#child;
+    if (child === undefined) return;
+    if (!hasExited(child)) {
+      await this.cut();
+      return;
+    }
+    this.#child = undefined;
+    const device = this.#windowsDevice;
+    this.#windowsDevice = undefined;
+    // The device is gone; what it started must be gone too. A POSIX group ID
+    // is not reused while the group has a member, so probing it is safe.
+    if (process.platform !== 'win32') {
+      await this.#posixGroupGone(child.pid!, 'outlived the device');
+      return;
+    }
+    if (device === undefined) return;
+    const alive = await windowsProcesses();
+    const survivors = windowsTree(alive, [device]).filter((entry) => entry.pid !== device.pid && entry.created >= device.created);
+    if (survivors.length > 0) throw new Error(`device tree outlived the device: ${JSON.stringify(survivors)}`);
+  }
+
+  async #posixGroupGone(pgid: number, what: string): Promise<void> {
     const deadline = Date.now() + 5_000;
-    while (processGroupAlive(child.pid!)) {
-      if (Date.now() > deadline) throw new Error(`a process of device group ${child.pid} survived SIGKILL`);
+    while (processGroupAlive(pgid)) {
+      if (Date.now() > deadline) throw new Error(`a process of device group ${pgid} ${what}`);
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   }
@@ -381,6 +419,20 @@ export class QemuDriver implements PowerCutDriver {
     this.#qemu = undefined;
     if (qemu !== undefined) {
       await qmpExecute(this.#options.qmpSocket, 'quit');
+      await exited(qemu);
+    }
+    this.#server?.close();
+    this.#server = undefined;
+  }
+
+  async close(): Promise<void> {
+    this.#socket?.destroy();
+    this.#socket = undefined;
+    for (const socket of this.#connections.splice(0)) socket.destroy();
+    const qemu = this.#qemu;
+    this.#qemu = undefined;
+    if (qemu !== undefined && !hasExited(qemu)) {
+      qemu.kill('SIGKILL');
       await exited(qemu);
     }
     this.#server?.close();

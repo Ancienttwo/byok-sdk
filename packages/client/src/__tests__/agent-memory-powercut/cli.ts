@@ -90,6 +90,7 @@ async function experiment(driver: PowerCutDriver, triggers: CutTrigger[], seed: 
     return report.violations === 0 && report.stoppedEarly === undefined ? 0 : 1;
   } finally {
     journal.close();
+    await driver.close();
   }
 }
 

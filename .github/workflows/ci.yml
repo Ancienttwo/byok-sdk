@@ -486,7 +486,7 @@ jobs:
                 sleep 15 & nap=$!; wait "$nap"
               done) > "$RUNNER_TEMP/w5-processes.log" 2>&1 &
             sampler=$!
-            trap 'kill "$sampler"' EXIT
+            trap 'kill "$sampler" 2>/dev/null || true' EXIT
           fi
           bun run --filter @byok-sdk/client test -- --reporter=verbose --reporter=hanging-process src/__tests__/agent-memory-powercut.test.ts
 
