@@ -41,6 +41,10 @@ export interface MessageReceipt { messageId: string; contentHash: string }
  * refusal is computed again on replay. Each receipt is the same fact as the K8 accepted reply of its task id, so the two
  * must agree. K4 `attempts` is not carried: it is `generation + 1` once the intent began (`submission` is not
  * `reserved`), and 0 before.
+ *
+ * The scheduler cursors of a concluded row are not carried either (#975 D6, the one exception to "no defaults"): K4
+ * `phase` and `notBefore`, H `tries`, `next_at`, `reconcile_at` and `last_error`. Nothing reads them on a concluded row,
+ * so a target writes its own initial values of a new row.
  */
 export interface IntentRecord {
   key: string; source: 'user' | 'bot' | 'routine'; handler?: string; ordinal: number; agent: string;
