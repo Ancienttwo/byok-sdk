@@ -453,7 +453,11 @@ class CodexSession implements Session {
         }
       }
     } catch (error) {
-      this.fail(error);
+      // After an exit the app-server made on its own, a failing record is one that exit produced
+      // (its exit record, or a control it settled as exited): the exit stays the class.
+      this.fail(this.exitedOnItsOwn
+        ? infrastructure(error instanceof Error ? error.message : 'codex runtime failed', { class: 'runtime_exited' })
+        : error);
       this.halted = this.failure;
       throw error;
     }

@@ -115,7 +115,10 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
       const finish = (evidence: Parameters<HostedCollaborationStore['finish']>[2]) => store().finish('s', 't', evidence, ports);
       // @ts-expect-error consume() takes the Host clock.
       const consume = (agent: Parameters<HostedCollaborationStore['consume']>[1]) => store().consume('s', agent, ports);
-      expect([commit, finish, consume].every(call => typeof call === 'function')).toBe(true);
+      type Receive = Parameters<HostedCollaborationStore['receive']>;
+      // @ts-expect-error receive() takes the Host clock.
+      const receive = (message: Receive[1], identity: Receive[2]) => store().receive('s', message, identity, ports);
+      expect([commit, finish, consume, receive].every(call => typeof call === 'function')).toBe(true);
     });
   });
 

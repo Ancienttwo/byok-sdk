@@ -50,6 +50,29 @@
   the FIFO stayed blocked and the owner call refused the key as not stuck. A
   Host that switches exhaustively on `IntentOutcomeError.code` must add the
   `outcome_failed` case.
+- **Feature (examples)** — with `roomHistory`, K8 publishes each accepted seat
+  post as the projection `room-message:<roomId>:<messageId>` with
+  `{ roomId, id, from, text, late }`, and does not read the next seat of a room
+  while that room has an undelivered post (#883 acceptance 2). The Host's
+  `deliver` must resolve only after the write can be read back. A projection
+  that never delivers releases each later seat of its room as `busy` at its
+  deadline. The rule's new optional `OutcomePorts.roomPosts` stays unset in H,
+  so H and every Host without the option are unchanged.
+- **Fixed (examples)** — K8 L no longer leaves a room seat waiting when a Turn
+  step releases the seat before it (a blocked or retired seat Turn). The L
+  sync runs the room step and the Turn steps again, as H's sync does since
+  #876, so the next seat gets its Turn in the same sync. Before, a round whose
+  seat Turns all blocked stopped after four seats, with no timer for the next.
+  A shared room vector holds both Hosts to this.
+- **Fixed (examples)** — K8 bounds the `history` and `roomHistory` reads with
+  the new `historyTimeoutMs` option (default 10 seconds). A read still open
+  after it counts as failed: the Turn stays queued and the timer reads again.
+  Before, a stalled `history` authority held the Host queue with no bound.
+
+- **Fixed (client)** — when a Codex app-server ends on its own and the
+  adapter's record consumer then fails on a record that exit produced (the
+  exit record, or a control settled as exited), the task now fails as
+  `runtime_exited` with the consumer's reason, instead of `unknown` (#869).
 
 ## 0.30.1 — 2026-10-24 (published)
 
