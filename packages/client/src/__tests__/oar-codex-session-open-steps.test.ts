@@ -3,12 +3,17 @@ import { codexSession } from '../../vendor/oar/c88a514/runtimes/codex/session';
 import { codexThreadOpen } from '../../vendor/oar/c88a514/runtimes/codex/open';
 import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/c88a514/runtimes/codex/app-server-client';
 
-/** A scripted app-server: answers every request, `thread/start` and `thread/resume` with the root thread. */
+/**
+ * A scripted app-server: answers every request, `thread/start` and
+ * `thread/resume` with the root thread. A kill exits on a later tick, as a
+ * process does.
+ */
 function fakeServer(answers: Record<string, Record<string, unknown>> = {}) {
   let receive!: (line: string) => void;
   const exitHandlers: Array<(code: number | null) => void> = [];
   let resolveExit!: (code: number | null) => void;
   let ended = false;
+  let exited = false;
   const writes: Record<string, any>[] = [];
   const child: LineProcess = {
     spawned: Promise.resolve(), exited: new Promise(resolve => { resolveExit = resolve; }),
@@ -24,11 +29,11 @@ function fakeServer(answers: Record<string, Record<string, unknown>> = {}) {
     writeAcknowledged: text => { child.write(text); return Promise.resolve(); },
     kill: vi.fn(() => {
       if (ended) return; ended = true;
-      exitHandlers.forEach(fn => fn(null)); resolveExit(null);
+      setTimeout(() => { exited = true; exitHandlers.forEach(fn => fn(null)); resolveExit(null); }, 5);
     }),
   };
   const spawn = vi.fn<SpawnLineProcess>(() => child);
-  return { child, spawn, writes, methods: () => writes.filter(frame => frame.id !== undefined).map(frame => frame.method) };
+  return { child, spawn, writes, exited: () => exited, methods: () => writes.filter(frame => frame.id !== undefined).map(frame => frame.method) };
 }
 const installation = { kind: 'available', via: 'executable', command: 'fake' } as const;
 const servers = [{ name: 'task_tool', command: '/bin/task-tool' }];
@@ -68,17 +73,18 @@ describe('vendored Codex caller-owned open steps (BYOK change)', () => {
     await session.dispose();
   });
 
-  it('kills the app-server and rethrows when beforeOpen throws, before any open request', async () => {
+  it('kills the app-server and rethrows after it exits when beforeOpen throws, before any open request', async () => {
     const fake = fakeServer();
     const refusal = new Error('before refused');
     await expect(codexSession(fake.spawn, installation, { cwd: '/workspace', env: { HOME: '/home' } }, 1000, {
       beforeOpen: async () => { throw refusal; },
     })).rejects.toBe(refusal);
     expect(fake.child.kill).toHaveBeenCalledTimes(1);
+    expect(fake.exited()).toBe(true);
     expect(fake.methods()).toEqual(['initialize']);
   });
 
-  it('kills the app-server and rethrows when afterOpen throws, and never reports the thread ready', async () => {
+  it('kills the app-server and rethrows after it exits when afterOpen throws, and never reports the thread ready', async () => {
     const fake = fakeServer();
     const refusal = new Error('after refused');
     const onReady = vi.fn();
@@ -86,6 +92,7 @@ describe('vendored Codex caller-owned open steps (BYOK change)', () => {
       afterOpen: async () => { throw refusal; }, onReady,
     })).rejects.toBe(refusal);
     expect(fake.child.kill).toHaveBeenCalledTimes(1);
+    expect(fake.exited()).toBe(true);
     expect(onReady).not.toHaveBeenCalled();
   });
 });
