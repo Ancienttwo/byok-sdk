@@ -1,6 +1,6 @@
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, promises as fs, readFileSync, statSync, type Stats } from 'node:fs';
+import { existsSync, promises as fs, readdirSync, readFileSync, statSync, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -490,10 +490,15 @@ const itHelper = helperBin !== undefined && isAgentMemoryFilesystemHelperSupport
 const itMacHelper = helperBin !== undefined && process.platform === 'darwin' ? it : it.skip;
 const itForeignHelper = isAgentMemoryFilesystemHelperSupported() && helperBin === undefined ? it.skip : it;
 
+/** `create-daemon.ts`, then the daemon composition's modules in `create-daemon/` (#926), sorted. */
+function createDaemonSourceFiles(): string[] {
+  const modules = readdirSync(new URL('../daemon/create-daemon/', import.meta.url)).filter((name) => name.endsWith('.ts')).sort();
+  return ['../daemon/create-daemon.ts', ...modules.map((name) => `../daemon/create-daemon/${name}`)];
+}
+
 // ===========================================================================
 // Live path
 // ===========================================================================
-
 describe('WP2I-S2 live path (real temp Agent home, fake Host)', () => {
   it('replace creates a new note from the bootstrap sha256("") base (missing file) and orders every barrier', async () => {
     const w = await world();
@@ -1380,7 +1385,7 @@ describe('WP2I-S2 integrity observer notification (gate finding 2)', () => {
   });
 
   it('the daemon wires the processor integrity result to that observer method', () => {
-    const source = readFileSync(new URL('../daemon/create-daemon.ts', import.meta.url), 'utf8');
+    const source = createDaemonSourceFiles().map((file) => readFileSync(new URL(file, import.meta.url), 'utf8')).join('\n');
     expect(source).toContain('onIntegrity: (event) => observer.noteAgentMemoryIntentIntegrity(event),');
   });
 });
@@ -1697,7 +1702,7 @@ describe('WP2I-S2 backend proof and fail-closed entry', () => {
   });
 
   it('exposes no control-socket method for intents; the mailbox notice is the only entry', () => {
-    for (const file of ['../daemon/create-daemon.ts', '../daemon/control-protocol.ts', '../daemon/control-server.ts']) {
+    for (const file of [...createDaemonSourceFiles(), '../daemon/control-protocol.ts', '../daemon/control-server.ts']) {
       const source = readFileSync(new URL(file, import.meta.url), 'utf8');
       expect(source, file).not.toMatch(/['"][a-z_]*intent[a-z_]*\.[a-z_]+['"]\s*:/u);
       expect(source, file).not.toMatch(/['"][a-z_]+\.[a-z_]*intent[a-z_]*['"]\s*:/u);
