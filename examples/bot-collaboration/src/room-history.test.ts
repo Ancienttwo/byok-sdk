@@ -107,3 +107,15 @@ it('releases a seat whose room read never succeeds at its deadline', async () =>
   expect(host().snapshot().turns[seat]).toMatchObject({ status: 'failed', conclusion: 'expired' });
   expect(host().core.intent(seat)).toBeUndefined();
 });
+
+it('reads the room history of a seat that a released seat queued in the same sync, before it freezes or blocks', async () => {
+  const reads: string[] = [];
+  const { other, room } = await open(async input => { reads.push(input.turnId); return ROWS; });
+  // Each seat Turn blocks in its Turn step. The second seat is queued after the first one's read, so it is read on the next sync.
+  const round = await host().roomInput('over-limit', room.id, '😀'.repeat(18000), [other, 'main']);
+  await host().drain();
+  const seats = host().snapshot().team.rounds[round]!.seats;
+  expect(seats.map(id => host().snapshot().team.seats[id]!)).toMatchObject([{ status: 'blocked', released: true }, { status: 'blocked', released: true }]);
+  expect(host().snapshot().team.rounds[round]).toMatchObject({ closed: true });
+  expect(reads).toEqual(expect.arrayContaining(seats));
+});
