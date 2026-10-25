@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example flushes Agent
+  home operations (#793 S13), as L's `flushHomes`, through the outbox
+  sender: a `home` outbox row indexes each pending operation at its
+  `retryAt`, the claim checks that it is its Bot's head with no open
+  intent, the readbacks and the enqueue run through the new `homes(scope)`
+  port, and each settle is fenced by the operation's retry count. K8 moves
+  the decisions of L's `flushHomes` into `team.ts` (`homeHead`,
+  `checkHomeReadback`, `planHomeRetry`, `homeEnqueued`, `applyHomeTerminal`,
+  `failHomeFlush`), and its shared `homeVectors` run on L and H.
 - **Feature (examples)** — the hosted collaboration example calls the
   connector of a confirmed card (#793 S12), as L's `flushCards`, through
   the outbox sender: a `card` outbox row claims the call (a try and a lease)
