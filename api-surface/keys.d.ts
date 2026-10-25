@@ -728,7 +728,7 @@ export interface ModelRouteHostEntry {
 export interface ModelRoutePolicy {
     /** Offered provider kinds, in order. Absent: every vendor, then `custom`. */
     readonly vendors?: readonly ModelProviderKind[];
-    /** Offered model ids per vendor. A listed vendor admits no other model. */
+    /** Offered model ids per vendor. A listed vendor admits no other model, from any source. */
     readonly models?: Readonly<Partial<Record<ModelProviderVendorId, readonly string[]>>>;
     readonly vendor_labels?: Readonly<Partial<Record<ModelProviderKind, string>>>;
     readonly model_labels?: Readonly<Partial<Record<ModelProviderVendorId, Readonly<Record<string, string>>>>>;
@@ -750,7 +750,10 @@ export interface ModelRouteContext {
     readonly stored: ModelRouteStoredProfile | null;
     readonly policy: ModelRoutePolicy;
 }
-/** A context over the pinned Pi catalog. */
+/**
+ * A context over the pinned Pi catalog. A policy that lists one vendor, api
+ * and model in two Host entries is a Host programming error and throws.
+ */
 export declare function modelRouteContext(input?: {
     readonly stored?: ModelRouteStoredProfile | null;
     readonly policy?: ModelRoutePolicy;
