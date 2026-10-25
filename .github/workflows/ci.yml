@@ -1686,10 +1686,71 @@ jobs:
           path: ${{ github.workspace }}/.ci-artifacts/credential-isolation
           if-no-files-found: warn
 
+  # #608: the Hermes adapter against a real Hermes on Windows. The qualified
+  # build (`QUALIFIED_HERMES_VERSION` in
+  # packages/client/src/adapters/hermes/hermes-version.ts) is installed with
+  # Hermes's own installer, fetched at that commit and checksum-verified, so an
+  # upstream change cannot alter what CI installs. The model is a local fake
+  # OpenAI-compatible endpoint inside the test: no paid call, no provider key.
+  # Its own job, because the install takes minutes and only Hermes paths select it.
+  hermes-real-windows:
+    needs: select
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'hermes-real-windows') }}
+    name: Hermes adapter against real Hermes on Windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup fixed Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun ci
+
+      - name: Build client dependencies
+        run: bun run build
+
+      - name: Install the qualified Hermes (pinned commit, checksum-verified installer)
+        run: |
+          $commit = "0b10b9f8155a7ecadd8c540b87712c791b5c8ac9"
+          $sha = "3d428ce54dea5fe26f8f52e40b2a49876d3cb95c49760e8350d6458046519479"
+          $installer = Join-Path $env:RUNNER_TEMP "hermes-install.ps1"
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/NousResearch/hermes-agent/$commit/scripts/install.ps1" -OutFile $installer
+          $actual = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLower()
+          if ($actual -ne $sha) { Write-Error "Hermes installer checksum mismatch: expected $sha, got $actual"; exit 1 }
+          # The install's own home, apart from the SDK root the test creates.
+          $hermesHome = Join-Path $env:RUNNER_TEMP "hermes-install-home"
+          $started = Get-Date
+          pwsh -NoProfile -File $installer -Commit $commit -NonInteractive -SkipBrowser -SkipComputerUse `
+            -HermesHome $hermesHome -InstallDir (Join-Path $env:RUNNER_TEMP "hermes-agent")
+          if ($LASTEXITCODE -ne 0) { Write-Error "Hermes install failed ($LASTEXITCODE)"; exit 1 }
+          Write-Host "Hermes install took $([int]((Get-Date) - $started).TotalSeconds) s"
+          $bin = Join-Path $hermesHome "bin\hermes.exe"
+          if (-not (Test-Path $bin)) { Get-ChildItem (Join-Path $hermesHome "bin") | Format-Table Name, Length; Write-Error "no $bin"; exit 1 }
+          $env:HERMES_HOME = $hermesHome
+          & $bin --version
+          if ($LASTEXITCODE -ne 0) { Write-Error "hermes --version failed ($LASTEXITCODE)"; exit 1 }
+          "BYOK_HERMES_REAL_BIN=$bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run the Hermes adapter against real Hermes with a fake model endpoint
+        run: |
+          # The test skips without this variable; never let a missing install pass as a skip.
+          if (-not (Test-Path $env:BYOK_HERMES_REAL_BIN)) { Write-Error "BYOK_HERMES_REAL_BIN is not set to the installed Hermes"; exit 1 }
+          bun run --filter @byok-sdk/client test -- src/__tests__/hermes-real.test.ts
+
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["select", "targeted", "build-test", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit"]
+    needs: ["select", "targeted", "build-test", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

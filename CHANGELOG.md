@@ -326,6 +326,68 @@
   releases it at once; `bindDevice` and `revokeDevice` now write the due
   time in their transaction. H's card claim uses K8's
   `CONNECTOR_OUTCOME_UNKNOWN` in place of its own copy of the text.
+- **Added (examples)** — the K4 Host execution core runs sealed executions
+  (#953, #654 E3d-4). An intent or routine may carry a
+  `SealedExecutionTemplate`, sent through the optional `submitSealed` port
+  (the cloud's `submitSealedAgentExecution`); `sameFrozenOffer` checks the
+  sealed or plain offer type both ways; `routineRef` must name the routine's
+  own id and version. K4 takes a sealed execution only as an inline routine
+  template that seals `task-input` alone, and with no memory ContextPack.
+  `sealRoutineTemplate` seals a routine template on the member side. No wire,
+  SDK or SQL change.
+- **Fixed (examples)** — K4 sealed executions, from the #962 security review
+  (#953). `enqueue`, on the core and as the exported transition, refuses a
+  sealed execution: one enters only as an occurrence of its routine, whose
+  stored definition pins the `routineRef`. The core's frozen port has
+  `submitSealed` only while the server does, so the reconcile resubmit of an
+  uncertain sealed intent also stops before its readback once the lane is
+  gone. `submitSealed` is called as a method of its port and of the server's
+  `executions`. `sealRoutineTemplate` seals exactly `['task-input']`.
+- **Changed (client, internal)** — `TaskRunner`'s method bodies now live in
+  `daemon/task-runner/`, one module per stage (#926). `handleOffer` and
+  `pump` are split along their existing stages, and no function is over 300
+  lines. Behavior, exports and the published `task-runner.d.ts` are unchanged.
+  The `@byok-sdk/client` closure grows by 7845 B and `bin:byok-agent` by
+  7869 B, for the delegating stubs and private-state access.
+- **Changed (client, internal)** — `buildDaemonWithAdapters`' construction
+  stages and nested functions now live in `daemon/create-daemon/` (#926). The
+  daemon's reassigned state is one `DaemonState` object, its functions take one
+  daemon scope, and a start runs in stages. `create-daemon.ts` is 982 lines and
+  no function is over 300 lines. Behavior, exports and the published
+  `create-daemon.d.ts` are unchanged. The `@byok-sdk/client` closure grows by
+  20609 B and `bin:byok-agent` by 20582 B, for the scope prologues, the bound
+  function wrappers and the stage hand-offs.
+- **Feature (client)** — `HermesAdapter` declares Windows (#608):
+  `descriptor.platforms` is `['darwin', 'linux', 'win32']`, so a daemon on
+  Windows detects and advertises Hermes. The evidence is a real run of the
+  qualified Hermes `0.22.2+2364.g0b10b9f` on `windows-latest` with a fake
+  model endpoint (new CI job `hermes-real-windows`, test `hermes-real.test.ts`):
+  `detect()`, `prepare()`, one custody turn through the owned gateway to
+  `turn_end`, the provider key only in the Hermes child, and the synchronous
+  pipe `WriteFile` against the real Hermes pipe server (0.29 ms at most). On
+  Windows the constructor also refuses `%LOCALAPPDATA%\hermes`, Hermes's
+  default home there, as `home`.
+- **Feature (examples)** — K8 L can be the old owner of a §4.1 device switch
+  (#957). It keeps one owner record per device and runs four steps, each on
+  the revision it expects: `freezeForSwitch` (read back from the ledger),
+  `drainForSwitch` (lists the device's open intents, Turns, input batches and
+  sent Agent home writes; with `cancel` it cancels the intents, Turns and
+  batches), and then `commitSwitch` or `abortSwitch`. While the device is
+  frozen, `input`, `receive`, `roomInput`, `answer`, `decide` and
+  `enqueueHostIntent` throw `DeviceSwitchingError` (`device_switching`) for it,
+  after the replay lookup, so an exact replay keeps its first result. A routine
+  slot on the device is refused, so the SDK delivers its wake again, the sync
+  holds any other new Turn on it under `held-switching:<turnId>`, and no new
+  Agent home write is sent. After the commit, every one of these refuses for
+  good with `DeviceModeError`. The L root exports `DeviceSwitchingError`,
+  `DeviceModeError`, `DeviceTopology` and `SwitchWork`. `./rules/commands`
+  adds `DEVICE_SWITCHING`, the `SyncRefusal` type (`DeviceRefusal` or
+  `switching`) that `SyncFacts.deviceRefusal` now returns, and the optional
+  `CommandPorts.admit` port. K4 gets `HostOptions.admitSubmit(intent, state)`,
+  asked when a submit begins and again right before the SDK call; `false`
+  holds the intent with its phase and generation. L wires it to its owner
+  records, so K4 sends nothing to a frozen device, the timer drain and direct
+  `bot.core` calls included.
 - **Feature (examples)** — the hosted collaboration example runs the owner
   switch of a device between L and H (#957, plan §4.1):
   `beginSwitch`, `drainDevice`, `commitSwitch` and `abortSwitch`, each on

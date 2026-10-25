@@ -2,16 +2,17 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ByokServer, ByokServerEvent, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
 import { HostLedger, OutboxFullError, type ApplicationRows } from './ledger';
-import { canonical, hash, project, taskId, time, validateJson, type HostJobHandler, type HostOccurrenceRun, type Attempt,
-  type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type Terminal } from './model';
+import { canonical, hash, isSealed, project, taskId, time, validateJson, type HostJobHandler, type HostOccurrenceRun, type Attempt,
+  type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type SealedAgentExecutionInput, type Terminal } from './model';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 import { applyPlan, auditCalendarError, auditIgnoredWake, deferSchedule, nextWake, occurrenceRun, promote, recordOccurrence, routineCommands, scheduleNext,
   switchVersion, versionSwitchDue, WAKE_HORIZON_MS, type RoutineCommands } from './routines';
 import { cancelWake, enqueue, fifoHeads, queuedExpiry, settle } from './transitions';
-import { frozenDelivered, submitFrozen, type FrozenSubmitPort } from './submit';
+import { frozenDelivered, SealedDispatchUnavailableError, submitFrozen, type FrozenSubmitPort } from './submit';
 
 export type ExecutionServer = {
-  executions: Pick<ByokServer['executions'], 'submit'>;
+  /** `submitSealed` is the sealed lane (#654). Without it, the core fails a sealed intent before any submit. */
+  executions: Pick<ByokServer['executions'], 'submit'> & Pick<FrozenSubmitPort, 'submitSealed'>;
   tasks: Pick<ByokServer['tasks'], 'offer' | 'deviceTerminal' | 'attempt' | 'cancel'>;
   wakes: ByokServer['wakes'];
   /** Embedded process-local hints; reads from tasks remain authoritative. */
@@ -68,6 +69,14 @@ export interface HostOptions {
   onOutbox?: (signal: AbortSignal) => void | Promise<void>;
   applyMessage?: (input: AgentMessageInput, transaction: MessageTransaction) => MessageDecision;
   applyOutcome?: (document: unknown, transaction: OutcomeTransaction) => void;
+  /**
+   * Submit admission (#957): asked in the transaction that begins a submit, and again in the readback right before the SDK
+   * call, with the intent and the ledger state. `false` holds the intent: a queued or backoff intent keeps its phase and
+   * generation, and a begun intent is not sent. A held queued or backoff intent arms the scan only for its expiry, so the
+   * Host drains after it admits again. A cancel still settles a held intent. Covers every
+   * submit of this core, the timer drain and direct `enqueue` calls included. Must be synchronous. Absent: every submit is admitted.
+   */
+  admitSubmit?: (intent: Readonly<Intent>, state: Readonly<LedgerState>) => boolean;
 }
 
 /** One instance per embedded tenant. Only horizon retries use a process-local timer. */
@@ -560,8 +569,12 @@ export class HostExecutionCore {
         state.scanWake = null; return;
       }
       const now = this.now();
+      // A held intent (#957) is not ready, so it arms the scan only for its expiry. A ready time would make every scan re-arm
+      // at `now + 1` while it stays held. An admission that throws counts as held: the begin records its error.
+      const held = (intent: Intent) => { try { return !this.admits(intent, state); } catch { return true; } };
       const due = Math.max(now + 1, notBefore, Math.min(...open.map(intent => {
         if (intent.phase === 'memory_blocked') return Math.min(intent.waitUntil, intent.retryUntil ?? Infinity);
+        if ((intent.phase === 'queued' || intent.phase === 'backoff') && held(intent)) return Math.min(intent.waitUntil, intent.retryUntil ?? Infinity);
         if (intent.phase === 'backoff') return Math.min(intent.notBefore, intent.waitUntil, intent.retryUntil ?? Infinity);
         if (intent.phase === 'queued') return open.some(other => other.agent === intent.agent && other.sequence < intent.sequence) ? intent.waitUntil : Math.min(intent.waitUntil, intent.retryUntil ?? Infinity, readyAt);
         if (this.eventsActive && this.liveTasks.has(intent.taskId)) return Infinity;
@@ -582,26 +595,43 @@ export class HostExecutionCore {
     if (attempt && (attempt.taskId !== intent.taskId || attempt.deviceId !== intent.execution.deviceId
       || canonical(attempt.agentRef) !== canonical(intent.execution.payload.agentRef))) throw new Error('Attempt identity conflict');
   }
-  private readonly frozenPort: FrozenSubmitPort = {
-    submit: async input => {
-      const enqueued = await this.server.executions.submit(input);
-      if (this.eventsActive) this.liveTasks.add(input.taskId);
+  /**
+   * The SDK calls of one frozen submit. It has `submitSealed` only while the server has one, so `submitFrozen` refuses a
+   * sealed input before its readback on every path, the reconcile resubmit included, not only in `begin`.
+   */
+  private frozenPort(): FrozenSubmitPort {
+    const live = <T>(enqueued: T, taskId: string): T => {
+      if (this.eventsActive) this.liveTasks.add(taskId);
       return enqueued;
-    },
-    offer: taskId => this.server.tasks.offer(taskId),
-  };
+    };
+    return {
+      submit: async input => live(await this.server.executions.submit(input), input.taskId),
+      ...this.server.executions.submitSealed && {
+        submitSealed: async (input: SealedAgentExecutionInput) => live(await this.server.executions.submitSealed!(input), input.taskId),
+      },
+      offer: taskId => this.server.tasks.offer(taskId),
+    };
+  }
   private delivered(intent: Intent): Promise<boolean> {
-    return frozenDelivered(this.frozenPort, this.ledger.snapshot().executions[intent.taskId]!.input);
+    return frozenDelivered({ offer: taskId => this.server.tasks.offer(taskId) }, this.ledger.snapshot().executions[intent.taskId]!.input);
+  }
+  private admits(intent: Intent, state: LedgerState): boolean {
+    if (!this.options.admitSubmit) return true;
+    const admitted: unknown = this.options.admitSubmit(intent, state);
+    if (typeof admitted !== 'boolean') throw new Error('Submit admission must return a boolean synchronously');
+    return admitted;
   }
   private async submit(intent: Intent): Promise<void> {
     const input = this.ledger.snapshot().executions[intent.taskId]!.input;
-    const outcome = await submitFrozen(this.frozenPort, input, () => {
-      const latest = this.ledger.snapshot().intents[intent.id]!;
+    const outcome = await submitFrozen(this.frozenPort(), input, () => {
+      const snapshot = this.ledger.snapshot(), latest = snapshot.intents[intent.id]!;
       if (latest.conclusion || latest.cancelReason) return false;
       if (this.now() >= latest.waitUntil) {
         this.ledger.transaction(state => { state.intents[intent.id]!.cancelReason = 'expired'; });
         return false;
       }
+      // The admission can change between the begin and the SDK call, so it is read again here.
+      if (!this.admits(latest, snapshot)) return false;
       this.options.memory?.refreshExecution({ deviceId: input.deviceId, agentRef: input.payload.agentRef }, input.taskId);
       return true;
     });
@@ -609,6 +639,8 @@ export class HostExecutionCore {
   }
   private memoryInstruction(intent: Intent): string | undefined {
     if (!this.options.memory) return undefined;
+    // A sealed instruction is member content: the Host neither reads it nor adds plaintext next to it.
+    if (isSealed(intent.execution)) throw new Error('A sealed execution takes no Host memory ContextPack');
     const instruction = intent.execution.payload.instruction;
     if (typeof instruction !== 'string') throw new Error('Memory ContextPack requires an inline instruction');
     const pack = this.options.memory.contextPack({ deviceId: intent.execution.deviceId, agentRef: intent.execution.payload.agentRef });
@@ -653,6 +685,14 @@ export class HostExecutionCore {
       const row = state.intents[intent.id]!;
       if (row.conclusion || row.cancelReason || this.now() >= row.waitUntil
         || this.now() >= (row.retryUntil ?? Infinity) || row.phase === 'inflight' || row.phase === 'memory_blocked') return undefined;
+      // A held intent keeps its phase and generation, so a backoff intent gets no new task id.
+      if (!this.admits(row, state)) return undefined;
+      if (isSealed(row.execution) && !this.server.executions.submitSealed) {
+        // Fail before any submit, as a refused preparation does, so the drain never retries a submit that cannot exist.
+        row.preparationError = new SealedDispatchUnavailableError().code;
+        settle(state, row, 'failed');
+        return undefined;
+      }
       let instruction: string | undefined;
       try { instruction = this.memoryInstruction(row); }
       catch (error) {

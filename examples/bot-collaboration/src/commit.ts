@@ -7,6 +7,7 @@ import { syncTurn, type SyncFacts, type SyncOptions } from './rules/sync';
 import { cardCallDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, refuseRetired, retiredIdentity, settleCardCall, type AdmittedIds, type Command,
   type CommandPorts } from './rules/commands';
 import type { CommandRecord, CommitRequest, CommitResult } from './rules/commit';
+import { botDeviceRefusal } from './topology';
 import { retainRoots, type RetentionInput, type RetentionLimits, type RetentionResult } from './retention';
 
 // The L store of the commit contract (#739 D1): one K4 ledger transaction holds the state change,
@@ -46,6 +47,8 @@ export function syncTurnInLedger(ledger: HostLedger, s: LedgerState, rows: Appli
     intent: intentFacts(s).intent,
     executionStarted: id => { const row = s.intents[hash(id)]; return !!row && !!s.executions[row.taskId]?.started; },
     retired: id => turnIntentRetired(ledger, s, turn, options.now) ? 'result_retired' : retiredIdentity('turn', id, (namespace, row) => rows.isRetired(namespace, row)) ? 'turn_retired' : undefined,
+    // #957: a Turn whose Bot's device is frozen for a switch, or owned by H, is held and never frozen into an intent.
+    deviceRefusal: botId => botDeviceRefusal(stateOf(s.application), botId),
   };
   const step = syncTurn(stateOf(s.application), turn, facts, options, (key, value) => project(s, key, value));
   switch (step?.kind) {

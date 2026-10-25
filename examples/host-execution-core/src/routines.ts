@@ -1,7 +1,7 @@
 import { WAKE_MAX_FUTURE_MS, type DueWake, type WakeScheduleInput } from '@byok-sdk/server';
-import { canonical, hash, time, validateInput, validateJson, validateRetry, type Conclusion, type ExecutionTemplate, type HostOccurrenceRun,
+import { canonical, hash, isSealed, time, validateInput, validateJson, validateRetry, type Conclusion, type HostOccurrenceRun, type IntentExecution,
   type IgnoredWakeAudit, type Intent, type LedgerState, type Occurrence, type Routine, type RoutineDefinition } from './model';
-import { cancelWake, enqueue, settle } from './transitions';
+import { admit, cancelWake, settle } from './transitions';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 
 // Use the public SDK admission limit for every Host horizon precheck.
@@ -94,6 +94,7 @@ export function validateRoutineDefinition(definition: RoutineDefinition, { now, 
     validateJson(definition.hostOccurrence.input);
   } else {
     validateInput({ key: definition.id, source: 'routine', execution: definition.execution!, waitUntil: now + definition.waitMs, retry: definition.retry });
+    routineRefOf(definition.execution!, definition.id, definition.version);
   }
 }
 
@@ -230,7 +231,7 @@ export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWa
   } else if (definition.hostOccurrence) {
     occurrence.hook = {}; // The core runs the hook in this transaction.
   } else {
-    const intent = enqueue(state, tenant, { key: `occurrence:${key}`, source: 'routine', execution: definition.execution,
+    const intent = admit(state, tenant, { key: `occurrence:${key}`, source: 'routine', execution: definition.execution,
       waitUntil: time(now + definition.waitMs), retry: definition.retry });
     intent.occurrence = key;
     if (next) intent.retryUntil = next.availableAt;
@@ -241,10 +242,19 @@ export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWa
   return occurrence;
 }
 
+/**
+ * A routine template (#654 E3d) is sealed for one routine version: its `routineRef` must name this routine and version,
+ * or the device would open it for an occurrence of another one.
+ */
+function routineRefOf(execution: IntentExecution, routineId: string, definitionVersion: number): void {
+  const ref = isSealed(execution) ? execution.payload.routineRef : undefined;
+  if (ref && (ref.routineId !== routineId || ref.definitionVersion !== definitionVersion)) throw new Error('routineRef names another routine version');
+}
 /** A Host decision joins the existing FIFO atomically. The deadline counts from occurrence admission. */
-export function promote(state: LedgerState, tenant: string, occurrence: Occurrence, execution: ExecutionTemplate): Intent {
+export function promote(state: LedgerState, tenant: string, occurrence: Occurrence, execution: IntentExecution): Intent {
+  routineRefOf(execution, occurrence.routineId, occurrence.definitionVersion);
   const routine = state.routines[hash(occurrence.routineId)]!;
-  const intent = enqueue(state, tenant, { key: `occurrence:${occurrence.key}`, source: 'routine', execution,
+  const intent = admit(state, tenant, { key: `occurrence:${occurrence.key}`, source: 'routine', execution,
     waitUntil: time(occurrence.recordedAt + routine.definition.waitMs), retry: routine.definition.retry });
   intent.occurrence = occurrence.key;
   occurrence.intentId = intent.id;
@@ -269,7 +279,7 @@ function openHostOccurrence(state: LedgerState, occurrenceKey: string): Occurren
  * Promotes an open `hostOccurrence` occurrence into the FIFO as intent `occurrence:<key>`.
  * Call it inside `ledger.transaction`, then `drain()`. A newer slot makes the intent settle as superseded at once.
  */
-export function promoteOccurrence(state: LedgerState, tenant: string, occurrenceKey: string, execution: ExecutionTemplate): Intent {
+export function promoteOccurrence(state: LedgerState, tenant: string, occurrenceKey: string, execution: IntentExecution): Intent {
   return promote(state, tenant, openHostOccurrence(state, occurrenceKey), execution);
 }
 const CONCLUSIONS: readonly Conclusion[] = ['succeeded', 'failed', 'declined', 'cancelled', 'expired', 'superseded'];

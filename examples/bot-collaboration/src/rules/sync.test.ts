@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEVICE_NOT_BOUND, syncTurn, type DeviceRefusal, type FreezeExecution, type SyncFacts, type SyncOptions, type SyncState } from './sync';
+import { DEVICE_NOT_BOUND, DEVICE_SWITCHING, syncTurn, type DeviceRefusal, type FreezeExecution, type SyncFacts, type SyncOptions, type SyncRefusal,
+  type SyncState } from './sync';
 import type { Json, Rejection, Turn } from './turn';
 import type { IntentFact } from './delegation';
 import { outcomeOffer, SYSTEM_PROMPT, systemPrompt, type CheckedOffer } from './schema';
@@ -101,6 +102,27 @@ describe('syncTurn', () => {
     const running = state(), work = turn(running), seen = published();
     expect(syncTurn(running, work, { ...facts({ taskId: 'task' }), deviceRefusal: () => 'revoked' }, OPTIONS, seen.publish)).toBeUndefined();
     expect([work.held, seen.rows]).toEqual([undefined, []]);
+  });
+
+  it('#957: holds a switching device under its own projection id, so each hold code keeps one body across holds', () => {
+    const s = state(), row = turn(s, { status: 'queued' }), out = published();
+    let refusal: SyncRefusal | undefined = 'unbound';
+    const refused: SyncFacts = { ...facts(), deviceRefusal: () => refusal };
+    syncTurn(s, row, refused, OPTIONS, out.publish);
+    // Released, but its profile is not ready, so it neither freezes nor stays held.
+    (s.team.bots.main as { readyRevision: string | null }).readyRevision = null;
+    refusal = undefined;
+    expect(syncTurn(s, row, refused, OPTIONS, out.publish)).toBeUndefined();
+    expect(row).not.toHaveProperty('held');
+    refusal = 'switching';
+    expect(syncTurn(s, row, refused, OPTIONS, out.publish)).toBeUndefined();
+    expect([row.status, row.held]).toEqual(['queued', DEVICE_SWITCHING]);
+    syncTurn(s, row, refused, OPTIONS, out.publish);
+    refusal = 'mode';
+    syncTurn(s, row, refused, OPTIONS, out.publish);
+    const notBound = { owner: 'main', turnId: 't1', code: DEVICE_NOT_BOUND }, switching = { owner: 'main', turnId: 't1', code: DEVICE_SWITCHING };
+    expect(out.rows).toEqual([['held:t1', notBound], ['held-switching:t1', switching], ['held:t1', notBound]]);
+    expect(s.audit).toEqual([`Turn held ${DEVICE_NOT_BOUND} unbound: t1`, `Turn held ${DEVICE_SWITCHING} switching: t1`, `Turn held ${DEVICE_NOT_BOUND} mode: t1`]);
   });
 
   it('waits for the profile of a Bot that is not ready, and for the history row in history mode', () => {

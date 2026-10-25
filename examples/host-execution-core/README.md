@@ -31,6 +31,7 @@ The crash test sends SIGKILL to a child Host during wake delivery.
 | `src/model.ts`, `src/transitions.ts` | Durable records, stable identities, atomic state changes, and the FIFO head and queued expiry rules. |
 | `src/canonical.ts` | Canonical JSON and its SHA-256. The `./canonical` entry exports only these two and imports only `node:crypto` (#884). |
 | `src/submit.ts` | The frozen-offer submit protocol: readback first, the frozen offer check and the stop hook. Shared with the hosted lane. |
+| `src/sealed-routine.ts` | The member side of a sealed routine: the template binding and `sealRoutineTemplate` (#953). |
 | `src/routines.ts` | Occurrence deduplication, next-slot commit, coalescing, lifecycle, version switches and Host occurrence transitions. |
 | `src/schedule.ts` | The default UTC interval calendar and the shared calendar callback type. |
 | `src/index.ts` | The example's copy-and-own entrypoint. This is not a published SDK package. |
@@ -340,6 +341,51 @@ finishes with the version that admitted it.
 A core without `updateRoutine` ignores `pending`: it keeps the current version and refills its
 chain. Let pending versions switch, or restore a backup, before you roll back to such a core.
 
+## Sealed routines
+
+A sealed routine (#654 E3d-4, design §6.3) runs an execution whose task input only a member and
+the device can read. A member seals one routine template for one routine version with
+`sealRoutineTemplate`: family `routine.template`, the routine id and version
+in place of a task id, no device, the Agent, the category list and the expiry `notAfter`. The Host
+stores the template and puts it, byte for byte, in the `sealed` member of each occurrence's
+`task.offer_for_agent_with_egress_fresh_sealed`, next to the plaintext `routineRef`. It never
+sees the scope key or the instruction.
+
+- A routine `execution` is a plain `ExecutionTemplate` or a `SealedExecutionTemplate` (the payload
+  has `sealing`). `enqueue`, on the core and as the exported transition, takes a plain execution
+  only and refuses a sealed one: no stored routine checks its `routineRef` there, so
+  `source: 'routine'` would be only a label. A sealed execution must parse as the sealed offer
+  payload, and K4 takes it only as a routine template occurrence that seals `task-input` alone:
+  - It must carry `routineRef` and enter as an occurrence of its routine: the routine's own
+    `execution`, or `promoteOccurrence`. A task-bound ciphertext names one task id,
+    and a retry generation gets a new one, so only the template binding, which names no task, can
+    be resubmitted unchanged.
+  - Its `sealing.categories` is exactly `['task-input']`: the core settles from the plaintext
+    terminal and reads its outcome.
+  - Its `sealed` member is inline: between occurrences no task holds a `ciphertextRef` blob, so
+    orphan GC could delete it. `sealRoutineTemplate` refuses a template above the inline limit.
+- `routineRef` must name the routine's own id and version: `addRoutine`, `updateRoutine` and
+  `promoteOccurrence` refuse another one. Every version needs its own template, and a retry
+  generation reuses the frozen bytes.
+- The Host does not check `notAfter`; the device declines a passed one (#843).
+- A sealed intent takes no memory ContextPack: with `options.memory` it fails with
+  `A sealed execution takes no Host memory ContextPack`, and no plaintext is written next to the
+  sealed instruction.
+- Sealed dispatch is the optional `submitSealed` of `ExecutionServer.executions` and
+  `FrozenSubmitPort`, the cloud's `submitSealedAgentExecution`. Without it, the core fails a
+  sealed intent before any submit (`preparationError: 'sealed_dispatch_unavailable'`), and
+  `submitFrozen` throws `SealedDispatchUnavailableError` before its readback. The core checks the
+  lane at every submit: when a server loses it while a sealed submit is uncertain, the reconcile
+  still verifies the frozen offer, but runs no submit readback and no submit until the lane
+  returns or the intent expires.
+- `sealRoutineTemplate` seals exactly `['task-input']`, the only category list K4 runs. The embedded `ByokServer` has none,
+  because it declares no `e2ee.member` and so no daemon paired to it advertises `sealed-payload-v1`.
+- `sameFrozenOffer` checks the offer type of the input's lane: a plain readback never matches a
+  sealed input, nor the reverse. The payload compares exactly, because the Host resubmits its
+  frozen bytes and the cloud keeps the first ciphertext.
+- The outcome, an outbox projection and anything else the Host derives from the terminal stay
+  plaintext, even when they carry content derived from the sealed input.
+
 ### Routine commands in an outcome
 
 `OutcomeTransaction.routines` runs `create`, `update` and `lifecycle` in the outcome commit, with
@@ -365,6 +411,17 @@ its wake retention; never delete SDK rows directly. Custom `events.subscribe()`
 iterators must implement `return()` that releases a pending `next()`; otherwise
 omit `events` and use durable reconciliation. The embedded server supports this
 cancellation without closing other subscribers.
+
+`HostOptions.admitSubmit(intent, state)` (#957) lets the Host hold a submit. The
+core asks it in the transaction that begins a submit and again in the readback
+right before the SDK call, with the intent and the ledger state. `false` holds
+the intent: a queued or `backoff` intent keeps its phase and generation, so it
+gets no new task id, and a begun intent is not sent. A held queued or `backoff`
+intent arms the scan only for its expiry, so the Host calls `drain()` after it
+admits again. A cancel still settles a held intent. It covers every submit of the core:
+the timer drain, `recover()`, and direct `enqueue` calls. It must return a
+boolean synchronously; any other value is a drain error on the intent's outbox
+row. Without it, every submit is admitted.
 
 `HostOptions.onOutbox(signal)` is a coalesced, serialized post-commit hint that a
 result projection is available, including conclusions produced by internal drains.

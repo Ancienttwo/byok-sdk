@@ -10,6 +10,8 @@ import { HostExecutionCore, type HostOptions, type ExecutionServer } from './cor
 import { HostLedger, type HostLedgerOptions } from './ledger';
 import type { ExecutionTemplate, IntentInput, AgentRoutineDefinition } from './model';
 
+/** The fixture's routines run plain executions; sealed tests build their own. */
+type PlainAgentRoutineDefinition = AgentRoutineDefinition & { execution: ExecutionTemplate };
 export const policy: AgentEgressPolicy = {
   policyRevision: 'k4-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
   reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 16384 },
@@ -72,7 +74,7 @@ export async function openHost(options: HostOptions & {
     intent(key: string, rest: Partial<IntentInput> = {}): IntentInput {
       return { key, source: 'bot', execution: template(deviceId), waitUntil: Date.now() + 60_000, ...rest };
     },
-    routine(id: string, rest: Partial<AgentRoutineDefinition> = {}): AgentRoutineDefinition {
+    routine(id: string, rest: Partial<PlainAgentRoutineDefinition> = {}): PlainAgentRoutineDefinition {
       return { id, version: 1, timeZone: 'UTC', rule: { anchorMs: Date.now() + 30, everyMs: 86_400_000 },
         execution: template(deviceId), waitMs: 60_000, lateAfterMs: 1000, ...rest };
     },

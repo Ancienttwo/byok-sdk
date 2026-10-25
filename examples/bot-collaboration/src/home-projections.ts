@@ -1,6 +1,7 @@
 import type { ByokServer } from '@byok-sdk/server';
 import { HostLedger, project } from '@byok-sdk/example-host-execution-core';
 import { stateOf } from './model';
+import { deviceRefusal, homeSent } from './topology';
 import { applyHomeTerminal, checkHomeReadback, failHomeFlush, homeEnqueued, homeHead, homeRequests, planHomeRetry, type HomeReadback } from './team';
 
 export type HomeServer = Partial<Pick<ByokServer, 'enqueueAgentHomeProjection' | 'readAgentHomeProjection'>>;
@@ -12,10 +13,13 @@ export async function flushHomes(server: HomeServer, ledger: HostLedger, now: ()
   const operation = (s: Parameters<Parameters<HostLedger['transaction']>[0]>[0], sequence: number) =>
     stateOf(s.application).team.homeOperations.find(o => o.sequence === sequence)!;
   // One snapshot of the team for the pass: each Bot flushes at most its oldest pending operation once.
-  const team = stateOf(ledger.snapshot().application).team;
+  const snapshot = stateOf(ledger.snapshot().application), team = snapshot.team;
   for (const pending of team.homeOperations.filter(o => o.status === 'pending').sort((a, b) => a.sequence - b.sequence)) {
     const op = homeHead(team, pending.sequence, busy);
     if (!op) continue;
+    // #957: a device frozen for a switch, or owned by H, gets no new home write. A write that was never sent has nothing to
+    // read back, so it waits; a sent write is still read back.
+    if (deviceRefusal(snapshot, op.request.deviceId) && !homeSent(op)) continue;
     try {
       if (!server.enqueueAgentHomeProjection || !server.readAgentHomeProjection) throw new Error('Home projection API required');
       // A device terminal can precede local writer cleanup. A control that
@@ -27,7 +31,13 @@ export async function flushHomes(server: HomeServer, ledger: HostLedger, now: ()
         if (terminal) break;
       }
       if (!terminal) {
-        const request = ledger.transaction(s => planHomeRetry(operation(s, op.sequence), now()));
+        const request = ledger.transaction(s => {
+          if (deviceRefusal(stateOf(s.application), op.request.deviceId)) return undefined;
+          const row = operation(s, op.sequence);
+          row.sent = true;
+          return planHomeRetry(row, now());
+        });
+        if (!request) continue;
         await server.enqueueAgentHomeProjection(request);
         ledger.transaction(s => homeEnqueued(operation(s, op.sequence), now()));
         continue;

@@ -19,7 +19,7 @@ import type { CommandRecord } from './rules/commit';
 import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
-  updateDefinition } from './routines';
+  updateDefinition, type BotRoutineInput } from './routines';
 
 import { applyManagement, updateBot, writeSnapshotBot } from './team';
 import { botCompactVeto } from './compaction';
@@ -29,6 +29,8 @@ import type { RoomFields } from '@byok-sdk/protocol';
 
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
 import { flushHomes, type HomeServer } from './home-projections';
+import { admitBot, admitDevice, admitRoom, checkTopology, deviceRefusal, deviceTopology, homeSent, switchStep, switchWork, type DeviceTopology,
+  type SwitchWork } from './topology';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy } from './coalesce';
 import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
 import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery';
@@ -155,10 +157,27 @@ function bounded<T>(read: Promise<T>, ms: number): Promise<T> {
   const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('History read timed out')), Math.max(0, ms)); });
   return Promise.race([read, late]).finally(() => clearTimeout(timer));
 }
-/** A Turn that has no offer yet and can freeze one: not concluded or failed, and its Bot is active with its profile applied. */
+/** A Turn that has no offer yet and can freeze one: not concluded, failed or held, and its Bot is active with its profile applied. */
 function awaitsOffer(ledger: LedgerState, state: CollaborationState, turn: Turn): boolean {
   const bot = state.team.bots[turn.botId];
-  return !turn.conclusion && !ledger.intents[hash(turn.id)] && turn.status !== 'failed' && !!bot && !bot.archived && bot.readyRevision === bot.revision;
+  return !turn.conclusion && !turn.held && !ledger.intents[hash(turn.id)] && turn.status !== 'failed' && !!bot && !bot.archived && bot.readyRevision === bot.revision;
+}
+/**
+ * #957: a new owner command that adds a Turn refuses while a device it would run on is frozen or owned by H. An answer adds
+ * a Turn for the question's Bot, and a decided card adds an `action_result` Turn for the card's Bot.
+ */
+function admitCommand(state: CollaborationState, command: Command): void {
+  const turnBot = (turnId: string | undefined) => turnId !== undefined && Object.hasOwn(state.turns, turnId) ? state.turns[turnId]!.botId : undefined;
+  let botId: string | undefined;
+  switch (command.kind) {
+    case 'input': botId = command.botId; break;
+    case 'receive': if (command.inbound === 'owner_input') botId = command.botId; else admitRoom(state, command.roomId); break;
+    case 'room_input': admitRoom(state, command.roomId); break;
+    case 'answer': botId = turnBot(Object.hasOwn(state.questions, command.questionId) ? state.questions[command.questionId]!.turnId : undefined); break;
+    case 'decide': botId = turnBot(Object.hasOwn(state.cards, command.cardId) ? state.cards[command.cardId]!.turnId : undefined); break;
+    default: return;
+  }
+  if (botId !== undefined) admitBot(state, botId);
 }
 /** The value of an accepted disposition. Keyless commands refuse by throwing, so they always accept. */
 function valueOf<T>(result: CommitResult): T {
@@ -205,6 +224,8 @@ export class BotCollaboration {
     admitBotToolsets(options.execution, options.readOnlyToolsets);
     for (const model of Object.values(this.models())) admitBotToolsets(model, options.readOnlyToolsets);
     const persisted = ledger.snapshot(), team = stateOf(persisted.application).team;
+    // #957: the owner records are read before any pass. Each refusal reads them again in the transaction that would write.
+    checkTopology(stateOf(persisted.application));
     // The team mode is stored in the ledger. A restart cannot change it.
     if (options.team === 'external' ? !team.external && Object.keys(team.bots).length : team.external) {
       throw new Error(`This ledger has ${team.external ? 'an external' : 'a local'} team`);
@@ -260,11 +281,16 @@ export class BotCollaboration {
       ...(options.hostJobs ? { hostJobs: options.hostJobs, hostJobExecution: 'fail' as const } : {}), ...(options.onOutbox ? { onOutbox: options.onOutbox } : {}),
       occurrenceHooks: { [BOT_ROUTINE]: (run, tx) => {
         const state = stateOf(tx.application);
+        // #957: a slot of a Bot whose device is frozen or owned by H throws, so K4 records neither the slot nor a Turn and the
+        // SDK delivers the wake again later. After an abort the slot runs; after a commit it refuses until the routine pauses.
+        admitBot(state, (run.input as BotRoutineInput).owner);
         this.commitCallback(state, run.occurrenceKey, { kind: 'occurrence', key: run.occurrenceKey },
           { publish: tx.publish, occurrence: () => routineTurn(state, run) });
       } },
       applyMessage: (input, tx) => this.applyMessage(input, tx),
-      applyOutcome: (document, tx) => this.applyOutcome(document, tx) });
+      applyOutcome: (document, tx) => this.applyOutcome(document, tx),
+      // #957: K4 sends nothing to a device that is frozen or owned by H: not the timer drain, not a `bot.core` call.
+      admitSubmit: (intent, state) => !deviceRefusal(stateOf(state.application as LedgerState['application']), intent.execution.deviceId) });
     ledger.transaction(s => {
       const state = stateOf(s.application);
       promoteReplyReceipts(ledger, s, state, this.now());
@@ -442,6 +468,8 @@ export class BotCollaboration {
         const state = stateOf(s.application), owner = hostIntent(state, input.key);
         if (Object.hasOwn(state.turns, input.key)) throw new Error('Host intent identity conflict: the key is a Bot Turn');
         if (owner ? owner.handler !== handler : s.intents[hash(input.key)]) throw new Error('Host intent identity conflict');
+        // #957: a replay keeps its first answer; only a new intent is admitted.
+        if (!owner) admitDevice(state, input.execution.deviceId);
         enqueue(s, this.ledger.tenant, input);
         // The key is the Host's string, so it is defined as an own property, never through a setter such as `__proto__`.
         Object.defineProperty(state.hostIntents ??= {}, input.key, { value: { handler }, enumerable: true, writable: true, configurable: true });
@@ -487,7 +515,7 @@ export class BotCollaboration {
   private commitOwner(commandId: string, command: Command, extra?: (s: LedgerState, state: CollaborationState) => Partial<CommandPorts>): CommitResult {
     return commitInLedger(this.ledger, { scope: this.ledger.tenant, commandId, command }, s => {
       const state = stateOf(s.application);
-      return { now: this.now, publish: (key, value) => project(s, key, value), intents: intentRows(s),
+      return { now: this.now, admit: next => admitCommand(state, next), publish: (key, value) => project(s, key, value), intents: intentRows(s),
         admitInput: fields => admitUserInput(state, fields, this.coalesce, this.now()),
         updatePersona: (botId, persona) => updateBot(state, { botId, persona }, this.models(), this.options.readOnlyToolsets),
         routes: {
@@ -679,11 +707,64 @@ export class BotCollaboration {
   cancelTurn(id: string, ...by: PrincipalArg): Promise<void> {
     return this.exclusive(async () => {
       this.ownerOnly(by, 'cancelTurn', id);
-      const result = this.commitKeyless({ kind: 'cancel_turn', turnId: id });
-      const value = valueOf<{ deliver: boolean } | { target: string; admitted: boolean }>(result);
-      if ('deliver' in value) return this.settleChain(result);
-      if (value.admitted) await this.core.cancel(value.target);
+      await this.cancelOneTurn(id);
+    });
+  }
+  private async cancelOneTurn(id: string): Promise<void> {
+    const result = this.commitKeyless({ kind: 'cancel_turn', turnId: id });
+    const value = valueOf<{ deliver: boolean } | { target: string; admitted: boolean }>(result);
+    if ('deliver' in value) return this.settleChain(result);
+    if (value.admitted) await this.core.cancel(value.target);
+    await this.process();
+  }
+  /** The L owner record of a device (#957, §4.1). A device with no record is L at revision 0. */
+  topology(deviceId: string): DeviceTopology { return deviceTopology(this.snapshot(), deviceId); }
+  /**
+   * Step 1 of a switch away from L (#957, §4.1): durably freezes new work on the device and returns the record read back
+   * from the ledger. From the commit on, each entry that can create execution for the device refuses with
+   * `DeviceSwitchingError`, and the sync holds the device's Turns. Raises the revision.
+   */
+  freezeForSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology> {
+    return this.exclusive(async () => {
+      this.ledger.transaction(s => switchStep(s, deviceId, expectedRevision, 'freeze'));
+      return this.topology(deviceId);
+    });
+  }
+  /**
+   * Step 2: the device's open work. With `cancel`, cancels every open intent and every open Turn and input batch, then runs a
+   * pass. Returns the work still open: a tried intent stays open until the reconciler reads its terminal. Waits for nothing.
+   */
+  drainForSwitch(deviceId: string, { cancel = false }: { cancel?: boolean } = {}): Promise<SwitchWork> {
+    return this.exclusive(async () => {
+      const work = this.ledger.transaction(s => {
+        if (!deviceTopology(stateOf(s.application), deviceId).switching) throw new Error(`Device ${deviceId} is not switching`);
+        const open = switchWork(s, deviceId);
+        if (cancel) for (const key of open.intents) s.intents[hash(key)]!.cancelReason ??= 'cancelled';
+        return open;
+      });
+      if (cancel) {
+        for (const id of [...work.batches, ...work.turns]) await this.cancelOneTurn(id);
+        await this.process();
+      }
+      return switchWork(this.ledger.snapshot(), deviceId);
+    });
+  }
+  /**
+   * Step 3, after H committed the device: L records that H owns it, on the frozen revision, only when the device has no open
+   * work in the same transaction. Every entry then refuses the device with `DeviceModeError`, also after a restart.
+   */
+  commitSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology> {
+    return this.exclusive(async () => {
+      this.ledger.transaction(s => switchStep(s, deviceId, expectedRevision, 'commit'));
+      return this.topology(deviceId);
+    });
+  }
+  /** A failed export or check: clears the freeze on the frozen revision, so L owns the device again and held Turns run. */
+  abortSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology> {
+    return this.exclusive(async () => {
+      this.ledger.transaction(s => switchStep(s, deviceId, expectedRevision, 'abort'));
       await this.process();
+      return this.topology(deviceId);
     });
   }
   /**
@@ -879,7 +960,9 @@ export class BotCollaboration {
       const due = [...(this.options.channel ? Object.values(state.channel?.deliveries ?? {}).filter(row => row.state === 'pending').map(row => row.nextAttemptAt ?? this.now()) : []),
         ...Object.values(state.channel?.inbounds ?? {}).filter(row => row.reply?.token).map(row => row.reply!.expiresAt),
         ...collaborationDue(state, this.timers),
-        ...state.team.homeOperations.filter(op => op.status === 'pending').map(op => Math.max(this.now() + 1000, op.retryAt ?? 0)),
+        // #957: a refused device waits only for the readback of a sent write; it never gets a new one.
+        ...state.team.homeOperations.filter(op => op.status === 'pending' && (homeSent(op) || !deviceRefusal(state, op.request.deviceId)))
+          .map(op => Math.max(this.now() + 1000, op.retryAt ?? 0)),
         ...Object.values(state.delegations).filter(d => d.cancel && !d.cancel.delivered).map(() => this.now() + 1000),
         ...this.unread.size ? [this.now() + 1000] : []];
       if (due.length) {
