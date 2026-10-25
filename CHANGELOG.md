@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example runs
+  summary-only Host job routines (#793 S14), as L's `hostJobs`. Host code
+  adds them with `addHostJobRoutine`, `updateHostJobRoutine` and
+  `setHostJobLifecycle`, checked against the store's new `hostJobs` option;
+  the scheduler records each due occurrence with a `host_job` outbox row;
+  the outbox sender claims it (a try and a lease), runs the handler with
+  `hostJobTimeoutMs` (default 30 s), and settles it fenced by that try. A
+  summary concludes the occurrence `succeeded`; a handler throw keeps it
+  pending with a backoff; a result that carries `execution` stores its
+  summary and concludes it `failed` with `host_job_execution_unsupported`,
+  with no promotion (owner Q4 A). K4 exports `validateJson`, and its
+  Host job runner takes `hostJobExecution` (`promote` by default, as
+  before, or `fail`); L sets `fail`, so it concludes such a result the
+  same way.
+- **Feature (examples)** — the hosted collaboration example flushes Agent
+  home operations (#793 S13), as L's `flushHomes`, through the outbox
+  sender: a `home` outbox row indexes each pending operation at its
+  `retryAt`, the claim checks that it is its Bot's head with no open
+  intent, the readbacks and the enqueue run through the new `homes(scope)`
+  port, and each settle is fenced by the operation's retry count. K8 moves
+  the decisions of L's `flushHomes` into `team.ts` (`homeHead`,
+  `checkHomeReadback`, `planHomeRetry`, `homeEnqueued`, `applyHomeTerminal`,
+  `failHomeFlush`), and its shared `homeVectors` run on L and H.
+- **Feature (examples)** — the hosted collaboration example calls the
+  connector of a confirmed card (#793 S12), as L's `flushCards`, through
+  the outbox sender: a `card` outbox row claims the call (a try and a lease)
+  before it, and the settle is fenced by that try. H calls a connector at
+  most once per card: a claim whose lease passed with no settle ends the
+  card as a timeout, where L calls again after a crash. The sender takes
+  `connector`, `connectorTimeoutMs` (default 30 s) and `changed`. The outbox
+  takes the kinds `card`, `home` and `host_job`, and `occurrence` gains
+  `job`. K8 moves L's card call decision into `cardCallDue` and
+  `settleCardCall`, and its shared `cardCallVectors` run on L and H.
+- **Feature (examples)** — the hosted collaboration example observes devices
+  (#793 S11), as L's `refreshDevices`. `HostedDeviceObserver.observe(scope)`
+  reads the SDK readiness of the scope's tenant (1 s timeout) when a
+  delegation can change, then `store.observeDevices` runs the K8
+  `observeDevices` rule under the scope lock: a delegation whose delivered,
+  unclaimed offer is on a disconnected device shows `waiting_device`, and
+  `queued` again once it connects. The deployment's composed `sync` runs it
+  before `store.sync`. K8 re-exports `observeDevices` from `rules/commands`,
+  and its shared `deviceVectors` run on L and H.
 - **Feature (examples)** — the hosted collaboration example has its
   authenticated product command entry (#793 S10). `HostedCommandEntry` is L's
   owner API for requests: it takes the product's session check
@@ -73,6 +115,22 @@
   adapter's record consumer then fails on a record that exit produced (the
   exit record, or a control settled as exited), the task now fails as
   `runtime_exited` with the consumer's reason, instead of `unknown` (#869).
+- **Added (client)** — `agentUserMcpServers?: 'inherit' | 'excluded'` on
+  `CodexAdapterOptions` and `GrokAdapterOptions` (#935). It applies to Agent
+  tasks only, and the default `'inherit'` changes nothing. Under `'excluded'`
+  a Codex thread gets only the task's and the SDK's MCP servers: the adapter
+  reads Codex's effective config, disables every other configured server and
+  turns off apps (connectors) and plugins for the thread, then reads the
+  thread's servers back and fails the start if another one is not disabled
+  or a user server shares a task server's name. Grok has no per-process
+  switch for its native MCP sources, so the adapter turns off the Claude,
+  Cursor and managed MCP cells and fails the start before the agent starts
+  while `grok inspect --json` still lists an enabled server or a plugin that
+  provides one. A Grok server turned on mid-session and administrator-pinned
+  managed MCP are not detected. Both refusals are non-retryable `authority`
+  start failures. `isReservedMcpServerName` is now exported, so a Host can
+  tell the SDK's own servers in `event.mcp.server`. The vendored Codex
+  session gains optional `beforeOpen` and `afterOpen` steps.
 
 - **Fixed (client)** — Pi's durable lane now follows the #869 contract. A
   start failure is a typed, non-retryable `RuntimeExecutionFailure` with a
@@ -98,6 +156,122 @@
   gets the required method `replaceRefusedTerminal`, and its `confirmTerminal`
   and `rejectTerminal` must accept the hash of replaced bytes as a no-op. A
   Host that injects its own journal must implement both.
+- **Breaking (core)** — scope key packages are version 2 (#654 E5b-2, owner
+  batch §77a): they sign the recipient's KEM epoch as `recipientKemEpoch`.
+  `sealScopeKeyPackage` and `openScopeKeyPackage` take `recipient.kemEpoch`,
+  and `sealScopeKeyPackage` returns `ScopeKeyPackageV2`. `openScopeKeyPackage`
+  still opens version 1 packages. Remove that code only once this check
+  returns 0 on every Host: Postgres
+  `SELECT count(*) FROM e2ee_scope_key_package WHERE (package::jsonb)->>'v' = '1'`,
+  SQLite
+  `SELECT count(*) FROM e2ee_scope_key_package WHERE json_extract(package, '$.v') = 1`.
+- **Breaking (cloud)** — the Host takes version 2 package puts only; a
+  version 1 package gets 400 `coordination_input_invalid`. A put of a package
+  below its recipient's KEM floor gets 409 `e2ee_scope_key_package_stale` and
+  stores nothing; read the chain and seal again. The device package read
+  needs exactly one of `epoch` and `afterEpoch`, so the read without `epoch`
+  now gets 400. Store implementers: `E2eeMemberStore` gains the required
+  `readOwnScopeKeyPackages`, `E2eeMemberChainAppendInput` gains `rotations`,
+  the put rows carry `recipientKemEpoch`, and the put can return
+  `kem_epoch_stale`. Upgrade the Host first, then daemons and web clients: a
+  0.30.1 Host refuses v2 puts. A Host rolled back to 0.30.1 fails closed with
+  `e2ee_member_state_unreadable` on any read that meets a stored v2 package.
+  Migration 0029, and the first 0.30.2 open of a SQLite store, refuse a
+  member chain that already holds a `rotate` entry. A Host that finds one
+  stays on 0.30.1 and opens an issue, because the SDK has no automatic way to
+  set those floors (`docs/security.md`).
+- **Breaking (protocol)** — `E2eeScopeKeyPackage` is version 1 or 2, and
+  `E2eeScopeKeyPackageV2Schema` is the put shape. `E2eeMemberChainEntrySchema`
+  refuses a `rotate` whose subject is not exactly
+  `{ memberId, kemPublicJwk, kemEpoch, kemSig }`.
+- **Feature (cloud, cloud-dataplane, server)** — an append that stores a
+  `rotate` raises its member's KEM floor, which never falls.
+  `GET /byok/e2ee/key-packages?scopeId=&afterEpoch=` returns this member's
+  packages after `afterEpoch`, by epoch, 16 per page, with `scopeHeadEpoch`
+  (`null` without an epoch). The Host declares `e2ee.member.kem-epoch` exactly
+  with `e2ee.member`. Postgres needs migration
+  `0029_e2ee_member_kem_floor.sql`; SQLite adds the table and index on open,
+  with no schema version change.
+
+- **Breaking (client)** — `byok-agent doctor` no longer scans `os.tmpdir()`
+  for the temporary directories that releases before 0.27.0 left there (#938).
+  `doctor --json` drops its `legacyTemp` field, so a script that parses it
+  must stop reading it, and the text output drops its `legacy-temp:` line.
+  `doctor --fix` no longer deletes those directories; any left on a machine
+  have to be removed by hand.
+
+- **Added (client)** — `ClaudeAdapterOptions.agentSessionPersistence`
+  (#936). With `'disabled'`, an Agent task (`task.offer_for_agent`) starts
+  Claude with `--no-session-persistence`, so Claude does not save the session
+  transcript under `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/`, outside the
+  Agent home. Such a session cannot be resumed: an Agent task that carries a
+  `sessionRef` (a resume, an Agent handoff or a memory-reader resume) fails
+  before Claude starts, as a non-retryable `authority` failure with the
+  reason `claude Agent session persistence is disabled, so the task cannot
+  resume a session`. Follow-ups in the same task still work. Other tasks and
+  the default, `'enabled'`, are unchanged. Auto memory, which also writes
+  under `projects/`, stays on unless `agentUserContext: 'excluded'` is set
+  too. `docs/adapter-capabilities.md` lists where each adapter keeps Agent
+  task session records.
+
+- **Feature (cloud, cloud-dataplane, server)** — maintenance prunes the
+  receipts of used device-proof request ids in a new twelfth step,
+  `proofReceipts`. `ByokCloudOptions.proofReceiptRetention` takes an
+  `authority` and an optional deployment-level `proofReceiptRetentionMs`
+  (default 24 hours, `DEFAULT_PROOF_RECEIPT_RETENTION_MS`). `createByokCloud`
+  refuses a value below `PROOF_RECEIPT_RETENTION_FLOOR_MS` (15 minutes) with
+  `maintenance_invalid_input`: past it, the verifier refuses every proof the
+  receipt can bind. Within the retention a `requestId` is single-use; after it
+  the same `requestId` is no longer recorded. cloud-dataplane adds
+  `PostgresProofReceiptRetentionAuthority(pool)` from `./runtime`, the
+  Postgres authority over `proof_request_receipt`; a hosted Host passes it as
+  `proofReceiptRetention.authority`, otherwise the step reports
+  `not-configured`. The SQLite composition of the server wires its own store
+  and adds the index `proof_request_receipt_recorded_idx`, which an existing
+  database gains when it opens. The memory composition does not prune: the
+  step reports `not-configured` and keeps every used `requestId` for the life
+  of the process. `MAINTENANCE_STEPS` and the `not-configured` report variant
+  gain `proofReceipts`, so a pass returns twelve step results.
+
+- **Breaking (client)** — every daemon journals its tasks (#924).
+  `DaemonConfig.hostedJournal` and `HostedJournalConfig` are removed, and a
+  config or overrides object that still has `hostedJournal` is refused with
+  `DaemonConfigFieldRemovedError`. Before, a daemon without `hostedJournal`
+  forgot the tasks it had claimed when it restarted, so they stayed `claimed`
+  or `running` in the cloud, and a `cancelTask` stayed `cancel_requested`.
+  Now a restarted daemon ends each claimed task it had not finished with
+  `task.fail` (`reason: 'daemon_interrupted'`, `retryable: false`) and never
+  runs it again. `busyTimeoutMs` and `maxRecordBytes` move to
+  `DaemonConfig.storage.journal` with the same defaults, an injected journal
+  moves to `DaemonOverrides.journal`, and the diagnostics and support bundle
+  drop their `config.hostedJournal` field. Migration: delete `hostedJournal`
+  from the config. `<storeDir>/daemon.db` is created at the first start after
+  the upgrade; tasks in flight before the upgrade have no record, so the Host
+  still ends those itself. A daemon that had no journal now also declines an
+  inbound offer above the journal record bound
+  (`inbound_envelope_too_large`) and drops any other envelope above it (#826),
+  and it admits result-document offers.
+
+- **Docs** — `docs/architecture/sdk-architecture.md` matches the source again
+  (#927): the `server → core` and `keys → core` edges, message types grouped by
+  `EnvelopeSchema` with no count, wire v3, Grok and the built-in versus
+  Host-injected adapters, pairing that returns the access token, offers read
+  from a held long-poll page, per-envelope `outcomes` with a stalled cursor for
+  an unknown executable message, and terminals recorded by the cloud inbound
+  gate. The journal is described as the one mode of every daemon (#924).
+- **Docs (protocol)** — the `CAPABILITY_FLAGS` comment says the daemon sends its
+  flags in `conn.hello` and the server sends its own on every long-poll
+  response; it no longer describes a `conn.ack` handshake (#925, phase 0). No
+  wire change.
+- **Changed (server)** — the package description no longer names a protocol
+  version (#927).
+- **Changed (cloud-do)** — `@byok-sdk/client` is a declared devDependency. The
+  cloud-do tests import client source, so a client change now also runs the
+  cloud-do suite in CI (#927).
+- **Removed (repo)** — the root scripts `check:brain-manifest`,
+  `check:architecture-sync` and `sync:brain-docs`. They called repo-harness
+  helpers that no longer exist, and `repo-harness run` exits 0 on an unknown
+  helper, so they passed without checking anything (#927).
 
 ## 0.30.1 — 2026-10-24 (published)
 

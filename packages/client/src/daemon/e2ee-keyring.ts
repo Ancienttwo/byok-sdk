@@ -56,7 +56,7 @@ import {
   type MemberKemKey,
   type MemberKeyBundleV1,
   type MemberKeys,
-  type ScopeKeyPackageV1,
+  type ScopeKeyPackageV2,
   type ScopeKeyPackageOpenResult,
   type SealedCategory,
   type SealedContentHeaderV1,
@@ -389,7 +389,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     try {
       const packages = await Promise.all(recipients.map((recipient) => sealScopeKeyPackage({
         scopeKey, tenantId: this.options.tenantId, scopeId, epoch,
-        recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk }, sender,
+        recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk, kemEpoch: recipient.kemEpoch }, sender,
       })));
       // The Host takes at most this many per put; the epoch is fresh only after every put.
       for (let at = 0; at < packages.length; at += E2EE_SCOPE_KEY_PACKAGE_PUT_MAX) {
@@ -597,7 +597,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       const found = await this.#readEpochs(scopeId);
       if (found === undefined) return 'scope_epochs_exceeded';
       const expected = new Map<number, string>();
-      const rewrapped: ScopeKeyPackageV1[] = [];
+      const rewrapped: ScopeKeyPackageV2[] = [];
       for (const [epoch, pkg] of found) {
         const current = await this.#openAccepted(view, scopeId, epoch, pkg, next);
         current?.scopeKey.fill(0);
@@ -612,7 +612,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
         }
         const sealed = await sealScopeKeyPackage({
           scopeKey: opened.scopeKey, tenantId: this.options.tenantId, scopeId, epoch,
-          recipient: { memberId: view.member.memberId, kemPublicJwk: next.publicJwk },
+          recipient: { memberId: view.member.memberId, kemPublicJwk: next.publicJwk, kemEpoch: next.epoch },
           sender: { signingPublicJwk: signing.publicJwk, signingPrivateKey: signing.privateKey },
         });
         opened.scopeKey.fill(0);
@@ -719,7 +719,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       opened = await openScopeKeyPackage({
         package: pkg,
         expected: { tenantId: this.options.tenantId, scopeId, epoch },
-        recipient: { memberId: session.member.memberId, kemPublicJwk: kem.publicJwk, kemPrivateKey: kem.privateKey },
+        recipient: { memberId: session.member.memberId, kemPublicJwk: kem.publicJwk, kemPrivateKey: kem.privateKey, kemEpoch: kem.epoch },
         senderSigningPublicJwk,
       });
       if (opened.ok) break;

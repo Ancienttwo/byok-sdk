@@ -1403,8 +1403,7 @@ is ready in this run. Otherwise it is the closed plaintext form, `task.fail`
 with `reason` `sealed_key_unavailable`. The journal replaces the refused
 terminal in place, keeps its hash as a transition of the task, and ignores a
 late acknowledgement of the refused bytes. A refusal journaled before a restart
-is replaced after the start and the member resume. A daemon without a journal
-sends the same replacement. The replacement is inline, so a refused
+is replaced after the start and the member resume. The replacement is inline, so a refused
 replacement settles once, and a refused inline terminal is not replaced. No
 answer, or a non-2xx answer, of `POST /byok/messages` is not a refusal: the
 daemon sends the same bytes again.
@@ -1438,6 +1437,12 @@ composition supplies an `E2eeMemberStore`. Declaring `e2ee.member` without a
 store fails at construction. `fullCapabilityDeclaration()` leaves it out
 unless `includeE2eeMember` is set.
 
+`e2ee.member.kem-epoch` (#654 E5b-2, owner batch §77a) is declared exactly
+when `e2ee.member` is. It says the Host takes version 2 key packages only,
+keeps a KEM floor per member from `rotate` entries, and serves the paged
+package read with the scope head. A 0.30.1 or older Host declares
+`e2ee.member` without it.
+
 The three writes are device-proof routes (`x-byok-device-proof`). The proof's
 `operation` is the constant in the table, and its `resource` is the route path.
 The tenant and device come from the proven device row. The body may be at most
@@ -1451,6 +1456,7 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
 | `POST /byok/e2ee/key-packages` | proof | `e2ee-scope-key-package.put` | `{ packages }` | `{ stored, skippedDeviceIds }` |
 | `GET /byok/e2ee/chain?afterSeq=&limit=` | device | — | — | `{ entries }` |
 | `GET /byok/e2ee/key-packages?scopeId=&epoch=` | device | — | — | `{ packages }` |
+| `GET /byok/e2ee/key-packages?scopeId=&afterEpoch=` | device | — | — | `{ packages, scopeHeadEpoch }` |
 | `GET /byok/e2ee/pairing-mac` | device | — | — | `{ mac, member, chainHead }` |
 
 - **Registration.** `member` is the device's own member key bundle, so its
@@ -1477,6 +1483,22 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   verifies no signature, so any paired device of the tenant can shred a
   scope on the Host ([security](security.md#deletion-paths)). The Host
   control plane `appendMemberChainEntries` does the same.
+- **Package version and KEM floor.** A put takes version 2 packages only,
+  which carry the signed `recipientKemEpoch`; a version 1 package gets 400
+  like any other bad shape. Reads return stored version 1 packages as they
+  are. A chain entry with `op: 'rotate'` must have exactly the subject
+  `{ memberId, kemPublicJwk, kemEpoch, kemSig }`; any other subject gets
+  400. When the append newly stores a `rotate` entry, the Host raises that
+  member's KEM floor to its `kemEpoch` in the same transaction; a floor never
+  falls, and a replayed entry raises nothing. A package put in which any
+  package has a `recipientKemEpoch` below its recipient's floor gets 409
+  `e2ee_scope_key_package_stale` and stores nothing: the sender reads the
+  chain again and seals again. The shred check runs first, then the floor
+  check, then the `keyId` check. In Postgres a `rotate` and a put to its
+  member take the same member lock, after the scope locks, so a put commits
+  either before the floor rises or not at all. The Host verifies no
+  signature, so any paired device of the tenant can raise a member's floor
+  with a well-shaped `rotate`, as it can shred a scope.
 - **Proof replay.** The proof's `requestId` is single-use per device on the
   three writes, as on the truth put (owner batch §41a A). The Host records
   the `requestId` with its binding (`operation`, `resource`, `bodySha256`,
@@ -1491,13 +1513,28 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   recorded `requestId` with another binding gets 409 `proof_request_conflict`
   and writes nothing. A refused write (any 4xx) records nothing, so the same
   request can succeed later. A Host control-plane write has no proof and
-  records nothing.
+  records nothing. A `requestId` is single-use within the deployment's
+  proof receipt retention (24 hours by default, at least 15 minutes). The
+  verifier refuses every proof a receipt can bind before that retention ends,
+  so maintenance then deletes the receipt. The memory composition keeps
+  every receipt for the life of the process.
 - **Reads.** A device route checks the bearer against the device row, so a
   revoked or superseded device gets 401. The package read returns only the
   packages addressed to the device's registered member; a query names no
   recipient. A query accepts only the names in the table, each once. The
   package read checks its query before the registration, so a bad query gets
   400 also from an unregistered device.
+- **Package reads.** The package read takes `scopeId` and exactly one of
+  `epoch` (a positive safe integer: the package of that epoch, or none) and
+  `afterEpoch` (a nonnegative safe integer, starting at 0). A read with
+  neither or both gets 400. The paged form returns this member's packages
+  with `epoch > afterEpoch`, ascending, at most 16
+  (`E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX`); fewer than 16 means the last page.
+  `scopeHeadEpoch` is the newest epoch of the scope, whoever its packages
+  are for, or `null` when the scope has no epoch, also after a shred. The
+  two parts are read without one snapshot, so the head can be newer than the
+  page; a put of an epoch someone else took gets 409
+  `e2ee_scope_key_conflict`.
 - **Errors.** Every error body is `{ error }`:
 
   | Status | `error` |
@@ -1505,7 +1542,7 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   | 400 | `coordination_input_invalid`, or an unreadable body |
   | 401 | `unauthorized` |
   | 404 | `e2ee_pairing_mac_not_found` |
-  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_scope_shredded`, `e2ee_member_key_conflict`, `e2ee_member_not_registered`, `proof_request_conflict` |
+  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_scope_shredded`, `e2ee_scope_key_package_stale`, `e2ee_member_key_conflict`, `e2ee_member_not_registered`, `proof_request_conflict` |
   | 413 | the body is over `maxE2eeRequestBytes` |
   | 500 | `e2ee_member_state_unreadable` |
 
@@ -3431,7 +3468,7 @@ does not add a second transport semantics.
 
 ### Durable terminal delivery and execution restart
 
-With hostedJournal enabled, canonical terminal bytes and their hash projection
+Every daemon journals (#924). Canonical terminal bytes and their hash projection
 are committed before entering ConnectionManager's existing authenticated
 `POST /byok/messages` queue. The accepted batch disposition is awaited through
 local `confirmed` persistence. A lost HTTP response or failed confirmation
@@ -3498,7 +3535,7 @@ Deploy the supporting server before using these recovery reports. Migration
 0021 remains required for custom claims; the recovery object lives in existing
 immutable terminal receipts and requires no additional database migration.
 
-For hosted journal replay, a selected but uncommitted terminal blocks admission
+For journal replay, a selected but uncommitted terminal blocks admission
 even when SQLite rolled the task row back to `received`. SDK-generated oversize
 failures project the admitted execution identity, including automatically
 selected custom adapters, through the same identity projection as other SDK

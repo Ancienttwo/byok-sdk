@@ -25,6 +25,7 @@ interface ChildConfig {
   readonly recoveryFault?: string;
   readonly agentHome?: boolean;
   readonly holdTerminalConfirmation?: boolean;
+  readonly holdCursorSave?: boolean;
   readonly ownedRuntimeTree?: boolean;
 }
 
@@ -953,6 +954,64 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     expect(starts()).toEqual([expect.objectContaining({ taskId: offer.taskId })]);
     await finish(offer.taskId, 'redelivered from cloud authority');
     await waitForAttempt(cloud, offer.taskId, 'complete');
+    expect(starts()).toHaveLength(1);
+  }, 30_000);
+
+  // #924: the fixture injects no journal here, so the daemon opens its own as with the default config.
+  it('fails a claimed task with daemon_interrupted after a SIGKILL and restart with the default config', async () => {
+    const cloud = await startCloud();
+    const { daemon, deviceId } = await pair(cloud);
+    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'default config kill' }) as { taskId: string };
+    await waitForAttempt(cloud, offer.taskId, 'running');
+    daemon.kill();
+    expect((await daemon.exited()).signal).toBe('SIGKILL');
+
+    await startDaemon();
+    const attempt = await waitForAttempt(cloud, offer.taskId, 'failed');
+    expect(attempt.terminalCause).toBe('daemon_interrupted');
+    const terminal = decodeEnvelope(String(await cloud.rpc('readTerminalBody', { taskId: offer.taskId })));
+    expect(terminal).toMatchObject({ type: 'task.fail', payload: { reason: 'daemon_interrupted', retryable: false } });
+    expect(starts()).toHaveLength(1);
+  }, 30_000);
+
+  it('ends a task the Host cancelled while its daemon was down, with the default config', async () => {
+    const cloud = await startCloud();
+    const { daemon, deviceId } = await pair(cloud);
+    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'cancel while down' }) as { taskId: string };
+    await waitForAttempt(cloud, offer.taskId, 'running');
+    daemon.kill();
+    expect((await daemon.exited()).signal).toBe('SIGKILL');
+    await cloud.rpc('cancelTask', { taskId: offer.taskId, reason: 'cancel while the daemon is down' });
+    expect((await cloud.rpc('readTaskAttempt', { taskId: offer.taskId }) as { status: string }).status).toBe('cancel_requested');
+
+    await startDaemon();
+    await waitForAttempt(cloud, offer.taskId, 'cancelled');
+    const wire = await cloud.rpc('readWire') as Array<{ type: string; task_id?: string }>;
+    expect(wire.filter((row) => row.task_id === offer.taskId && ['task.complete', 'task.fail', 'task.cancelled'].includes(row.type)))
+      .toEqual([expect.objectContaining({ type: 'task.fail' })]);
+    expect(starts()).toHaveLength(1);
+  }, 30_000);
+
+  it('does not run a claimed offer again when the daemon died before it saved the cursor past it', async () => {
+    const cloud = await startCloud();
+    const { daemon, deviceId } = await pair(cloud, { holdCursorSave: true });
+    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'claimed before cursor save' }) as { taskId: string };
+    await waitForAttempt(cloud, offer.taskId, 'running');
+    await waitForFile(path.join(current!.daemonBase.controlDir, 'cursor-save-held.reached'));
+    daemon.kill();
+    expect((await daemon.exited()).signal).toBe('SIGKILL');
+    expect((await cloud.rpc('readCursor', { deviceId }) as { ackedSeq: number }).ackedSeq).toBe(0);
+    expect(journalRows('SELECT local_state FROM journal_task')).toEqual([{ local_state: 'admitted' }]);
+
+    await startDaemon();
+    const attempt = await waitForAttempt(cloud, offer.taskId, 'failed');
+    expect(attempt.terminalCause).toBe('daemon_interrupted');
+    await waitForJournalTruth('confirmed');
+    // The mailbox redelivers the offer; the restarted daemon acks it and only retries the recovery terminal.
+    for (const deadline = Date.now() + 10_000; (await cloud.rpc('readCursor', { deviceId }) as { ackedSeq: number }).ackedSeq === 0;) {
+      if (Date.now() >= deadline) throw new Error('the redelivered offer was never acked');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     expect(starts()).toHaveLength(1);
   }, 30_000);
 });

@@ -1948,6 +1948,8 @@ export declare const E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES = 65536;
 export declare const E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES = 256;
 /** The most scope key packages one put accepts. */
 export declare const E2EE_SCOPE_KEY_PACKAGE_PUT_MAX = 256;
+/** The most packages one paged device read returns. */
+export declare const E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX = 16;
 /**
  * The longest scope id, in UTF-16 code units, as for other opaque Host ids.
  * Core sets no maximum, so the scope key package shape (which the parity test
@@ -2005,8 +2007,22 @@ export declare const E2eeMemberChainEntrySchema: z.ZodObject<{
     sig: z.ZodString;
 }, z.core.$strict>;
 export type E2eeMemberChainEntry = z.infer<typeof E2eeMemberChainEntrySchema>;
-/** One scope key wrapped to one member (§7.4). */
-export declare const E2eeScopeKeyPackageSchema: z.ZodObject<{
+/** One scope key wrapped to one member's KEM key of `recipientKemEpoch` (§7.4, §77a). A put takes version 2 only. */
+export declare const E2eeScopeKeyPackageV2Schema: z.ZodObject<{
+    tenantId: z.ZodString;
+    scopeId: z.ZodString;
+    epoch: z.ZodNumber;
+    keyId: z.ZodString;
+    recipient: z.ZodString;
+    sender: z.ZodString;
+    enc: z.ZodString;
+    ciphertext: z.ZodString;
+    sig: z.ZodString;
+    v: z.ZodLiteral<2>;
+    recipientKemEpoch: z.ZodNumber;
+}, z.core.$strict>;
+/** A stored package as a read returns it: version 1 from before `e2ee.member.kem-epoch`, version 2 after. */
+export declare const E2eeScopeKeyPackageSchema: z.ZodUnion<readonly [z.ZodObject<{
     v: z.ZodLiteral<1>;
     tenantId: z.ZodString;
     scopeId: z.ZodString;
@@ -2017,7 +2033,19 @@ export declare const E2eeScopeKeyPackageSchema: z.ZodObject<{
     enc: z.ZodString;
     ciphertext: z.ZodString;
     sig: z.ZodString;
-}, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    tenantId: z.ZodString;
+    scopeId: z.ZodString;
+    epoch: z.ZodNumber;
+    keyId: z.ZodString;
+    recipient: z.ZodString;
+    sender: z.ZodString;
+    enc: z.ZodString;
+    ciphertext: z.ZodString;
+    sig: z.ZodString;
+    v: z.ZodLiteral<2>;
+    recipientKemEpoch: z.ZodNumber;
+}, z.core.$strict>]>;
 export type E2eeScopeKeyPackage = z.infer<typeof E2eeScopeKeyPackageSchema>;
 /** A pairing MAC (§7.2 steps 3 and 4): HMAC-SHA-256 under `pv`, which the Host never holds. */
 export declare const E2eePairingMacSchema: z.ZodString;
@@ -2954,7 +2982,7 @@ export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';
 export { CUSTOM_HARNESS_CAPABILITY } from './version';
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
-export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_APPEND_OPERATION, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_MEMBER_KEY_REGISTER_OPERATION, E2EE_SCOPE_ID_MAX_LENGTH, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eeMemberKeyRegisterRequestSchema, E2eeKeyPackageAvailablePayloadSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, } from './e2ee-member';
+export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_APPEND_OPERATION, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_MEMBER_KEY_REGISTER_OPERATION, E2EE_SCOPE_ID_MAX_LENGTH, E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eeMemberKeyRegisterRequestSchema, E2eeKeyPackageAvailablePayloadSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, E2eeScopeKeyPackageV2Schema, } from './e2ee-member';
 export type { E2eeClientPairingMac, E2eeKeyPackageAvailablePayload, E2eeMemberChainEntry, E2eeMemberKeyBundle, E2eeMemberKeyRegisterRequest, E2eeScopeKeyPackage, } from './e2ee-member';
 export * from './bot-turn-outcome';
 export { resultOutcomeMaxBytes } from './result-schema';
@@ -7828,9 +7856,10 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  */
 export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
 /**
- * Capability flags exchanged during the connection handshake (`conn.hello` /
- * `conn.ack`). Additional flags may be introduced without a protocol version
- * bump; unrecognized flags must be ignored by both sides.
+ * Capability flags. The daemon sends its flags in `conn.hello`; the server
+ * sends its own on every long-poll response (`EventsPollResponse`). Additional
+ * flags may be introduced without a protocol version bump; unrecognized flags
+ * must be ignored by both sides.
  *
  * `interactive-approval` is RESERVED as of this addition: it gates the
  * (currently unexercised) approval seam — a server must not route an
@@ -7841,10 +7870,9 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * `approval_resolved` (additive-minor): a SERVER-advertised flag meaning
  * "I understand the `task.approval_resolved` message" (`messages.ts`). This
  * is the N/N-1 answer for that new daemon -> server message: an old server's
- * `CAPABILITY_FLAGS`/`conn.ack.capabilities` never includes it, so a new
- * daemon talking to an old server never sends `task.approval_resolved` at
- * all (see `packages/client`'s `task-runner.ts`) and falls back to the
- * pre-existing implicit-resume inference
+ * advertised capabilities never include it, so a new daemon talking to an old
+ * server never sends `task.approval_resolved` at all (see `packages/client`'s
+ * `task-runner.ts`) and falls back to the pre-existing implicit-resume inference
  * (`ConnectionHub.resumeIfImplicitlyApproved`, `packages/server/src/hub.ts`)
  * unconditionally, exactly as before this flag existed. Unlike
  * `interactive-approval`, this one IS exercised the moment both sides

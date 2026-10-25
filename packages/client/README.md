@@ -32,8 +32,9 @@ The local BYOK daemon. It pairs a device, durably journals tasks, connects over
 WebSocket or long poll, dispatches to local Claude Code, Codex, or pi adapters,
 and exposes authenticated local diagnostics/control commands.
 
-With `hostedJournal: { mode: 'sqlite' }`, the journal bounds each record by
-`hostedJournal.maxRecordBytes` (default 256 KiB). An inbound envelope record
+Every daemon journals tasks in `<storeDir>/daemon.db` before it acknowledges
+them. The journal bounds each record by `storage.journal.maxRecordBytes`
+(default 256 KiB). An inbound envelope record
 may still reach a floor of 415083 bytes. The journal derives the floor from
 the largest inline sealed member (#654): 256 KiB + 16 bytes of ciphertext as
 base64url, plus 64 KiB for the other fields. So the daemon journals a sealed
@@ -64,8 +65,8 @@ the canonical outcome in the Agent home (`.byok/results/`, fsynced before the
 tool returns its `staged` receipt) and sends it as `task.complete.document` at
 the end of the turn. A turn that ends with nothing staged fails with
 `result_not_submitted` (`retryable: false`); failure, cancellation and restart
-never deliver a staged outcome. Result-document offers need an Agent home and
-the hosted journal; `DaemonConfig.resultDocument` no longer exists and is
+never deliver a staged outcome. Result-document offers need an Agent home;
+`DaemonConfig.resultDocument` no longer exists and is
 refused with `DaemonConfigFieldRemovedError`.
 Provider
 credentials are not read by the dispatch plane; `@byok-sdk/keys` is a separate

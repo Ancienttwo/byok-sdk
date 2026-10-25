@@ -31,7 +31,7 @@ it('distinguishes pre-claim cancellation from claimed cancellation through attem
     productId, productName: 'K4 probe', localAgentRelease: { version: '0.0.0-probe' },
     serverUrl: `http://127.0.0.1:${address.port}`, workspaceRoot: path.join(root, 'workspace'),
     storeDir: path.join(root, 'sdk'), agentHome: { hostStorageRoot: path.join(root, 'homes') },
-    agentEgress: { policy }, hostedJournal: { mode: 'sqlite' as const },
+    agentEgress: { policy },
   };
   let daemon = createDaemonWithAdapters(config, [adapter], { deviceCredentials });
   let releaseInterrupt: (() => void) | undefined;

@@ -12,9 +12,15 @@
  *   "byok-sdk.sealed.v1.mac")`.
  *
  * A key package carries SK to one member: HPKE base mode with core's one suite
- * (`hpke.ts`), info `byok-sdk.scope-key.v1`, AAD the canonical JSON of the
- * package's identity fields. HPKE base mode does not authenticate the sender,
- * so the sender member also signs the package.
+ * (`hpke.ts`), info `byok-sdk.scope-key.v<version>`, AAD the canonical JSON of
+ * the package's identity fields. HPKE base mode does not authenticate the
+ * sender, so the sender member also signs the package.
+ *
+ * Version 2 (#654 E5b-2, owner batch §77a) adds `recipientKemEpoch`, the KEM
+ * epoch of the recipient key the package is wrapped to, to the identity
+ * fields, so the Host can refuse a package wrapped to a retired KEM key.
+ * Packages are sealed as version 2; version 1 packages stored before it
+ * still open.
  */
 import { z } from 'zod';
 
@@ -23,6 +29,7 @@ import { ByokCoreError } from '../errors';
 import { hpkeOpenBase, hpkeSealBase } from '../hpke';
 import { safeParseTotal } from '../total-parse';
 import type { WebCryptoKey } from '../webcrypto';
+import { KemEpochSchema } from './member-bundle';
 import { MEMBER_ID_PATTERN, deriveMemberId } from './member-chain';
 import {
   base64UrlBytes,
@@ -59,6 +66,10 @@ export const SCOPE_KEY_HPKE_INFO = 'byok-sdk.scope-key.v1';
 
 /** Prepended to the canonical package bytes the sender signs. */
 export const SCOPE_KEY_PACKAGE_DOMAIN_PREFIX = 'byok-scope-key-package-v1\n';
+
+export const SCOPE_KEY_PACKAGE_V2 = 2;
+export const SCOPE_KEY_HPKE_INFO_V2 = 'byok-sdk.scope-key.v2';
+export const SCOPE_KEY_PACKAGE_V2_DOMAIN_PREFIX = 'byok-scope-key-package-v2\n';
 
 const P256_POINT_BYTES = 65;
 const AEAD_TAG_BYTES = 16;
@@ -126,37 +137,32 @@ const ScopeKeyPackageV1Schema = z.strictObject({
   sig: base64UrlBytes(64),
 });
 
-type PackageIdentity = Pick<ScopeKeyPackageV1, 'v' | 'tenantId' | 'scopeId' | 'epoch' | 'keyId' | 'recipient' | 'sender'>;
-
-/** HPKE AAD: the canonical JSON of the package's identity fields. */
-function packageAad(identity: PackageIdentity): Uint8Array {
-  return canonicalizeJsonBytes({
-    v: identity.v,
-    tenantId: identity.tenantId,
-    scopeId: identity.scopeId,
-    epoch: identity.epoch,
-    keyId: identity.keyId,
-    recipient: identity.recipient,
-    sender: identity.sender,
-  });
+export interface ScopeKeyPackageV2 extends Omit<ScopeKeyPackageV1, 'v'> {
+  readonly v: typeof SCOPE_KEY_PACKAGE_V2;
+  /** The KEM epoch of the recipient key the package is wrapped to. */
+  readonly recipientKemEpoch: number;
 }
 
-/** The bytes the sender signs: every field except `sig`. */
-function packageSigningInput(pkg: Omit<ScopeKeyPackageV1, 'sig'>): Bytes {
-  return concat(
-    utf8(SCOPE_KEY_PACKAGE_DOMAIN_PREFIX),
-    canonicalizeJsonBytes({
-      v: pkg.v,
-      tenantId: pkg.tenantId,
-      scopeId: pkg.scopeId,
-      epoch: pkg.epoch,
-      keyId: pkg.keyId,
-      recipient: pkg.recipient,
-      sender: pkg.sender,
-      enc: pkg.enc,
-      ciphertext: pkg.ciphertext,
-    }),
-  );
+export type ScopeKeyPackage = ScopeKeyPackageV1 | ScopeKeyPackageV2;
+
+const ScopeKeyPackageV2Schema = z.strictObject({
+  ...ScopeKeyPackageV1Schema.shape,
+  v: z.literal(SCOPE_KEY_PACKAGE_V2),
+  recipientKemEpoch: KemEpochSchema,
+});
+
+const ScopeKeyPackageSchema = z.union([ScopeKeyPackageV1Schema, ScopeKeyPackageV2Schema]);
+
+type PackageIdentity = Omit<ScopeKeyPackage, 'enc' | 'ciphertext' | 'sig'>;
+
+/** HPKE AAD: the canonical JSON of the package's identity fields. */
+function packageAad({ enc: _enc, ciphertext: _ciphertext, sig: _sig, ...identity }: PackageIdentity & Partial<ScopeKeyPackage>): Uint8Array {
+  return canonicalizeJsonBytes(identity);
+}
+
+/** The bytes the sender signs: every field except `sig`, after the prefix of its version. */
+function packageSigningInput({ sig: _sig, ...pkg }: Omit<ScopeKeyPackage, 'sig'> & { readonly sig?: string }): Bytes {
+  return concat(utf8(pkg.v === SCOPE_KEY_PACKAGE_V2 ? SCOPE_KEY_PACKAGE_V2_DOMAIN_PREFIX : SCOPE_KEY_PACKAGE_DOMAIN_PREFIX), canonicalizeJsonBytes(pkg));
 }
 
 export interface SealScopeKeyPackageInput {
@@ -164,32 +170,34 @@ export interface SealScopeKeyPackageInput {
   readonly tenantId: string;
   readonly scopeId: string;
   readonly epoch: number;
-  readonly recipient: { readonly memberId: string; readonly kemPublicJwk: P256PublicJwk };
+  /** The recipient's current KEM key, with its epoch from the verified member chain. */
+  readonly recipient: { readonly memberId: string; readonly kemPublicJwk: P256PublicJwk; readonly kemEpoch: number };
   readonly sender: { readonly signingPublicJwk: P256PublicJwk; readonly signingPrivateKey: WebCryptoKey };
 }
 
-const PackageIdentitySchema = ScopeKeyPackageV1Schema.omit({ enc: true, ciphertext: true, sig: true });
+const PackageIdentitySchema = ScopeKeyPackageV2Schema.omit({ enc: true, ciphertext: true, sig: true });
 
 /**
- * Wrap one scope key to one member and sign the package. A signing private key
- * that does not pair with `sender.signingPublicJwk` throws
- * `sealed_secret_invalid`.
+ * Wrap one scope key to one member's KEM key of `recipient.kemEpoch` and sign
+ * the version 2 package. A signing private key that does not pair with
+ * `sender.signingPublicJwk` throws `sealed_secret_invalid`.
  */
-export async function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackageV1> {
+export async function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackageV2> {
   const parsed = safeParseTotal(PackageIdentitySchema, {
-    v: SCOPE_KEY_PACKAGE_VERSION,
+    v: SCOPE_KEY_PACKAGE_V2,
     tenantId: input.tenantId,
     scopeId: input.scopeId,
     epoch: input.epoch,
     keyId: await deriveScopeKeyId(input.scopeKey),
     recipient: input.recipient.memberId,
+    recipientKemEpoch: input.recipient.kemEpoch,
     sender: await deriveMemberId(input.sender.signingPublicJwk),
   });
   if (!parsed.success) throw invalidInput('Scope key package input is invalid');
   const identity = parsed.data;
   const { enc, ciphertext } = await hpkeSealBase({
     recipientPublicKey: await p256PublicKeyBytes(input.recipient.kemPublicJwk),
-    info: utf8(SCOPE_KEY_HPKE_INFO),
+    info: utf8(SCOPE_KEY_HPKE_INFO_V2),
     aad: packageAad(identity),
     plaintext: input.scopeKey,
   });
@@ -205,6 +213,8 @@ export interface OpenScopeKeyPackageInput {
     readonly memberId: string;
     readonly kemPublicJwk: P256PublicJwk;
     readonly kemPrivateKey: WebCryptoKey;
+    /** The KEM epoch of this key pair. A version 2 package must name it. */
+    readonly kemEpoch: number;
   };
   /** The signing key the caller's verified chain holds for `package.sender`. */
   readonly senderSigningPublicJwk: P256PublicJwk;
@@ -219,16 +229,18 @@ export type ScopeKeyPackageOpenResult =
 
 /**
  * Verify and open one key package, in this order: shape; addressed to this
- * recipient for the expected tenant, scope and epoch; sender key matches the
+ * recipient (and, for version 2, its KEM epoch) for the expected tenant,
+ * scope and epoch; sender key matches the
  * sender id; sender signature; HPKE open; key length; and `keyId` equal to
  * the opened key's own id. Nothing here throws for hostile input.
  */
 export async function openScopeKeyPackage(input: OpenScopeKeyPackageInput): Promise<ScopeKeyPackageOpenResult> {
-  const parsed = safeParseTotal(ScopeKeyPackageV1Schema, input.package);
+  const parsed = safeParseTotal(ScopeKeyPackageSchema, input.package);
   if (!parsed.success) return { ok: false, reason: 'key_package_invalid' };
   const pkg = parsed.data;
   if (
     pkg.recipient !== input.recipient.memberId
+    || (pkg.v === SCOPE_KEY_PACKAGE_V2 && pkg.recipientKemEpoch !== input.recipient.kemEpoch)
     || pkg.tenantId !== input.expected.tenantId
     || pkg.scopeId !== input.expected.scopeId
     || pkg.epoch !== input.expected.epoch
@@ -245,7 +257,7 @@ export async function openScopeKeyPackage(input: OpenScopeKeyPackageInput): Prom
       recipientPrivateKey: input.recipient.kemPrivateKey,
       recipientPublicKey: await p256PublicKeyBytes(input.recipient.kemPublicJwk),
       enc: decodeBase64Url(pkg.enc, 'enc'),
-      info: utf8(SCOPE_KEY_HPKE_INFO),
+      info: utf8(pkg.v === SCOPE_KEY_PACKAGE_V2 ? SCOPE_KEY_HPKE_INFO_V2 : SCOPE_KEY_HPKE_INFO),
       aad: packageAad(pkg),
       ciphertext: decodeBase64Url(pkg.ciphertext, 'ciphertext'),
     });

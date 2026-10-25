@@ -120,7 +120,6 @@ describe('a sealed envelope at the inline maximum, on a daemon with the default 
       storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed journal test', productId: 'sealed-journal-test',
       serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
-      hostedJournal: { mode: 'sqlite' },
     }, [new StubRuntimeAdapter('pi')]);
     const device = await daemon.pair('pair-code');
     await daemon.start();

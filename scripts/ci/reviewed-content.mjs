@@ -57,6 +57,20 @@ function revertPiMove(before, after, field) {
   return true;
 }
 
+// #927 retires three root scripts whose repo-harness helpers no longer exist,
+// drops the protocol version from the server description and declares the
+// cloud-do test edge to client (its tests import client source).
+const RETIRED_ROOT_SCRIPTS = Object.freeze({
+  'check:brain-manifest': 'repo-harness run check-brain-manifest',
+  'check:architecture-sync': 'repo-harness run check-architecture-sync',
+  'sync:brain-docs': 'repo-harness run sync-brain-docs --all',
+});
+const SERVER_DESCRIPTION = Object.freeze({
+  from: 'BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, protocol v2, memory or single-process SQLite storage.',
+  to: 'BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, memory or single-process SQLite storage.',
+});
+const CLOUD_DO_CLIENT_EDGE = '@byok-sdk/client';
+
 const version = value => typeof value === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -212,6 +226,12 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
         && manifest.devDependencies?.esbuild === '0.28.1') {
         delete current.devDependencies.esbuild;
       }
+      if (dir === 'packages/cloud-do'
+        && record.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === undefined
+        && current.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === 'workspace:*'
+        && manifest.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === 'workspace:*') {
+        delete current.devDependencies[CLOUD_DO_CLIENT_EDGE];
+      }
       const undiciField = UNDICI_FIELDS[dir];
       if (undiciField && manifest[undiciField]?.undici === UNDICI_MOVE.to && revertUndiciMove(record, current, undiciField)) qualify.push(dir);
       const piField = PI_FIELDS[dir];
@@ -277,6 +297,9 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     }
     if (index !== oldTests.length || new Set(newTests).size !== newTests.length) throw new Error('Existing tests must remain in order without duplicates');
     delete before.scripts['test:scripts']; delete after.scripts['test:scripts'];
+    for (const [name, command] of Object.entries(RETIRED_ROOT_SCRIPTS)) {
+      if (before.scripts[name] === command && !Object.hasOwn(after.scripts, name)) delete before.scripts[name];
+    }
     if (revertPiMove(before, after, 'overrides')) qualify.push(...Object.keys(PI_FIELDS));
   } else {
     if (!version(before.version) || !version(after.version)) throw new Error('Invalid package version');
@@ -306,6 +329,16 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       const key = './sealed-payload';
       const entry = { types: './dist/sealed-payload/index.d.ts', import: './dist/sealed-payload/index.js' };
       if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
+    }
+    if (path === 'packages/server/package.json'
+      && before.description === SERVER_DESCRIPTION.from && after.description === SERVER_DESCRIPTION.to) {
+      after.description = before.description;
+    }
+    if (path === 'packages/cloud-do/package.json'
+      && before.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === undefined
+      && after.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === 'workspace:*') {
+      delete after.devDependencies[CLOUD_DO_CLIENT_EDGE];
+      qualify.push('packages/cloud-do');
     }
     // #702 raises the public Node floor with the Node 24.22.1 pin. Admit only
     // this exact engines.node edit in a public manifest. Any other engines value

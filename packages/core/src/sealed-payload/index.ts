@@ -31,8 +31,10 @@ export type {
 export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './scope-key';
 export type {
   OpenScopeKeyPackageInput,
+  ScopeKeyPackage,
   ScopeKeyPackageOpenResult,
   ScopeKeyPackageV1,
+  ScopeKeyPackageV2,
   SealScopeKeyPackageInput,
 } from './scope-key';
 export {

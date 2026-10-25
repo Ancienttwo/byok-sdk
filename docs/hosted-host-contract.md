@@ -142,6 +142,10 @@ The mailbox rows of the device also stay. Under retention, its pending rows beco
 Today the product concludes the intent itself, for example as `abandoned`, and records the cause.
 Use a product rule: the waiting deadline, `device_offline` or the revoke action.
 
+A device that restarts is not lost. On start it ends each task it claimed and had not finished
+with `task.fail` (`reason: daemon_interrupted`, `retryable: false`), and it never runs that task again (#924).
+So a `cancelTask` sent while the device was down settles once the device is back.
+
 ## 2. Rescan contract
 
 The SDK sends the Host no reliable notice of a state change:
@@ -342,6 +346,14 @@ Current behavior:
 - So the mailbox copy of an acked offer goes.
   The mailbox copy of an offer that the device never acked stays as a dead letter.
   The receipt copy stays in both cases.
+- Used device-proof request ids live in `proof_request_receipt`. The `proofReceipts` step prunes them only when the Host
+  passes `proofReceiptRetention: { authority }` to `createByokCloud`; the authority is a `PostgresProofReceiptRetentionAuthority`
+  from `@byok-sdk/cloud-dataplane/runtime`, over the same table as the `proofReceipts` port
+  (`packages/cloud/src/cloud.ts:311`, `packages/cloud-dataplane/src/stores/proof-receipts.ts:104`).
+  Without it the step reports `not-configured` and the table keeps every row.
+  With it the step deletes rows recorded more than `proofReceiptRetentionMs` before `now`: 24 hours by default,
+  at least 15 minutes, checked at construction (`packages/cloud/src/maintenance.ts:46-61`).
+  Within the retention a `requestId` stays single-use.
 
 What the kept rows hold:
 

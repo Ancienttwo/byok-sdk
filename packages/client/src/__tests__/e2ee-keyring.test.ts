@@ -16,7 +16,7 @@ import {
   openScopeKeyPackage,
   type MemberKeyBundleV1,
   type MemberKeys,
-  type ScopeKeyPackageV1,
+  type ScopeKeyPackageV2,
   type SealedContentHeaderV1,
 } from '@byok-sdk/core/sealed-payload';
 import { E2EE_SCOPE_KEY_PACKAGE_PUT_MAX } from '@byok-sdk/protocol';
@@ -290,7 +290,7 @@ async function openStored(host: E2eeTestHost, sender: MemberKeyBundleV1, scopeId
   const opened = await openScopeKeyPackage({
     package: pkg,
     expected: { tenantId: 'tenant-test', scopeId, epoch },
-    recipient: { memberId: recipient, kemPublicJwk: kem.publicJwk, kemPrivateKey: kem.privateKey },
+    recipient: { memberId: recipient, kemPublicJwk: kem.publicJwk, kemPrivateKey: kem.privateKey, kemEpoch: kem.epoch },
     senderSigningPublicJwk: sender.signingPublicJwk,
   });
   if (!opened.ok) throw new Error(`the package of epoch ${epoch} does not open: ${opened.reason}`);
@@ -644,8 +644,8 @@ describe('device member keyring rotation (E2d-4)', () => {
     server.e2ee.holdPackagePuts = undefined;
     const next = (await keyring.sealingKey('scope-a', 1))!;
     expect(next.epoch).toBe(3);
-    expect(await openStored(server.e2ee, device, 'scope-a', 3, web.member.memberId, kem)).toEqual(next.scopeKey);
-    await expect(openStored(server.e2ee, device, 'scope-a', 3, web.member.memberId, web.keys.kem)).rejects.toThrow(/does not open/u);
+    expect(await openStored(server.e2ee, device, 'scope-a', 3, web.member.memberId, { ...kem, epoch: kemEpoch })).toEqual(next.scopeKey);
+    await expect(openStored(server.e2ee, device, 'scope-a', 3, web.member.memberId, { ...web.keys.kem, epoch: kemEpoch })).rejects.toThrow(/does not open/u);
   });
   it('rotates above an epoch whose put conflicted with another client that left this device out', async () => {
     const { server, web, device, logs, keyring } = await member();
@@ -1103,7 +1103,7 @@ describe('device member KEM rotation (E2d-5)', () => {
   it('keeps the old key when an old-key package lands after the read-back and before the final read-back', async () => {
     const { server, web, device, custody, keyring, restart } = await member();
     const scopeKey = await web.putScope('scope-a', [device]);
-    const ownAtOne = (pkg: ScopeKeyPackageV1) => pkg.recipient === device.memberId && pkg.scopeId === 'scope-a' && pkg.epoch === 1;
+    const ownAtOne = (pkg: ScopeKeyPackageV2) => pkg.recipient === device.memberId && pkg.scopeId === 'scope-a' && pkg.epoch === 1;
     const original = server.e2ee.packages.find(ownAtOne)!;
     const handle = server.e2ee.handle.bind(server.e2ee);
     let reads = 0;

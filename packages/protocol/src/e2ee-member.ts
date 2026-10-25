@@ -20,6 +20,8 @@ export const E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES = 65_536;
 export const E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES = 256;
 /** The most scope key packages one put accepts. */
 export const E2EE_SCOPE_KEY_PACKAGE_PUT_MAX = 256;
+/** The most packages one paged device read returns. */
+export const E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX = 16;
 /**
  * The longest scope id, in UTF-16 code units, as for other opaque Host ids.
  * Core sets no maximum, so the scope key package shape (which the parity test
@@ -83,6 +85,18 @@ export const E2EE_MEMBER_CHAIN_OPS = ['add', 'remove', 'rotate', 'scope-policy',
 const E2eeScopeShredSubjectSchema = z.strictObject({ scopeId: z.string().min(1) });
 
 /**
+ * The subject of a `rotate` entry. The Host reads `memberId` and `kemEpoch`
+ * to raise the member's KEM floor (#654 E5b-2, owner batch §77a), so it
+ * checks this subject as strictly as core's walk does.
+ */
+const E2eeMemberRotateSubjectSchema = z.strictObject({
+  memberId: MemberIdSchema,
+  kemPublicJwk: P256PublicJwkSchema,
+  kemEpoch: PositiveSafeIntegerSchema,
+  kemSig: SignatureSchema,
+});
+
+/**
  * One signed member chain entry. `subject` must be a JSON object; the Host
  * stores the entry as canonical JSON, which refuses any value outside JSON.
  * A `shred` subject must also be exactly `{ scopeId }`.
@@ -107,11 +121,14 @@ export const E2eeMemberChainEntrySchema = z
   .refine(entry => entry.op !== 'shred' || E2eeScopeShredSubjectSchema.safeParse(entry.subject).success, {
     path: ['subject'],
     message: 'a shred subject is exactly { scopeId }',
+  })
+  .refine(entry => entry.op !== 'rotate' || E2eeMemberRotateSubjectSchema.safeParse(entry.subject).success, {
+    path: ['subject'],
+    message: 'a rotate subject is exactly { memberId, kemPublicJwk, kemEpoch, kemSig }',
   });
 export type E2eeMemberChainEntry = z.infer<typeof E2eeMemberChainEntrySchema>;
 
-/** One scope key wrapped to one member (§7.4). */
-export const E2eeScopeKeyPackageSchema = z.strictObject({
+const E2eeScopeKeyPackageV1Schema = z.strictObject({
   v: z.literal(1),
   tenantId: z.string().min(1),
   scopeId: z.string().min(1),
@@ -123,6 +140,16 @@ export const E2eeScopeKeyPackageSchema = z.strictObject({
   ciphertext: base64UrlBytes(48),
   sig: SignatureSchema,
 });
+
+/** One scope key wrapped to one member's KEM key of `recipientKemEpoch` (§7.4, §77a). A put takes version 2 only. */
+export const E2eeScopeKeyPackageV2Schema = z.strictObject({
+  ...E2eeScopeKeyPackageV1Schema.shape,
+  v: z.literal(2),
+  recipientKemEpoch: PositiveSafeIntegerSchema,
+});
+
+/** A stored package as a read returns it: version 1 from before `e2ee.member.kem-epoch`, version 2 after. */
+export const E2eeScopeKeyPackageSchema = z.union([E2eeScopeKeyPackageV1Schema, E2eeScopeKeyPackageV2Schema]);
 export type E2eeScopeKeyPackage = z.infer<typeof E2eeScopeKeyPackageSchema>;
 
 /** A pairing MAC (§7.2 steps 3 and 4): HMAC-SHA-256 under `pv`, which the Host never holds. */

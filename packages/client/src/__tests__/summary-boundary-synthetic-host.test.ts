@@ -127,7 +127,6 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
     serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir,
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     // A result-document offer is admitted only by a daemon that journals its terminals.
-    hostedJournal: { mode: 'sqlite' },
   }, [adapter], { deviceCredentials: testDeviceCredentials(options.productId) });
   const host = new SyntheticHost();
   const summaryTaskIds: string[] = [];

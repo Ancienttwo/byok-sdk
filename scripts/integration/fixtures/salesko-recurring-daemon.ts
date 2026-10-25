@@ -18,7 +18,7 @@ adapter.prepare = async input => { preparations++; return prepare(input); };
 const daemon = createDaemonWithAdapters({
   localAgentRelease: { version: '0.0.0-recovery-test' }, productName: 'recovery fixture', productId: config.productId,
   serverUrl: config.serverUrl, workspaceRoot: join(config.localRoot, 'workspace'), storeDir: join(config.localRoot, 'store'),
-  hostedJournal: { mode: 'sqlite' }, agentHome: { hostStorageRoot: join(config.localRoot, 'home') },
+  agentHome: { hostStorageRoot: join(config.localRoot, 'home') },
   agentEgress: { policy: config.egressPolicy },
   mcpToolsets: { 'salesko.read.v1': { mcpServers: { read: { command: '/bin/false' } } },
     'salesko.propose.v1': { mcpServers: { propose: { command: '/bin/false' } } } },

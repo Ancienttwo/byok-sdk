@@ -219,7 +219,6 @@ describe('daemon log chain for a failing provisioning handler', () => {
         serverUrl: server.url,
         workspaceRoot,
         storeDir,
-        hostedJournal: { mode: 'sqlite' as const },
         providerProvisioning: async (notice) => build(deviceId)(notice),
       },
       [new StubRuntimeAdapter()],
