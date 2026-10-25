@@ -6640,8 +6640,10 @@ export interface LocalTransitionRecord {
 /** Whether the cloud has confirmed the terminal this daemon produced (§12.7.3's "terminal 生成后、truth 写入前" window). */
 export type TerminalTruthState = 'pending' | 'confirmed' | 'failed';
 /**
- * One immutable canonical terminal and its delivery projection. Bytes are the
- * replay authority; the hash is checked against them, never used as a substitute.
+ * One canonical terminal and its delivery projection. Bytes are the replay
+ * authority; the hash is checked against them, never used as a substitute.
+ * The bytes change only when the cloud refused them
+ * ({@link LocalTaskJournal.replaceRefusedTerminal}).
  */
 export interface LocalTerminalRecord {
     readonly taskId: string;
@@ -6751,9 +6753,24 @@ export interface LocalTaskJournal {
     recordTerminal(record: LocalTerminalRecord): Promise<void>;
     /** Exact original terminal bytes, including rejected records, until acknowledged. */
     listPendingTerminals(identity: JournalIdentity): Promise<LocalTerminalRecord[]>;
-    /** A successful authenticated transport disposition, bound to the original bytes. */
+    /**
+     * A successful authenticated transport disposition, bound to the original
+     * bytes. A disposition of bytes that {@link replaceRefusedTerminal} replaced
+     * changes nothing and must not throw: the daemon keeps the batch of a failed
+     * disposition and posts it again.
+     */
     confirmTerminal(taskId: string, payloadHash: string): Promise<void>;
+    /** A refusal of the original bytes; the same rule as {@link confirmTerminal} for replaced bytes. */
     rejectTerminal(taskId: string, payloadHash: string, reason: string): Promise<void>;
+    /**
+     * Replace a terminal the cloud refused ({@link rejectTerminal}) with another
+     * one, which becomes the pending terminal (#654 §77b). The cloud records
+     * nothing for a refused terminal, so the replacement is the first terminal
+     * it receives. Refuses a row that is not refused or names another hash.
+     * Idempotent: a repeat whose bytes are already current changes nothing. The
+     * replaced hash is kept as a transition of the task.
+     */
+    replaceRefusedTerminal(taskId: string, refusedPayloadHash: string, record: LocalTerminalRecord): Promise<void>;
     /** Includes old interruption markers without reports; they must not hide pending work. */
     listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]>;
     readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined>;
@@ -6862,7 +6879,7 @@ export declare const DEFAULT_JOURNAL_BUSY_TIMEOUT_MS = 5000;
  * (`util/secure-dir.ts`): a seam the production path never supplies, exercised
  * from any host.
  */
-export type JournalFaultStep = 'append:before-begin' | 'append:after-envelope' | 'append:after-task' | 'append:after-receipt' | 'append:before-commit' | 'append:after-commit' | 'admission:before-commit' | 'transition:before-commit' | 'terminal:before-commit' | 'terminal:after-commit' | 'recovery:after-commit' | 'confirm:before-commit' | 'confirm:after-commit' | 'recovery:before-commit' | 'cleanup:before-commit' | 'prune:before-commit';
+export type JournalFaultStep = 'append:before-begin' | 'append:after-envelope' | 'append:after-task' | 'append:after-receipt' | 'append:before-commit' | 'append:after-commit' | 'admission:before-commit' | 'transition:before-commit' | 'terminal:before-commit' | 'terminal:after-commit' | 'recovery:after-commit' | 'confirm:before-commit' | 'confirm:after-commit' | 'replace:before-commit' | 'replace:after-commit' | 'recovery:before-commit' | 'cleanup:before-commit' | 'prune:before-commit';
 export interface JournalFaultSeam {
     /** Throw to simulate a crash or IO error at exactly this step. Return normally to proceed. */
     onStep?(step: JournalFaultStep): void;
@@ -6928,6 +6945,7 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
     listPendingTerminals(identity: JournalIdentity): Promise<LocalTerminalRecord[]>;
     confirmTerminal(taskId: string, payloadHash: string): Promise<void>;
     rejectTerminal(taskId: string, payloadHash: string, reason: string): Promise<void>;
+    replaceRefusedTerminal(taskId: string, refusedPayloadHash: string, record: LocalTerminalRecord): Promise<void>;
     /**
      * What this daemon was in the middle of: a task whose offer envelope is
      * durable, that has no terminal, that was not declined, and that recovery
@@ -8323,6 +8341,8 @@ export declare class SealedTasks {
     sealRecovered(offer: Envelope, terminal: Envelope, sealable?: boolean): Promise<Envelope>;
     /** The plaintext envelope a sealed outbound replaced, so the local observer keeps reading plaintext. */
     plainOf(envelope: Envelope): Envelope;
+    /** The failure that replaces a refused terminal sent by `ciphertextRef` (§77b); `undefined` for any other envelope. */
+    refusedReplacement(refused: Envelope): Envelope | undefined;
     /** The closed plaintext form of a terminal that has no sealing key (decision 12d). */
     unsealable(envelope: Envelope): Envelope | undefined;
 }

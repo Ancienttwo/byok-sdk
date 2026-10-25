@@ -53,6 +53,7 @@ class CapturingJournal implements LocalTaskJournal {
   async listPendingTerminals(): Promise<[]> { return []; }
   async confirmTerminal(): Promise<void> {}
   async rejectTerminal(): Promise<void> {}
+  async replaceRefusedTerminal(): Promise<void> {}
   async listRecoveryTasks(): Promise<[]> { return []; }
   async readTask(): Promise<undefined> { return undefined; }
   async listRecoverable(): Promise<[]> { return []; }
