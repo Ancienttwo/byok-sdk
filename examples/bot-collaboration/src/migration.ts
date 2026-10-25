@@ -1,6 +1,6 @@
 import { canonical, hash } from '@byok-sdk/example-host-execution-core/canonical';
-import { taskId as taskIdOf, validateJson, type Conclusion, type Json, type Occurrence, type Routine, type RoutineDefinition }
-  from '@byok-sdk/example-host-execution-core';
+import { taskId as taskIdOf, validateJson, type Conclusion, type Intent, type Json, type Occurrence, type RetryPolicy, type Routine,
+  type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState } from './model';
 
 /**
@@ -31,26 +31,37 @@ export interface ArchivedRecord { namespace: string; id: string; body: Json; exp
  * A concluded intent, moved as a row: L K4 `intents` and `executions[taskId]` with K8 `hostIntents`, H `intent`. `input` is
  * the frozen execution input that was submitted, a sealed one still sealed. A late terminal or message for it is refused
  * by its conclusion; one for a compacted intent, by its `intent` tombstone.
+ *
+ * `messageReceipt` is the accepted Agent message of the current task, which K4 answers a replay from. The same fact is the
+ * K8 accepted reply of that task id, so the two must agree. K4 `attempts` is not carried: it is `generation + 1` once
+ * the intent began (`submission` is not `reserved`), and 0 before.
  */
 export interface IntentRecord {
   key: string; source: 'user' | 'bot' | 'routine'; handler?: string; ordinal: number; agent: string;
-  taskId: string; generation: number; input: Json; waitUntil: number;
+  taskId: string; generation: number; input: Json; waitUntil: number; retry: RetryPolicy;
   submission: 'reserved' | 'uncertain' | 'delivered'; started: boolean; attempt?: Json; terminal?: Json;
+  messageReceipt?: { messageId: string; contentHash: string };
+  preparationError?: string; memoryBlocked?: NonNullable<Intent['memoryBlocked']>;
   cancelReason?: 'expired' | 'cancelled'; retryUntil?: number; conclusion: Conclusion;
 }
-/** A routine: L K4 `routines` (its insertion order is `ordinal`), H `routine`. `nextAt` is the planned slot. */
+/**
+ * A routine: L K4 `routines` (its insertion order is `ordinal`), H `routine`. `nextAt` is the planned slot. The schedule
+ * retry fields and `lastError` are K4's pacing of a slot past the SDK's furthest wake, and `lastError` is never cleared.
+ */
 export interface RoutineRecord {
   id: string; ordinal: number; definition: RoutineDefinition; pending?: RoutineDefinition;
   lifecycle: Routine['lifecycle']; status: Routine['status']; nextAt: number | null; calendarErrors?: NonNullable<Routine['calendarErrors']>;
+  scheduleRetryAt?: number; scheduleRetryCount?: number; lastError?: NonNullable<Routine['lastError']>;
 }
 /**
  * An occurrence: L K4 `occurrences` (its insertion order is `ordinal`), H `occurrence`. `job` is a Host job's tries and
  * summary, `null` for an occurrence hook. `conclusion` is set only on one with no intent; a promoted one has its intent's.
+ * K4 `attempts` is not carried: it is its intent's, or 0. `slotReplayCount` counts redelivered wakes of its slot.
  */
 export interface OccurrenceRecord {
   key: string; ordinal: number; routineId: string; definitionVersion: number; trigger: Occurrence['trigger'];
   recordedAt: number; nextAt: number | null; job: { attempts: number; summary?: Json } | null; executionSuperseded: boolean;
-  conclusion?: Conclusion;
+  conclusion?: Conclusion; slotReplayCount?: number;
 }
 /** A routine slot's replay guard: the slot hash and its occurrence key. */
 export interface SlotRecord { slot: string; occurrenceKey: string }
@@ -70,7 +81,7 @@ export interface SwitchContent {
 export interface SwitchManifest { counts: Record<SwitchSection, number>; digests: Record<SwitchSection, string>; digest: string }
 export interface SwitchExport extends SwitchContent { manifest: SwitchManifest }
 
-export type SwitchExportRefusal = 'invalid' | 'unsorted' | 'duplicate' | 'reference' | 'owner_record' | 'device_missing' | 'open_work'
+export type SwitchExportRefusal = 'invalid' | 'unsorted' | 'duplicate' | 'reference' | 'receipt_mismatch' | 'owner_record' | 'device_missing' | 'open_work'
   | 'home_sent' | 'card_call' | 'manifest';
 /** An export that the format refuses. Nothing may be imported or committed from it. */
 export class SwitchExportError extends Error {
@@ -187,30 +198,41 @@ function definition(value: unknown, id: string): boolean {
     && (present[0] === 'execution' ? object(run) : keys(run, ['type', 'input']) && text(run.type));
 }
 function routineRecord(row: unknown): boolean {
-  return keys(row, ['id', 'ordinal', 'definition', 'lifecycle', 'status', 'nextAt'], ['pending', 'calendarErrors']) && text(row.id) && time(row.ordinal)
+  return keys(row, ['id', 'ordinal', 'definition', 'lifecycle', 'status', 'nextAt'],
+    ['pending', 'calendarErrors', 'scheduleRetryAt', 'scheduleRetryCount', 'lastError']) && text(row.id) && time(row.ordinal)
     && definition(row.definition, row.id) && optional(row.pending, pending => definition(pending, row.id as string))
     && oneOf(['active', 'paused', 'completed'])(row.lifecycle)
     && oneOf(['ok', 'schedule_retrying', 'no_occurrence_within_horizon', 'calendar_error'])(row.status)
     && (row.nextAt === null || time(row.nextAt))
     && optional(row.calendarErrors, errors => Array.isArray(errors) && errors.length > 0
       && errors.every(error => keys(error, ['at', 'message'], ['wakeKey']) && time(error.at) && typeof error.message === 'string'
-        && optional(error.wakeKey, text)));
+        && optional(error.wakeKey, text)))
+    && optional(row.scheduleRetryAt, time) && optional(row.scheduleRetryCount, count => time(count) && count >= 1)
+    && optional(row.lastError, error => keys(error, ['code', 'message']) && text(error.code) && typeof error.message === 'string');
 }
 function occurrenceRecord(row: unknown): boolean {
-  return keys(row, ['key', 'ordinal', 'routineId', 'definitionVersion', 'trigger', 'recordedAt', 'nextAt', 'job', 'executionSuperseded'], ['conclusion'])
+  return keys(row, ['key', 'ordinal', 'routineId', 'definitionVersion', 'trigger', 'recordedAt', 'nextAt', 'job', 'executionSuperseded'],
+    ['conclusion', 'slotReplayCount'])
     && text(row.key) && time(row.ordinal) && text(row.routineId) && time(row.definitionVersion) && row.definitionVersion >= 1
     && keys(row.trigger, ['kind', 'plannedAt']) && oneOf(['scheduled', 'catch_up'])(row.trigger.kind) && time(row.trigger.plannedAt)
     && time(row.recordedAt) && (row.nextAt === null || time(row.nextAt))
     && (row.job === null || keys(row.job, ['attempts'], ['summary']) && time(row.job.attempts))
-    && typeof row.executionSuperseded === 'boolean' && optional(row.conclusion, conclusionText);
+    && typeof row.executionSuperseded === 'boolean' && optional(row.conclusion, conclusionText)
+    && optional(row.slotReplayCount, count => time(count) && count >= 1);
 }
 function intentRecord(row: unknown): boolean {
-  return keys(row, ['key', 'source', 'ordinal', 'agent', 'taskId', 'generation', 'input', 'waitUntil', 'submission', 'started', 'conclusion'],
-    ['handler', 'attempt', 'terminal', 'cancelReason', 'retryUntil'])
+  return keys(row, ['key', 'source', 'ordinal', 'agent', 'taskId', 'generation', 'input', 'waitUntil', 'retry', 'submission', 'started', 'conclusion'],
+    ['handler', 'attempt', 'terminal', 'messageReceipt', 'preparationError', 'memoryBlocked', 'cancelReason', 'retryUntil'])
     && text(row.key) && oneOf(['user', 'bot', 'routine'])(row.source) && optional(row.handler, text) && time(row.ordinal) && text(row.agent)
     && digestText(row.taskId) && time(row.generation) && object(row.input) && time(row.waitUntil)
     && oneOf(['reserved', 'uncertain', 'delivered'])(row.submission) && typeof row.started === 'boolean'
+    && keys(row.retry, ['maxAttempts', 'delaysMs', 'retryFailures']) && time(row.retry.maxAttempts) && typeof row.retry.retryFailures === 'boolean'
+    && Array.isArray(row.retry.delaysMs) && row.retry.delaysMs.every(time)
     && optional(row.attempt, object) && optional(row.terminal, object)
+    && optional(row.messageReceipt, receipt => keys(receipt, ['messageId', 'contentHash']) && text(receipt.messageId) && text(receipt.contentHash))
+    && optional(row.preparationError, text)
+    && optional(row.memoryBlocked, blocked => keys(blocked, ['resume', 'reason']) && oneOf(['queued', 'backoff'])(blocked.resume)
+      && typeof blocked.reason === 'string')
     && optional(row.cancelReason, oneOf(['expired', 'cancelled'])) && optional(row.retryUntil, time) && optional(row.conclusion, conclusionText);
 }
 
@@ -276,6 +298,15 @@ function checkReferences(content: SwitchContent): void {
     ensure(!(promoted.has(row.key) && row.conclusion !== undefined), `occurrence ${row.key} has an intent and its own conclusion`);
   }
   for (const row of content.slots) reference(occurrences.has(row.occurrenceKey), `slot ${row.slot} names no occurrence of the export`);
+  // The K8 accepted reply of a task, live or retained (#798), is the same fact as the K4 message receipt of that task.
+  const archivedReplies = new Map(content.archived.filter(row => row.namespace === 'replies').map(row => [row.id, row.body]));
+  for (const row of content.intents) {
+    const reply = (content.collaboration.replies as Record<string, unknown>)[row.taskId] ?? archivedReplies.get(row.taskId);
+    const receipt = row.messageReceipt;
+    const same = receipt === undefined ? reply === undefined
+      : object(reply) && reply.messageId === receipt.messageId && reply.contentHash === receipt.contentHash;
+    if (!same) throw new SwitchExportError('receipt_mismatch', `Switch export intent ${row.key} has a message receipt that differs from its K8 reply`);
+  }
   for (const row of content.outbox) {
     if (row.kind === 'host-job') reference(occurrences.get(row.occurrenceKey)?.job != null, `Host job ${row.occurrenceKey} names no Host job occurrence`);
   }

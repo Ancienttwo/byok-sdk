@@ -23,18 +23,23 @@ const OCCURRENCES = [occurrence('o1', 0, 'r1', { job: { attempts: 1, summary: { 
 const intent = (key: string, ordinal: number, extra: Partial<IntentRecord> = {}): IntentRecord => {
   const taskId = hash([key, extra.generation ?? 1]);
   return { key, source: 'user', ordinal, agent: 'agent-1', taskId, generation: 1, input: { taskId, deviceId: 'd1' }, waitUntil: 5_000,
-    submission: 'delivered', started: true, conclusion: 'succeeded', ...extra };
+    retry: { maxAttempts: 3, delaysMs: [300_000, 900_000], retryFailures: false }, submission: 'delivered', started: true, conclusion: 'succeeded',
+    ...extra };
 };
+/** `i2` has an accepted message: its K4 receipt and its K8 reply. */
+const RECEIPT = { messageId: 'm1', contentHash: 'h1' };
+const REPLY = { turnId: 'i2', ...RECEIPT, contentType: 'text/plain', acceptedAt: 1_000 };
 
 function content(edit: (state: CollaborationState) => void = () => {}): SwitchContent {
   const state = stateOf({});
   state.team.bots.b1 = bot('b1', 'd1');
+  state.replies[hash(['i2', 1])] = structuredClone(REPLY);
   edit(state);
   return {
     version: 1, source: 'L', domain: 'tenant-1', devices: [{ deviceId: 'd2', frozenRevision: 1 }, { deviceId: 'd1', frozenRevision: 3 }], exportedAt: 1_000,
     collaboration: state,
     archived: [{ namespace: 'turns', id: 't2', body: { n: 2 }, expiresAt: 9_000 }, { namespace: 'commands', id: 'c1', body: { n: 1 } }],
-    intents: [intent('i2', 0, { attempt: { id: 'a' }, terminal: { type: 'task.complete' } }),
+    intents: [intent('i2', 0, { attempt: { id: 'a' }, terminal: { type: 'task.complete' }, messageReceipt: { ...RECEIPT } }),
       intent('i1', 1, { submission: 'reserved', started: false, conclusion: 'cancelled', cancelReason: 'cancelled', handler: 'h' }),
       intent('occurrence:o2', 2, { source: 'routine', conclusion: 'failed', retryUntil: 4_000 })],
     routines: structuredClone(ROUTINES),
@@ -145,6 +150,42 @@ describe('switch export format (#975)', () => {
       value => { value.intents[0]!.input = { taskId: hash(['other', 1]) }; },
       // A promoted occurrence's conclusion is its intent's.
       value => { value.occurrences[1]!.conclusion = 'failed'; },
+    ]);
+  });
+
+  it('carries the K4 routine schedule retry fields and slot replay count, and the intent fields only K4 keeps (#975 D2, D3, D5)', () => {
+    const value = content();
+    Object.assign(value.routines[0]!, { status: 'schedule_retrying', scheduleRetryAt: 70_000, scheduleRetryCount: 2,
+      lastError: { code: 'WAKE_AVAILABLE_AT_INVALID', message: 'too far' } });
+    value.occurrences[0]!.slotReplayCount = 3;
+    Object.assign(value.intents[1]!, { preparationError: 'sealed_dispatch_unavailable', memoryBlocked: { resume: 'queued', reason: 'locked' } });
+    const sealed = sealSwitchExport(value);
+    expect(sealed.routines[0]).toMatchObject({ scheduleRetryAt: 70_000, scheduleRetryCount: 2, lastError: { code: 'WAKE_AVAILABLE_AT_INVALID' } });
+    expect(verifySwitchExport(sealed)).toEqual(sealed.manifest);
+    refusesEach('invalid', [
+      value => { value.routines[0]!.scheduleRetryCount = 0; },
+      value => { value.routines[0]!.lastError = { code: '', message: 'm' }; },
+      value => { Object.assign(value.routines[0]!, { lastError: { code: 'c', message: 'm', at: 1 } }); },
+      value => { value.occurrences[0]!.slotReplayCount = 0; },
+      value => { delete (value.intents[0] as { retry?: unknown }).retry; },
+      value => { value.intents[0]!.retry = { maxAttempts: 3, delaysMs: [-1], retryFailures: false }; },
+      value => { value.intents[0]!.preparationError = ''; },
+      value => { Object.assign(value.intents[0]!, { memoryBlocked: { resume: 'inflight', reason: 'r' } }); },
+      value => { Object.assign(value.intents[0]!, { messageReceipt: { messageId: 'm1' } }); },
+    ]);
+  });
+
+  it('refuses a message receipt that is not the K8 accepted reply of the same task, live or retained (#975 D4)', () => {
+    // The reply may have been retained into archived rows.
+    const retained = content(state => { delete state.replies[hash(['i2', 1])]; });
+    retained.archived.push({ namespace: 'replies', id: hash(['i2', 1]), body: structuredClone(REPLY) });
+    expect(verifySwitchExport(sealSwitchExport(retained)).counts.archived).toBe(3);
+    refusesEach('receipt_mismatch', [
+      value => { delete value.intents[0]!.messageReceipt; },
+      value => { value.intents[0]!.messageReceipt = { ...RECEIPT, contentHash: 'h2' }; },
+      value => { value.intents[0]!.messageReceipt = { ...RECEIPT, messageId: 'm2' }; },
+      value => { delete value.collaboration.replies[hash(['i2', 1])]; },
+      value => { value.intents[1]!.messageReceipt = { messageId: 'm9', contentHash: 'h9' }; },
     ]);
   });
 
