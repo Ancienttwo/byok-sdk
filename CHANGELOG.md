@@ -294,6 +294,12 @@
   `held:<turnId>` projection with a fixed body, and an audit row with the
   reason. The rest of the scope syncs, and the next sync with no refusal
   freezes the Turn. L sets no fact; H adopts it in a follow-up.
+- **Changed (client, internal)** — `TaskRunner`'s method bodies now live in
+  `daemon/task-runner/`, one module per stage (#926). `handleOffer` and
+  `pump` are split along their existing stages, and no function is over 300
+  lines. Behavior, exports and the published `task-runner.d.ts` are unchanged.
+  The `@byok-sdk/client` closure grows by 7893 B and `bin:byok-agent` by
+  7917 B, for the delegating stubs and private-state access.
 
 ## 0.30.1 — 2026-10-24 (published)
 
