@@ -60,4 +60,11 @@ describe('the member side of a sealed routine (#953)', () => {
     await expect(sealRoutineTemplate({ ...member, sealing: { ...sealing, categories: ['task-output'] }, routineRef, agentRef, instruction: 'x' }))
       .rejects.toThrow('sealed task input');
   });
+
+  it('refuses a sealing that adds any category to task-input: K4 runs exactly [task-input]', async () => {
+    for (const categories of [['task-input', 'task-output'], ['task-output', 'task-input']] as TaskSealing['categories'][]) {
+      await expect(sealRoutineTemplate({ ...member, sealing: { ...sealing, categories }, routineRef, agentRef, instruction: 'x' }))
+        .rejects.toThrow('A routine template is sealed task input only');
+    }
+  });
 });
