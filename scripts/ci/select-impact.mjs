@@ -420,6 +420,8 @@ export function selectImpact(paths, context = {}) {
     // #654: the core sealed-payload subpath entry.
     if (path === 'packages/core/tsup.config.ts') { dirs.add('packages/core'); families.add('npm-release-pack'); continue; }
     if (path === 'scripts/keys/generate-pi-model-catalog.ts') { dirs.add('packages/keys'); dirs.add('packages/client'); continue; }
+    // The generated Pi defaults: keys source, and the client drift test re-renders them.
+    if (path === 'packages/keys/src/pi-runtime-defaults.generated.ts') { dirs.add('packages/keys'); dirs.add('packages/client'); continue; }
     // pack-and-smoke.mjs runs it against the packed client.
     if (path === 'packages/client/scripts/packed-cli-mcp-smoke.mjs') { dirs.add('packages/client'); families.add('npm-release-pack'); continue; }
     if (path === 'packages/client/scripts/packed-agent-memory-helper-smoke.mjs'

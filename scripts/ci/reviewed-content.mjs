@@ -331,6 +331,9 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       const key = './pi-catalog';
       const entry = { types: './dist/pi-catalog.d.ts', import: './dist/pi-catalog.js' };
       if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
+      // The browser-safe headless model-route subpath.
+      const route = { types: './dist/model-route.d.ts', import: './dist/model-route.js' };
+      if (before.exports?.['./model-route'] === undefined && isDeepStrictEqual(after.exports?.['./model-route'], route)) delete after.exports['./model-route'];
     }
     if (path === 'packages/core/package.json') {
       // #654 adds one subpath for sealed payload v1, so the root bundle does not grow.
