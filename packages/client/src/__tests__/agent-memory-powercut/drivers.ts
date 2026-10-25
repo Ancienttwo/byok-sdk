@@ -191,7 +191,7 @@ export class ProcessKillDriver implements PowerCutDriver {
     await once(child, 'spawn');
     if (process.platform === 'win32') {
       this.#windowsDevice = (await windowsProcesses()).find((entry) => entry.pid === child.pid);
-      if (this.#windowsDevice === undefined) throw new Error(`device process ${child.pid} exited at start`);
+      if (this.#windowsDevice === undefined) throw new Error(`the device ended before it sent its snapshot (process ${child.pid} exited at start)`);
     }
     return { link: { input: child.stdout!, output: child.stdin! }, ended: exited(child) };
   }
