@@ -2,7 +2,8 @@ import type { Pool, PoolClient } from 'pg';
 import { canonical, hash, occurrenceRun, taskId, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type Json,
   type Routine } from '@byok-sdk/example-host-execution-core';
 import { botRoutines, endable, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
-import { applyManagement, requireMain, updateBot, writeSnapshotBot } from '@byok-sdk/example-bot-collaboration/team';
+import { applyHomeTerminal, applyManagement, failHomeFlush, homeEnqueued, homeHead, planHomeRetry, requireMain, updateBot, writeSnapshotBot,
+  type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
@@ -130,6 +131,17 @@ type ReadbackResult = Awaited<ReturnType<NonNullable<ChannelPort['readback']>>>;
  * with `tries`.
  */
 export type CardClaim = { kind: 'none' } | { kind: 'ended' } | { kind: 'call'; tries: number; action: string; draft: Json };
+type HomeOperation = CollaborationState['team']['homeOperations'][number];
+/**
+ * The sender's view of one Agent home claim (#793 S13). `none`: nothing to flush now. `flush`: read back each request of
+ * `op` in order, then settle with `retries` (the operation's retry count at the claim) as the fence. `lease` is the
+ * `next_at` that the claim wrote; a settle that plans an enqueue keeps it until `homeEnqueued`.
+ */
+export type HomeClaim = { kind: 'none' } | { kind: 'flush'; op: HomeOperation; retries: number; lease: number };
+/** One settle of an Agent home flush: a terminal readback, a retry plan (no request is terminal), or a step that threw. */
+export type HomeStep = { terminal: HomeReadback } | { retry: true } | { error: unknown };
+/** The outbox key of an Agent home operation's row. */
+export const homeRowKey = (sequence: number): string => JSON.stringify(['home', sequence]);
 /** The outbox key of a card's connector call row. An array key never equals a projection id. */
 export const cardRowKey = (cardId: string): string => JSON.stringify(['card', cardId]);
 /** L's connector timeout error (K8 host.ts `callConnector`). An expired H claim ends its card with it too. */
@@ -640,6 +652,84 @@ export class HostedCollaborationStore {
   }
 
   /**
+   * Claims the Agent home operation `sequence` (#793 S13), in one transaction under the scope lock, at the clock read after the
+   * lock. K8 `homeHead` decides, as L's `flushHomes`: the operation must be its Bot's oldest pending one, and the Bot must have
+   * no intent row with no conclusion. A pending operation that is not a head waits `backoffMs` (never earlier). A head takes
+   * a lease (`next_at = now + leaseMs`); the entity is the fence, so `tries` stays 0. A row whose operation is gone or
+   * settled settles with no call.
+   */
+  claimHome(scope: string, sequence: number, clock: () => number, leaseMs: number, backoffMs: number): Promise<HomeClaim> {
+    const key = storedKey(scope), row = homeRowKey(sequence);
+    return this.transaction(client => this.decideIn<HomeClaim>(client, key, undefined, async state => {
+      const now = clock(), op = state.team.homeOperations.find(o => o.sequence === sequence);
+      if (!op || op.status !== 'pending') {
+        await client.query(`UPDATE outbox SET settled_at = $3 WHERE scope = $1 AND key = $2 AND kind = 'home' AND settled_at IS NULL`, [key, row, now]);
+        return { value: { kind: 'none' }, outbox: [] };
+      }
+      const busy = (await client.query<{ busy: boolean }>(`SELECT EXISTS (SELECT 1 FROM intent WHERE scope = $1 AND conclusion IS NULL
+        AND input->'payload'->'agentRef'->>'agentId' = $2) AS busy`, [key, op.botId])).rows[0]!.busy;
+      if (!homeHead(state.team, sequence, botId => botId === op.botId && busy)) {
+        await client.query('UPDATE outbox SET next_at = GREATEST(next_at, $3) WHERE scope = $1 AND key = $2 AND settled_at IS NULL', [key, row, now + backoffMs]);
+        return { value: { kind: 'none' }, outbox: [] };
+      }
+      const leased = await client.query(`UPDATE outbox SET next_at = $3 + $4
+        WHERE scope = $1 AND key = $2 AND kind = 'home' AND settled_at IS NULL AND next_at <= $3`, [key, row, now, leaseMs]);
+      if (!leased.rowCount) return { value: { kind: 'none' }, outbox: [] };
+      return { value: { kind: 'flush', op: structuredClone(op), retries: op.retries.length, lease: now + leaseMs }, outbox: [] };
+    }), false);
+  }
+
+  /**
+   * Settles one Agent home flush step (#793 S13) with the K8 rule, in one transaction under the scope lock: a terminal runs
+   * `applyHomeTerminal` (its projection reaches the outbox), a retry runs `planHomeRetry` and returns the request to enqueue,
+   * an error runs `failHomeFlush`. It applies only while the operation is pending with `retries` retries; otherwise it writes
+   * nothing and returns `undefined`. It returns the retry count after the step, the fence of the next step. The home index
+   * writes the row's `next_at` or `settled_at` in the same transaction. A retry that plans an enqueue then puts `next_at`
+   * back to the claim's `lease`: the enqueue runs after this transaction, and no other sender may claim the row before
+   * `homeEnqueued` publishes the new `retryAt`.
+   */
+  settleHome(scope: string, sequence: number, retries: number, step: HomeStep, clock: () => number, lease: number):
+    Promise<{ retries: number; enqueue?: HomeOperation['request'] } | undefined> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      const settled = await this.settleHomeIn(client, key, sequence, retries, step, clock);
+      if (settled?.enqueue) await setHomeDue(client, key, homeRowKey(sequence), lease);
+      return settled;
+    }, false);
+  }
+  private settleHomeIn(client: PoolClient, key: string, sequence: number, retries: number, step: HomeStep, clock: () => number) {
+    return this.decideIn(client, key, undefined, async (state, publish) => {
+      const now = clock(), op = state.team.homeOperations.find(o => o.sequence === sequence);
+      if (!op || op.status !== 'pending' || op.retries.length !== retries) return { value: undefined, outbox: [] };
+      const published = new Set<string>();
+      let enqueue: HomeOperation['request'] | undefined;
+      if ('terminal' in step) applyHomeTerminal(state, op, step.terminal, (id, body) => { publish(id, body); published.add(id); });
+      else if ('retry' in step) enqueue = structuredClone(planHomeRetry(op, now));
+      else failHomeFlush(op, step.error);
+      return { value: { retries: op.retries.length, ...enqueue ? { enqueue } : {} }, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now };
+    });
+  }
+
+  /**
+   * K8 `homeEnqueued` after the enqueue of the operation's latest request (#793 S13), fenced like `settleHome`. It ends the
+   * flush's lease: the row is due at the operation's `retryAt`. Returns false when the operation moved on.
+   */
+  homeEnqueued(scope: string, sequence: number, retries: number, clock: () => number): Promise<boolean> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      const retryAt = await this.decideIn(client, key, undefined, async state => {
+        const now = clock(), op = state.team.homeOperations.find(o => o.sequence === sequence);
+        if (!op || op.status !== 'pending' || op.retries.length !== retries) return { value: undefined, outbox: [] };
+        homeEnqueued(op, now);
+        return { value: op.retryAt!, outbox: [], now };
+      });
+      if (retryAt === undefined) return false;
+      await setHomeDue(client, key, homeRowKey(sequence), retryAt);
+      return true;
+    }, false);
+  }
+
+  /**
    * One K8 retention call on `scope` (#793 D2g, #798), in one transaction under the scope lock: the acknowledged roots move
    * into `archived_row`, their ids are retired in `retired_identity`, and the moved command records answer replays until
    * they expire. A refusal or a throw writes nothing. A scope with no row has no rows to retain, so the rule runs on the
@@ -787,7 +877,7 @@ export class HostedCollaborationStore {
    * `SendFailure`) to `waitMs` after the clock, read under the scope lock. It never moves `next_at` earlier, so it cannot
    * shorten the lease of a newer claim.
    */
-  deferOutbox(scope: string, id: string | readonly string[], clock: () => number, waitMs: number): Promise<void> {
+  deferOutbox(scope: string, id: string | readonly (string | number)[], clock: () => number, waitMs: number): Promise<void> {
     const key = storedKey(scope);
     return this.transaction(async client => {
       await lockScope(client, key);
@@ -847,6 +937,7 @@ export class HostedCollaborationStore {
     if (indexed) {
       await this.indexDeliveries(client, key, before, after, now);
       await this.indexCards(client, key, before, after, now);
+      await this.indexHomes(client, key, before, after, now);
     }
     await this.writeOutbox(client, key, outbox, published);
     // The scope's due time is a projection of the state that this transaction commits (#793 S4).
@@ -979,6 +1070,36 @@ export class HostedCollaborationStore {
   }
 
   /**
+   * The Agent home index of the outbox (#793 S13), from the home operations that this transaction changed, beside the
+   * delivery index: a new pending operation gets a `home` row due at its `retryAt` (0 when unset); a pending operation whose
+   * `retryAt` changed moves its row's `next_at` there; an operation that is `applied` or `failed` settles its row. The
+   * operation is the authority and the fence.
+   */
+  private async indexHomes(client: PoolClient, scopeKey: string, before: Split, after: Split, now: number | undefined): Promise<void> {
+    const group = entryGroup('home_operation', '');
+    const parse = (split: Split) => new Map((split.entries.get(group)?.bodies ?? []).map(body => {
+      const op = JSON.parse(body) as HomeOperation;
+      return [op.sequence, op] as const;
+    }));
+    const old = parse(before);
+    for (const [sequence, op] of parse(after)) {
+      const was = old.get(sequence);
+      if (was && canonical(was as unknown as Json) === canonical(op as unknown as Json)) continue;
+      const row = homeRowKey(sequence);
+      if (op.status !== 'pending') {
+        if (was?.status !== 'pending') continue;
+        if (now === undefined) throw new Error('A settled home operation needs the clock of its writer');
+        await client.query(`UPDATE outbox SET settled_at = $3 WHERE scope = $1 AND key = $2 AND kind = 'home' AND settled_at IS NULL`, [scopeKey, row, now]);
+      } else if (!was) {
+        await client.query(`INSERT INTO outbox (scope, key, ordinal, kind, next_at) SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'home', $3
+          FROM outbox WHERE scope = $1`, [scopeKey, row, op.retryAt ?? 0]);
+      } else if (was.retryAt !== op.retryAt) {
+        await setHomeDue(client, scopeKey, row, op.retryAt ?? 0);
+      }
+    }
+  }
+
+  /**
    * Saves each outbox intent of the commit. An existing projection with the same id must hold the same value;
    * otherwise the commit throws and rolls back, as the K4 projection does in L.
    */
@@ -1006,6 +1127,11 @@ export class HostedCollaborationStore {
   private transaction<T>(work: (client: PoolClient) => Promise<T>, readOnly: boolean): Promise<T> {
     return inSchema(this.pool, this.schema, work, readOnly);
   }
+}
+
+/** Moves the `next_at` of an unsettled home row: the home index, a flush that keeps its lease, and the end of that lease. */
+async function setHomeDue(client: PoolClient, scopeKey: string, row: string, at: number): Promise<void> {
+  await client.query(`UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2 AND kind = 'home' AND settled_at IS NULL`, [scopeKey, row, at]);
 }
 
 /** Runs `work` in one transaction with `search_path` set to `schema`. A throw rolls back every row. */

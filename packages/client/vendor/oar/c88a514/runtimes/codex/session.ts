@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR c88a514 for injected processes, native-first recording, bounded request refusal, caller-selected sandbox and session credential redaction without sealSession (Apache-2.0).
+// BYOK change: Modified from OAR c88a514 for injected processes, native-first recording, bounded request refusal, caller-selected sandbox, caller-owned open steps and session credential redaction without sealSession (Apache-2.0).
 /* oxlint-disable import/max-dependencies -- The adapter composes protocol, input and process-lifetime mechanisms. */
 import type { AvailableInstallation } from "../../contracts/installation.js"; // BYOK change: direct type-only contract import.
 import { randomUUID } from "node:crypto";
@@ -67,6 +67,9 @@ export async function codexSession(
     readonly onServerRequest?: (id: string | number, method: string, params: JsonRecord, reply: {
       respond(value: JsonRecord): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;
     }) => void;
+    // BYOK change: caller-owned steps on this app-server client, before the thread open request and after its read-back.
+    readonly beforeOpen?: (request: CodexOpenStepRequest, params: JsonRecord) => Promise<JsonRecord>;
+    readonly afterOpen?: (request: CodexOpenStepRequest, threadId: string) => Promise<void>;
   } = {},
 ): Promise<CodexAdapterSession> {
   // BYOK change: Upstream withSessionCredentials without sealSession. One redactor per open keeps
@@ -77,6 +80,8 @@ export async function codexSession(
 }
 
 type CodexSessionArgs = Parameters<typeof codexSession>;
+// BYOK change: one request on the session's own client, for the caller-owned open steps.
+export type CodexOpenStepRequest = (method: string, params: JsonRecord) => Promise<JsonRecord>;
 
 async function openCodexSession(
   spawnLineProcess: SpawnLineProcess,
@@ -119,6 +124,13 @@ async function openCodexSession(
   }
   client.notify("initialized", {});
   const filteredOpenParams = await prepareCodexToolDenials(client, options, openParams);
+  // BYOK change: a caller-owned open step that throws releases the process, as a refused open does.
+  const openStep = async <T>(step: () => Promise<T>): Promise<T> => {
+    try { return await step(); } catch (error) { client.kill(); await client.exited; throw error; }
+  };
+  const stepRequest: CodexOpenStepRequest = (method, params) => client.request(method, params);
+  const { beforeOpen, afterOpen } = hooks;
+  const requestParams = beforeOpen === undefined ? filteredOpenParams : await openStep(() => beforeOpen(stepRequest, filteredOpenParams));
   // The open event is marked at the reply's wire position AS the reply line
   // is read (onSettled → client.mark), not after this await: a frame codex
   // wrote in the same chunk right after the reply (thread/started) would
@@ -131,7 +143,7 @@ async function openCodexSession(
     }
   };
   const started = await openThread(client, openMethod, async () => {
-    const reply = await client.request(openMethod, filteredOpenParams, markOpen);
+    const reply = await client.request(openMethod, requestParams, markOpen);
     return reply;
   }, options.serviceTier, options.resume);
   const threadId = asRecord(started.thread)?.id;
@@ -153,6 +165,7 @@ async function openCodexSession(
     await client.exited;
     throw new Error(readback.refusal);
   }
+  if (afterOpen !== undefined) await openStep(() => afterOpen(stepRequest, threadId));
 
   // BYOK change: The record consumer observes from seq 0: it registers before any record is appended.
   // Observer errors are swallowed by the kernel, so the consumer fails the session itself.

@@ -419,6 +419,23 @@ export interface CodexAdapterOptions {
     operationTimeoutMs?: number;
     /** Opt-in local Host UI; independent of the remote boolean approval lane. */
     nativeInteractions?: NativeInteractionHostOptions;
+    /**
+     * For an Agent task (`task.offer_for_agent`), `excluded` gives the Codex
+     * thread only the task's and the SDK's MCP servers. Before the thread
+     * opens, the adapter reads Codex's effective configuration for the task cwd
+     * (`config/read`), sets `enabled = false` on every other `mcp_servers`
+     * entry, and turns off the `apps` (connectors) and `plugins` features for
+     * the thread. The thread then has no plugins at all, not only no plugin
+     * MCP servers. After the open it reads the thread's MCP server status
+     * back, and the start fails if any other server is not disabled, or if a
+     * user server has the name of a task or SDK server. The user's
+     * `AGENTS.md`, login, model, sandbox setting and other configuration still
+     * apply. It covers new and resumed threads. On a resume, Codex may start a
+     * queued turn before the read-back: that turn already runs with the
+     * overrides, and a failed read-back stops the app server. Other tasks are
+     * unchanged. Default `inherit`.
+     */
+    agentUserMcpServers?: 'inherit' | 'excluded';
 }
 /** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export declare class CodexAdapter implements RuntimeAdapter {
@@ -475,6 +492,22 @@ export interface GrokAdapterOptions {
      * them. Default `inherit`: the user's Grok settings apply.
      */
     compatInstructions?: 'inherit' | 'disabled';
+    /**
+     * For an Agent task (`task.offer_for_agent`), `excluded` sets
+     * `GROK_CLAUDE_MCPS_ENABLED`, `GROK_CURSOR_MCPS_ENABLED` and
+     * `GROK_MANAGED_MCPS_ENABLED` to `0` on the Grok agent process, then runs
+     * `grok inspect --json` in the task cwd with the same environment. The
+     * start fails before the agent starts if inspect lists an MCP server that
+     * is not disabled, or an enabled plugin that provides MCP servers, or if
+     * inspect fails. Grok has no per-process switch for the servers of
+     * `~/.grok/config.toml`, project `.grok/config.toml` and `.mcp.json`, or
+     * plugins, so a user who has one enabled cannot run Agent tasks with this
+     * option. Two sources are not detected: a server turned on while the
+     * session runs (a config hot-reload, `/mcps` or `grok mcp enable`), and
+     * managed MCP that an administrator pins on. Other tasks are unchanged.
+     * Default `inherit`.
+     */
+    agentUserMcpServers?: 'inherit' | 'excluded';
     resolveBin?: () => ResolvedBin;
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
@@ -10823,6 +10856,8 @@ export type { ExecutionScratch } from './daemon/retention/scratch';
 export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './daemon/agent-memory-helper-release';
 /** The reserved name of the SDK memory MCP server in an Agent task's MCP servers. */
 export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
+/** Whether `name` is the name of an MCP server the SDK owns in a task's MCP servers. */
+export { isReservedMcpServerName } from './sdk-reserved-mcp';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
 export type { AgentMemoryExport, AgentMemoryExportOptions } from './daemon/agent-memory-export';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
