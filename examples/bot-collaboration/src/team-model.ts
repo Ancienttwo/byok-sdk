@@ -13,6 +13,8 @@ export interface HomeOperation {
   sequence: number; botId: string; request: AgentHomeProjectionRequest;
   retries: AgentHomeProjectionRequest[]; retryAt?: number;
   status: 'pending' | 'applied' | 'failed'; error?: string;
+  /** Set in the transaction before the first write is sent (#957), so a crash or a failed send still counts it as sent. */
+  sent?: true;
 }
 export interface TeamState {
   bots: Record<string, BotProfile>; rooms: Record<string, Room>; rounds: Record<string, Round>;

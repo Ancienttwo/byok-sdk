@@ -38,13 +38,17 @@ export class DeviceModeError extends Error {
   }
 }
 
+/** A device id is the Host's string, so the table is read and written through own properties only, never `__proto__`. */
+function recordOf(state: CollaborationState, deviceId: string): DeviceTopology | undefined {
+  return state.topology && Object.hasOwn(state.topology, deviceId) ? state.topology[deviceId] : undefined;
+}
 export function deviceTopology(state: CollaborationState, deviceId: string): DeviceTopology {
-  const row = state.topology?.[deviceId];
+  const row = recordOf(state, deviceId);
   return row ? { ...row } : { mode: 'L', revision: 0 };
 }
 /** The sync refusal of the device (#956 `deviceRefusal`), or undefined when L may create work on it. */
 export function deviceRefusal(state: CollaborationState, deviceId: string): Extract<DeviceRefusal, 'mode' | 'switching'> | undefined {
-  const row = state.topology?.[deviceId];
+  const row = recordOf(state, deviceId);
   return row?.mode === 'H' ? 'mode' : row?.switching ? 'switching' : undefined;
 }
 export function botDeviceRefusal(state: CollaborationState, botId: string): ReturnType<typeof deviceRefusal> {
@@ -53,7 +57,7 @@ export function botDeviceRefusal(state: CollaborationState, botId: string): Retu
 }
 /** Throws the typed refusal when L must not create work on the device. */
 export function admitDevice(state: CollaborationState, deviceId: string): void {
-  const row = state.topology?.[deviceId];
+  const row = recordOf(state, deviceId);
   if (row?.mode === 'H') throw new DeviceModeError(deviceId, row.mode, row.revision);
   if (row?.switching) throw new DeviceSwitchingError(deviceId, row.switching, row.revision);
 }
@@ -73,8 +77,8 @@ export function switchWork(s: LedgerState, deviceId: string): SwitchWork {
     intents: Object.values(s.intents).filter(intent => !intent.conclusion && intent.execution.deviceId === deviceId).map(intent => intent.key),
     turns: Object.values(state.turns).filter(turn => !turn.conclusion && !s.intents[hash(turn.id)] && onDevice(turn.botId)).map(turn => turn.id),
     batches: Object.values(state.inputBatches ?? {}).filter(batch => batch.state === 'open' && onDevice(batch.botId)).map(batch => batch.id),
-    // `retryAt` is set once the first write is sent. A write that was never sent moves with the exported state.
-    homeOperations: state.team.homeOperations.filter(op => op.status === 'pending' && op.retryAt !== undefined && op.request.deviceId === deviceId)
+    // A write that was never sent moves with the exported state.
+    homeOperations: state.team.homeOperations.filter(op => op.status === 'pending' && op.sent && op.request.deviceId === deviceId)
       .map(op => op.sequence),
   };
 }
@@ -96,7 +100,7 @@ export function switchStep(s: LedgerState, deviceId: string, expectedRevision: n
   if (step === 'commit' && !switchDrained(switchWork(s, deviceId))) throw new Error(`Device ${deviceId} still has open work`);
   const next: DeviceTopology = step === 'freeze' ? { mode: 'L', revision: row.revision + 1, switching: 'H' }
     : { mode: step === 'commit' ? 'H' : 'L', revision: row.revision + 1 };
-  (state.topology ??= {})[deviceId] = next;
+  Object.defineProperty(state.topology ??= {}, deviceId, { value: next, enumerable: true, writable: true, configurable: true });
   return { ...next };
 }
 

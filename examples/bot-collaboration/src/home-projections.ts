@@ -29,7 +29,12 @@ export async function flushHomes(server: HomeServer, ledger: HostLedger, now: ()
       }
       if (!terminal) {
         // #957: a device frozen for a switch, or owned by H, gets no new home write. A sent write is still read back.
-        const request = ledger.transaction(s => deviceRefusal(stateOf(s.application), op.request.deviceId) ? undefined : planHomeRetry(operation(s, op.sequence), now()));
+        const request = ledger.transaction(s => {
+          if (deviceRefusal(stateOf(s.application), op.request.deviceId)) return undefined;
+          const row = operation(s, op.sequence);
+          row.sent = true;
+          return planHomeRetry(row, now());
+        });
         if (!request) continue;
         await server.enqueueAgentHomeProjection(request);
         ledger.transaction(s => homeEnqueued(operation(s, op.sequence), now()));

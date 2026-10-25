@@ -907,7 +907,9 @@ raises the revision:
    - open K4 intents whose execution names the device;
    - Turns of its Bots with no conclusion and no intent;
    - open input batches;
-   - Agent home writes that were sent and have no terminal readback.
+   - Agent home writes that were sent and have no terminal readback. A write
+     is marked sent in the transaction before the send, so a crash or a
+     failed send still counts it.
 
    With `cancel`, it cancels the intents, Turns and batches first, then runs a
    pass. A tried intent concludes only from its SDK terminal, so it stays

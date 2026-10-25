@@ -58,6 +58,10 @@ it('freezes one device on the expected revision, reads the record back, and refu
   expect(stored()).toBe(before);
   // The other device keeps its default record.
   expect(bot!.topology(OTHER)).toEqual({ mode: 'L', revision: 0 });
+  // A device id is stored as an own key, whatever its text.
+  expect(await bot!.freezeForSwitch('__proto__', 0)).toEqual({ mode: 'L', revision: 1, switching: 'H' });
+  expect(bot!.topology('constructor')).toEqual({ mode: 'L', revision: 0 });
+  expect(Object.keys(stateOf(fixture!.ledger.snapshot().application).topology!)).toEqual([device(), '__proto__']);
 });
 
 it('refuses each entry that can create execution on the frozen device with device_switching, and writes nothing', async () => {
@@ -67,6 +71,8 @@ it('refuses each entry that can create execution on the frozen device with devic
   const refusal = { code: 'device_switching', deviceId: device(), target: 'H', revision: 1 };
   await expect(bot!.input('k1', 'hello')).rejects.toMatchObject(refusal);
   await expect(bot!.input('k1', 'hello')).rejects.toBeInstanceOf(DeviceSwitchingError);
+  await expect(bot!.receive({ channel: 'fake', platformMessageId: 'm1', conversation: { kind: 'direct', id: 'main' },
+    sender: { id: 'owner', kind: 'human' }, text: 'hello', mentions: [] })).rejects.toMatchObject(refusal);
   // A room input can seat any Bot member, so one member on the frozen device refuses it.
   await expect(bot!.roomInput('r1', 'room', 'hello')).rejects.toMatchObject(refusal);
   await expect(bot!.enqueueHostIntent(hostInput('host-1', device()), 'research')).rejects.toMatchObject(refusal);
@@ -122,6 +128,20 @@ it('sends no Agent home write for a Bot on the frozen device, and sends it after
   // A write that was never sent is not open work: it moves with the exported state.
   expect((await bot!.drainForSwitch(device())).homeOperations).toEqual([]);
   await bot!.abortSwitch(device(), 1);
+  expect(enqueue).toHaveBeenCalledTimes(1);
+});
+
+it('counts a home write whose send failed as sent, so the switch waits for its readback', async () => {
+  await setup();
+  // The server may have taken the write before the send failed.
+  const enqueue = vi.spyOn(fixture!.server, 'enqueueAgentHomeProjection').mockRejectedValueOnce(new Error('connection reset'));
+  fixture!.ledger.transaction(s => updateBot(stateOf(s.application), { botId: 'main', persona: 'New persona' }, { default: template(device()) }));
+  await bot!.drain().catch(() => {});
+  expect(enqueue).toHaveBeenCalledTimes(1);
+  const [op] = bot!.snapshot().team.homeOperations.filter(row => row.status === 'pending');
+  await bot!.freezeForSwitch(device(), 0);
+  expect((await bot!.drainForSwitch(device(), { cancel: true })).homeOperations).toEqual([op!.sequence]);
+  await expect(bot!.commitSwitch(device(), 1)).rejects.toThrow('still has open work');
   expect(enqueue).toHaveBeenCalledTimes(1);
 });
 
