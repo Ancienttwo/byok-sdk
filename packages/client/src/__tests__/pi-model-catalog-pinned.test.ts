@@ -94,7 +94,7 @@ describe('keys Pi model catalog against the pinned pi-ai', () => {
       const fields = ['id', 'name', 'input', 'reasoning', 'contextWindow', 'maxTokens', 'thinkingLevelMap', 'compat', 'inputLimits'];
       const pick = (source: Record<string, unknown>) => Object.fromEntries(fields.map((field) => [field, source[field] ?? null]));
       // The projected name is the profile display_name, which the profile schema trims
-      // (pi-ai 1.4.0 openrouter google/gemma-4-26b-a4b carries a trailing space).
+      // (pi-ai 1.4.0 openrouter google/gemma-4-26b-a4b-it carries a trailing space).
       expect({ provider, ...pick(entry) }).toEqual({ provider, ...pick({ compat: {}, ...model, name: String(model.name).trim() }) });
     }
     // Cerebras, Z.AI GLM, MiniMax and the other entries; a pi-ai upgrade that empties this set is a regression.

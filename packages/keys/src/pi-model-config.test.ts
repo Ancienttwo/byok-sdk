@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { InMemoryTruthStore, tenantId } from '@byok-sdk/core';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
-import { ModelProviderProfileSchema, parseModelProviderProfile, exactProviderProfileBinding, assertExactProviderProfileBinding } from './provider-profile';
+import { parseModelProviderProfile, exactProviderProfileBinding, assertExactProviderProfileBinding } from './provider-profile';
 import { assertPiLaunchArgs, buildPiProviderArgs, buildPiProviderProjection } from './pi-provider-projection';
 import { assertPiPreparedProviderProfile } from './pi-provider-launcher-core';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
@@ -9,6 +9,7 @@ import { InMemoryProviderProfileStore } from './profile-store';
 import { TruthStoreProviderProfileStore } from './truth-profile-store';
 import { ProviderRegistry } from './registry';
 import { InMemorySecretStore } from './secret-store';
+import { ModelProviderProfileSchema } from './provider-profile';
 
 const profileInput = {
   adapter: 'openai_compatible', auth_mode: 'none', base_url: 'http://127.0.0.1:9191/v1',
