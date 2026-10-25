@@ -404,8 +404,8 @@ scope lock, on the expected mode revision, and returns the binding row read back
   owner: the open intent rows that run on the device, and for its Bots the Turns that are not concluded, the open input
   batches and the pending Agent home operations. With `cancel`, it first sends K8 `cancel_turn` for each Turn and batch,
   and the K4 cancel for an intent with no Turn, and returns each cancel that threw. A tried intent concludes only from SDK
-  evidence, so it stays open until the reconciliation concludes it. The drain waits for nothing; the caller calls it
-  again. For a switch toward H it refuses with `not_owner`: L drains its own work.
+  evidence, so it stays open until the reconciliation concludes it. The drain waits for nothing: the caller syncs the
+  scope, which concludes the cancelled Turns, and calls it again. For a switch toward H it refuses with `not_owner`: L drains its own work.
 - `commitSwitch(scope, deviceId, expectedRevision)` makes the target the owner mode and raises the revision. Away from H,
   it refuses with `open_work` while the drain finds any open work, whatever its age: §4.1 has no timeout path.
 - `abortSwitch(scope, deviceId, expectedRevision)` ends the switch on the old mode and raises the revision.
@@ -420,6 +420,7 @@ During the freeze:
   target and the frozen revision), as L's error with the same code: the command entry, the freeze of an intent (a Host
   intent too), the submit claim and the read right before the SDK call. The freeze raises the revision, so a submit
   claimed before it is not made;
+- a Bot routine fire of the device throws it too and writes nothing; the slot stays due and fires after an abort;
 - the inbound channel entry refuses input that adds work for a Bot on the device with the same error. Input for an
   unbound or revoked device is still taken and held (#956);
 - the sync holds a Turn of the device's Bots with the `switching` reason. An abort writes the due time 0, so the next
@@ -799,7 +800,9 @@ three and runs these suites.
 - The topology switch tests (`switch.test.ts`, #957) cover each step's revision checks and refusals, a switch to H from a
   device with no row, a revoke during a switch, the typed refusal of each entry during the freeze and after a commit to L,
   a Turn held during the freeze and frozen after an abort, a submit claimed before the freeze, the drain and cancel with a
-  tried intent that holds the commit until it concludes, and home flushes during the switch and after a commit to L.
+  tried intent that holds the commit until it concludes, the cancel of a Host intent with no Turn, a routine fire during
+  the freeze and after an abort, a new store that reads the freeze, and home flushes during the switch and after a
+  commit to L.
 - The K8 retention vectors (`retentionVectors`) run on the store, with H tests for message replays after retention.
 - The compaction tests cover a settled intent and its tombstone, a repeated call, a refused freeze of a retired Turn, a
   K8 veto, an unsettled row, an unknown Turn id, a routine intent, and the sync's `result_retired`.

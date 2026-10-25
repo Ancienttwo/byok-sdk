@@ -995,7 +995,8 @@ export class HostedCollaborationStore {
    * routine, delegation chain and seat Turns), the open input batches and the pending Agent home operations. A room seat
    * that has no Turn yet is round state, not execution: it moves with the state export. A cancel is the K8 `cancel_turn`
    * command for a Turn or a batch, and the K4 cancel for an intent with no Turn. A tried intent concludes only from SDK evidence, so it stays open until the reconciler concludes
-   * it. A home operation is never cancelled: the sender settles it. The drain waits for nothing; the caller calls it again.
+   * it. A home operation is never cancelled: the sender settles it. The drain waits for nothing: the caller syncs the scope,
+   * which concludes the cancelled Turns, and calls it again.
    * Returns the work that is still open, and each cancel that threw.
    */
   async drainDevice(scope: string, deviceId: string, expectedRevision: number, options: { cancel?: boolean }, clock: () => number):

@@ -1,20 +1,27 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
+import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
+import { hash, taskId, type Json, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { routineCalendar } from '@byok-sdk/example-bot-collaboration/routines';
 import type { InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { DEVICE_NOT_BOUND } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
-import { HostedSubmitter } from './intents';
 import { storedKey } from './layout';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedOutboxSender } from './sender';
-import { homeRowKey, type HostedCollaborationStore, type InboundIdentity } from './store';
+import { TEST_HOST } from './memory-subject.test-support';
+import { HostedCollaborationStore, homeRowKey, inSchema, lockScope, type InboundIdentity } from './store';
+import { freezeIntent, HostedSubmitter } from './intents';
+import type { TaskEvidence } from './reconcile';
 
 // #957: the owner switch of a device (§4.1) on H: freeze, drain, commit or abort, each on the expected mode revision.
-let opened: Awaited<ReturnType<typeof openStore>> | undefined;
-const store = (): HostedCollaborationStore => opened!.store;
+let opened: Awaited<ReturnType<typeof openStore>> | undefined, hosted: HostedCollaborationStore | undefined;
+/** A store over the test schema with one Host intent handler, `job`. */
+const open = () => new HostedCollaborationStore(opened!.pool, opened!.store.schema, { host: TEST_HOST, hostIntents: { job: () => {} } });
+const store = (): HostedCollaborationStore => hosted!;
 const table = (name: string) => `"${store().schema}".${name}`;
 const SYNC = { ...SYNC_OPTIONS, history: undefined };
 const IDENTITY: InboundIdentity = { owner: 'owner', self: {} };
@@ -59,7 +66,7 @@ const submitter = (port: FrozenSubmitPort) =>
 
 describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#957)', () => {
   // One schema for each test, because the submit and sender scans cover the whole schema.
-  beforeEach(async () => { opened = await openStore(); });
+  beforeEach(async () => { opened = await openStore(); hosted = open(); });
   afterEach(async () => { await opened?.close(); });
 
   it('steps through freeze, commit and abort on the expected revision, and refuses every other step with nothing written', async () => {
@@ -118,7 +125,10 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
       sender: { id: 'owner', kind: 'human' }, text: 'Do it', mentions: [] };
     await expect(store().receive(scope, owner, IDENTITY, clock)).rejects.toEqual(switching('L', 2));
     await expect(store().enqueueHostIntent(scope, { key: 'h1', source: 'user', execution: template('device'), waitUntil: VECTOR_NOW + 60_000 },
-      'job', clock)).rejects.toThrow();
+      'job', clock)).rejects.toEqual(switching('L', 2));
+    // A restarted Host reads the freeze from the row: a new store refuses the same input.
+    await expect(open().commit(scope, { scope, commandId: randomUUID(), command: input }, clock, { requireBinding: true }))
+      .rejects.toEqual(switching('L', 2));
     expect(await store().dump(scope)).toBe(frozen);
     // After the commit to L, the same input is refused for good with the mode reason.
     await store().commitSwitch(scope, 'device', 2);
@@ -182,6 +192,41 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     await store().sync(scope, SYNC);
     expect((await store().drainDevice(scope, 'device', 2, {}, clock)).open).toEqual({ intents: [], turns: [], batches: [], homes: [] });
     expect(await store().commitSwitch(scope, 'device', 2)).toEqual({ mode: 'L', revision: 3, revoked: false });
+  });
+
+  it('cancels a Host intent with no Turn in the drain, and then commits', async () => {
+    const scope = await bound();
+    await store().enqueueHostIntent(scope, { key: 'h1', source: 'user', execution: template('device'), waitUntil: VECTOR_NOW + 60_000 }, 'job', clock);
+    await store().beginSwitch(scope, 'device', 'L', 1);
+    expect((await store().drainDevice(scope, 'device', 2, {}, clock)).open).toEqual({ intents: ['h1'], turns: [], batches: [], homes: [] });
+    expect(await store().drainDevice(scope, 'device', 2, { cancel: true }, clock))
+      .toEqual({ open: { intents: [], turns: [], batches: [], homes: [] }, failed: [] });
+    expect(await intents(scope)).toEqual([{ key: 'h1', tries: 0, cancel_reason: 'cancelled', conclusion: 'cancelled' }]);
+    expect(await store().commitSwitch(scope, 'device', 2)).toEqual({ mode: 'L', revision: 3, revoked: false });
+  });
+
+  it('does not fire a Bot routine of the frozen device: nothing is written, and the slot fires after an abort', async () => {
+    const scope = `tenant:${randomUUID()}`, now = Date.UTC(2026, 0, 1), schedule = { minute: 0, hour: 9, tz: 'UTC' };
+    await store().seed(scope, state => seedCollaboration(state));
+    await store().bindDevice(scope, 'device');
+    // The seed's processing owner Turn `t1` creates one Bot routine through its outcome.
+    await inSchema(opened!.pool, store().schema, async client => {
+      await lockScope(client, storedKey(scope));
+      await freezeIntent(client, scope, { key: 't1', source: 'user', execution: template('device'), waitUntil: now + 60_000 });
+    });
+    const document: Json = { create_routine: [{ localId: 'new_routine_1', schedule, prompt: 'Daily report' }] };
+    const evidence = { terminal: { envelope: { task_id: taskId('t1', 0), type: 'task.complete', payload: { document } } } as unknown as DeviceTerminal,
+      attempt: { taskId: taskId('t1', 0) } as unknown as TaskAttempt } satisfies TaskEvidence;
+    expect(await store().finish(scope, 't1', evidence, () => now)).toBe('succeeded');
+    const id = hash([taskId('t1', 0), 'create_routine', 0]);
+    const first = routineCalendar({ rule: schedule, timeZone: 'UTC' } as unknown as RoutineDefinition, now - 1)!;
+    await store().beginSwitch(scope, 'device', 'L', 1);
+    const frozen = await store().dump(scope);
+    await expect(store().fire(scope, id, first)).rejects.toEqual(switching('L', 2));
+    expect(await store().dump(scope)).toBe(frozen);
+    expect((await opened!.pool.query(`SELECT 1 FROM ${table('occurrence')} WHERE scope = $1`, [storedKey(scope)])).rows).toEqual([]);
+    await store().abortSwitch(scope, 'device', 2);
+    expect(await store().fire(scope, id, first)).toBe('fired');
   });
 
   it('flushes a pending home operation while the switch is open, and backs it off after a commit to L', async () => {
