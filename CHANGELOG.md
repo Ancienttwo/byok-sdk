@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example observes devices
+  (#793 S11), as L's `refreshDevices`. `HostedDeviceObserver.observe(scope)`
+  reads the SDK readiness of the scope's tenant (1 s timeout) when a
+  delegation can change, then `store.observeDevices` runs the K8
+  `observeDevices` rule under the scope lock: a delegation whose delivered,
+  unclaimed offer is on a disconnected device shows `waiting_device`, and
+  `queued` again once it connects. The deployment's composed `sync` runs it
+  before `store.sync`. K8 re-exports `observeDevices` from `rules/commands`,
+  and its shared `deviceVectors` run on L and H.
 - **Feature (examples)** — the hosted collaboration example has its
   authenticated product command entry (#793 S10). `HostedCommandEntry` is L's
   owner API for requests: it takes the product's session check
@@ -106,6 +115,20 @@
   `doctor --fix` no longer deletes those directories; any left on a machine
   have to be removed by hand.
 
+- **Added (client)** — `ClaudeAdapterOptions.agentSessionPersistence`
+  (#936). With `'disabled'`, an Agent task (`task.offer_for_agent`) starts
+  Claude with `--no-session-persistence`, so Claude does not save the session
+  transcript under `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/`, outside the
+  Agent home. Such a session cannot be resumed: an Agent task that carries a
+  `sessionRef` (a resume, an Agent handoff or a memory-reader resume) fails
+  before Claude starts, as a non-retryable `authority` failure with the
+  reason `claude Agent session persistence is disabled, so the task cannot
+  resume a session`. Follow-ups in the same task still work. Other tasks and
+  the default, `'enabled'`, are unchanged. Auto memory, which also writes
+  under `projects/`, stays on unless `agentUserContext: 'excluded'` is set
+  too. `docs/adapter-capabilities.md` lists where each adapter keeps Agent
+  task session records.
+
 - **Breaking (client)** — every daemon journals its tasks (#924).
   `DaemonConfig.hostedJournal` and `HostedJournalConfig` are removed, and a
   config or overrides object that still has `hostedJournal` is refused with
@@ -124,27 +147,6 @@
   inbound offer above the journal record bound
   (`inbound_envelope_too_large`) and drops any other envelope above it (#826),
   and it admits result-document offers.
-
-## 0.30.1 — 2026-10-24 (published)
-
-0.30.1 is a PATCH release under a one-release exception to the pre-1.0
-policy. On 2026-10-24 the owner chose 0.30.x instead of 0.31.0 (issue #872),
-although it adds public API, gated wire additions and Postgres migration
-0028, and it has breaking changes. #857, #859 and #860 are breaking in
-cloud. #870 and #909 are breaking in client, and #909 also in cloud-do.
-#870 adds `message_draft_delta` items to `Session.events`. The pi-durable
-SQLite migration of #909 means that a migrated store cannot go back to Pi
-1.3.0. The examples changes of #882 and #884 are also breaking for a Host
-that copies the K8 example. The npm registry lists all nine public packages
-at 0.30.1. The registry publication times fall on 2026-10-24 (UTC). The
-registry read on 2026-10-24 at 19:19 UTC reports 0.30.1 as `latest` for all
-nine. The tag `v0.30.1` and its GitHub Release point to
-`142acbe2`. A 0.30.1 daemon paired as an E2EE member advertises
-`sealed-payload-v1` while its member is verified and the deployment declares
-`e2ee.member`. See the [release notes](docs/releases/v0.30.1.md) for scope,
-the release rule of `sealed-payload-v1`, the upgrade notes and the
-qualification limits that were recorded at preparation. All nine public
-manifests and their lock records move to 0.30.1.
 
 ## 0.30.1 — 2026-10-24 (published)
 

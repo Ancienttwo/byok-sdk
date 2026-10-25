@@ -179,6 +179,17 @@
 //                                          "wait for the process to exit" —
 //                                          the process staying alive is the
 //                                          whole point of this toggle.
+//   FAKE_CLAUDE_PERSIST_SESSIONS=1      -> stands in for Claude's session
+//                                          transcript: each turn appends its
+//                                          instruction to
+//                                          `$CLAUDE_CONFIG_DIR/projects/<cwd
+//                                          with every non-alphanumeric
+//                                          character as '-'>/<session>.jsonl`,
+//                                          unless argv has
+//                                          `--no-session-persistence`. It
+//                                          requires CLAUDE_CONFIG_DIR, so a
+//                                          test never writes the real
+//                                          `~/.claude`.
 
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -393,6 +404,7 @@ function runProbeOrTurnFlow() {
     '--mcp-config': true,
     '--strict-mcp-config': false,
     '--settings': true,
+    '--no-session-persistence': false,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -513,6 +525,16 @@ function runProbeOrTurnFlow() {
 
   async function runTurn(incomingText) {
     turn += 1;
+    if (process.env.FAKE_CLAUDE_PERSIST_SESSIONS === '1' && !argv.includes('--no-session-persistence')) {
+      const configDir = process.env.CLAUDE_CONFIG_DIR;
+      if (!configDir) {
+        process.stderr.write('FAKE_CLAUDE_PERSIST_SESSIONS requires CLAUDE_CONFIG_DIR\n');
+        process.exit(1);
+      }
+      const projectDir = path.join(configDir, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'));
+      mkdirSync(projectDir, { recursive: true });
+      appendFileSync(path.join(projectDir, `${reportedSessionId}.jsonl`), `${JSON.stringify({ type: 'user', text: incomingText })}\n`);
+    }
 
     send({
       type: 'system',
