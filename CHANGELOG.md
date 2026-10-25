@@ -341,6 +341,14 @@
   lines. Behavior, exports and the published `task-runner.d.ts` are unchanged.
   The `@byok-sdk/client` closure grows by 7845 B and `bin:byok-agent` by
   7869 B, for the delegating stubs and private-state access.
+- **Changed (client, internal)** — `buildDaemonWithAdapters`' construction
+  stages and nested functions now live in `daemon/create-daemon/` (#926). The
+  daemon's reassigned state is one `DaemonState` object, its functions take one
+  daemon scope, and a start runs in stages. `create-daemon.ts` is 982 lines and
+  no function is over 300 lines. Behavior, exports and the published
+  `create-daemon.d.ts` are unchanged. The `@byok-sdk/client` closure grows by
+  20609 B and `bin:byok-agent` by 20582 B, for the scope prologues, the bound
+  function wrappers and the stage hand-offs.
 
 ## 0.30.1 — 2026-10-24 (published)
 
