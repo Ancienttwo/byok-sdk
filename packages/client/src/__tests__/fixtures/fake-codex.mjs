@@ -1,5 +1,10 @@
 #!/usr/bin/env node
 // Qualified app-server JSON-RPC fixture. No exec parser or exec event compatibility lane.
+// FAKE_CODEX_USER_CONFIG: JSON of the user's effective config. `config/read`
+// answers it; `mcpServerStatus/list` reports its `mcp_servers` merged with the
+// thread's, a `codex_apps` server while it has `apps` and the thread did not
+// turn the feature off, and one server per enabled plugin likewise.
+// FAKE_CODEX_STATUS_EXTRA: JSON array of more status entries, a source config/read does not show.
 import { spawn } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -291,6 +296,20 @@ async function runTurn(id, input) {
   }
   complete(id);
 }
+const userConfig = JSON.parse(process.env.FAKE_CODEX_USER_CONFIG ?? '{}');
+let threadFeatures = {};
+function mcpStatus() {
+  const merged = { ...userConfig.mcp_servers };
+  for (const [name, server] of Object.entries(sessionMcpServers)) merged[name] = { ...merged[name], ...server };
+  const status = (name, on, pluginId = null) => ({ name, runtimeStatus: on ? 'connected' : 'disabled', pluginId, tools: {}, resources: [], resourceTemplates: [], authStatus: 'unsupported' });
+  return [
+    ...Object.entries(merged).map(([name, server]) => status(name, server.enabled !== false)),
+    ...(userConfig.apps !== undefined && threadFeatures.apps !== false ? [status('codex_apps', true)] : []),
+    ...Object.entries(userConfig.plugins ?? {}).filter(([, plugin]) => plugin.enabled !== false && threadFeatures.plugins !== false)
+      .map(([pluginId]) => status(`${pluginId.split('@')[0]}_srv`, true, pluginId)),
+    ...JSON.parse(process.env.FAKE_CODEX_STATUS_EXTRA ?? '[]'),
+  ];
+}
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   let frame;
   try {
@@ -306,12 +325,21 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     send({ id, result: { userAgent: 'fake-codex' } });
     return;
   }
+  if (method === 'config/read') {
+    send({ id, result: { config: userConfig, origins: {} } });
+    return;
+  }
+  if (method === 'mcpServerStatus/list') {
+    send({ id, result: { data: mcpStatus(), nextCursor: null } });
+    return;
+  }
   if (method === 'thread/start' || method === 'thread/resume') {
     if (process.env.FAKE_CODEX_HANG_BEFORE_THREAD === '1') return;
+    threadFeatures = params.config?.features ?? {};
     // Session MCP servers arrive in the open's config; codex merges them into
     // the user's own config field by field.
     for (const [name, server] of Object.entries(params.config?.mcp_servers ?? {}))
-      config[`mcp_servers.${name}.command`] = JSON.stringify(server.command);
+      if (server.command !== undefined) config[`mcp_servers.${name}.command`] = JSON.stringify(server.command);
     sessionMcpServers = { ...sessionMcpServers, ...(params.config?.mcp_servers ?? {}) };
     if (method === 'thread/resume' && params.threadId !== threadId) {
       send({
@@ -330,7 +358,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
           process.env.FAKE_CODEX_NO_THREAD_STARTED === '1'
             ? {}
             : { id: process.env.FAKE_CODEX_REPORTED_THREAD_ID ?? threadId },
-        model: params.model ?? 'fake-model',
+        model: params.model ?? userConfig.model ?? 'fake-model',
         reasoningEffort: null,
       },
     });
