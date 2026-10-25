@@ -251,6 +251,7 @@
         "@earendil-works/pi-durable": "1.4.0",
       },
       "devDependencies": {
+        "@byok-sdk/client": "workspace:*",
         "@byok-sdk/keys": "workspace:*",
         "@cloudflare/workers-types": "5.20260811.1",
         "esbuild": "0.28.1",
