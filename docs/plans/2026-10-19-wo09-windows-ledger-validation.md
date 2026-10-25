@@ -451,8 +451,8 @@ Cause, from libuv `src/win/process.c` (v1.x): every child that `uv_spawn`
 starts without `UV_PROCESS_DETACHED` is assigned to a job created with
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and the spawning process holds the only
 handle. Terminating the device closes that handle, so Windows is already
-terminating the helper when taskkill reaches it (inferred; the next run
-records it). The child's child is most likely the helper's `conhost.exe`,
+terminating the helper when taskkill reaches it. The third run below
+confirms it. The child's child is most likely the helper's `conhost.exe`,
 since the helper starts with `windowsHide`.
 
 Second run, at `1102a31b`: the cut took a Win32_Process snapshot (one
@@ -474,6 +474,14 @@ alive. The test prints how many cuts hit a live helper and does not assert
 it, because that depends on timing. A Host-point cut never hits a helper:
 the processor never calls the Host while it holds a home, and the helper
 lives only inside that window.
+
+Third run, at `cb02228a`: the file passed on windows-latest. 5 of 14 cuts hit
+a live helper. In each, taskkill ended the device, then reported the helper
+and its child as "could not be terminated. Reason: The operation attempted
+is not supported." (exit 128), and both were gone at the first check, about
+0.4 s later. This confirms the job-object cause above on NTFS: terminating
+the device ends its helpers. The other 9 cuts, every Host point among them,
+named only `bun.exe`.
 
 ### Evaluation: a QEMU/KVM Windows guest on a GitHub-hosted Linux runner
 
