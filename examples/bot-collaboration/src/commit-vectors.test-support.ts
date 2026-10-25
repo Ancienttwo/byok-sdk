@@ -958,3 +958,87 @@ export function deviceVectors(name: string, open: () => DeviceSubject | Promise<
     });
   });
 }
+
+/** The Host connector of a confirmed card, as L's `HostOptions.connector`. */
+export type CardConnector = (id: string, action: string, draft: Json, signal: AbortSignal) => Promise<unknown>;
+/**
+ * #793 S12 card calls. `callCards(connector)` is the Host's card call step, as L's `flushCards` runs it: for each card that K8
+ * `cardCallDue` selects, one call of `connector` outside any transaction, then K8 `settleCardCall` with its result or its
+ * error. It runs no sync: the next `sync` reports the card and adds its `action_result` Turn.
+ */
+export interface CardCallSubject extends CardSubject {
+  callCards(connector: CardConnector): void | Promise<void>;
+}
+export function cardCallVectors(name: string, open: () => CardCallSubject | Promise<CardCallSubject>): void {
+  describe(`card call contract: ${name}`, () => {
+    const result = hash(['action_result', 'c1']);
+    /** `t1` is concluded and reported, card `c1` is pending until a minute after `VECTOR_NOW`, and `decide` decides it. */
+    const opened = async () => {
+      const subject = await open();
+      await subject.change(state => {
+        Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+        state.cards.c1!.expiresAt = VECTOR_NOW + 60_000;
+      });
+      const decide = async (decision: 'confirmed' | 'rejected') => {
+        const done = await subject.commit({ scope: subject.scope, commandId: `decide-${decision}`, command: { kind: 'decide', cardId: 'c1', decision } });
+        expect(done.disposition).toEqual({ outcome: 'accepted' });
+        await subject.sync(VECTOR_NOW);
+      };
+      const calls: unknown[][] = [];
+      /** A connector that records its arguments, then returns `value`, or throws it when it is an Error. */
+      const connector = (value: unknown): CardConnector => async (id, action, draft) => {
+        calls.push([id, action, draft]);
+        if (value instanceof Error) throw value;
+        return value;
+      };
+      /** Runs the call step and expects that it wrote nothing. */
+      const unchanged = async (step: CardConnector) => {
+        const before = await subject.stored();
+        await subject.callCards(step);
+        expect(await subject.stored()).toBe(before);
+      };
+      return { subject, decide, calls, connector, unchanged };
+    };
+
+    it('calls the connector once for a confirmed card, writes its result, and the next sync reports it with its action_result Turn', async () => {
+      const h = await opened();
+      await h.decide('confirmed');
+      await h.subject.callCards(h.connector({ sent: true }));
+      expect(h.calls).toEqual([['c1', 'send_message', { text: 'hi' }]]);
+      expect((await h.subject.state()).cards.c1).toMatchObject({ state: 'confirmed', result: { sent: true }, conclusion: 'succeeded' });
+      // A settled card is never called again.
+      await h.unchanged(h.connector({ sent: false }));
+      expect(h.calls).toHaveLength(1);
+      await h.subject.sync(VECTOR_NOW);
+      expect(await h.subject.projection('card:c1:confirmed')).toEqual([expect.objectContaining({ id: 'c1', result: { sent: true } })]);
+      expect((await h.subject.state()).turns[result]).toMatchObject({ source: 'action_result',
+        request: JSON.stringify({ cardId: 'c1', state: 'confirmed', conclusion: 'succeeded', result: { sent: true } }) });
+    });
+
+    it('writes a connector error, cut to 1024 characters, with a failed conclusion', async () => {
+      const h = await opened();
+      await h.decide('confirmed');
+      await h.subject.callCards(h.connector(new Error('x'.repeat(2000))));
+      expect((await h.subject.state()).cards.c1).toMatchObject({ error: 'x'.repeat(1024), conclusion: 'failed' });
+      expect((await h.subject.state()).cards.c1).not.toHaveProperty('result');
+      await h.subject.sync(VECTOR_NOW);
+      expect((await h.subject.state()).turns[result]).toMatchObject({ source: 'action_result',
+        request: JSON.stringify({ cardId: 'c1', state: 'confirmed', conclusion: 'failed', error: 'x'.repeat(1024) }) });
+    });
+
+    it('writes a result that is not JSON as an error', async () => {
+      const h = await opened();
+      await h.decide('confirmed');
+      await h.subject.callCards(h.connector(undefined));
+      expect((await h.subject.state()).cards.c1).toMatchObject({ error: expect.any(String), conclusion: 'failed' });
+    });
+
+    it('calls nothing for a pending or a rejected card', async () => {
+      const h = await opened();
+      await h.unchanged(h.connector({ sent: true }));
+      await h.decide('rejected');
+      await h.unchanged(h.connector({ sent: true }));
+      expect(h.calls).toEqual([]);
+    });
+  });
+}
