@@ -2,13 +2,14 @@ import type { Pool, PoolClient } from 'pg';
 import { canonical, hash, occurrenceRun, taskId, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type Json,
   type Routine } from '@byok-sdk/example-host-execution-core';
 import { botRoutines, endable, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
-import { applyManagement, requireMain, updateBot, writeSnapshotBot } from '@byok-sdk/example-bot-collaboration/team';
+import { applyHomeTerminal, applyManagement, failHomeFlush, homeEnqueued, homeHead, planHomeRetry, requireMain, updateBot, writeSnapshotBot,
+  type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
-import { addTurn, stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { advanceRoomSeats, checkReply, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions, seatTurn,
-  settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { addTurn, stateOf, type Card, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
+import { advanceRoomSeats, cardCallDue, checkReply, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions,
+  seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, bindDevice, revokeDevice } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
@@ -24,7 +25,7 @@ import { classifyInbound, inboundKey, verified, type ChannelPort, type Delivery,
 import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from '@byok-sdk/example-bot-collaboration/delivery';
 import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, refuseRoute, rememberInbound, resendUnknown,
   revokePush } from '@byok-sdk/example-bot-collaboration/delivery-routing';
-import { assemble, entryGroup, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
+import { assemble, entryGroup, idOf, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
 
 /** A stored scope row of a store version that this code does not support. Nothing was written. */
 export class HostedStoreVersionError extends Error {
@@ -123,6 +124,27 @@ export interface DeliveryTimes {
 export const UNKNOWN_WAIT_MS = 3_600_000;
 type SendResult = Awaited<ReturnType<ChannelPort['send']>>;
 type ReadbackResult = Awaited<ReturnType<NonNullable<ChannelPort['readback']>>>;
+
+/**
+ * The sender's view of one card call claim (#793 S12). `none`: nothing to call. `ended`: an earlier claim's lease passed with
+ * no settle, so the claim ended the card as a timeout and the scope changed. `call`: call the connector once, then settle
+ * with `tries`.
+ */
+export type CardClaim = { kind: 'none' } | { kind: 'ended' } | { kind: 'call'; tries: number; action: string; draft: Json };
+type HomeOperation = CollaborationState['team']['homeOperations'][number];
+/**
+ * The sender's view of one Agent home claim (#793 S13). `none`: nothing to flush now. `flush`: read back each request of
+ * `op` in order, then settle with `retries` (the operation's retry count at the claim) as the fence.
+ */
+export type HomeClaim = { kind: 'none' } | { kind: 'flush'; op: HomeOperation; retries: number };
+/** One settle of an Agent home flush: a terminal readback, a retry plan (no request is terminal), or a step that threw. */
+export type HomeStep = { terminal: HomeReadback } | { retry: true } | { error: unknown };
+/** The outbox key of an Agent home operation's row. */
+export const homeRowKey = (sequence: number): string => JSON.stringify(['home', sequence]);
+/** The outbox key of a card's connector call row. An array key never equals a projection id. */
+export const cardRowKey = (cardId: string): string => JSON.stringify(['card', cardId]);
+/** L's connector timeout error (K8 host.ts `callConnector`). An expired H claim ends its card with it too. */
+export const CONNECTOR_TIMEOUT = 'Connector timed out; external outcome is unknown';
 
 const SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
 /**
@@ -585,6 +607,112 @@ export class HostedCollaborationStore {
   }
 
   /**
+   * Claims the connector call of card `cardId` (#793 S12), in one transaction under the scope lock, at the clock read after
+   * the lock. A due row of a card that K8 `cardCallDue` still selects takes a try and a lease (`next_at = now + leaseMs`).
+   * A row that already had a try belongs to a claim whose lease passed with no settle: the call may have run, so the claim
+   * ends the card with `CONNECTOR_TIMEOUT` through K8 `settleCardCall` and never calls again (owner Q3 A; L calls again
+   * after a crash). A row whose card is gone, or has its outcome, settles with no call.
+   */
+  claimCard(scope: string, cardId: string, clock: () => number, leaseMs: number): Promise<CardClaim> {
+    const key = storedKey(scope), row = cardRowKey(cardId);
+    return this.transaction(client => this.decideIn<CardClaim>(client, key, undefined, async state => {
+      const now = clock(), card = state.cards[cardId];
+      if (!card || !cardCallDue(card)) {
+        await client.query(`UPDATE outbox SET settled_at = $3 WHERE scope = $1 AND key = $2 AND kind = 'card' AND settled_at IS NULL`, [key, row, now]);
+        return { value: { kind: 'none' }, outbox: [] };
+      }
+      const claimed = await client.query<{ tries: number }>(`UPDATE outbox SET tries = tries + 1, next_at = $3 + $4
+        WHERE scope = $1 AND key = $2 AND kind = 'card' AND settled_at IS NULL AND next_at <= $3 RETURNING tries`, [key, row, now, leaseMs]);
+      const tries = claimed.rows[0]?.tries;
+      if (tries === undefined) return { value: { kind: 'none' }, outbox: [] };
+      if (tries > 1) {
+        settleCardCall(card, { error: new Error(CONNECTOR_TIMEOUT) });
+        return { value: { kind: 'ended' }, outbox: [], now };
+      }
+      return { value: { kind: 'call', tries, action: card.action.action, draft: card.action.draft }, outbox: [] };
+    }), false);
+  }
+
+  /**
+   * Writes the outcome of one card connector call (#793 S12) with K8 `settleCardCall`, in one transaction under the scope
+   * lock. It applies only while the card's row is unsettled with the claim's `tries` and the card still waits for its call;
+   * otherwise it writes nothing and returns false. The card index settles the row in the same transaction.
+   */
+  settleCard(scope: string, cardId: string, tries: number, outcome: Parameters<typeof settleCardCall>[1], clock: () => number): Promise<boolean> {
+    const key = storedKey(scope);
+    return this.transaction(client => this.decideIn(client, key, undefined, async state => {
+      const card = state.cards[cardId];
+      const row = await client.query<{ tries: number }>(`SELECT tries FROM outbox WHERE scope = $1 AND key = $2 AND kind = 'card' AND settled_at IS NULL`,
+        [key, cardRowKey(cardId)]);
+      if (!card || !cardCallDue(card) || row.rows[0]?.tries !== tries) return { value: false, outbox: [] };
+      settleCardCall(card, outcome);
+      return { value: true, outbox: [], now: clock() };
+    }), false);
+  }
+
+  /**
+   * Claims the Agent home operation `sequence` (#793 S13), in one transaction under the scope lock, at the clock read after the
+   * lock. K8 `homeHead` decides, as L's `flushHomes`: the operation must be its Bot's oldest pending one, and the Bot must have
+   * no intent row with no conclusion. A pending operation that is not a head waits `backoffMs` (never earlier). A head takes
+   * a lease (`next_at = now + leaseMs`); the entity is the fence, so `tries` stays 0. A row whose operation is gone or
+   * settled settles with no call.
+   */
+  claimHome(scope: string, sequence: number, clock: () => number, leaseMs: number, backoffMs: number): Promise<HomeClaim> {
+    const key = storedKey(scope), row = homeRowKey(sequence);
+    return this.transaction(client => this.decideIn<HomeClaim>(client, key, undefined, async state => {
+      const now = clock(), op = state.team.homeOperations.find(o => o.sequence === sequence);
+      if (!op || op.status !== 'pending') {
+        await client.query(`UPDATE outbox SET settled_at = $3 WHERE scope = $1 AND key = $2 AND kind = 'home' AND settled_at IS NULL`, [key, row, now]);
+        return { value: { kind: 'none' }, outbox: [] };
+      }
+      const busy = (await client.query<{ busy: boolean }>(`SELECT EXISTS (SELECT 1 FROM intent WHERE scope = $1 AND conclusion IS NULL
+        AND input->'payload'->'agentRef'->>'agentId' = $2) AS busy`, [key, op.botId])).rows[0]!.busy;
+      if (!homeHead(state.team, sequence, botId => botId === op.botId && busy)) {
+        await client.query('UPDATE outbox SET next_at = GREATEST(next_at, $3) WHERE scope = $1 AND key = $2 AND settled_at IS NULL', [key, row, now + backoffMs]);
+        return { value: { kind: 'none' }, outbox: [] };
+      }
+      const leased = await client.query(`UPDATE outbox SET next_at = $3 + $4
+        WHERE scope = $1 AND key = $2 AND kind = 'home' AND settled_at IS NULL AND next_at <= $3`, [key, row, now, leaseMs]);
+      if (!leased.rowCount) return { value: { kind: 'none' }, outbox: [] };
+      return { value: { kind: 'flush', op: structuredClone(op), retries: op.retries.length }, outbox: [] };
+    }), false);
+  }
+
+  /**
+   * Settles one Agent home flush step (#793 S13) with the K8 rule, in one transaction under the scope lock: a terminal runs
+   * `applyHomeTerminal` (its projection reaches the outbox), a retry runs `planHomeRetry` and returns the request to enqueue,
+   * an error runs `failHomeFlush`. It applies only while the operation is pending with `retries` retries; otherwise it writes
+   * nothing and returns `undefined`. It returns the retry count after the step, the fence of the next step. The home index
+   * writes the row's `next_at` or `settled_at` in the same transaction.
+   */
+  settleHome(scope: string, sequence: number, retries: number, step: HomeStep, clock: () => number):
+    Promise<{ retries: number; enqueue?: HomeOperation['request'] } | undefined> {
+    return this.transaction(client => this.decideIn(client, storedKey(scope), undefined, async (state, publish) => {
+      const now = clock(), op = state.team.homeOperations.find(o => o.sequence === sequence);
+      if (!op || op.status !== 'pending' || op.retries.length !== retries) return { value: undefined, outbox: [] };
+      const published = new Set<string>();
+      let enqueue: HomeOperation['request'] | undefined;
+      if ('terminal' in step) applyHomeTerminal(state, op, step.terminal, (id, body) => { publish(id, body); published.add(id); });
+      else if ('retry' in step) enqueue = structuredClone(planHomeRetry(op, now));
+      else failHomeFlush(op, step.error);
+      return { value: { retries: op.retries.length, ...enqueue ? { enqueue } : {} }, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now };
+    }), false);
+  }
+
+  /**
+   * K8 `homeEnqueued` after the enqueue of the operation's latest request (#793 S13), fenced like `settleHome`. Returns false
+   * when the operation moved on.
+   */
+  homeEnqueued(scope: string, sequence: number, retries: number, clock: () => number): Promise<boolean> {
+    return this.transaction(client => this.decideIn(client, storedKey(scope), undefined, async state => {
+      const now = clock(), op = state.team.homeOperations.find(o => o.sequence === sequence);
+      if (!op || op.status !== 'pending' || op.retries.length !== retries) return { value: false, outbox: [] };
+      homeEnqueued(op, now);
+      return { value: true, outbox: [], now };
+    }), false);
+  }
+
+  /**
    * One K8 retention call on `scope` (#793 D2g, #798), in one transaction under the scope lock: the acknowledged roots move
    * into `archived_row`, their ids are retired in `retired_identity`, and the moved command records answer replays until
    * they expire. A refusal or a throw writes nothing. A scope with no row has no rows to retain, so the rule runs on the
@@ -728,15 +856,16 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * The wait after a step that threw: moves the `next_at` of an unsettled outbox row of `scope` to `waitMs` after the clock,
-   * read under the scope lock. It never moves `next_at` earlier, so it cannot shorten the lease of a newer claim.
+   * The wait after a step that threw: moves the `next_at` of an unsettled outbox row of `scope` (`id` is the row id, see
+   * `SendFailure`) to `waitMs` after the clock, read under the scope lock. It never moves `next_at` earlier, so it cannot
+   * shorten the lease of a newer claim.
    */
-  deferOutbox(scope: string, id: string, clock: () => number, waitMs: number): Promise<void> {
+  deferOutbox(scope: string, id: string | readonly (string | number)[], clock: () => number, waitMs: number): Promise<void> {
     const key = storedKey(scope);
     return this.transaction(async client => {
       await lockScope(client, key);
       await client.query('UPDATE outbox SET next_at = GREATEST(next_at, $3) WHERE scope = $1 AND key = $2 AND settled_at IS NULL',
-        [key, storedKey(id), clock() + waitMs]);
+        [key, JSON.stringify(id), clock() + waitMs]);
     }, false);
   }
 
@@ -788,7 +917,11 @@ export class HostedCollaborationStore {
     }, client);
     const after = split(state);
     await this.write(client, key, rows, before, after);
-    if (indexed) await this.indexDeliveries(client, key, before, after, now);
+    if (indexed) {
+      await this.indexDeliveries(client, key, before, after, now);
+      await this.indexCards(client, key, before, after, now);
+      await this.indexHomes(client, key, before, after, now);
+    }
     await this.writeOutbox(client, key, outbox, published);
     // The scope's due time is a projection of the state that this transaction commits (#793 S4).
     await client.query('UPDATE scope SET due_at = $2 WHERE scope = $1 AND due_at IS DISTINCT FROM $2', [key, this.dueAt(state)]);
@@ -893,6 +1026,58 @@ export class HostedCollaborationStore {
         await client.query('UPDATE outbox SET settled_at = $3 WHERE scope = $1 AND key = $2 AND settled_at IS NULL', [scopeKey, key, now]);
       } else if (row.state === 'pending') {
         await client.query('UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2', [scopeKey, key, row.nextAttemptAt ?? 0]);
+      }
+    }
+  }
+
+  /**
+   * The card index of the outbox (#793 S12), from the card entities that this transaction changed, beside the delivery index:
+   * a card that K8 `cardCallDue` starts to select gets a `card` row, due at once; a card that leaves it (its call has an
+   * outcome) settles its row. The card is the authority.
+   */
+  private async indexCards(client: PoolClient, scopeKey: string, before: Split, after: Split, now: number | undefined): Promise<void> {
+    const old = before.entities.get('card'), next = after.entities.get('card');
+    for (const [key, body] of next ?? []) {
+      const prior = old?.get(key);
+      if (prior === body) continue;
+      const due = cardCallDue(JSON.parse(body) as Card), was = prior !== undefined && cardCallDue(JSON.parse(prior) as Card);
+      if (due && !was) {
+        await client.query(`INSERT INTO outbox (scope, key, ordinal, kind) SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'card'
+          FROM outbox WHERE scope = $1`, [scopeKey, cardRowKey(idOf(key))]);
+      } else if (was && !due) {
+        if (now === undefined) throw new Error('A settled card call needs the clock of its writer');
+        await client.query(`UPDATE outbox SET settled_at = $3 WHERE scope = $1 AND key = $2 AND kind = 'card' AND settled_at IS NULL`,
+          [scopeKey, cardRowKey(idOf(key)), now]);
+      }
+    }
+  }
+
+  /**
+   * The Agent home index of the outbox (#793 S13), from the home operations that this transaction changed, beside the
+   * delivery index: a new pending operation gets a `home` row due at its `retryAt` (0 when unset); a pending operation whose
+   * `retryAt` changed moves its row's `next_at` there; an operation that is `applied` or `failed` settles its row. The
+   * operation is the authority and the fence.
+   */
+  private async indexHomes(client: PoolClient, scopeKey: string, before: Split, after: Split, now: number | undefined): Promise<void> {
+    const group = entryGroup('home_operation', '');
+    const parse = (split: Split) => new Map((split.entries.get(group)?.bodies ?? []).map(body => {
+      const op = JSON.parse(body) as HomeOperation;
+      return [op.sequence, op] as const;
+    }));
+    const old = parse(before);
+    for (const [sequence, op] of parse(after)) {
+      const was = old.get(sequence);
+      if (was && canonical(was as unknown as Json) === canonical(op as unknown as Json)) continue;
+      const row = homeRowKey(sequence);
+      if (op.status !== 'pending') {
+        if (was?.status !== 'pending') continue;
+        if (now === undefined) throw new Error('A settled home operation needs the clock of its writer');
+        await client.query(`UPDATE outbox SET settled_at = $3 WHERE scope = $1 AND key = $2 AND kind = 'home' AND settled_at IS NULL`, [scopeKey, row, now]);
+      } else if (!was) {
+        await client.query(`INSERT INTO outbox (scope, key, ordinal, kind, next_at) SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'home', $3
+          FROM outbox WHERE scope = $1`, [scopeKey, row, op.retryAt ?? 0]);
+      } else if (was.retryAt !== op.retryAt) {
+        await client.query(`UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2 AND kind = 'home' AND settled_at IS NULL`, [scopeKey, row, op.retryAt ?? 0]);
       }
     }
   }

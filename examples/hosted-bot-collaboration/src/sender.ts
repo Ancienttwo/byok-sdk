@@ -2,7 +2,8 @@ import type { Pool } from 'pg';
 import type { Json } from '@byok-sdk/example-host-execution-core';
 import type { ChannelPort } from '@byok-sdk/example-bot-collaboration/channel';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
-import { inSchema, lockScope, type DeliveryTimes, type HostedCollaborationStore } from './store';
+import { checkHomeReadback, homeRequests, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
+import { CONNECTOR_TIMEOUT, inSchema, lockScope, type DeliveryTimes, type HomeClaim, type HomeStep, type HostedCollaborationStore } from './store';
 
 /**
  * The Host's projection receiver. It must deduplicate by `(scope, id)`: a send is at least once, as K4's projection flush
@@ -11,10 +12,32 @@ import { inSchema, lockScope, type DeliveryTimes, type HostedCollaborationStore 
 export interface ProjectionPort {
   deliver(scope: string, id: string, value: Json, signal: AbortSignal): Promise<void>;
 }
+type HomeRequest = Extract<HomeClaim, { kind: 'flush' }>['op']['request'];
+/**
+ * The SDK Agent home calls of one tenant (#793 S13), as L binds `readAgentHomeProjection` and `enqueueAgentHomeProjection`:
+ * the SDK `getAgentHomeProjectionStatus` and `enqueueAgentHomeProjection` for the request's device.
+ */
+export interface HostedHomePort {
+  read(request: HomeRequest): Promise<HomeReadback | undefined>;
+  enqueue(request: HomeRequest): Promise<unknown>;
+}
+/** The Host connector of a confirmed card (#793 S12), as L's `HostOptions.connector`. */
+export type CardConnector = (id: string, action: string, draft: Json, signal: AbortSignal) => Promise<unknown>;
 export interface SenderOptions {
   projections: ProjectionPort;
   /** The channel of the K8 deliveries. Absent: the Host has no channel, and a delivery row fails. */
   channel?: ChannelPort;
+  /** The connector of the confirmed cards. Absent: the Host has no connector, and a card row fails. */
+  connector?: CardConnector;
+  /** The deadline of one connector call, as L's `connectorTimeoutMs`. Default 30 s. With a connector, `leaseMs` must be longer. */
+  connectorTimeoutMs?: number;
+  /** The Agent home calls of the tenant that owns `scope`. Absent: the Host has no home port, and a home row fails. */
+  homes?: (scope: string) => HostedHomePort;
+  /**
+   * Called once per pass for each scope whose state a card call or a home operation's terminal changed, so the deployment
+   * syncs it, as the reconciler's `changed`.
+   */
+  changed?: (scope: string) => void;
   now?: () => number;
   /** How long a claim holds a row. It must be longer than `sendTimeoutMs`, or a running send could be recovered. Default 60 s. */
   leaseMs?: number;
@@ -27,12 +50,16 @@ export interface SenderOptions {
   /** The most rows that one pass takes. Default 100. */
   batch?: number;
 }
-/** A row whose step threw, or a projection send or delivery readback that failed. The pass went on with the next row. */
-export interface SendFailure { scope: string; id: string; error: unknown }
+/**
+ * A row whose step threw, or a projection send or delivery readback that failed. The pass went on with the next row. `id` is
+ * the row's id: a projection or delivery id, `['card', cardId]` or `['home', sequence]`.
+ */
+export interface SendFailure { scope: string; id: OutboxId; error: unknown }
+export type OutboxId = string | readonly ['card', string] | readonly ['home', number];
 /** `steps`: the rows on which this pass changed something, a send among them. */
 export interface SendPass { steps: number; failed: SendFailure[] }
 
-type DueRow = { scope: string; key: string; kind: 'projection' | 'delivery' };
+type DueRow = { scope: string; key: string; kind: 'projection' | 'delivery' | 'card' | 'home' };
 
 /**
  * The H outbox sender (#793 D2b-out-2). One pass reads the unsettled rows that are due, across scopes, and runs each in its
@@ -41,11 +68,19 @@ type DueRow = { scope: string; key: string; kind: 'projection' | 'delivery' };
  *   with no lock, and the settle is fenced by that `tries`. A sent projection keeps its row, with `settled_at`.
  * - A delivery runs the K8 delivery rules through the store (`claimDelivery`, `finishDelivery`, `readDelivery`), as L's
  *   `flushDeliveries` does: the claim commits before the send, and a claim whose lease passed becomes `unknown`.
+ * - A card calls its connector at most once (#793 S12): the claim (`claimCard`) takes a try and a lease before the call, the
+ *   call runs with no lock and `connectorTimeoutMs`, and the settle (`settleCard`) is fenced by that try. A claim whose lease
+ *   passed with no settle ends the card as a timeout, where L calls again after a crash (owner Q3 A).
+ * - An Agent home operation runs L's `flushHomes` step (#793 S13): the claim (`claimHome`) checks that it is its Bot's head
+ *   and takes a lease, the readbacks and the enqueue run with no lock, and each settle is fenced by the operation's retry
+ *   count. The operation is the authority: its `retryAt` is the row's `next_at`, so H enqueues at `retryAt` where L enqueues
+ *   again at each pass.
  */
 export class HostedOutboxSender {
   private readonly now: () => number;
   private readonly times: DeliveryTimes;
   private readonly sendTimeoutMs: number;
+  private readonly connectorTimeoutMs: number;
   private readonly backoffMs: number;
   private readonly batch: number;
 
@@ -60,6 +95,11 @@ export class HostedOutboxSender {
     if (![this.backoffMs, this.times.readbackMs, this.batch].every(value => Number.isSafeInteger(value) && value >= 1)) {
       throw new Error('The outbox backoff, readback wait and batch must be positive integers');
     }
+    this.connectorTimeoutMs = options.connectorTimeoutMs ?? 30_000;
+    if (!Number.isSafeInteger(this.connectorTimeoutMs) || this.connectorTimeoutMs < 1 || this.connectorTimeoutMs > 2_147_483_647
+      || options.connector && this.times.leaseMs <= this.connectorTimeoutMs) {
+      throw new Error('The outbox lease must be longer than the connector timeout');
+    }
   }
 
   async run(): Promise<SendPass> {
@@ -68,11 +108,13 @@ export class HostedOutboxSender {
       `SELECT o.scope, o.key, o.kind FROM outbox o JOIN scope s ON s.scope = o.scope
         WHERE s.state_version = ANY($1::integer[]) AND o.settled_at IS NULL AND o.next_at <= $2
         ORDER BY o.next_at, o.scope, o.ordinal LIMIT $3`, [[...SUPPORTED_STORE_VERSIONS], this.now(), this.batch]), true);
-    const pass: SendPass = { steps: 0, failed: [] };
+    const pass: SendPass = { steps: 0, failed: [] }, changed = new Set<string>();
     for (const row of due.rows) {
-      const scope = JSON.parse(row.scope) as string, id = JSON.parse(row.key) as string;
+      const scope = JSON.parse(row.scope) as string, id = JSON.parse(row.key) as OutboxId;
       try {
-        const step = row.kind === 'projection' ? await this.project(row.scope, row.key, scope, id) : await this.deliver(scope, id);
+        const step = row.kind === 'card' ? await this.call(scope, (id as readonly ['card', string])[1], changed)
+          : row.kind === 'home' ? await this.home(scope, (id as readonly ['home', number])[1], changed)
+          : row.kind === 'projection' ? await this.project(row.scope, row.key, scope, id as string) : await this.deliver(scope, id as string);
         if (step === false) continue;
         pass.steps++;
         if (step !== true) pass.failed.push({ scope, id, error: step.error });
@@ -83,7 +125,70 @@ export class HostedOutboxSender {
         catch (deferError) { throw new AggregateError([deferError, error], message(deferError)); }
       }
     }
+    for (const scope of changed) this.options.changed?.(scope);
     return pass;
+  }
+
+  /**
+   * C1-C3 of one card row: claim, one connector call, fenced settle. A connector error or timeout is the card's outcome, as
+   * in L, not a failed step. Returns false when the claim found nothing to call.
+   */
+  private async call(scope: string, cardId: string, changed: Set<string>): Promise<boolean> {
+    const connector = this.options.connector;
+    if (!connector) throw new Error('The Host has no connector for a card call');
+    const claim = await this.store.claimCard(scope, cardId, this.now, this.times.leaseMs);
+    if (claim.kind === 'none') return false;
+    if (claim.kind === 'ended') { changed.add(scope); return true; }
+    let outcome: Parameters<HostedCollaborationStore['settleCard']>[3];
+    try { outcome = { result: await this.callDeadline(signal => connector(cardId, claim.action, claim.draft, signal)) }; }
+    catch (error) { outcome = { error }; }
+    if (await this.store.settleCard(scope, cardId, claim.tries, outcome, this.now)) changed.add(scope);
+    return true;
+  }
+
+  /**
+   * H1-H4 of one home row: claim, the readback of each request in order (K8 `checkHomeReadback`), the fenced settle, then for
+   * a retry the enqueue of the latest request and `homeEnqueued`. A read or enqueue that throws or outlasts `sendTimeoutMs`
+   * is the operation's error (K8 `failHomeFlush`), as a throw is in L, which awaits these calls with no deadline. Returns
+   * false when the claim found nothing to flush.
+   */
+  private async home(scope: string, sequence: number, changed: Set<string>): Promise<boolean | { error: unknown }> {
+    const homes = this.options.homes;
+    if (!homes) throw new Error('The Host has no Agent home port for a home operation');
+    const claim = await this.store.claimHome(scope, sequence, this.now, this.times.leaseMs, this.backoffMs);
+    if (claim.kind === 'none') return false;
+    const port = homes(scope);
+    let step: HomeStep;
+    try {
+      let terminal: HomeReadback | undefined;
+      for (const request of homeRequests(claim.op)) {
+        terminal = checkHomeReadback(request, await this.deadline(() => port.read(request)));
+        if (terminal) break;
+      }
+      step = terminal ? { terminal } : { retry: true };
+    } catch (error) { step = { error }; }
+    const settled = await this.store.settleHome(scope, sequence, claim.retries, step, this.now);
+    if ('terminal' in step && settled) changed.add(scope);
+    if ('error' in step) return { error: step.error };
+    if (!settled?.enqueue) return true;
+    try { await this.deadline(() => port.enqueue(settled.enqueue!)); }
+    catch (error) {
+      await this.store.settleHome(scope, sequence, settled.retries, { error }, this.now);
+      return { error };
+    }
+    await this.store.homeEnqueued(scope, sequence, settled.retries, this.now);
+    return true;
+  }
+
+  /** A connector call with an abort signal, which rejects with L's timeout error after `connectorTimeoutMs`. */
+  private async callDeadline<T>(call: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => { const error = new Error(CONNECTOR_TIMEOUT); controller.abort(error); reject(error); }, this.connectorTimeoutMs);
+    });
+    try { return await Promise.race([Promise.resolve().then(() => call(controller.signal)), deadline]); }
+    finally { clearTimeout(timer); }
   }
 
   /** P1-P3 of one projection row. Returns false when another sender holds it or it settled, true when sent. */
