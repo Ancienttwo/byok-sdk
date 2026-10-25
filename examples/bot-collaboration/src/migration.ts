@@ -27,20 +27,26 @@ export type SwitchSection = typeof SWITCH_SECTIONS[number];
 export interface SwitchDevice { deviceId: string; frozenRevision: number }
 /** A K8 retention row (#798), `commands` included, with its absolute expiry. The importer keeps the expiry. */
 export interface ArchivedRecord { namespace: string; id: string; body: Json; expiresAt?: number }
+/** An accepted Agent message of one task: the K4 execution's `messageReceipt`. */
+export interface MessageReceipt { messageId: string; contentHash: string }
 /**
  * A concluded intent, moved as a row: L K4 `intents` and `executions[taskId]` with K8 `hostIntents`, H `intent`. `input` is
  * the frozen execution input that was submitted, a sealed one still sealed. A late terminal or message for it is refused
  * by its conclusion; one for a compacted intent, by its `intent` tombstone.
  *
- * `messageReceipt` is the accepted Agent message of the current task, which K4 answers a replay from. The same fact is the
- * K8 accepted reply of that task id, so the two must agree. K4 `attempts` is not carried: it is `generation + 1` once
- * the intent began (`submission` is not `reserved`), and 0 before.
+ * `messageReceipt` is the accepted Agent message of the current task, which K4 answers a replay from. `earlierReceipts`
+ * holds the same for each earlier generation that has one (#975 D1): a replay of its message must still get `accepted`.
+ * Its task id is `hash([key, generation])` and its binding input is `input` with that task id, so neither is stored. An
+ * earlier generation with no receipt is compacted history: a late message for it is refused on either Host, and a
+ * refusal is computed again on replay. Each receipt is the same fact as the K8 accepted reply of its task id, so the two
+ * must agree. K4 `attempts` is not carried: it is `generation + 1` once the intent began (`submission` is not
+ * `reserved`), and 0 before.
  */
 export interface IntentRecord {
   key: string; source: 'user' | 'bot' | 'routine'; handler?: string; ordinal: number; agent: string;
   taskId: string; generation: number; input: Json; waitUntil: number; retry: RetryPolicy;
   submission: 'reserved' | 'uncertain' | 'delivered'; started: boolean; attempt?: Json; terminal?: Json;
-  messageReceipt?: { messageId: string; contentHash: string };
+  messageReceipt?: MessageReceipt; earlierReceipts?: Array<{ generation: number; messageReceipt: MessageReceipt }>;
   preparationError?: string; memoryBlocked?: NonNullable<Intent['memoryBlocked']>;
   cancelReason?: 'expired' | 'cancelled'; retryUntil?: number; conclusion: Conclusion;
 }
@@ -179,6 +185,7 @@ function keys(value: unknown, required: readonly string[], allowed: readonly str
   return object(value) && required.every(key => Object.hasOwn(value, key))
     && Object.keys(value).every(key => required.includes(key) || allowed.includes(key));
 }
+const receiptShape = (value: unknown) => keys(value, ['messageId', 'contentHash']) && text(value.messageId) && text(value.contentHash);
 /** K4's JSON rule: a value that serialization would change (`NaN`, `undefined`, a class instance) cannot be digested. */
 function json(value: unknown): boolean { try { validateJson(value); return true; } catch { return false; } }
 function invalid(message: string): never { throw new SwitchExportError('invalid', `Invalid switch export: ${message}`); }
@@ -222,14 +229,22 @@ function occurrenceRecord(row: unknown): boolean {
 }
 function intentRecord(row: unknown): boolean {
   return keys(row, ['key', 'source', 'ordinal', 'agent', 'taskId', 'generation', 'input', 'waitUntil', 'retry', 'submission', 'started', 'conclusion'],
-    ['handler', 'attempt', 'terminal', 'messageReceipt', 'preparationError', 'memoryBlocked', 'cancelReason', 'retryUntil'])
+    ['handler', 'attempt', 'terminal', 'messageReceipt', 'earlierReceipts', 'preparationError', 'memoryBlocked', 'cancelReason', 'retryUntil'])
     && text(row.key) && oneOf(['user', 'bot', 'routine'])(row.source) && optional(row.handler, text) && time(row.ordinal) && text(row.agent)
     && digestText(row.taskId) && time(row.generation) && object(row.input) && time(row.waitUntil)
+    // K4 opens a generation only for a retry within `maxAttempts` (`core.ts` reconcile and begin), which also bounds the
+    // receipt check below.
+    && object(row.retry) && time(row.retry.maxAttempts) && row.generation < Math.max(row.retry.maxAttempts, 1)
     && oneOf(['reserved', 'uncertain', 'delivered'])(row.submission) && typeof row.started === 'boolean'
     && keys(row.retry, ['maxAttempts', 'delaysMs', 'retryFailures']) && time(row.retry.maxAttempts) && typeof row.retry.retryFailures === 'boolean'
     && Array.isArray(row.retry.delaysMs) && row.retry.delaysMs.every(time)
     && optional(row.attempt, object) && optional(row.terminal, object)
-    && optional(row.messageReceipt, receipt => keys(receipt, ['messageId', 'contentHash']) && text(receipt.messageId) && text(receipt.contentHash))
+    && optional(row.messageReceipt, receiptShape)
+    // Earlier generations only, each once, in generation order, and only those with a receipt.
+    && optional(row.earlierReceipts, earlier => Array.isArray(earlier) && earlier.length > 0
+      && earlier.every((entry, index) => keys(entry, ['generation', 'messageReceipt']) && time(entry.generation)
+        && entry.generation < (row.generation as number) && (index === 0 || entry.generation > (earlier[index - 1] as { generation: number }).generation)
+        && receiptShape(entry.messageReceipt)))
     && optional(row.preparationError, text)
     && optional(row.memoryBlocked, blocked => keys(blocked, ['resume', 'reason']) && oneOf(['queued', 'backoff'])(blocked.resume)
       && typeof blocked.reason === 'string')
@@ -300,12 +315,19 @@ function checkReferences(content: SwitchContent): void {
   for (const row of content.slots) reference(occurrences.has(row.occurrenceKey), `slot ${row.slot} names no occurrence of the export`);
   // The K8 accepted reply of a task, live or retained (#798), is the same fact as the K4 message receipt of that task.
   const archivedReplies = new Map(content.archived.filter(row => row.namespace === 'replies').map(row => [row.id, row.body]));
+  const replyOf = (taskId: string) => (content.collaboration.replies as Record<string, unknown>)[taskId] ?? archivedReplies.get(taskId);
   for (const row of content.intents) {
-    const reply = (content.collaboration.replies as Record<string, unknown>)[row.taskId] ?? archivedReplies.get(row.taskId);
-    const receipt = row.messageReceipt;
-    const same = receipt === undefined ? reply === undefined
-      : object(reply) && reply.messageId === receipt.messageId && reply.contentHash === receipt.contentHash;
-    if (!same) throw new SwitchExportError('receipt_mismatch', `Switch export intent ${row.key} has a message receipt that differs from its K8 reply`);
+    // Every generation of the intent, current and earlier: a receipt and a K8 reply of its task id come together or not at all.
+    const receipts = new Map((row.earlierReceipts ?? []).map(entry => [entry.generation, entry.messageReceipt]));
+    if (row.messageReceipt) receipts.set(row.generation, row.messageReceipt);
+    for (let generation = 0; generation <= row.generation; generation++) {
+      const reply = replyOf(taskIdOf(row.key, generation)), receipt = receipts.get(generation);
+      const same = receipt === undefined ? reply === undefined
+        : object(reply) && reply.messageId === receipt.messageId && reply.contentHash === receipt.contentHash;
+      if (!same) {
+        throw new SwitchExportError('receipt_mismatch', `Switch export intent ${row.key} generation ${generation} has a message receipt that differs from its K8 reply`);
+      }
+    }
   }
   for (const row of content.outbox) {
     if (row.kind === 'host-job') reference(occurrences.get(row.occurrenceKey)?.job != null, `Host job ${row.occurrenceKey} names no Host job occurrence`);

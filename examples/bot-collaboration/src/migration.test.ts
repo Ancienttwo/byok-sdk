@@ -189,6 +189,29 @@ describe('switch export format (#975)', () => {
     ]);
   });
 
+  it('carries the receipts of earlier generations, each matching the K8 reply of its task id (#975 D1)', () => {
+    // `i2` is in generation 1. Generation 0 also had an accepted message, which a replay must still get `accepted` for.
+    const earlier = { messageId: 'm0', contentHash: 'h0' };
+    const withEarlier = (edit: (state: CollaborationState) => void = () => {}) => {
+      const value = content(state => { state.replies[hash(['i2', 0])] = { ...REPLY, ...earlier }; edit(state); });
+      value.intents[0]!.earlierReceipts = [{ generation: 0, messageReceipt: { ...earlier } }];
+      return value;
+    };
+    expect(verifySwitchExport(sealSwitchExport(withEarlier())).counts.intents).toBe(3);
+    // A K8 reply of an earlier task with no receipt, a receipt with no reply, or one that differs: the fact has forked.
+    refused(() => sealSwitchExport(content(state => { state.replies[hash(['i2', 0])] = { ...REPLY, ...earlier }; })), 'receipt_mismatch');
+    refused(() => sealSwitchExport(withEarlier(state => { delete state.replies[hash(['i2', 0])]; })), 'receipt_mismatch');
+    refused(() => sealSwitchExport(withEarlier(state => { state.replies[hash(['i2', 0])] = { ...REPLY, ...earlier, contentHash: 'other' }; })), 'receipt_mismatch');
+    refusesEach('invalid', [
+      value => { value.intents[0]!.earlierReceipts = []; },
+      value => { value.intents[0]!.earlierReceipts = [{ generation: 1, messageReceipt: { ...RECEIPT } }]; },
+      value => { value.intents[0]!.earlierReceipts = [{ generation: 0, messageReceipt: { ...RECEIPT } }, { generation: 0, messageReceipt: { ...RECEIPT } }]; },
+      value => { Object.assign(value.intents[0]!, { earlierReceipts: [{ generation: 0, messageReceipt: { ...RECEIPT }, taskId: hash(['i2', 0]) }] }); },
+      // A generation K4 could not have opened under the intent's retry policy.
+      value => { Object.assign(value.intents[0]!, { generation: 3, taskId: hash(['i2', 3]), input: { taskId: hash(['i2', 3]) } }); },
+    ]);
+  });
+
   it('refuses the source owner records and a live Bot whose device the export does not move', () => {
     refused(() => sealSwitchExport(content(state => { state.topology = {}; })), 'owner_record');
     refused(() => sealSwitchExport(content(state => { state.hostIntents = { i1: { handler: 'h' } }; })), 'owner_record');

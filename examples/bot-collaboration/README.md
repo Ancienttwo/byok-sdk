@@ -1052,6 +1052,11 @@ in JS or reseals; a database `ORDER BY` under a non-C collation gives
 The format refuses, with `SwitchExportError` and a `reason`:
 - the source's owner records (L `topology`, and L `hostIntents`, whose handler
   each intent carries);
+- a K4 message receipt, of the current generation or an earlier one, that is
+  not the K8 accepted reply of the same task id, or a reply with no receipt
+  (`receipt_mismatch`). An intent carries the receipt of each earlier
+  generation that has one, so a replay of that message still gets `accepted`
+  after the switch; an earlier generation with no receipt is compacted history;
 - a record that names one the export does not hold (`reference`): an
   occurrence intent, slot or Host job outbox row without its occurrence, an
   occurrence without its routine, or a task id that is not
