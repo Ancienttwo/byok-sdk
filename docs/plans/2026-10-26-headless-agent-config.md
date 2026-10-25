@@ -75,7 +75,7 @@ AiphaBee 的 web 只做两件事：选路线（subscription 或 local_byok），
 | thinking level | 页面没有选择器，只能写在 `pi_model` 里（来自预设或手填 JSON） | 数据在 SDK，但没有导出 |
 | 模型发现 | Host 分页请求 provider 的 `/models`（15 s 期限，最多 2000 个），用 SDK 的 fetch guard | 走网络，第一阶段不收（§8） |
 
-Salesko（SDK 0.22.0）在设备上配置 Pi，再把 binding 导出粘贴到 web，没有 provider 或 model 选择界面。
+Salesko（SDK 0.22.0）的 web 让用户选电脑和 runtime（Claude 订阅、Codex 订阅或 Pi 自带 key）。订阅 runtime 可以手填 model id。Pi 的 provider 在设备上配置，用户把 binding JSON 粘贴到 web。没有 vendor 或 model 的选择列表。
 
 ### 2.3 RAFT 的做法
 
