@@ -25,22 +25,43 @@
   `ports`. `HostedSyncOptions` drops `models` and `readOnlyToolsets`: the sync
   reads them from the same config. `CommitPorts`, `CommitPortsFactory`,
   `FinishPortsFactory` and `PortsFactory` are gone.
+- **Fixed (client)** — the last read-back of a member KEM rotation (#654
+  E2d-5) now also requires each epoch whose key the run holds, and each
+  epoch with a freshness point, to read back, including a key the run opened
+  or a point it gained during the rotation. A Host that withholds such a row
+  now stops the rotation with `key_package_missing`, and the old key stays.
+  Before, the rotation finished and dropped that epoch. The rotation still
+  has no production caller.
+- **Fixed (examples)** — K8 counts a Bot Turn whose outcome commit throws as a
+  stuck intent, with the new `IntentOutcomeError` code `outcome_failed`.
+  `drain()` and every API that runs a pass reject with it, the audit gets one
+  row, and `failStuckIntent(key)` ends it: the intent settles `failed`, the
+  next sync fails the Turn and reports it, and the Bot's FIFO moves on. Before,
+  K4 kept the error only as the outbox row's `lastError`, `drain()` resolved,
+  the FIFO stayed blocked and the owner call refused the key as not stuck. A
+  Host that switches exhaustively on `IntentOutcomeError.code` must add the
+  `outcome_failed` case.
 
-## 0.30.1 — source candidate
+## 0.30.1 — 2026-10-24 (published)
 
 0.30.1 is a PATCH release under a one-release exception to the pre-1.0
 policy. On 2026-10-24 the owner chose 0.30.x instead of 0.31.0 (issue #872),
 although it adds public API, gated wire additions and Postgres migration
 0028, and it has breaking changes. #857, #859 and #860 are breaking in
-cloud. The pi-durable SQLite migration of #909 is breaking in client and
-cloud-do: a migrated store cannot go back to Pi 1.3.0. The examples changes
-of #882 and #884 are also breaking for a Host that copies the K8 example.
-This candidate is not published. A 0.30.1 daemon paired as an E2EE member
-advertises `sealed-payload-v1` while its member is verified and the
-deployment declares `e2ee.member`. See the
-[release notes](docs/releases/v0.30.1.md) for scope, the release rule of
-`sealed-payload-v1` and the upgrade notes. All nine public manifests and
-their lock records move to 0.30.1.
+cloud. #870 and #909 are breaking in client, and #909 also in cloud-do.
+#870 adds `message_draft_delta` items to `Session.events`. The pi-durable
+SQLite migration of #909 means that a migrated store cannot go back to Pi
+1.3.0. The examples changes of #882 and #884 are also breaking for a Host
+that copies the K8 example. The npm registry lists all nine public packages
+at 0.30.1. The registry publication times fall on 2026-10-24 (UTC). The
+registry read on 2026-10-24 at 19:19 UTC reports 0.30.1 as `latest` for all
+nine. The tag `v0.30.1` and its GitHub Release point to
+`142acbe2`. A 0.30.1 daemon paired as an E2EE member advertises
+`sealed-payload-v1` while its member is verified and the deployment declares
+`e2ee.member`. See the [release notes](docs/releases/v0.30.1.md) for scope,
+the release rule of `sealed-payload-v1`, the upgrade notes and the
+qualification limits that were recorded at preparation. All nine public
+manifests and their lock records move to 0.30.1.
 
 - **Changed (client, cloud-do, keys)** — pin the nine official Pi packages to
   exactly 1.4.0 (closureDigest `79c414be`). A preparation compiled for 1.3.0
@@ -340,12 +361,15 @@ their lock records move to 0.30.1.
   the only authority: each later `progress` event reconciles the draft, and
   `progress`, the closing reply and the published body are unchanged. There
   is no protocol or wire change.
-- **Type change (client)** — `Session.events` is now
+- **Breaking (client)** — `Session.events` is now
   `AsyncIterable<AgentEvent | MessageDraftDelta>`, and `MessageDraftDelta`
   is exported from `@byok-sdk/client`. Code that iterates `Session.events`
   and types each item as `AgentEvent` no longer compiles. It must widen the
   type or skip items of type `message_draft_delta`. An adapter whose
-  `events` yields only `AgentEvent` still compiles.
+  `events` yields only `AgentEvent` still compiles. The Claude, Codex and
+  Grok adapters now always yield `message_draft_delta` items. A consumer
+  that checks `event.type` against a list and rejects unknown types still
+  compiles, and then fails at run time. Accept or skip these items.
 - **Feature (client)** — an opt-in Claude option for Agent tasks (#871,
   #873). `ClaudeAdapterOptions.agentUserContext: 'excluded'` starts a
   `task.offer_for_agent` task with `--strict-mcp-config`, so only the task's
@@ -447,7 +471,7 @@ their lock records move to 0.30.1.
   result, so the H sync uses the same rule. Turns frozen before keep their
   schema.
 
-## 0.30.0 — 2026-10-24 (published)
+## 0.30.0 — 2026-10-24 (published; superseded by 0.30.1)
 
 0.30.0 is a MINOR release under the default pre-1.0 policy, with no exception.
 It adds public API, gated wire types and behavior, and it has breaking changes
@@ -455,8 +479,9 @@ in protocol, server, cloud and client. The owner confirmed the breaking labels
 of #783, #784, #831 and #834. The examples changes of #820, #823 and #852 are
 also breaking for a Host that copies the K8 example. The npm registry lists
 all nine public packages at 0.30.0. The registry publication times fall on
-2026-10-24 (UTC). The registry read on 2026-10-24 at 07:39 UTC reports 0.30.0
-as `latest` for all nine. The tag `v0.30.0` and its GitHub Release point to
+2026-10-24 (UTC). The registry read on 2026-10-24 at 07:39 UTC reported
+0.30.0 as `latest` for all nine. The read on 2026-10-24 at 19:19 UTC reports
+0.30.1 as `latest`. The tag `v0.30.0` and its GitHub Release point to
 `6b779cff`. A default 0.30.0 daemon does not advertise `sealed-payload-v1`.
 See the [release notes](docs/releases/v0.30.0.md) for scope, the release rule
 of `sealed-payload-v1`, the upgrade notes and the qualification limits that
@@ -873,7 +898,7 @@ client and keys. The owner labelled #723, #744, #751 and #767 as breaking.
 The npm registry lists all nine public packages at 0.29.0. The registry
 publication times fall on 2026-10-23 (UTC). The registry read on 2026-10-23
 at 10:20 UTC reported 0.29.0 as `latest` for all nine. The read on 2026-10-24
-at 07:39 UTC reports 0.30.0 as `latest`. The tag `v0.29.0` and
+at 07:39 UTC reported 0.30.0 as `latest`. The tag `v0.29.0` and
 its GitHub Release point to `df0c91d2`. See the
 [release notes](docs/releases/v0.29.0.md) for scope and the qualification
 limits that were recorded at preparation. All nine public manifests and their
