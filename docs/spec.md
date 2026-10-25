@@ -1365,11 +1365,17 @@ makes itself `unknown`. The class never changes `retry`.
 | Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
 | Pi, Hermes | no structured field: `unknown` |
 
-Claude, Codex, Grok, Pi (the rpc and prepared lanes) and Hermes report a runtime
-process that ends on its own before its terminal, during start or a turn, as
-`runtime_exited`; an exit the SDK or the vendored session asked for is not one.
-Pi's durable lane reports `unknown` for a worker exit: it recovers a crash during
-a run and otherwise fails without a class.
+Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes) and Hermes report a
+runtime process that ends on its own before its terminal, during start or a turn,
+as `runtime_exited`; an exit the SDK or the vendored session asked for is not one.
+Pi's durable lane recovers a worker that ends on its own during a run (within its
+respawn limit). When that recovery is refused, the worker ends on its own while
+the daemon awaits its reply to a tool or shell acknowledgement, or a respawned
+worker ends on its own before its start receipt, the run fails as
+`runtime_exited`; a reported worker
+failure, a refused or changed start receipt and a protocol violation are `unknown`.
+Its start failures are typed and not retryable: a worker that ends on its own
+before its start receipt is `runtime_exited`, any other is `unknown`.
 
 ### Terminal inference usage observation
 

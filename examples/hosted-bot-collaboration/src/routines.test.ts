@@ -8,11 +8,10 @@ import { createDefinition, ROUTINE_WAIT_MS, routineCalendar, routineTurn } from 
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { freezeIntent, HostedSubmitter } from './intents';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedReconciler, type TaskEvidence } from './reconcile';
 import { hostedRoutineCommands, loadSlice, writeSlice } from './routines';
-import { inSchema, lockScope, type CommitPortsFactory, type FinishPortsFactory } from './store';
+import { inSchema, lockScope } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -40,8 +39,8 @@ const intentRow = async (scope: string, key: string) => (await query<{ source: s
   tries: number; conclusion: string | null }>(`SELECT source, input, wait_until::text, retry_until::text, tries, conclusion FROM ${table('intent')}
   WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(key)]))[0];
 
-/** The command ports of the tests, on the test clock. */
-const ports: FinishPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW });
+/** The Host clock of the tests. */
+const clock = () => NOW;
 /** A device terminal that completes the task of Turn `turnId` with `document`. */
 function completed(turnId: string, document: Json): TaskEvidence {
   const task = taskId(turnId, 0);
@@ -66,7 +65,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
   /** Freezes the intent of Turn `turnId`, then completes it with `document` through the store's terminal transaction. */
   async function finished(scope: string, turnId: string, document: Json) {
     await locked(scope, client => freezeIntent(client, scope, { key: turnId, source: 'user', execution: template('device'), waitUntil: NOW + 60_000 }));
-    return store().finish(scope, turnId, completed(turnId, document), ports);
+    return store().finish(scope, turnId, completed(turnId, document), clock);
   }
   /** The seed's processing owner Turn `t1` creates one Bot routine through its outcome. Returns its id. */
   async function created(scope: string): Promise<string> {
@@ -154,10 +153,10 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
     });
     // The sync freezes both Turns with an outcome schema that lists the routine.
     await store().sync(scope, SYNC);
-    expect(await store().finish(scope, 't2', completed('t2', { update_routine: [{ routineId: id, prompt: 'Version 2' }] }), ports)).toBe('succeeded');
+    expect(await store().finish(scope, 't2', completed('t2', { update_routine: [{ routineId: id, prompt: 'Version 2' }] }), clock)).toBe('succeeded');
     expect(await routineRow(scope, id)).toMatchObject({ pending: null, lifecycle: 'active', next_at: String(FIRST),
       definition: { version: 2, hostOccurrence: { input: { prompt: 'Version 2' } } } });
-    expect(await store().finish(scope, 't3', completed('t3', { cancel_routine: [{ routineId: id }] }), ports)).toBe('succeeded');
+    expect(await store().finish(scope, 't3', completed('t3', { cancel_routine: [{ routineId: id }] }), clock)).toBe('succeeded');
     expect(await routineRow(scope, id)).toMatchObject({ lifecycle: 'completed', next_at: null });
   });
 
@@ -191,7 +190,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
   it('concludes the occurrence cancelled when its routine Turn ends before promotion', async () => {
     const scope = await scoped(), id = await created(scope);
     const { key, turn } = await fired(scope, id, FIRST);
-    await store().commit(scope, { scope, commandId: 'cancel', command: { kind: 'cancel_turn', turnId: turn } }, ports);
+    await store().commit(scope, { scope, commandId: 'cancel', command: { kind: 'cancel_turn', turnId: turn } }, clock);
     await store().sync(scope, SYNC);
     expect(await occurrenceRow(scope, key)).toEqual({ execution_superseded: false, conclusion: 'cancelled' });
     expect(await intentRow(scope, turn)).toBeUndefined();
@@ -268,7 +267,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
       const scope = await scoped(), id = await created(scope);
       const { key, turn } = await fired(scope, id, FIRST);
       await store().updateRoutine(scope, 'main', { routineId: id, prompt: 'Version 2' }, FIRST);
-      await store().commit(scope, { scope, commandId: 'cancel', command: { kind: 'cancel_turn', turnId: turn } }, ports);
+      await store().commit(scope, { scope, commandId: 'cancel', command: { kind: 'cancel_turn', turnId: turn } }, clock);
       await store().sync(scope, { ...SYNC, now: FIRST });
       expect(await occurrenceRow(scope, key)).toMatchObject({ conclusion: 'cancelled' });
       await switched(scope, id, FIRST);
@@ -278,20 +277,20 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
       await query(`UPDATE ${table('intent')} SET submission = 'uncertain', tries = 1, cancel_reason = 'cancelled' WHERE scope = $1 AND key = $2`,
         [storedKey(scope), storedKey(turn)]);
       const none = async () => undefined;
-      await new HostedReconciler(opened!.pool, store().schema, store(), { ports, now: () => now,
+      await new HostedReconciler(opened!.pool, store().schema, store(), { now: () => now,
         port: () => ({ offer: none, attempt: none, deviceTerminal: none, cancel: none }) }).run();
       expect(await intentRow(scope, turn)).toMatchObject({ conclusion: 'cancelled' });
       await switched(scope, id, now);
     });
     it('the owner cancel of a promoted untried Turn (#793 D2f-4)', async () => {
       const { scope, id, turn } = await staged();
-      await store().commit(scope, { scope, commandId: 'cancel', command: { kind: 'cancel_turn', turnId: turn } }, ports);
+      await store().commit(scope, { scope, commandId: 'cancel', command: { kind: 'cancel_turn', turnId: turn } }, clock);
       expect(await intentRow(scope, turn)).toMatchObject({ tries: 0, conclusion: 'cancelled' });
       await switched(scope, id, NOW);
     });
     it('the terminal transaction', async () => {
       const { scope, id, turn } = await staged();
-      expect(await store().finish(scope, turn, completed(turn, {}), ports)).toBe('succeeded');
+      expect(await store().finish(scope, turn, completed(turn, {}), clock)).toBe('succeeded');
       await switched(scope, id, NOW);
     });
     it('the end_routine commit of another routine (§55c)', async () => {
@@ -306,25 +305,19 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
         return definition.id;
       });
       expect(await routineRow(scope, id)).toMatchObject({ pending: { version: 2 } });
-      await store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'end_routine', botId: 'main', routineId: other } }, ports);
+      await store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'end_routine', botId: 'main', routineId: other } }, clock);
       expect(await routineRow(scope, other)).toMatchObject({ lifecycle: 'completed' });
       await switched(scope, id, NOW);
     });
   });
 
-  it('owns the routines port of end_routine: a refusal writes nothing, a caller port is never called, and none type-checks (§55c)', async () => {
+  it('owns the routines port of end_routine: a refusal writes nothing, and an acceptance completes the routine (§55c)', async () => {
     const scope = await scoped(), id = await created(scope), before = await store().dump(scope);
-    await expect(store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'end_routine', botId: 'main', routineId: 'missing' } }, ports))
+    await expect(store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'end_routine', botId: 'main', routineId: 'missing' } }, clock))
       .rejects.toThrow('No open Bot routine has this id');
     expect(await store().dump(scope)).toBe(before);
-    let called = 0;
-    const slipped = ((...args: Parameters<CommitPortsFactory>) => ({ ...ports(...args), routines: { end: () => { called++; } } })) as unknown as CommitPortsFactory;
-    await store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'end_routine', botId: 'main', routineId: id } }, slipped);
-    expect(called).toBe(0);
+    await store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'end_routine', botId: 'main', routineId: id } }, clock);
     expect(await routineRow(scope, id)).toMatchObject({ lifecycle: 'completed', next_at: null, pending: null });
-    // @ts-expect-error The commit ports carry no routines port.
-    const withRoutines: CommitPortsFactory = (state, publish) => ({ ...ports(state, publish), routines: { end: () => {} } });
-    expect(typeof withRoutines).toBe('function');
   });
 
   it('refuses a routine that is not a bot-routine, on the store\'s routine port, and changes nothing', async () => {

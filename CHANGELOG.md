@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example has its
+  authenticated product command entry (#793 S10). `HostedCommandEntry` is L's
+  owner API for requests: it takes the product's session check
+  (`authenticate`), the scope's owner principal id and the deployment's
+  composed `sync`. Each method checks the principal as L's R2 checks do
+  (with the same audit lines), commits under L's command id, syncs the scope
+  and returns L's value. It commits with the new `requireBinding` option of
+  `store.commit`: a commit that adds work for a Bot whose device has no
+  active H binding (a Turn that is not concluded, a room seat, or an input
+  batch or an input to one) throws `DeviceBindingError` and rolls back. `store.audit(scope, line, clock)` appends one audit line.
+- **Breaking (examples)** — the hosted collaboration store builds every
+  command port itself, from a per-scope Host config (#793 S9).
+  `new HostedCollaborationStore(pool, schema, { host })` requires
+  `host(scope) → { models, readOnlyToolsets }`, L's `models` and
+  `readOnlyToolsets`; a model template carries the device that a new Bot runs
+  on, so each scope has its own. The store builds `updatePersona`, `teamBot`,
+  the outcome's `manage` and, with `{ channel: true }`, the push route ports,
+  as L's owner commands and outcomes do. `commit`, `receive`, `consume` and
+  `finish` take the Host clock in place of a ports factory;
+  `hostedMessageConsumer` takes `now` and `HostedReconciler` no longer takes
+  `ports`. `HostedSyncOptions` drops `models` and `readOnlyToolsets`: the sync
+  reads them from the same config. `CommitPorts`, `CommitPortsFactory`,
+  `FinishPortsFactory` and `PortsFactory` are gone.
 - **Fixed (client)** — the last read-back of a member KEM rotation (#654
   E2d-5) now also requires each epoch whose key the run holds, and each
   epoch with a freshness point, to read back, including a key the run opened
@@ -18,6 +41,14 @@
   the FIFO stayed blocked and the owner call refused the key as not stuck. A
   Host that switches exhaustively on `IntentOutcomeError.code` must add the
   `outcome_failed` case.
+- **Feature (examples)** — with `roomHistory`, K8 publishes each accepted seat
+  post as the projection `room-message:<roomId>:<messageId>` with
+  `{ roomId, id, from, text, late }`, and does not read the next seat of a room
+  while that room has an undelivered post (#883 acceptance 2). The Host's
+  `deliver` must resolve only after the write can be read back. A projection
+  that never delivers releases each later seat of its room as `busy` at its
+  deadline. The rule's new optional `OutcomePorts.roomPosts` stays unset in H,
+  so H and every Host without the option are unchanged.
 - **Fixed (examples)** — K8 L no longer leaves a room seat waiting when a Turn
   step releases the seat before it (a blocked or retired seat Turn). The L
   sync runs the room step and the Turn steps again, as H's sync does since
@@ -37,6 +68,20 @@
   bound when it became ready, so a terminal made after that member retired
   at shutdown seals with a next run of the same member instead of taking the
   closed form.
+
+- **Fixed (client)** — when a Codex app-server ends on its own and the
+  adapter's record consumer then fails on a record that exit produced (the
+  exit record, or a control settled as exited), the task now fails as
+  `runtime_exited` with the consumer's reason, instead of `unknown` (#869).
+
+- **Fixed (client)** — Pi's durable lane now follows the #869 contract. A
+  start failure is a typed, non-retryable `RuntimeExecutionFailure` with a
+  fixed reason, instead of being reported as "runtime adapter contract
+  violation during start"; a worker that ends on its own before its start
+  receipt is `runtime_exited`. A run whose worker ended on its own and could
+  not be recovered, or whose respawned worker ended on its own before its
+  start receipt, fails as `runtime_exited` instead of `unknown` (#869).
+
 - **Breaking (client)** — a sealed terminal that the daemon sent by
   `ciphertextRef` and that the Host refused now reaches the Host as one
   replacement terminal (#654, owner batch §77b). The Host refuses one when it
@@ -53,6 +98,14 @@
   gets the required method `replaceRefusedTerminal`, and its `confirmTerminal`
   and `rejectTerminal` must accept the hash of replaced bytes as a no-op. A
   Host that injects its own journal must implement both.
+
+- **Breaking (client)** — `byok-agent doctor` no longer scans `os.tmpdir()`
+  for the temporary directories that releases before 0.27.0 left there (#938).
+  `doctor --json` drops its `legacyTemp` field, so a script that parses it
+  must stop reading it, and the text output drops its `legacy-temp:` line.
+  `doctor --fix` no longer deletes those directories; any left on a machine
+  have to be removed by hand.
+
 - **Breaking (client)** — every daemon journals its tasks (#924).
   `DaemonConfig.hostedJournal` and `HostedJournalConfig` are removed, and a
   config or overrides object that still has `hostedJournal` is refused with
@@ -71,6 +124,27 @@
   inbound offer above the journal record bound
   (`inbound_envelope_too_large`) and drops any other envelope above it (#826),
   and it admits result-document offers.
+
+## 0.30.1 — 2026-10-24 (published)
+
+0.30.1 is a PATCH release under a one-release exception to the pre-1.0
+policy. On 2026-10-24 the owner chose 0.30.x instead of 0.31.0 (issue #872),
+although it adds public API, gated wire additions and Postgres migration
+0028, and it has breaking changes. #857, #859 and #860 are breaking in
+cloud. #870 and #909 are breaking in client, and #909 also in cloud-do.
+#870 adds `message_draft_delta` items to `Session.events`. The pi-durable
+SQLite migration of #909 means that a migrated store cannot go back to Pi
+1.3.0. The examples changes of #882 and #884 are also breaking for a Host
+that copies the K8 example. The npm registry lists all nine public packages
+at 0.30.1. The registry publication times fall on 2026-10-24 (UTC). The
+registry read on 2026-10-24 at 19:19 UTC reports 0.30.1 as `latest` for all
+nine. The tag `v0.30.1` and its GitHub Release point to
+`142acbe2`. A 0.30.1 daemon paired as an E2EE member advertises
+`sealed-payload-v1` while its member is verified and the deployment declares
+`e2ee.member`. See the [release notes](docs/releases/v0.30.1.md) for scope,
+the release rule of `sealed-payload-v1`, the upgrade notes and the
+qualification limits that were recorded at preparation. All nine public
+manifests and their lock records move to 0.30.1.
 
 ## 0.30.1 — 2026-10-24 (published)
 
