@@ -305,8 +305,8 @@
   `daemon/task-runner/`, one module per stage (#926). `handleOffer` and
   `pump` are split along their existing stages, and no function is over 300
   lines. Behavior, exports and the published `task-runner.d.ts` are unchanged.
-  The `@byok-sdk/client` closure grows by 7893 B and `bin:byok-agent` by
-  7917 B, for the delegating stubs and private-state access.
+  The `@byok-sdk/client` closure grows by 7895 B and `bin:byok-agent` by
+  7919 B, for the delegating stubs and private-state access.
 
 ## 0.30.1 — 2026-10-24 (published)
 
