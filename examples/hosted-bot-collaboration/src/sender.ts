@@ -184,13 +184,13 @@ export class HostedOutboxSender {
       }
       step = terminal ? { terminal } : { retry: true };
     } catch (error) { step = { error }; }
-    const settled = await this.store.settleHome(scope, sequence, claim.retries, step, this.now);
+    const settled = await this.store.settleHome(scope, sequence, claim.retries, step, this.now, claim.lease);
     if ('terminal' in step && settled) changed.add(scope);
     if ('error' in step) return { error: step.error };
     if (!settled?.enqueue) return true;
     try { await this.deadline(() => port.enqueue(settled.enqueue!)); }
     catch (error) {
-      await this.store.settleHome(scope, sequence, settled.retries, { error }, this.now);
+      await this.store.settleHome(scope, sequence, settled.retries, { error }, this.now, claim.lease);
       return { error };
     }
     await this.store.homeEnqueued(scope, sequence, settled.retries, this.now);

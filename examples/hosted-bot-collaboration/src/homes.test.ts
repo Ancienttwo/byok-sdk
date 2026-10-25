@@ -118,6 +118,28 @@ describe.skipIf(POSTGRES_URL === undefined)('H Agent home flush on real Postgres
     expect(h.enqueued).toHaveLength(1);
   });
 
+  it('keeps the claim lease while a retry enqueue runs, so no second sender enqueues, then moves the row to retryAt', async () => {
+    const h = await retried();
+    await sender({ homes: () => h.calls() }).run();
+    clock = VECTOR_NOW + 1000;
+    let release!: () => void;
+    const enqueued: string[] = [];
+    const slow: HomeCalls = { read: async () => undefined,
+      enqueue: request => { enqueued.push(request.payload.requestId); return new Promise(resolve => { release = () => resolve(undefined); }); } };
+    const first = sender({ homes: () => slow }).run();
+    await expect.poll(() => enqueued.length).toBe(1);
+    // The retry is due 2 s after the plan, but the claim's lease holds the row until the enqueue ends.
+    const retryAt = (await store().read(h.scope)).team.homeOperations.find(row => row.sequence === h.op.sequence)!.retryAt!;
+    expect(retryAt).toBe(VECTOR_NOW + 3000);
+    expect(await rows(h.scope)).toMatchObject([{ next_at: String(VECTOR_NOW + 1000 + 20_000), settled_at: null }]);
+    clock = retryAt;
+    expect(await sender({ homes: () => slow }).run()).toEqual({ steps: 0, failed: [] });
+    expect(enqueued).toHaveLength(1);
+    release();
+    expect(await first).toEqual({ steps: 1, failed: [] });
+    expect(await rows(h.scope)).toMatchObject([{ next_at: String(retryAt), settled_at: null }]);
+  });
+
   it('flushes once when two senders run on one operation: the lease holds the second', async () => {
     const h = await retried();
     let release!: () => void, reads = 0;

@@ -141,9 +141,10 @@ export type CardClaim = { kind: 'none' } | { kind: 'ended' } | { kind: 'call'; t
 type HomeOperation = CollaborationState['team']['homeOperations'][number];
 /**
  * The sender's view of one Agent home claim (#793 S13). `none`: nothing to flush now. `flush`: read back each request of
- * `op` in order, then settle with `retries` (the operation's retry count at the claim) as the fence.
+ * `op` in order, then settle with `retries` (the operation's retry count at the claim) as the fence. `lease` is the
+ * `next_at` that the claim wrote; a settle that plans an enqueue keeps it until `homeEnqueued`.
  */
-export type HomeClaim = { kind: 'none' } | { kind: 'flush'; op: HomeOperation; retries: number };
+export type HomeClaim = { kind: 'none' } | { kind: 'flush'; op: HomeOperation; retries: number; lease: number };
 /** One settle of an Agent home flush: a terminal readback, a retry plan (no request is terminal), or a step that threw. */
 export type HomeStep = { terminal: HomeReadback } | { retry: true } | { error: unknown };
 /** The outbox key of an Agent home operation's row. */
@@ -787,7 +788,7 @@ export class HostedCollaborationStore {
       const leased = await client.query(`UPDATE outbox SET next_at = $3 + $4
         WHERE scope = $1 AND key = $2 AND kind = 'home' AND settled_at IS NULL AND next_at <= $3`, [key, row, now, leaseMs]);
       if (!leased.rowCount) return { value: { kind: 'none' }, outbox: [] };
-      return { value: { kind: 'flush', op: structuredClone(op), retries: op.retries.length }, outbox: [] };
+      return { value: { kind: 'flush', op: structuredClone(op), retries: op.retries.length, lease: now + leaseMs }, outbox: [] };
     }), false);
   }
 
@@ -796,11 +797,21 @@ export class HostedCollaborationStore {
    * `applyHomeTerminal` (its projection reaches the outbox), a retry runs `planHomeRetry` and returns the request to enqueue,
    * an error runs `failHomeFlush`. It applies only while the operation is pending with `retries` retries; otherwise it writes
    * nothing and returns `undefined`. It returns the retry count after the step, the fence of the next step. The home index
-   * writes the row's `next_at` or `settled_at` in the same transaction.
+   * writes the row's `next_at` or `settled_at` in the same transaction. A retry that plans an enqueue then puts `next_at`
+   * back to the claim's `lease`: the enqueue runs after this transaction, and no other sender may claim the row before
+   * `homeEnqueued` publishes the new `retryAt`.
    */
-  settleHome(scope: string, sequence: number, retries: number, step: HomeStep, clock: () => number):
+  settleHome(scope: string, sequence: number, retries: number, step: HomeStep, clock: () => number, lease: number):
     Promise<{ retries: number; enqueue?: HomeOperation['request'] } | undefined> {
-    return this.transaction(client => this.decideIn(client, storedKey(scope), undefined, async (state, publish) => {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      const settled = await this.settleHomeIn(client, key, sequence, retries, step, clock);
+      if (settled?.enqueue) await setHomeDue(client, key, homeRowKey(sequence), lease);
+      return settled;
+    }, false);
+  }
+  private settleHomeIn(client: PoolClient, key: string, sequence: number, retries: number, step: HomeStep, clock: () => number) {
+    return this.decideIn(client, key, undefined, async (state, publish) => {
       const now = clock(), op = state.team.homeOperations.find(o => o.sequence === sequence);
       if (!op || op.status !== 'pending' || op.retries.length !== retries) return { value: undefined, outbox: [] };
       const published = new Set<string>();
@@ -809,20 +820,26 @@ export class HostedCollaborationStore {
       else if ('retry' in step) enqueue = structuredClone(planHomeRetry(op, now));
       else failHomeFlush(op, step.error);
       return { value: { retries: op.retries.length, ...enqueue ? { enqueue } : {} }, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now };
-    }), false);
+    });
   }
 
   /**
-   * K8 `homeEnqueued` after the enqueue of the operation's latest request (#793 S13), fenced like `settleHome`. Returns false
-   * when the operation moved on.
+   * K8 `homeEnqueued` after the enqueue of the operation's latest request (#793 S13), fenced like `settleHome`. It ends the
+   * flush's lease: the row is due at the operation's `retryAt`. Returns false when the operation moved on.
    */
   homeEnqueued(scope: string, sequence: number, retries: number, clock: () => number): Promise<boolean> {
-    return this.transaction(client => this.decideIn(client, storedKey(scope), undefined, async state => {
-      const now = clock(), op = state.team.homeOperations.find(o => o.sequence === sequence);
-      if (!op || op.status !== 'pending' || op.retries.length !== retries) return { value: false, outbox: [] };
-      homeEnqueued(op, now);
-      return { value: true, outbox: [], now };
-    }), false);
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      const retryAt = await this.decideIn(client, key, undefined, async state => {
+        const now = clock(), op = state.team.homeOperations.find(o => o.sequence === sequence);
+        if (!op || op.status !== 'pending' || op.retries.length !== retries) return { value: undefined, outbox: [] };
+        homeEnqueued(op, now);
+        return { value: op.retryAt!, outbox: [], now };
+      });
+      if (retryAt === undefined) return false;
+      await setHomeDue(client, key, homeRowKey(sequence), retryAt);
+      return true;
+    }, false);
   }
 
   /**
@@ -1190,7 +1207,7 @@ export class HostedCollaborationStore {
         await client.query(`INSERT INTO outbox (scope, key, ordinal, kind, next_at) SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'home', $3
           FROM outbox WHERE scope = $1`, [scopeKey, row, op.retryAt ?? 0]);
       } else if (was.retryAt !== op.retryAt) {
-        await client.query(`UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2 AND kind = 'home' AND settled_at IS NULL`, [scopeKey, row, op.retryAt ?? 0]);
+        await setHomeDue(client, scopeKey, row, op.retryAt ?? 0);
       }
     }
   }
@@ -1223,6 +1240,11 @@ export class HostedCollaborationStore {
   private transaction<T>(work: (client: PoolClient) => Promise<T>, readOnly: boolean): Promise<T> {
     return inSchema(this.pool, this.schema, work, readOnly);
   }
+}
+
+/** Moves the `next_at` of an unsettled home row: the home index, a flush that keeps its lease, and the end of that lease. */
+async function setHomeDue(client: PoolClient, scopeKey: string, row: string, at: number): Promise<void> {
+  await client.query(`UPDATE outbox SET next_at = $3 WHERE scope = $1 AND key = $2 AND kind = 'home' AND settled_at IS NULL`, [scopeKey, row, at]);
 }
 
 /** Runs `work` in one transaction with `search_path` set to `schema`. A throw rolls back every row. */

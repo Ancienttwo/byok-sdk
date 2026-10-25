@@ -575,7 +575,9 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
     identity conflict`. `store.settleHome`, fenced by the operation still pending with the claim's retry count, then
     applies a terminal (`applied` or `idempotent` readies the Bot; any other status fails the operation and publishes
     `persona-failed:<sequence>`), or plans the retry (`planHomeRetry`, a new durable request id once `retryAt` passed). The
-    sender then enqueues the latest request (the SDK `enqueueAgentHomeProjection`) and runs `homeEnqueued`.
+    sender then enqueues the latest request (the SDK `enqueueAgentHomeProjection`) and runs `homeEnqueued`. The claim's
+    lease holds the row through that enqueue: the settle that plans a retry keeps it, and `homeEnqueued` moves the row to
+    the operation's `retryAt`, so no other sender enqueues the same operation meanwhile.
   - A read or enqueue that throws, or outlasts `sendTimeoutMs`, is the operation's error (`failHomeFlush`): it stays
     pending and is looked at again when its lease passes. L awaits these calls with no deadline.
   - **H enqueues at `retryAt`; L enqueues again at each pass.** The enqueue is idempotent by request id, so H skips L's
@@ -768,7 +770,7 @@ three and runs these suites.
   once `retryAt` has passed a retry with the next request id and a backoff; a Bot with an open intent waits without
   blocking another Bot; a Bot's later operation is not read while its oldest one is pending. H tests (`homes.test.ts`) add
   the home row of a committed operation (`retry_persona`) with its lease and settle, the row at `retryAt` after an
-  enqueue, two senders on one operation, the wait of a busy Bot, a read timeout, a Host with no home port, and, on the
+  enqueue, the lease kept through a retry enqueue, two senders on one operation, the wait of a busy Bot, a read timeout, a Host with no home port, and, on the
   hosted SDK with a paired daemon, a Bot readied through the real `enqueueAgentHomeProjection` whose Turn then freezes.
 - The Host job tests (`host-jobs.test.ts`) port the cases of K4 `host-jobs.test.ts` through the scheduler and the sender:
   a summary stored once with a settled row and no intent; the Bot policy kept apart from Host code, and the definition
