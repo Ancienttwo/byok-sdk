@@ -118,6 +118,27 @@
         "vitest": "^4.1.10",
       },
     },
+    "examples/hosted-bot-collaboration-worker": {
+      "name": "@byok-sdk/example-hosted-bot-collaboration-worker",
+      "version": "0.0.1",
+      "dependencies": {
+        "@byok-sdk/cloud": "workspace:*",
+        "@byok-sdk/cloud-dataplane": "workspace:*",
+        "@byok-sdk/example-bot-collaboration": "workspace:*",
+        "@byok-sdk/example-host-execution-core": "workspace:*",
+        "@byok-sdk/example-hosted-bot-collaboration": "workspace:*",
+        "pg": "^8.22.0",
+      },
+      "devDependencies": {
+        "@byok-sdk/client": "workspace:*",
+        "@types/node": "^24",
+        "@types/pg": "^8.20.4",
+        "tsx": "^4.19.2",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10",
+        "wrangler": "4.123.0",
+      },
+    },
     "examples/live-activity-host": {
       "name": "@byok-sdk/example-live-activity-host",
       "version": "0.0.1",
@@ -414,6 +435,8 @@
     "@byok-sdk/example-host-execution-core": ["@byok-sdk/example-host-execution-core@workspace:examples/host-execution-core"],
 
     "@byok-sdk/example-hosted-bot-collaboration": ["@byok-sdk/example-hosted-bot-collaboration@workspace:examples/hosted-bot-collaboration"],
+
+    "@byok-sdk/example-hosted-bot-collaboration-worker": ["@byok-sdk/example-hosted-bot-collaboration-worker@workspace:examples/hosted-bot-collaboration-worker"],
 
     "@byok-sdk/example-live-activity-host": ["@byok-sdk/example-live-activity-host@workspace:examples/live-activity-host"],
 
