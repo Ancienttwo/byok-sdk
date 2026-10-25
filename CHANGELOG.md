@@ -470,6 +470,14 @@
   scan wake key names the tenant, and there is no memory state. `discard()`
   deletes every row of a tenant and closes the ledger, for an aborted import.
   The K4 index exports `LedgerDump` and its row types.
+- **Fix (examples)** — H's due and routine schedulers keep their backoff in
+  Postgres (#794 H1): `scope.retry_at` and `routine.retry_at`. A scope whose
+  sync throws or stays due, and a routine whose fire throws or is fenced, wait
+  out `backoffMs` across scheduler instances and processes, so a Worker
+  invocation no longer retries them on every pass. A backoff holds only for the
+  due time or slot it was set on: the store write that moves `due_at` or
+  `next_at` clears it. The in-memory maps are gone. H DDL adds the two columns;
+  no SDK or wire change.
 - **Feature (examples)** — K8 gains the owner switch format (#975 slice 2):
   the `./migration` entry, also exported from the K8 root. `SwitchExport`
   version 1 holds one whole coordination domain (an L tenant or an H scope) in

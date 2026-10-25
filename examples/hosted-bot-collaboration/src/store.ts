@@ -1243,7 +1243,8 @@ export class HostedCollaborationStore {
     }
     await this.writeOutbox(client, key, outbox, published);
     // The scope's due time is a projection of the state that this transaction commits (#793 S4).
-    await client.query('UPDATE scope SET due_at = $2 WHERE scope = $1 AND due_at IS DISTINCT FROM $2', [key, await this.dueAt(client, key, state)]);
+    // A new due time is new work, so it clears the scheduler's backoff (#794 H1).
+    await client.query('UPDATE scope SET due_at = $2, retry_at = NULL WHERE scope = $1 AND due_at IS DISTINCT FROM $2', [key, await this.dueAt(client, key, state)]);
     return value;
   }
 
