@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg';
 import { applyPlan, auditCalendarError, canonical, DEFAULT_RETRY, hash, nextWake, recordOccurrence, routineCommands, scheduleNext, switchVersion,
-  versionSwitchDue, type FrozenInput, type Intent, type LedgerState, type Occurrence, type Routine, type RoutineCommands,
-  type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
+  versionSwitchDue, type FrozenInput, type HostJobHandler, type Intent, type Json, type LedgerState, type Occurrence, type Routine,
+  type RoutineCommands, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import { BOT_ROUTINE, createDefinition, owned, routineCalendar, routineTurn, updateDefinition } from '@byok-sdk/example-bot-collaboration/routines';
 import type { CommandPorts } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { storedKey } from './layout';
@@ -18,23 +18,28 @@ export interface RoutineSlice {
 type RoutineRow = { id: string; definition: RoutineDefinition; pending: RoutineDefinition | null; lifecycle: Routine['lifecycle'];
   status: Routine['status']; next_at: string | null; calendar_errors: Routine['calendarErrors'] | null };
 type OccurrenceRow = { key: string; routine_id: string; definition_version: number; trigger_kind: Occurrence['trigger']['kind']; planned_at: string;
-  recorded_at: string; next_at: string | null; execution_superseded: boolean };
+  recorded_at: string; next_at: string | null; execution_superseded: boolean; job: { summary?: Json } | null };
 type IntentRow = OccurrenceRow & { intent_key: string; ordinal: string; agent: string; input: FrozenInput; wait_until: string; tries: number;
   retry_until: string | null; cancel_reason: Intent['cancelReason'] | null };
 
 const OCCURRENCE_COLUMNS = `o.key, o.routine_id, o.definition_version, o.trigger_kind, o.planned_at::text, o.recorded_at::text, o.next_at::text,
-  o.execution_superseded`;
+  o.execution_superseded, o.job`;
 // The intent key of an occurrence: JSON.stringify(`occurrence:${key}`). A K4 occurrence key is hex, so JSON adds no escapes.
 const INTENT_OF = `'"occurrence:' || (o.key::json #>> '{}') || '"'`;
 // The occurrence key of a routine intent, so the join uses the occurrence primary key: 'occurrence:' is 11 characters.
 const OCCURRENCE_OF = `'"' || substr(i.key::json #>> '{}', 12) || '"'`;
 const slot = (id: string, version: number, at: number) => `${id}:${version}:${at}`;
+/** The outbox key of the Host job row of occurrence `occurrenceKey` (#793 S14). */
+export const hostJobRowKey = (occurrenceKey: string) => JSON.stringify(['host_job', occurrenceKey]);
 
 function occurrence(row: OccurrenceRow, intentKey?: string): Occurrence {
   const routineId = JSON.parse(row.routine_id) as string, plannedAt = Number(row.planned_at);
+  const superseded = row.execution_superseded ? { executionSuperseded: true as const } : {};
+  // A Host job keeps its tries in its outbox row, so `attempts` here is 0: no K4 routine rule reads it.
+  const pending = row.job ? { job: { attempts: 0, ...row.job, ...superseded } } : { hook: superseded };
   return { key: JSON.parse(row.key) as string, routineId, definitionVersion: row.definition_version, trigger: { kind: row.trigger_kind, plannedAt },
     wakeKey: slot(routineId, row.definition_version, plannedAt), recordedAt: Number(row.recorded_at), nextAt: row.next_at === null ? null : Number(row.next_at),
-    attempts: 0, hook: row.execution_superseded ? { executionSuperseded: true } : {}, ...(intentKey === undefined ? {} : { intentId: hash(intentKey) }) };
+    attempts: 0, ...pending, ...(intentKey === undefined ? {} : { intentId: hash(intentKey) }) };
 }
 
 /**
@@ -79,8 +84,9 @@ const routineColumns = (routine: Routine) => [JSON.stringify(routine.definition)
  * Writes the slice diff: routine rows, the superseded flag and the conclusion of an occurrence with no intent, and the
  * `retry_until` and conclusion of loaded intents. The K4 fields with no H reader stay behind: the slice outbox,
  * `attempts`, `slotReplayCount`, `ignoredWakes`, `sequence`, and the conclusion that K4 copies onto a promoted occurrence.
- * A promotion writes its own intent row. Only the scheduler's fire adds an occurrence: `recorded` is its key. The caller
- * holds the scope lock.
+ * A promotion writes its own intent row. Only the scheduler's fire adds an occurrence: `recorded` is its key. A Host job
+ * occurrence gets its `host_job` outbox row with it, in place of the K4 `host-job:<key>` row (#793 S14); only the Host job
+ * settle writes its summary. The caller holds the scope lock.
  */
 export async function writeSlice(client: PoolClient, scopeKey: string, slice: RoutineSlice, recorded?: string): Promise<void> {
   const { state, before } = slice;
@@ -91,7 +97,7 @@ export async function writeSlice(client: PoolClient, scopeKey: string, slice: Ro
     if (next && (next.payload !== undefined || next.dedupKey !== slot(definition.id, definition.version, next.availableAt))) {
       throw new Error('A routine reservation differs from its stored slot');
     }
-    if (definition.hostOccurrence?.type !== BOT_ROUTINE) throw new Error('H runs only bot-routine routines');
+    if (definition.hostOccurrence?.type !== BOT_ROUTINE && !definition.hostJob) throw new Error('H runs only bot-routine and Host job routines');
     const prior = before.routines[id];
     if (!prior) {
       await client.query(`INSERT INTO routine (scope, id, ordinal, definition, pending, lifecycle, status, next_at, calendar_errors)
@@ -104,18 +110,23 @@ export async function writeSlice(client: PoolClient, scopeKey: string, slice: Ro
   }
   for (const [key, row] of Object.entries(state.occurrences)) {
     const prior = before.occurrences[key];
-    if (row.job) throw new Error('H runs no Host job routines');
     if (!prior) {
       if (key !== recorded) throw new Error('H records occurrences only in its scheduler');
-      await client.query(`INSERT INTO occurrence (scope, key, ordinal, routine_id, definition_version, trigger_kind, planned_at, recorded_at, next_at)
-        SELECT $1, $2, coalesce(max(ordinal) + 1, 0), $3, $4, $5, $6, $7, $8 FROM occurrence WHERE scope = $1`,
-      [scopeKey, storedKey(key), storedKey(row.routineId), row.definitionVersion, row.trigger.kind, row.trigger.plannedAt, row.recordedAt, row.nextAt]);
+      await client.query(`INSERT INTO occurrence (scope, key, ordinal, routine_id, definition_version, trigger_kind, planned_at, recorded_at, next_at, job)
+        SELECT $1, $2, coalesce(max(ordinal) + 1, 0), $3, $4, $5, $6, $7, $8, $9::json FROM occurrence WHERE scope = $1`,
+      [scopeKey, storedKey(key), storedKey(row.routineId), row.definitionVersion, row.trigger.kind, row.trigger.plannedAt, row.recordedAt, row.nextAt,
+        row.job ? '{}' : null]);
+      if (row.job) {
+        await client.query(`INSERT INTO outbox (scope, key, ordinal, kind) SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'host_job'
+          FROM outbox WHERE scope = $1`, [scopeKey, hostJobRowKey(key)]);
+      }
       continue;
     }
     if (prior.intentId !== undefined || row.intentId !== undefined) continue;
-    if (!!row.hook?.executionSuperseded !== !!prior.hook?.executionSuperseded || row.conclusion !== prior.conclusion) {
+    const superseded = (o: Occurrence) => !!(o.job ?? o.hook)?.executionSuperseded;
+    if (superseded(row) !== superseded(prior) || row.conclusion !== prior.conclusion) {
       await client.query(`UPDATE occurrence SET execution_superseded = $3, conclusion = $4 WHERE scope = $1 AND key = $2 AND conclusion IS NULL`,
-        [scopeKey, storedKey(key), !!row.hook?.executionSuperseded, row.conclusion ?? null]);
+        [scopeKey, storedKey(key), superseded(row), row.conclusion ?? null]);
     }
   }
   for (const [id, prior] of Object.entries(before.intents)) {
@@ -153,7 +164,7 @@ export function dueRoutine(slice: RoutineSlice, id: string, now: number): Routin
 export function recordDue(slice: RoutineSlice, scope: string, routine: Routine, now: number): Occurrence {
   const { dedupKey, availableAt } = routine.next!;
   const occurrence = recordOccurrence(slice.state, scope, { wakeId: dedupKey, dedupKey, availableAt, deliveredAt: now, delivery: 1 }, now, routineCalendar);
-  if (!occurrence?.hook) throw new Error('A due routine slot recorded no occurrence');
+  if (!occurrence?.hook && !occurrence?.job) throw new Error('A due routine slot recorded no occurrence');
   return occurrence;
 }
 
@@ -171,7 +182,10 @@ export function planSlice(slice: RoutineSlice, now: number, phase: 'start' | 'pa
   }
 }
 
-/** H runs only `bot-routine` routines (#793 §53c). Host-job and execution-template routines need a later slice. */
+/**
+ * A Bot and the owner add only `bot-routine` routines (#793 §53c). Host code adds Host job routines through `hostJobCommands`
+ * (#793 S14). An `execution` routine stays refused: no K8 Turn could settle its intent.
+ */
 function botRoutineOnly(definition: RoutineDefinition): void {
   if (definition.hostOccurrence?.type !== BOT_ROUTINE || definition.execution !== undefined || definition.hostJob !== undefined) {
     throw new Error('H runs only bot-routine routines');
@@ -184,6 +198,24 @@ export function hostedRoutineCommands(slice: RoutineSlice, now: number): Routine
   return { ...commands,
     create: definition => { botRoutineOnly(definition); commands.create(definition); },
     update: definition => { botRoutineOnly(definition); commands.update(definition); } };
+}
+/**
+ * The K4 routine commands of the Host's own Host job routines (#793 S14), as L's `core.addRoutine`, `updateRoutine` and
+ * `lifecycle`, with the Host's handlers. They take only Host job routines, so a Bot routine stays under its Bot policy.
+ */
+export function hostJobCommands(slice: RoutineSlice, now: number, hostJobs: ReadonlyMap<string, HostJobHandler>): Omit<RoutineCommands, 'list'> {
+  const commands = routineCommands(slice.state, { now: () => now, nextTime: routineCalendar, hostJobs, occurrenceHooks: new Map() });
+  const hostJobOnly = (definition: RoutineDefinition) => {
+    if (definition.hostJob === undefined) throw new Error('Host code adds only Host job routines');
+  };
+  return {
+    create: definition => { hostJobOnly(definition); commands.create(definition); },
+    update: definition => { hostJobOnly(definition); commands.update(definition); },
+    lifecycle: (id, lifecycle) => {
+      if (!commands.list().find(row => row.definition.id === id)?.definition.hostJob) throw new Error('No Host job routine has this id');
+      commands.lifecycle(id, lifecycle);
+    },
+  };
 }
 /** The outcome ports of the routine actions of task `taskId`, with the K8 Bot policy, as L binds them (K8 host.ts:291-293). */
 export function outcomeRoutinePorts(slice: RoutineSlice, now: number, taskId: string): Pick<NonNullable<CommandPorts['outcome']>,

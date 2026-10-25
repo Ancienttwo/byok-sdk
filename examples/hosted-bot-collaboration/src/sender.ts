@@ -1,9 +1,10 @@
 import type { Pool } from 'pg';
-import type { Json } from '@byok-sdk/example-host-execution-core';
+import { validateJson, type Json } from '@byok-sdk/example-host-execution-core';
 import type { ChannelPort } from '@byok-sdk/example-bot-collaboration/channel';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { checkHomeReadback, homeRequests, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
-import { CONNECTOR_TIMEOUT, inSchema, lockScope, type DeliveryTimes, type HomeClaim, type HomeStep, type HostedCollaborationStore } from './store';
+import { CONNECTOR_TIMEOUT, errorText, HOST_JOB_EXECUTION_UNSUPPORTED, inSchema, lockScope, type DeliveryTimes, type HomeClaim, type HomeStep,
+  type HostedCollaborationStore, type HostJobOutcome } from './store';
 
 /**
  * The Host's projection receiver. It must deduplicate by `(scope, id)`: a send is at least once, as K4's projection flush
@@ -31,6 +32,11 @@ export interface SenderOptions {
   connector?: CardConnector;
   /** The deadline of one connector call, as L's `connectorTimeoutMs`. Default 30 s. With a connector, `leaseMs` must be longer. */
   connectorTimeoutMs?: number;
+  /**
+   * The deadline of one Host job handler run (#793 S14); its signal aborts then. Default 30 s. With Host job handlers in the
+   * store, `leaseMs` must be longer.
+   */
+  hostJobTimeoutMs?: number;
   /** The Agent home calls of the tenant that owns `scope`. Absent: the Host has no home port, and a home row fails. */
   homes?: (scope: string) => HostedHomePort;
   /**
@@ -51,15 +57,16 @@ export interface SenderOptions {
   batch?: number;
 }
 /**
- * A row whose step threw, or a projection send or delivery readback that failed. The pass went on with the next row. `id` is
- * the row's id: a projection or delivery id, `['card', cardId]` or `['home', sequence]`.
+ * A row whose step threw, a projection send or delivery readback that failed, or a Host job run that failed. The pass went on
+ * with the next row. `id` is the row's id: a projection or delivery id, `['card', cardId]`, `['home', sequence]` or
+ * `['host_job', occurrenceKey]`.
  */
 export interface SendFailure { scope: string; id: OutboxId; error: unknown }
-export type OutboxId = string | readonly ['card', string] | readonly ['home', number];
+export type OutboxId = string | readonly ['card', string] | readonly ['home', number] | readonly ['host_job', string];
 /** `steps`: the rows on which this pass changed something, a send among them. */
 export interface SendPass { steps: number; failed: SendFailure[] }
 
-type DueRow = { scope: string; key: string; kind: 'projection' | 'delivery' | 'card' | 'home' };
+type DueRow = { scope: string; key: string; kind: 'projection' | 'delivery' | 'card' | 'home' | 'host_job' };
 
 /**
  * The H outbox sender (#793 D2b-out-2). One pass reads the unsettled rows that are due, across scopes, and runs each in its
@@ -75,12 +82,16 @@ type DueRow = { scope: string; key: string; kind: 'projection' | 'delivery' | 'c
  *   and takes a lease, the readbacks and the enqueue run with no lock, and each settle is fenced by the operation's retry
  *   count. The operation is the authority: its `retryAt` is the row's `next_at`, so H enqueues at `retryAt` where L enqueues
  *   again at each pass.
+ * - A Host job runs K4 `runHostJobs` for one occurrence (#793 S14): the claim (`claimHostJob`) takes a try and a lease, the
+ *   handler runs with no lock and `hostJobTimeoutMs`, and the settle (`settleHostJob`) is fenced by that try. A handler that
+ *   throws, times out or returns no JSON summary keeps the occurrence pending, and the row waits `backoffMs`.
  */
 export class HostedOutboxSender {
   private readonly now: () => number;
   private readonly times: DeliveryTimes;
   private readonly sendTimeoutMs: number;
   private readonly connectorTimeoutMs: number;
+  private readonly hostJobTimeoutMs: number;
   private readonly backoffMs: number;
   private readonly batch: number;
 
@@ -100,6 +111,11 @@ export class HostedOutboxSender {
       || options.connector && this.times.leaseMs <= this.connectorTimeoutMs) {
       throw new Error('The outbox lease must be longer than the connector timeout');
     }
+    this.hostJobTimeoutMs = options.hostJobTimeoutMs ?? 30_000;
+    if (!Number.isSafeInteger(this.hostJobTimeoutMs) || this.hostJobTimeoutMs < 1 || this.hostJobTimeoutMs > 2_147_483_647
+      || store.hostJobs.size > 0 && this.times.leaseMs <= this.hostJobTimeoutMs) {
+      throw new Error('The outbox lease must be longer than the Host job timeout');
+    }
   }
 
   async run(): Promise<SendPass> {
@@ -114,6 +130,7 @@ export class HostedOutboxSender {
       try {
         const step = row.kind === 'card' ? await this.call(scope, (id as readonly ['card', string])[1], changed)
           : row.kind === 'home' ? await this.home(scope, (id as readonly ['home', number])[1], changed)
+          : row.kind === 'host_job' ? await this.job(scope, (id as readonly ['host_job', string])[1])
           : row.kind === 'projection' ? await this.project(row.scope, row.key, scope, id as string) : await this.deliver(scope, id as string);
         if (step === false) continue;
         pass.steps++;
@@ -122,7 +139,7 @@ export class HostedOutboxSender {
         pass.failed.push({ scope, id, error });
         // A failure to write the wait is a store failure, not a row failure, so it ends the pass. It keeps the step error.
         try { await this.store.deferOutbox(scope, id, this.now, this.backoffMs); }
-        catch (deferError) { throw new AggregateError([deferError, error], message(deferError)); }
+        catch (deferError) { throw new AggregateError([deferError, error], errorText(deferError)); }
       }
     }
     for (const scope of changed) this.options.changed?.(scope);
@@ -180,12 +197,39 @@ export class HostedOutboxSender {
     return true;
   }
 
+  /**
+   * J1-J3 of one Host job row: claim, one handler run, fenced settle. The result checks are K4's: a summary is required and
+   * must be JSON. A result that also carries `execution` is settled as `failed` and reported as this row's failure. Returns
+   * false when the claim found nothing to run, or when another claim took the row before the settle.
+   */
+  private async job(scope: string, occurrenceKey: string): Promise<boolean | { error: unknown }> {
+    const claim = await this.store.claimHostJob(scope, occurrenceKey, this.now, this.times.leaseMs);
+    if (claim.kind === 'none') return false;
+    let outcome: HostJobOutcome;
+    try {
+      const handler = this.store.hostJobs.get(claim.run.type);
+      if (typeof handler !== 'function') throw new Error('Host job handler not registered');
+      const result = await this.within(this.hostJobTimeoutMs, HOST_JOB_TIMEOUT, signal => Promise.resolve(handler({ ...claim.run, signal })));
+      if (!result || !Object.hasOwn(result, 'summary')) throw new Error('Host job result requires a summary');
+      validateJson(result.summary);
+      outcome = { summary: structuredClone(result.summary), unsupported: result.execution !== undefined };
+    } catch (error) { outcome = { error }; }
+    // A settle that another claim fenced out wrote nothing, so this run reports nothing.
+    if (!await this.store.settleHostJob(scope, occurrenceKey, claim.tries, outcome, this.now, this.backoffMs)) return false;
+    if ('error' in outcome) return { error: outcome.error };
+    return outcome.unsupported ? { error: new Error(HOST_JOB_EXECUTION_UNSUPPORTED) } : true;
+  }
+
   /** A connector call with an abort signal, which rejects with L's timeout error after `connectorTimeoutMs`. */
-  private async callDeadline<T>(call: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  private callDeadline<T>(call: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    return this.within(this.connectorTimeoutMs, CONNECTOR_TIMEOUT, call);
+  }
+  /** Runs `call` with an abort signal, and aborts it and rejects with `Error(timeout)` after `ms`. */
+  private async within<T>(ms: number, timeout: string, call: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => { const error = new Error(CONNECTOR_TIMEOUT); controller.abort(error); reject(error); }, this.connectorTimeoutMs);
+      timer = setTimeout(() => { const error = new Error(timeout); controller.abort(error); reject(error); }, ms);
     });
     try { return await Promise.race([Promise.resolve().then(() => call(controller.signal)), deadline]); }
     finally { clearTimeout(timer); }
@@ -215,7 +259,7 @@ export class HostedOutboxSender {
           AND settled_at IS NULL`, [scopeKey, key, claim.tries, now]);
       } else {
         await client.query(`UPDATE outbox SET last_error = $4, next_at = $5 WHERE scope = $1 AND key = $2 AND tries = $3
-          AND settled_at IS NULL`, [scopeKey, key, claim.tries, message(failure.error), now + this.backoffMs]);
+          AND settled_at IS NULL`, [scopeKey, key, claim.tries, errorText(failure.error), now + this.backoffMs]);
       }
     });
     return failure ?? true;
@@ -263,7 +307,7 @@ export class HostedOutboxSender {
   }
 }
 
+const HOST_JOB_TIMEOUT = 'Host job timed out';
 class SendDeadline extends Error {
   constructor() { super('send_timeout'); this.name = 'SendDeadline'; }
 }
-const message = (error: unknown): string => (error instanceof Error ? error.message : String(error)).slice(0, 1024);
