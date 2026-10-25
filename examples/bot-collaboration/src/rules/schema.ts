@@ -101,8 +101,11 @@ export function outcomeOffer(offer: OutcomeOffer): CheckedOffer {
 function allow(fragments: BotTurnOutcomeFragments, names: readonly string[] | undefined): BotTurnOutcomeFragments {
   return names ? Object.fromEntries(Object.entries(fragments).filter(([name]) => names.includes(name))) : fragments;
 }
-/** The routine fields that the schema reads. The ContextPack copies the whole view. */
-export interface ContextRoutine { readonly id: string; readonly owner: string; readonly lifecycle: string }
+/**
+ * The routine fields that the schema reads. The ContextPack copies the whole view. A sealed routine (#953) changes only
+ * through a member reseal, so the schema never offers `update_routine` for it.
+ */
+export interface ContextRoutine { readonly id: string; readonly owner: string; readonly lifecycle: string; readonly definition?: { readonly sealed?: true } }
 
 /**
  * The Bot Turn prompt by line. Each sentence names the actions it describes; `null` is for every Bot Turn.
@@ -156,7 +159,8 @@ export function ownerMainTurn(state: ContextState, botId: string, turn?: Turn): 
 /** `routines` are the Bot routine views of the K4 routine rows. */
 export function outcomeSchema(botId: string, state: ContextState, turn?: Turn, models: readonly string[] = ['default'], routines: readonly ContextRoutine[] = [],
   offer?: CheckedOffer) {
-  const ids = routines.filter(r => r.owner === botId && r.lifecycle !== 'completed').map(r => r.id);
+  const owned = routines.filter(r => r.owner === botId && r.lifecycle !== 'completed'), ids = owned.map(r => r.id);
+  const updatable = owned.filter(r => !r.definition?.sealed).map(r => r.id);
   const timeZones = (offer?.timeZones ?? DEFAULT_TIME_ZONES) as unknown as NonEmptyIds;
   const compose = (scheduleShape: RoutineScheduleShape) => {
     const fragments: BotTurnOutcomeFragments = turn?.source === 'room_slot' ? (() => {
@@ -171,10 +175,8 @@ export function outcomeSchema(botId: string, state: ContextState, turn?: Turn, m
       ask_user: f.askUser(),
       confirmable_action: f.confirmableAction({ actions: (offer?.confirmable ?? DEFAULT_CONFIRMABLE) as [ConfirmableSpec, ...ConfirmableSpec[]] }),
       create_routine: f.createRoutine({ localIds: ['new_routine_1'], timeZones, scheduleShape }),
-      ...(ids.length ? {
-        update_routine: f.updateRoutine({ routineIds: ids as unknown as NonEmptyIds, timeZones, scheduleShape }),
-        cancel_routine: f.cancelRoutine({ routineIds: ids as unknown as NonEmptyIds }),
-      } : {}),
+      ...(updatable.length ? { update_routine: f.updateRoutine({ routineIds: updatable as unknown as NonEmptyIds, timeZones, scheduleShape }) } : {}),
+      ...(ids.length ? { cancel_routine: f.cancelRoutine({ routineIds: ids as unknown as NonEmptyIds }) } : {}),
     }, offer?.actions?.turn);
     if (ownerMainTurn(state, botId, turn)) {
       const open = openDelegations(state).items.map(d => d.id);

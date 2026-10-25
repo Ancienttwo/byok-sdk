@@ -388,6 +388,16 @@
   holds the intent with its phase and generation. L wires it to its owner
   records, so K4 sends nothing to a frozen device, the timer drain and direct
   `bot.core` calls included.
+- **Added (examples)** — sealed Bot routines in K8 (#953, #654 E3d-4). A
+  Bot routine may hold a member-sealed Turn instruction for each version:
+  `sealedDefinition` and `resealDefinition` check the routine id, the version,
+  the categories (exactly `task-input`) and the Agent revision, and a sealed
+  routine never turns plain. Its occurrence Turn has no request; the sync
+  freezes it from the Host's `sealedTemplate` lookup into a sealed offer with
+  the template byte for byte and `routineRef`, and no instruction or
+  ContextPack. A missing template or a changed Agent ends the Turn `failed`
+  and never blocks it. The outcome schema offers `update_routine` for no
+  sealed routine. L has no sealed dispatch. No wire, SDK or SQL change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

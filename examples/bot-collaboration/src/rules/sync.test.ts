@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEVICE_NOT_BOUND, DEVICE_SWITCHING, syncTurn, type DeviceRefusal, type FreezeExecution, type SyncFacts, type SyncOptions, type SyncRefusal,
-  type SyncState } from './sync';
+import { DEVICE_NOT_BOUND, DEVICE_SWITCHING, syncTurn, type DeviceRefusal, type FreezeExecution, type SealedRoutineTemplate, type SyncFacts, type SyncOptions,
+  type SyncRefusal, type SyncState } from './sync';
 import type { Json, Rejection, Turn } from './turn';
 import type { IntentFact } from './delegation';
 import { outcomeOffer, SYSTEM_PROMPT, systemPrompt, type CheckedOffer } from './schema';
@@ -151,6 +151,55 @@ describe('syncTurn', () => {
     for (const external of [true, false]) {
       expect(prompt(external)).toBe(SYSTEM_PROMPT);
       expect(prompt(external, outcomeOffer({ timeZones: ['Asia/Shanghai'] }))).toBe(SYSTEM_PROMPT);
+    }
+  });
+});
+
+describe('a sealed routine Turn (#953)', () => {
+  const agentRef = { agentId: 'main', profileRevision: '1' };
+  const sealedTemplate: SealedRoutineTemplate = {
+    sealing: { scopeId: 'scope-1', epoch: 1, categories: ['task-input'] }, agentRef, notAfter: '2099-01-01T00:00:00.000Z',
+    template: { ciphertext: 'c' } as unknown as SealedRoutineTemplate['template'],
+  };
+  const ref = { routineId: 'r-1', definitionVersion: 2 };
+  function sealedState(revision = '1'): SyncState<FreezeExecution> {
+    const s = state();
+    const bot = s.team.bots.main!;
+    (s.team.bots as Record<string, typeof bot>).main = { ...bot, execution: { payload: { agentRef: { ...agentRef, profileRevision: revision },
+      instruction: 'template default', requiredToolsets: [] } as FreezeExecution['payload'] } };
+    return s;
+  }
+  const sealedOptions = (lookup = (r: typeof ref) => r.routineId === ref.routineId && r.definitionVersion === ref.definitionVersion ? sealedTemplate : undefined):
+    SyncOptions<never> => ({ ...OPTIONS, historyMode: true, sealedTemplate: lookup });
+
+  it('freezes the template byte for byte with its routineRef and the plaintext result contract, and no instruction or history', () => {
+    const s = sealedState(), row = turn(s, { id: 'occurrence:o1', root: 'occurrence:o1', source: 'routine', request: '', status: 'queued', sealedRoutine: ref });
+    const step = syncTurn(s, row, facts(), sealedOptions(), () => {});
+    expect(step?.kind).toBe('routine');
+    const { payload } = (step as { execution: { payload: Record<string, unknown> } }).execution;
+    expect(payload).not.toHaveProperty('instruction');
+    expect(payload).toMatchObject({ agentRef, requiredToolsets: [], sealing: sealedTemplate.sealing, sealed: sealedTemplate.template,
+      routineRef: { ...ref, notAfter: sealedTemplate.notAfter }, terminalProjection: { mode: 'result-document', schema: s.schemas['occurrence:o1'] } });
+    expect(payload.sealed).toBe(sealedTemplate.template);
+    expect([row.status, row.request, s.rejected]).toEqual(['processing', '', []]);
+  });
+
+  it('fails and ends a Turn with no template or a changed Agent, with one projection, and never blocks it', () => {
+    for (const [s, options, reason] of [
+      [sealedState(), sealedOptions(() => undefined), 'sealed_routine_template_missing'],
+      [sealedState(), { ...OPTIONS }, 'sealed_routine_template_missing'],
+      [sealedState('2'), sealedOptions(), 'sealed_routine_agent_changed'],
+    ] as const) {
+      const row = turn(s, { id: 'occurrence:o1', root: 'occurrence:o1', source: 'routine', request: '', status: 'queued', sealedRoutine: ref });
+      const out = published();
+      expect(syncTurn(s, row, facts(), options, out.publish)).toEqual({ kind: 'ended' });
+      expect([row.status, row.conclusion, row.blockedReason]).toEqual(['failed', 'failed', undefined]);
+      expect(s.audit).toEqual([`Sealed routine Turn failed ${reason}: occurrence:o1`]);
+      expect(out.rows).toEqual([[`sealed-routine-failed:occurrence:o1`, { owner: 'main', turnId: 'occurrence:o1', ...ref, reason,
+        ...(reason === 'sealed_routine_agent_changed' ? { sealedAgentRef: agentRef } : {}),
+        agentRef: { agentId: 'main', profileRevision: reason === 'sealed_routine_agent_changed' ? '2' : '1' } }]]);
+      expect(syncTurn(s, row, facts(), options, out.publish)).toEqual({ kind: 'ended' });
+      expect(out.rows).toHaveLength(1);
     }
   });
 });
