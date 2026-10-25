@@ -365,20 +365,28 @@ mode revision in one write, and keeps the row as the tombstone.
   tombstone row in the default mode L at revision 2 (creating the scope row if needed), so a later bind of the id is
   refused.
 - Each write that can create execution checks the binding under the scope lock, and throws `DeviceBindingError`
-  unless the device has an active binding in mode H: the freeze of a new intent (so a sync that would freeze a Turn
-  for such a device throws and writes nothing), and the submit claim (the row backs off with the error).
+  unless the device has an active binding in mode H: the freeze of a new intent and the submit claim (the row backs off
+  with the error). The freeze check is the last guard: the sync reads the bindings first (next bullet).
 - Right before the SDK call, the submitter reads the binding again. A revoked or changed binding throws, so the try
   backs off with the error. It does not record an expiry.
 - The reconciliation and the message consumer do not check the binding: the result of work that started still lands
   under its own identity. A revoke does not cancel the open intents of the device. One that was not delivered concludes
   `expired` at its `wait_until`, through the claim's queued expiry or through the reconciliation, with the revoke
   reason in `last_error`. A delivered task keeps reconciling under its own identity.
-- One device with no active H binding stalls the sync of its whole scope. The sync writes every Turn of a scope in one
-  transaction, and a freeze for that device throws, so no Turn, cancel or projection of the scope is written. An
-  accepted delegation to a Bot on an unbound or revoked device triggers it too. The owner recovers with a command that
-  does not check the binding: `cancel_turn` for the Turn, `abandon_delegation` for the delegation, or a `team_snapshot`
-  that moves the Bot to a bound device. The command entry refuses a commit that adds work for such a device (see Command
-  entry); the per-Turn K8 sync refusal, which would also cover an Agent's delegation, is a later issue (§55a).
+- The sync holds a Turn whose Bot's device has no active H binding (#956, §55a). Each sync round reads, in one query,
+  the binding of each Bot's current device and answers K8's `deviceRefusal(botId)` (`unbound`, `revoked` or `mode`).
+  The K8 step then holds that Bot's Turns that have no intent: `held: 'device_not_bound'`, one `held:<turnId>`
+  projection with a fixed body, and an audit line with the reason. The rest of the scope syncs, an Agent's delegation to
+  such a Bot included. A Turn that already has an intent is not checked: its work lands under its own identity.
+- A held Turn is released by the next sync that does not hold it. The scope's due time (`scope.due_at`, written in each
+  transaction) is 0 while a held Turn's Bot device has an active binding or its Bot is archived or gone, so the due
+  scheduler syncs it at once:
+  - after `bindDevice` of that device, which writes the due time in the same transaction, the Turn freezes;
+  - after a `team_snapshot` without the Bot (or `delete_bot`), which archives it, the Turn ends `cancelled`.
+
+  A snapshot cannot move a Bot to another device: K8 keeps the device when the model changes. A held Turn on a
+  refused device adds no due time, so a revoked device does not make the scope spin. The owner can also end the Turn
+  with `cancel_turn`. The command entry still refuses a commit that adds work for a refused device (see Command entry).
 - The routine scheduler checks it before a fire (see Routines).
 
 ## Retention
@@ -583,11 +591,10 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
     `store.settleCard` writes its result or error (cut to 1024 characters) and conclusion, fenced by that try and by the
     card still waiting. A connector error or timeout is the card's outcome, as in L, not a failed step. A settle that
     finds another claim's try changes nothing.
-  - **H calls a connector at most once per card; L may call it twice.** A row that already had a try belongs to a claim
+  - **A connector runs at most once per card, in H as in L (#958).** A row that already had a try belongs to a claim
     whose lease passed with no settle (the sender stopped after the call, or its settle failed). The call may have run,
-    so the next claim ends the card with L's timeout error, `Connector timed out; external outcome is unknown`, and
-    never calls again (owner Q3 A). L records nothing before its call, so after a crash L calls the connector again at
-    its next pass.
+    so the next claim ends the card with K8's `CONNECTOR_OUTCOME_UNKNOWN`, `Connector timed out; external outcome is
+    unknown`, and never calls again (owner Q3 A).
   - **With a connector, the lease must be longer than `connectorTimeoutMs`** (the constructor refuses it otherwise). A
     Host with no connector fails a card row and waits `backoffMs`. A row whose card is gone settles with no call.
   - Each settle, and each claim that ends a card, reports its scope once per pass through the `changed` option, so the
@@ -744,7 +751,9 @@ three and runs these suites.
 - The D1 commit vectors run on the store and on a reference subject (the pure rules in memory).
 - The D2b sync vectors run on the store.
 - The message consumer tests port the K4 Host-side message vectors (`host-execution-core/src/message.test.ts`).
-- The device binding tests use an SDK tenant in memory for the submit checks.
+- The device binding tests use an SDK tenant in memory for the submit checks. The device hold tests (`device-hold.test.ts`,
+  #956) cover a refused Bot's Turn held while another Bot's Turn freezes in the same sync, the due time at once after a bind
+  that survives another transaction, and a `team_snapshot` that archives the Bot of a held Turn.
 - The K8 retention vectors (`retentionVectors`) run on the store, with H tests for message replays after retention.
 - The compaction tests cover a settled intent and its tombstone, a repeated call, a refused freeze of a retired Turn, a
   K8 veto, an unsettled row, an unknown Turn id, a routine intent, and the sync's `result_retired`.
