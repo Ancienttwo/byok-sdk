@@ -14,6 +14,7 @@ import {
   type ModelRouteChange,
   type ModelRouteContext,
   type ModelRouteDraft,
+  type ModelRouteHostEntry,
   type ModelRoutePolicy,
   type ModelRouteStoredProfile,
   type PiModelCatalogTable,
@@ -376,6 +377,51 @@ describe('Host policy', () => {
     const choice = field(draft, invalid, 'model').choices!.find((entry) => entry.value === override.model);
     expect(choice).toMatchObject({ source: 'host', status: 'unrepresentable', unrepresentable: ['maxTokens'] });
     expect(applyModelRouteChange(draft, { field: 'model', value: override.model }, invalid).model_source).toBe('manual');
+  });
+});
+
+describe('acceptance review fixes', () => {
+  const houseConfig = { contextWindow: 128000, maxTokens: 8192, reasoning: false, compat: {} };
+  const entry = (overrides: Partial<ModelRouteHostEntry>): ModelRouteHostEntry => ({
+    provider_kind: 'openai', api: 'openai-responses', model: 'house', config: houseConfig, input: ['text'], ...overrides,
+  });
+
+  /** A submission the device accepts carries the api and model the page showed. */
+  function assertDeviceAccepts(draft: ModelRouteDraft, context: ModelRouteContext): void {
+    const { profile } = persisted(draft, context);
+    expect(profile.model).toBe(draft.model);
+    const projected = profile.adapter === 'anthropic' ? 'anthropic-messages' : profile.pi_model?.api ?? 'openai-completions';
+    if (draft.model_api !== null) expect(projected).toBe(draft.model_api);
+  }
+
+  it('1: offers a Host entry as unrepresentable when its config projects another api', () => {
+    const context = modelRouteContext({ policy: { overrides: [entry({})] } });
+    const draft = named(context, { field: 'provider_kind', value: 'openai' });
+    const choice = field(draft, context, 'model').choices!.find((option) => option.value === 'house');
+    expect(choice).toMatchObject({ source: 'host', status: 'unrepresentable', unrepresentable: ['api'] });
+    const selected = applyModelRouteChange(draft, { field: 'model', value: 'house', api: 'openai-responses' }, context);
+    expect(selected.model_source).toBe('manual');
+  });
+
+  it('1: submits a Host entry whose config projects its own api, and the device stores that api', () => {
+    const context = modelRouteContext({ policy: { overrides: [entry({ config: { ...houseConfig, api: 'openai-responses' } })] } });
+    const draft = named(context,
+      { field: 'provider_kind', value: 'openai' },
+      { field: 'model', value: 'house', api: 'openai-responses' },
+      { field: 'thinking_level', value: 'off' },
+      { field: 'secret', value: { replace: 'k' } });
+    expect(draft).toMatchObject({ model_source: 'host', model_api: 'openai-responses' });
+    assertDeviceAccepts(draft, context);
+    expect(persisted(draft, context).profile.pi_model?.api).toBe('openai-responses');
+  });
+
+  it('1: refuses a declared api on a Host entry for an anthropic vendor', () => {
+    const context = modelRouteContext({ policy: { overrides: [entry({
+      provider_kind: 'minimax', api: 'anthropic-messages', config: { ...houseConfig, api: 'openai-completions' },
+    })] } });
+    const draft = named(context, { field: 'provider_kind', value: 'minimax' });
+    expect(field(draft, context, 'model').choices!.find((option) => option.value === 'house'))
+      .toMatchObject({ status: 'unrepresentable', unrepresentable: ['api'] });
   });
 });
 

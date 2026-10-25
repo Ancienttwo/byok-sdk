@@ -526,7 +526,8 @@ function modelChoices(draft: ModelRouteDraft, context: ModelRouteContext): Model
   const vendor = draft.provider_kind as ModelProviderVendorId;
   const overrides = (context.policy.overrides ?? []).filter((entry) => entry.provider_kind === vendor);
   const key = (api: string, model: string): string => `${api}\u0000${model}`;
-  const host = new Map(overrides.map((entry) => [key(entry.api, entry.model), hostListing(entry)]));
+  const adapter = modelProviderVendor(vendor)!.adapter;
+  const host = new Map(overrides.map((entry) => [key(entry.api, entry.model), hostListing(entry, adapter)]));
   const listed: { listing: PiCatalogModelListing; source: 'catalog' | 'host' }[] = [];
   for (const listing of catalogListing(context.catalog, vendor)) {
     const replaced = host.get(key(listing.api, listing.model));
@@ -546,12 +547,23 @@ function modelChoices(draft: ModelRouteDraft, context: ModelRouteContext): Model
     }));
 }
 
-function hostListing(entry: ModelRouteHostEntry): PiCatalogModelListing {
-  const levels = isRecord(entry.config) ? manualThinkingLevels(entry.config) : [];
-  const parsed = PiModelConfigSchema.safeParse({ ...(isRecord(entry.config) ? entry.config : {}), thinkingLevel: levels[0] ?? 'off' });
-  if (!parsed.success || !isRecord(entry.config) || Object.hasOwn(entry.config, 'thinkingLevel')) {
-    const paths = parsed.success ? ['thinkingLevel'] : issuePaths(parsed.error.issues);
-    return { model: entry.model, api: entry.api, status: 'unrepresentable', unrepresentable: paths };
+/**
+ * A Host entry is representable only when `PiModelConfigSchema` accepts its
+ * config and the api the vendor's adapter projects for that config is the api
+ * the entry is listed under, as for a catalog entry.
+ */
+function hostListing(entry: ModelRouteHostEntry, adapter: ModelProviderAdapter): PiCatalogModelListing {
+  const config = isRecord(entry.config) ? entry.config : undefined;
+  const levels = config === undefined ? [] : manualThinkingLevels(config);
+  const parsed = PiModelConfigSchema.safeParse({ ...config, thinkingLevel: levels[0] ?? 'off' });
+  const paths = new Set(parsed.success ? [] : issuePaths(parsed.error.issues));
+  if (config !== undefined && Object.hasOwn(config, 'thinkingLevel')) paths.add('thinkingLevel');
+  const projected = adapter === 'anthropic'
+    ? (config?.api === undefined ? 'anthropic-messages' : undefined)
+    : config?.api ?? 'openai-completions';
+  if (projected !== entry.api) paths.add('api');
+  if (!parsed.success || paths.size > 0) {
+    return { model: entry.model, api: entry.api, status: 'unrepresentable', unrepresentable: [...paths].sort() };
   }
   return {
     model: entry.model, api: entry.api, status: 'representable', input: [...entry.input],
