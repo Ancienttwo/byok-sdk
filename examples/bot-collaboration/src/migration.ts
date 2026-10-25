@@ -231,17 +231,22 @@ function occurrenceRecord(row: unknown): boolean {
     && typeof row.executionSuperseded === 'boolean' && optional(row.conclusion, conclusionText)
     && optional(row.slotReplayCount, count => time(count) && count >= 1);
 }
+// The policy K4 `validateRetry` (`model.ts`) accepts; K4 does not export it from the package index.
+function retryPolicy(retry: unknown): retry is { maxAttempts: number } {
+  return keys(retry, ['maxAttempts', 'delaysMs', 'retryFailures'])
+    && Number.isSafeInteger(retry.maxAttempts) && (retry.maxAttempts as number) >= 1 && (retry.maxAttempts as number) <= 100
+    && Array.isArray(retry.delaysMs) && retry.delaysMs.length >= (retry.maxAttempts as number) - 1 && retry.delaysMs.every(time)
+    && typeof retry.retryFailures === 'boolean';
+}
 function intentRecord(row: unknown): boolean {
   return keys(row, ['key', 'source', 'ordinal', 'agent', 'taskId', 'generation', 'input', 'waitUntil', 'retry', 'submission', 'started', 'conclusion'],
     ['handler', 'attempt', 'terminal', 'messageReceipt', 'earlierReceipts', 'preparationError', 'memoryBlocked', 'cancelReason', 'retryUntil'])
     && text(row.key) && oneOf(['user', 'bot', 'routine'])(row.source) && optional(row.handler, text) && time(row.ordinal) && text(row.agent)
     && digestText(row.taskId) && time(row.generation) && object(row.input) && time(row.waitUntil)
-    // K4 opens a generation only for a retry within `maxAttempts` (`core.ts` reconcile and begin), which also bounds the
-    // receipt check below.
-    && object(row.retry) && time(row.retry.maxAttempts) && row.generation < Math.max(row.retry.maxAttempts, 1)
+    // K4 opens a generation only for a retry within `maxAttempts` (`core.ts` reconcile and begin), and its policy is
+    // bounded by `validateRetry`, so the receipt check below walks at most 100 generations.
+    && retryPolicy(row.retry) && row.generation < row.retry.maxAttempts
     && oneOf(['reserved', 'uncertain', 'delivered'])(row.submission) && typeof row.started === 'boolean'
-    && keys(row.retry, ['maxAttempts', 'delaysMs', 'retryFailures']) && time(row.retry.maxAttempts) && typeof row.retry.retryFailures === 'boolean'
-    && Array.isArray(row.retry.delaysMs) && row.retry.delaysMs.every(time)
     && optional(row.attempt, object) && optional(row.terminal, object)
     && optional(row.messageReceipt, receiptShape)
     // Earlier generations only, each once, in generation order, and only those with a receipt.

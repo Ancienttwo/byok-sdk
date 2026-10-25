@@ -169,6 +169,11 @@ describe('switch export format (#975)', () => {
       value => { value.occurrences[0]!.slotReplayCount = 0; },
       value => { delete (value.intents[0] as { retry?: unknown }).retry; },
       value => { value.intents[0]!.retry = { maxAttempts: 3, delaysMs: [-1], retryFailures: false }; },
+      // The bounds of K4 `validateRetry`: 1 to 100 attempts, a delay for each retry.
+      value => { value.intents[0]!.retry = { maxAttempts: 0, delaysMs: [], retryFailures: false }; },
+      value => { value.intents[0]!.retry = { maxAttempts: 101, delaysMs: Array(100).fill(1), retryFailures: false }; },
+      value => { value.intents[0]!.retry = { maxAttempts: 2.5, delaysMs: [1, 1], retryFailures: false }; },
+      value => { value.intents[0]!.retry = { maxAttempts: 3, delaysMs: [300_000], retryFailures: false }; },
       value => { value.intents[0]!.preparationError = ''; },
       value => { Object.assign(value.intents[0]!, { memoryBlocked: { resume: 'inflight', reason: 'r' } }); },
       value => { Object.assign(value.intents[0]!, { messageReceipt: { messageId: 'm1' } }); },
@@ -209,6 +214,11 @@ describe('switch export format (#975)', () => {
       value => { Object.assign(value.intents[0]!, { earlierReceipts: [{ generation: 0, messageReceipt: { ...RECEIPT }, taskId: hash(['i2', 0]) }] }); },
       // A generation K4 could not have opened under the intent's retry policy.
       value => { Object.assign(value.intents[0]!, { generation: 3, taskId: hash(['i2', 3]), input: { taskId: hash(['i2', 3]) } }); },
+      // A policy past K4's bound is refused before the receipt check walks the generations.
+      value => {
+        Object.assign(value.intents[0]!, { generation: 1e9, taskId: hash(['i2', 1e9]), input: { taskId: hash(['i2', 1e9]) },
+          retry: { maxAttempts: 2 ** 31, delaysMs: [], retryFailures: false } });
+      },
     ]);
   });
 
