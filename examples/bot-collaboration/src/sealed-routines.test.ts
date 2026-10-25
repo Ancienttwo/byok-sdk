@@ -1,5 +1,7 @@
 import { describe, expect, it, beforeAll } from 'vitest';
-import { hash, promoteOccurrence, recordOccurrence, routineCommands, sealRoutineTemplate, type LedgerState, type Routine } from '@byok-sdk/example-host-execution-core';
+import { hash, promoteOccurrence, recordOccurrence, routineCommands, routineTemplateBinding, sealRoutineTemplate, type LedgerState,
+  type Routine } from '@byok-sdk/example-host-execution-core';
+import { sealContent } from '@byok-sdk/core/sealed-payload';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BOT_ROUTINE, botRoutines, resealDefinition, routineCalendar, routineTurn, sealedDefinition, sealedRoutineInstruction, sealedTemplate,
   SealedRoutineVersionError, updateDefinition, type SealedRoutineAction, type SealedRoutineTemplate } from './routines';
@@ -73,6 +75,26 @@ describe('sealed Bot routines (#953)', () => {
     // A member retry of the same reseal is the same definition, which K4 takes as a no-op.
     commands.update(resealDefinition(commands.list(), 'main', action(2, v2), execution));
     expect(() => resealDefinition(commands.list(), 'main', action(2, v1), execution)).toThrow(SealedRoutineVersionError);
+  });
+
+  it('refuses a template that travels by ciphertextRef: between occurrences no task holds its blob', async () => {
+    const agentRef = { agentId: execution.payload.agentRef.agentId, profileRevision: execution.payload.agentRef.profileRevision };
+    // A real seal above the inline limit, so the header is valid and only the inline check refuses it.
+    const large = await sealContent({ scopeKey, scope: { id: sealing.scopeId, epoch: sealing.epoch }, chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+      sender: 'A'.repeat(43), category: 'task-input', plaintext: { instruction: 'x'.repeat(300 * 1024) }, maxContentLength: 2 * 1024 * 1024,
+      binding: routineTemplateBinding('product:p', { routineId: 'r-1', definitionVersion: 1, notAfter }, agentRef, sealing.categories) });
+    const byReference = { ...v1, template: { ...large.header, ciphertextRef: { blobId: 'blob-1', contentHash: `sha256:${'b'.repeat(64)}`,
+      size: large.ciphertext.byteLength, contentType: 'application/octet-stream' } } } as unknown as SealedRoutineTemplate;
+    expect(() => sealedDefinition([], 'main', action(1, byReference), execution)).toThrow('A sealed routine template must be inline');
+  });
+
+  it('checks a reseal as a create: another Agent revision or another category list is refused', () => {
+    const { commands } = ledger();
+    commands.create(sealedDefinition(commands.list(), 'main', action(1, v1), execution));
+    const otherAgent = { ...execution, payload: { ...execution.payload, agentRef: { agentId: 'main', profileRevision: '2' } } };
+    expect(() => resealDefinition(commands.list(), 'main', action(2, v2), otherAgent)).toThrow('another Agent revision');
+    const both = { ...v2, sealing: { ...sealing, categories: ['task-input', 'task-output'] as const } } as unknown as SealedRoutineTemplate;
+    expect(() => resealDefinition(commands.list(), 'main', action(2, both), execution)).toThrow('task-input only');
   });
 
   it('never turns a sealed routine plain, and never seals a plain one', () => {
