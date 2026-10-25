@@ -3,15 +3,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { MIN_TOMBSTONE_RETENTION_MS, taskId, type Json } from '@byok-sdk/example-host-execution-core';
 import { inboundKey, type ChannelPort, type Delivery, type InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
-import { enablePush } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { RetentionRefused } from '@byok-sdk/example-bot-collaboration/retention';
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
+import { TEST_HOST } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import type { TaskEvidence } from './reconcile';
 import { HostedOutboxSender, type ProjectionPort, type SenderOptions } from './sender';
-import { HostedCollaborationStore, lockScope, UNKNOWN_WAIT_MS, type CommitPorts, type DeliveryClaim, type FinishPortsFactory } from './store';
+import { HostedCollaborationStore, lockScope, UNKNOWN_WAIT_MS, type DeliveryClaim } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -258,22 +257,20 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       expect(await row(scope, 'ghost')).toMatchObject({ settled_at: null, next_at: String(NOW + 1 + 5_000) });
     });
 
-    const ports = (extra: Partial<CommitPorts> = {}): FinishPortsFactory => (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW, ...extra });
+    const hostClock = () => NOW;
     const MESSAGE: InboundMessage = { channel: 'fake', platformMessageId: 'in1', conversation: DIRECT, sender: { id: 'owner', kind: 'human' }, text: 'Do it',
       mentions: [], replyRoute: { kind: 'reply', channel: 'fake', inboundId: 'in1', token: 'secret', expiresAt: NOW + 600_000 } };
     /** A channel store whose owner message `MESSAGE` has a Turn with a frozen intent, as `receive()` and a sync leave it. */
     async function received() {
-      const channelStore = new HostedCollaborationStore(opened!.pool, store().schema, { channel: true });
+      const channelStore = new HostedCollaborationStore(opened!.pool, store().schema, { host: TEST_HOST, channel: true });
       const scope = `tenant:${randomUUID()}`;
       // Card `c1` stays pending, so the sync queues no card projection beside the delivery.
       await channelStore.seed(scope, state => { seedCollaboration(state); state.cards.c1!.expiresAt = Number.MAX_SAFE_INTEGER; });
       await channelStore.bindDevice(scope, 'device');
       // A push route exists too: a view that missed a concluded intent, or saw a conclusion too early, would choose the other route.
-      const unused = () => { throw new Error('Unused route port'); };
       await channelStore.commit(scope, { scope, commandId: randomUUID(), command: { kind: 'enable_push_route', conversation: DIRECT, channel: 'fake', target: 't', owner: 'owner' } },
-        (state, publish) => ports({ routes: { enable: (conversation, name, target, owner) => enablePush(state, conversation, name, target, owner, NOW).id,
-          revoke: unused, resend: unused } })(state, publish));
-      const turnId = (await channelStore.receive(scope, MESSAGE, { owner: 'owner' }, ports())).id!;
+        hostClock);
+      const turnId = (await channelStore.receive(scope, MESSAGE, { owner: 'owner' }, hostClock)).id!;
       await channelStore.sync(scope, { ...SYNC_OPTIONS, now: NOW, history: undefined });
       return { channelStore, scope, turnId };
     }
@@ -363,7 +360,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       const run = (on: HostedCollaborationStore) => new HostedOutboxSender(opened!.pool, on, { projections: receiver().port, channel: channel(calls),
         now: () => clock, leaseMs: TIMES.leaseMs, sendTimeoutMs: 10_000 }).run();
       clock = NOW;
-      expect(await run(new Racing(opened!.pool, store().schema, { channel: true }))).toEqual({ steps: 0, failed: [] });
+      expect(await run(new Racing(opened!.pool, store().schema, { host: TEST_HOST, channel: true }))).toEqual({ steps: 0, failed: [] });
       expect(raced).toBe(true);
       // The other sender died before its send settled. Once its lease passed, a claim recovers the attempt, with no call.
       clock = NOW + TIMES.leaseMs;
@@ -475,7 +472,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       class Broken extends HostedCollaborationStore {
         override deferOutbox(): Promise<void> { return Promise.reject(new Error('store down')); }
       }
-      const broken = new Broken(opened!.pool, store().schema);
+      const broken = new Broken(opened!.pool, store().schema, { host: TEST_HOST });
       await expect(new HostedOutboxSender(opened!.pool, broken, { projections: receiver().port, channel: channel(), now: () => clock,
         leaseMs: 20_000, sendTimeoutMs: 10_000 }).run()).rejects.toThrow('store down');
       // The error keeps the step error that the wait was for.
@@ -504,7 +501,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       const { channelStore, scope, turnId } = await received();
       await claimed(channelStore, scope, turnId);
       // The owner cancels the Turn: its untried intent concludes in the commit, and the Turn ends at the next sync.
-      await channelStore.commit(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_turn', turnId } }, ports());
+      await channelStore.commit(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_turn', turnId } }, hostClock);
       expect((await channelStore.read(scope)).channel!.inbounds[inboundKey(MESSAGE)]!.reply).toMatchObject({ token: 'secret' });
       await channelStore.finishDelivery(scope, 'd1', 1, { result: { result: 'accepted', platformMessageId: 'p1' } }, () => NOW + 1, TIMES);
       const state = await channelStore.read(scope);
@@ -518,7 +515,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       const document: Json = { confirmable_action: [{ action: 'send_message', summary: 'Send it', draft: { text: 'hi' } }] };
       const evidence = { terminal: { envelope: { task_id: taskId(turnId, 0), type: 'task.complete', payload: { document } } } as unknown as DeviceTerminal,
         attempt: { taskId: taskId(turnId, 0) } as unknown as TaskAttempt } satisfies TaskEvidence;
-      expect(await channelStore.finish(scope, turnId, evidence, ports())).toBe('succeeded');
+      expect(await channelStore.finish(scope, turnId, evidence, hostClock)).toBe('succeeded');
       const deliveries = Object.values((await channelStore.read(scope)).channel!.deliveries);
       expect(deliveries).toMatchObject([{ turnId, body: 'Send it', route: { kind: 'reply', inboundId: inboundKey(MESSAGE) }, state: 'pending' }]);
       expect(await row(scope, deliveries[0]!.id)).toEqual({ next_at: '0', tries: 0, last_error: null, settled_at: null });

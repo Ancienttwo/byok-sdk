@@ -10,7 +10,7 @@ import { replyVectors, seedCollaboration, settlementVectors, SYNC_OPTIONS, VECTO
 import type { FrozenInput } from '@byok-sdk/example-host-execution-core';
 import { frozenIntent, settleFacts } from './intents';
 import { storedKey } from './layout';
-import { callbackPorts, vectorPorts } from './memory-subject.test-support';
+import { TEST_HOST, VECTOR_ROUTINES, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL, VectorStore } from './postgres.test-support';
 import { HostedReconciler, type HostedTaskPort, type TaskEvidence } from './reconcile';
 import { HostedReplyChecker } from './replies';
@@ -21,7 +21,7 @@ let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
 const table = (name: string) => `"${store().schema}".${name}`;
 /** The test store, or a store over the same schema with these delegation timers, which are a store option (#793 S4). */
-const timed = (timers?: DelegationTimers) => timers ? new VectorStore(opened!.pool, store().schema, { timers }) : store();
+const timed = (timers?: DelegationTimers) => timers ? new VectorStore(opened!.pool, store().schema, { host: TEST_HOST, timers }) : store();
 
 /** Bot `b` beside the seeded Main Bot, on the same bound device, with its persona applied. `t1` has ended. */
 function team(state: CollaborationState): void {
@@ -40,12 +40,12 @@ async function delegated() {
   await store().seed(scope, team);
   await store().bindDevice(scope, 'device');
   const commit = async (command: Command) => {
-    const result = await store().commit(scope, { scope, commandId: randomUUID(), command }, vectorPorts);
+    const result = await store().commit(scope, { scope, commandId: randomUUID(), command }, vectorClock);
     if (result.disposition.outcome !== 'accepted') throw new Error(`Refused ${command.kind}: ${JSON.stringify(result.disposition)}`);
     return result.disposition.value;
   };
   const sync = (now = VECTOR_NOW, timers?: DelegationTimers) => timed(timers).sync(scope, { ...SYNC_OPTIONS, now, history: undefined });
-  const finish = (turnId: string, type: string, payload: Json = {}) => store().finish(scope, turnId, evidence(taskId(turnId, 0), type, payload), vectorPorts);
+  const finish = (turnId: string, type: string, payload: Json = {}) => store().finish(scope, turnId, evidence(taskId(turnId, 0), type, payload), vectorClock);
   const root = await commit({ kind: 'input', botId: 'main', key: 'r1', request: 'Ask b', sender: 'owner' }) as string;
   await sync();
   expect(await finish(root, 'task.complete', { document: { delegate: [{ to: 'b', request: 'Check' }] } })).toBe('succeeded');
@@ -73,7 +73,7 @@ async function settlementSubject(): Promise<SettlementSubject> {
   return {
     scope,
     // The vectors commit an outcome, a K4 callback command, so the subject uses the internal entry (#793 D2f-6).
-    commit: request => store().commitIn(scope, request, callbackPorts),
+    commit: request => store().commitIn(scope, request, vectorClock, VECTOR_ROUTINES),
     stored: () => store().dump(scope),
     state: () => store().read(scope),
     change: edit => store().seed(scope, edit),
@@ -321,7 +321,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
         cancel: async () => { throw new Error('Unused cancel'); },
       };
       const reported: string[] = [];
-      const reconciler = new HostedReconciler(opened!.pool, store().schema, store(), { port: () => port, ports: vectorPorts, pollMs: 0,
+      const reconciler = new HostedReconciler(opened!.pool, store().schema, store(), { port: () => port, pollMs: 0,
         now: () => VECTOR_NOW, changed: scope => { reported.push(scope); } });
       expect(await reconciler.run()).toEqual({ concluded: 1, failed: [] });
       expect(reported).toEqual([h.scope]);

@@ -6,7 +6,7 @@ import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
 import { freezeIntent } from './intents';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
+import { vectorClock } from './memory-subject.test-support';
 import { hostedMessageConsumer, type AgentMessageInput } from './messages';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedStoreVersionError, inSchema, lockScope } from './store';
@@ -17,7 +17,7 @@ let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
 const execution = { ...template('device'), agentMessageContext: { destinationBinding: 'one' } };
 /** The SDK tenant is the H scope in these tests. */
-const consumer = () => hostedMessageConsumer(store(), { scopeOf: tenant => tenant, ports: vectorPorts });
+const consumer = () => hostedMessageConsumer(store(), { scopeOf: tenant => tenant, now: vectorClock });
 
 /** A seeded scope, and an intent frozen for `turnId`. Returns the SDK input of its first reply. */
 async function fixture(turnId = 't1') {
