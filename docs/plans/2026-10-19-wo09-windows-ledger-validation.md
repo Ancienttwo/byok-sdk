@@ -393,7 +393,7 @@ Drivers:
 
 | Driver | Fault | Storage profile | Cut |
 |---|---|---|---|
-| `ProcessKillDriver` | process-crash | `os-cache-keeps-writes` | SIGKILL of the process group, then wait until the group is empty. On Windows: record the device tree (Win32_Process, PID plus creation time), `taskkill /T /F`, then require that no recorded process and no process the tree started is alive; the taskkill exit code is kept as evidence, not trusted. The helper is spawned without `detached` (`agent-memory-fs-helper.ts`), so it is in the group and dies with the device; a helper left alive would see end of input and finish its write. |
+| `ProcessKillDriver` | process-crash | `os-cache-keeps-writes` | SIGKILL of the process group, then wait until the group is empty. On Windows: `start` records the device with its creation time; the cut runs `taskkill /T /F` at once, reads the tree at that moment from its output, and requires that none of those processes and nothing they started is alive; creation times rule out a reused PID, and the taskkill exit code is kept as evidence, not trusted. The helper is spawned without `detached` (`agent-memory-fs-helper.ts`), so it is in the group and dies with the device; a helper left alive would see end of input and finish its write. |
 | `QemuDriver` | os-crash | the configured layer | QMP `inject-nmi`. Windows 8 and later bugcheck on an NMI. The guest must reboot automatically and write no crash dump to the disk under test. QEMU keeps running. |
 | `QemuDriver` | power-loss | the configured layer | `StorageLayer.cut` while QEMU is alive, SIGKILL of QEMU, `StorageLayer.prepareBoot`, a new boot. Never QMP `quit`, `stop` or a pause before the cut: each flushes the block devices. |
 
@@ -455,12 +455,25 @@ terminating the helper when taskkill reaches it (inferred; the next run
 records it). The child's child is most likely the helper's `conhost.exe`,
 since the helper starts with `windowsHide`.
 
-Change: the Windows cut no longer trusts taskkill's exit code either way. It
-records the tree (Win32_Process, PID plus creation time), runs taskkill, and
-requires within 10 s that no recorded process and no process the tree
-started is alive; a survivor fails the cut with the tree, the taskkill output
-and the survivors. The test prints each kill record on Windows and requires
-one per cut.
+Second run, at `1102a31b`: the cut took a Win32_Process snapshot (one
+PowerShell start) before taskkill. That passed on windows-latest, but each
+cut landed several hundred milliseconds to about a second after its
+trigger, longer than the whole 1 to 600 ms random range, and the device kept
+running meanwhile. All 14 kills named only `bun.exe`; none hit a live
+helper. macOS kills the process group at the trigger, so the two legs did
+not measure the same thing.
+
+Change: `start` records the device process and its creation time. The cut
+runs `taskkill /T /F` at the trigger, with no snapshot first. taskkill names
+every process of the tree at that moment, including the ones it reports as
+not terminable. The cut then requires, within 10 s, that none of those
+processes and nothing they started is alive, using creation times to rule
+out a reused PID; a survivor fails the cut. Each kill record lists the named
+processes by role (device, helper, helper child) and whether a helper was
+alive. The test prints how many cuts hit a live helper and does not assert
+it, because that depends on timing. A Host-point cut never hits a helper:
+the processor never calls the Host while it holds a home, and the helper
+lives only inside that window.
 
 ### Evaluation: a QEMU/KVM Windows guest on a GitHub-hosted Linux runner
 

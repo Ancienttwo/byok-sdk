@@ -13,7 +13,7 @@ import {
 } from '../daemon/agent-memory-intent';
 import { checkCut, checkRecovery, type CutCheck, type InvariantId } from './agent-memory-powercut/checker';
 import { powercutTriggers } from './agent-memory-powercut/cli';
-import { ProcessKillDriver, QemuDriver, qmpExecute, windowsTree, type PowerCutDriver, type StorageProfile } from './agent-memory-powercut/drivers';
+import { ProcessKillDriver, QemuDriver, qmpExecute, taskkillNamedProcesses, windowsTree, type PowerCutDriver, type StorageProfile } from './agent-memory-powercut/drivers';
 import { runExperiment } from './agent-memory-powercut/experiment';
 import { contentRevision, HostJournal, PowercutHost, powercutContent, type IssuedIntent } from './agent-memory-powercut/host';
 import { EMPTY_REVISION, revisionOf, type DeviceSnapshot, type FileObservation, type HomeSnapshot } from './agent-memory-powercut/snapshot';
@@ -207,10 +207,12 @@ describe('W5 process-crash run', () => {
       expect(report.cuts).toHaveLength(14);
       expect(report.evidence).toBe('process-crash');
       if (process.platform === 'win32') {
-        // Each cut recorded the tree and saw every process of it gone. The
-        // taskkill output stays in the log as evidence of what it reported.
-        console.log(`W5 Windows kills: ${JSON.stringify(driver.windowsKills)}`);
-        expect(driver.windowsKills).toHaveLength(14);
+        // Each cut saw every process taskkill named gone. Whether a cut hit a
+        // live helper depends on its timing, so it is reported, not asserted.
+        const kills = driver.windowsKills;
+        console.log(`W5 Windows kills: ${kills.filter((kill) => kill.helperAlive).length} of ${kills.length} cuts hit a live helper; ${JSON.stringify(kills)}`);
+        expect(kills).toHaveLength(14);
+        for (const kill of kills) expect(kill.killed.filter((entry) => entry.role === 'device')).toHaveLength(1);
       }
       // A Host point stops answering at one message, so its window is exact.
       expect(report.cuts.slice(0, 6).map((cut) => [cut.trigger, cut.window])).toEqual([
@@ -311,6 +313,20 @@ function commands(log: string): string[] {
 const DROPS: StorageProfile = { id: 'test-drop', dropsUnflushedWrites: true, description: 'test layer' };
 
 describe('W5 Windows device tree', () => {
+  it('reads the tree at the kill from taskkill output, failed terminations included', () => {
+    const output = [
+      'SUCCESS: The process with PID 4368 (child process of PID 7876) has been terminated.',
+      'ERROR: The process with PID 7876 (child process of PID 7292) could not be terminated.',
+      'Reason: The operation attempted is not supported.',
+      'SUCCESS: The process with PID 7292 (child process of PID 1408) has been terminated.',
+    ].join('\r\n');
+    expect(taskkillNamedProcesses(output, 7292)).toEqual([
+      { pid: 4368, ppid: 7876, role: 'helper-child' },
+      { pid: 7876, ppid: 7292, role: 'helper' },
+      { pid: 7292, ppid: 1408, role: 'device' },
+    ]);
+  });
+
   const entry = (pid: number, ppid: number, created: number, name = `p${pid}`) => ({ pid, ppid, name, created });
 
   it('follows parent links from the device, and rejects a reused PID and a later process', () => {
