@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
-import { canonical, hash, occurrenceRun, taskId, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type Json,
-  type Routine } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, occurrenceRun, taskId, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
+  type HostJobRun, type HostJobRoutineDefinition, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
 import { botRoutines, endable, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
 import { applyHomeTerminal, applyManagement, failHomeFlush, homeEnqueued, homeHead, planHomeRetry, requireMain, updateBot, writeSnapshotBot,
   type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
@@ -18,7 +18,8 @@ import { cancelIntent, deliverCancels, frozenIntent, intentConclusions, seatFact
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
 import { decideFinish, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
-import { dueRoutine, hostedRoutineCommands, loadSlice, planSlice, recordDue, switchDueVersions, writeSlice } from './routines';
+import { dueRoutine, hostedRoutineCommands, hostJobCommands, hostJobRowKey, loadSlice, planSlice, recordDue, switchDueVersions,
+  writeSlice } from './routines';
 import type { RetentionInput, RetentionLimits, RetentionResult } from '@byok-sdk/example-bot-collaboration/retention';
 import { classifyInbound, inboundKey, verified, type ChannelPort, type Delivery, type InboundClass, type InboundMessage, type PushRoute,
   type ReplyRoute } from '@byok-sdk/example-bot-collaboration/channel';
@@ -94,6 +95,12 @@ export interface HostedStoreOptions {
    * the Host gives each sync in `limits`. Each sync checks it against that budget. Without it, each input keeps its own Turn.
    */
   coalesce?: CoalescePolicy;
+  /**
+   * The handlers of the Host's own Host job routines (#793 S14), by type, as L's `hostJobs`. The store checks a Host job
+   * routine against them, and the outbox sender runs them. A Host job may return only a summary: a result with `execution`
+   * concludes its occurrence `failed` (owner Q4 A).
+   */
+  hostJobs?: Readonly<Record<string, HostJobHandler>>;
 }
 /** The delegation fields that a reply check read. A settle applies only while they are unchanged. */
 export interface ReplyFence { checks?: number; nextCheckAt: number }
@@ -146,6 +153,20 @@ export const homeRowKey = (sequence: number): string => JSON.stringify(['home', 
 export const cardRowKey = (cardId: string): string => JSON.stringify(['card', cardId]);
 /** L's connector timeout error (K8 host.ts `callConnector`). An expired H claim ends its card with it too. */
 export const CONNECTOR_TIMEOUT = 'Connector timed out; external outcome is unknown';
+/** The error of a Host job result that carries `execution` (owner Q4 A): its occurrence concludes `failed` with it. */
+export const HOST_JOB_EXECUTION_UNSUPPORTED = 'host_job_execution_unsupported';
+/**
+ * The sender's view of one Host job claim (#793 S14). `none`: nothing to run. `run`: call the handler of `run.type` once, then
+ * settle with `tries`, which is also the K4 `attempt`.
+ */
+export type HostJobClaim = { kind: 'none' } | { kind: 'run'; tries: number; run: Omit<HostJobRun, 'signal'> };
+/**
+ * One Host job settle: a valid summary, with `unsupported` when the result carried `execution`, or a handler that threw,
+ * timed out or returned no JSON summary.
+ */
+export type HostJobOutcome = { summary: Json; unsupported: boolean } | { error: unknown };
+/** The stored text of a failed outbox step: the error message, cut to 1024 characters. */
+export const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error)).slice(0, 1024);
 
 const SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
 /**
@@ -177,9 +198,12 @@ export class HostedCollaborationStore {
   private readonly coalesce?: CoalescePolicy;
   private readonly timers: DelegationTimers | undefined;
   private readonly host: (scope: string) => HostConfig;
+  /** The Host job handlers by type (#793 S14). */
+  readonly hostJobs: ReadonlyMap<string, HostJobHandler>;
   constructor(private readonly pool: Pool, readonly schema: string, options: HostedStoreOptions) {
     if (typeof options?.host !== 'function') throw new Error('The Host config of each scope is required');
     this.host = options.host;
+    this.hostJobs = new Map(Object.entries(options.hostJobs ?? {}));
     this.channel = options.channel === true;
     // The ContextPack budget comes with each sync, so the construction checks every bound except that one.
     if (options.coalesce) this.coalesce = coalescePolicy(options.coalesce, Number.MAX_SAFE_INTEGER);
@@ -476,6 +500,32 @@ export class HostedCollaborationStore {
   }
 
   /**
+   * Host API, as L's `core.addRoutine` for a Host job (#793 S14): adds a Host job routine to `scope`, checked by K4 against
+   * the store's handlers. Host code calls it; no Bot command or entry reaches it. A refusal writes nothing.
+   */
+  addHostJobRoutine(scope: string, definition: HostJobRoutineDefinition, now: number): Promise<void> {
+    return this.hostJobCommand(scope, now, commands => commands.create(definition));
+  }
+  /** Host API, as L's `core.updateRoutine` for a Host job: stages the next version, which switches once no old work is open. */
+  updateHostJobRoutine(scope: string, definition: HostJobRoutineDefinition, now: number): Promise<void> {
+    return this.hostJobCommand(scope, now, commands => commands.update(definition));
+  }
+  /** Host API, as L's `core.lifecycle` for a Host job: pauses, resumes or completes it. A Bot routine id is refused. */
+  setHostJobLifecycle(scope: string, id: string, lifecycle: Routine['lifecycle'], now: number): Promise<void> {
+    return this.hostJobCommand(scope, now, commands => commands.lifecycle(id, lifecycle));
+  }
+  private hostJobCommand(scope: string, now: number, run: (commands: ReturnType<typeof hostJobCommands>) => void): Promise<void> {
+    const key = storedKey(scope);
+    return this.change(scope, undefined, async (_state, _publish, client) => {
+      const slice = await loadSlice(client, key);
+      run(hostJobCommands(slice, now, this.hostJobs));
+      await writeSlice(client, key, slice);
+      await switchDueVersions(client, key, now);
+      return { value: undefined, outbox: [] };
+    });
+  }
+
+  /**
    * Fires the due slot of routine `id` (#793 D2f-3, scheduler note §2.2), as K4 `consume` records an occurrence and runs its
    * hook in one transaction: the occurrence row, the routine's next slot, the supersede of its earlier untried intents and
    * the K8 routine Turn commit together, under the scope lock. The K8 `occurrence` command gets no record, as in L: the slot
@@ -488,6 +538,9 @@ export class HostedCollaborationStore {
    * routine Turn creates no execution, because the sync ends it before any freeze, as L does. A revoke and an archive are both
    * final, so with the fence that slot could never fire.
    *
+   * A Host job routine (#793 S14) records its occurrence and its `host_job` outbox row, as K4 `recordOccurrence` does, with no
+   * K8 command and no fence: a Host job creates no execution. The outbox sender runs it.
+   *
    * It runs no version switch: a fire leaves its new occurrence open, so K4 `versionSwitchDue` stays false for the routine.
    */
   fire(scope: string, id: string, now: number): Promise<'fired' | 'skipped'> {
@@ -495,6 +548,10 @@ export class HostedCollaborationStore {
     return this.transaction(client => this.decideIn(client, key, undefined, async (state, publish) => {
       const slice = await loadSlice(client, key), routine = dueRoutine(slice, id, now);
       if (!routine) return { value: 'skipped' as const, outbox: [] };
+      if (routine.definition.hostJob) {
+        await writeSlice(client, key, slice, recordDue(slice, scope, routine, now).key);
+        return { value: 'fired' as const, outbox: [] };
+      }
       const owner = (routine.definition.hostOccurrence?.input as BotRoutineInput | undefined)?.owner;
       const bot = owner === undefined ? undefined : state.team.bots[owner];
       if (!bot) throw new Error('Routine owner Bot not found');
@@ -649,6 +706,62 @@ export class HostedCollaborationStore {
       settleCardCall(card, outcome);
       return { value: true, outbox: [], now: clock() };
     }), false);
+  }
+
+  /**
+   * Claims the Host job of occurrence `occurrenceKey` (#793 S14), in one transaction under the scope lock, at the clock read
+   * after the lock, as K4 `runHostJobs` raises `attempts` before the handler runs: the row takes a try and a lease. A claim
+   * whose lease passed runs the job again, as K4 retries pending work, so a handler runs at least once. A row whose
+   * occurrence is no longer open settles with no run.
+   */
+  claimHostJob(scope: string, occurrenceKey: string, clock: () => number, leaseMs: number): Promise<HostJobClaim> {
+    const key = storedKey(scope), row = hostJobRowKey(occurrenceKey);
+    return this.transaction(async (client): Promise<HostJobClaim> => {
+      await lockScope(client, key);
+      const now = clock(), slice = await loadSlice(client, key);
+      const occurrence = Object.hasOwn(slice.state.occurrences, occurrenceKey) ? slice.state.occurrences[occurrenceKey]! : undefined;
+      if (!occurrence?.job || occurrence.intentId || occurrence.conclusion) {
+        await client.query(`UPDATE outbox SET settled_at = $3 WHERE scope = $1 AND key = $2 AND kind = 'host_job' AND settled_at IS NULL`, [key, row, now]);
+        return { kind: 'none' };
+      }
+      const hostJob = slice.state.routines[hash(occurrence.routineId)]?.definition.hostJob;
+      if (!hostJob) throw new Error('Invalid pending Host job');
+      const claimed = await client.query<{ tries: number }>(`UPDATE outbox SET tries = tries + 1, next_at = $3 + $4
+        WHERE scope = $1 AND key = $2 AND kind = 'host_job' AND settled_at IS NULL AND next_at <= $3 RETURNING tries`, [key, row, now, leaseMs]);
+      const tries = claimed.rows[0]?.tries;
+      if (tries === undefined) return { kind: 'none' };
+      return { kind: 'run', tries, run: { ...structuredClone(hostJob), occurrenceKey, routineId: occurrence.routineId,
+        definitionVersion: occurrence.definitionVersion, trigger: structuredClone(occurrence.trigger), attempt: tries } };
+    }, false);
+  }
+
+  /**
+   * Writes the outcome of one Host job run (#793 S14), in one transaction under the scope lock, fenced by the claim's `tries`:
+   * a settle after another claim took the row writes nothing and returns false. A summary is stored and concludes the
+   * occurrence `succeeded`, as K4 does; a result with `execution` stores its summary and concludes it `failed`, with
+   * `host_job_execution_unsupported` as the row's error, and nothing is promoted, superseded or not (owner Q4 A). Either
+   * settles the row, then a staged version switches when it is due. An error keeps the occurrence pending and the row waits
+   * `backoffMs`, as K4 keeps the row for its next pass.
+   */
+  settleHostJob(scope: string, occurrenceKey: string, tries: number, outcome: HostJobOutcome, clock: () => number, backoffMs: number): Promise<boolean> {
+    const key = storedKey(scope), row = hostJobRowKey(occurrenceKey);
+    return this.transaction(async client => {
+      await lockScope(client, key);
+      const now = clock();
+      if ('error' in outcome) {
+        const failed = await client.query(`UPDATE outbox SET last_error = $4, next_at = $5 WHERE scope = $1 AND key = $2 AND tries = $3
+          AND settled_at IS NULL`, [key, row, tries, errorText(outcome.error), now + backoffMs]);
+        return failed.rowCount === 1;
+      }
+      const settled = await client.query(`UPDATE outbox SET settled_at = $4, last_error = $5 WHERE scope = $1 AND key = $2 AND tries = $3
+        AND settled_at IS NULL`, [key, row, tries, now, outcome.unsupported ? HOST_JOB_EXECUTION_UNSUPPORTED : null]);
+      if (settled.rowCount !== 1) return false;
+      const concluded = await client.query(`UPDATE occurrence SET job = $3::json, conclusion = $4 WHERE scope = $1 AND key = $2 AND job IS NOT NULL
+        AND conclusion IS NULL`, [key, storedKey(occurrenceKey), JSON.stringify({ summary: outcome.summary }), outcome.unsupported ? 'failed' : 'succeeded']);
+      if (concluded.rowCount !== 1) throw new Error('Invalid pending Host job');
+      await switchDueVersions(client, key, now);
+      return true;
+    }, false);
   }
 
   /**

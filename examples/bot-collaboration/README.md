@@ -227,7 +227,10 @@ command needs the Main Bot role and gets the K4 rows through the
 occurrence through its intent key, and a concluded occurrence through its
 occurrence key. `botRoutines` reads the Bot routine views from the K4 rows.
 Other K4 routines of the Host, for example Host jobs from `BotOptions.hostJobs`,
-are not Bot routines.
+are not Bot routines. A Host job may return only a summary: L sets K4
+`hostJobExecution: 'fail'`, so a result with `execution` concludes its
+occurrence `failed` and promotes nothing, as H does, because no K8 Turn could
+settle that intent. K4 alone promotes it by default.
 
 ### Compaction
 

@@ -6,8 +6,8 @@ commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c), result
 reconciliation (D2d), the device binding (D2e), retention (D2g), routines (D2f-2), their scheduler (D2f-3), the outbox
 sender (D2b-out-2), delegation settlement (D2f-5), the inbound channel entry (D2b-out-3), the batch seal, the
-authenticated command entry (S10), the device observation (S11), the connector card calls (S12) and the Agent home
-flush (S13).
+authenticated command entry (S10), the device observation (S11), the connector card calls (S12), the Agent home
+flush (S13) and summary-only Host job routines (S14).
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -409,7 +409,8 @@ occurrences (D2f-3).
   owner's too, as L `endRoutine` does (§55c). The store loads the slice for it and owns its `routines` port, so a caller's
   port never reaches the command. A new acceptance writes the slice back and switches each due version of the scope, as
   the owner API does.
-- H runs only `bot-routine` routines. A Host-job or execution-template routine is refused.
+- A Bot and the owner add only `bot-routine` routines. Host code adds summary-only Host job routines (#793 S14, see Host
+  jobs). An execution-template routine is refused: no K8 Turn could settle its intent.
 - Each transaction that can conclude routine work then switches a staged version that is due: the claim expiry, the
   sync, the reconciliation conclude, the terminal transaction and the owner API. K4 does this after each drain; H has
   no drain.
@@ -587,7 +588,41 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
     L flushes at most one operation per Bot in a pass.
   - A terminal reports its scope through the `changed` option, so the deployment syncs it and the Bot's waiting Turns
     freeze. A Host with no home port fails a home row and waits `backoffMs`.
+- **Host jobs** (#793 S14) run K4 `runHostJobs` for one occurrence, with the claim, lease and fence of a card call. The
+  handlers are the store's `hostJobs` option, by type, as L's `hostJobs`: the store checks a Host job routine against them
+  and the sender runs them, so a deployment registers each type once. See Host jobs.
 - Reply readback is not in the sender (§54c A).
+
+### Host jobs
+
+L runs a Bot routine and a summary-only Host job on one K4 core (K8 `routines.test.ts`). H runs both, in the store and
+the outbox sender; there is no separate job runner.
+
+- **Host code owns the routine.** `addHostJobRoutine(scope, definition, now)`, `updateHostJobRoutine` and
+  `setHostJobLifecycle(scope, id, lifecycle, now)` are L's `core.addRoutine`, `updateRoutine` and `lifecycle` for a Host
+  job, through K4 `routineCommands` with the store's handlers and the K8 calendar. No Bot command or entry reaches them.
+  They take only Host job routines; the Bot and owner paths take only `bot-routine` routines, so a Host job stays out of
+  the Bot policy (`owned`, `endable`, the ContextPack routine views).
+- **The scheduler fires it.** A due slot records its K4 occurrence (`recordOccurrence`), with no K8 command and no device
+  fence: a Host job creates no execution. The occurrence row gets `job = {}`, and an outbox row (`kind = 'host_job'`, key
+  `["host_job", occurrenceKey]`, due at once) takes the place of K4's `host-job:<key>` row. A later slot of the routine
+  marks a pending job `execution_superseded`, as K4 does.
+- **The sender runs it.** `store.claimHostJob` takes a try and a lease under the scope lock while the occurrence is open;
+  the try is the K4 `attempt`. The handler runs with no lock, with an abort signal and `hostJobTimeoutMs` (default 30 s;
+  L has no deadline). The sender then checks the result as K4 does (a summary is required and must be JSON), and
+  `store.settleHostJob`, fenced by that try, writes it:
+  - a summary is stored (`job = { summary }`) and concludes the occurrence `succeeded`;
+  - **a result that carries `execution` stores its summary and concludes the occurrence `failed`**, with
+    `host_job_execution_unsupported` as the row's `last_error`, and the pass reports it as the row's failure. Nothing is
+    promoted, whether the occurrence was superseded or not (owner Q4 A). L concludes it the same way through K4
+    `hostJobExecution: 'fail'` (K5); K4 alone promotes it by default;
+  - a handler that throws, times out or returns no JSON summary keeps the occurrence pending: the row keeps the error in
+    `last_error` and waits `backoffMs`, as K4 keeps the row for its next pass. A later success clears `last_error`.
+  A settle that concludes switches a staged version that is due. A settle that finds another claim's try changes nothing.
+- **A handler runs at least once.** A claim whose lease passed with no settle runs the job again with the next attempt,
+  as K4 retries pending work after a restart. A handler must tolerate a second run of one occurrence.
+- **With Host job handlers, the lease must be longer than `hostJobTimeoutMs`** (the sender refuses it otherwise). A store
+  with no handler for the type fails the row with `Host job handler not registered` and keeps the occurrence pending.
 
 ## Deployment config
 
@@ -657,6 +692,9 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   ```
   The device must install the Host's persona hook as its Agent home projection consumer, or it does not advertise
   `agent-home-projection` and the SDK refuses the enqueue (the operation keeps the error).
+- **Host jobs.** The store takes the Host job handlers (`{ host, hostJobs: { watchlist } }`), and the sender takes their
+  deadline (`hostJobTimeoutMs`). Host code adds each routine once with `addHostJobRoutine`. Every store over one schema
+  that a sender or the scheduler uses must have the same handlers.
 
 ## Tests
 
@@ -679,8 +717,8 @@ three and runs these suites.
 - The compaction tests cover a settled intent and its tombstone, a repeated call, a refused freeze of a retired Turn, a
   K8 veto, an unsettled row, an unknown Turn id, a routine intent, and the sync's `result_retired`.
 - The routine tests seed each occurrence as the scheduler records it. They cover the outcome actions, the owner API,
-  promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, and the
-  `bot-routine` refusal.
+  promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, and the refusal of
+  an execution routine on the Bot path.
 - The D2f-1 routine vectors (`routineVectors`) run on the store, with the scheduler fire and a submitter pass on an SDK
   tenant in memory. The `end_routine` tests cover a refusal that writes nothing and a caller's `routines` port.
 - The K8 delivery vectors (`deliveryVectors`) run on the store, its inbound entry and the outbox sender, all 21. After each Host step, the delivery outbox index matches the K8 entities. The
@@ -736,6 +774,12 @@ three and runs these suites.
   the home row of a committed operation (`retry_persona`) with its lease and settle, the row at `retryAt` after an
   enqueue, the lease kept through a retry enqueue, no call after the lease has passed, two senders on one operation, the wait of a busy Bot, a read timeout, a Host with no home port, and, on the
   hosted SDK with a paired daemon, a Bot readied through the real `enqueueAgentHomeProjection` whose Turn then freezes.
+- The Host job tests (`host-jobs.test.ts`) port the cases of K4 `host-jobs.test.ts` through the scheduler and the sender:
+  a summary stored once with a settled row and no intent; the Bot policy kept apart from Host code, and the definition
+  checks; a handler throw with its backoff and a retry with the same occurrence key; a missing and a non-JSON summary;
+  a result with `execution` concluded `failed`, superseded or not; a timeout with its aborted signal; two senders on one
+  row; an expired lease that runs the job again with a stale settle ignored; a missing handler after a restart; a version
+  switch after the job; pause, completion and no resume; and the option check.
 - The due tests check the stored due time against the K8 rule after each seed, commit, sync and finish, a cancel commit
   with the store's timers, a command that throws, a step that keeps the time, and the DDL check. The due scheduler tests
   cover a due scope whose sync clears it, the clock read for each sync, a stalled scope and a failed sync with their

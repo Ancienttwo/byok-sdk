@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example runs
+  summary-only Host job routines (#793 S14), as L's `hostJobs`. Host code
+  adds them with `addHostJobRoutine`, `updateHostJobRoutine` and
+  `setHostJobLifecycle`, checked against the store's new `hostJobs` option;
+  the scheduler records each due occurrence with a `host_job` outbox row;
+  the outbox sender claims it (a try and a lease), runs the handler with
+  `hostJobTimeoutMs` (default 30 s), and settles it fenced by that try. A
+  summary concludes the occurrence `succeeded`; a handler throw keeps it
+  pending with a backoff; a result that carries `execution` stores its
+  summary and concludes it `failed` with `host_job_execution_unsupported`,
+  with no promotion (owner Q4 A). K4 exports `validateJson`, and its
+  Host job runner takes `hostJobExecution` (`promote` by default, as
+  before, or `fail`); L sets `fail`, so it concludes such a result the
+  same way.
 - **Feature (examples)** — the hosted collaboration example flushes Agent
   home operations (#793 S13), as L's `flushHomes`, through the outbox
   sender: a `home` outbox row indexes each pending operation at its

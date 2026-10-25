@@ -1,4 +1,4 @@
-export { CallbackCommandError, HostedCollaborationStore, HostedStoreVersionError, InboundCommandError, type DueReplyCheck, type HostConfig,
+export { CallbackCommandError, HOST_JOB_EXECUTION_UNSUPPORTED, HostedCollaborationStore, HostedStoreVersionError, InboundCommandError, type DueReplyCheck, type HostConfig,
   type HostedStoreOptions, type HostedSyncOptions, type InboundIdentity, type Publish, type ReplyFence, type StorePorts, type SyncResult } from './store';
 export { DDL, STORE_VERSION } from './ddl';
 export type { IntentCompaction, IntentCompactionInput } from './compaction';

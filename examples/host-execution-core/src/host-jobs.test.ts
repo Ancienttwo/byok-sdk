@@ -116,6 +116,23 @@ it('lets admitted Host work finish after pause and promotes only on the Host dec
   expect(host.adapter.starts).toHaveLength(1);
 });
 
+it('concludes a result with execution as failed, with its summary and no intent, when the Host sets hostJobExecution fail', async () => {
+  const handler = vi.fn(() => ({ summary: { escalate: true }, execution: template(host.deviceId) }));
+  host = await openHost({ hostJobs: { watchlist: handler }, hostJobExecution: 'fail' });
+  const at = Date.now() + 60_000;
+  await host.core.addRoutine(definition('no-promote', at));
+  await expect(host.core.consume(wake('no-promote', at), signal())).rejects.toThrow('Wake dispatch failed');
+  expect(rows()[0]).toMatchObject({ conclusion: 'failed', job: { attempts: 1, summary: { escalate: true } } });
+  expect(rows()[0]?.intentId).toBeUndefined();
+  expect(host.ledger.snapshot().intents).toEqual({});
+  expect(Object.values(host.ledger.snapshot().outbox).filter(row => row.kind === 'host-job')).toEqual([]);
+  // No retry: a later drain runs nothing.
+  await host.core.drain();
+  expect(handler).toHaveBeenCalledTimes(1);
+  expect(host.adapter.starts).toEqual([]);
+  expect(() => new HostExecutionCore(host.server, host.ledger, { hostJobExecution: 'drop' as never })).toThrow('Invalid hostJobExecution');
+});
+
 it.each([
   ['missing summary', {}],
   ['non-JSON summary', { summary: { bad: undefined } }],
