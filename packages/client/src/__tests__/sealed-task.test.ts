@@ -219,3 +219,39 @@ describe('the failure class of a sealed task (#869)', () => {
     expect((await between.sealOutbound(complete('complete-between')))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false });
   });
 });
+
+describe('a terminal built for a sealed task in a run that may not seal it (#866 R1, R2)', () => {
+  const tasks = () => new SealedTasks({
+    keyring: new GatedKeyring(), tenantId: 'tenant-test', deviceId: 'dev_1',
+    blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
+    serverCapabilities: () => [],
+  });
+  const sealedOffer = createEnvelope('task.offer_sealed', {
+    instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+  } as never, { taskId: 'recovered', seq: 1 });
+
+  it.each([
+    ['an interrupted task.fail with its recovery', createEnvelope('task.fail', {
+      reason: 'daemon_interrupted', retryable: false, recovery: { kind: 'daemon_interrupted', offerId: sealedOffer.id },
+    } as never, { taskId: 'recovered' })],
+    ['a task.decline with its sealed code', createEnvelope('task.decline', { reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false } as never, { taskId: 'recovered' })],
+    ['a task.cancelled without a reason', createEnvelope('task.cancelled', {} as never, { taskId: 'recovered' })],
+  ])('keeps %s, which is already a closed plaintext form', async (_label, terminal) => {
+    expect(await tasks().sealRecovered(sealedOffer, terminal, false)).toBe(terminal);
+  });
+
+  it('gives any other terminal its closed plaintext form, with no free text', async () => {
+    const fail = createEnvelope('task.fail', { reason: 'secret reason', retryable: true, agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } } as never, { taskId: 'recovered' });
+    const closed = await tasks().sealRecovered(sealedOffer, fail, false);
+    expect(closed.type).toBe('task.fail');
+    expect(closed.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } });
+    const cancelled = await tasks().sealRecovered(sealedOffer, createEnvelope('task.cancelled', { reason: 'secret reason' } as never, { taskId: 'recovered' }), false);
+    expect(cancelled.payload).toEqual({});
+  });
+
+  it('keeps every terminal of a task whose offer does not seal output', async () => {
+    const plainOffer = createEnvelope('task.offer', { instruction: 'plain instruction' }, { taskId: 'recovered', seq: 1 });
+    const fail = createEnvelope('task.fail', { reason: 'plain reason', retryable: false }, { taskId: 'recovered' });
+    expect(await tasks().sealRecovered(plainOffer, fail, false)).toBe(fail);
+  });
+});

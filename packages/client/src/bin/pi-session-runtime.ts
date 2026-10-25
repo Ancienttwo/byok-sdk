@@ -8,12 +8,14 @@ import {
 function fail(message: string): never { throw new Error(`byok-pi-rpc: ${message}`); }
 
 /**
- * Pi 1.3 restores a resumed transcript's active tools, so a tool this open's
- * extensions register (such as a new MCP toolset tool) stays inactive. As OAR
- * 0.67 does (#416), reset a resumed default-tools session to the current
- * native defaults and default-active extension tools before `session_start`,
- * so it offers the same tools as a new session with the same options. Pi
- * still applies `excludeTools` and exposure rules.
+ * Pi 1.4 restores a resumed transcript's recorded tool loadout. It activates
+ * an extension tool the transcript never mentioned, but it keeps the recorded
+ * built-in tools instead of the current `defaultTools`, and it reactivates a
+ * declared extension tool that now registers default-inactive, deferred or
+ * codemode. As OAR 0.67 does (#416), reset a resumed default-tools session to
+ * the current native defaults and default-active extension tools before
+ * `session_start`, so it offers the same tools as a new session with the same
+ * options. Pi still applies `excludeTools` and exposure rules.
  *
  * The restore also keeps the transcript's not-yet-registered tools pending,
  * and a registration during `session_start` would activate them. Pi drops
