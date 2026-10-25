@@ -79,7 +79,7 @@ export async function keyPackage(
     tenantId: tenant,
     scopeId: 'scope-1',
     epoch,
-    recipient: { memberId: recipient.bundle.memberId, kemPublicJwk: recipient.bundle.kemPublicJwk },
+    recipient: { memberId: recipient.bundle.memberId, kemPublicJwk: recipient.bundle.kemPublicJwk, kemEpoch: recipient.bundle.kemEpoch },
     sender: { signingPublicJwk: sender.signer.publicJwk, signingPrivateKey: sender.signer.privateKey },
   });
 }

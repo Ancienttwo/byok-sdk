@@ -9,7 +9,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash, createPublicKey, verify as edVerify } from 'node:crypto';
 import { DEVICE_PROOF_HEADER, deviceProofSigningInput, type DeviceProofProtectedClaims } from '@byok-sdk/core';
-import type { ScopeKeyPackageV1 } from '@byok-sdk/core/sealed-payload';
+import type { ScopeKeyPackageV2 } from '@byok-sdk/core/sealed-payload';
 import {
   BYOK_E2EE_CHAIN_PATH,
   BYOK_E2EE_KEY_PACKAGES_PATH,
@@ -71,7 +71,7 @@ export class E2eeTestHost {
   /** When set, each pairing MAC read waits for it before it answers. */
   holdPairingMacReads: Promise<void> | undefined;
   /** Every key package put, as stored. */
-  readonly packages: ScopeKeyPackageV1[] = [];
+  readonly packages: ScopeKeyPackageV2[] = [];
   /** Answer this many key package reads with 503 first. */
   failPackageReads = 0;
   /** When set, every key package read answers with this status. */
@@ -84,7 +84,7 @@ export class E2eeTestHost {
   /** When set, each key package read waits for it before it answers. */
   holdPackageReads: Promise<void> | undefined;
   /** Every device key package put body, in order. */
-  readonly devicePuts: ScopeKeyPackageV1[][] = [];
+  readonly devicePuts: ScopeKeyPackageV2[][] = [];
   /** When set, each device key package put waits for it before it stores. */
   holdPackagePuts: Promise<void> | undefined;
   /** Answer this many device key package puts with 503 first. */
@@ -109,7 +109,7 @@ export class E2eeTestHost {
   }
 
   /** Host control plane: store key packages, one per (scope, epoch, recipient). */
-  clientPutPackages(...packages: ScopeKeyPackageV1[]): void {
+  clientPutPackages(...packages: ScopeKeyPackageV2[]): void {
     this.packages.push(...packages);
   }
 
@@ -237,7 +237,7 @@ export class E2eeTestHost {
       this.failPackagePuts -= 1;
       return respond(res, 503, { error: 'unavailable' });
     }
-    const { packages } = JSON.parse(body.toString('utf8')) as { packages: ScopeKeyPackageV1[] };
+    const { packages } = JSON.parse(body.toString('utf8')) as { packages: ScopeKeyPackageV2[] };
     this.devicePuts.push(packages);
     await this.holdPackagePuts;
     if (this.dropPackagePuts) return respond(res, 200, { stored: packages.length, skippedDeviceIds: [] });

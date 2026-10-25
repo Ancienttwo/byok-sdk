@@ -58,6 +58,8 @@ export const CLOUD_ERROR_CODES = {
   e2ee_scope_key_conflict: 'e2ee_scope_key_conflict',
   /** The member chain shredded that scope (design §11.2), so the Host stores no more key packages for it. */
   e2ee_scope_shredded: 'e2ee_scope_shredded',
+  /** A package is wrapped to an older KEM epoch than its recipient's latest `rotate` on the member chain. Read the chain again and seal again. */
+  e2ee_scope_key_package_stale: 'e2ee_scope_key_package_stale',
   /** The device already used this device-proof `requestId` with another request. A proof is single-use. */
   proof_request_conflict: 'proof_request_conflict',
   /** The device has not registered a member key bundle. */

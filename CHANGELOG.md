@@ -142,6 +142,42 @@
   gets the required method `replaceRefusedTerminal`, and its `confirmTerminal`
   and `rejectTerminal` must accept the hash of replaced bytes as a no-op. A
   Host that injects its own journal must implement both.
+- **Breaking (core)** — scope key packages are version 2 (#654 E5b-2, owner
+  batch §77a): they sign the recipient's KEM epoch as `recipientKemEpoch`.
+  `sealScopeKeyPackage` and `openScopeKeyPackage` take `recipient.kemEpoch`,
+  and `sealScopeKeyPackage` returns `ScopeKeyPackageV2`. `openScopeKeyPackage`
+  still opens version 1 packages. Remove that code only once this check
+  returns 0 on every Host: Postgres
+  `SELECT count(*) FROM e2ee_scope_key_package WHERE (package::jsonb)->>'v' = '1'`,
+  SQLite
+  `SELECT count(*) FROM e2ee_scope_key_package WHERE json_extract(package, '$.v') = 1`.
+- **Breaking (cloud)** — the Host takes version 2 package puts only; a
+  version 1 package gets 400 `coordination_input_invalid`. A put of a package
+  below its recipient's KEM floor gets 409 `e2ee_scope_key_package_stale` and
+  stores nothing; read the chain and seal again. The device package read
+  needs exactly one of `epoch` and `afterEpoch`, so the read without `epoch`
+  now gets 400. Store implementers: `E2eeMemberStore` gains the required
+  `readOwnScopeKeyPackages`, `E2eeMemberChainAppendInput` gains `rotations`,
+  the put rows carry `recipientKemEpoch`, and the put can return
+  `kem_epoch_stale`. Upgrade the Host first, then daemons and web clients: a
+  0.30.1 Host refuses v2 puts. A Host rolled back to 0.30.1 fails closed with
+  `e2ee_member_state_unreadable` on any read that meets a stored v2 package.
+  Migration 0029, and the first 0.30.2 open of a SQLite store, refuse a
+  member chain that already holds a `rotate` entry. A Host that finds one
+  stays on 0.30.1 and opens an issue, because the SDK has no automatic way to
+  set those floors (`docs/security.md`).
+- **Breaking (protocol)** — `E2eeScopeKeyPackage` is version 1 or 2, and
+  `E2eeScopeKeyPackageV2Schema` is the put shape. `E2eeMemberChainEntrySchema`
+  refuses a `rotate` whose subject is not exactly
+  `{ memberId, kemPublicJwk, kemEpoch, kemSig }`.
+- **Feature (cloud, cloud-dataplane, server)** — an append that stores a
+  `rotate` raises its member's KEM floor, which never falls.
+  `GET /byok/e2ee/key-packages?scopeId=&afterEpoch=` returns this member's
+  packages after `afterEpoch`, by epoch, 16 per page, with `scopeHeadEpoch`
+  (`null` without an epoch). The Host declares `e2ee.member.kem-epoch` exactly
+  with `e2ee.member`. Postgres needs migration
+  `0029_e2ee_member_kem_floor.sql`; SQLite adds the table and index on open,
+  with no schema version change.
 
 - **Breaking (client)** — `byok-agent doctor` no longer scans `os.tmpdir()`
   for the temporary directories that releases before 0.27.0 left there (#938).
