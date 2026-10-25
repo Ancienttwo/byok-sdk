@@ -99,7 +99,7 @@ async function start(options: {
   policy?: readonly SealedCategory[];
   /** `false`: the Host does not declare `e2ee.member`, and start waits for the first hello only. */
   e2ee?: false;
-  beforeStart?: (storeDir: string, deviceId: string, member: ScopeMember) => Promise<void>;
+  beforeStart?: (storeDir: string, deviceId: string, member: ScopeMember, device: { readonly memberId: string }) => Promise<void>;
 } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
   dirs.push(root);
@@ -123,7 +123,7 @@ async function start(options: {
   const { deviceId } = await daemon.pair('pair-code', { verificationSecret: web.verificationSecret });
   const device = await web.approve(deviceId);
   const member: ScopeMember = { web, scopeKey: await web.putScope(SCOPE, [device], { categories: options.policy ?? BOTH.categories }) };
-  await options.beforeStart?.(storeDir, deviceId, member);
+  await options.beforeStart?.(storeDir, deviceId, member, device);
   await daemon.start();
   await server.waitFor(options.e2ee === false ? (envelope) => envelope.type === 'conn.hello' : advertised, BUDGET_MS);
   return { server, adapter, deviceId, storeDir, member, device, cursor: () => new CursorStore(storeDir).load(server!.url, deviceId) };
@@ -1201,5 +1201,191 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     }
     expect(server.blobUploadsHeld).toBe(0);
     expect(taskEnvelopes('inline-only-approval').map((envelope) => envelope.type)).not.toContain('task.await_approval_sealed');
+  });
+});
+
+const TERMINAL_OUTPUTS = ['task.complete', 'task.fail', 'task.cancelled', 'task.decline', 'task.complete_sealed', 'task.fail_sealed', 'task.cancelled_sealed', 'task.decline_sealed'];
+
+function terminalTypes(taskId: string): string[] {
+  return taskEnvelopes(taskId).filter((envelope) => TERMINAL_OUTPUTS.includes(envelope.type)).map((envelope) => envelope.type);
+}
+
+function byReference(envelope: Envelope): boolean {
+  return (envelope.payload as { sealed?: { ciphertextRef?: unknown } }).sealed?.ciphertextRef !== undefined;
+}
+
+function journalTerminal(storeDir: string, taskId: string): { bytes: string; truth_state: string } | undefined {
+  const db = openJournalDatabase(path.join(storeDir, JOURNAL_DB_FILENAME), DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
+  try {
+    return db.prepare('SELECT bytes, truth_state FROM journal_terminal WHERE task_id = ?').get(taskId) as { bytes: string; truth_state: string } | undefined;
+  } finally { db.close(); }
+}
+
+/** Runs a sealed task whose result seals above the inline frame, so the daemon sends it by `ciphertextRef`. */
+async function runLargeResult(adapter: StubRuntimeAdapter, member: ScopeMember, deviceId: string, taskId: string): Promise<void> {
+  server!.send(await sealedOffer(member, taskId, server!.nextSeq(), deviceId, 'run'));
+  await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+  adapter.sessions[0]!.emit({ type: 'progress', text: `large summary ${'s'.repeat(300 * 1024)}` });
+  adapter.sessions[0]!.emit({ type: 'turn_end' });
+}
+
+/**
+ * A crash image of a journal: a sealed task whose result the daemon sent by
+ * `ciphertextRef` under `sender`, and that the Host refused. A 0.30.1 daemon
+ * leaves the same rows.
+ */
+async function seedRefusedResult(storeDir: string, deviceId: string, member: ScopeMember, taskId: string, sender: string): Promise<Envelope> {
+  const offer = await sealedOffer(member, taskId, 1, deviceId, 'run');
+  const { header, ciphertext } = await sealContent({
+    scopeKey: member.scopeKey, scope: { id: SCOPE, epoch: EPOCH }, chainHead: member.web.head!, sender, category: 'task-output',
+    binding: binding('task.complete', 'daemon-to-server', { taskId }, deviceId, BOTH),
+    plaintext: { summary: `large summary ${'s'.repeat(300 * 1024)}` } as never, maxContentLength: SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
+  });
+  const contentHash = `sha256:${createHash('sha256').update(ciphertext).digest('hex')}`;
+  const refused = createEnvelope('task.complete_sealed', {
+    sessionRef: 'sess-refused',
+    sealed: { ...header, ciphertextRef: { blobId: `collected-${taskId}`, contentHash, size: ciphertext.length, contentType: 'application/octet-stream' } },
+  } as never, { taskId });
+  const journal = new SqliteLocalTaskJournal({ storeDir });
+  try {
+    const offerBytes = encodeEnvelope(offer);
+    await journal.appendEnvelope({ identity: { tenantId: TENANT, productId: 'sealed-daemon-test', deviceId },
+      taskId, envelopeId: offer.id, seq: 1, bytes: offerBytes, bytesHash: journalHash(offerBytes),
+      opensTask: true, receivedAt: new Date().toISOString() });
+    await journal.recordAdmission({ taskId, admitted: true, claimedRuntime: 'pi', decidedAt: new Date().toISOString() });
+    const bytes = encodeEnvelope(refused);
+    await journal.recordTerminal({ taskId, terminalType: 'complete', bytes, payloadHash: journalHash(bytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
+    await journal.rejectTerminal(taskId, journalHash(bytes), 'payload_invalid');
+  } finally { await journal.close(); }
+  return refused;
+}
+
+/** Opens a sealed output at whichever epoch the device sealed it, rotated or not. */
+async function openAtEpoch(member: ScopeMember, envelope: Envelope, deviceId: string, device: { readonly memberId: string }) {
+  const epoch = (envelope.payload as { sealed: { scope: { epoch: number } } }).sealed.scope.epoch;
+  const key = epoch === EPOCH ? member.scopeKey : await member.web.openPackage(SCOPE, epoch, device as never);
+  return openOutput(member, envelope, deviceId, BOTH, key);
+}
+
+describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
+  it.each(['payload_invalid', 'unsupported'])('replaces a result the Host refuses with %s by one sealed failure, in the journal too', async (reason) => {
+    const { server, adapter, deviceId, storeDir, member } = await start({ ciphertextRef: true });
+    server.setOutboundRefusal((envelope) => (envelope.type === 'task.complete_sealed' && byReference(envelope) ? reason : undefined));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await runLargeResult(adapter, member, deviceId, 'refused-ref');
+
+    const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'refused-ref', BUDGET_MS);
+    expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
+    expect(failed.payload).not.toHaveProperty('sealed.ciphertextRef');
+    await vi.waitFor(() => expect(journalTerminal(storeDir, 'refused-ref')).toEqual({ bytes: encodeEnvelope(failed), truth_state: 'confirmed' }), BUDGET_MS);
+    await vi.waitFor(() => expect(daemon!.tasks().find((task) => task.taskId === 'refused-ref')).toMatchObject({ state: 'Failed', summary: 'terminal_result_unsealable' }), BUDGET_MS);
+    expect(terminalTypes('refused-ref')).toEqual(['task.complete_sealed', 'task.fail_sealed']);
+    expect(daemon!.status().pendingTerminalCommits).toBe(0);
+  });
+
+  it('settles a refused replacement once, with no third terminal', async () => {
+    const { server, adapter, deviceId, storeDir, member } = await start({ ciphertextRef: true });
+    server.setOutboundRefusal((envelope) => {
+      if (envelope.type === 'task.complete_sealed' && byReference(envelope)) return 'payload_invalid';
+      return envelope.type === 'task.fail_sealed' ? 'not_permitted' : undefined;
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await runLargeResult(adapter, member, deviceId, 'refused-twice');
+
+    const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'refused-twice', BUDGET_MS);
+    await vi.waitFor(() => expect(journalTerminal(storeDir, 'refused-twice')).toEqual({ bytes: encodeEnvelope(failed), truth_state: 'failed' }), BUDGET_MS);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(terminalTypes('refused-twice')).toEqual(['task.complete_sealed', 'task.fail_sealed']);
+    expect(daemon!.status().pendingTerminalCommits).toBe(0);
+  });
+
+  it('does not replace a refused inline terminal', async () => {
+    const { server, adapter, deviceId, storeDir, member } = await start({ ciphertextRef: true });
+    server.setOutboundRefusal((envelope) => (envelope.type === 'task.complete_sealed' ? 'payload_invalid' : undefined));
+    server.send(await sealedOffer(member, 'refused-inline', server.nextSeq(), deviceId, 'run'));
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'small answer' });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+
+    const complete = await server.waitFor((envelope) => envelope.type === 'task.complete_sealed' && envelope.task_id === 'refused-inline', BUDGET_MS);
+    expect(byReference(complete)).toBe(false);
+    await vi.waitFor(() => expect(journalTerminal(storeDir, 'refused-inline')).toEqual({ bytes: encodeEnvelope(complete), truth_state: 'failed' }), BUDGET_MS);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(terminalTypes('refused-inline')).toEqual(['task.complete_sealed']);
+  });
+
+  it('keeps a result whose sends fail on the route, and replaces nothing', async () => {
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
+    const release = server.holdBlobUploads();
+    await runLargeResult(adapter, member, deviceId, 'route-retry');
+    await vi.waitFor(() => expect(server.blobUploadsHeld).toBeGreaterThan(0), BUDGET_MS);
+    server.setFailMessagesSends(true);
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    server.setFailMessagesSends(false);
+
+    const complete = await server.waitFor((envelope) => envelope.type === 'task.complete_sealed' && envelope.task_id === 'route-retry', BUDGET_MS);
+    expect(byReference(complete)).toBe(true);
+    await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0), BUDGET_MS);
+    expect(terminalTypes('route-retry')).toEqual(['task.complete_sealed']);
+  });
+
+  it('replaces a refused result once without a journal', async () => {
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true, journal: false });
+    server.setOutboundRefusal((envelope) => (envelope.type === 'task.complete_sealed' && byReference(envelope) ? 'payload_invalid' : undefined));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await runLargeResult(adapter, member, deviceId, 'refused-no-journal');
+
+    const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'refused-no-journal', BUDGET_MS);
+    expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(terminalTypes('refused-no-journal')).toEqual(['task.complete_sealed', 'task.fail_sealed']);
+  });
+
+  it('replaces a refusal journaled before a restart (or by 0.30.1) with a sealed failure, once the member resumes', async () => {
+    let refused: Envelope | undefined;
+    const { server, deviceId, storeDir, member, device } = await start({
+      ciphertextRef: true,
+      beforeStart: async (storeDir, deviceId, member, device) => { refused = await seedRefusedResult(storeDir, deviceId, member, 'refused-before-restart', device.memberId); },
+    });
+    const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'refused-before-restart', BUDGET_MS);
+    expect(await openAtEpoch(member, failed, deviceId, device)).toEqual({ reason: 'terminal_result_unsealable' });
+    await vi.waitFor(() => expect(journalTerminal(storeDir, 'refused-before-restart')).toEqual({ bytes: encodeEnvelope(failed), truth_state: 'confirmed' }), BUDGET_MS);
+    expect(terminalTypes('refused-before-restart')).toEqual(['task.fail_sealed']);
+    expect(server.received.map((envelope) => envelope.id)).not.toContain(refused!.id);
+  });
+
+  it('replaces a refusal that another member sealed with the closed plaintext form', async () => {
+    const { server, storeDir } = await start({
+      ciphertextRef: true,
+      beforeStart: async (storeDir, deviceId, member) => { await seedRefusedResult(storeDir, deviceId, member, 'refused-other-member', member.web.member.memberId); },
+    });
+    const failed = await server.waitFor((envelope) => envelope.type === 'task.fail' && envelope.task_id === 'refused-other-member', BUDGET_MS);
+    expect(failed.payload).toMatchObject({ reason: 'sealed_key_unavailable', retryable: false });
+    expect(isSealedTaskPlainOutput(failed.type, failed.payload)).toBe(true);
+    await vi.waitFor(() => expect(journalTerminal(storeDir, 'refused-other-member')?.truth_state).toBe('confirmed'), BUDGET_MS);
+    expect(terminalTypes('refused-other-member')).toEqual(['task.fail']);
+  });
+
+  it('sends a replacement journaled before a restart with its exact bytes', async () => {
+    let replacement: Envelope | undefined;
+    const { server, storeDir } = await start({
+      ciphertextRef: true,
+      beforeStart: async (storeDir, deviceId, member, device) => {
+        const refused = await seedRefusedResult(storeDir, deviceId, member, 'replaced-before-restart', device.memberId);
+        replacement = createEnvelope('task.fail', { reason: 'sealed_key_unavailable', retryable: false }, { taskId: 'replaced-before-restart' });
+        const bytes = encodeEnvelope(replacement);
+        const journal = new SqliteLocalTaskJournal({ storeDir });
+        try {
+          await journal.replaceRefusedTerminal('replaced-before-restart', journalHash(encodeEnvelope(refused)), {
+            taskId: 'replaced-before-restart', terminalType: 'failed', bytes, payloadHash: journalHash(bytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(),
+          });
+        } finally { await journal.close(); }
+      },
+    });
+    const failed = await server.waitFor((envelope) => envelope.type === 'task.fail' && envelope.task_id === 'replaced-before-restart', BUDGET_MS);
+    expect(encodeEnvelope(failed)).toBe(encodeEnvelope(replacement!));
+    await vi.waitFor(() => expect(journalTerminal(storeDir, 'replaced-before-restart')?.truth_state).toBe('confirmed'), BUDGET_MS);
+    expect(terminalTypes('replaced-before-restart')).toEqual(['task.fail']);
   });
 });

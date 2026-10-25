@@ -132,6 +132,11 @@ class RecordingJournal implements LocalTaskJournal {
     if (!terminal) throw new Error('terminal acknowledgement does not match durable terminal');
     this.terminals[this.terminals.indexOf(terminal)] = { ...terminal, truthState: 'failed', lastError: reason };
   }
+  async replaceRefusedTerminal(taskId: string, refusedPayloadHash: string, record: LocalTerminalRecord): Promise<void> {
+    const terminal = this.terminals.find((candidate) => candidate.taskId === taskId && candidate.payloadHash === refusedPayloadHash && candidate.truthState === 'failed');
+    if (!terminal) throw new Error('terminal replacement does not match a refused durable terminal');
+    this.terminals[this.terminals.indexOf(terminal)] = record;
+  }
   async listRecoveryTasks(): Promise<[]> { return []; }
   async readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | undefined> {
     const task = this.tasks.get(taskId);
