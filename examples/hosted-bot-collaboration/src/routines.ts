@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
 import { applyPlan, auditCalendarError, canonical, DEFAULT_RETRY, hash, nextWake, recordOccurrence, routineCommands, scheduleNext, switchVersion,
-  versionSwitchDue, type FrozenInput, type HostJobHandler, type Intent, type Json, type LedgerState, type Occurrence, type Routine,
+  versionSwitchDue, type FrozenExecutionInput, type HostJobHandler, type Intent, type Json, type LedgerState, type Occurrence, type Routine,
   type RoutineCommands, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import { BOT_ROUTINE, createDefinition, owned, routineCalendar, routineTurn, updateDefinition } from '@byok-sdk/example-bot-collaboration/routines';
 import type { CommandPorts } from '@byok-sdk/example-bot-collaboration/rules/commands';
@@ -19,7 +19,7 @@ type RoutineRow = { id: string; definition: RoutineDefinition; pending: RoutineD
   status: Routine['status']; next_at: string | null; calendar_errors: Routine['calendarErrors'] | null };
 type OccurrenceRow = { key: string; routine_id: string; definition_version: number; trigger_kind: Occurrence['trigger']['kind']; planned_at: string;
   recorded_at: string; next_at: string | null; execution_superseded: boolean; job: { summary?: Json } | null };
-type IntentRow = OccurrenceRow & { intent_key: string; ordinal: string; agent: string; input: FrozenInput; wait_until: string; tries: number;
+type IntentRow = OccurrenceRow & { intent_key: string; ordinal: string; agent: string; input: FrozenExecutionInput; wait_until: string; tries: number;
   retry_until: string | null; cancel_reason: Intent['cancelReason'] | null };
 
 const OCCURRENCE_COLUMNS = `o.key, o.routine_id, o.definition_version, o.trigger_kind, o.planned_at::text, o.recorded_at::text, o.next_at::text,

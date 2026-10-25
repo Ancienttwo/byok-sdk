@@ -80,6 +80,7 @@ export async function openHostedCloud() {
     /** The SDK calls of the tenant, as H binds them. */
     const port: FrozenSubmitPort & HostedTaskPort = {
       submit: input => cloud.submitAgentExecution(tenant, input),
+      submitSealed: input => cloud.submitSealedAgentExecution(tenant, input),
       offer: taskId => cloud.readTaskOffer(tenant, taskId),
       attempt: taskId => cloud.readTaskAttempt(tenant, taskId),
       deviceTerminal: taskId => cloud.readDeviceTerminal(tenant, taskId),
