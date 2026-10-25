@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Feature (keys)** — `PiModelConfigSchema.compat` accepts
+  `sendSessionAffinityHeaders` (`openai-completions` and `anthropic-messages`)
+  and `allowEmptySignature` (`anthropic-messages`), both booleans, as pinned
+  pi-ai 1.4.0 reads them; `openai-responses` refuses both. The regenerated
+  `@byok-sdk/keys/pi-catalog` table returns 752 of 1,019 pinned entries (178
+  before): 324 more OpenRouter, 238 more Vercel AI Gateway and 12 more
+  Baseten entries. The prepared entry still refuses
+  `sendSessionAffinityHeaders`, which its frozen wire does not carry, and
+  compiles no `anthropic-messages` request.
 - **Feature (examples)** — the hosted collaboration example runs
   summary-only Host job routines (#793 S14), as L's `hostJobs`. Host code
   adds them with `addHostJobRoutine`, `updateHostJobRoutine` and

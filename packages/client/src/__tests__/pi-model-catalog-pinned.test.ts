@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai/models';
 import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all';
+import { CompatSchemasByApi } from '@earendil-works/pi-ai/providers/compat-schema';
 import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
 import clientManifest from '../../package.json' with { type: 'json' };
 // Relative and test-only: the release graph keeps `@byok-sdk/keys` and the
@@ -10,7 +11,9 @@ import clientManifest from '../../package.json' with { type: 'json' };
 import { PI_MODEL_CATALOG_FILE, renderPiModelCatalog } from '../../../../scripts/keys/generate-pi-model-catalog';
 import { PI_MODEL_CATALOG, PI_MODEL_CATALOG_PI_AI_VERSION } from '../../../keys/src/pi-model-catalog.generated';
 import { piModelConfigFromPinnedCatalog } from '../../../keys/src/pi-model-catalog';
-import { PI_MODEL_APIS, PI_THINKING_LEVELS, piSupportedThinkingLevels, type PiModelApi } from '../../../keys/src/pi-model-config';
+import {
+  PI_COMPAT_KEYS_BY_API, PI_MODEL_APIS, PI_THINKING_LEVELS, piSupportedThinkingLevels, type PiModelApi,
+} from '../../../keys/src/pi-model-config';
 import { buildPiProviderProjection } from '../../../keys/src/pi-provider-projection';
 import { MODEL_PROVIDER_VENDORS, type ModelProviderVendorId } from '../../../keys/src/provider-catalog';
 import { parseModelProviderProfile } from '../../../keys/src/provider-profile';
@@ -31,6 +34,20 @@ describe('keys Pi model catalog against the pinned pi-ai', () => {
     expect(PI_MODEL_CATALOG_PI_AI_VERSION).toBe(clientManifest.dependencies['@earendil-works/pi-ai']);
     // A Windows checkout may convert the file to CRLF; only the content is compared.
     expect(readFileSync(PI_MODEL_CATALOG_FILE, 'utf8').replaceAll('\r\n', '\n')).toBe(await renderPiModelCatalog());
+  });
+
+  it("admits each compat key only under a Pi api whose compat schema declares it", () => {
+    for (const api of PI_MODEL_APIS) {
+      const declared = CompatSchemasByApi[api].properties as Record<string, { type?: string }>;
+      expect([api, PI_COMPAT_KEYS_BY_API[api].filter((key) => !Object.hasOwn(declared, key))]).toEqual([api, []]);
+    }
+    // The two keys added for the OpenRouter, Vercel AI Gateway and Baseten entries.
+    for (const api of ['openai-completions', 'anthropic-messages'] as const) {
+      expect(CompatSchemasByApi[api].properties.sendSessionAffinityHeaders.type).toBe('boolean');
+    }
+    expect(CompatSchemasByApi['anthropic-messages'].properties.allowEmptySignature.type).toBe('boolean');
+    expect(Object.hasOwn(CompatSchemasByApi['openai-responses'].properties, 'sendSessionAffinityHeaders')).toBe(false);
+    expect(Object.hasOwn(CompatSchemasByApi['openai-completions'].properties, 'allowEmptySignature')).toBe(false);
   });
 
   it("mirrors Pi's thinking levels", () => {
@@ -76,7 +93,9 @@ describe('keys Pi model catalog against the pinned pi-ai', () => {
       expect([provider, model.id, projected.api]).toEqual([provider, model.id, model.api]);
       const fields = ['id', 'name', 'input', 'reasoning', 'contextWindow', 'maxTokens', 'thinkingLevelMap', 'compat', 'inputLimits'];
       const pick = (source: Record<string, unknown>) => Object.fromEntries(fields.map((field) => [field, source[field] ?? null]));
-      expect({ provider, ...pick(entry) }).toEqual({ provider, ...pick({ compat: {}, ...model }) });
+      // The projected name is the profile display_name, which the profile schema trims
+      // (pi-ai 1.4.0 openrouter google/gemma-4-26b-a4b carries a trailing space).
+      expect({ provider, ...pick(entry) }).toEqual({ provider, ...pick({ compat: {}, ...model, name: String(model.name).trim() }) });
     }
     // Cerebras, Z.AI GLM, MiniMax and the other entries; a pi-ai upgrade that empties this set is a regression.
     expect(representable).toBeGreaterThan(0);

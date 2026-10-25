@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { classifyPiCatalogModel, piModelConfigFromPinnedCatalog } from './pi-model-catalog';
 import { assertPiPreparedProviderProfile } from './pi-provider-launcher-core';
 import { buildPiProviderProjection } from './pi-provider-projection';
+import { MODEL_PROVIDER_VENDORS } from './provider-catalog';
 import { parseModelProviderProfile } from './provider-profile';
 
 // pi-ai 1.3.0 `providers/data/zai.json` glm-5.3, as `getBuiltinModels('zai')` returns it.
@@ -114,6 +115,51 @@ describe('piModelConfigFromPinnedCatalog', () => {
   });
 });
 
+describe('pinned entries that declare sendSessionAffinityHeaders or allowEmptySignature', () => {
+  const timestamps = { created_at: '2026-10-26T00:00:00.000Z', updated_at: '2026-10-26T00:00:00.000Z' };
+
+  it('returns an OpenRouter completions entry with sendSessionAffinityHeaders and projects it to Pi', () => {
+    // pi-ai 1.4.0 `providers/data/openrouter.json` deepseek/deepseek-chat.
+    const result = piModelConfigFromPinnedCatalog({ provider: 'openrouter', api: 'openai-completions', model: 'deepseek/deepseek-chat', thinkingLevel: 'off' });
+    const compat = { supportsDeveloperRole: false, thinkingFormat: 'openrouter', supportsStrictMode: true, sendSessionAffinityHeaders: true };
+    expect(result).toEqual({
+      ok: true, config: { contextWindow: 128_000, maxTokens: 16_000, reasoning: false, thinkingLevel: 'off', compat }, input: ['text'],
+    });
+    if (!result.ok) throw new Error(result.reason);
+    const vendor = MODEL_PROVIDER_VENDORS.openrouter;
+    const profile = parseModelProviderProfile({
+      ...timestamps, adapter: vendor.adapter, auth_mode: vendor.auth_mode, base_url: vendor.base_url, capabilities: [],
+      display_name: 'DeepSeek', enabled: true, kind: 'model', model: 'deepseek/deepseek-chat', profile_ref: 'or-deepseek',
+      provider_kind: 'openrouter', pi_model: result.config,
+    });
+    const provider = (buildPiProviderProjection(profile, 'pi-rpc') as any).providers['byok-sdk-or-deepseek'];
+    expect(provider.api).toBe('openai-completions');
+    expect(provider.models[0].compat).toEqual(compat);
+    expect(() => assertPiPreparedProviderProfile(profile)).toThrow(/compat\.sendSessionAffinityHeaders; the prepared model wire/);
+  });
+
+  it('returns a Vercel AI Gateway anthropic-messages entry with allowEmptySignature and projects it to Pi', () => {
+    // pi-ai 1.4.0 `providers/data/vercel-ai-gateway.json` alibaba/qwen-3-235b.
+    const result = piModelConfigFromPinnedCatalog({ provider: 'vercel-ai-gateway', api: 'anthropic-messages', model: 'alibaba/qwen-3-235b', thinkingLevel: 'off' });
+    expect(result).toEqual({
+      ok: true,
+      config: { contextWindow: 262_144, maxTokens: 16_384, reasoning: false, thinkingLevel: 'off', compat: { allowEmptySignature: true } },
+      input: ['text'],
+    });
+    if (!result.ok) throw new Error(result.reason);
+    const vendor = MODEL_PROVIDER_VENDORS['vercel-ai-gateway'];
+    const profile = parseModelProviderProfile({
+      ...timestamps, adapter: vendor.adapter, auth_mode: vendor.auth_mode, base_url: vendor.base_url, capabilities: [],
+      display_name: 'Qwen 3 235B', enabled: true, kind: 'model', model: 'alibaba/qwen-3-235b', profile_ref: 'vercel-qwen',
+      provider_kind: 'vercel-ai-gateway', pi_model: result.config,
+    });
+    const provider = (buildPiProviderProjection(profile, 'pi-rpc') as any).providers['byok-sdk-vercel-qwen'];
+    expect(provider.api).toBe('anthropic-messages');
+    expect(provider.models[0].compat).toEqual({ allowEmptySignature: true });
+    expect(() => assertPiPreparedProviderProfile(profile)).toThrow(/anthropic adapter/);
+  });
+});
+
 describe('classifyPiCatalogModel', () => {
   const completions = { ...GLM_5_3, thinkingLevelMap: FULL_MAP, compat: {} };
 
@@ -122,10 +168,10 @@ describe('classifyPiCatalogModel', () => {
       ...completions,
       headers: { 'x-extra': '1' },
       futureField: true,
-      compat: { sendSessionAffinityHeaders: true, supportsStrictMode: true },
+      compat: { sessionAffinityFormat: 'openrouter', supportsStrictMode: true },
       thinkingLevelMap: { ...FULL_MAP, minimal: undefined },
     }, 'openai_compatible')).toEqual({
-      unrepresentable: ['compat.sendSessionAffinityHeaders', 'futureField', 'headers', 'thinkingLevelMap.minimal'],
+      unrepresentable: ['compat.sessionAffinityFormat', 'futureField', 'headers', 'thinkingLevelMap.minimal'],
     });
   });
 
@@ -147,6 +193,26 @@ describe('classifyPiCatalogModel', () => {
       .toMatchObject({ config: { api: 'openai-responses', compat: { supportsStrictMode: false } } });
     expect(classifyPiCatalogModel({ ...responses, compat: { requiresReasoningContentOnAssistantMessages: true } }, 'openai_compatible'))
       .toEqual({ unrepresentable: ['compat.requiresReasoningContentOnAssistantMessages'] });
+  });
+
+  it('admits sendSessionAffinityHeaders under completions and anthropic-messages, and allowEmptySignature under anthropic-messages only', () => {
+    const both = { sendSessionAffinityHeaders: true, allowEmptySignature: true };
+    expect(classifyPiCatalogModel({ ...completions, api: 'anthropic-messages', compat: both }, 'anthropic'))
+      .toMatchObject({ config: { compat: both } });
+    expect(classifyPiCatalogModel({ ...completions, compat: { sendSessionAffinityHeaders: false } }, 'openai_compatible'))
+      .toMatchObject({ config: { compat: { sendSessionAffinityHeaders: false } } });
+    expect(classifyPiCatalogModel({ ...completions, compat: both }, 'openai_compatible'))
+      .toEqual({ unrepresentable: ['compat.allowEmptySignature'] });
+    expect(classifyPiCatalogModel({ ...completions, api: 'openai-responses', compat: both }, 'openai_compatible'))
+      .toEqual({ unrepresentable: ['compat.allowEmptySignature', 'compat.sendSessionAffinityHeaders'] });
+  });
+
+  it.each(['sendSessionAffinityHeaders', 'allowEmptySignature'] as const)('refuses a non-boolean compat.%s', (key) => {
+    const anthropic = { ...completions, api: 'anthropic-messages' };
+    for (const value of ['true', 1, null]) {
+      expect(classifyPiCatalogModel({ ...anthropic, compat: { [key]: value } }, 'anthropic'))
+        .toEqual({ unrepresentable: [`compat.${key}`] });
+    }
   });
 
   it('keeps an absent thinkingLevelMap absent', () => {
