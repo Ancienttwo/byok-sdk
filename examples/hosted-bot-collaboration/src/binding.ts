@@ -74,12 +74,13 @@ export async function switchFence(client: PoolClient, scopeKey: string, deviceId
 }
 
 /**
- * The device's row names mode L and is not revoked (#957): L owns it, or owns it until an open switch to H commits. H then
- * leaves the Agent home writes of its Bots to L. A device with no row, or a revoked one, keeps the flush it had before.
+ * H sends no new Agent home write to this device (#957), as L's `flushHomes` for a refused device: its row is not revoked,
+ * and a switch is open or the row names mode L. A write that was sent is still read back. A device with no row, or a
+ * revoked one, keeps the flush it had before.
  */
-export async function ownedByL(client: PoolClient, scopeKey: string, deviceId: string): Promise<boolean> {
+export async function refusesHomeWrites(client: PoolClient, scopeKey: string, deviceId: string): Promise<boolean> {
   const row = await readRow(client, scopeKey, deviceId);
-  return row !== undefined && !row.revoked && row.mode === 'L';
+  return row !== undefined && !row.revoked && (row.switching !== null || row.mode === 'L');
 }
 
 /**

@@ -12,7 +12,7 @@ import { addTurn, stateOf, type Card, type CollaborationState, type Turn } from 
 import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions,
   seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { activeBinding, beginSwitch, ownedByL, switchFence, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
+import { activeBinding, beginSwitch, refusesHomeWrites, switchFence, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { cancelIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
@@ -191,7 +191,7 @@ function addedDevices(state: CollaborationState): () => string[] {
     return [...new Set(bots.flatMap(botId => state.team.bots[botId] ? [state.team.bots[botId]!.execution.deviceId] : []))];
   };
 }
-/** The open work of a device during its switch (#957), by kind. `homes` are Agent home operation sequences. */
+/** The open work of a device during its switch (#957), by kind. `homes`: sequences of sent Agent home writes with no terminal readback. */
 export interface DeviceWork { intents: string[]; turns: string[]; batches: string[]; homes: number[] }
 /** The open work of `deviceId` in `state` and the intent rows. The caller's transaction reads it. */
 async function openWork(client: PoolClient, scopeKey: string, state: CollaborationState, deviceId: string): Promise<DeviceWork> {
@@ -201,7 +201,8 @@ async function openWork(client: PoolClient, scopeKey: string, state: Collaborati
   return { intents,
     turns: Object.values(state.turns).filter(turn => !turn.conclusion && onDevice(turn.botId)).map(turn => turn.id),
     batches: Object.values(state.inputBatches ?? {}).filter(batch => batch.state === 'open' && onDevice(batch.botId)).map(batch => batch.id),
-    homes: state.team.homeOperations.filter(op => op.status === 'pending' && onDevice(op.botId)).map(op => op.sequence) };
+    // A home write that was never sent is not work on the device: it moves with the exported state.
+    homes: state.team.homeOperations.filter(op => op.status === 'pending' && op.sent && op.request.deviceId === deviceId).map(op => op.sequence) };
 }
 const releasedSeats = (state: CollaborationState) => Object.values(state.team.seats).filter(seat => seat.released).length;
 const EMPTY_FRAME = split(stateOf({})).frame;
@@ -848,9 +849,9 @@ export class HostedCollaborationStore {
    * lock. K8 `homeHead` decides, as L's `flushHomes`: the operation must be its Bot's oldest pending one, and the Bot must have
    * no intent row with no conclusion. A pending operation that is not a head waits `backoffMs` (never earlier). A head takes
    * a lease (`next_at = now + leaseMs`); the entity is the fence, so `tries` stays 0. A row whose operation is gone or
-   * settled settles with no call. A Bot whose device row names mode L (#957) is L's to flush, so its operation waits
-   * `backoffMs` too: after a commit to L, and during a switch from L to H until it commits. A switch away from H does not
-   * stop it: that commit waits for the device's pending operations to settle.
+   * settled settles with no call. While the operation's device refuses new home writes (#957: a switch is open, or its row
+   * names mode L), an operation that was never sent waits `backoffMs` too, and a sent one is read back with no new enqueue
+   * (`settleHome`), as L's `flushHomes` does.
    */
   claimHome(scope: string, sequence: number, clock: () => number, leaseMs: number, backoffMs: number): Promise<HomeClaim> {
     const key = storedKey(scope), row = homeRowKey(sequence);
@@ -862,9 +863,9 @@ export class HostedCollaborationStore {
       }
       const busy = (await client.query<{ busy: boolean }>(`SELECT EXISTS (SELECT 1 FROM intent WHERE scope = $1 AND conclusion IS NULL
         AND input->'payload'->'agentRef'->>'agentId' = $2) AS busy`, [key, op.botId])).rows[0]!.busy;
-      const device = state.team.bots[op.botId]?.execution.deviceId;
-      const lOwned = device !== undefined && await ownedByL(client, key, device);
-      if (lOwned || !homeHead(state.team, sequence, botId => botId === op.botId && busy)) {
+      // A write that was never sent waits while its device refuses new home writes: it has nothing to read back.
+      const unsent = !op.sent && await refusesHomeWrites(client, key, op.request.deviceId);
+      if (unsent || !homeHead(state.team, sequence, botId => botId === op.botId && busy)) {
         await client.query('UPDATE outbox SET next_at = GREATEST(next_at, $3) WHERE scope = $1 AND key = $2 AND settled_at IS NULL', [key, row, now + backoffMs]);
         return { value: { kind: 'none' }, outbox: [] };
       }
@@ -900,7 +901,14 @@ export class HostedCollaborationStore {
       const published = new Set<string>();
       let enqueue: HomeOperation['request'] | undefined;
       if ('terminal' in step) applyHomeTerminal(state, op, step.terminal, (id, body) => { publish(id, body); published.add(id); });
-      else if ('retry' in step) enqueue = structuredClone(planHomeRetry(op, now));
+      else if ('retry' in step) {
+        // The mark comes before the first send, in the transaction that plans it, so a crash or a failed send still counts the
+        // write as sent (K8 `HomeOperation.sent`). A device that refuses new home writes gets no enqueue: the row waits.
+        if (!await refusesHomeWrites(client, key, op.request.deviceId)) {
+          op.sent = true;
+          enqueue = structuredClone(planHomeRetry(op, now));
+        }
+      }
       else failHomeFlush(op, step.error);
       return { value: { retries: op.retries.length, ...enqueue ? { enqueue } : {} }, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now };
     });
@@ -993,10 +1001,11 @@ export class HostedCollaborationStore {
    * The drain of a device that H is switching away from (#957): its open work, and with `cancel` the cancel of each item
    * first. It refuses with `not_owner` for a switch toward H, whose old owner L drains its own work. Open work is the
    * open intent rows that run on the device, and for the Bots on the device the Turns that are not concluded (held, queued,
-   * routine, delegation chain and seat Turns), the open input batches and the pending Agent home operations. A room seat
-   * that has no Turn yet is round state, not execution: it moves with the state export. A cancel is the K8 `cancel_turn`
-   * command for a Turn or a batch, and the K4 cancel for an intent with no Turn. A tried intent concludes only from SDK evidence, so it stays open until the reconciler concludes
-   * it. A home operation is never cancelled: the sender settles it. The drain waits for nothing: the caller syncs the scope,
+   * routine, delegation chain and seat Turns), the open input batches and the Agent home writes to the device that were
+   * sent and have no terminal readback. A home write that was never sent, and a room seat that has no Turn yet, are state,
+   * not execution: they move with the state export. A cancel is the K8 `cancel_turn` command for a Turn or a batch, and the
+   * K4 cancel for an intent with no Turn. A tried intent concludes only from SDK evidence, so it stays open until the
+   * reconciler concludes it. A sent home write is never cancelled: its readback settles it. The drain waits for nothing: the caller syncs the scope,
    * which concludes the cancelled Turns, and calls it again.
    * Returns the work that is still open, and each cancel that threw.
    */

@@ -246,45 +246,78 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
       FROM ${table('outbox')} WHERE scope = $1`, [storedKey(scope), homeRowKey(sequence)]);
     return sequence;
   }
-  /** A sender whose home port reads every request back as applied, and records each read. */
-  const homeSender = (reads: string[], now = VECTOR_NOW) => new HostedOutboxSender(opened!.pool, store(), { projections: { deliver: async () => {} }, now: () => now,
-    leaseMs: 20_000, sendTimeoutMs: 10_000, backoffMs: 5_000, homes: () => ({
-      read: async request => { reads.push(request.payload.requestId); return { deviceId: request.deviceId, agentRef: request.payload.agentRef,
-        requestId: request.payload.requestId, projectionHash: request.payload.projectionHash, status: 'applied' as const }; },
-      enqueue: async () => {} }) });
-  const backedOff = async (scope: string, sequence: number) => expect((await opened!.pool.query(`SELECT next_at::text, settled_at FROM
-    ${table('outbox')} WHERE scope = $1 AND key = $2`, [storedKey(scope), homeRowKey(sequence)])).rows).toEqual([{ next_at: String(VECTOR_NOW + 5_000), settled_at: null }]);
+  /**
+   * A sender at `now` whose home port answers every read with `status` (no readback when absent), and records each read and
+   * each enqueue.
+   */
+  const homeSender = (calls: { reads: string[]; enqueued?: string[] }, now = VECTOR_NOW, status?: 'applied') =>
+    new HostedOutboxSender(opened!.pool, store(), { projections: { deliver: async () => {} }, now: () => now, leaseMs: 20_000, sendTimeoutMs: 10_000,
+      backoffMs: 5_000, homes: () => ({
+        read: async request => {
+          calls.reads.push(request.payload.requestId);
+          return status && { deviceId: request.deviceId, agentRef: request.payload.agentRef, requestId: request.payload.requestId,
+            projectionHash: request.payload.projectionHash, status };
+        },
+        enqueue: async request => { calls.enqueued?.push(request.payload.requestId); } }) });
+  const backedOff = async (scope: string, sequence: number, now = VECTOR_NOW) => expect((await opened!.pool.query(`SELECT next_at::text, settled_at
+    FROM ${table('outbox')} WHERE scope = $1 AND key = $2`, [storedKey(scope), homeRowKey(sequence)])).rows).toEqual([{ next_at: String(now + 5_000), settled_at: null }]);
+  const operation = async (scope: string, sequence: number) => (await store().read(scope)).team.homeOperations.find(op => op.sequence === sequence)!;
 
-  it('flushes a pending home operation while the switch is open, and backs it off after a commit to L', async () => {
-    const scope = await bound(), reads: string[] = [];
+  it('reads back a home write sent before the freeze with no new enqueue, and the commit waits for its terminal readback', async () => {
+    const scope = await bound(), calls = { reads: [] as string[], enqueued: [] as string[] };
     const first = await pendingHome(scope);
+    // No readback yet: the flush marks the write sent and enqueues it.
+    await homeSender(calls).run();
+    expect(calls).toEqual({ reads: [`r-${first}`], enqueued: [`r-${first}`] });
+    expect(await operation(scope, first)).toMatchObject({ status: 'pending', sent: true, retries: [] });
     await store().beginSwitch(scope, 'device', 'L', 1);
     expect((await store().drainDevice(scope, 'device', 2, {}, clock)).open.homes).toEqual([first]);
-    await homeSender(reads).run();
-    expect(reads).toEqual([`r-${first}`]);
+    await expect(store().commitSwitch(scope, 'device', 2)).rejects.toEqual(refused('open_work'));
+    // Past its retry time, the frozen device's write is read back, and no retry is enqueued.
+    await homeSender(calls, VECTOR_NOW + 2_000).run();
+    expect(calls).toEqual({ reads: [`r-${first}`, `r-${first}`], enqueued: [`r-${first}`] });
+    expect((await operation(scope, first)).retries).toEqual([]);
+    // After the claim's lease, the terminal readback settles it, and the commit goes through.
+    await homeSender(calls, VECTOR_NOW + 30_000, 'applied').run();
+    expect((await operation(scope, first)).status).toBe('applied');
     expect((await store().drainDevice(scope, 'device', 2, {}, clock)).open.homes).toEqual([]);
     await store().commitSwitch(scope, 'device', 2);
+    // After the commit to L, a new write is L's: H never sends it.
     const second = await pendingHome(scope);
-    await homeSender(reads).run();
-    expect(reads).toEqual([`r-${first}`]);
-    await backedOff(scope, second);
+    await homeSender(calls, VECTOR_NOW + 30_000, 'applied').run();
+    expect(calls.reads).toHaveLength(3);
+    await backedOff(scope, second, VECTOR_NOW + 30_000);
+  });
+
+  it('sends no home write that a frozen device never got, and leaves it out of the drain', async () => {
+    const scope = await bound(), calls = { reads: [] as string[], enqueued: [] as string[] };
+    await store().beginSwitch(scope, 'device', 'L', 1);
+    // A team change during the freeze projects a new write for a Bot on the device.
+    const sequence = await pendingHome(scope);
+    await homeSender(calls).run();
+    expect(calls).toEqual({ reads: [], enqueued: [] });
+    await backedOff(scope, sequence);
+    expect(await operation(scope, sequence)).not.toHaveProperty('sent');
+    expect((await store().drainDevice(scope, 'device', 2, {}, clock)).open.homes).toEqual([]);
+    // It moves with the state, so it does not hold the commit.
+    expect(await store().commitSwitch(scope, 'device', 2)).toEqual({ mode: 'L', revision: 3, revoked: false });
   });
 
   it('backs off home flushes during a switch from L to H, and flushes them after its commit', async () => {
-    const scope = `tenant:${randomUUID()}`, reads: string[] = [];
+    const scope = `tenant:${randomUUID()}`, calls = { reads: [] as string[] };
     await store().seed(scope, state => {
       seedCollaboration(state);
       Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
     });
     const sequence = await pendingHome(scope);
     await store().beginSwitch(scope, 'device', 'H', 0);
-    await homeSender(reads).run();
-    expect(reads).toEqual([]);
+    await homeSender(calls).run();
+    expect(calls.reads).toEqual([]);
     await backedOff(scope, sequence);
     await store().commitSwitch(scope, 'device', 1);
     // The row waits the backoff of its fenced try, then flushes.
-    await homeSender(reads, VECTOR_NOW + 5_000).run();
-    expect(reads).toEqual([`r-${sequence}`]);
+    await homeSender(calls, VECTOR_NOW + 5_000, 'applied').run();
+    expect(calls.reads).toEqual([`r-${sequence}`]);
   });
 
   it('stops a drain that an abort overtook: no cancel after the abort, and the drain refuses', async () => {
@@ -296,5 +329,15 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     await expect(store().drainDevice(scope, 'device', 2, { cancel: true }, clock)).rejects.toEqual(refused('not_switching'));
     expect((await store().read(scope)).turns.q1).toMatchObject({ status: 'queued' });
     expect((await store().read(scope)).turns.q1).not.toHaveProperty('conclusion');
+  });
+
+  it('stops a drain that an abort overtook before it cancels a Host intent with no Turn', async () => {
+    const scope = await bound();
+    await store().enqueueHostIntent(scope, { key: 'h1', source: 'user', execution: template('device'), waitUntil: VECTOR_NOW + 60_000 }, 'job', clock);
+    await store().beginSwitch(scope, 'device', 'L', 1);
+    const read = store().read.bind(store());
+    vi.spyOn(store(), 'read').mockImplementationOnce(async target => { await store().abortSwitch(scope, 'device', 2); return read(target); });
+    await expect(store().drainDevice(scope, 'device', 2, { cancel: true }, clock)).rejects.toEqual(refused('not_switching'));
+    expect(await intents(scope)).toEqual([{ key: 'h1', tries: 0, cancel_reason: null, conclusion: null }]);
   });
 });

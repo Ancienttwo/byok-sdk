@@ -402,7 +402,8 @@ scope lock, on the expected mode revision, and returns the binding row read back
   row.
 - `drainDevice(scope, deviceId, expectedRevision, { cancel }, clock)` returns the device's open work while H is the old
   owner: the open intent rows that run on the device, and for its Bots the Turns that are not concluded, the open input
-  batches and the pending Agent home operations. With `cancel`, it first sends K8 `cancel_turn` for each Turn and batch,
+  batches and the Agent home writes to the device that were sent and have no terminal readback (a write that was never
+  sent moves with the state). With `cancel`, it first sends K8 `cancel_turn` for each Turn and batch,
   and the K4 cancel for an intent with no Turn, and returns each cancel that threw. A tried intent concludes only from SDK
   evidence, so it stays open until the reconciliation concludes it. The drain waits for nothing: the caller syncs the
   scope, which concludes the cancelled Turns, and calls it again. For a switch toward H it refuses with `not_owner`: L
@@ -428,11 +429,13 @@ During the freeze:
   unbound or revoked device is still taken and held (#956);
 - the sync holds a Turn of the device's Bots with K8's `switching` refusal: `held: 'device_switching'` and a
   `held-switching:<turnId>` projection. An abort writes the due time 0, so the next sync freezes it;
-- Agent home flushes go on in a switch away from H: the commit waits for them.
+- H sends no new Agent home write to the device, as L. A write that was never sent waits; a sent one is still read back,
+  with no new enqueue, and the commit waits for its terminal readback. H marks a write `sent` (K8 `HomeOperation.sent`)
+  in the transaction that plans its first enqueue.
 
-After a commit to L, the same writes refuse with `DeviceBindingError` and `mode`. While the device's row names mode L
-(after a commit to L, and during a switch from L to H until it commits), the outbox sender backs off the Agent home
-operations of the device's Bots: L writes them. The switch moves no data: the state export and import between H and an L
+After a commit to L, the same writes refuse with `DeviceBindingError` and `mode`. The home write rule of the freeze holds
+while the device's row names mode L too (after a commit to L, and during a switch from L to H until it commits): L writes
+them. The switch moves no data: the state export and import between H and an L
 ledger (the §8 migration set) is a follow-up. Until then, a room seat of a Bot on the device that has no Turn yet stays in
 H's state, and after a commit to L its Turn is held with `mode`.
 
