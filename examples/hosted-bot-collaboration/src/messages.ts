@@ -6,7 +6,7 @@ import { CommitConflict, revisionOf, type CommitResult } from '@byok-sdk/example
 import { frozenIntent } from './intents';
 import { storedKey } from './layout';
 import { acceptedReply, commitStored } from './retention';
-import type { Decision, HostedCollaborationStore, PortsFactory, Publish } from './store';
+import type { Decision, HostedCollaborationStore, StorePorts } from './store';
 
 /** The SDK admission hook that H installs (#793 D2c). */
 export type AgentMessageConsumer = NonNullable<ByokCloudOptions['agentMessage']>;
@@ -21,8 +21,8 @@ export const messageCommandId = (input: AgentMessageInput): string => `${input.t
  * Decides one Agent message in the consume transaction, in the order of K4 `consumeMessage`. The checks before the commit
  * write nothing. They stay stable for a replay, because the frozen input never changes and an accepted reply stays.
  */
-export async function decideMessage(client: PoolClient, scope: string, state: CollaborationState, publish: Publish,
-  input: AgentMessageInput, ports: PortsFactory, channel: boolean): Promise<Decision<MessageDecision>> {
+export async function decideMessage(client: PoolClient, scope: string, state: CollaborationState,
+  input: AgentMessageInput, ports: StorePorts, channel: boolean): Promise<Decision<MessageDecision>> {
   const refuse = (reasonCode: string): Decision<MessageDecision> => ({ value: { outcome: 'refused', reasonCode }, outbox: [] });
   const frozen = await frozenIntent(client, scope, input.taskId);
   if (!frozen) return refuse('unknown_task');
@@ -33,7 +33,7 @@ export async function decideMessage(client: PoolClient, scope: string, state: Co
   const reply = await acceptedReply(client, storedKey(scope), state, input.taskId);
   if (reply && (reply.messageId !== input.payload.messageId || reply.contentHash !== input.payload.contentHash)) return refuse('message_conflict');
   if (reply) return { value: { outcome: 'accepted' }, outbox: [] };
-  const head = revisionOf(state), base = ports(state, publish);
+  const head = revisionOf(state), { manage: _manage, ...base } = ports;
   let result: CommitResult;
   try {
     result = await commitStored(client, scope, state, { scope, commandId: messageCommandId(input),
@@ -56,10 +56,11 @@ export interface MessageConsumerOptions {
    * repeat K4's tenant check: this mapping is the tenant check.
    */
   scopeOf(tenant: TenantId): string;
-  /** The command ports of the consume transaction. */
-  ports: PortsFactory;
+  /** The Host clock of the consume transaction. Default `Date.now`. The store builds the command ports. */
+  now?: () => number;
 }
 /** The `agentMessage` option of `createByokCloud` for an H store. */
 export function hostedMessageConsumer(store: HostedCollaborationStore, options: MessageConsumerOptions): AgentMessageConsumer {
-  return { consume: input => store.consume(options.scopeOf(input.tenant), input, options.ports) };
+  const now = options.now ?? Date.now;
+  return { consume: input => store.consume(options.scopeOf(input.tenant), input, now) };
 }

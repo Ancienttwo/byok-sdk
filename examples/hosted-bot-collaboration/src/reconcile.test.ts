@@ -11,7 +11,6 @@ import { waitForTaskCleanup } from '../../basic/goal-btw.test-support';
 import { openHostedCloud, SKIP_HOSTED_CLOUD, type HostedCloud } from './hosted-cloud.test-support';
 import { freezeIntent, HostedSubmitter } from './intents';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedReconciler, type HostedTaskPort } from './reconcile';
 import { inSchema, lockScope } from './store';
@@ -27,7 +26,7 @@ const row = async (scope: string, turnId: string): Promise<Row> => (await opened
 const commands = async (scope: string) => (await opened!.pool.query<{ key: string }>(
   `SELECT key FROM ${table('command')} WHERE scope = $1 ORDER BY key`, [storedKey(scope)])).rows.map(found => JSON.parse(found.key) as string);
 const reconciler = (port: HostedTaskPort, now?: () => number) =>
-  new HostedReconciler(opened!.pool, store().schema, store(), { port: () => port, ports: vectorPorts, pollMs: 0, ...(now ? { now } : {}) });
+  new HostedReconciler(opened!.pool, store().schema, store(), { port: () => port, pollMs: 0, ...(now ? { now } : {}) });
 /** A document that the frozen outcome schema of a Main Bot user Turn accepts. Its action writes one card projection. */
 const DOCUMENT = { confirmable_action: [{ action: 'send_message', summary: 'Send', draft: { text: 'hello' } }] };
 
@@ -189,7 +188,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
   it('reports a scope where the pass recorded a first claim with no conclusion, and not a claim recorded before (#793 D2f-5)', async () => {
     const { scope, input } = await tried(), sdk = fakePort();
     const changed: string[] = [], pass = () => new HostedReconciler(opened!.pool, store().schema, store(),
-      { port: () => sdk.port, ports: vectorPorts, pollMs: 0, now: () => clock, changed: reported => { changed.push(reported); } }).run();
+      { port: () => sdk.port, pollMs: 0, now: () => clock, changed: reported => { changed.push(reported); } }).run();
     sdk.deliver(input);
     expect(await pass()).toEqual({ concluded: 0, failed: [] });
     expect(changed).toEqual([]);
@@ -205,7 +204,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
     const { scope, input } = await tried(), sdk = fakePort();
     sdk.deliver(input, { status: 'complete', ownerDeviceId: 'device', cancellation: { requestedAt: 'now' } });
     sdk.complete(input, DOCUMENT);
-    const throwing = new HostedReconciler(opened!.pool, store().schema, store(), { port: () => sdk.port, ports: vectorPorts, pollMs: 0, now: () => clock,
+    const throwing = new HostedReconciler(opened!.pool, store().schema, store(), { port: () => sdk.port, pollMs: 0, now: () => clock,
       changed: () => { throw new Error('Host sync refused'); } });
     await expect(throwing.run()).rejects.toThrow('Host sync refused');
     expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled' });
@@ -326,7 +325,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
     sdk.deliver(d.inputs[0]!);
     const changed: string[] = [];
     const pass = await new HostedReconciler(opened!.pool, store().schema, store(),
-      { port: () => sdk.port, ports: vectorPorts, pollMs: 0, now: () => clock, changed: scope => { changed.push(scope); } }).run();
+      { port: () => sdk.port, pollMs: 0, now: () => clock, changed: scope => { changed.push(scope); } }).run();
     expect([pass.concluded, pass.failed.map(failure => [failure.turnId, (failure.error as Error).message])])
       .toEqual([3, [['b1', 'Attempt identity conflict'], ['c1', 'Projection identity conflict']]]);
     // c committed its first claim before its terminal transaction rolled back, so the Host syncs it too.
