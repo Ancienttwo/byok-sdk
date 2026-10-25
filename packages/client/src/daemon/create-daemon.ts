@@ -81,7 +81,9 @@ import { BlobClient } from './blob-client';
 import { SealedTasks } from './sealed-task';
 import { DAEMON_TASK_FAILURE, taskFailureField } from './task-failure';
 import { resolveMachineId } from './machine-id';
-import { declares, E2EE_MEMBER_CAPABILITY, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from './capabilities-client';
+import {
+  declares, E2EE_MEMBER_CAPABILITY, E2EE_MEMBER_KEM_EPOCH_CAPABILITY, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY,
+} from './capabilities-client';
 import type { CapabilityDeclaration } from '@byok-sdk/core';
 import {
   assertPresenceHeartbeatCadence,
@@ -3259,10 +3261,13 @@ export function buildDaemonWithAdapters(
   function applyCapabilityDeclaration(declaration: CapabilityDeclaration | undefined): void {
     deploymentDeclaration = declaration;
     const taskContext = setHelloCapability(HOST_MCP_TASK_CONTEXT_CAPABILITY, taskContextCapabilityAvailable());
-    // #654 E2d-e5: only a verified member on a Host with the E2EE member routes.
-    const sealedPayload = setHelloCapability(SEALED_PAYLOAD_CAPABILITY,
-      deviceMember?.session !== undefined && declaration !== undefined && declares(declaration, E2EE_MEMBER_CAPABILITY));
+    // #654 E2d-e5, E5b-2: only a verified member on a Host with the E2EE member routes and their KEM epoch rules.
+    const member = deviceMember?.session !== undefined && declaration !== undefined && declares(declaration, E2EE_MEMBER_CAPABILITY);
+    const kemEpoch = member && declares(declaration!, E2EE_MEMBER_KEM_EPOCH_CAPABILITY);
+    if (member && !kemEpoch) logMember(`the Host does not declare ${E2EE_MEMBER_KEM_EPOCH_CAPABILITY}; E2EE stays off until the Host is upgraded`);
+    const sealedPayload = setHelloCapability(SEALED_PAYLOAD_CAPABILITY, kemEpoch);
     if (taskContext || sealedPayload) connection?.refreshHello();
+    if (kemEpoch) deviceMember!.checkKemRotation();
   }
 
   /** Whether the advertisement changed. */
@@ -3443,6 +3448,7 @@ export function buildDaemonWithAdapters(
       const member = new DeviceMemberKeyring(session, {
         ...options,
         carried,
+        kemRotation: () => deploymentDeclaration !== undefined && declares(deploymentDeclaration, E2EE_MEMBER_KEM_EPOCH_CAPABILITY),
         onLost: () => {
           if (deviceMember === member) applyCapabilityDeclaration(deploymentDeclaration);
         },
@@ -3476,7 +3482,8 @@ export function buildDaemonWithAdapters(
     inputPreparationStatusAbort = undefined;
     blobLifecycleAbort?.abort();
     blobLifecycleAbort = undefined;
-    // The member resume writes custody entries; it ends before this run releases ownership.
+    // The member resume and a background KEM rotation write custody entries; they end before this run releases ownership.
+    const member = deviceMember;
     memberAbort?.abort();
     memberAbort = undefined;
     deviceMember = undefined;
@@ -3484,6 +3491,7 @@ export function buildDaemonWithAdapters(
     activateSealedTasks = undefined;
     await memberResume;
     memberResume = undefined;
+    await member?.kemRotationSettled();
     const errors: unknown[] = [];
     let mutationBarrierComplete = hostedStorageInitializationBarrierComplete;
     if (!hostedStorageInitializationBarrierComplete) {

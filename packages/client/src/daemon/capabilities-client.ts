@@ -34,6 +34,13 @@ export const PRESENCE_HINTS_CAPABILITY = 'presence.hints';
 /** The hosted E2EE member routes (#654). The daemon advertises `sealed-payload-v1` only where they exist. */
 export const E2EE_MEMBER_CAPABILITY = 'e2ee.member';
 
+/**
+ * The member KEM epoch rules (#654 E5b-2): v2 key packages, the per-member
+ * KEM floor, and the paged own-package read. The daemon seals and rotates its
+ * KEM key only where the Host declares them.
+ */
+export const E2EE_MEMBER_KEM_EPOCH_CAPABILITY = 'e2ee.member.kem-epoch';
+
 /** Thrown for every way discovery can fail. One type: a caller only ever needs "no declaration was read". */
 export class CapabilityDiscoveryError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {

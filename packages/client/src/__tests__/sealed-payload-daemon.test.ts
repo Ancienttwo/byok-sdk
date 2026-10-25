@@ -41,6 +41,7 @@ import { CursorStore } from '../daemon/cursor-store';
 import { journalHash } from '../daemon/journal/journal';
 import { DEFAULT_JOURNAL_BUSY_TIMEOUT_MS, JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { openJournalDatabase } from '../daemon/journal/sqlite-support';
+import { DeviceMemberKeyStore } from '../daemon/device-member-custody';
 import { DeviceMemberKeyring } from '../daemon/e2ee-keyring';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { E2eeWebClient } from './fixtures/e2ee-web-client';
@@ -65,8 +66,12 @@ interface ScopeMember {
   readonly scopeKey: Uint8Array;
 }
 
-/** The Host declares the E2EE member routes, so a verified member advertises sealed-payload-v1. */
-const E2EE_DECLARATION = { schema: 'byok-capabilities-v1', version: 1, capabilities: [HOST_MCP_TASK_CONTEXT_CAPABILITY, 'e2ee.member'] };
+/** The Host declares the E2EE member routes and their KEM epoch rules, so a verified member advertises sealed-payload-v1. */
+const E2EE_DECLARATION = {
+  schema: 'byok-capabilities-v1', version: 1, capabilities: [HOST_MCP_TASK_CONTEXT_CAPABILITY, 'e2ee.member', 'e2ee.member.kem-epoch'],
+};
+/** A Host from before the KEM epoch rules (#654 E5b-2): a verified member never advertises sealed-payload-v1 to it. */
+const NO_KEM_EPOCH_DECLARATION = { ...E2EE_DECLARATION, capabilities: [HOST_MCP_TASK_CONTEXT_CAPABILITY, 'e2ee.member'] };
 /** A Host without the E2EE member routes: a verified member never advertises sealed-payload-v1 to it. */
 const NO_E2EE_DECLARATION = { ...E2EE_DECLARATION, capabilities: [HOST_MCP_TASK_CONTEXT_CAPABILITY] };
 
@@ -95,8 +100,8 @@ async function start(options: {
   shutdown?: { readonly graceMs: number; readonly taskInterruptTimeoutMs: number };
   /** The categories of the device scope's policy. */
   policy?: readonly SealedCategory[];
-  /** `false`: the Host does not declare `e2ee.member`, and start waits for the first hello only. */
-  e2ee?: false;
+  /** `false`: the Host does not declare `e2ee.member`; `'no-kem-epoch'`: only that, without `e2ee.member.kem-epoch`. Start waits for the first hello only. */
+  e2ee?: false | 'no-kem-epoch';
   beforeStart?: (storeDir: string, deviceId: string, member: ScopeMember, device: { readonly memberId: string }) => Promise<void>;
 } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
@@ -113,7 +118,7 @@ async function start(options: {
     serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
     ...(options.shutdown === undefined ? {} : { shutdownGraceMs: options.shutdown.graceMs }),
   };
-  server.setCapabilityDeclaration(options.e2ee === false ? NO_E2EE_DECLARATION : E2EE_DECLARATION);
+  server.setCapabilityDeclaration(options.e2ee === false ? NO_E2EE_DECLARATION : options.e2ee === 'no-kem-epoch' ? NO_KEM_EPOCH_DECLARATION : E2EE_DECLARATION);
   daemon = createDaemonWithAdapters(config, [adapter],
     options.shutdown === undefined ? {} : { shutdown: { taskInterruptTimeoutMs: options.shutdown.taskInterruptTimeoutMs } });
   const web = await E2eeWebClient.create(server.e2ee);
@@ -122,7 +127,7 @@ async function start(options: {
   const member: ScopeMember = { web, scopeKey: await web.putScope(SCOPE, [device], { categories: options.policy ?? BOTH.categories }) };
   await options.beforeStart?.(storeDir, deviceId, member, device);
   await daemon.start();
-  await server.waitFor(options.e2ee === false ? (envelope) => envelope.type === 'conn.hello' : advertised, BUDGET_MS);
+  await server.waitFor(options.e2ee === undefined ? advertised : (envelope) => envelope.type === 'conn.hello', BUDGET_MS);
   return { server, adapter, deviceId, storeDir, member, device, cursor: () => new CursorStore(storeDir).load(server!.url, deviceId) };
 }
 
@@ -226,6 +231,46 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(await sealedOffer(member, 'undeclared', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     expect(server.received.filter(advertised)).toEqual([]);
+  });
+
+  it('does not advertise sealed-payload-v1 on a Host that declares e2ee.member without e2ee.member.kem-epoch, and says why', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    const { server } = await start({ e2ee: 'no-kem-epoch' });
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(
+      '[byok/client] the Host does not declare e2ee.member.kem-epoch; E2EE stays off until the Host is upgraded',
+    ), BUDGET_MS);
+    expect(server.received.filter(advertised)).toEqual([]);
+  });
+
+  it('waits on stop for the custody write of a background KEM rotation before it releases ownership', async () => {
+    const begin = DeviceMemberKeyStore.prototype.beginKemRotation;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let began = false;
+    const order: string[] = [];
+    const spy = vi.spyOn(DeviceMemberKeyStore.prototype, 'beginKemRotation').mockImplementation(async function (this: DeviceMemberKeyStore, binding) {
+      began = true;
+      await held;
+      try {
+        return await begin.call(this, binding);
+      } finally {
+        order.push('custody written');
+      }
+    });
+    try {
+      // A shred of a scope whose policy holds the device owes a KEM rotation, which starts once the Host declares the KEM epoch rules.
+      await start({ beforeStart: async (_storeDir, _deviceId, member) => { await member.web.append('shred', { scopeId: SCOPE }); } });
+      await vi.waitFor(() => expect(began).toBe(true), BUDGET_MS);
+      const stopping = daemon!.stop().then(() => { order.push('stopped'); });
+      daemon = undefined;
+      expect(await Promise.race([stopping.then(() => 'stopped'), new Promise((resolve) => setTimeout(() => resolve('waiting'), 1000))])).toBe('waiting');
+      release();
+      await stopping;
+      expect(order).toEqual(['custody written', 'stopped']);
+    } finally {
+      release();
+      spy.mockRestore();
+    }
   });
 
   it('withdraws sealed-payload-v1 when the chain removes the device', async () => {
