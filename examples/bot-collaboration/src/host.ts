@@ -24,7 +24,7 @@ import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCale
 import { applyManagement, updateBot, writeSnapshotBot } from './team';
 import { botCompactVeto } from './compaction';
 import { teamSnapshot, TeamModeError, type TeamSnapshot } from './rules/team';
-import { advanceRoomsAndTurns, roomMessages, type Mentions, type RoomMessage } from './rooms';
+import { advanceRoomsAndTurns, roomMessageProjection, roomMessages, type Mentions, type RoomMessage } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
@@ -395,6 +395,7 @@ export class BotCollaboration {
         createRoutine: (turn, action, index) => tx.routines.create(createDefinition(tx.routines.list(), turn.botId, taskId, index, action, turn.authority ?? 'bot')),
         updateRoutine: (turn, action) => tx.routines.update(updateDefinition(tx.routines.list(), turn.botId, action)),
         cancelRoutine: (turn, action) => tx.routines.lifecycle(owned(tx.routines.list(), turn.botId, action.routineId).definition.id, 'completed'),
+        roomPosts: !!this.options.roomHistory,
       },
     });
   }
@@ -822,9 +823,14 @@ export class BotCollaboration {
       const seat = turn.source === 'room_slot' ? state.team.seats[turn.id] : undefined;
       try {
         if (seat && readRoom && !seat.released) {
+          const roomId = state.team.rounds[seat.roundId]!.roomId;
+          // Q2 A (#883): the Host writes each post to its authority before the next seat reads it. A seat whose room still has
+          // an undelivered post waits like a failed read, so the pass does not spin and the timer looks again.
+          if (Object.values(ledger.outbox).some(row => row.kind === 'projection' && row.id.startsWith(roomMessageProjection(roomId, ''))
+            && (row.value as { roomId?: unknown }).roomId === roomId)) { this.unread.add(turn.id); continue; }
           // A read still open at the seat deadline fails too, so the sync can expire the seat (#883).
           const ms = Math.min(this.historyTimeoutMs, seat.deadline === undefined ? Infinity : seat.deadline - this.now());
-          const rows = roomMessages(await bounded(readRoom({ roomId: state.team.rounds[seat.roundId]!.roomId, botId: turn.botId, turnId: turn.id }), ms));
+          const rows = roomMessages(await bounded(readRoom({ roomId, botId: turn.botId, turnId: turn.id }), ms));
           injected.rooms.set(turn.id, { rows, digest: hash(canonical(rows)) });
         } else if (turn.source !== 'room_slot' && read) {
           const rows = contextTurns(await bounded(read({ botId: turn.botId, turnId: turn.id }), this.historyTimeoutMs));

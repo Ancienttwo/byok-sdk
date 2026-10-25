@@ -18,6 +18,14 @@
   the FIFO stayed blocked and the owner call refused the key as not stuck. A
   Host that switches exhaustively on `IntentOutcomeError.code` must add the
   `outcome_failed` case.
+- **Feature (examples)** — with `roomHistory`, K8 publishes each accepted seat
+  post as the projection `room-message:<roomId>:<messageId>` with
+  `{ roomId, id, from, text, late }`, and does not read the next seat of a room
+  while that room has an undelivered post (#883 acceptance 2). The Host's
+  `deliver` must resolve only after the write can be read back. A projection
+  that never delivers releases each later seat of its room as `busy` at its
+  deadline. The rule's new optional `OutcomePorts.roomPosts` stays unset in H,
+  so H and every Host without the option are unchanged.
 - **Fixed (examples)** — K8 L no longer leaves a room seat waiting when a Turn
   step releases the seat before it (a blocked or retired seat Turn). The L
   sync runs the room step and the Turn steps again, as H's sync does since
