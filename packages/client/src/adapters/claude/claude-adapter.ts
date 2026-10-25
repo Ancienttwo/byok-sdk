@@ -108,6 +108,15 @@ export interface ClaudeAdapterOptions {
    * unchanged. Default `inherit`.
    */
   agentUserContext?: 'inherit' | 'excluded';
+  /**
+   * For an Agent task (`task.offer_for_agent`), `disabled` starts Claude with
+   * `--no-session-persistence`, so Claude does not save the session
+   * transcript under `<config dir>/projects/`. Such a session cannot be
+   * resumed: an Agent task that carries a `sessionRef` fails before Claude
+   * starts. Follow-ups in the same task still work. Other tasks are
+   * unchanged. Default `enabled`.
+   */
+  agentSessionPersistence?: 'enabled' | 'disabled';
 }
 
 /**
@@ -134,6 +143,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
     if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 2_147_483_647) throw new TypeError('invalid Claude interrupt timeout');
     if (options.agentUserContext !== undefined && options.agentUserContext !== 'inherit' && options.agentUserContext !== 'excluded')
       throw new TypeError('ClaudeAdapterOptions.agentUserContext must be inherit or excluded');
+    if (options.agentSessionPersistence !== undefined && options.agentSessionPersistence !== 'enabled' && options.agentSessionPersistence !== 'disabled')
+      throw new TypeError('ClaudeAdapterOptions.agentSessionPersistence must be enabled or disabled');
     this.nativeOptions = options.nativeInteractions === undefined ? undefined : snapshotNativeInteractionHostOptions(options.nativeInteractions);
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id: 'claude',
@@ -254,6 +265,15 @@ export class ClaudeAdapter implements RuntimeAdapter {
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
       throwIfCancelled();
+      const persistSession = startInput.manifest.agentRef === undefined || this.options.agentSessionPersistence !== 'disabled';
+      // Claude saved no transcript to resume. Refused before any write, so
+      // the task never runs as a silent fresh session.
+      if (!persistSession && startInput.manifest.sessionRef !== undefined) {
+        throw new RuntimeExecutionFailure({
+          phase: 'start', category: 'authority', retry: 'non-retryable',
+          reason: 'claude Agent session persistence is disabled, so the task cannot resume a session',
+        });
+      }
       // Built before any write, so a refusal leaves no file behind.
       const userContextSettings = this.options.agentUserContext === 'excluded' && startInput.manifest.agentRef !== undefined
         ? claudeAgentUserContextSettings(startInput.manifest, startInput.env, process.platform, os.homedir, dir => {
@@ -329,6 +349,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         '--verbose',
         // Text deltas for the display-only draft (`stream_event` frames).
         '--include-partial-messages',
+        ...(persistSession ? [] : ['--no-session-persistence']),
         ...(manifestModelId ? ['--model', manifestModelId] : []),
         ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
         // YOLO by default, as in OAR (`runtimes/claude/session.ts`): no human
