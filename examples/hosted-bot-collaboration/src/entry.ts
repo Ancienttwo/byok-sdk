@@ -9,6 +9,7 @@ type RoomInputCommand = Extract<Command, { kind: 'room_input' }>;
 type PushRouteCommand = Extract<KeylessCommand, { kind: 'enable_push_route' }>;
 /** A K8 `update_routine` action, as the store's owner API takes it. */
 type UpdateRoutineAction = Parameters<HostedCollaborationStore['updateRoutine']>[2];
+type SealedRoutineAction = Parameters<HostedCollaborationStore['createSealedRoutine']>[2];
 
 /** The scope that an authenticated request acts in, and the principal that the Host verified for it. */
 export interface EntryCaller { scope: string; principal: Principal }
@@ -132,6 +133,21 @@ export class HostedCommandEntry<C> {
   async updateRoutine(credential: C, botId: string, action: UpdateRoutineAction): Promise<void> {
     const { scope } = await this.owned(credential, 'updateRoutine', action.routineId);
     await this.store.updateRoutine(scope, botId, action, this.now());
+    await this.options.sync(scope, this.now());
+  }
+  /**
+   * The owner's member endpoint adds a sealed routine of Main Bot `botId` (#953): version 1, with the template that the member
+   * sealed for it. An exact retry is a no-op.
+   */
+  async createSealedRoutine(credential: C, botId: string, action: SealedRoutineAction): Promise<void> {
+    const { scope } = await this.owned(credential, 'createSealedRoutine', action.routineId);
+    await this.store.createSealedRoutine(scope, botId, action, this.now());
+    await this.options.sync(scope, this.now());
+  }
+  /** The member endpoint stages the next version of a sealed routine of Main Bot `botId`, with a new template (#953). */
+  async resealRoutine(credential: C, botId: string, action: SealedRoutineAction): Promise<void> {
+    const { scope } = await this.owned(credential, 'resealRoutine', action.routineId);
+    await this.store.resealRoutine(scope, botId, action, this.now());
     await this.options.sync(scope, this.now());
   }
   /**

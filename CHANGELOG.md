@@ -431,6 +431,14 @@
   ContextPack. A missing template or a changed Agent ends the Turn `failed`
   and never blocks it. The outcome schema offers `update_routine` for no
   sealed routine. L has no sealed dispatch. No wire, SDK or SQL change.
+- **Added (examples)** — sealed Bot routines on the hosted (H) Host (#953,
+  #654 E3d-4). The owner API `createSealedRoutine` and `resealRoutine`, also
+  owner commands of the entry, add and reseal a K8 sealed Bot routine of the
+  Main Bot. An exact retry is a no-op, also for K8 `sealedDefinition`. The
+  sync freezes each sealed occurrence Turn from the routine's stored template,
+  and the submitter sends it through `FrozenSubmitPort.submitSealed`, the
+  cloud's `submitSealedAgentExecution`. `freezeIntent` refuses a sealed
+  execution outside a routine occurrence. No DDL, SDK or wire change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

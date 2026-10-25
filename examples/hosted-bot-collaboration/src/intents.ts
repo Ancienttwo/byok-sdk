@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
-import { agentKey, canonical, fifoHeads, hash, promoteOccurrence, queuedExpiry, RetiredIntentIdentityError, submitFrozen, taskId,
-  type Conclusion, type ExecutionTemplate, type FrozenInput, type FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
+import { agentKey, canonical, fifoHeads, hash, isSealed, promoteOccurrence, queuedExpiry, RetiredIntentIdentityError, submitFrozen, taskId,
+  type Conclusion, type ExecutionTemplate, type FrozenExecutionInput, type FrozenSubmitPort, type IntentExecution } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';
@@ -16,7 +16,11 @@ import { inSchema, lockScope } from './store';
  * What a Turn freezes: the `freeze` step input of the sync rule, or a promoted routine occurrence. `key` is the Turn id.
  * A Host intent (#955) has its own key and the name of its handler.
  */
-export interface IntentFreeze { key: string; source: 'user' | 'bot' | 'routine'; waitUntil: number; execution: ExecutionTemplate; handler?: string }
+export interface IntentFreeze<E extends IntentExecution = IntentExecution> {
+  key: string; source: 'user' | 'bot' | 'routine'; waitUntil: number;
+  /** A sealed execution comes only from a routine occurrence (#953): K4 `promoteOccurrence` checked it. */
+  execution: E; handler?: string;
+}
 /** The K4 times of a promoted routine intent (#793 D2f): its retry bound, and `superseded` when a newer slot already exists. */
 export interface RoutineTimes { retryUntil?: number; conclusion?: Conclusion }
 
@@ -26,11 +30,14 @@ export interface RoutineTimes { retryUntil?: number; conclusion?: Conclusion }
  * The handler is part of the identity, so a Turn never takes over a Host intent row, and a Host intent never a Turn's.
  * A Turn whose intent compaction retired throws `RetiredIntentIdentityError`, as K4 `enqueue` refuses a retired key (#793 S8).
  */
-export async function freezeIntent(client: PoolClient, scope: string, freeze: IntentFreeze, routine: RoutineTimes = {}): Promise<FrozenInput> {
+export async function freezeIntent<E extends IntentExecution>(client: PoolClient, scope: string, freeze: IntentFreeze<E>, routine: RoutineTimes = {}):
+  Promise<E & { taskId: string }> {
   // H never retries a task (#793 D2d option A), so it cannot honor a K4 retry policy. It refuses one instead of dropping it.
   if ((freeze as IntentFreeze & { retry?: unknown }).retry !== undefined) throw new Error('H intents have no retry policy');
+  // Only a promoted routine occurrence has a stored routine whose version pins the template's `routineRef` (K4 `enqueue`).
+  if (isSealed(freeze.execution) && freeze.source !== 'routine') throw new Error('A sealed execution must be a routine template occurrence');
   const scopeKey = storedKey(scope), key = storedKey(freeze.key);
-  const input: FrozenInput = { ...structuredClone(freeze.execution), taskId: taskId(freeze.key, 0) };
+  const input = { ...structuredClone(freeze.execution), taskId: taskId(freeze.key, 0) };
   const prior = await client.query<{ source: string; handler: string | null; input: string; wait_until: string }>(
     'SELECT source, handler, input::text AS input, wait_until::text FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
   if (prior.rows[0]) {
@@ -52,8 +59,8 @@ export async function freezeIntent(client: PoolClient, scope: string, freeze: In
 }
 
 /** The frozen input of a task and the Turn that froze it. The input never changes after the freeze. */
-export async function frozenIntent(client: PoolClient, scope: string, task: string): Promise<{ turnId: string; input: FrozenInput } | undefined> {
-  const found = await client.query<{ key: string; input: FrozenInput }>('SELECT key, input FROM intent WHERE scope = $1 AND task_id = $2',
+export async function frozenIntent(client: PoolClient, scope: string, task: string): Promise<{ turnId: string; input: FrozenExecutionInput } | undefined> {
+  const found = await client.query<{ key: string; input: FrozenExecutionInput }>('SELECT key, input FROM intent WHERE scope = $1 AND task_id = $2',
     [storedKey(scope), task]);
   const row = found.rows[0];
   return row && { turnId: JSON.parse(row.key) as string, input: row.input };
@@ -220,7 +227,7 @@ export interface SubmitterOptions {
   /** The most rows that one pass takes. */
   batch?: number;
 }
-type Claim = { scopeKey: string; key: string; tries: number; input: FrozenInput; waitUntil: number; modeRevision: number };
+type Claim = { scopeKey: string; key: string; tries: number; input: FrozenExecutionInput; waitUntil: number; modeRevision: number };
 /** A row whose try threw outside the SDK call, for example on an unknown store version. The pass went on. */
 export interface SubmitFailure { scope: string; turnId: string; error: unknown }
 export interface SubmitPass { tried: number; failed: SubmitFailure[] }
@@ -312,7 +319,7 @@ export class HostedSubmitter {
     return inSchema(this.pool, this.schema, async client => {
       await lockScope(client, scopeKey);
       const now = this.now();
-      const found = await client.query<{ agent: string; ordinal: string; tries: number; wait_until: string; retry_until: string | null; input: FrozenInput }>(
+      const found = await client.query<{ agent: string; ordinal: string; tries: number; wait_until: string; retry_until: string | null; input: FrozenExecutionInput }>(
         `SELECT agent, ordinal::text, tries, wait_until::text, retry_until::text, input FROM intent WHERE scope = $1 AND key = $2
           AND conclusion IS NULL AND submission <> 'delivered' AND cancel_reason IS NULL AND next_at <= $3 FOR UPDATE`, [scopeKey, key, now]);
       const row = found.rows[0];

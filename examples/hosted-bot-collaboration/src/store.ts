@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { canonical, hash, occurrenceRun, taskId, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
   type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
-import { botRoutines, endable, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
+import { botRoutines, endable, owned, resealDefinition, routineTurn, sealedDefinition, sealedTemplate, updateDefinition, type BotRoutineInput,
+  type SealedRoutineAction } from '@byok-sdk/example-bot-collaboration/routines';
 import { admitBotToolsets, applyHomeTerminal, applyManagement, failHomeFlush, homeEnqueued, homeHead, planHomeRetry, requireMain, updateBot,
   writeSnapshotBot, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
@@ -40,10 +41,10 @@ type Decide<T> = (state: CollaborationState, publish: Publish, client: PoolClien
 type TurnHistory = NonNullable<SyncOptions<never>['history']>;
 /**
  * The sync options of a scope. In history mode, `history` holds the rows of each Turn that may freeze, by Turn id.
- * The store reads the routines itself (#793 D2f). The delegation timers are store options (#793 S4). The model names and the
- * read-only toolsets come from the scope's Host config (#793 S9).
+ * The store reads the routines and their sealed templates itself (#793 D2f, #953). The delegation timers are store options
+ * (#793 S4). The model names and the read-only toolsets come from the scope's Host config (#793 S9).
  */
-export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines' | 'models' | 'readOnlyToolsets'>
+export type HostedSyncOptions = Omit<SyncOptions<never>, 'history' | 'routines' | 'models' | 'readOnlyToolsets' | 'sealedTemplate'>
   & { history?: ReadonlyMap<string, TurnHistory> };
 /** `dueAt`: the scope's due time after the sync, the value that it wrote to `scope.due_at` (#793 S4). */
 export interface SyncResult { dueAt: number | null }
@@ -478,7 +479,8 @@ export class HostedCollaborationStore {
         const facts = await syncFacts(client, scope, Object.keys(state.turns), state.team.bots);
         const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
         for (const turn of Object.values(state.turns)) {
-          const step = syncTurn(state, turn, facts, { ...options, models, readOnlyToolsets, routines, history: options.history?.get(turn.id) }, emit);
+          const step = syncTurn(state, turn, facts, { ...options, models, readOnlyToolsets, routines, history: options.history?.get(turn.id),
+            sealedTemplate: ref => sealedTemplate(Object.values(slice.state.routines), ref) }, emit);
           if (step) steps.push([turn, step]);
         }
         more = false;
@@ -507,17 +509,34 @@ export class HostedCollaborationStore {
   updateRoutine(scope: string, botId: string, action: UpdateRoutineAction, now: number): Promise<void> {
     return this.routineCommand(scope, botId, now, commands => commands.update(updateDefinition(commands.list(), botId, action)));
   }
+  /**
+   * Owner API for a sealed routine of the Main Bot `botId` (#953), from the owner's member endpoint: adds version 1 with the
+   * member's template, checked against the Bot's current execution template. An exact retry is a no-op. A refusal writes
+   * nothing.
+   */
+  createSealedRoutine(scope: string, botId: string, action: SealedRoutineAction, now: number): Promise<void> {
+    return this.routineCommand(scope, botId, now, (commands, execution) => commands.create(sealedDefinition(commands.list(), botId, action, execution)));
+  }
+  /**
+   * Owner API (#953): stages version `max(current, pending) + 1` of a sealed routine of the Main Bot `botId` with a new
+   * template. A template sealed for another version throws `SealedRoutineVersionError`, and nothing is written. An exact
+   * retry is a no-op, also after the Bot's Agent changed: the freeze then reports `sealed_routine_agent_changed`.
+   */
+  resealRoutine(scope: string, botId: string, action: SealedRoutineAction, now: number): Promise<void> {
+    return this.routineCommand(scope, botId, now, (commands, execution) => commands.update(resealDefinition(commands.list(), botId, action, execution)));
+  }
   /** Owner API, as L `setRoutineLifecycle` (K8 host.ts:456-461): pauses, resumes or completes a routine of the Main Bot `botId`. */
   setRoutineLifecycle(scope: string, botId: string, id: string, lifecycle: Routine['lifecycle'], now: number): Promise<void> {
     return this.routineCommand(scope, botId, now, commands => commands.lifecycle(owned(commands.list(), botId, id).definition.id, lifecycle));
   }
-  private routineCommand(scope: string, botId: string, now: number, run: (commands: ReturnType<typeof hostedRoutineCommands>) => void): Promise<void> {
+  private routineCommand(scope: string, botId: string, now: number,
+    run: (commands: ReturnType<typeof hostedRoutineCommands>, execution: ExecutionTemplate) => void): Promise<void> {
     const key = storedKey(scope);
     return this.change(scope, undefined, async (state, _publish, client) => {
       // H has no Host-wide Bot id, so the caller names the acting Bot. Only the Main Bot owns this API.
       requireMain(state.team, botId);
       const slice = await loadSlice(client, key);
-      run(hostedRoutineCommands(slice, now));
+      run(hostedRoutineCommands(slice, now), state.team.bots[botId]!.execution);
       await writeSlice(client, key, slice);
       await switchDueVersions(client, key, now);
       return { value: undefined, outbox: [] };
