@@ -77,6 +77,11 @@ export type CommandState = OutcomeState & CommitState & TeamRows;
 export interface CommandPorts {
   /** The Host clock. A command reads it when it needs a time. */
   now(): number;
+  /**
+   * The Host's admission of a new command (#957). It runs after the replay lookup, so an exact replay still returns its
+   * first result. It throws to refuse, and the commit writes nothing. Absent: every command is admitted.
+   */
+  admit?(command: Command): void;
   publish: Publish;
   /** Input admission with the Host coalescing policy. Returns the id of the Turn that answers the input. */
   admitInput?(fields: InputFields): string;
@@ -376,6 +381,7 @@ export function commitCommand(state: CommandState, request: CommitRequest<Comman
   const command = request.command;
   let root: string | undefined;
   const decide = (out: (intent: OutboxIntent) => void): Disposition => {
+    ports.admit?.(command);
     const before = { turn: new Set(Object.keys(state.turns)), input: new Set(Object.keys(state.inputs ?? {})), round: new Set(Object.keys(state.team.rounds)) };
     const disposition = decideCommand(state, command, ports, out);
     const added = (namespace: RetiredNamespace, rows: Record<string, unknown>) => Object.keys(rows).filter(id => !before[namespace].has(id));

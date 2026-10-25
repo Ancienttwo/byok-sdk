@@ -29,7 +29,8 @@ import type { RoomFields } from '@byok-sdk/protocol';
 
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
 import { flushHomes, type HomeServer } from './home-projections';
-import { admitBot, admitDevice, admitRoom, checkTopology, deviceTopology, switchStep, switchWork, type DeviceTopology, type SwitchWork } from './topology';
+import { admitBot, admitDevice, admitRoom, checkTopology, deviceRefusal, deviceTopology, homeSent, switchStep, switchWork, type DeviceTopology,
+  type SwitchWork } from './topology';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy } from './coalesce';
 import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
 import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery';
@@ -161,10 +162,22 @@ function awaitsOffer(ledger: LedgerState, state: CollaborationState, turn: Turn)
   const bot = state.team.bots[turn.botId];
   return !turn.conclusion && !turn.held && !ledger.intents[hash(turn.id)] && turn.status !== 'failed' && !!bot && !bot.archived && bot.readyRevision === bot.revision;
 }
-/** #957: an owner command that creates execution refuses while a device it would run on is frozen or owned by H. */
+/**
+ * #957: a new owner command that adds a Turn refuses while a device it would run on is frozen or owned by H. An answer adds
+ * a Turn for the question's Bot, and a decided card adds an `action_result` Turn for the card's Bot.
+ */
 function admitCommand(state: CollaborationState, command: Command): void {
-  if (command.kind === 'input' || (command.kind === 'receive' && command.inbound === 'owner_input')) admitBot(state, command.botId);
-  else if (command.kind === 'room_input' || command.kind === 'receive') admitRoom(state, command.roomId);
+  const turnBot = (turnId: string | undefined) => turnId !== undefined && Object.hasOwn(state.turns, turnId) ? state.turns[turnId]!.botId : undefined;
+  let botId: string | undefined;
+  switch (command.kind) {
+    case 'input': botId = command.botId; break;
+    case 'receive': if (command.inbound === 'owner_input') botId = command.botId; else admitRoom(state, command.roomId); break;
+    case 'room_input': admitRoom(state, command.roomId); break;
+    case 'answer': botId = turnBot(Object.hasOwn(state.questions, command.questionId) ? state.questions[command.questionId]!.turnId : undefined); break;
+    case 'decide': botId = turnBot(Object.hasOwn(state.cards, command.cardId) ? state.cards[command.cardId]!.turnId : undefined); break;
+    default: return;
+  }
+  if (botId !== undefined) admitBot(state, botId);
 }
 /** The value of an accepted disposition. Keyless commands refuse by throwing, so they always accept. */
 function valueOf<T>(result: CommitResult): T {
@@ -451,9 +464,10 @@ export class BotCollaboration {
       admitBotToolsets(input.execution, this.options.readOnlyToolsets);
       this.ledger.transaction(s => {
         const state = stateOf(s.application), owner = hostIntent(state, input.key);
-        admitDevice(state, input.execution.deviceId);
         if (Object.hasOwn(state.turns, input.key)) throw new Error('Host intent identity conflict: the key is a Bot Turn');
         if (owner ? owner.handler !== handler : s.intents[hash(input.key)]) throw new Error('Host intent identity conflict');
+        // #957: a replay keeps its first answer; only a new intent is admitted.
+        if (!owner) admitDevice(state, input.execution.deviceId);
         enqueue(s, this.ledger.tenant, input);
         // The key is the Host's string, so it is defined as an own property, never through a setter such as `__proto__`.
         Object.defineProperty(state.hostIntents ??= {}, input.key, { value: { handler }, enumerable: true, writable: true, configurable: true });
@@ -499,8 +513,7 @@ export class BotCollaboration {
   private commitOwner(commandId: string, command: Command, extra?: (s: LedgerState, state: CollaborationState) => Partial<CommandPorts>): CommitResult {
     return commitInLedger(this.ledger, { scope: this.ledger.tenant, commandId, command }, s => {
       const state = stateOf(s.application);
-      admitCommand(state, command);
-      return { now: this.now, publish: (key, value) => project(s, key, value), intents: intentRows(s),
+      return { now: this.now, admit: next => admitCommand(state, next), publish: (key, value) => project(s, key, value), intents: intentRows(s),
         admitInput: fields => admitUserInput(state, fields, this.coalesce, this.now()),
         updatePersona: (botId, persona) => updateBot(state, { botId, persona }, this.models(), this.options.readOnlyToolsets),
         routes: {
@@ -945,7 +958,9 @@ export class BotCollaboration {
       const due = [...(this.options.channel ? Object.values(state.channel?.deliveries ?? {}).filter(row => row.state === 'pending').map(row => row.nextAttemptAt ?? this.now()) : []),
         ...Object.values(state.channel?.inbounds ?? {}).filter(row => row.reply?.token).map(row => row.reply!.expiresAt),
         ...collaborationDue(state, this.timers),
-        ...state.team.homeOperations.filter(op => op.status === 'pending').map(op => Math.max(this.now() + 1000, op.retryAt ?? 0)),
+        // #957: a refused device waits only for the readback of a sent write; it never gets a new one.
+        ...state.team.homeOperations.filter(op => op.status === 'pending' && (homeSent(op) || !deviceRefusal(state, op.request.deviceId)))
+          .map(op => Math.max(this.now() + 1000, op.retryAt ?? 0)),
         ...Object.values(state.delegations).filter(d => d.cancel && !d.cancel.delivered).map(() => this.now() + 1000),
         ...this.unread.size ? [this.now() + 1000] : []];
       if (due.length) {

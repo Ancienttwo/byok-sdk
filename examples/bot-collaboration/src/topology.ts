@@ -1,5 +1,6 @@
 import { hash, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { stateOf, type CollaborationState } from './model';
+import type { HomeOperation } from './team-model';
 import { CommitConflict } from './rules/commit';
 import { DEVICE_NOT_BOUND, DEVICE_SWITCHING, type SyncRefusal } from './rules/commands';
 
@@ -78,9 +79,16 @@ export function switchWork(s: LedgerState, deviceId: string): SwitchWork {
     turns: Object.values(state.turns).filter(turn => !turn.conclusion && !s.intents[hash(turn.id)] && onDevice(turn.botId)).map(turn => turn.id),
     batches: Object.values(state.inputBatches ?? {}).filter(batch => batch.state === 'open' && onDevice(batch.botId)).map(batch => batch.id),
     // A write that was never sent moves with the exported state.
-    homeOperations: state.team.homeOperations.filter(op => op.status === 'pending' && op.sent && op.request.deviceId === deviceId)
+    homeOperations: state.team.homeOperations.filter(op => op.status === 'pending' && homeSent(op) && op.request.deviceId === deviceId)
       .map(op => op.sequence),
   };
+}
+/**
+ * A home write that may have reached the server: marked before its first send, or (in a ledger written before the mark)
+ * with the retry time that a send sets.
+ */
+export function homeSent(op: HomeOperation): boolean {
+  return op.sent === true || op.retryAt !== undefined;
 }
 export function switchDrained(work: SwitchWork): boolean {
   return !work.intents.length && !work.turns.length && !work.batches.length && !work.homeOperations.length;

@@ -17,11 +17,18 @@ afterEach(async () => { await bot?.close(); await fixture?.close(); bot = undefi
 // The routine slot is at least 11 hours away, so no routine wake becomes due in the SDK during a test.
 const schedule = { minute: 0, hour: (new Date().getUTCHours() + 12) % 24, tz: 'UTC' };
 const OTHER = 'device-2';
-const options = (): BotOptions => ({ botId: 'main', execution: template(fixture!.deviceId), connector: async () => null, now: () => clock,
-  hostIntents: { research: () => {} } });
-async function setup(): Promise<BotCollaboration> {
-  clock = Date.now();
-  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
+let extra: Partial<BotOptions> = {};
+/** The template can carry message egress, so a Bot outcome can offer a card (as in `acceptance.test.ts`). */
+function options(): BotOptions {
+  const base = template(fixture!.deviceId);
+  return { botId: 'main', execution: { ...base, agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'topology' },
+    payload: { ...base.payload, messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 } } },
+  connector: async () => null, now: () => clock, hostIntents: { research: () => {} }, ...extra };
+}
+async function setup(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> {
+  clock = Date.now(); extra = rest;
+  fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal),
+    agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   bot = new BotCollaboration(fixture.server, fixture.ledger, options());
   // A second Bot on another device, and a room with both Bots.
   fixture.ledger.transaction(s => {
@@ -45,6 +52,11 @@ async function running(id: string) {
   }, { timeout: 5000 });
   return fixture!.adapter.sessions.get(bot!.core.intent(id)!.taskId)!;
 }
+async function finish(id: string, document: unknown = {}) {
+  (await running(id)).finish(document);
+  await vi.waitFor(async () => { await bot!.drain(); expect(bot!.snapshot().turns[id]?.status).toBe('succeeded'); }, { timeout: 5000 });
+}
+const empty = { intents: [], turns: [], batches: [], homeOperations: [] };
 
 it('freezes one device on the expected revision, reads the record back, and refuses a stale or second freeze', async () => {
   await setup();
@@ -119,14 +131,20 @@ it('refuses a routine slot during the freeze so K4 records nothing, and runs the
 
 it('sends no Agent home write for a Bot on the frozen device, and sends it after the abort', async () => {
   await setup();
-  const enqueue = vi.spyOn(fixture!.server, 'enqueueAgentHomeProjection');
+  const enqueue = vi.spyOn(fixture!.server, 'enqueueAgentHomeProjection'), read = vi.spyOn(fixture!.server, 'readAgentHomeProjection');
   await bot!.freezeForSwitch(device(), 0);
   // A team change is not refused: it queues a persona write, as an applied snapshot does.
   fixture!.ledger.transaction(s => updateBot(stateOf(s.application), { botId: 'main', persona: 'New persona' }, { default: template(device()) }));
   await bot!.drain();
-  expect(enqueue).not.toHaveBeenCalled();
+  // Nothing was sent, so nothing is read back.
+  expect([enqueue.mock.calls.length, read.mock.calls.length]).toEqual([0, 0]);
   // A write that was never sent is not open work: it moves with the exported state.
   expect((await bot!.drainForSwitch(device())).homeOperations).toEqual([]);
+  // A ledger written before the `sent` mark has only the retry time that a send sets.
+  const [op] = bot!.snapshot().team.homeOperations.filter(row => row.status === 'pending');
+  fixture!.ledger.transaction(s => { stateOf(s.application).team.homeOperations.find(row => row.sequence === op!.sequence)!.retryAt = clock; });
+  expect((await bot!.drainForSwitch(device())).homeOperations).toEqual([op!.sequence]);
+  fixture!.ledger.transaction(s => { delete stateOf(s.application).team.homeOperations.find(row => row.sequence === op!.sequence)!.retryAt; });
   await bot!.abortSwitch(device(), 1);
   expect(enqueue).toHaveBeenCalledTimes(1);
 });
@@ -194,4 +212,120 @@ it('refuses to open a ledger with a malformed topology record', async () => {
   bot = undefined;
   fixture!.ledger.transaction(s => { stateOf(s.application).topology = { [device()]: { mode: 'H', revision: 1, switching: 'H' } }; });
   expect(() => new BotCollaboration(fixture!.server, fixture!.ledger, options())).toThrow(`Invalid topology record for device ${device()}`);
+});
+
+it('refuses an answer and a card decision for a Bot on the frozen device, and returns the first result of an exact replay', async () => {
+  await setup();
+  const root = await bot!.input('ask', 'Prepare a draft');
+  await finish(root, { confirmable_action: [{ action: 'send_message', summary: 'Send', draft: { text: 'hello' } }],
+    ask_user: { question: 'Continue?', answerKind: 'text' } });
+  const card = Object.values(bot!.snapshot().cards)[0]!, question = Object.values(bot!.snapshot().questions)[0]!;
+  const accepted = await bot!.input('before', 'hello');
+  const host = await bot!.enqueueHostIntent(hostInput('host-0', device()), 'research');
+  await bot!.freezeForSwitch(device(), 0);
+  const before = stored();
+  const refusal = { code: 'device_switching', deviceId: device() };
+  await expect(bot!.answer(question.id, 'Yes')).rejects.toMatchObject(refusal);
+  await expect(bot!.decide(card.id, 'confirmed')).rejects.toMatchObject(refusal);
+  await expect(bot!.decide(card.id, 'rejected')).rejects.toMatchObject(refusal);
+  expect(stored()).toBe(before);
+  // A replay adds no work, so it keeps its first answer.
+  expect(await bot!.input('before', 'hello')).toBe(accepted);
+  expect(await bot!.enqueueHostIntent(hostInput('host-0', device()), 'research')).toEqual(host);
+});
+
+it('receives no room input and no bot background for a room with a Bot member on the frozen device', async () => {
+  await setup();
+  await bot!.freezeForSwitch(OTHER, 0);
+  const before = stored();
+  const room = (platformMessageId: string, sender: { id: string; kind: 'human' | 'bot' }) => bot!.receive({ channel: 'fake', platformMessageId,
+    conversation: { kind: 'group', id: 'room' }, sender, text: 'hello', mentions: [] });
+  await expect(room('m1', { id: 'owner', kind: 'human' })).rejects.toMatchObject({ code: 'device_switching', deviceId: OTHER });
+  await expect(room('m2', { id: 'peer', kind: 'bot' })).rejects.toMatchObject({ code: 'device_switching', deviceId: OTHER });
+  expect(stored()).toBe(before);
+});
+
+it('keeps refusing and holding after a restart while frozen, and the new Host can abort', async () => {
+  await setup();
+  await bot!.freezeForSwitch(device(), 0);
+  await bot!.close();
+  bot = new BotCollaboration(fixture!.server, fixture!.ledger, options());
+  expect(bot.topology(device())).toEqual({ mode: 'L', revision: 1, switching: 'H' });
+  await expect(bot.input('k1', 'hello')).rejects.toBeInstanceOf(DeviceSwitchingError);
+  seedTurn('t1');
+  await bot.drain();
+  expect(bot.snapshot().turns.t1).toMatchObject({ held: 'device_switching' });
+  expect(bot.core.intent('t1')).toBeUndefined();
+  await bot.abortSwitch(device(), 1);
+  expect(bot.core.intent('t1')).toBeDefined();
+});
+
+it('holds the delegation Turn that a Bot outcome adds for a Bot on the frozen device', async () => {
+  await setup();
+  await bot!.freezeForSwitch(OTHER, 0);
+  const root = await bot!.input('ask-b', 'Ask B');
+  await finish(root, { delegate: [{ to: 'b', request: 'Check the totals' }] });
+  const chain = Object.values(bot!.snapshot().turns).find(turn => turn.botId === 'b')!;
+  expect(chain).toMatchObject({ source: 'bot_request', held: 'device_switching', status: 'queued' });
+  expect(bot!.core.intent(chain.id)).toBeUndefined();
+  expect((await bot!.drainForSwitch(OTHER)).turns).toEqual([chain.id]);
+});
+
+it('holds the next seat Turn of a room round for a Bot on the frozen device', async () => {
+  await setup();
+  const roundId = await bot!.roomInput('mention', 'room', 'Review this', ['main', 'b']);
+  const round = bot!.snapshot().team.rounds[roundId]!;
+  const [first, second] = round.seats.map(seat => bot!.snapshot().team.seats[seat]!);
+  expect([first!.botId, second!.botId]).toEqual(['main', 'b']);
+  await bot!.freezeForSwitch(OTHER, 0);
+  await finish(first!.id, { speech: { kind: 'post', text: 'Done' } });
+  expect(bot!.snapshot().turns[second!.id]).toMatchObject({ source: 'room_slot', held: 'device_switching' });
+  expect(bot!.core.intent(second!.id)).toBeUndefined();
+});
+
+it('lists an open input batch so the commit waits, and holds its Turn when it seals during the freeze', async () => {
+  await setup({ coalesce: {} });
+  const first = await bot!.input('k1', 'first');
+  const session = await running(first);
+  // The Bot is busy, so the next input opens a batch.
+  const batch = await bot!.input('k2', 'second');
+  await bot!.freezeForSwitch(device(), 0);
+  expect(await bot!.drainForSwitch(device())).toEqual({ ...empty, intents: [first], batches: [batch] });
+  await expect(bot!.commitSwitch(device(), 1)).rejects.toThrow('still has open work');
+  clock += 11_000;
+  await bot!.drain();
+  expect(bot!.snapshot().turns[batch]).toMatchObject({ held: 'device_switching' });
+  expect(bot!.core.intent(batch)).toBeUndefined();
+  session.finish({});
+  await vi.waitFor(async () => {
+    await bot!.drain();
+    expect(await bot!.drainForSwitch(device(), { cancel: true })).toEqual(empty);
+  }, { timeout: 5000 });
+  expect(bot!.snapshot().turns[batch]).toMatchObject({ conclusion: 'cancelled' });
+  expect(await bot!.commitSwitch(device(), 1)).toEqual({ mode: 'H', revision: 2 });
+});
+
+it('cancels a running Host intent and a running routine intent of the device through the drain', async () => {
+  await setup();
+  await bot!.enqueueHostIntent(hostInput('host-1', device()), 'research');
+  await running('host-1');
+  const id = await seedRoutine(bot!, 'task-1', 'report', schedule);
+  clock = routineOf(bot!, id).next!.availableAt;
+  await deliverRoutine(bot!, id, clock);
+  const routine = Object.values(bot!.snapshot().turns).find(turn => turn.source === 'routine')!;
+  const occurrence = bot!.ledger.snapshot().intents[Object.keys(bot!.ledger.snapshot().intents).find(key =>
+    bot!.ledger.snapshot().intents[key]!.source === 'routine')!]!;
+  await vi.waitFor(async () => {
+    await bot!.drain();
+    expect(bot!.ledger.snapshot().executions[occurrence.taskId]?.started).toBe(true);
+  }, { timeout: 5000 });
+  await bot!.freezeForSwitch(device(), 0);
+  expect((await bot!.drainForSwitch(device())).intents.sort()).toEqual(['host-1', occurrence.key].sort());
+  await bot!.drainForSwitch(device(), { cancel: true });
+  await vi.waitFor(async () => {
+    await bot!.drain();
+    expect(await bot!.drainForSwitch(device())).toEqual(empty);
+  }, { timeout: 5000 });
+  expect(bot!.core.intent('host-1')).toMatchObject({ cancelReason: 'cancelled' });
+  expect(bot!.snapshot().turns[routine.id]!.conclusion).toBeDefined();
 });
