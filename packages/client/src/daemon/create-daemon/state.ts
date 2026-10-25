@@ -153,3 +153,14 @@ export interface DaemonState {
   auth: AuthManager;
   lifecycleMutationTail: Promise<void>;
 }
+
+/** One start's sealed-task lane, shared by the closures that start builds (#926). */
+export interface SealedRunState {
+  // Assigned once the blob client exists. Startup recovery before that
+  // writes only `daemon_interrupted`, which stays plaintext (decision 12d).
+  sealedTasks: SealedTasks | undefined;
+  /** This run's verified member, bound when it is first ready; a loss leaves it bound and keyless. */
+  sealedMember: DeviceMemberKeyring | undefined;
+  /** The (tenant, device, member) of {@link sealedMember}, taken when it is bound, so retiring the member at shutdown keeps it. */
+  ownSealIdentity: string | undefined;
+}
