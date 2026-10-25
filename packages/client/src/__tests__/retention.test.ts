@@ -18,7 +18,6 @@ import { resolveStorageConfig } from '../daemon/retention/config';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, RetentionRegistry, type RetentionClassId, type ClassUsage, type ClassAuthority } from '../daemon/retention/registry';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { createSupportBundle } from '../diagnostics/support-bundle';
-import { collectLegacyTemp } from '../diagnostics/legacy-temp';
 import { testScratchRoot, testExecutionScratch } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -169,10 +168,6 @@ it('projection and maintenance honor the same skill publication gate',async()=>{
  const gate=await acquirePathMutationGate({scope:'skill-pack-store',targetPath:root});
  try { await expect(projectSkillPack(f.store,'known',testScratchRoot())).rejects.toBeInstanceOf(PathMutationGateBusyError);expect((await f.sweeper.runPass('periodic')).failures).toBe(0); }
  finally { await gate.release(); }
-});
-it('one-shot legacy migration scans exact production names without following links and needs explicit fix',async()=>{
- const root=testScratchRoot(),legacy=path.join(root,'byok-mcp-Ab12cD'),unrelated=path.join(root,'byok-mcp-Ab12cD-extra');await fs.mkdir(legacy);await fs.writeFile(path.join(legacy,'mcp-config.json'),'secret');await fs.mkdir(unrelated);await fs.symlink(unrelated,path.join(root,'byok-pi-mcp-Aa12Bb'));
- expect(await collectLegacyTemp({root})).toMatchObject({found:1,deleted:0});expect(await collectLegacyTemp({root,fix:true})).toMatchObject({found:1,deleted:1,bytesReclaimed:6});expect(await exists(unrelated)).toBe(true);
 });
 it('default scratch root leaves an application-data storeDir that is too long for runtime sockets',async()=>{
  const short='/byok-missing-root/p',long='/byok-missing-root/Library/Application Support/Product/Local Agent/'+'a'.repeat(64)+'/device';

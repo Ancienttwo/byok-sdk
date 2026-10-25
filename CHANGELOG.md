@@ -45,6 +45,12 @@
   inbound offer above the journal record bound
   (`inbound_envelope_too_large`) and drops any other envelope above it (#826),
   and it admits result-document offers.
+- **Breaking (client)** — `byok-agent doctor` no longer scans `os.tmpdir()`
+  for the temporary directories that releases before 0.27.0 left there (#938).
+  `doctor --json` drops its `legacyTemp` field, so a script that parses it
+  must stop reading it, and the text output drops its `legacy-temp:` line.
+  `doctor --fix` no longer deletes those directories; any left on a machine
+  have to be removed by hand.
 
 ## 0.30.1 — source candidate
 
