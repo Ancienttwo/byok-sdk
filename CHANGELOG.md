@@ -99,6 +99,13 @@
   and `rejectTerminal` must accept the hash of replaced bytes as a no-op. A
   Host that injects its own journal must implement both.
 
+- **Breaking (client)** — `byok-agent doctor` no longer scans `os.tmpdir()`
+  for the temporary directories that releases before 0.27.0 left there (#938).
+  `doctor --json` drops its `legacyTemp` field, so a script that parses it
+  must stop reading it, and the text output drops its `legacy-temp:` line.
+  `doctor --fix` no longer deletes those directories; any left on a machine
+  have to be removed by hand.
+
 - **Added (client)** — `ClaudeAdapterOptions.agentSessionPersistence`
   (#936). With `'disabled'`, an Agent task (`task.offer_for_agent`) starts
   Claude with `--no-session-persistence`, so Claude does not save the session
