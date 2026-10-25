@@ -1580,17 +1580,22 @@ rotation yet. The steps:
    starts again, at most three times.
 4. It reads the scope's epochs again, with the same range and stops. Each
    epoch it re-wrapped or found already wrapped to the next key must open
-   with the next key under its `keyId`, and no package from an accepted
-   sender may still open only with the old key. Otherwise the rotation stops
-   and keeps the old key.
+   with the next key under its `keyId`, the epochs of step 3 whose key the
+   run holds or that have a freshness point must still be found, and no
+   package from an accepted sender may still open only with the old key.
+   Otherwise the rotation stops and keeps the old key.
 5. Once every scope is done, it catches up and reads back, the same way,
    every scope it may use at the new head, including one that became usable
    or was created during the rotation. Each epoch of step 4 must still open
-   with the next key under its `keyId`, and no package from an accepted
-   sender at any epoch may open only with the old key, such as a new epoch
-   that a client which has not seen the `rotate` wrapped to the old key.
-   Otherwise the rotation stops and keeps the old key. Each failed read-back
-   logs the scope id and the epoch.
+   with the next key under its `keyId`. Each epoch whose key the run holds
+   at the new head must be found and open with the next key, and each epoch
+   with a freshness point must be found, also when the run opened it or
+   gained the point during the rotation; a missing one stops the rotation
+   with `key_package_missing`. No package from an accepted sender at any
+   epoch may open only with the old key, such as a new epoch that a client
+   which has not seen the `rotate` wrapped to the old key. Otherwise the
+   rotation stops and keeps the old key. Each failed read-back logs the
+   scope id and the epoch.
 6. Only then does it drop the old private key from the record.
 
 A rotation reads every usable scope three times (steps 3 to 5), each up to
