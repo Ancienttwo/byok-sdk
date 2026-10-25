@@ -1,7 +1,8 @@
-import type { BotTurnOutcome, CreateBotAction, RoomFields, UpdateBotAction } from '@byok-sdk/protocol';
+import type { AgentHomeProjectionReadback, BotTurnOutcome, CreateBotAction, RoomFields, UpdateBotAction } from '@byok-sdk/protocol';
 import { hash, canonical, type ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
-import type { CollaborationState } from './model';
-import type { BotProfile, Room } from './team-model';
+import { json, type CollaborationState } from './model';
+import type { BotProfile, HomeOperation, Room, TeamState } from './team-model';
+import type { Publish } from './rules/delegation';
 import { roomFields, roomVisibility } from './rules/rooms';
 
 import { NEW_BOTS, NEW_ROOMS } from './rules/schema';
@@ -12,6 +13,66 @@ export const TEAM_NOTE_LIMIT = 20;
 export function projectionRequestId(value: unknown): string {
   const digest = hash(value);
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+}
+/**
+ * The Agent home flush rules (#793 S13), the pure part of L's `flushHomes`; each Host runs its own I/O around them.
+ * `homeHead` gives the pending operation `sequence` when it is its Bot's oldest pending one and the Bot is free
+ * (`busy(botId)`: the Bot has an intent with no conclusion). Only a head is flushed.
+ */
+export function homeHead(team: Pick<TeamState, 'homeOperations'>, sequence: number, busy: (botId: string) => boolean): HomeOperation | undefined {
+  const op = team.homeOperations.find(row => row.sequence === sequence);
+  if (!op || op.status !== 'pending') return undefined;
+  const oldest = team.homeOperations.filter(row => row.botId === op.botId && row.status === 'pending').reduce((a, b) => a.sequence <= b.sequence ? a : b);
+  return oldest === op && !busy(op.botId) ? op : undefined;
+}
+/** The requests of an operation in the order a flush reads them back: the first, then each retry. */
+export const homeRequests = (op: HomeOperation) => [op.request, ...op.retries];
+export type HomeReadback = Pick<AgentHomeProjectionReadback, 'deviceId' | 'agentRef' | 'requestId' | 'projectionHash' | 'status'>;
+/**
+ * Checks the readback of one request of the operation. A readback for another device, Agent, request or projection throws
+ * `Home readback identity conflict`. Returns it when it is terminal (not `pending`); the flush reads no later request then.
+ */
+export function checkHomeReadback(request: HomeOperation['request'], read: HomeReadback | undefined): HomeReadback | undefined {
+  if (!read) return undefined;
+  const payload = request.payload;
+  if (read.deviceId !== request.deviceId || !same(read.agentRef, payload.agentRef)
+    || read.requestId !== payload.requestId || read.projectionHash !== payload.projectionHash) throw new Error('Home readback identity conflict');
+  return read.status !== 'pending' ? read : undefined;
+}
+/**
+ * No request is terminal. Once `retryAt` has passed, adds a retry of the same desired revision with the next durable request
+ * id and a backoff (min(60 s, 1 s × 2^n)). Returns the request to enqueue: the latest.
+ */
+export function planHomeRetry(op: HomeOperation, now: number): HomeOperation['request'] {
+  if (op.retryAt !== undefined && now >= op.retryAt) {
+    const retry = structuredClone(op.request);
+    retry.payload.requestId = projectionRequestId([op.request.payload.requestId, op.retries.length + 1]);
+    op.retries.push(retry);
+    op.retryAt = now + Math.min(60_000, 1000 * 2 ** Math.min(op.retries.length, 6));
+  }
+  return op.retries.at(-1) ?? op.request;
+}
+/** The enqueue of the latest request succeeded: the first retry is due a second later. */
+export function homeEnqueued(op: HomeOperation, now: number): void {
+  op.retryAt ??= now + 1000;
+}
+/**
+ * Settles the operation with a terminal readback: `applied` or `idempotent` applies it and readies its Bot at that revision;
+ * any other status fails it and publishes `persona-failed:<sequence>`.
+ */
+export function applyHomeTerminal(state: CollaborationState, op: HomeOperation, terminal: HomeReadback, publish: Publish): void {
+  if (terminal.status === 'applied' || terminal.status === 'idempotent') {
+    op.status = 'applied';
+    const bot = state.team.bots[op.botId]!;
+    if (bot.revision === op.request.payload.agentRef.profileRevision) bot.readyRevision = bot.revision;
+  } else {
+    op.status = 'failed'; op.error = terminal.status;
+    publish(`persona-failed:${op.sequence}`, json({ owner: op.botId, revision: op.request.payload.agentRef.profileRevision, reason: op.error, recoverable: true }));
+  }
+}
+/** A flush step threw: the operation keeps `pending` with the error. */
+export function failHomeFlush(op: HomeOperation, error: unknown): void {
+  op.error = String(error instanceof Error ? error.message : error);
 }
 function projection(state: CollaborationState, bot: BotProfile): void {
   const value = profileProjection(bot);

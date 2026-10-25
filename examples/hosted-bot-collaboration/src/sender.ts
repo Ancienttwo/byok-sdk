@@ -2,7 +2,8 @@ import type { Pool } from 'pg';
 import type { Json } from '@byok-sdk/example-host-execution-core';
 import type { ChannelPort } from '@byok-sdk/example-bot-collaboration/channel';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
-import { CONNECTOR_TIMEOUT, inSchema, lockScope, type DeliveryTimes, type HostedCollaborationStore } from './store';
+import { checkHomeReadback, homeRequests, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
+import { CONNECTOR_TIMEOUT, inSchema, lockScope, type DeliveryTimes, type HomeClaim, type HomeStep, type HostedCollaborationStore } from './store';
 
 /**
  * The Host's projection receiver. It must deduplicate by `(scope, id)`: a send is at least once, as K4's projection flush
@@ -10,6 +11,15 @@ import { CONNECTOR_TIMEOUT, inSchema, lockScope, type DeliveryTimes, type Hosted
  */
 export interface ProjectionPort {
   deliver(scope: string, id: string, value: Json, signal: AbortSignal): Promise<void>;
+}
+type HomeRequest = Extract<HomeClaim, { kind: 'flush' }>['op']['request'];
+/**
+ * The SDK Agent home calls of one tenant (#793 S13), as L binds `readAgentHomeProjection` and `enqueueAgentHomeProjection`:
+ * the SDK `getAgentHomeProjectionStatus` and `enqueueAgentHomeProjection` for the request's device.
+ */
+export interface HostedHomePort {
+  read(request: HomeRequest): Promise<HomeReadback | undefined>;
+  enqueue(request: HomeRequest): Promise<unknown>;
 }
 /** The Host connector of a confirmed card (#793 S12), as L's `HostOptions.connector`. */
 export type CardConnector = (id: string, action: string, draft: Json, signal: AbortSignal) => Promise<unknown>;
@@ -21,7 +31,12 @@ export interface SenderOptions {
   connector?: CardConnector;
   /** The deadline of one connector call, as L's `connectorTimeoutMs`. Default 30 s. With a connector, `leaseMs` must be longer. */
   connectorTimeoutMs?: number;
-  /** Called once per pass for each scope whose state a card call changed, so the deployment syncs it, as the reconciler's `changed`. */
+  /** The Agent home calls of the tenant that owns `scope`. Absent: the Host has no home port, and a home row fails. */
+  homes?: (scope: string) => HostedHomePort;
+  /**
+   * Called once per pass for each scope whose state a card call or a home operation's terminal changed, so the deployment
+   * syncs it, as the reconciler's `changed`.
+   */
   changed?: (scope: string) => void;
   now?: () => number;
   /** How long a claim holds a row. It must be longer than `sendTimeoutMs`, or a running send could be recovered. Default 60 s. */
@@ -37,14 +52,14 @@ export interface SenderOptions {
 }
 /**
  * A row whose step threw, or a projection send or delivery readback that failed. The pass went on with the next row. `id` is
- * the row's id: a projection or delivery id, or `['card', cardId]`.
+ * the row's id: a projection or delivery id, `['card', cardId]` or `['home', sequence]`.
  */
 export interface SendFailure { scope: string; id: OutboxId; error: unknown }
-export type OutboxId = string | readonly ['card', string];
+export type OutboxId = string | readonly ['card', string] | readonly ['home', number];
 /** `steps`: the rows on which this pass changed something, a send among them. */
 export interface SendPass { steps: number; failed: SendFailure[] }
 
-type DueRow = { scope: string; key: string; kind: 'projection' | 'delivery' | 'card' };
+type DueRow = { scope: string; key: string; kind: 'projection' | 'delivery' | 'card' | 'home' };
 
 /**
  * The H outbox sender (#793 D2b-out-2). One pass reads the unsettled rows that are due, across scopes, and runs each in its
@@ -56,6 +71,10 @@ type DueRow = { scope: string; key: string; kind: 'projection' | 'delivery' | 'c
  * - A card calls its connector at most once (#793 S12): the claim (`claimCard`) takes a try and a lease before the call, the
  *   call runs with no lock and `connectorTimeoutMs`, and the settle (`settleCard`) is fenced by that try. A claim whose lease
  *   passed with no settle ends the card as a timeout, where L calls again after a crash (owner Q3 A).
+ * - An Agent home operation runs L's `flushHomes` step (#793 S13): the claim (`claimHome`) checks that it is its Bot's head
+ *   and takes a lease, the readbacks and the enqueue run with no lock, and each settle is fenced by the operation's retry
+ *   count. The operation is the authority: its `retryAt` is the row's `next_at`, so H enqueues at `retryAt` where L enqueues
+ *   again at each pass.
  */
 export class HostedOutboxSender {
   private readonly now: () => number;
@@ -94,6 +113,7 @@ export class HostedOutboxSender {
       const scope = JSON.parse(row.scope) as string, id = JSON.parse(row.key) as OutboxId;
       try {
         const step = row.kind === 'card' ? await this.call(scope, (id as readonly ['card', string])[1], changed)
+          : row.kind === 'home' ? await this.home(scope, (id as readonly ['home', number])[1], changed)
           : row.kind === 'projection' ? await this.project(row.scope, row.key, scope, id as string) : await this.deliver(scope, id as string);
         if (step === false) continue;
         pass.steps++;
@@ -123,6 +143,47 @@ export class HostedOutboxSender {
     try { outcome = { result: await this.callDeadline(signal => connector(cardId, claim.action, claim.draft, signal)) }; }
     catch (error) { outcome = { error }; }
     if (await this.store.settleCard(scope, cardId, claim.tries, outcome, this.now)) changed.add(scope);
+    return true;
+  }
+
+  /**
+   * H1-H4 of one home row: claim, the readback of each request in order (K8 `checkHomeReadback`), the fenced settle, then for
+   * a retry the enqueue of the latest request and `homeEnqueued`. Each read and the enqueue get `sendTimeoutMs` or the time
+   * left on the claim's lease, whichever is shorter; once the lease has passed, the next call is not made. A read or enqueue
+   * that throws, outlasts its deadline or is not made is the operation's error (K8 `failHomeFlush`), as a throw is in L,
+   * which awaits these calls with no deadline. Returns false when the claim found nothing to flush.
+   */
+  private async home(scope: string, sequence: number, changed: Set<string>): Promise<boolean | { error: unknown }> {
+    const homes = this.options.homes;
+    if (!homes) throw new Error('The Host has no Agent home port for a home operation');
+    const claim = await this.store.claimHome(scope, sequence, this.now, this.times.leaseMs, this.backoffMs);
+    if (claim.kind === 'none') return false;
+    const port = homes(scope);
+    // Every call of the flush ends within the claim's lease, so no other sender can claim the operation while one runs.
+    const inLease = <T>(call: () => Promise<T>): Promise<T> => {
+      const left = claim.lease - this.now();
+      if (left <= 0) return Promise.reject(new Error(HOME_LEASE_PASSED));
+      return this.deadline(call, Math.min(this.sendTimeoutMs, left));
+    };
+    let step: HomeStep;
+    try {
+      let terminal: HomeReadback | undefined;
+      for (const request of homeRequests(claim.op)) {
+        terminal = checkHomeReadback(request, await inLease(() => port.read(request)));
+        if (terminal) break;
+      }
+      step = terminal ? { terminal } : { retry: true };
+    } catch (error) { step = { error }; }
+    const settled = await this.store.settleHome(scope, sequence, claim.retries, step, this.now, claim.lease);
+    if ('terminal' in step && settled) changed.add(scope);
+    if ('error' in step) return { error: step.error };
+    if (!settled?.enqueue) return true;
+    try { await inLease(() => port.enqueue(settled.enqueue!)); }
+    catch (error) {
+      await this.store.settleHome(scope, sequence, settled.retries, { error }, this.now, claim.lease);
+      return { error };
+    }
+    await this.store.homeEnqueued(scope, sequence, settled.retries, this.now);
     return true;
   }
 
@@ -195,20 +256,21 @@ export class HostedOutboxSender {
   }
 
   /**
-   * Runs a channel or receiver call with an abort signal, and rejects with `SendDeadline` after `sendTimeoutMs`, as L's
-   * delivery deadline. H bounds a readback with it too, where L awaits a readback with no deadline.
+   * Runs a channel or receiver call with an abort signal, and rejects with `SendDeadline` after `ms` (`sendTimeoutMs`), as
+   * L's delivery deadline. H bounds a readback with it too, where L awaits a readback with no deadline.
    */
-  private async deadline<T>(send: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  private async deadline<T>(send: (signal: AbortSignal) => Promise<T>, ms = this.sendTimeoutMs): Promise<T> {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => { controller.abort(); reject(new SendDeadline()); }, this.sendTimeoutMs);
+      timer = setTimeout(() => { controller.abort(); reject(new SendDeadline()); }, ms);
     });
     try { return await Promise.race([Promise.resolve().then(() => send(controller.signal)), deadline]); }
     finally { clearTimeout(timer); }
   }
 }
 
+const HOME_LEASE_PASSED = 'Home flush outlasted its lease';
 class SendDeadline extends Error {
   constructor() { super('send_timeout'); this.name = 'SendDeadline'; }
 }
