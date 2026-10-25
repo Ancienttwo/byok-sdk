@@ -662,4 +662,11 @@ test('#927: the cloud-do client test edge is admitted only as a workspace spec, 
   }
   f.write(path, { ...manifest, dependencies: { '@byok-sdk/client': 'workspace:*' } });
   assert.throws(() => selectImpact([path], f), /more than/, 'a runtime edge');
+  // The lock row must match the manifest: a reviewed manifest does not admit another lock spec.
+  f.write(path, { ...manifest, devDependencies: edge });
+  f.lock.workspaces['packages/cloud-do'].devDependencies = { ...edge, '@byok-sdk/client': '^0.30.1' }; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /more than/, 'a lock range under a workspace manifest');
+  f.write(path, manifest);
+  f.lock.workspaces['packages/cloud-do'].devDependencies = edge; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /more than/, 'a lock edge the manifest does not declare');
 });
