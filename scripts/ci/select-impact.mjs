@@ -375,6 +375,10 @@ export function selectImpact(paths, context = {}) {
     if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts') {
       dirs.add('examples/basic'); continue;
     }
+    // The usage notes of the clarification and goal/btw examples.
+    if (path === 'examples/basic/clarification-usage.md' || path === 'examples/basic/goal-btw-usage.md') { dirs.add('examples/basic'); continue; }
+    // The Salesko recovery integration fixture runs the client daemon; no CI job runs scripts/integration.
+    if (path === 'scripts/integration/fixtures/salesko-recurring-daemon.ts') { dirs.add('packages/client'); continue; }
     if (path === 'api-surface/entries.json') {
       for (const dir of changedApiOwners(context)) {
         if (!workspaceGraph[dir]) requireMapping(path);
@@ -392,6 +396,8 @@ export function selectImpact(paths, context = {}) {
     // #654: the core sealed-payload subpath entry.
     if (path === 'packages/core/tsup.config.ts') { dirs.add('packages/core'); families.add('npm-release-pack'); continue; }
     if (path === 'scripts/keys/generate-pi-model-catalog.ts') { dirs.add('packages/keys'); dirs.add('packages/client'); continue; }
+    // pack-and-smoke.mjs runs it against the packed client.
+    if (path === 'packages/client/scripts/packed-cli-mcp-smoke.mjs') { dirs.add('packages/client'); families.add('npm-release-pack'); continue; }
     if (path === 'packages/client/scripts/packed-agent-memory-helper-smoke.mjs'
       || path === 'scripts/release/agent-memory-helper-source.test.mjs') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;

@@ -17,15 +17,16 @@ import { createTestKeychain } from '../../../../../scripts/testing/macos-keychai
 process.umask(0o077);
 const hash = value => createHash('sha256').update(value).digest('hex');
 const terminal = event => ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type);
+// Every daemon journals (#924), so a restart never runs task A again.
 const scenarios = [
-  { name: 'fixed-no-journal-acked', journal: false, changeUrl: false, barrier: 'acked', dispatchB: false, expectedA: 1 },
-  { name: 'fixed-no-journal-pending', journal: false, changeUrl: false, barrier: 'pending-ack', dispatchB: false, expectedA: 1 },
-  { name: 'fixed-journal-pending-terminal', journal: true, changeUrl: false, barrier: 'pending-terminal', dispatchB: false, expectedA: 1 },
-  { name: 'fixed-journal-terminal-response-held', journal: true, changeUrl: false, barrier: 'pending-terminal-response', dispatchB: false, expectedA: 1 },
-  { name: 'fixed-journal-then-dispatch-B', journal: true, changeUrl: false, barrier: 'pending-terminal', dispatchB: true, expectedA: 1 },
-  { name: 'changed-url-no-journal-pending', journal: false, changeUrl: true, barrier: 'pending-ack', dispatchB: false, expectedA: 2 },
-  { name: 'changed-url-no-journal-pending-then-B', journal: false, changeUrl: true, barrier: 'pending-ack', dispatchB: true, expectedA: 2 },
-  { name: 'changed-url-no-journal-acked', journal: false, changeUrl: true, barrier: 'acked', dispatchB: false, expectedA: 1 },
+  { name: 'fixed-acked', changeUrl: false, barrier: 'acked', dispatchB: false },
+  { name: 'fixed-pending-ack', changeUrl: false, barrier: 'pending-ack', dispatchB: false },
+  { name: 'fixed-pending-terminal', changeUrl: false, barrier: 'pending-terminal', dispatchB: false },
+  { name: 'fixed-terminal-response-held', changeUrl: false, barrier: 'pending-terminal-response', dispatchB: false },
+  { name: 'fixed-then-dispatch-B', changeUrl: false, barrier: 'pending-terminal', dispatchB: true },
+  { name: 'changed-url-pending-ack', changeUrl: true, barrier: 'pending-ack', dispatchB: false },
+  { name: 'changed-url-pending-ack-then-B', changeUrl: true, barrier: 'pending-ack', dispatchB: true },
+  { name: 'changed-url-acked', changeUrl: true, barrier: 'acked', dispatchB: false },
 ];
 async function until(predicate, label, timeout = 20_000) {
   const deadline = Date.now() + timeout;
@@ -96,7 +97,7 @@ async function observation(root, config, serverUrl, deviceId, selectServer) {
       taskId: envelope.task_id ?? null, envelopeId: envelope.id,
     }; });
   const journalPath = path.join(root, 'device', 'daemon.db');
-  let journal = { enabled: config.journal, exists: existsSync(journalPath) };
+  let journal = { exists: existsSync(journalPath) };
   if (journal.exists) journal = { ...journal,
     envelopes: select(journalPath, 'SELECT envelope_id, task_id, seq, acked_at FROM journal_envelope ORDER BY seq'),
     tasks: select(journalPath, 'SELECT task_id, envelope_id, seq, admitted, claimed_runtime, local_state, recovery_marker FROM journal_task ORDER BY task_id'),
@@ -146,8 +147,7 @@ async function child(stage, root) {
     deviceCredentials: config.deviceCredentials,
     localAgentRelease: { version: '0.0.0-attribution' }, serverUrl,
     storeDir: path.join(root, 'device'), workspaceRoot: path.join(root, 'workspace'),
-    allowedRuntimes: ['pi'],
-    ...(config.journal ? { hostedJournal: { mode: 'sqlite' } } : {}) };
+    allowedRuntimes: ['pi'] };
   let byok, http, daemon, diagnosticDeviceId, selectServer;
   try {
     daemon = createDaemonWithAdapters(daemonConfig, [adapter]);
@@ -218,7 +218,7 @@ async function child(stage, root) {
       enrollment = { state: 'paired', ...await daemon.pair(code.code) };
     }
     assert.equal(enrollment.state, 'paired'); diagnosticDeviceId = enrollment.deviceId;
-    await log({ kind: 'phase-start', serverUrl, deviceId: enrollment.deviceId, journal: config.journal,
+    await log({ kind: 'phase-start', serverUrl, deviceId: enrollment.deviceId,
       hostRequestId: config.hostRequestId });
     const preStart = await observation(root, config, serverUrl, enrollment.deviceId, selectServer);
     await daemon.start();
@@ -256,7 +256,7 @@ async function child(stage, root) {
       const allowAbsentCursor = config.changeUrl && config.barrier === 'acked' && !seenOffers.has(taskA);
       if (!hasAcknowledgedOffer(state, enrollment.deviceId, taskA, { allowAbsentCursor }) || emptyPolls < emptyAtStart + 2) return false;
       if ((await byok.tasks.get(taskA))?.state !== 'Complete') return false;
-      if (config.journal && !state.journal.terminals.some(row => row.task_id === taskA && row.truth_state === 'confirmed')) return false;
+      if (!state.journal.terminals.some(row => row.task_id === taskA && row.truth_state === 'confirmed')) return false;
       return true;
     }), 'recovery: durable offer ACK, terminal disposition, two subsequent empty polls');
     const recoveryBarrier = await snap();
@@ -269,7 +269,7 @@ async function child(stage, root) {
       assert.notEqual(taskB, taskA);
       await until(() => checked(async () => {
         const state = await snap(); const offer = state.mailbox.find(row => row.taskId === taskB && row.type.startsWith('task.offer'));
-        return hasAcknowledgedOffer(state, enrollment.deviceId, taskB) && (!config.journal || state.journal.terminals.some(row => row.task_id === taskB && row.truth_state === 'confirmed')) && (await byok.tasks.get(taskB))?.state === 'Complete';
+        return hasAcknowledgedOffer(state, enrollment.deviceId, taskB) && state.journal.terminals.some(row => row.task_id === taskB && row.truth_state === 'confirmed') && (await byok.tasks.get(taskB))?.state === 'Complete';
       }), 'B: ACK and confirmed terminal');
     }
     const finalState = await snap(); await tail;
@@ -351,8 +351,8 @@ async function runScenarioWithCustody(scenario, outDir, deviceCredentials) {
     if (scenario.changeUrl) assert.equal(report.recovery.preStart.localCursor, null);
     else assert.equal(report.recovery.preStart.localCursor, report.first.state.localCursor);
     const A = report.first.taskA; const B = report.recovery.taskB;
-    report.counts = validateStarts(report.events, B ? [A, B] : [A], { [A]: scenario.expectedA, ...(B ? { [B]: 1 } : {}) });
-    if (scenario.journal) {
+    report.counts = validateStarts(report.events, B ? [A, B] : [A], { [A]: 1, ...(B ? { [B]: 1 } : {}) });
+    if (scenario.barrier.startsWith('pending-terminal')) {
       const before = report.first.state.journal.terminals.find(row => row.task_id === A);
       const after = report.recovery.recoveryBarrier.journal.terminals.find(row => row.task_id === A);
       assert.equal(before.payload_hash, after.payload_hash); assert.equal(after.truth_state, 'confirmed');

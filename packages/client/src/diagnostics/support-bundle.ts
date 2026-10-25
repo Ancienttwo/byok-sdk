@@ -26,7 +26,6 @@ export interface SupportBundle {
   config: {
     serverProtocol: 'http' | 'https' | 'ws' | 'wss' | 'invalid' | 'unsupported';
     customStoreDir: boolean;
-    hostedJournal: boolean;
     runtimeAllowlistCount?: number;
   };
   device: { status: DiagnosticsSnapshot['device']['status']; deviceIdHash?: string };
@@ -228,7 +227,6 @@ export async function createSupportBundle(
     config: {
       serverProtocol: snapshot.config.serverProtocol,
       customStoreDir: snapshot.config.customStoreDir,
-      hostedJournal: snapshot.config.hostedJournal,
       ...(snapshot.config.runtimeAllowlistCount === undefined ? {} : { runtimeAllowlistCount: snapshot.config.runtimeAllowlistCount }),
     },
     device: {

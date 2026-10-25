@@ -45,7 +45,7 @@ it.skipIf(process.platform === 'win32').each([
   const config = { productId: 'result-reply-kill', productName: 'Fake recovery test', localAgentRelease: { version: '0.0.0-test' },
     serverUrl: server.url, storeDir: path.join(root, 'store'), workspaceRoot: path.join(root, 'workspace'),
     storage: { scratchRoot: testScratchRoot() }, agentHome: { hostStorageRoot: path.join(root, 'homes') },
-    agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, hostedJournal: { mode: 'sqlite' as const } };
+    agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } };
   const credentials = new InMemoryDeviceCredentialStore();
   const pairing = createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { deviceCredentials: credentials });
   const { deviceId } = await pairing.pair((await server.createPairingCode()).code);

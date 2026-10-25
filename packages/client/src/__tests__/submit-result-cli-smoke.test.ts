@@ -46,7 +46,7 @@ async function run(outcome: unknown) {
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-result-smoke' }, productName: 'Result smoke', productId: 'result-smoke',
     serverUrl: server.url, workspaceRoot: path.join(root, 'work'), storeDir: path.join(root, 'store'),
-    agentHome: { hostStorageRoot: path.join(root, 'home') }, hostedJournal: { mode: 'sqlite' },
+    agentHome: { hostStorageRoot: path.join(root, 'home') },
   }, [new CodexAdapter({ resolveBin: () => ({ command: FAKE_CODEX, source: 'path' }) })], { deviceCredentials: new InMemoryDeviceCredentialStore() });
   cleanup.push(() => daemon.stop());
   await daemon.pair('pairing-code');

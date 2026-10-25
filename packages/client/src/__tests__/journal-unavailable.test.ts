@@ -22,7 +22,7 @@ vi.mock('../daemon/journal/sqlite-support', async (importOriginal) => {
 const { SqliteLocalTaskJournal } = await import('../daemon/journal/sqlite-journal');
 const { JournalUnavailableError } = await import('../daemon/journal/journal');
 
-describe('hosted journal mode on a runtime without node:sqlite', () => {
+describe('the journal on a runtime without node:sqlite', () => {
   it('refuses to construct, with a typed error, before touching the filesystem', () => {
     // A storeDir that does not exist and must not be created: the refusal is
     // the whole behaviour, and a refusal that leaves directories behind is

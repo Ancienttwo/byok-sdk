@@ -69,7 +69,7 @@ export async function openHostedCloud() {
       agentHome: { hostStorageRoot: path.join(root, 'homes'), projection: createAgentHomeProjectionConsumer(async ({ projection, writeHomeFile }) => {
         await writeHomeFile('AGENTS.md', String((projection as { persona?: unknown }).persona ?? ''));
       }) },
-      hostedJournal: { mode: 'sqlite' as const }, agentEgress: { policy },
+      agentEgress: { policy },
     }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
     const { code } = await cloud.createPairingCode(tenant, { productId: PRODUCT_ID });
     const { deviceId } = await daemon.pair(code);

@@ -657,13 +657,6 @@ export interface TaskRunnerDeps {
    * behaves exactly as it did before this seam existed.
    */
   admissionGuard?: (offer: { readonly taskId: string; readonly payload: AcceptedOfferPayload }) => AdmissionGuardDecision;
-  /**
-   * True only when every terminal envelope this runner sends is recorded in
-   * the durable local journal before it reaches the transport. A
-   * result-document offer needs that persist-before-send boundary, so a
-   * runner without it declines such offers.
-   */
-  terminalJournal?: boolean;
   /** Durable normal-turn result failure intent, before handing off a required reply. */
   recordResultReplyFailure?(taskId: string, failure: ResultReplyFailure): Promise<void>;
   recordAgentMessageAccepted?(taskId: string): Promise<void>;
@@ -2368,12 +2361,6 @@ export class TaskRunner {
       return;
     }
     if (terminalProjection?.mode === 'result-document') {
-      // Persist-before-send: without the journal there is no store that makes
-      // a delivered outcome durable before the transport sees it.
-      if (this.deps.terminalJournal !== true) {
-        decline('offer requires a result document but this daemon has no durable terminal journal', false);
-        return;
-      }
       if (agentRef === undefined || this.deps.tenantId === undefined || this.deps.agentResultMcpBin === undefined) {
         decline('offer requires a result document but this daemon cannot host the submit_result channel: it needs an Agent offer, an enrolled tenant and the SDK result helper', false);
         return;

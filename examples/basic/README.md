@@ -283,7 +283,7 @@ explicit sidecar path that cannot execute, or an unsupported offer field.
 See the private [goal/btw Host reference](./goal-btw-usage.md) for bounded goals and independent side questions using [goal-btw.ts](./goal-btw.ts). It uses explicit Host state and public SDK APIs; the existing quickstart is unchanged.
 
 The daemon needs Agent-home support, the matching `agentEgress.policy` and
-a durable terminal journal (`hostedJournal: { mode: 'sqlite' }`). Offers carry the example's frozen schema; the runtime calls the SDK `submit_result` tool. On Host restart, recover pending
+a durable terminal journal, which every daemon has. Offers carry the example's frozen schema; the runtime calls the SDK `submit_result` tool. On Host restart, recover pending
 records by exact taskId before reconciling their terminal results. Drive
 `tickGoal` from your Host scheduler; no timer or per-step limit is supplied.
 `acceptGoalResult` must be idempotent and verify product evidence. This is a

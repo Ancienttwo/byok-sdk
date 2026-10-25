@@ -88,7 +88,7 @@ function snapshot(storeDir: string): Record<string, unknown[]> {
 describe('startup refuses a journal of another wire major', () => {
   async function pairedDaemonStore() {
     const server = await TestServer.start(); cleanup.push(() => server.close());
-    const config = { ...(await baseConfig(server.url)), hostedJournal: { mode: 'sqlite' as const } };
+    const config = { ...(await baseConfig(server.url)) };
     const pairing = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
     await pairing.pair('pairing-code');
     const device = (await createTestDeviceStore(config.storeDir!, undefined, config.productId).credentials.read())!;
@@ -105,7 +105,7 @@ describe('startup refuses a journal of another wire major', () => {
   async function expectStartupRefused(config: DaemonConfig, expected: Partial<DaemonJournalProtocolUnsupportedError>): Promise<void> {
     const before = snapshot(config.storeDir!);
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
-    const daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { hostedJournal: { journal } });
+    const daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { journal });
     cleanup.push(async () => { await daemon.stop().catch(() => {}); await journal.close().catch(() => {}); });
     let thrown: unknown;
     try { await daemon.start(); } catch (error) { thrown = error; }
@@ -156,7 +156,7 @@ describe('result-document recovery from the journal', () => {
   async function pairedAgentStore(requiredReply = false) {
     const server = await TestServer.start(); cleanup.push(() => server.close());
     const root = await tmpDir('byok-result-recovery-');
-    const config: DaemonConfig = { ...(await baseConfig(server.url)), hostedJournal: { mode: 'sqlite' },
+    const config: DaemonConfig = { ...(await baseConfig(server.url)),
       agentHome: { hostStorageRoot: path.join(root, 'agent-home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } };
     await createDaemonWithAdapters(config, [new StubRuntimeAdapter()]).pair('pairing-code');
     const device = (await createTestDeviceStore(config.storeDir!, undefined, config.productId).credentials.read())!;
@@ -170,7 +170,7 @@ describe('result-document recovery from the journal', () => {
   }
 
   async function startWith(config: DaemonConfig, journal: SqliteLocalTaskJournal) {
-    const daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { hostedJournal: { journal } });
+    const daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { journal });
     cleanup.push(async () => { await daemon.stop().catch(() => {}); await journal.close().catch(() => {}); });
     await daemon.start();
     return daemon;
@@ -185,7 +185,7 @@ describe('result-document recovery from the journal', () => {
     await journal.appendEnvelope({ identity, taskId, envelopeId: JSON.parse(bytes).id, seq: 1, bytes, bytesHash: journalHash(bytes), opensTask: true, receivedAt: new Date().toISOString() });
     await journal.recordAdmission({ taskId, admitted: true, claimedRuntime: 'pi', decidedAt: new Date().toISOString() });
     await journal.recordTransition({ transitionId: `result-reply:${taskId}`, taskId, to: 'required-reply-result-missing', occurredAt: new Date().toISOString() });
-    const daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { hostedJournal: { journal } });
+    const daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { journal });
     cleanup.push(() => daemon.stop().catch(() => {}));
     await expect(daemon.start()).rejects.toThrow('does not match its original offer');
     expect(await journal.listPendingTerminals(identity)).toEqual([]);

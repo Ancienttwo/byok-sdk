@@ -96,8 +96,6 @@ async function start(options: {
   ciphertextRef?: boolean;
   /** The server also takes a failed task's runtime failure class (`runtime-failure-class`). */
   failureClass?: boolean;
-  /** `false` runs the daemon without a hosted journal. */
-  journal?: false;
   /** A short shutdown: the grace deadline, and how long a task's interrupt may take. */
   shutdown?: { readonly graceMs: number; readonly taskInterruptTimeoutMs: number };
   /** The categories of the device scope's policy. */
@@ -118,7 +116,6 @@ async function start(options: {
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed daemon test', productId: 'sealed-daemon-test',
     serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
-    ...(options.journal === false ? {} : { hostedJournal: { mode: 'sqlite' as const } }),
     ...(options.shutdown === undefined ? {} : { shutdownGraceMs: options.shutdown.graceMs }),
   };
   server.setCapabilityDeclaration(options.e2ee === false ? NO_E2EE_DECLARATION : options.e2ee === 'no-kem-epoch' ? NO_KEM_EPOCH_DECLARATION : E2EE_DECLARATION);
@@ -724,9 +721,9 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(JSON.stringify(server.received)).not.toContain('ciphertextRef');
   });
 
-  it('sends a sealed terminal made at shutdown before the connection closes, without a journal', async () => {
-    const { server, adapter, deviceId, member } = await start({ journal: false });
-    server.send(await sealedOffer(member, 'stop-no-journal', server.nextSeq(), deviceId, 'run'));
+  it('sends a sealed terminal made at shutdown before the connection closes', async () => {
+    const { server, adapter, deviceId, member } = await start();
+    server.send(await sealedOffer(member, 'stop-sealed', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -741,9 +738,9 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     daemon = undefined;
     setTimeout(release, 200);
     await stopped;
-    const fail = taskEnvelopes('stop-no-journal').find((envelope) => envelope.type === 'task.fail_sealed');
+    const fail = taskEnvelopes('stop-sealed').find((envelope) => envelope.type === 'task.fail_sealed');
     expect(fail).toBeDefined();
-    expect(taskEnvelopes('stop-no-journal').map((envelope) => envelope.type)).not.toContain('task.fail');
+    expect(taskEnvelopes('stop-sealed').map((envelope) => envelope.type)).not.toContain('task.fail');
   });
 
   it('reports an interrupted sealed task with the plaintext daemon_interrupted terminal', async () => {
@@ -920,8 +917,8 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     expect(await openOutput(member, complete!, deviceId)).toMatchObject({ summary });
   });
 
-  it.each(['with', 'without'] as const)('retries a failed terminal upload %s a journal, and never replaces the result with a sealed failure', async (journal) => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true, ...(journal === 'without' ? { journal: false as const } : {}) });
+  it('retries a failed terminal upload, and never replaces the result with a sealed failure', async () => {
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
     server.send(await sealedOffer(member, 'upload-retry', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     server.setFailBlobUploads(true);
@@ -982,8 +979,8 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 ย
     expect(taskEnvelopes('upload-refused-retry').map((envelope) => envelope.type)).not.toContain('task.fail_sealed');
   });
 
-  it.each(['with', 'without'] as const)('waits for the next session to read the server flags before it seals a large terminal %s a journal', async (journal) => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true, ...(journal === 'without' ? { journal: false as const } : {}) });
+  it('waits for the next session to read the server flags before it seals a large terminal', async () => {
+    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true });
     server.send(await sealedOffer(member, 'between-sessions', server.nextSeq(), deviceId, 'run'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     // A route failure withdraws the server flags until the next session advertises them.
@@ -1373,18 +1370,6 @@ describe('a refused terminal sent by ciphertextRef (#654 ยง77b)', () => {
     expect(byReference(complete)).toBe(true);
     await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(0), BUDGET_MS);
     expect(terminalTypes('route-retry')).toEqual(['task.complete_sealed']);
-  });
-
-  it('replaces a refused result once without a journal', async () => {
-    const { server, adapter, deviceId, member } = await start({ ciphertextRef: true, journal: false });
-    server.setOutboundRefusal((envelope) => (envelope.type === 'task.complete_sealed' && byReference(envelope) ? 'payload_invalid' : undefined));
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    await runLargeResult(adapter, member, deviceId, 'refused-no-journal');
-
-    const failed = await server.waitFor((envelope) => envelope.type === 'task.fail_sealed' && envelope.task_id === 'refused-no-journal', BUDGET_MS);
-    expect(await openOutput(member, failed, deviceId)).toEqual({ reason: 'terminal_result_unsealable' });
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
-    expect(terminalTypes('refused-no-journal')).toEqual(['task.complete_sealed', 'task.fail_sealed']);
   });
 
   it('replaces a refusal journaled before a restart (or by 0.30.1) with a sealed failure, once the member resumes', async () => {
