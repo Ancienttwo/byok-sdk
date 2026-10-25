@@ -242,6 +242,18 @@ and makes no network request.
 - A catalog or Host entry applies only when the draft's base URL normalizes to
   the vendor's own base URL, because the pinned Pi fills each undeclared
   `compat` key from the endpoint URL. At any other URL the model is manual.
+  At that URL a representable entry equals the pinned pi-ai built-in model's
+  configuration field by field. Run-time branches that pi-ai takes on its own
+  provider id are outside that promise, because the projected provider id is
+  `byok-sdk-<profile_ref>`. In pi-ai 1.4.0 these are `cacheControlFormat` for
+  openrouter `anthropic/*` models (`api/openai-completions.js:1269`), the
+  xai `reasoning.encrypted_content` include (`api/openai-responses.js:308`),
+  cerebras body-less overflow detection (`utils/overflow.js:146`), the
+  Responses tool-call id kept only for `OPENAI_TOOL_CALL_PROVIDERS`
+  (`api/openai-responses.js:15`, `api/openai-responses-shared.js:104`) and
+  the error message prefix (`api/openai-responses.js:182`). The pinned catalog
+  drift test in `@byok-sdk/client` keeps a review list of these branches, so a
+  pi-ai upgrade reviews them again.
 - The `custom` kind has no adapter, auth mode or base URL of its own; a Host
   passes defaults in its policy. A Host entry is marked `host`, must pass
   `PiModelConfigSchema`, and is offered as unrepresentable otherwise.

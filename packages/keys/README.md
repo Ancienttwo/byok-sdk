@@ -294,7 +294,22 @@ if (submission.ok) {
   when the model supports it; otherwise the user picks one. Any other model is
   `manual`: the user supplies `pi_model`, checked by `PiModelConfigSchema`.
 - Catalog and policy entries apply only at the vendor's own base URL: the
-  pinned Pi fills undeclared `compat` keys from the endpoint URL.
+  pinned Pi fills undeclared `compat` keys from the endpoint URL. There, a
+  representable entry equals the pinned pi-ai built-in model's configuration
+  field by field. Pi's run-time branches on its own provider id are not part
+  of that promise, because the projected provider is `byok-sdk-<profile_ref>`.
+  In pi-ai 1.4.0 they are:
+  - openrouter `anthropic/*` `cacheControlFormat`. No representable entry is
+    affected.
+  - the xai `reasoning.encrypted_content` include. There is no difference at a
+    supported thinking level.
+  - cerebras body-less overflow detection.
+  - the Responses tool-call id, which is kept only for `openai`, `openai-codex`
+    and `opencode`. Other providers flatten `callId|itemId`.
+  - the error message prefix.
+
+  The client's pinned catalog drift test keeps a review list of these
+  branches.
 - Errors are codes from `MODEL_ROUTE_ERROR_CODES`, one per visible field.
 - The key is write-only. A view shows `keep`, `none` or `replace`, never the
   key. `providerSecretReusable` keeps a stored key only while `profile_ref`,
