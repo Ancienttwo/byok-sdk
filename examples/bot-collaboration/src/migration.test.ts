@@ -1,5 +1,5 @@
 import { hash } from '@byok-sdk/example-host-execution-core/canonical';
-import type { Occurrence } from '@byok-sdk/example-host-execution-core';
+import type { Occurrence, Routine } from '@byok-sdk/example-host-execution-core';
 import { describe, expect, it } from 'vitest';
 import { sealSwitchExport, SwitchExportError, verifySwitchExport, type SwitchContent, type SwitchExport, type SwitchExportRefusal } from './migration';
 import { stateOf, type CollaborationState } from './model';
@@ -9,6 +9,14 @@ const bot = (id: string, deviceId: string, archived = false) =>
   ({ id, name: id, role: 'r', persona: 'p', model: 'm', mainBot: false, archived, revision: '1', readyRevision: '1', execution: { deviceId, agentId: 'main' } }) as unknown as BotProfile;
 const home = (sequence: number, extra: Partial<HomeOperation> = {}) =>
   ({ sequence, botId: 'b1', request: {}, retries: [], status: 'pending', ...extra }) as unknown as HomeOperation;
+
+const ROUTINE: Routine = {
+  definition: { id: 'r1', version: 1, timeZone: 'UTC', rule: { every: 'day' }, waitMs: 0, lateAfterMs: 60_000, hostJob: { type: 'job', input: {} } },
+  lifecycle: 'active', status: 'ok', next: null,
+};
+const OCCURRENCE: Occurrence = {
+  key: 'o1', routineId: 'r1', definitionVersion: 1, trigger: { kind: 'scheduled', plannedAt: 900 }, wakeKey: 'w1', recordedAt: 900, nextAt: null, attempts: 0,
+};
 
 function content(edit: (state: CollaborationState) => void = () => {}): SwitchContent {
   const state = stateOf({});
@@ -20,8 +28,8 @@ function content(edit: (state: CollaborationState) => void = () => {}): SwitchCo
     archived: [{ namespace: 'turns', id: 't2', body: { n: 2 }, expiresAt: 9_000 }, { namespace: 'commands', id: 'c1', body: { n: 1 } }],
     intents: [{ key: 'i2', source: 'user', taskId: hash(['i2', 1]), generation: 1, deviceId: 'd1', agentId: 'main', conclusion: 'succeeded', started: true },
       { key: 'i1', source: 'routine', taskId: hash(['i1', 1]), generation: 1, deviceId: 'd1', agentId: 'main', conclusion: 'cancelled', started: false, cancelReason: 'cancelled' }],
-    routines: [],
-    occurrences: [{ key: 'o1', routineId: 'r1' } as unknown as Occurrence],
+    routines: [{ id: 'r1', routine: ROUTINE }],
+    occurrences: [OCCURRENCE],
     slots: [{ slot: hash('s1'), occurrenceKey: 'o1' }],
     outbox: [{ kind: 'projection', id: 'p1', value: { v: 1 } }, { kind: 'host-job', occurrenceKey: 'o1' }],
     tombstones: [{ kind: 'row', digest: hash('r'), expiresAt: 5_000 }, { kind: 'intent', digest: hash('i0') }],
@@ -47,7 +55,7 @@ describe('switch export format (#975)', () => {
     expect(sealed.intents.map(row => row.key)).toEqual(['i1', 'i2']);
     expect(sealed.outbox.map(row => row.kind)).toEqual(['host-job', 'projection']);
     expect(sealed.tombstones.map(row => row.kind)).toEqual(['intent', 'row']);
-    expect(sealed.manifest.counts).toEqual({ collaboration: 1, archived: 2, intents: 2, routines: 0, occurrences: 1, slots: 1, outbox: 2, tombstones: 2 });
+    expect(sealed.manifest.counts).toEqual({ collaboration: 1, archived: 2, intents: 2, routines: 1, occurrences: 1, slots: 1, outbox: 2, tombstones: 2 });
     expect(sealed.manifest.digests.archived).toBe(hash(sealed.archived));
     expect(verifySwitchExport(sealed)).toEqual(sealed.manifest);
     // A target's read-back is a JSON round trip of what it wrote: the digest does not depend on key order or row order.
@@ -116,6 +124,16 @@ describe('switch export format (#975)', () => {
       value => { value.archived[0]!.expiresAt = 1.5; },
       value => { (value.intents[0] as { conclusion: string }).conclusion = 'done'; },
       value => { (value.collaboration.team as { bots: unknown }).bots = null; },
+      value => { value.archived[0]!.body = { n: Number.NaN }; },
+      value => { value.outbox[0] = { kind: 'projection', id: 'p1', value: { at: new Date(0) } as unknown as Record<string, number> }; },
+      value => { (value.archived[1] as { expiresAt?: number }).expiresAt = undefined; },
+      value => { value.routines[0]!.routine = {} as Routine; },
+      value => { value.routines[0]!.routine = { ...ROUTINE, definition: { ...ROUTINE.definition, id: 'r2' } }; },
+      value => { value.routines[0]!.routine = { ...ROUTINE, definition: { ...ROUTINE.definition, execution: {} } } as unknown as Routine; },
+      value => { value.routines[0]!.routine = { ...ROUTINE, lifecycle: 'gone' } as unknown as Routine; },
+      value => { const { wakeKey: _wakeKey, ...rest } = OCCURRENCE; value.occurrences[0] = rest as Occurrence; },
+      value => { value.occurrences[0] = { ...OCCURRENCE, trigger: { kind: 'late', plannedAt: 900 } } as unknown as Occurrence; },
+      value => { value.occurrences[0] = { ...OCCURRENCE, nextAt: -1 }; },
       value => { (value.collaboration.team as { homeOperations: unknown }).homeOperations = {}; },
       value => { (value.collaboration.team.bots.b1 as { execution: unknown }).execution = null; },
       value => { value.collaboration.turns.t1 = null as unknown as CollaborationState['turns'][string]; },

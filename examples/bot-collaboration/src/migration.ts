@@ -1,5 +1,5 @@
 import { canonical, hash } from '@byok-sdk/example-host-execution-core/canonical';
-import type { Conclusion, Json, Occurrence, Routine } from '@byok-sdk/example-host-execution-core';
+import { validateJson, type Conclusion, type Json, type Occurrence, type Routine } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState } from './model';
 
 /**
@@ -135,11 +135,38 @@ const digestText = (value: unknown): value is string => typeof value === 'string
 /** Keyed by K4's `Conclusion`, so a new K4 conclusion fails to compile here until the format names it. */
 const CONCLUSIONS: Record<Conclusion, true> = { succeeded: true, failed: true, declined: true, cancelled: true, expired: true, superseded: true };
 const optional = (value: unknown, check: (value: unknown) => boolean) => value === undefined || check(value);
+const oneOf = (values: readonly string[]) => (value: unknown) => typeof value === 'string' && values.includes(value);
+/** K4's JSON rule: a value that serialization would change (`NaN`, `undefined`, a class instance) cannot be digested. */
+function json(value: unknown): boolean { try { validateJson(value); return true; } catch { return false; } }
+/** The K4 `RoutineDefinition` fields that every consumer reads, and exactly one of its three run kinds. */
+function definition(value: unknown, id: string): boolean {
+  if (!object(value)) return false;
+  const kinds = [value.execution, value.hostJob, value.hostOccurrence].filter(kind => kind !== undefined);
+  return value.id === id && time(value.version) && value.version >= 1 && text(value.timeZone) && value.rule !== undefined
+    && time(value.waitMs) && time(value.lateAfterMs) && optional(value.endAt, time) && optional(value.retry, object)
+    && kinds.length === 1 && object(kinds[0]);
+}
+function routine(row: RoutineRecord): boolean {
+  const value: unknown = row.routine;
+  return object(value) && definition(value.definition, row.id) && optional(value.pending, pending => definition(pending, row.id))
+    && oneOf(['active', 'paused', 'completed'])(value.lifecycle)
+    && oneOf(['ok', 'schedule_retrying', 'no_occurrence_within_horizon', 'calendar_error'])(value.status)
+    && (value.next === null || object(value.next)) && optional(value.scheduleRetryAt, time) && optional(value.scheduleRetryCount, time);
+}
+function occurrence(row: Occurrence): boolean {
+  const value: unknown = row;
+  return object(value) && text(value.key) && text(value.routineId) && time(value.definitionVersion) && value.definitionVersion >= 1
+    && object(value.trigger) && oneOf(['scheduled', 'catch_up'])(value.trigger.kind) && time(value.trigger.plannedAt)
+    && text(value.wakeKey) && time(value.recordedAt) && (value.nextAt === null || time(value.nextAt)) && optional(value.intentId, text)
+    && optional(value.job, job => object(job) && time(job.attempts)) && optional(value.hook, object) && time(value.attempts)
+    && optional(value.conclusion, conclusion => Object.hasOwn(CONCLUSIONS, conclusion as string)) && optional(value.slotReplayCount, time);
+}
 function invalid(message: string): never { throw new SwitchExportError('invalid', `Invalid switch export: ${message}`); }
 function ensure(ok: boolean, message: string): void { if (!ok) invalid(message); }
 
 function checkContent(content: SwitchContent): void {
   ensure(object(content), 'not an object');
+  ensure(json(content), 'not JSON');
   ensure(content.version === SWITCH_EXPORT_VERSION, `version ${String(content.version)}`);
   ensure(content.source === 'L' || content.source === 'H', 'source');
   ensure(text(content.domain), 'domain');
@@ -159,8 +186,8 @@ function checkContent(content: SwitchContent): void {
       && optional(row.conclusion, value => Object.hasOwn(CONCLUSIONS, value as string)), 'intent');
     if (row.conclusion === undefined) throw new SwitchExportError('open_work', `Switch export has an open intent: ${row.key}`);
   }
-  for (const row of content.routines) ensure(object(row) && text(row.id) && object(row.routine), 'routine');
-  for (const row of content.occurrences) ensure(object(row) && text(row.key) && text(row.routineId), 'occurrence');
+  for (const row of content.routines) ensure(object(row) && text(row.id) && routine(row), 'routine');
+  for (const row of content.occurrences) ensure(occurrence(row), 'occurrence');
   for (const row of content.slots) ensure(object(row) && text(row.slot) && text(row.occurrenceKey), 'slot');
   for (const row of content.outbox) {
     ensure(object(row) && (row.kind === 'projection' ? text(row.id) && row.value !== undefined : row.kind === 'host-job' && text(row.occurrenceKey)), 'outbox row');

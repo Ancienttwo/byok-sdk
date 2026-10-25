@@ -1048,7 +1048,9 @@ The format refuses, with `SwitchExportError` and a `reason`:
   card call in flight;
 - a pending Agent home write that is `sent` or has a `retryAt`, because it may
   have reached the device. An unsent one moves and is sent by the new owner;
-- rows out of identity order or repeated, malformed fields, and a manifest
+- rows out of identity order or repeated, malformed fields (K4 `Routine` and
+  `Occurrence` rows are checked field by field), a value that is not JSON by
+  K4's `validateJson` (`NaN`, `undefined`, a class instance), and a manifest
   that does not match the content.
 
 The export, the import and the commit of the switch on each Host come in
