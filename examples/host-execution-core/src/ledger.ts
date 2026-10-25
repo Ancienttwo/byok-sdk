@@ -1,6 +1,7 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import type { MemoryIntentRow } from './memory';
 import { hash, taskId, time, type Json, type LedgerState, type Occurrence } from './model';
+import { agentKey } from './transitions';
 
 export interface ProjectionOutboxLimits { maxCount?: number; maxBytes?: number }
 /**
@@ -432,7 +433,8 @@ export class HostLedger {
   /**
    * Writes a `dumpForSwitch` result into this tenant in one transaction (#975). The tenant must be empty: the body of a new
    * ledger and no other row. Expiry is kept, never reset. The loaded body passes the intent identity checks of `transaction()`
-   * against the dump's own tombstones. Any refusal or write failure rolls the whole load back. It runs before any core is
+   * against the dump's own tombstones. The dump must be bound to this tenant: each intent's `agent` is `agentKey(tenant, …)`,
+   * a scan wake key names this tenant, and it holds no memory state or retired memory intent. Any refusal or write failure rolls the whole load back. It runs before any core is
    * bound to this ledger, so loaded work stays inert until the caller starts one; it sends no outbox hint.
    */
   loadForSwitch(dump: LedgerDump): void {
@@ -452,15 +454,20 @@ export class HostLedger {
       rowNamespace(row.namespace); rowId(row.id);
       return [row.namespace as string, row.id as string, serialized(row.value, 'row value'), expiry(row.expiresAt)] as const;
     });
-    const memory = (input.memoryTombstones as unknown[]).map(value => {
-      const row = record(value, 'memory tombstone');
-      return [text(row.intentId, 'memory intent'), text(row.approval, 'memory approval'), serialized(record(row.row, 'memory row'), 'memory row'),
-        time(row.expiresAt as number)] as const;
-    });
     const retired = new Set(tombstones.filter(([kind]) => kind === 'intent').map(([, identity]) => identity));
     for (const [id, intent] of Object.entries(record(body.intents, 'intents') as LedgerState['intents'])) {
       if (retired.has(id) || OCCURRENCE_INTENT_KEY.test(intent.key) && (intent.key !== `occurrence:${intent.occurrence}`
         || body.occurrences?.[intent.occurrence!]?.intentId !== id)) throw new RetiredIntentIdentityError();
+      // The FIFO key includes the tenant, so an intent of another tenant would queue apart from new work here.
+      if (intent.agent !== agentKey(this.tenant, intent.execution)) throw new Error('A switch dump intent must queue under this tenant');
+    }
+    // The scan wake key names the tenant too. Memory binds the tenant inside its digests, so it does not move (D4).
+    const scan = `host-scan:${hash(this.tenant)}:`;
+    const scanKeys = [body.scanWake?.dedupKey, ...Object.values(record(body.outbox, 'outbox') as LedgerState['outbox'])
+      .map(row => row.kind === 'schedule' ? row.input.dedupKey : row.kind === 'cancel-wake' ? row.key : undefined)];
+    if (scanKeys.some(key => key?.startsWith('host-scan:') && !key.startsWith(scan))) throw new Error('A switch dump scan wake must name this tenant');
+    if ((input.memoryTombstones as unknown[]).length || body.memory && Object.values(body.memory).some(value => !value || typeof value !== 'object' || Object.keys(value).length)) {
+      throw new Error('A switch dump carries no memory state');
     }
     const state = serialized(body, 'body');
     this.db.exec('BEGIN IMMEDIATE');
@@ -472,8 +479,6 @@ export class HostLedger {
       for (const row of tombstones) tombstone.run(this.tenant, ...row);
       const put = this.db.prepare('INSERT INTO host_application_row (tenant,namespace,id,body,expires_at) VALUES (?,?,?,?,?)');
       for (const row of rows) put.run(this.tenant, ...row);
-      const retire = this.db.prepare('INSERT INTO host_retired_memory_intent (tenant,intent_id,approval,body,expires_at) VALUES (?,?,?,?,?)');
-      for (const row of memory) retire.run(this.tenant, ...row);
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError, type LedgerDump } from './index';
 import { hash, taskId, type IntentInput } from './model';
-import { enqueue, settle } from './transitions';
+import { agentKey, enqueue, fifoHeads, settle } from './transitions';
 import { template } from './test-support';
 
 // #975 slice 1: a whole tenant moves to another, empty tenant for a topology switch.
@@ -39,9 +39,9 @@ function seed(ledger: HostLedger, key: string, options: { routine?: boolean; gen
   return intentKey;
 }
 const memoryRow = { deviceId: 'device', expiresAt: 9_000_000, intent: { intentId: 'memory-1', approvalRef: 'approval' } };
-/** A tenant with every kind of stored row: intent tombstones with and without expiry, application, slot and row tombstones,
- * application rows with no, a future and a passed expiry, a retired memory intent, open work and an unsent projection. */
-function populate(ledger: HostLedger, filename: string): { done: string; routine: string } {
+/** A tenant with every kind of stored row except memory: intent tombstones with and without expiry, application, slot and row
+ * tombstones, application rows with no, a future and a passed expiry, open work and an unsent projection. */
+function populate(ledger: HostLedger): { done: string; routine: string } {
   const done = seed(ledger, 'done', { generation: 1 }), routine = seed(ledger, 'nightly', { routine: true });
   seed(ledger, 'unacked', { ack: false });
   ledger.transaction((state, rows) => {
@@ -53,17 +53,20 @@ function populate(ledger: HostLedger, filename: string): { done: string; routine
     rows.retire('archive', 'gone');
   });
   ledger.compact({ now: NOW, tombstoneRetentionMs: RETENTION, acknowledgedIntentKeys: [done, routine] });
-  // `compact` writes a retired memory intent only from a live memory store; the dump copies the table as stored.
-  const db = new DatabaseSync(filename);
-  db.prepare('INSERT INTO host_retired_memory_intent VALUES (?,?,?,?,?)').run(ledger.tenant, 'memory-1', hash(['device', 'approval']),
-    JSON.stringify(memoryRow), 9_000_000);
-  db.close();
   return { done, routine };
 }
+/** Binds a dump to another tenant, as a switch import builds one: each intent queues under that tenant. */
+function bind(dump: LedgerDump, tenant: string): LedgerDump {
+  const bound = structuredClone(dump);
+  for (const intent of Object.values(bound.body.intents)) intent.agent = agentKey(tenant, intent.execution);
+  return bound;
+}
+/** A target tenant with the source's name in its own file. */
+const twin = () => open(file(), 'source');
 
 it('loads a dump into an empty tenant so that its own dump is equal, with every expiry kept', () => {
-  const filename = file(), source = open(filename, 'source');
-  const { done, routine } = populate(source, filename);
+  const source = open(file(), 'source');
+  const { done, routine } = populate(source);
   const dump = source.dumpForSwitch();
   const expiresAt = NOW + RETENTION;
   expect(dump.tombstones).toEqual([
@@ -80,48 +83,61 @@ it('loads a dump into an empty tenant so that its own dump is equal, with every 
     { namespace: 'archive', id: 'turn-1', value: { text: 'later' }, expiresAt: 5_000_000 },
     { namespace: 'commands', id: 'command-1', value: { disposition: 'applied' }, expiresAt: null },
   ]);
-  expect(dump.memoryTombstones).toEqual([{ intentId: 'memory-1', approval: hash(['device', 'approval']), row: memoryRow, expiresAt: 9_000_000 }]);
+  expect(dump.memoryTombstones).toEqual([]);
   expect(dump.body).toEqual(source.snapshot());
   expect(Object.keys(dump.body.outbox)).toContain(`projection:${hash('intent:unacked')}`);
 
-  // Another tenant of the same file, and a tenant of another file.
-  for (const target of [open(filename, 'target'), open(file(), 'elsewhere')]) {
-    target.loadForSwitch(structuredClone(dump));
-    expect(target.dumpForSwitch()).toEqual(dump);
-    expect(target.hasTombstone('intent', done, NOW)).toBe(true);
-    expect(target.hasTombstone('intent', routine, expiresAt - 1)).toBe(true);
-    expect(target.hasTombstone('intent', routine, expiresAt)).toBe(false);
-    expect(target.retiredMemoryIntent('intent', 'memory-1', NOW)).toEqual(memoryRow);
-    expect(() => target.transaction(state => { enqueue(state, target.tenant, input(done)); })).toThrow(RetiredIntentIdentityError);
-    expect(target.transaction((_state, rows) => [rows.get('commands', 'command-1'), rows.isRetired('archive', 'gone')]))
-      .toEqual([{ disposition: 'applied' }, true]);
-  }
+  const target = twin();
+  target.loadForSwitch(structuredClone(dump));
+  expect(target.dumpForSwitch()).toEqual(dump);
+  expect(target.hasTombstone('intent', done, NOW)).toBe(true);
+  expect(target.hasTombstone('intent', routine, expiresAt - 1)).toBe(true);
+  expect(target.hasTombstone('intent', routine, expiresAt)).toBe(false);
+  expect(() => target.transaction(state => { enqueue(state, target.tenant, input(done)); })).toThrow(RetiredIntentIdentityError);
+  expect(target.transaction((_state, rows) => [rows.get('commands', 'command-1'), rows.isRetired('archive', 'gone')]))
+    .toEqual([{ disposition: 'applied' }, true]);
   expect(source.dumpForSwitch()).toEqual(dump);
 });
 
-it('refuses a tenant that is not empty, or one with a core bound, and changes nothing', () => {
+it('loads only a dump bound to this tenant, so imported and new work share one FIFO', () => {
   const filename = file(), source = open(filename, 'source');
-  populate(source, filename);
+  populate(source);
   const dump = source.dumpForSwitch();
-  const fresh = (tenant: string) => open(filename, tenant);
-  const used: Array<[string, (ledger: HostLedger) => void]> = [
+  // Each intent of a dump from another tenant would queue apart from the work this tenant admits.
+  const other = open(filename, 'target'), empty = other.dumpForSwitch();
+  expect(() => other.loadForSwitch(dump)).toThrow('A switch dump intent must queue under this tenant');
+  expect(other.dumpForSwitch()).toEqual(empty);
+
+  other.loadForSwitch(bind(dump, 'target'));
+  const next = other.transaction(state => enqueue(state, other.tenant, input('next')));
+  const open_ = Object.values(other.snapshot().intents).filter(intent => intent.phase !== 'settled');
+  expect(open_.map(intent => intent.key).sort()).toEqual(['active', 'next']);
+  expect(next.agent).toBe(other.snapshot().intents[hash('active')]!.agent);
+  expect(fifoHeads(open_).map(intent => intent.key)).toEqual(['active']);
+});
+
+it('refuses a tenant that is not empty, or one with a core bound, and changes nothing', () => {
+  const source = open(file(), 'source');
+  populate(source);
+  const dump = source.dumpForSwitch();
+  const used: Array<[string, (ledger: HostLedger, filename: string) => void]> = [
     ['body', ledger => ledger.transaction(state => { state.application.x = 1; })],
     ['row', ledger => ledger.transaction((_state, rows) => rows.put('commands', 'c', {}))],
     ['row tombstone', ledger => ledger.transaction((_state, rows) => rows.retire('commands', 'c'))],
-    ['memory tombstone', ledger => {
+    ['memory tombstone', (ledger, filename) => {
       const db = new DatabaseSync(filename);
       db.prepare('INSERT INTO host_retired_memory_intent VALUES (?,?,?,?,?)').run(ledger.tenant, 'm', 'a', '{}', 1);
       db.close();
     }],
   ];
   for (const [what, use] of used) {
-    const target = fresh(`used-${what}`);
-    use(target);
+    const filename = file(), target = open(filename, 'source');
+    use(target, filename);
     const before = target.dumpForSwitch();
     expect(() => target.loadForSwitch(dump), what).toThrow('A switch dump loads only into an empty tenant');
     expect(target.dumpForSwitch(), what).toEqual(before);
   }
-  const bound = fresh('bound');
+  const bound = twin();
   const stop = bound.onOutbox(() => {});
   expect(() => bound.loadForSwitch(dump)).toThrow('Load a switch dump before any core is bound to this ledger');
   stop();
@@ -129,18 +145,41 @@ it('refuses a tenant that is not empty, or one with a core bound, and changes no
   expect(bound.dumpForSwitch()).toEqual(dump);
 });
 
-it('rolls the whole load back when a write fails, and refuses a malformed dump before it writes', () => {
+it('dumps retired memory intents, and refuses to load any memory state', () => {
   const filename = file(), source = open(filename, 'source');
-  populate(source, filename);
+  populate(source);
+  const db = new DatabaseSync(filename);
+  db.prepare('INSERT INTO host_retired_memory_intent VALUES (?,?,?,?,?)').run('source', 'memory-1', hash(['device', 'approval']),
+    JSON.stringify(memoryRow), 9_000_000);
+  db.close();
   const dump = source.dumpForSwitch();
-  const target = open(filename, 'target'), empty = target.dumpForSwitch();
+  expect(dump.memoryTombstones).toEqual([{ intentId: 'memory-1', approval: hash(['device', 'approval']), row: memoryRow, expiresAt: 9_000_000 }]);
+  const target = twin(), empty = target.dumpForSwitch();
+  expect(() => target.loadForSwitch(dump)).toThrow('A switch dump carries no memory state');
+  const live = structuredClone(dump);
+  live.memoryTombstones = [];
+  live.body.memory = { intents: { 'memory-1': memoryRow as never }, approvals: {}, projections: {} };
+  expect(() => target.loadForSwitch(live)).toThrow('A switch dump carries no memory state');
+  expect(target.dumpForSwitch()).toEqual(empty);
+  // An empty memory store, as a bound memory page leaves it, carries nothing.
+  live.body.memory = { intents: {}, approvals: {}, projections: {} };
+  target.loadForSwitch(live);
+  expect(target.snapshot().memory).toEqual({ intents: {}, approvals: {}, projections: {} });
+});
+
+it('rolls the whole load back when a write fails, and refuses a malformed dump before it writes', () => {
+  const source = open(file(), 'source');
+  populate(source);
+  const dump = source.dumpForSwitch();
+  const target = twin(), empty = target.dumpForSwitch();
   // The body and the first rows are written before the duplicate key fails.
   const duplicate = structuredClone(dump);
   duplicate.rows.push(duplicate.rows[0]!);
   expect(() => target.loadForSwitch(duplicate)).toThrow();
   expect(target.dumpForSwitch()).toEqual(empty);
 
-  const malformed: Array<[string, (dump: LedgerDump) => void, string | RegExp | (new () => Error)]> = [
+  const stale = `host-scan:${hash('target')}:1`;
+  const malformed: Array<[string, (dump: LedgerDump) => void, string | (new () => Error)]> = [
     ['version', d => { (d as { version: number }).version = 2; }, 'Unsupported switch dump version'],
     ['body version', d => { (d.body as { version: number }).version = 2; }, 'Unsupported Host ledger version'],
     ['rows', d => { (d as { rows: unknown }).rows = {}; }, 'Invalid switch dump rows'],
@@ -150,19 +189,25 @@ it('rolls the whole load back when a write fails, and refuses a malformed dump b
     ['missing expiry', d => { delete (d.rows[0] as { expiresAt?: number | null }).expiresAt; }, 'Time must be a nonnegative safe integer'],
     ['namespace', d => { d.rows[0]!.namespace = 'n'.repeat(129); }, 'Invalid application row namespace'],
     ['value', d => { d.rows[0]!.value = undefined as never; }, 'Invalid switch dump row value'],
-    ['memory expiry', d => { (d.memoryTombstones[0] as { expiresAt: unknown }).expiresAt = null; }, 'Time must be a nonnegative safe integer'],
     // A body intent that its own tombstones retired, and a derived occurrence key outside its occurrence.
     ['retired intent', d => { d.tombstones.push({ kind: 'intent', identity: hash('active'), expiresAt: null }); }, RetiredIntentIdentityError],
     ['occurrence key', d => {
-      const intent = d.body.intents[hash('active')]!, key = `occurrence:${hash('other')}`;
+      // Its occurrence names this intent, but the key names another occurrence.
+      const intent = d.body.intents[hash('unacked')]!, key = `occurrence:${hash('other')}`;
       d.body.intents[hash(key)] = { ...intent, id: hash(key), key };
-      delete d.body.intents[hash('active')];
+      delete d.body.intents[hash('unacked')];
+      d.body.occurrences[intent.occurrence!]!.intentId = hash(key);
     }, RetiredIntentIdentityError],
     ['occurrence owner', d => {
       // The key names its occurrence, but that occurrence names another intent.
       const owner = d.body.intents[hash('unacked')]!, occurrence = owner.occurrence!, key = `occurrence:${occurrence}`;
       d.body.intents[hash(key)] = { ...owner, id: hash(key), key };
     }, RetiredIntentIdentityError],
+    // Scan wake keys of another tenant: the current wake, a pending schedule and a pending cancel.
+    ['scan wake', d => { d.body.scanWake = { dedupKey: stale, availableAt: 1 }; }, 'A switch dump scan wake must name this tenant'],
+    ['scan schedule', d => { d.body.outbox[`schedule:${stale}`] = { kind: 'schedule', input: { dedupKey: stale, availableAt: 1 } }; },
+      'A switch dump scan wake must name this tenant'],
+    ['scan cancel', d => { d.body.outbox[`cancel:${stale}`] = { kind: 'cancel-wake', key: stale }; }, 'A switch dump scan wake must name this tenant'],
   ];
   for (const [what, change, error] of malformed) {
     const bad = structuredClone(dump);
@@ -170,19 +215,23 @@ it('rolls the whole load back when a write fails, and refuses a malformed dump b
     expect(() => target.loadForSwitch(bad), what).toThrow(error as never);
     expect(target.dumpForSwitch(), what).toEqual(empty);
   }
-  target.loadForSwitch(dump);
-  expect(target.dumpForSwitch()).toEqual(dump);
+  // A scan wake of this tenant loads.
+  const own = structuredClone(dump), key = `host-scan:${hash('source')}:1`;
+  own.body.scanWake = { dedupKey: key, availableAt: 1 };
+  own.body.outbox[`schedule:${key}`] = { kind: 'schedule', input: { dedupKey: key, availableAt: 1 } };
+  target.loadForSwitch(own);
+  expect(target.dumpForSwitch()).toEqual(own);
 });
 
 it('discards every row of one tenant and closes that ledger, leaving other tenants of the file', () => {
   const filename = file(), source = open(filename, 'source');
-  populate(source, filename);
-  const dump = source.dumpForSwitch();
+  populate(source);
+  const dump = source.dumpForSwitch(), bound = bind(dump, 'imported');
   const imported = open(filename, 'imported');
-  imported.loadForSwitch(dump);
+  imported.loadForSwitch(bound);
   const stop = imported.onOutbox(() => {});
   expect(() => imported.discard()).toThrow('Close the core bound to this ledger before discarding it');
-  expect(imported.dumpForSwitch()).toEqual(dump);
+  expect(imported.dumpForSwitch()).toEqual(bound);
   stop();
   imported.discard();
   expect(() => imported.snapshot()).toThrow('database is not open');
@@ -195,6 +244,6 @@ it('discards every row of one tenant and closes that ledger, leaving other tenan
   // Reopening the tenant id creates an empty tenant, which a dump can load into again.
   const reopened = open(filename, 'imported');
   expect(reopened.dumpForSwitch()).toEqual(open(file(), 'new').dumpForSwitch());
-  reopened.loadForSwitch(dump);
-  expect(reopened.dumpForSwitch()).toEqual(dump);
+  reopened.loadForSwitch(bound);
+  expect(reopened.dumpForSwitch()).toEqual(bound);
 });

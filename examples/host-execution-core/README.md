@@ -587,11 +587,21 @@ state) and the neutral switch format belong to the caller (K8).
   - It refuses a malformed dump. It also refuses a body intent that the dump's own `intent`
     tombstones retire, and a derived `occurrence:<key>` intent outside its occurrence. These
     are the checks of `transaction()`.
+  - The dump must be bound to this tenant, because some stored identities include the tenant:
+    - each intent's `agent` must be `agentKey(tenant, execution)`; otherwise imported work
+      would queue apart from new work for the same device and Agent;
+    - a `host-scan:` wake key (`scanWake`, or a pending schedule or cancel) must name this
+      tenant;
+    - there must be no memory state (no memory record and no retired memory intent). Memory
+      binds the tenant inside its digests and does not move (D4).
+
+    A dump from a tenant of the same id loads as it is. For a new tenant id, the caller
+    builds the dump with that tenant's keys.
   - Every expiry is kept, never reset, so replay evidence ends when it would have ended on
     the source.
   - Any failure, a duplicate key included, rolls the whole load back.
 
-  A dump loaded into an empty tenant dumps back equal.
+  A dump loaded into an empty tenant whose tenant-derived identities it names dumps back equal.
 - `ledger.discard()` deletes every row of this tenant in one transaction, tombstones
   included, and then closes the ledger. It cannot be undone, and the retired identities of
   that tenant become usable again under its id.
