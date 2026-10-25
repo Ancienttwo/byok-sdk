@@ -7,6 +7,10 @@ import type { CollaborationState } from './model';
  * exported by the old owner after every device of the domain is frozen and drained, and imported by the new owner into an
  * empty domain. Both Hosts read and write this one neutral form, so neither Host's storage is the format. The old owner
  * seals it; the new owner verifies it, writes it, reads its own rows back into this form, and compares the digest.
+ *
+ * The digest covers the header too: `domain` is the source's tenant or scope id, never the target's (a switch back to L
+ * opens a new tenant). So the target's read-back copies the document's header as it is and rebuilds only the sections
+ * from its own rows.
  */
 export const SWITCH_EXPORT_VERSION = 1;
 export const SWITCH_SECTIONS = ['collaboration', 'archived', 'intents', 'routines', 'occurrences', 'slots', 'outbox', 'tombstones'] as const;
@@ -72,6 +76,7 @@ const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 export function sealSwitchExport(content: SwitchContent): SwitchExport {
   const sealed = structuredClone(content) as SwitchContent;
   checkContent(sealed);
+  sealed.devices.sort((a, b) => compare(a.deviceId, b.deviceId));
   for (const section of LISTS) {
     const key = IDENTITY[section] as (row: unknown) => Json;
     (sealed[section] as unknown[]).sort((a, b) => compare(canonical(key(a)), canonical(key(b))));
@@ -107,6 +112,11 @@ function manifestOf(content: SwitchContent): SwitchManifest {
 }
 
 function checkOrder(content: SwitchContent): void {
+  for (let i = 1; i < content.devices.length; i++) {
+    if (compare(content.devices[i - 1]!.deviceId, content.devices[i]!.deviceId) > 0) {
+      throw new SwitchExportError('unsorted', `Switch export devices are not in id order at ${content.devices[i]!.deviceId}`);
+    }
+  }
   for (const section of LISTS) {
     const key = IDENTITY[section] as (row: unknown) => Json;
     const keys = (content[section] as unknown[]).map(row => canonical(key(row)));
@@ -122,6 +132,8 @@ const object = (value: unknown): value is Record<string, unknown> => typeof valu
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 const time = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 const digestText = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+/** Keyed by K4's `Conclusion`, so a new K4 conclusion fails to compile here until the format names it. */
+const CONCLUSIONS: Record<Conclusion, true> = { succeeded: true, failed: true, declined: true, cancelled: true, expired: true, superseded: true };
 const optional = (value: unknown, check: (value: unknown) => boolean) => value === undefined || check(value);
 function invalid(message: string): never { throw new SwitchExportError('invalid', `Invalid switch export: ${message}`); }
 function ensure(ok: boolean, message: string): void { if (!ok) invalid(message); }
@@ -143,8 +155,9 @@ function checkContent(content: SwitchContent): void {
   for (const row of content.intents) {
     ensure(object(row) && text(row.key) && ['user', 'bot', 'routine'].includes(row.source) && optional(row.handler, text) && digestText(row.taskId)
       && time(row.generation) && text(row.deviceId) && text(row.agentId) && typeof row.started === 'boolean'
-      && optional(row.cancelReason, value => value === 'expired' || value === 'cancelled') && optional(row.retryUntil, time), 'intent');
-    if (!text(row.conclusion)) throw new SwitchExportError('open_work', `Switch export has an open intent: ${row.key}`);
+      && optional(row.cancelReason, value => value === 'expired' || value === 'cancelled') && optional(row.retryUntil, time)
+      && optional(row.conclusion, value => Object.hasOwn(CONCLUSIONS, value as string)), 'intent');
+    if (row.conclusion === undefined) throw new SwitchExportError('open_work', `Switch export has an open intent: ${row.key}`);
   }
   for (const row of content.routines) ensure(object(row) && text(row.id) && object(row.routine), 'routine');
   for (const row of content.occurrences) ensure(object(row) && text(row.key) && text(row.routineId), 'occurrence');
@@ -163,7 +176,12 @@ function checkContent(content: SwitchContent): void {
  */
 function checkCollaboration(content: SwitchContent): void {
   const state = content.collaboration;
-  ensure(object(state) && state.version === 3 && object(state.team) && object(state.turns), 'collaboration state');
+  ensure(object(state) && state.version === 3 && object(state.team) && object(state.team.bots) && Array.isArray(state.team.homeOperations)
+    && object(state.turns) && optional(state.inputBatches, object) && optional(state.cardCalls, object), 'collaboration state');
+  for (const bot of Object.values(state.team.bots)) ensure(object(bot) && object(bot.execution) && text(bot.execution.deviceId), 'bot');
+  for (const turn of Object.values(state.turns)) ensure(object(turn), 'turn');
+  for (const batch of Object.values(state.inputBatches ?? {})) ensure(object(batch), 'input batch');
+  for (const op of state.team.homeOperations) ensure(object(op), 'home operation');
   if (state.topology !== undefined) throw new SwitchExportError('owner_record', 'Switch export carries the source owner records (topology)');
   const devices = new Set(content.devices.map(device => device.deviceId));
   for (const bot of Object.values(state.team.bots)) {

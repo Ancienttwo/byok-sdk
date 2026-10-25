@@ -1035,7 +1035,11 @@ manifest. The manifest has the count and the `hash(canonical(section))` of
 each section, and one digest over them and the header (source, domain, frozen
 device revisions, export time). The new owner runs `verifySwitchExport` on
 the document before it writes anything, and again on its own rows read back
-into this form, so the digest it records in its receipt is the source's.
+into this form, so the digest it records in its receipt is the source's. The
+digest covers the header, and `domain` is the source's tenant or scope id (a
+switch back to L opens a new tenant). So the read-back copies the document's
+header as it is and rebuilds only the sections from the target's rows. Devices
+and every section are in one order, by id, so a rebuilt list hashes the same.
 
 The format refuses, with `SwitchExportError` and a `reason`:
 - the source's owner records (L `topology`);

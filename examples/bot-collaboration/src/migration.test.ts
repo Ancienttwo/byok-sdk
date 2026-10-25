@@ -15,7 +15,7 @@ function content(edit: (state: CollaborationState) => void = () => {}): SwitchCo
   state.team.bots.b1 = bot('b1', 'd1');
   edit(state);
   return {
-    version: 1, source: 'L', domain: 'tenant-1', devices: [{ deviceId: 'd1', frozenRevision: 3 }], exportedAt: 1_000,
+    version: 1, source: 'L', domain: 'tenant-1', devices: [{ deviceId: 'd2', frozenRevision: 1 }, { deviceId: 'd1', frozenRevision: 3 }], exportedAt: 1_000,
     collaboration: state,
     archived: [{ namespace: 'turns', id: 't2', body: { n: 2 }, expiresAt: 9_000 }, { namespace: 'commands', id: 'c1', body: { n: 1 } }],
     intents: [{ key: 'i2', source: 'user', taskId: hash(['i2', 1]), generation: 1, deviceId: 'd1', agentId: 'main', conclusion: 'succeeded', started: true },
@@ -42,6 +42,7 @@ describe('switch export format (#975)', () => {
     const before = structuredClone(input);
     const sealed = sealSwitchExport(input);
     expect(input).toEqual(before);
+    expect(sealed.devices.map(device => device.deviceId)).toEqual(['d1', 'd2']);
     expect(sealed.archived.map(row => row.id)).toEqual(['c1', 't2']);
     expect(sealed.intents.map(row => row.key)).toEqual(['i1', 'i2']);
     expect(sealed.outbox.map(row => row.kind)).toEqual(['host-job', 'projection']);
@@ -53,7 +54,7 @@ describe('switch export format (#975)', () => {
     const readBack = JSON.parse(JSON.stringify({ ...sealed, intents: [...sealed.intents] })) as SwitchExport;
     expect(verifySwitchExport(readBack).digest).toBe(sealed.manifest.digest);
     const shuffled = content();
-    shuffled.archived.reverse(); shuffled.outbox.reverse(); shuffled.tombstones.reverse();
+    shuffled.devices.reverse(); shuffled.archived.reverse(); shuffled.outbox.reverse(); shuffled.tombstones.reverse();
     expect(sealSwitchExport(shuffled).manifest.digest).toBe(sealed.manifest.digest);
   });
 
@@ -61,13 +62,14 @@ describe('switch export format (#975)', () => {
     const sealed = sealSwitchExport(content());
     refused(() => verifySwitchExport({ ...sealed, archived: [{ ...sealed.archived[0]!, body: { n: 9 } }, sealed.archived[1]!] }), 'manifest');
     refused(() => verifySwitchExport({ ...sealed, exportedAt: 1_001 }), 'manifest');
-    refused(() => verifySwitchExport({ ...sealed, devices: [{ deviceId: 'd1', frozenRevision: 4 }] }), 'manifest');
+    refused(() => verifySwitchExport({ ...sealed, devices: [{ deviceId: 'd1', frozenRevision: 4 }, sealed.devices[1]!] }), 'manifest');
     refused(() => verifySwitchExport({ ...sealed, outbox: sealed.outbox.slice(1) }), 'manifest');
   });
 
   it('refuses rows out of identity order and repeated identities', () => {
     const sealed = sealSwitchExport(content());
     refused(() => verifySwitchExport({ ...sealed, intents: [...sealed.intents].reverse() }), 'unsorted');
+    refused(() => verifySwitchExport({ ...sealed, devices: [...sealed.devices].reverse() }), 'unsorted');
     const repeated = content();
     repeated.intents.push({ ...repeated.intents[0]! });
     refused(() => sealSwitchExport(repeated), 'duplicate');
@@ -76,8 +78,8 @@ describe('switch export format (#975)', () => {
 
   it('refuses the source owner records and a live Bot whose device the export does not move', () => {
     refused(() => sealSwitchExport(content(state => { state.topology = {}; })), 'owner_record');
-    refused(() => sealSwitchExport(content(state => { state.team.bots.b2 = bot('b2', 'd2'); })), 'device_missing');
-    expect(() => sealSwitchExport(content(state => { state.team.bots.b2 = bot('b2', 'd2', true); }))).not.toThrow();
+    refused(() => sealSwitchExport(content(state => { state.team.bots.b2 = bot('b2', 'd3'); })), 'device_missing');
+    expect(() => sealSwitchExport(content(state => { state.team.bots.b2 = bot('b2', 'd3', true); }))).not.toThrow();
   });
 
   it('refuses open work: an open Turn, an open input batch, an intent without a conclusion, a card call in flight', () => {
@@ -112,6 +114,11 @@ describe('switch export format (#975)', () => {
       value => { (value.tombstones[0] as { kind: string }).kind = 'other'; },
       value => { (value.outbox[1] as { kind: string }).kind = 'intent'; },
       value => { value.archived[0]!.expiresAt = 1.5; },
+      value => { (value.intents[0] as { conclusion: string }).conclusion = 'done'; },
+      value => { (value.collaboration.team as { bots: unknown }).bots = null; },
+      value => { (value.collaboration.team as { homeOperations: unknown }).homeOperations = {}; },
+      value => { (value.collaboration.team.bots.b1 as { execution: unknown }).execution = null; },
+      value => { value.collaboration.turns.t1 = null as unknown as CollaborationState['turns'][string]; },
     ];
     for (const edit of cases) {
       const value = content();
