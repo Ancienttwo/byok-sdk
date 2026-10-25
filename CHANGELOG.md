@@ -287,6 +287,14 @@
   `check:architecture-sync` and `sync:brain-docs`. They called repo-harness
   helpers that no longer exist, and `repo-harness run` exits 0 on an unknown
   helper, so they passed without checking anything (#927).
+- **Added (examples)** — the K4 Host execution core runs sealed executions
+  (#953, #654 E3d-4). An intent or routine may carry a
+  `SealedExecutionTemplate`, sent through the optional `submitSealed` port
+  (the cloud's `submitSealedAgentExecution`); `sameFrozenOffer` checks the
+  sealed or plain offer type both ways; `routineRef` must name the routine's
+  own id and version; a sealed template must be inline and takes no memory
+  ContextPack. The new `./sealed-routine` entry seals a routine template on
+  the member side. No wire, SDK or SQL change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

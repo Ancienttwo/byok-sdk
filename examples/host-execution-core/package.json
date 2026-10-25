@@ -11,6 +11,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./canonical": "./src/canonical.ts",
+    "./sealed-routine": "./src/sealed-routine.ts",
     "./test-support": "./src/test-support.ts"
   },
   "scripts": {

@@ -1,0 +1,159 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { HostLedger } from './ledger';
+import { HostMemoryPage } from './memory';
+import { hash, type AgentRoutineDefinition, type LedgerState, type SealedAgentExecutionInput, type SealedExecutionTemplate } from './model';
+import { nextIntervalOccurrence } from './schedule';
+import { promoteOccurrence, recordOccurrence, routineCommands } from './routines';
+import { sealContent } from '@byok-sdk/core/sealed-payload';
+import { routineTemplateBinding, sealRoutineTemplate, type RoutineRef } from './sealed-routine';
+import { openHost, template, type TestHost } from './test-support';
+import type { ExecutionServer, FrozenOffer } from './index';
+
+let host: TestHost | undefined;
+afterEach(async () => { vi.useRealTimers(); await host?.close(); host = undefined; });
+
+const sealing = { scopeId: 'scope-1', epoch: 2, categories: ['task-input' as const] };
+const scopeKey = Uint8Array.from({ length: 32 }, (_, index) => index + 3);
+const agentRef = { agentId: 'main', profileRevision: '1' };
+const notAfter = '2099-12-31T00:00:00.000Z';
+
+async function sealedTemplate(deviceId: string, routineRef?: RoutineRef): Promise<SealedExecutionTemplate> {
+  const { payload } = template(deviceId);
+  const { instruction: _, ...plain } = payload;
+  const sealed = await sealRoutineTemplate({ tenantId: 'product:host-core-test', scopeKey, sealing, chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+    sender: 'A'.repeat(43), routineRef: routineRef ?? { routineId: 'none', definitionVersion: 1, notAfter }, agentRef, instruction: 'Check the watchlist.' });
+  return { deviceId, payload: { ...plain, sealing, sealed, ...(routineRef ? { routineRef } : {}) } };
+}
+
+/**
+ * The embedded server has no sealed lane, so the test adds one: `submitSealed` records the input and `tasks.offer` reads it
+ * back. `declineOnce` answers the first sealed task with a busy decline, so the intent backs off and retries.
+ */
+function sealedLane(options: { declineOnce?: boolean } = {}) {
+  const submitted: SealedAgentExecutionInput[] = [];
+  let declined = !options.declineOnce;
+  const wrap = (server: ExecutionServer): ExecutionServer => ({ ...server,
+    executions: { ...server.executions, submitSealed: async input => {
+      submitted.push(structuredClone(input));
+      return {} as never;
+    } },
+    tasks: { ...server.tasks,
+      offer: async taskId => {
+        const input = submitted.find(row => row.taskId === taskId);
+        return input ? { taskId, deviceId: input.deviceId, messageId: `m-${taskId}`, type: 'task.offer_for_agent_with_egress_fresh_sealed',
+          payload: structuredClone(input.payload), recordedAt: '1', delivered: true } as FrozenOffer : server.tasks.offer(taskId);
+      },
+      attempt: async taskId => {
+        const input = submitted.find(row => row.taskId === taskId);
+        return input ? { taskId, deviceId: input.deviceId, agentRef: input.payload.agentRef, status: 'declined' } as never : server.tasks.attempt(taskId);
+      },
+      deviceTerminal: async taskId => {
+        if (!submitted.some(row => row.taskId === taskId) || declined) return server.tasks.deviceTerminal(taskId);
+        declined = true;
+        return { envelope: { type: 'task.decline', task_id: taskId, payload: { code: 'agent_home_writer_busy', reason: 'busy' } } } as never;
+      },
+    } });
+  return { submitted, wrap };
+}
+
+describe('a sealed routine on the K4 core (#953)', () => {
+  it('submits the template byte for byte with its routineRef, and a retry generation reuses the same bytes', async () => {
+    const lane = sealedLane({ declineOnce: true });
+    host = await openHost({ wrapServer: lane.wrap });
+    const routineRef = { routineId: 'watch', definitionVersion: 1, notAfter };
+    const execution = await sealedTemplate(host.deviceId, routineRef);
+    const definition: AgentRoutineDefinition = { id: 'watch', version: 1, timeZone: 'UTC', rule: { anchorMs: Date.now() + 30, everyMs: 86_400_000 },
+      execution, waitMs: 600_000, lateAfterMs: 1000, retry: { maxAttempts: 2, delaysMs: [20], retryFailures: false } };
+    await host.core.addRoutine(definition);
+    await vi.waitFor(async () => { await host!.core.drain(); expect(lane.submitted).toHaveLength(2); }, { timeout: 5000 });
+    const [first, retry] = lane.submitted;
+    expect(first!.taskId).not.toBe(retry!.taskId);
+    for (const input of [first!, retry!]) {
+      expect(input.payload).toEqual(execution.payload);
+      expect(input.payload).not.toHaveProperty('instruction');
+    }
+    const intent = Object.values(host.ledger.snapshot().intents)[0]!;
+    expect(intent).toMatchObject({ generation: 1, taskId: retry!.taskId });
+    expect(host.adapter.starts).toHaveLength(0);
+  });
+
+  it('refuses a routineRef of another routine or version, a ciphertextRef template, and a routineRef outside a routine', async () => {
+    host = await openHost({ wrapServer: sealedLane().wrap });
+    const base = { timeZone: 'UTC', rule: { anchorMs: Date.now() + 60_000, everyMs: 86_400_000 }, waitMs: 60_000, lateAfterMs: 1000 };
+    for (const routineRef of [{ routineId: 'other', definitionVersion: 1, notAfter }, { routineId: 'watch', definitionVersion: 2, notAfter }]) {
+      await expect(host.core.addRoutine({ ...base, id: 'watch', version: 1, execution: await sealedTemplate(host.deviceId, routineRef) }))
+        .rejects.toThrow('routineRef names another routine version');
+    }
+    const inline = await sealedTemplate(host.deviceId, { routineId: 'watch', definitionVersion: 1, notAfter });
+    // A template above the inline limit travels by ciphertextRef, which no task holds between occurrences.
+    const large = await sealContent({ scopeKey, scope: { id: sealing.scopeId, epoch: sealing.epoch }, chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+      sender: 'A'.repeat(43), category: 'task-input', plaintext: { instruction: 'x'.repeat(300 * 1024) }, maxContentLength: 2 * 1024 * 1024,
+      binding: routineTemplateBinding('product:host-core-test', { routineId: 'watch', definitionVersion: 1, notAfter }, agentRef, sealing.categories) });
+    const byReference = { ...inline, payload: { ...inline.payload, sealed: { ...large.header, ciphertextRef: { blobId: 'blob-1',
+      contentHash: `sha256:${'b'.repeat(64)}`, size: large.ciphertext.byteLength, contentType: 'application/octet-stream' } } } };
+    await expect(host.core.addRoutine({ ...base, id: 'watch', version: 1, execution: byReference as never })).rejects.toThrow('must be inline');
+    await expect(host.core.enqueue({ key: 'bot-turn', source: 'bot', execution: inline, waitUntil: Date.now() + 60_000 }))
+      .rejects.toThrow('Only a routine occurrence carries routineRef');
+    expect(Object.keys(host.ledger.snapshot().routines)).toEqual([]);
+  });
+
+  it('fails a sealed intent before any submit on a server with no sealed lane', async () => {
+    host = await openHost();
+    const intent = await host.core.enqueue({ key: 'sealed-turn', source: 'bot', execution: await sealedTemplate(host.deviceId), waitUntil: Date.now() + 60_000 });
+    await vi.waitFor(() => expect(host!.core.intent('sealed-turn')).toMatchObject({ conclusion: 'failed', preparationError: 'sealed_dispatch_unavailable' }));
+    expect(await host.server.tasks.offer(intent.taskId)).toBeUndefined();
+  });
+
+  it('fails a sealed intent with memory on, and writes no instruction next to the sealed one', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'sealed-memory-'));
+    const ledger = new HostLedger(path.join(root, 'ledger.sqlite'), 'product:host-core-test');
+    try {
+      const page = new HostMemoryPage(ledger, { now: () => Date.now(), isCurrent: () => true, notify: async () => {}, authorizeProjection: () => true });
+      const lane = sealedLane();
+      host = await openHost({ memory: page, wrapServer: lane.wrap });
+      await host.core.enqueue({ key: 'sealed-turn', source: 'bot', execution: await sealedTemplate(host.deviceId), waitUntil: Date.now() + 60_000 });
+      await vi.waitFor(() => expect(host!.core.intent('sealed-turn')).toMatchObject({ conclusion: 'failed',
+        preparationError: 'A sealed execution takes no Host memory ContextPack' }));
+      expect(lane.submitted).toEqual([]);
+      const { input } = Object.values(host.ledger.snapshot().executions)[0]!;
+      expect(input.payload).not.toHaveProperty('instruction');
+    } finally {
+      await host?.close(); host = undefined;
+      ledger.close(); await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('a promoted sealed occurrence (#953)', () => {
+  const now = 1_000_000;
+  const refs = { previous: { routineId: 'watch', definitionVersion: 2, notAfter }, other: { routineId: 'other', definitionVersion: 3, notAfter },
+    own: { routineId: 'watch', definitionVersion: 3, notAfter } };
+  const templates = new Map<RoutineRef, SealedExecutionTemplate>();
+  beforeAll(async () => { for (const ref of Object.values(refs)) templates.set(ref, await sealedTemplate('device-1', ref)); });
+  /** An open `hostOccurrence` occurrence of routine `watch` version 3. */
+  function occurrence() {
+    const state: LedgerState = { version: 1, sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {},
+      outbox: {}, applied: {}, application: {}, scanWake: null };
+    const commands = routineCommands(state, { now: () => now, nextTime: nextIntervalOccurrence, hostJobs: new Map(), occurrenceHooks: new Map([['bot', () => {}]]) });
+    commands.create({ id: 'watch', version: 3, timeZone: 'UTC', rule: { anchorMs: now + 10, everyMs: 86_400_000 }, waitMs: 60_000, lateAfterMs: 1000,
+      hostOccurrence: { type: 'bot', input: null } });
+    const next = state.routines[hash('watch')]!.next!;
+    const recorded = recordOccurrence(state, 'product:host-core-test', { wakeId: 'w', dedupKey: next.dedupKey, availableAt: next.availableAt,
+      deliveredAt: next.availableAt, delivery: 1 }, next.availableAt, nextIntervalOccurrence)!;
+    return { state, key: recorded.key };
+  }
+
+  it('takes a template sealed for its own routine version only', () => {
+    for (const ref of [refs.previous, refs.other]) {
+      const { state, key } = occurrence();
+      expect(() => promoteOccurrence(state, 'product:host-core-test', key, structuredClone(templates.get(ref)!))).toThrow('routineRef names another routine version');
+      expect(state.intents).toEqual({});
+    }
+    const { state, key } = occurrence();
+    const intent = promoteOccurrence(state, 'product:host-core-test', key, structuredClone(templates.get(refs.own)!));
+    expect(intent.execution.payload).toMatchObject({ routineRef: refs.own });
+  });
+});

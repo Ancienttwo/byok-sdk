@@ -89,6 +89,9 @@ const K8_HOSTED_EXPORTS = Object.freeze({
 // hash and canonical and imports only node:crypto, so K8 rules/ loads no ledger.
 const K4_EXPORTS = Object.freeze({ '.': './src/index.ts', './test-support': './src/test-support.ts' });
 const K4_CANONICAL_EXPORTS = Object.freeze({ './canonical': './src/canonical.ts' });
+// #953: the member side of a sealed routine. It imports @byok-sdk/core/sealed-payload,
+// so it is a subpath and the K4 root never loads the seal code.
+const K4_SEALED_ROUTINE_EXPORTS = Object.freeze({ './sealed-routine': './src/sealed-routine.ts' });
 // #793 D2g: the K8 retention rule and its shared vectors, added to the hosted
 // entries for H's retention slice (owner question §53d).
 const K8_RETENTION_EXPORTS = Object.freeze({
@@ -277,6 +280,11 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     if (before.private !== true || after.private !== true) throw new Error('The host execution core example must stay private');
     // #884: only the ./canonical entry, only on top of exactly the existing entries.
     if (isDeepStrictEqual(before.exports, K4_EXPORTS) && isDeepStrictEqual(after.exports, { ...K4_EXPORTS, ...K4_CANONICAL_EXPORTS })) {
+      after.exports = before.exports;
+    }
+    // #953: only the ./sealed-routine entry, only on top of exactly the entries with ./canonical.
+    const canonicalExports = { ...K4_EXPORTS, ...K4_CANONICAL_EXPORTS };
+    if (isDeepStrictEqual(before.exports, canonicalExports) && isDeepStrictEqual(after.exports, { ...canonicalExports, ...K4_SEALED_ROUTINE_EXPORTS })) {
       after.exports = before.exports;
     }
   } else if (path === 'package.json') {

@@ -1,10 +1,30 @@
 import type { MemoryState } from './memory';
 import { canonical, hash } from './canonical';
 import type { AgentExecutionInput, ByokServer, WakeScheduleInput } from '@byok-sdk/server';
-import { HarnessIdSchema, RuntimeIdSchema } from '@byok-sdk/protocol';
+import { HarnessIdSchema, MESSAGE_PAYLOAD_SCHEMAS, RuntimeIdSchema, type AgentMessageServerContext,
+  type TaskOfferForAgentWithEgressFreshSealedPayload } from '@byok-sdk/protocol';
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type ExecutionTemplate = Omit<AgentExecutionInput, 'taskId'>;
+/**
+ * The input of the cloud's `submitSealedAgentExecution` (#654): a `task.offer_for_agent_with_egress_fresh_sealed` payload
+ * with its terminal projection. A routine template rides in `sealed`, with its plaintext `routineRef`.
+ */
+export interface SealedAgentExecutionInput {
+  taskId: string;
+  deviceId: string;
+  payload: TaskOfferForAgentWithEgressFreshSealedPayload & { terminalProjection: NonNullable<TaskOfferForAgentWithEgressFreshSealedPayload['terminalProjection']> };
+  agentMessageContext?: AgentMessageServerContext;
+}
+export type SealedExecutionTemplate = Omit<SealedAgentExecutionInput, 'taskId'>;
+/** What an intent runs: a plain execution, or a sealed one whose task input only a member and the device can read. */
+export type IntentExecution = ExecutionTemplate | SealedExecutionTemplate;
+export type FrozenExecutionInput = AgentExecutionInput | SealedAgentExecutionInput;
+/** A sealed execution carries the task's `sealing`; a plain one never does (the cloud's plain lane refuses it). */
+export function isSealed<T extends { payload: object }>(execution: T): execution is Extract<T, { payload: { sealing: unknown } }> {
+  return 'sealing' in execution.payload;
+}
+const SEALED_EXECUTION_PAYLOAD = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent_with_egress_fresh_sealed'];
 export type Terminal = NonNullable<Awaited<ReturnType<ByokServer['tasks']['deviceTerminal']>>>;
 export type Attempt = NonNullable<Awaited<ReturnType<ByokServer['tasks']['attempt']>>>;
 export type Conclusion = 'succeeded' | 'failed' | 'declined' | 'cancelled' | 'expired' | 'superseded';
@@ -13,7 +33,7 @@ export const DEFAULT_RETRY: RetryPolicy = { maxAttempts: 3, delaysMs: [300_000, 
 export interface IntentInput {
   key: string;
   source: 'user' | 'bot' | 'routine';
-  execution: ExecutionTemplate;
+  execution: IntentExecution;
   waitUntil: number;
   retry?: RetryPolicy;
 }
@@ -27,7 +47,7 @@ export interface Intent extends IntentInput {
   cancelReason?: 'expired' | 'cancelled'; conclusion?: Conclusion;
 }
 export interface Execution {
-  input: AgentExecutionInput;
+  input: FrozenExecutionInput;
   submission: 'reserved' | 'uncertain' | 'delivered';
   started: boolean;
   /** At most one acceptance per execution; retained/compacted with its execution. */
@@ -41,7 +61,7 @@ interface RoutineSchedule {
   endAt?: number;
 }
 export interface HostJobSpec { type: string; input: Json }
-export type AgentRoutineDefinition = RoutineSchedule & { execution: ExecutionTemplate; hostJob?: never; hostOccurrence?: never };
+export type AgentRoutineDefinition = RoutineSchedule & { execution: IntentExecution; hostJob?: never; hostOccurrence?: never };
 export type HostJobRoutineDefinition = RoutineSchedule & { hostJob: HostJobSpec; execution?: never; hostOccurrence?: never };
 /** The registered occurrence hook `type` runs in the occurrence commit. The Host later promotes or concludes the occurrence. */
 export type HostOccurrenceRoutineDefinition = RoutineSchedule & { hostOccurrence: { type: string; input: Json }; execution?: never; hostJob?: never };
@@ -134,7 +154,17 @@ export function validateInput(input: IntentInput): void {
   if (!execution.deviceId || !execution.payload.agentRef?.agentId || !execution.payload.agentRef.profileRevision
     || !validIdentity || !execution.payload.egressPolicy || !execution.payload.terminalProjection
     || 'sessionRef' in execution.payload || 'taskId' in execution) throw new Error('Supply a complete fresh execution template');
+  if (isSealed(execution)) validateSealed(execution, input.source);
   validateRetry(input.retry ?? DEFAULT_RETRY);
+}
+/**
+ * A sealed template must be a valid sealed offer payload. Its `routineRef` belongs to a routine occurrence only. Its
+ * `sealed` member must be inline: between occurrences no task holds a `ciphertextRef` blob, so orphan GC may delete it.
+ */
+function validateSealed(execution: SealedExecutionTemplate, source: IntentInput['source']): void {
+  if (!SEALED_EXECUTION_PAYLOAD.safeParse(execution.payload).success) throw new Error('Supply a valid sealed execution template');
+  if (execution.payload.routineRef !== undefined && source !== 'routine') throw new Error('Only a routine occurrence carries routineRef');
+  if (execution.payload.sealed !== undefined && 'ciphertextRef' in execution.payload.sealed) throw new Error('A sealed execution template must be inline');
 }
 export function validateRetry(retry: RetryPolicy): void {
   if (!Number.isSafeInteger(retry.maxAttempts) || retry.maxAttempts < 1 || retry.maxAttempts > 100
