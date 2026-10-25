@@ -1,0 +1,143 @@
+import { startControlServer, AnotherControlServerRunningError } from '../control-server';
+import { type DaemonLifecycle, type DaemonHaltReason, DaemonHaltError } from '../daemon-lifecycle';
+import { InsecureServerUrlError } from '../url';
+import { DeviceRecordRePairRequiredError } from '../store';
+import { DeviceRevokedError } from '../auth-manager';
+import type { DaemonScope } from './scope';
+
+/** The daemon lifecycle: the serialized mutation slot, lifecycle phases, start and stop (#926). */
+
+export async function runLifecycleMutation<T>(daemonScope: DaemonScope, operation: () => Promise<T>): Promise<T> {
+  const { daemonState } = daemonScope;
+  const predecessor = daemonState.lifecycleMutationTail;
+  let release!: () => void;
+  daemonState.lifecycleMutationTail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await predecessor;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
+export async function replaceControlServer(daemonScope: DaemonScope, required: boolean, enrollmentOnly = false): Promise<void> {
+  const { daemonState, controlMethods, storeDir, config } = daemonScope;
+  if (daemonState.controlServerHandle) {
+    await daemonState.controlServerHandle.close();
+    daemonState.controlServerHandle = undefined;
+  }
+  try {
+    const methods = enrollmentOnly
+      ? {
+          unary: {
+            status: controlMethods.unary.status!,
+            'enrollment.pair': controlMethods.unary['enrollment.pair']!,
+          },
+          stream: {},
+        }
+      : controlMethods;
+    daemonState.controlServerHandle = await startControlServer({ storeDir, productId: config.productId, methods });
+  } catch (err) {
+    if (required || err instanceof AnotherControlServerRunningError) throw err;
+    console.warn(
+      `[byok/client] control socket failed to start (continuing without it): ${err instanceof Error ? err.message : String(err)}`,
+    );
+    daemonState.controlServerHandle = undefined;
+  }
+}
+
+/** One report path per lifecycle fact: `status().lifecycle` and the `lifecycle` event change together. */
+export function setLifecycle(daemonScope: DaemonScope, next: DaemonLifecycle): void {
+  const { daemonState, observer } = daemonScope;
+  if (JSON.stringify(next) === JSON.stringify(daemonState.lifecycle)) return;
+  daemonState.lifecycle = next;
+  observer.noteLifecycle(next);
+}
+
+export function halted(daemonScope: DaemonScope, reason: DaemonHaltReason): void {
+  const { setLifecycle } = daemonScope;
+  setLifecycle({ phase: 'halted', reason, at: new Date().toISOString() });
+}
+
+/**
+ * #394's crash path for a run that already started: the connection has
+ * stopped itself; record the `lifecycle` health failure and report the
+ * crash. Like a halt, the daemon stays up for its owner to stop.
+ */
+export function crashed(daemonScope: DaemonScope): void {
+  const { setLifecycle, operationalHealth } = daemonScope;
+  setLifecycle({ phase: 'crashed', at: new Date().toISOString() });
+  void operationalHealth.recordFailure('lifecycle').catch((err: unknown) => {
+    console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
+  });
+}
+
+export async function start(daemonScope: DaemonScope): Promise<void> {
+  const { checkServerUrl, runLifecycleMutation, startUnderLease } = daemonScope;
+  try {
+    checkServerUrl();
+  } catch (err) {
+    if (err instanceof InsecureServerUrlError) throw new DaemonHaltError('config_invalid', { cause: err });
+    throw err;
+  }
+  await runLifecycleMutation(startUnderLease);
+}
+
+/**
+ * The halts a start can find locally. Anything else thrown from startup is
+ * a crash. `store_owned` is found before this process owns the store, so it
+ * is thrown only (see {@link DaemonHaltError}).
+ */
+export function startupHaltReason(daemonScope: DaemonScope, err: unknown): DaemonHaltReason | undefined {
+  if (err instanceof DaemonHaltError) return err.reason;
+  if (err instanceof AnotherControlServerRunningError) return 'store_owned';
+  if (err instanceof DeviceRecordRePairRequiredError) return 're_pair_required';
+  if (err instanceof DeviceRevokedError) return 'device_revoked';
+  return undefined;
+}
+
+export async function startUnderLease(daemonScope: DaemonScope): Promise<void> {
+  const { daemonState, runStartUnderLease } = daemonScope;
+  daemonState.startInProgress = true;
+  try {
+    await runStartUnderLease();
+  } finally {
+    daemonState.startInProgress = false;
+  }
+}
+
+/**
+ * Public `Daemon.stop()` (also `unpair()`'s own teardown, below) — see
+ * `runShutdownSequence`'s own doc comment for the sequence this now runs.
+ * `opts` is an internal-only extension of the public `stop(): Promise<void>`
+ * interface (this file already has the analogous `performControlShutdown`
+ * convention of calling this closure directly with extra options a plain
+ * `Daemon.stop()` caller never needs to pass): `performControlShutdown`
+ * below supplies its own `reason` instead of this default.
+ */
+export async function stop(daemonScope: DaemonScope, opts: { drainTimeoutMs?: number; reason?: string } = {}): Promise<void> {
+  const { daemonState, requestShutdown } = daemonScope;
+  // Plan `device-assertion-broker` (codex round-2 F1): arm the minting latch
+  // the INSTANT `stop()` is called, before `requestShutdown` enqueues the
+  // teardown behind any in-progress lifecycle mutation. `runShutdownSequence`
+  // sets it too, but that runs only AFTER `runLifecycleMutation` awaits its
+  // predecessor — so a `stop()` queued behind an in-progress `start()`/
+  // `pair()` would otherwise leave the control socket minting with
+  // `shuttingDown === false` for the whole duration of that predecessor.
+  // Setting it here, synchronously, before the first await, closes that gap.
+  daemonState.shuttingDown = true;
+  await requestShutdown(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
+}
+
+export function requestShutdown(daemonScope: DaemonScope, reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {
+  const { daemonState, runLifecycleMutation, runShutdownSequence } = daemonScope;
+  if (daemonState.shutdownPromise) return daemonState.shutdownPromise;
+  const current = runLifecycleMutation(() => runShutdownSequence(reason, opts));
+  daemonState.shutdownPromise = current;
+  void current.finally(() => {
+    if (daemonState.shutdownPromise === current) daemonState.shutdownPromise = undefined;
+  }).catch(() => undefined);
+  return current;
+}
