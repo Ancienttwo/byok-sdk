@@ -1476,7 +1476,7 @@ describe('device member KEM rotation after a shred (E5b-2)', () => {
     expect(await rotate.mock.results[0]!.value).toEqual({ ok: true, epoch: 2 });
   });
 
-  it('does not retry a failed rotation in the same run, and rotates again after the next shred', async () => {
+  it('does not retry a failed rotation in the same run, rotates again after the next shred, and once more when that retry resumed the key the shredded scope was wrapped to', async () => {
     const { server, web, device, custody, logs, keyring } = await member({ kemRotation: () => true });
     await web.putScope('scope-a', [device]);
     await web.putScope('scope-b', [device]);
@@ -1489,13 +1489,30 @@ describe('device member KEM rotation after a shred (E5b-2)', () => {
     keyring.checkKemRotation();
     expect(rotate).toHaveBeenCalledTimes(1);
     server.e2ee.dropPackagePuts = false;
+    const pending = (stored(custody).nextKem as { readonly epoch: number; readonly jwk: { readonly d: string } });
+    expect(pending.epoch).toBe(2);
     await web.follow();
-    await web.putScope('scope-c', [device]);
+    // The failed run's rotate is on the chain, so scope-c is wrapped to the epoch-2 key that the retry resumes.
+    const registered = keyring.session!.state.members.get(device.memberId)!;
+    expect(registered.kemEpoch).toBe(2);
+    await web.putScope('scope-c', [registered]);
     await web.append('shred', { scopeId: 'scope-c' });
+    const shredSeq = web.head!.seq;
     await keyring.catchUp();
-    await rotated(custody, 2);
-    expect(rotate).toHaveBeenCalledTimes(2);
-    expect(server.e2ee.deviceAppends).toHaveLength(1);
+    await rotated(custody, 3);
+    expect(rotate).toHaveBeenCalledTimes(3);
+    expect(logs).toContain('rotated the member KEM key to epoch 2');
+    expect(logs).toContain('rotated the member KEM key to epoch 3');
+    const appends = server.e2ee.deviceAppends as { readonly seq: number; readonly op: string; readonly subject: { readonly kemEpoch: number } }[][];
+    expect(appends.map(([entry]) => [entry!.op, entry!.subject.kemEpoch])).toEqual([['rotate', 2], ['rotate', 3]]);
+    expect(appends[1]![0]!.seq).toBeGreaterThan(shredSeq);
+    expect(custody.entries.get('member-keys')).not.toContain(pending.jwk.d);
+    // Its own new rotate entry is above every shred, so nothing more is owed.
+    await keyring.catchUp();
+    keyring.checkKemRotation();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(rotate).toHaveBeenCalledTimes(3);
+    expect(server.e2ee.deviceAppends).toHaveLength(2);
   });
 
   it('resumes an unfinished rotation of the custody when the daemon asks, once the Host declares the KEM epoch rules', async () => {

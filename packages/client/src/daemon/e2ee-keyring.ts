@@ -814,7 +814,11 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       || this.#shreds.some((shred) => shred.seq > since && this.#policyAt(shred.scopeId, shred.seq)?.members.includes(self) === true);
     if (!owed) return;
     this.#kemTried = session.state.head!.seq;
-    void this.rotateKem().then(() => this.#checkKemRotation(), (error: unknown) => {
+    // A success clears the attempt: a resumed rotation appends no `rotate`, so a shred after its entry is still owed.
+    void this.rotateKem().then((result) => {
+      if (result.ok) this.#kemTried = undefined;
+      this.#checkKemRotation();
+    }, (error: unknown) => {
       this.options.log(`the KEM rotation failed; the old key stays: ${error instanceof Error ? error.message : String(error)}`);
     });
   }
