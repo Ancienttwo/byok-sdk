@@ -3601,7 +3601,8 @@ export function buildDaemonWithAdapters(
     inputPreparationStatusAbort = undefined;
     blobLifecycleAbort?.abort();
     blobLifecycleAbort = undefined;
-    // The member resume writes custody entries; it ends before this run releases ownership.
+    // The member resume and a background KEM rotation write custody entries; they end before this run releases ownership.
+    const member = deviceMember;
     memberAbort?.abort();
     memberAbort = undefined;
     deviceMember = undefined;
@@ -3609,6 +3610,7 @@ export function buildDaemonWithAdapters(
     activateSealedTasks = undefined;
     await memberResume;
     memberResume = undefined;
+    await member?.kemRotationSettled();
     const errors: unknown[] = [];
     let mutationBarrierComplete = hostedStorageInitializationBarrierComplete;
     if (!hostedStorageInitializationBarrierComplete) {

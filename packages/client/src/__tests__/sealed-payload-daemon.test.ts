@@ -41,6 +41,7 @@ import { CursorStore } from '../daemon/cursor-store';
 import { journalHash } from '../daemon/journal/journal';
 import { DEFAULT_JOURNAL_BUSY_TIMEOUT_MS, JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { openJournalDatabase } from '../daemon/journal/sqlite-support';
+import { DeviceMemberKeyStore } from '../daemon/device-member-custody';
 import { DeviceMemberKeyring } from '../daemon/e2ee-keyring';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { E2eeWebClient } from './fixtures/e2ee-web-client';
@@ -242,6 +243,37 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
       '[byok/client] the Host does not declare e2ee.member.kem-epoch; E2EE stays off until the Host is upgraded',
     ), BUDGET_MS);
     expect(server.received.filter(advertised)).toEqual([]);
+  });
+
+  it('waits on stop for the custody write of a background KEM rotation before it releases ownership', async () => {
+    const begin = DeviceMemberKeyStore.prototype.beginKemRotation;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let began = false;
+    const order: string[] = [];
+    const spy = vi.spyOn(DeviceMemberKeyStore.prototype, 'beginKemRotation').mockImplementation(async function (this: DeviceMemberKeyStore, binding) {
+      began = true;
+      await held;
+      try {
+        return await begin.call(this, binding);
+      } finally {
+        order.push('custody written');
+      }
+    });
+    try {
+      // A shred of a scope whose policy holds the device owes a KEM rotation, which starts once the Host declares the KEM epoch rules.
+      await start({ beforeStart: async (_storeDir, _deviceId, member) => { await member.web.append('shred', { scopeId: SCOPE }); } });
+      await vi.waitFor(() => expect(began).toBe(true), BUDGET_MS);
+      const stopping = daemon!.stop().then(() => { order.push('stopped'); });
+      daemon = undefined;
+      expect(await Promise.race([stopping.then(() => 'stopped'), new Promise((resolve) => setTimeout(() => resolve('waiting'), 1000))])).toBe('waiting');
+      release();
+      await stopping;
+      expect(order).toEqual(['custody written', 'stopped']);
+    } finally {
+      release();
+      spy.mockRestore();
+    }
   });
 
   it('withdraws sealed-payload-v1 when the chain removes the device', async () => {
