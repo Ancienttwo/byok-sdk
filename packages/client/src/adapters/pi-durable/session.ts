@@ -21,29 +21,38 @@ export interface DurableStart {
   launcherArgs: readonly string[];
   spawnFn?: SpawnFn;
 }
+/**
+ * Every start failure is typed. Reasons are fixed SDK text: a worker error can
+ * carry runtime output. A worker that ended on its own before its start
+ * receipt is `runtime_exited` (#869); any other start failure is `unknown`.
+ */
+const startFailure = (category: 'authority' | 'infrastructure', reason = 'durable runtime start failed', exited = false, cause?: unknown) =>
+  new RuntimeExecutionFailure({ phase: 'start', category, retry: 'non-retryable', reason,
+    failure: { class: exited ? 'runtime_exited' : 'unknown' } }, { cause });
 export async function startDurablePi(options: DurableStart): Promise<Session> {
   const { input, runtimeLaunch, launcher } = options;
   const context = input.durableContext;
   const manifest = input.manifest;
   if (!context || !manifest.agentRef || !manifest.lease || runtimeLaunch.credentialSource !== 'keys-profile' || runtimeLaunch.kind !== 'pi-durable'
-    || manifest.cwd !== manifest.lease.canonicalHome || input.signal?.aborted) throw new Error('durable requires current Agent lease and credential custody');
+    || manifest.cwd !== manifest.lease.canonicalHome || input.signal?.aborted) throw startFailure('authority', 'durable requires current Agent lease and credential custody');
   const selection = manifest.dispatchSelection;
-  if (!selection || (selection.lane !== 'byok' && selection.lane !== 'byok-profile')) throw new Error('durable requires BYOK selection');
+  if (!selection || (selection.lane !== 'byok' && selection.lane !== 'byok-profile')) throw startFailure('authority', 'durable requires BYOK selection');
   const binding = { agentRef: { ...manifest.agentRef, tenantId: context.tenantId }, taskId: manifest.taskId, leaseId: manifest.lease.leaseId, canonicalHome: manifest.lease.canonicalHome };
-  const file = await admitReplica(options.replicaRoot, binding);
   const configDir = input.scratch.sdkDir;
-  await fs.chmod(configDir, 0o700);
   const configPath = path.join(configDir, 'config.json');
   const profileRef = selection.lane === 'byok-profile' ? selection.providerProfile.profileRef : selection.providerId;
   const model = selection.lane === 'byok-profile' ? selection.providerProfile.modelId : selection.modelId;
-  const serialized = serializePiHostConfig({ format: 'byok.pi.durable-launch', version: 2,
-    replica: binding, replicaRoot: options.replicaRoot,
-    provider: `byok-sdk-${profileRef}`, model, instruction: input.instruction,
-    mcp: { mcpEnv: input.mcpEnv, mcpServers: input.mcpServers ?? {}, observation: input.mcpToolsetTools ?? {},
-      launchCwd: binding.canonicalHome },
-  });
-  try { await fs.writeFile(configPath, serialized.bytes, { mode: 0o600 }); }
-  catch (error) { await input.scratch.release(); throw error; }
+  let serialized: ReturnType<typeof serializePiHostConfig>;
+  let file: Awaited<ReturnType<typeof admitReplica>>;
+  try {
+    serialized = serializePiHostConfig({ format: 'byok.pi.durable-launch', version: 2,
+      replica: binding, replicaRoot: options.replicaRoot,
+      provider: `byok-sdk-${profileRef}`, model, instruction: input.instruction,
+      mcp: { mcpEnv: input.mcpEnv, mcpServers: input.mcpServers ?? {}, observation: input.mcpToolsetTools ?? {},
+        launchCwd: binding.canonicalHome },
+    });
+    file = await admitReplica(options.replicaRoot, binding);
+  } catch (error) { throw startFailure('infrastructure', undefined, false, error); }
   const shellGroups = new Set<number>();
   let workerPid: number | undefined;
   const queue = new AsyncQueue<AgentEvent>();
@@ -55,14 +64,20 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   const seenUsage = new Set<string>();
   let disposal: Promise<void> | undefined;
   let pump: Promise<void> | undefined;
+  /** The latest spawned worker ended on its own before its start receipt. */
+  let exitedBeforeReceipt = false;
   const spawn = async (resume: boolean) => {
+    exitedBeforeReceipt = false;
     if (closing || !context.lifecycle.ownsLease()) throw new Error('durable lease ended before spawn');
     const launch = piLaunchCommand(runtimeLaunch, 'pi-durable', serialized.digest, ['--config', configPath],
       { command: launcher.command, args: launcher.args ?? [], profileArgs: options.launcherArgs });
     const child = new PiRpcClient({ command: launch.command, args: launch.args,
       cwd: runtimeLaunch.cwd, env: { ...runtimeLaunch.env }, spawnFn: options.spawnFn, nativeAssetRoot: options.nativeAssetRoot });
     rpc = child;
-    const receipt = await child.send({ type: 'start', resume, ...(resume ? { projectionDigest } : {}) });
+    let receipt: Awaited<ReturnType<PiRpcClient['send']>>;
+    // Read before any disposal: the SDK's own kill also closes the client.
+    try { receipt = await child.send({ type: 'start', resume, ...(resume ? { projectionDigest } : {}) }); }
+    catch (error) { exitedBeforeReceipt = child.processExited; throw error; }
     if (receipt.success !== true || typeof receipt.projectionDigest !== 'string' || !/^[0-9a-f]{64}$/u.test(receipt.projectionDigest) || (resume && receipt.projectionDigest !== projectionDigest)) throw new Error('durable worker refused start or changed provider projection');
     if(typeof receipt.workerPid !== 'number'||!Number.isSafeInteger(receipt.workerPid)||receipt.workerPid<=1)throw new Error('durable worker identity missing');
     workerPid=receipt.workerPid;
@@ -82,10 +97,20 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
     disposal = attempt.catch(error => { disposal = undefined; throw error; });
     return disposal;
   };
+  // A typed start failure claims cleanup: everything after admission is disposed through close().
   try {
+    await fs.chmod(configDir, 0o700);
+    await fs.writeFile(configPath, serialized.bytes, { mode: 0o600 });
     const first = await spawn(false);
     pump = (async () => {
       let child = first;
+      /** A worker ended on its own, and its recovery is in progress or was refused. */
+      let crashed = false;
+      /** An acknowledgement the worker's own exit rejected ends the run as that exit. */
+      const ack = (message: Parameters<PiRpcClient['send']>[0]) => child.send(message).catch((error: unknown) => {
+        crashed = child.processExited;
+        throw error;
+      });
       try {
         for (;;) {
           let fatal = false;
@@ -95,13 +120,13 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
               if(typeof frame.pid!=='number'||workerPid===undefined||closing||!context.lifecycle.ownsLease())throw new Error('durable shell ownership refused');
               assertDurableShellOwner(frame.pid,workerPid);shellGroups.add(frame.pid);
               if(closing||!context.lifecycle.ownsLease())throw new Error('durable shell lease ended');
-              await child.send({type:'shell_ack',pid:frame.pid});
+              await ack({ type: 'shell_ack', pid: frame.pid });
             } else if(frame.type==='tool_process_closed'){
               if(typeof frame.pid!=='number'||!shellGroups.delete(frame.pid))throw new Error('invalid durable shell disposal receipt');
             } else if (frame.type === 'tool_intent') {
               if (typeof frame.toolCallId !== 'string') throw new Error('invalid durable tool intent');
               await recovery.beforeTool(frame.toolCallId);
-              await child.send({ type: 'tool_ack', toolCallId: frame.toolCallId });
+              await ack({ type: 'tool_ack', toolCallId: frame.toolCallId });
             } else if (frame.type === 'tool_committed') {
               if (typeof frame.toolCallId !== 'string') throw new Error('invalid durable tool receipt');
               await recovery.committedTool(frame.toolCallId);
@@ -122,17 +147,30 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
             } else if (frame.type === 'durable_failed') { fatal = true; break; }
             else throw new Error('unknown durable frame');
           }
+          // Read before disposal: the SDK's own kill also closes the client.
+          const exited = !fatal && child.processExited;
           try { await child.dispose(); } finally { await disposeDurableShellGroups(shellGroups); } // native lock may be reused only after confirmed tree death
           if (closing || completed) return;
           if (fatal) throw new Error('durable worker failed');
+          crashed = exited;
           await recovery.crash();
+          crashed = false;
           child = await spawn(true);
         }
-      } catch {
-        if (!closing) { recovery.stop(); failure=new RuntimeExecutionFailure({phase:'run',category:'authority',retry:'non-retryable',reason:'durable runtime failed or recovery was refused'}); queue.push({ type: 'error', message: failure.message }); queue.end(); }
+      } catch (error) {
+        if (!closing) {
+          recovery.stop();
+          failure = new RuntimeExecutionFailure({ phase: 'run', category: 'authority', retry: 'non-retryable', reason: 'durable runtime failed or recovery was refused',
+            failure: { class: crashed || exitedBeforeReceipt ? 'runtime_exited' : 'unknown' } }, { cause: error });
+          queue.push({ type: 'error', message: failure.message }); queue.end();
+        }
       }
     })();
-  } catch (error) { await close(); throw error; }
+  } catch (error) {
+    const exited = exitedBeforeReceipt;
+    await close();
+    throw startFailure('infrastructure', undefined, exited, error);
+  }
   return { sessionRef: manifest.taskId, events: (async function*(){for await(const event of queue)yield event;if(failure)throw failure;})(),
     resolveApproval: async () => { throw new Error('durable Pi is YOLO-only'); },
     steer: async () => { throw new Error('durable steering is outside slice 1'); },

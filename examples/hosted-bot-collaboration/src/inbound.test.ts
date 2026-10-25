@@ -5,9 +5,9 @@ import { inboundKey, type Delivery, type InboundMessage } from '@byok-sdk/exampl
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { seedCollaboration, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
+import { TEST_HOST, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { HostedCollaborationStore, InboundCommandError, type CommitPortsFactory, type InboundIdentity } from './store';
+import { HostedCollaborationStore, InboundCommandError, type InboundIdentity } from './store';
 
 // #793 D2b-out-3: the H inbound channel entry, as L `receive()`.
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
@@ -31,7 +31,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
     `SELECT key FROM "${store().schema}".command WHERE scope = $1 ORDER BY key`, [storedKey(scope)])).rows.map(row => JSON.parse(row.key) as string);
 
   async function scoped(channel: boolean, seed: (state: CollaborationState) => void = seedCollaboration) {
-    const on = new HostedCollaborationStore(opened!.pool, store().schema, { channel });
+    const on = new HostedCollaborationStore(opened!.pool, store().schema, { host: TEST_HOST, channel });
     const scope = `tenant:${randomUUID()}`;
     await on.seed(scope, seed);
     return { on, scope };
@@ -39,47 +39,39 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
 
   it('takes an owner message as owner input, keeps its inbound and reply route with a channel, and replays a redelivery', async () => {
     const { on, scope } = await scoped(true), inbound = message({ replyRoute: REPLY });
-    const first = await on.receive(scope, inbound, IDENTITY, vectorPorts);
+    const first = await on.receive(scope, inbound, IDENTITY, vectorClock);
     expect(first).toEqual({ kind: 'owner_input', id: hash(['user', 'main', inboundKey(inbound)]) });
     const state = await on.read(scope);
     expect(state.turns[first.id!]).toMatchObject({ botId: 'main', request: 'Do it', authority: 'owner' });
     expect(state.channel!.inbounds[inboundKey(inbound)]).toMatchObject({ root: first.id, conversation: DIRECT, channel: 'fake', reply: REPLY });
     const before = await on.dump(scope);
-    expect(await on.receive(scope, inbound, IDENTITY, vectorPorts)).toEqual(first);
+    expect(await on.receive(scope, inbound, IDENTITY, vectorClock)).toEqual(first);
     expect(await on.dump(scope)).toBe(before);
   });
 
   it('keeps no inbound without a channel, as L passes no remember port then', async () => {
     const { on, scope } = await scoped(false);
-    expect(await on.receive(scope, message({ replyRoute: REPLY }), IDENTITY, vectorPorts)).toMatchObject({ kind: 'owner_input' });
-    expect((await on.read(scope)).channel?.inbounds ?? {}).toEqual({});
-  });
-
-  it('never calls a remember port that a caller slips past the type, with no channel', async () => {
-    const { on, scope } = await scoped(false), called: string[] = [];
-    const slipped = ((...args: Parameters<CommitPortsFactory>) => ({ ...vectorPorts(...args), remember: (root: string) => { called.push(root); } })) as unknown as CommitPortsFactory;
-    expect(await on.receive(scope, message({ replyRoute: REPLY }), IDENTITY, slipped)).toMatchObject({ kind: 'owner_input' });
-    expect(called).toEqual([]);
+    expect(await on.receive(scope, message({ replyRoute: REPLY }), IDENTITY, vectorClock)).toMatchObject({ kind: 'owner_input' });
     expect((await on.read(scope)).channel?.inbounds ?? {}).toEqual({});
   });
 
   it('takes a human message in a room as room input, and replays a redelivery', async () => {
     const { on, scope } = await scoped(true, room);
     const human = message({ conversation: GROUP, sender: { id: 'alice', kind: 'human' }, mentions: ['main'] });
-    const first = await on.receive(scope, human, IDENTITY, vectorPorts);
+    const first = await on.receive(scope, human, IDENTITY, vectorClock);
     expect(first).toEqual({ kind: 'room_input', id: hash(['room-input', 'r1', inboundKey(human)]) });
     const state = await on.read(scope);
     expect(state.team.rooms.r1!.messages).toEqual([expect.objectContaining({ from: 'alice', text: 'Do it' })]);
     expect(state.channel!.inbounds[inboundKey(human)]).toMatchObject({ root: first.id });
     const before = await on.dump(scope);
-    expect(await on.receive(scope, human, IDENTITY, vectorPorts)).toEqual(first);
+    expect(await on.receive(scope, human, IDENTITY, vectorClock)).toEqual(first);
     expect(await on.dump(scope)).toBe(before);
   });
 
   it('takes a bot message in a room as background with no mention, as L roomInput, and replays a redelivery', async () => {
     const { on, scope } = await scoped(true, room);
     const bot = message({ conversation: GROUP, platformMessageId: 'in2', sender: { id: 'other-bot', kind: 'bot' }, mentions: ['main'], text: 'Hi' });
-    const first = await on.receive(scope, bot, IDENTITY, vectorPorts);
+    const first = await on.receive(scope, bot, IDENTITY, vectorClock);
     expect(first).toEqual({ kind: 'bot_background', id: hash(['room-input', 'r1', inboundKey(bot)]) });
     const state = await on.read(scope);
     expect(state.team.rooms.r1!.messages).toEqual([expect.objectContaining({ from: 'other-bot', text: 'Hi' })]);
@@ -87,15 +79,15 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
     // The command id is L roomInput's.
     expect(await commandKeys(scope)).toEqual([hash(['room_input', 'r1', inboundKey(bot)])]);
     const before = await on.dump(scope);
-    expect(await on.receive(scope, bot, IDENTITY, vectorPorts)).toEqual(first);
+    expect(await on.receive(scope, bot, IDENTITY, vectorClock)).toEqual(first);
     expect(await on.dump(scope)).toBe(before);
   });
 
   it('checks the inbound identity and reply route in the commit, as L, and a refusal writes nothing', async () => {
     const { on, scope } = await scoped(true), before = await on.dump(scope);
-    await expect(on.receive(scope, message({ replyRoute: { ...REPLY, inboundId: 'other' } }), IDENTITY, vectorPorts)).rejects.toThrow('Invalid reply route binding');
-    await expect(on.receive(scope, message({ platformMessageId: '' }), IDENTITY, vectorPorts)).rejects.toThrow('Invalid inbound identity');
-    await expect(on.receive(scope, { ...message(), conversation: undefined } as unknown as InboundMessage, IDENTITY, vectorPorts)).rejects.toThrow(TypeError);
+    await expect(on.receive(scope, message({ replyRoute: { ...REPLY, inboundId: 'other' } }), IDENTITY, vectorClock)).rejects.toThrow('Invalid reply route binding');
+    await expect(on.receive(scope, message({ platformMessageId: '' }), IDENTITY, vectorClock)).rejects.toThrow('Invalid inbound identity');
+    await expect(on.receive(scope, { ...message(), conversation: undefined } as unknown as InboundMessage, IDENTITY, vectorClock)).rejects.toThrow(TypeError);
     expect(await on.dump(scope)).toBe(before);
   });
 
@@ -110,20 +102,20 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
     ];
     for (const [inbound, kind, line] of cases) {
       const before = await on.read(scope);
-      expect(await on.receive(scope, inbound, IDENTITY, vectorPorts)).toEqual({ kind });
+      expect(await on.receive(scope, inbound, IDENTITY, vectorClock)).toEqual({ kind });
       const after = await on.read(scope);
       expect(after.audit).toEqual([...before.audit, line]);
       expect(Object.keys(after.turns)).toEqual(Object.keys(before.turns));
       // L writes an audit line for each delivery, so a redelivery adds the same line again.
-      expect(await on.receive(scope, inbound, IDENTITY, vectorPorts)).toEqual({ kind });
+      expect(await on.receive(scope, inbound, IDENTITY, vectorClock)).toEqual({ kind });
       expect((await on.read(scope)).audit).toEqual([...before.audit, line, line]);
     }
   });
 
   it('cuts an audit line at 1024 characters, as L, for an audit kind and an unmatched echo', async () => {
     const { on, scope } = await scoped(true), long = 'x'.repeat(1100);
-    await on.receive(scope, message({ sender: { id: 'mallory', kind: 'human' }, platformMessageId: long }), IDENTITY, vectorPorts);
-    await on.receive(scope, message({ sender: { id: 'own-bot', kind: 'bot' }, platformMessageId: long, text: '' }), IDENTITY, vectorPorts);
+    await on.receive(scope, message({ sender: { id: 'mallory', kind: 'human' }, platformMessageId: long }), IDENTITY, vectorClock);
+    await on.receive(scope, message({ sender: { id: 'own-bot', kind: 'bot' }, platformMessageId: long, text: '' }), IDENTITY, vectorClock);
     expect((await on.read(scope)).audit.slice(-2)).toEqual([`Inbound not_owner: fake direct:main ${long}`.slice(0, 1024),
       `Delivery unmatched_echo: fake ${long}`.slice(0, 1024)]);
   });
@@ -142,24 +134,24 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
     // A seed writes no outbox row, so this adds the delivery index row by hand.
     await opened!.pool.query(`INSERT INTO "${store().schema}".outbox (scope, key, ordinal, kind) VALUES ($1, $2, 0, 'delivery')`, [storedKey(scope), storedKey('d1')]);
     const echo = (fields: Partial<InboundMessage>) => message({ sender: { id: 'own-bot', kind: 'bot' }, text: '', ...fields });
-    expect(await on.receive(scope, echo({ platformMessageId: 'x', deliveryId: 'none' }), IDENTITY, vectorPorts)).toEqual({ kind: 'echo' });
+    expect(await on.receive(scope, echo({ platformMessageId: 'x', deliveryId: 'none' }), IDENTITY, vectorClock)).toEqual({ kind: 'echo' });
     let state = await on.read(scope);
     const turns = Object.keys(state.turns);
     expect(state.audit.at(-1)).toBe('Delivery unmatched_echo: fake x');
     expect(state.channel!.deliveries.d1).toMatchObject({ state: 'unknown' });
     // The echo transaction drops the expired reply token, as L's does.
     expect(state.channel!.inbounds.i1!.reply!.token).toBeUndefined();
-    expect(await on.receive(scope, echo({ platformMessageId: 'shared' }), IDENTITY, vectorPorts)).toEqual({ kind: 'echo' });
+    expect(await on.receive(scope, echo({ platformMessageId: 'shared' }), IDENTITY, vectorClock)).toEqual({ kind: 'echo' });
     expect((await on.read(scope)).audit.at(-1)).toBe('Delivery unmatched_echo: fake shared');
     // An unmatched echo that is delivered again gets its audit line again, as L.
     const audit = (await on.read(scope)).audit;
-    expect(await on.receive(scope, echo({ platformMessageId: 'shared' }), IDENTITY, vectorPorts)).toEqual({ kind: 'echo' });
+    expect(await on.receive(scope, echo({ platformMessageId: 'shared' }), IDENTITY, vectorClock)).toEqual({ kind: 'echo' });
     expect((await on.read(scope)).audit).toEqual([...audit, 'Delivery unmatched_echo: fake shared']);
     const accepted = echo({ platformMessageId: 'echoed', deliveryId: 'd1' });
-    expect(await on.receive(scope, accepted, IDENTITY, vectorPorts)).toEqual({ kind: 'echo' });
+    expect(await on.receive(scope, accepted, IDENTITY, vectorClock)).toEqual({ kind: 'echo' });
     const settled = await on.dump(scope);
     // The same echo again changes no row.
-    expect(await on.receive(scope, accepted, IDENTITY, vectorPorts)).toEqual({ kind: 'echo' });
+    expect(await on.receive(scope, accepted, IDENTITY, vectorClock)).toEqual({ kind: 'echo' });
     expect(await on.dump(scope)).toBe(settled);
     state = await on.read(scope);
     expect(state.channel!.deliveries.d1).toMatchObject({ state: 'accepted', platformMessageId: 'echoed' });
@@ -170,13 +162,10 @@ describe.skipIf(POSTGRES_URL === undefined)('H inbound channel entry on real Pos
     expect(row.rows).toEqual([{ settled_at: String(VECTOR_NOW) }]);
   });
 
-  it('refuses the receive command in commit(), before it reads or writes, and takes no remember port by type', async () => {
+  it('refuses the receive command in commit(), before it reads or writes', async () => {
     const { on, scope } = await scoped(true), before = await on.dump(scope);
     await expect(on.commit(scope, { scope, commandId: 'r1', command: { kind: 'receive', inbound: 'owner_input', key: 'k', botId: 'main', request: 'x', sender: 'owner' } },
-      vectorPorts)).rejects.toBeInstanceOf(InboundCommandError);
+      vectorClock)).rejects.toBeInstanceOf(InboundCommandError);
     expect(await on.dump(scope)).toBe(before);
-    // @ts-expect-error The commit ports carry no remember port.
-    const withRemember: CommitPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), remember: () => {} });
-    expect(typeof withRemember).toBe('function');
   });
 });

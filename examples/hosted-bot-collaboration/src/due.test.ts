@@ -8,7 +8,7 @@ import { collaborationDue, type Command, type DelegationTimers } from '@byok-sdk
 import { ROOM_GRACE_MS, seedCollaboration, seedRoom, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
 import { HostedDueScheduler, type DueSchedulerOptions } from './due';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
+import { TEST_HOST, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL, VectorStore } from './postgres.test-support';
 import type { TaskEvidence } from './reconcile';
 import { HostedReplyChecker } from './replies';
@@ -17,7 +17,7 @@ import { HostedReplyChecker } from './replies';
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const TIMERS: DelegationTimers = { cancelGraceMs: 1_000, uncertainAfterMs: 5_000 };
 /** A store over the test schema with `TIMERS`, which the due time reads too. */
-const store = () => new VectorStore(opened!.pool, opened!.store.schema, { timers: TIMERS });
+const store = () => new VectorStore(opened!.pool, opened!.store.schema, { host: TEST_HOST, timers: TIMERS });
 const table = (name: string) => `"${opened!.store.schema}".${name}`;
 const query = <T extends object>(text: string, values: unknown[]) => opened!.pool.query<T>(text, values).then(found => found.rows);
 /** The seed card `c1` stays pending, so its expiry is never due in these tests. */
@@ -47,7 +47,7 @@ function team(state: CollaborationState): void {
 async function delegated(step: () => Promise<void> = async () => {}) {
   const scope = `tenant:${randomUUID()}`;
   const commit = async (command: Command) => {
-    const result = await store().commit(scope, { scope, commandId: randomUUID(), command }, vectorPorts);
+    const result = await store().commit(scope, { scope, commandId: randomUUID(), command }, vectorClock);
     if (result.disposition.outcome !== 'accepted') throw new Error(`Refused ${command.kind}: ${JSON.stringify(result.disposition)}`);
     return result.disposition.value;
   };
@@ -60,7 +60,7 @@ async function delegated(step: () => Promise<void> = async () => {}) {
   await sync();
   await step();
   expect(await store().finish(scope, root, evidence(taskId(root, 0), 'task.complete', { document: { delegate: [{ to: 'b', request: 'Check' }] } }),
-    vectorPorts)).toBe('succeeded');
+    vectorClock)).toBe('succeeded');
   await step();
   const id = hash([taskId(root, 0), 'delegate', 0]);
   await sync();
@@ -208,7 +208,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
 
     it('seals a due input batch in one scheduled sync, which clears the time (#793 S1)', async () => {
       const policy = { windowMs: 1000, maxItems: 2, maxBytes: 8192 };
-      const coalescing = new VectorStore(opened!.pool, opened!.store.schema, { timers: TIMERS, coalesce: policy });
+      const coalescing = new VectorStore(opened!.pool, opened!.store.schema, { host: TEST_HOST, timers: TIMERS, coalesce: policy });
       const scope = `tenant:${randomUUID()}`;
       await coalescing.seed(scope, state => {
         team(state);
@@ -216,7 +216,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
       });
       await coalescing.bindDevice(scope, 'device');
       await coalescing.sync(scope, { ...SYNC_OPTIONS, history: undefined });
-      const result = await coalescing.commit(scope, { scope, commandId: 'k1', command: { kind: 'input', botId: 'main', key: 'k1', request: 'Say k1', sender: 'owner' } }, vectorPorts);
+      const result = await coalescing.commit(scope, { scope, commandId: 'k1', command: { kind: 'input', botId: 'main', key: 'k1', request: 'Say k1', sender: 'owner' } }, vectorClock);
       expect(result.disposition.outcome).toBe('accepted');
       expect(await dueAt(scope)).toBe(String(VECTOR_NOW + 1000));
       clock = VECTOR_NOW + 1000;
@@ -231,7 +231,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
 
     it('runs a due reply check in the deployment sync before the store sync, which clears the check time (#793 S7)', async () => {
       const h = await delegated();
-      expect(await store().finish(h.scope, h.id, evidence(taskId(h.id, 0), 'task.complete', { document: {} }), vectorPorts)).toBe('succeeded');
+      expect(await store().finish(h.scope, h.id, evidence(taskId(h.id, 0), 'task.complete', { document: {} }), vectorClock)).toBe('succeeded');
       await h.sync();
       expect(await dueAt(h.scope)).toBe(String(VECTOR_NOW));
       // The store sync alone does not read the reply, so the scope stays due.

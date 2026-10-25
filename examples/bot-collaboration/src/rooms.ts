@@ -4,7 +4,7 @@ import { addTurn, type CollaborationState, type Turn } from './model';
 import * as rules from './rules/rooms';
 
 // K8 adapter for the pure room rules in `rules/rooms.ts`.
-export { ROOM_GRACE_MS, memberPresent, roomContext, roomMessages, roomVisibility, type Mentions, type RoomMessage } from './rules/rooms';
+export { ROOM_GRACE_MS, memberPresent, roomContext, roomMessageProjection, roomMessages, roomVisibility, type Mentions, type RoomMessage } from './rules/rooms';
 export { ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES } from './rules/rooms';
 export function roomInput(state: CollaborationState, key: string, roomId: string, text: string, mentions: rules.Mentions, from?: string): string {
   return rules.roomInput(state.team, key, roomId, text, mentions, from);

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hash } from '@byok-sdk/example-host-execution-core';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { Command } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import type { CommandRecord, CommitRequest } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { commitVectors, seedCollaboration, type CommitSubject, type SeedTeam } from '@byok-sdk/example-bot-collaboration/test-support';
-import { CallbackCommandError, HostedStoreVersionError, type CommitPortsFactory } from './store';
-import { callbackPorts, memorySubject, vectorPorts } from './memory-subject.test-support';
+import { CallbackCommandError, HostedCollaborationStore, HostedStoreVersionError } from './store';
+import { memorySubject, VECTOR_ROUTINES, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
@@ -14,7 +15,7 @@ const store = () => opened!.store;
 async function hosted(team?: SeedTeam): Promise<CommitSubject> {
   const scope = `tenant:${randomUUID()}`;
   await store().seed(scope, state => seedCollaboration(state, team));
-  return { scope, commit: request => store().commitIn(scope, request, callbackPorts), stored: () => store().dump(scope), state: () => store().read(scope) };
+  return { scope, commit: request => store().commitIn(scope, request, vectorClock, VECTOR_ROUTINES), stored: () => store().dump(scope), state: () => store().read(scope) };
 }
 const input = (key: string, request = 'Hello'): Command => ({ kind: 'input', botId: 'main', key, request, sender: 'owner' });
 const message = (turnId: string, taskId: string, body: string): Command =>
@@ -66,7 +67,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
     it.each(callbacks)('refuses the callback command %s before any write, also on a retry', async (kind, command) => {
       const h = await hosted(), before = await h.stored();
       for (const attempt of [1, 2]) {
-        const refusal = await store().commit(h.scope, { scope: h.scope, commandId: `callback-${kind}`, command }, vectorPorts)
+        const refusal = await store().commit(h.scope, { scope: h.scope, commandId: `callback-${kind}`, command }, vectorClock)
           .then(() => undefined, (error: unknown) => error);
         expect(refusal, `try ${attempt}`).toBeInstanceOf(CallbackCommandError);
         expect(refusal, `try ${attempt}`).toMatchObject({ kind, message: `commit() does not take the K4 callback command ${kind}` });
@@ -76,7 +77,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
 
     it.each(callbacks)('refuses the callback command %s for a scope with no row, and creates no scope row', async (_kind, command) => {
       const scope = `tenant:${randomUUID()}`, before = await store().dump(scope);
-      await expect(store().commit(scope, { scope, commandId: 'c1', command }, vectorPorts)).rejects.toBeInstanceOf(CallbackCommandError);
+      await expect(store().commit(scope, { scope, commandId: 'c1', command }, vectorClock)).rejects.toBeInstanceOf(CallbackCommandError);
       expect(await store().dump(scope)).toBe(before);
       expect((await opened!.pool.query(`SELECT 1 FROM "${store().schema}".scope WHERE scope = $1`, [JSON.stringify(scope)])).rows).toEqual([]);
     });
@@ -85,8 +86,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
       const h = await hosted();
       await h.commit({ scope: h.scope, commandId: 'i1', command: input('k1') });
       await opened!.pool.query(`UPDATE "${store().schema}".scope SET state_version = 3 WHERE scope = $1`, [JSON.stringify(h.scope)]);
-      await expect(store().commit(h.scope, { scope: h.scope, commandId: 'task-1', command: outcome }, vectorPorts)).rejects.toBeInstanceOf(CallbackCommandError);
-      await expect(store().commit(h.scope, { scope: h.scope, commandId: 'i2', command: input('k2') }, vectorPorts)).rejects.toBeInstanceOf(HostedStoreVersionError);
+      await expect(store().commit(h.scope, { scope: h.scope, commandId: 'task-1', command: outcome }, vectorClock)).rejects.toBeInstanceOf(CallbackCommandError);
+      await expect(store().commit(h.scope, { scope: h.scope, commandId: 'i2', command: input('k2') }, vectorClock)).rejects.toBeInstanceOf(HostedStoreVersionError);
     });
 
     // Each owner kind reaches the K8 rules: a commit result, or the rule's own refusal for a seed that lacks its row.
@@ -100,19 +101,45 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
     ];
     it.each(owners)('takes the owner command %s through commit()', async (_kind, command, team, refusal) => {
       const h = await hosted(team);
-      const result = await store().commit(h.scope, { scope: h.scope, commandId: randomUUID(), command }, vectorPorts).then(value => value, (error: unknown) => error);
+      const result = await store().commit(h.scope, { scope: h.scope, commandId: randomUUID(), command }, vectorClock).then(value => value, (error: unknown) => error);
       expect(result).not.toBeInstanceOf(CallbackCommandError);
       if (refusal) expect((result as Error).message).toContain(refusal);
       else expect(result).toHaveProperty('disposition');
     });
 
-    it('takes no outcome or occurrence port in the commit ports, by type', () => {
-      // @ts-expect-error The commit ports carry no outcome port.
-      const withOutcome: CommitPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), outcome: callbackPorts(state, publish).outcome });
-      // @ts-expect-error The commit ports carry no occurrence port.
-      const withOccurrence: CommitPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), occurrence: () => {} });
-      const plain: CommitPortsFactory = vectorPorts;
-      expect([withOutcome, withOccurrence, plain].every(ports => typeof ports === 'function')).toBe(true);
+    it('takes the Host clock, never a caller\'s ports, in commit, receive, consume and finish (#793 S9)', () => {
+      const ports = () => ({ now: vectorClock, publish: () => {}, outcome: {} });
+      // @ts-expect-error commit() takes the Host clock.
+      const commit = () => store().commit('s', { scope: 's', commandId: 'c', command: input('k') }, ports);
+      // @ts-expect-error finish() takes the Host clock.
+      const finish = (evidence: Parameters<HostedCollaborationStore['finish']>[2]) => store().finish('s', 't', evidence, ports);
+      // @ts-expect-error consume() takes the Host clock.
+      const consume = (agent: Parameters<HostedCollaborationStore['consume']>[1]) => store().consume('s', agent, ports);
+      type Receive = Parameters<HostedCollaborationStore['receive']>;
+      // @ts-expect-error receive() takes the Host clock.
+      const receive = (message: Receive[1], identity: Receive[2]) => store().receive('s', message, identity, ports);
+      expect([commit, finish, consume, receive].every(call => typeof call === 'function')).toBe(true);
+    });
+  });
+
+  describe('the Host config of each scope (#793 S9)', () => {
+    it('refuses a store with no Host config', () => {
+      expect(() => new HostedCollaborationStore(opened!.pool, store().schema, {} as never)).toThrow('The Host config of each scope is required');
+    });
+
+    it('builds the command ports from the Host config of the commit\'s scope: a snapshot Bot runs on that scope\'s device', async () => {
+      const devices = new Map<string, string>();
+      const perScope = new HostedCollaborationStore(opened!.pool, store().schema,
+        { host: scope => ({ models: { default: template(devices.get(scope)!, 'main') }, readOnlyToolsets: [] }) });
+      const snapshot: Command = { kind: 'team_snapshot', snapshot: { revision: 2, bots: [
+        { id: 'main', name: 'main', role: 'Team owner', persona: '', model: 'default', mainBot: true },
+        { id: 'b2', name: 'b2', role: 'Helper', persona: '', model: 'default', mainBot: false }] } };
+      for (const device of ['device-a', 'device-b']) {
+        const h = await hosted('external');
+        devices.set(h.scope, device);
+        expect((await perScope.commit(h.scope, { scope: h.scope, commandId: randomUUID(), command: snapshot }, vectorClock)).disposition.outcome).toBe('accepted');
+        expect((await perScope.read(h.scope)).team.bots.b2!.execution.deviceId).toBe(device);
+      }
     });
   });
 
@@ -214,7 +241,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
     const scope = `tenant:${randomUUID()}`;
     await store().seed(scope, state => seedCollaboration(state));
     const revisions = await Promise.all(['i1', 'i2', 'i3'].map(commandId =>
-      store().commit(scope, { scope, commandId, command: input(commandId) }, vectorPorts).then(result => result.revision)));
+      store().commit(scope, { scope, commandId, command: input(commandId) }, vectorClock).then(result => result.revision)));
     expect(revisions.sort()).toEqual([1, 2, 3]);
   });
 });

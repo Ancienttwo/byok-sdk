@@ -5,9 +5,9 @@ import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { coalescePolicy, type CoalescePolicy } from '@byok-sdk/example-bot-collaboration/coalesce';
 import { coalesceVectors, seedCollaboration, SYNC_OPTIONS, VECTOR_NOW, type CoalesceSubject, type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
+import { TEST_HOST, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { HostedCollaborationStore, type CommitPortsFactory } from './store';
+import { HostedCollaborationStore } from './store';
 
 // #793 H batch seal: input coalescing in the H commit and sync, as L's.
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
@@ -16,13 +16,13 @@ const input = (key: string) => ({ kind: 'input' as const, botId: 'main', key, re
 
 /** One H subject per call: a store with `policy`, and a new scope seeded like the memory subject, its Bot bound for a freeze. */
 async function hosted(policy?: CoalescePolicy): Promise<CoalesceSubject & { store: HostedCollaborationStore }> {
-  const store = new HostedCollaborationStore(opened!.pool, opened!.store.schema, policy ? { coalesce: policy } : {});
+  const store = new HostedCollaborationStore(opened!.pool, opened!.store.schema, { host: TEST_HOST, ...policy ? { coalesce: policy } : {} });
   const scope = `tenant:${randomUUID()}`, pool = opened!.pool;
   await store.seed(scope, state => seedCollaboration(state));
   await store.bindDevice(scope, 'device');
   return {
     scope, store,
-    commit: request => store.commit(scope, request, vectorPorts),
+    commit: request => store.commit(scope, request, vectorClock),
     stored: () => store.dump(scope),
     state: () => store.read(scope),
     change: edit => store.seed(scope, edit),
@@ -49,7 +49,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H input coalescing on real Postgres
   coalesceVectors('H HostedCollaborationStore on Postgres', hosted);
 
   it('checks the policy at construction with K8 coalescePolicy', () => {
-    expect(() => new HostedCollaborationStore(opened!.pool, opened!.store.schema, { coalesce: { windowMs: 10, maxItems: 2, maxBytes: 4096 } }))
+    expect(() => new HostedCollaborationStore(opened!.pool, opened!.store.schema, { host: TEST_HOST, coalesce: { windowMs: 10, maxItems: 2, maxBytes: 4096 } }))
       .toThrow('coalesce.windowMs must be an integer from 1000 to 60000');
   });
 
@@ -83,16 +83,10 @@ describe.skipIf(POSTGRES_URL === undefined)('H input coalescing on real Postgres
     expect(await subject.intent(batch)).toMatchObject({ key: batch, source: 'user' });
   });
 
-  it('admits each input with its own policy, never with a port that a caller slips past the type', async () => {
-    const subject = await hosted(coalescePolicy({}, 32_768)), called: string[] = [];
-    const slipped = ((...args: Parameters<CommitPortsFactory>) => ({ ...vectorPorts(...args),
-      admitInput: (fields: { id: string }) => { called.push(fields.id); return fields.id; } })) as unknown as CommitPortsFactory;
+  it('admits each input with its own policy: commit() takes the Host clock, so no caller port reaches the admission', async () => {
+    const subject = await hosted(coalescePolicy({}, 32_768));
     // `t1` is open, so the Bot is busy and the input opens a batch.
-    await subject.store.commit(subject.scope, { scope: subject.scope, commandId: 'c1', command: input('k1') }, slipped);
-    expect(called).toEqual([]);
+    await subject.store.commit(subject.scope, { scope: subject.scope, commandId: 'c1', command: input('k1') }, vectorClock);
     expect(Object.values((await subject.state()).inputBatches ?? {})).toMatchObject([{ state: 'open' }]);
-    // @ts-expect-error The commit ports carry no input admission.
-    const withAdmit: CommitPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), admitInput: () => 'x' });
-    expect(typeof withAdmit).toBe('function');
   });
 });
