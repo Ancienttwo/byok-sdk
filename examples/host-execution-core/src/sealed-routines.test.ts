@@ -7,6 +7,7 @@ import { HostMemoryPage } from './memory';
 import { hash, type AgentRoutineDefinition, type LedgerState, type SealedAgentExecutionInput, type SealedExecutionTemplate } from './model';
 import { nextIntervalOccurrence } from './schedule';
 import { promoteOccurrence, recordOccurrence, routineCommands } from './routines';
+import { enqueue } from './transitions';
 import { sealContent } from '@byok-sdk/core/sealed-payload';
 import { routineTemplateBinding, sealRoutineTemplate, type RoutineRef } from './sealed-routine';
 import { openHost, template, type TestHost } from './test-support';
@@ -25,7 +26,8 @@ async function sealedTemplate(deviceId: string, routineRef: RoutineRef, taskSeal
   Promise<SealedExecutionTemplate> {
   const { payload } = template(deviceId);
   const { instruction: _, ...plain } = payload;
-  const sealed = await sealRoutineTemplate({ tenantId: 'product:host-core-test', scopeKey, sealing: taskSealing,
+  // The member seals only `['task-input']`, so another `taskSealing` is a payload that skipped `sealRoutineTemplate`.
+  const sealed = await sealRoutineTemplate({ tenantId: 'product:host-core-test', scopeKey, sealing,
     chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` }, sender: 'A'.repeat(43), routineRef, agentRef, instruction: 'Check the watchlist.' });
   return { deviceId, payload: { ...plain, sealing: taskSealing, sealed, routineRef } };
 }
@@ -118,6 +120,59 @@ describe('a sealed routine on the K4 core (#953)', () => {
         .rejects.toThrow('A sealed execution must be a routine template occurrence');
     }
     expect(Object.keys(host.ledger.snapshot().routines)).toEqual([]);
+  });
+
+  it('enqueues no sealed execution outside a routine occurrence, even one labelled routine with the right routineRef', async () => {
+    host = await openHost({ wrapServer: sealedLane().wrap });
+    const execution = await sealedTemplate(host.deviceId, watch);
+    const input = { key: 'occurrence:forged', source: 'routine' as const, execution: execution as never, waitUntil: Date.now() + 60_000 };
+    await expect(host.core.enqueue(input)).rejects.toThrow('A sealed execution must be a routine template occurrence');
+    const state = host.ledger.snapshot();
+    expect(() => enqueue(state, host!.ledger.tenant, input)).toThrow('A sealed execution must be a routine template occurrence');
+    expect(state.intents).toEqual({});
+    expect(host.ledger.snapshot().intents).toEqual({});
+  });
+
+  it('calls the server submitSealed as a method of its executions', async () => {
+    const submitted: SealedAgentExecutionInput[] = [];
+    const lane = sealedLane();
+    host = await openHost({ wrapServer: server => {
+      const wrapped = lane.wrap(server);
+      const executions = { ...wrapped.executions, async submitSealed(input: SealedAgentExecutionInput) {
+        if (this !== executions) throw new Error('unbound submitSealed');
+        submitted.push(input);
+        return wrapped.executions.submitSealed!(input);
+      } };
+      return { ...wrapped, executions };
+    } });
+    await host.core.addRoutine(await sealedRoutine(host.deviceId));
+    await vi.waitFor(async () => { await host!.core.drain(); expect(submitted).toHaveLength(1); }, { timeout: 5000 });
+    expect(Object.values(host.ledger.snapshot().executions)[0]).toMatchObject({ submission: 'delivered' });
+  });
+
+  it('refuses the reconcile resubmit of an uncertain sealed intent before its readback once the sealed lane is gone', async () => {
+    const calls = { submitSealed: 0, offer: 0, deviceTerminal: 0 };
+    let executions: ExecutionServer['executions'] | undefined;
+    host = await openHost({ wrapServer: server => {
+      executions = { ...server.executions, submitSealed: async () => { calls.submitSealed++; throw new Error('lost response'); } };
+      return { ...server, executions, tasks: { ...server.tasks,
+        offer: async taskId => { calls.offer++; return server.tasks.offer(taskId); },
+        deviceTerminal: async taskId => { calls.deviceTerminal++; return server.tasks.deviceTerminal(taskId); } } };
+    } });
+    await host.core.addRoutine(await sealedRoutine(host.deviceId));
+    await vi.waitFor(async () => { await host!.core.drain(); expect(calls.submitSealed).toBeGreaterThan(0); }, { timeout: 5000 });
+    expect(intents()[0]).toMatchObject({ phase: 'inflight' });
+    expect(Object.values(host.ledger.snapshot().executions)[0]).toMatchObject({ submission: 'uncertain' });
+    delete executions!.submitSealed;
+    const sent = calls.submitSealed;
+    await host.core.drain();
+    Object.assign(calls, { offer: 0, deviceTerminal: 0 });
+    await host.core.drain(); await host.core.drain();
+    // Each reconcile pass reads the offer once, to verify the frozen input, and stops before the submit readback.
+    expect(calls.deviceTerminal).toBeGreaterThan(0);
+    expect(calls.offer).toBe(calls.deviceTerminal);
+    expect(calls.submitSealed).toBe(sent);
+    expect(host.ledger.snapshot().outbox[`intent:${intents()[0]!.id}`]?.lastError).toContain('This Host has no sealed dispatch');
   });
 
   it('fails a sealed occurrence before any submit on a server with no sealed lane', async () => {
