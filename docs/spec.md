@@ -253,7 +253,7 @@ selected PATCH (0.30.x instead of 0.31.0) despite the new public API, the
 gated wire additions, Postgres migration 0028 and the pre-1.0 breaking changes
 in cloud, client and cloud-do. This explicit exception does not change the
 general policy above or waive validation, publication authorization, or
-registry readback. See the [0.30.1 candidate notes](releases/v0.30.1.md).
+registry readback. See the [0.30.1 release notes](releases/v0.30.1.md).
 
 0.30.0 was a MINOR under the general policy above, with no exception. It added
 gated wire types and public API, and it had pre-1.0 breaking cuts in protocol,
@@ -278,19 +278,20 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-Public registry metadata read on 2026-10-24 at 07:39 UTC reports `latest`
-0.30.0 for all nine packages. The keys 0.30.0 package depends on exactly
-`@byok-sdk/core` 0.30.0. The same read lists 0.29.0, 0.28.3, 0.28.2, 0.28.1 /
-keys 0.13.1 and 0.28.0 / keys 0.13.0 as the earlier published versions. The
-registry publication times are 2026-10-20 (UTC) for 0.28.0 / keys 0.13.0,
-2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22 (UTC) for 0.28.2 and
-0.28.3, 2026-10-23 (UTC) for 0.29.0, and 2026-10-24 (UTC) for 0.30.0. The tag
-`v0.30.0` and its GitHub Release point to `6b779cff`, the merge of #837. The
-tag `v0.29.0` points to `df0c91d2`, the merge of #773. The 0.28.0 to 0.30.0
-source-candidate notes are preparation history. They are not publication
-records. This read confirms registry availability. It does not establish
-isolated-install qualification. A later release needs the accepted
-final-commit CI artifact and separate owner authorization.
+Public registry metadata read on 2026-10-24 at 19:19 UTC reports `latest`
+0.30.1 for all nine packages. The keys 0.30.1 package depends on exactly
+`@byok-sdk/core` 0.30.1. The same read lists 0.30.0, 0.29.0, 0.28.3, 0.28.2,
+0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0 as the earlier published
+versions. The registry publication times are 2026-10-20 (UTC) for 0.28.0 /
+keys 0.13.0, 2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22 (UTC) for
+0.28.2 and 0.28.3, 2026-10-23 (UTC) for 0.29.0, and 2026-10-24 (UTC) for
+0.30.0 and 0.30.1. The tag `v0.30.1` and its GitHub Release point to
+`142acbe2`, the merge of #916. The tag `v0.30.0` points to `6b779cff`, the
+merge of #837. The 0.28.0 to 0.30.1 source-candidate notes are preparation
+history. They are not publication records. This read confirms registry
+availability. It does not establish isolated-install qualification. A later
+release needs the accepted final-commit CI artifact and separate owner
+authorization.
 
 0.27.0 / keys 0.12.0 was published on `latest` from `v0.27.0` (`cd977261`). It
 was `latest` until 0.28.0.
@@ -1364,11 +1365,17 @@ makes itself `unknown`. The class never changes `retry`.
 | Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
 | Pi, Hermes | no structured field: `unknown` |
 
-Claude, Codex, Grok, Pi (the rpc and prepared lanes) and Hermes report a runtime
-process that ends on its own before its terminal, during start or a turn, as
-`runtime_exited`; an exit the SDK or the vendored session asked for is not one.
-Pi's durable lane reports `unknown` for a worker exit: it recovers a crash during
-a run and otherwise fails without a class.
+Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes) and Hermes report a
+runtime process that ends on its own before its terminal, during start or a turn,
+as `runtime_exited`; an exit the SDK or the vendored session asked for is not one.
+Pi's durable lane recovers a worker that ends on its own during a run (within its
+respawn limit). When that recovery is refused, the worker ends on its own while
+the daemon awaits its reply to a tool or shell acknowledgement, or a respawned
+worker ends on its own before its start receipt, the run fails as
+`runtime_exited`; a reported worker
+failure, a refused or changed start receipt and a protocol violation are `unknown`.
+Its start failures are typed and not retryable: a worker that ends on its own
+before its start receipt is `runtime_exited`, any other is `unknown`.
 
 ### Terminal inference usage observation
 

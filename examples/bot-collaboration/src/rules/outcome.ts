@@ -2,7 +2,7 @@ import { validateResultOutcome, type BotTurnOutcome, type ResultSchema } from '@
 import { hash } from '@byok-sdk/example-host-execution-core/canonical';
 import { json, type Card, type Question, type Turn } from './turn';
 import { applyDelegate, arbitrateCancel, endChain, observeStart, type DelegationBot, type DelegationState, type IntentFacts, type Publish } from './delegation';
-import { applySpeech, memberPresent, type RoomsState } from './rooms';
+import { applySpeech, memberPresent, roomMessageProjection, type RoomsState } from './rooms';
 import { requireMain } from './team';
 
 /**
@@ -29,6 +29,11 @@ export interface OutcomePorts {
   cancelRoutine(turn: Turn, action: Action<'cancel_routine'>): void;
   /** Queue one channel message. Absent: the Host has no channel. */
   deliver?(turn: Turn, key: string, text: string): void;
+  /**
+   * Room history mode (#883): an accepted seat post also publishes `room-message:<roomId>:<messageId>` with the stored
+   * message, so the Host can write it to its room authority. Absent: no such projection.
+   */
+  roomPosts?: boolean;
 }
 /** `turnId` is the Turn of the K4 intent key; `taskId` is the task of the terminal. A refused action goes to `rejected`. */
 export function applyTurnOutcome(state: OutcomeState, turnId: string, taskId: string, document: unknown, ports: OutcomePorts): void {
@@ -53,7 +58,13 @@ export function applyTurnOutcome(state: OutcomeState, turnId: string, taskId: st
   }
   if (seat) {
     applySpeech(state.team, turn.id, outcome, taskId, ports.now(), accept);
-    if (state.team.seats[turn.id]?.status === 'post' && outcome.speech?.kind === 'post') ports.deliver?.(turn, `speech:${turn.id}`, outcome.speech.text);
+    if (state.team.seats[turn.id]?.status === 'post' && outcome.speech?.kind === 'post') {
+      ports.deliver?.(turn, `speech:${turn.id}`, outcome.speech.text);
+      if (ports.roomPosts) {
+        const roomId = state.team.rounds[seat.roundId]!.roomId, message = state.team.rooms[roomId]!.messages.find(row => row.id === turn.id)!;
+        ports.publish(roomMessageProjection(roomId, message.id), { roomId, ...message });
+      }
+    }
   }
   const managed: Accept = (kind, work) => accept(kind, () => {
     // Also deny management from room offers frozen before this policy change.
