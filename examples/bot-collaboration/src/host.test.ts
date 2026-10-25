@@ -5,6 +5,7 @@ import type { ExecutionServer } from '@byok-sdk/example-host-execution-core';
 import { BotCollaboration, type BotOptions } from './host';
 import { contextPack } from './schema';
 import { stateOf } from './model';
+import { CONNECTOR_OUTCOME_UNKNOWN } from './rules/commands';
 import { botRoutines } from './routines';
 import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support';
 import { botCompactVeto } from './compaction';
@@ -309,7 +310,7 @@ it('gives a user answer a new stable continuation budget', async () => {
   await finish(child.id);
 });
 
-it('replays the same connector key after an external effect and a failed SQLite result commit', async () => {
+it('#958: ends the card with an unknown outcome after an external effect and a failed SQLite result commit, with no second call', async () => {
   const effects = new Map<string, string>();
   const calls: string[] = [];
   const options = await setup({ connector: async id => {
@@ -335,10 +336,12 @@ it('replays the same connector key after an external effect and a failed SQLite 
   extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant, { compactVeto: botCompactVeto });
   bot = new BotCollaboration(fixture.server, extra, options);
   await bot.recover();
-  expect(calls).toEqual([card.id, card.id]);
+  // The call was claimed before it ran, and its settle never committed, so its outcome is unknown and it is not called again.
+  expect(calls).toEqual([card.id]);
   expect(effects.size).toBe(1);
+  expect(bot.snapshot().cards[card.id]).toMatchObject({ state: 'confirmed', error: CONNECTOR_OUTCOME_UNKNOWN, conclusion: 'failed' });
   const result = Object.values(bot.snapshot().turns).find(t => t.source === 'action_result')!;
-  expect(result.request).toContain('external-1');
+  expect(result.request).toContain(CONNECTOR_OUTCOME_UNKNOWN);
   await finish(result.id);
 });
 

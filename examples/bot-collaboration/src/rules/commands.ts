@@ -22,7 +22,7 @@ export { checkReply, delegationDue, observeDevices, replyCheckDue, settleDelegat
 export { advanceRoomSeats, seatTurn, type SeatFacts } from './rooms';
 export { collaborationDue } from './due';
 export { compactVeto, type CompactFacts, type CompactState } from './compaction';
-export { cardCallDue, expireCards, reportCardDecisions, settleCardCall } from './cards';
+export { cardCallDue, CONNECTOR_OUTCOME_UNKNOWN, expireCards, reportCardDecisions, settleCardCall } from './cards';
 
 /** Commands with a caller key or a K4 key. The store records them, so a retry replays the first result. */
 export type KeyedCommand =
