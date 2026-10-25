@@ -99,6 +99,13 @@
   and `rejectTerminal` must accept the hash of replaced bytes as a no-op. A
   Host that injects its own journal must implement both.
 
+- **Breaking (client)** — `byok-agent doctor` no longer scans `os.tmpdir()`
+  for the temporary directories that releases before 0.27.0 left there (#938).
+  `doctor --json` drops its `legacyTemp` field, so a script that parses it
+  must stop reading it, and the text output drops its `legacy-temp:` line.
+  `doctor --fix` no longer deletes those directories; any left on a machine
+  have to be removed by hand.
+
 ## 0.30.1 — 2026-10-24 (published)
 
 0.30.1 is a PATCH release under a one-release exception to the pre-1.0
