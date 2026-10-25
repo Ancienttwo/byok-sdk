@@ -343,6 +343,12 @@
   uncertain sealed intent also stops before its readback once the lane is
   gone. `submitSealed` is called as a method of its port and of the server's
   `executions`. `sealRoutineTemplate` seals exactly `['task-input']`.
+- **Changed (client, internal)** — `TaskRunner`'s method bodies now live in
+  `daemon/task-runner/`, one module per stage (#926). `handleOffer` and
+  `pump` are split along their existing stages, and no function is over 300
+  lines. Behavior, exports and the published `task-runner.d.ts` are unchanged.
+  The `@byok-sdk/client` closure grows by 7845 B and `bin:byok-agent` by
+  7869 B, for the delegating stubs and private-state access.
 
 ## 0.30.1 — 2026-10-24 (published)
 
