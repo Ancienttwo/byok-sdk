@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example calls the
+  connector of a confirmed card (#793 S12), as L's `flushCards`, through
+  the outbox sender: a `card` outbox row claims the call (a try and a lease)
+  before it, and the settle is fenced by that try. H calls a connector at
+  most once per card: a claim whose lease passed with no settle ends the
+  card as a timeout, where L calls again after a crash. The sender takes
+  `connector`, `connectorTimeoutMs` (default 30 s) and `changed`. The outbox
+  takes the kinds `card`, `home` and `host_job`, and `occurrence` gains
+  `job`. K8 moves L's card call decision into `cardCallDue` and
+  `settleCardCall`, and its shared `cardCallVectors` run on L and H.
 - **Feature (examples)** — the hosted collaboration example observes devices
   (#793 S11), as L's `refreshDevices`. `HostedDeviceObserver.observe(scope)`
   reads the SDK readiness of the scope's tenant (1 s timeout) when a
