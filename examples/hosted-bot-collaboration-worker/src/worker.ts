@@ -168,6 +168,12 @@ async function compose(env: Env, notify: () => void): Promise<Host> {
           await hang(env, 'hang-after-submit', input.taskId);
           return result;
         },
+        // The sealed lane (#953): a sealed routine occurrence goes here, never to `submit`.
+        submitSealed: async input => {
+          const result = await cloud.submitSealedAgentExecution(tenant, input);
+          await hang(env, 'hang-after-submit', input.taskId);
+          return result;
+        },
         offer: id => cloud.readTaskOffer(tenant, id),
         attempt: id => cloud.readTaskAttempt(tenant, id),
         deviceTerminal: async id => {
@@ -188,10 +194,10 @@ async function compose(env: Env, notify: () => void): Promise<Host> {
       return store.sync(scope, { ...SYNC, now });
     };
     const passes = async (): Promise<PassReport> => {
-      const changed = new Set<string>();
+      const changed = new Set<string>(), concluded = new Set<string>();
       // The clock times these passes, so the scheduler checks the clock's interval against the K8 late bound.
       const routines = new HostedRoutineScheduler(hostPool, store, { intervalMs: clockMs(env), changed: scope => { changed.add(scope); } });
-      const submitter = new HostedSubmitter(hostPool, env.H_SCHEMA, { port: taskPort,
+      const submitter = new HostedSubmitter(hostPool, env.H_SCHEMA, { port: taskPort, changed: scope => { concluded.add(scope); },
         ...optional('leaseMs', milliseconds(env.H_SUBMIT_LEASE_MS, 'H_SUBMIT_LEASE_MS')) });
       const reconciler = new HostedReconciler(hostPool, env.H_SCHEMA, store, { port: taskPort, changed: scope => { changed.add(scope); },
         ...optional('pollMs', milliseconds(env.H_RECONCILE_POLL_MS, 'H_RECONCILE_POLL_MS')) });
@@ -200,17 +206,23 @@ async function compose(env: Env, notify: () => void): Promise<Host> {
       const routineStart = failures(await routines.start());
       const routinePass = await routines.run();
       const reconcile = await reconciler.run();
-      const synced: { scope: string; error?: string }[] = [];
-      for (const scope of changed) {
-        try { await syncScope(scope, Date.now()); synced.push({ scope }); } catch (error) { synced.push({ scope, error: text(error) }); }
-      }
+      const syncAll = async (scopes: Iterable<string>) => {
+        const synced: Synced[] = [];
+        for (const scope of scopes) {
+          try { await syncScope(scope, Date.now()); synced.push({ scope }); } catch (error) { synced.push({ scope, error: text(error) }); }
+        }
+        return synced;
+      };
+      const synced = await syncAll(changed);
       const duePass = await due.run();
-      // Last, so a Turn that this pass froze is offered in the same pass.
+      // Last, so a Turn that this pass froze is offered in the same pass. An intent that the submitter concluded with no SDK
+      // call (the queued expiry, or a sealed row with no sealed lane) has its scope synced here, so its Turn settles too.
       const submit = await submitter.run();
+      const submitSynced = await syncAll(concluded);
       return { routineStart, routines: { fired: routinePass.fired, fenced: failures(routinePass.fenced), failed: failures(routinePass.failed) },
         reconcile: { concluded: reconcile.concluded, failed: failures(reconcile.failed) }, synced,
         due: { synced: duePass.synced, stalled: duePass.stalled, failed: failures(duePass.failed) },
-        submit: { tried: submit.tried, failed: failures(submit.failed) } };
+        submit: { tried: submit.tried, failed: failures(submit.failed), synced: submitSynced } };
     };
     return { cloud, store, scopes, passes, syncScope, close };
   } catch (error) {
@@ -223,10 +235,12 @@ export interface PassReport {
   routineStart: Failure[];
   routines: { fired: number; fenced: Failure[]; failed: Failure[] };
   reconcile: { concluded: number; failed: Failure[] };
-  synced: { scope: string; error?: string }[];
+  synced: Synced[];
   due: { synced: number; stalled: string[]; failed: Failure[] };
-  submit: { tried: number; failed: Failure[] };
+  /** `synced`: the scopes of the intents that the submitter concluded with no SDK call, synced after it. */
+  submit: { tried: number; failed: Failure[]; synced: Synced[] };
 }
+interface Synced { scope: string; error?: string }
 interface Failure { scope: string; id?: string; error: string }
 const text = (error: unknown): string => error instanceof Error ? error.message : String(error);
 function failures(list: readonly { scope: string; error: unknown; routineId?: string; turnId?: string }[]): Failure[] {
@@ -324,7 +338,7 @@ async function admin(request: Request, env: Env): Promise<boolean> {
 
 /** The product side: the operator routes and the owner's command entry. */
 async function serveHost(request: Request, env: Env, ctx: ExecutionContext, route: string): Promise<Response> {
-  if (route === '/host/input') return serveInput(request, env, ctx);
+  if (route === '/host/input' || route === '/host/sealed-routine') return serveOwner(request, env, ctx, route);
   if (!await admin(request, env)) return new Response('unauthorized\n', { status: 401 });
   if (route === '/host/passes') return Response.json(await runPasses(env));
   if (route === '/host/board-item') {
@@ -347,8 +361,11 @@ async function serveHost(request: Request, env: Env, ctx: ExecutionContext, rout
   return new Response('not found\n', { status: 404 });
 }
 
-/** `POST /host/input {botId, key, request}` with the owner's session bearer: H's authenticated command entry. */
-async function serveInput(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+/**
+ * The owner's routes of H's authenticated command entry, with the owner's session bearer: `POST /host/input {botId, key,
+ * request}`, and `POST /host/sealed-routine {botId, action}`, the member endpoint's `createSealedRoutine` (#953).
+ */
+async function serveOwner(request: Request, env: Env, ctx: ExecutionContext, route: string): Promise<Response> {
   const notify = notifier(env, ctx);
   const host = await compose(env, notify);
   try {
@@ -363,8 +380,13 @@ async function serveInput(request: Request, env: Env, ctx: ExecutionContext): Pr
       owner: scope => host.scopes.get(scope)!.owner.id,
       sync: host.syncScope,
     });
-    const body = await request.json() as { botId: string; key: string; request: string };
     try {
+      if (route === '/host/sealed-routine') {
+        const body = await request.json() as { botId: string; action: Parameters<typeof entry.createSealedRoutine>[2] };
+        await entry.createSealedRoutine(credential, body.botId, body.action);
+        return Response.json({ routineId: body.action.routineId });
+      }
+      const body = await request.json() as { botId: string; key: string; request: string };
       const turnId = await entry.input(credential, body.botId, body.key, body.request);
       // The commit froze the Turn's intent. The notified pass offers it; the next alarm pass would too.
       notify();
@@ -397,7 +419,8 @@ export default {
     } catch (error) {
       return Response.json({ error: text(error) }, { status: 500 });
     }
-    return new Response('routes: /byok/* (device surface); POST /host/input /host/passes /host/pairing-code /host/board-item\n', { status: 404 });
+    return new Response('routes: /byok/* (device surface); POST /host/input /host/sealed-routine /host/passes /host/pairing-code /host/board-item\n',
+      { status: 404 });
   },
   /** The cron trigger arms the clock and runs no pass. */
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
