@@ -794,6 +794,11 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     this.#checkKemRotation();
   }
 
+  /** Settles once no KEM rotation runs, so a shutdown can wait for its custody writes. */
+  async kemRotationSettled(): Promise<void> {
+    while (this.#kemRotation !== undefined) await this.#kemRotation.catch(() => undefined);
+  }
+
   /** Start the KEM rotation this member owes, if any; see the module comment. */
   checkKemRotation(): void {
     this.#checkKemRotation();
