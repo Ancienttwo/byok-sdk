@@ -156,7 +156,8 @@ test('reviewed root-level basic fixtures select their workspace while unknown ro
 
 test('shared goal fixture selects its consumers without broadening unknown root support files', () => {
   const plan = selectImpact(['examples/basic/goal-btw.test-support.ts']);
-  assert.deepEqual(plan.dirs, ['examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/host-execution-core', 'examples/hosted-bot-collaboration']);
+  assert.deepEqual(plan.dirs, ['examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/host-execution-core', 'examples/hosted-bot-collaboration',
+    'examples/hosted-bot-collaboration-worker']);
   assert.deepEqual(plan.families, ['adapter-lifecycle-smoke', 'dataplane']);
   assert.throws(() => selectImpact(['examples/basic/other.test-support.ts']));
 });
@@ -467,6 +468,36 @@ test('#793: the hosted example manifest and lock rows are admitted only with the
   f.lock.packages[manifest.name] = [`${manifest.name}@workspace:${dir}`];
   f.lock.packages.y = ['y@1.0.0']; f.write('bun.lock', f.lock);
   assert.throws(() => selectImpact(['bun.lock'], f), /more than/, 'a new resolved package');
+});
+
+test('#794 D3: the Worker example manifest and lock rows are admitted by the same reviewed shape, under their own name', t => {
+  const f = fixture(t);
+  const dir = 'examples/hosted-bot-collaboration-worker', path = `${dir}/package.json`;
+  const manifest = { name: '@byok-sdk/example-hosted-bot-collaboration-worker', version: '0.0.1', private: true, type: 'module',
+    scripts: { typecheck: 'tsc --noEmit', test: 'vitest run' }, dependencies: { '@byok-sdk/client': 'workspace:*', x: '1.0.0' } };
+  f.write(path, manifest);
+  f.lock.workspaces[dir] = { name: manifest.name, version: manifest.version, dependencies: manifest.dependencies };
+  f.lock.packages[manifest.name] = [`${manifest.name}@workspace:${dir}`];
+  f.write('bun.lock', f.lock);
+  assert.ok(selectImpact([path, 'bun.lock'], f).dirs.includes(dir));
+  for (const [candidate, reason] of [
+    [{ ...manifest, name: '@byok-sdk/example-hosted-bot-collaboration' }, 'the H example name'],
+    [{ ...manifest, dependencies: { x: '2.0.0' } }, 'a spec that no other workspace declares'],
+    [{ ...manifest, private: false }, 'a public manifest'],
+  ]) {
+    f.write(path, candidate);
+    assert.throws(() => selectImpact([path], f), /Reviewed CI mapping required/, reason);
+  }
+  // The H example cannot vouch for a spec that no other workspace declares, nor the Worker example for H.
+  f.write('examples/hosted-bot-collaboration/package.json', { name: '@byok-sdk/example-hosted-bot-collaboration', version: '0.0.1', private: true,
+    type: 'module', scripts: manifest.scripts, dependencies: { x: '9.9.9' } });
+  f.write(path, { ...manifest, dependencies: { x: '9.9.9' } });
+  assert.throws(() => selectImpact([path], f), /may only reuse a declared dependency spec \(x\)/, 'a spec that only the H example declares');
+  assert.throws(() => selectImpact(['examples/hosted-bot-collaboration/package.json'], f), /may only reuse a declared dependency spec \(x\)/,
+    'a spec that only the Worker example declares');
+  f.write(path, manifest);
+  f.lock.workspaces[dir].dependencies = { x: '1.0.0' }; f.write('bun.lock', f.lock);
+  assert.throws(() => selectImpact(['bun.lock'], f), /lock rows differ/, 'a lock entry that differs from the manifest');
 });
 
 test('#793: the K8 manifest admits only the reviewed hosted entries, and stays private', t => {

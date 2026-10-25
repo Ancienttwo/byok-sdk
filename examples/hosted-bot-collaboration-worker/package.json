@@ -1,0 +1,18 @@
+{
+  "name": "@byok-sdk/example-hosted-bot-collaboration-worker",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "The hosted (H) Bot collaboration Host composed as a Cloudflare Worker, run on local workerd",
+  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "dependencies": {
+    "@byok-sdk/cloud": "workspace:*",
+    "@byok-sdk/cloud-dataplane": "workspace:*",
+    "@byok-sdk/example-bot-collaboration": "workspace:*",
+    "@byok-sdk/example-host-execution-core": "workspace:*",
+    "@byok-sdk/example-hosted-bot-collaboration": "workspace:*",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": { "@byok-sdk/client": "workspace:*", "@types/node": "^24", "@types/pg": "^8.20.4", "tsx": "^4.19.2", "typescript": "^7.0.2", "vitest": "^4.1.10",
+    "wrangler": "4.123.0" }
+}

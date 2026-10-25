@@ -388,6 +388,17 @@
   holds the intent with its phase and generation. L wires it to its owner
   records, so K4 sends nothing to a frozen device, the timer drain and direct
   `bot.core` calls included.
+- **Feature (examples)** — a private example composes the hosted (H) Bot
+  collaboration Host as one Cloudflare Worker and runs it on local workerd
+  (#794 D3). Each invocation builds and ends its own pools over the Hyperdrive
+  binding, the SDK stores, `createByokCloud` and the H store; a device
+  response keeps its pools until its body ends, so the board SSE stream works.
+  Host passes run from cron and an operator route, and a notification only
+  schedules one more pass. Tests cover lost and duplicate notifications, an
+  instance killed mid-request, and two device processes running a delegation
+  and reply with a synthetic runtime. The CI `dataplane` job runs them. No H,
+  SDK, wire or SQL change; there is no deployment, physical-device or
+  real-runtime evidence yet.
 - **Fix (examples)** — K8 L refuses `execution` routines at creation, as H
   does (#954). K8 owns only Turn and Host intents, so no K8 owner could settle
   such a routine's occurrence intent. K4 gets `HostOptions.executionRoutines`
