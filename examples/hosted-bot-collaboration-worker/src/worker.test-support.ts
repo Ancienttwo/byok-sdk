@@ -19,6 +19,10 @@ import { createPostgresCoreStores, createByokPool, migrate, migrationsDir } from
 import { tenantId } from '@byok-sdk/cloud';
 import { HostedCollaborationStore, type HostConfig } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
 import type { Principal } from '@byok-sdk/example-bot-collaboration/channel';
+import { seedCollaboration } from '@byok-sdk/example-bot-collaboration/test-support';
+import { taskId } from '@byok-sdk/example-host-execution-core';
+import { template } from '@byok-sdk/example-host-execution-core/test-support';
+import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout';
 import { hostScopeDdl, sha256Hex, writeHostScope } from './host-scopes';
 import type { ChildMessage, ParentMessage } from './device.child';
 import type { PassReport } from './worker';
@@ -286,3 +290,69 @@ export async function until<T>(check: () => Promise<T | undefined>, timeoutMs = 
     await new Promise(resolve => setTimeout(resolve, intervalMs));
   }
 }
+
+/**
+ * One substrate, one paired device process, and its scope (`home`: the SDK tenant that owns the enrollment), with a Worker
+ * instance that a test may kill and restart on the same port, so the device reconnects to the new instance.
+ */
+export async function openHome(options: WorkerOptions = {}) {
+  const substrate = await openSubstrate();
+  const home = `worker-tenant-${randomUUID()}`;
+  let worker: WorkerInstance | undefined, device: DeviceProcess | undefined;
+  try {
+    await substrate.provision(home, OWNER, { models: { default: template('pending', 'main') }, readOnlyToolsets: [] });
+    worker = await startWorker(substrate, options);
+    const { code } = await worker.admin<{ code: string }>('/host/pairing-code', { scope: home });
+    device = await startDevice(worker.base, code);
+  } catch (error) {
+    await device?.stop(); await worker?.kill(); await substrate.dispose();
+    throw error;
+  }
+  const port = Number(new URL(worker.base).port);
+  const h = substrate.hSchema;
+  return {
+    substrate, home, device,
+    get worker() { return worker!; },
+    /** Destroys the running instance and starts a new one on the same port, with these options (no fault by default). */
+    async restart(next: WorkerOptions = {}) {
+      await worker!.kill();
+      worker = await startWorker(substrate, { ...next, port });
+      return worker;
+    },
+    /** A Main Bot on the device with its own Agent, bound to H. Returns a new owner session token. */
+    async bot(agentId = `agent-${randomUUID()}`) {
+      const execution = template(device!.deviceId, agentId);
+      const token = await substrate.provision(home, OWNER, { models: { default: execution }, readOnlyToolsets: [] });
+      await substrate.store.seed(home, state => {
+        seedCollaboration(state);
+        Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+        state.team.bots.main!.execution = execution;
+      });
+      await substrate.store.bindDevice(home, device!.deviceId);
+      return { token, agentId };
+    },
+    /** The owner's input through the Worker's command entry. Returns the Turn id and its task id. */
+    async input(token: string, request = 'Hello from the Worker') {
+      const response = await worker!.input(token, 'main', `k-${randomUUID()}`, request);
+      if (response.status !== 200) throw new Error(`input: HTTP ${response.status} ${await response.text()}`);
+      const { turnId } = await response.json() as { turnId: string };
+      return { turnId, task: taskId(turnId, 0) };
+    },
+    intent: async (turnId: string) => (await substrate.pool.query<{ tries: number; submission: string; conclusion: string | null }>(
+      `SELECT tries, submission, conclusion FROM "${h}".intent WHERE scope = $1 AND key = $2`, [storedKey(home), storedKey(turnId)])).rows[0],
+    /** The command record ids of the scope. A terminal's outcome commits under its task id. */
+    commands: async () => (await substrate.pool.query<{ key: string }>(
+      `SELECT key FROM "${h}".command WHERE scope = $1 ORDER BY key`, [storedKey(home)])).rows.map(row => JSON.parse(row.key) as string),
+    /** The envelope types of the SDK mailbox rows that name `task`. One offer is one row, however many submits resolved. */
+    mailbox: async (task: string) => (await substrate.pool.query<{ type: string }>(
+      `SELECT body::jsonb->>'type' AS type FROM "${substrate.sdkSchema}".outbox WHERE tenant_id = $1 AND position($2 in body) > 0 ORDER BY seq`,
+      [home, task])).rows.map(row => row.type),
+    /** The SDK attempt status of `task`, the durable fact that a device terminal committed. */
+    taskStatus: async (task: string) => (await substrate.pool.query<{ status: string }>(
+      `SELECT status FROM "${substrate.sdkSchema}".task WHERE tenant_id = $1 AND task_id = $2`, [home, task])).rows[0]?.status,
+    turn: async (turnId: string) => (await substrate.store.read(home)).turns[turnId],
+    async close() { await device?.stop(); await worker?.kill(); await substrate.dispose(); },
+  };
+}
+export type Home = Awaited<ReturnType<typeof openHome>>;
+const OWNER = { id: 'owner', kind: 'human' } as const;
