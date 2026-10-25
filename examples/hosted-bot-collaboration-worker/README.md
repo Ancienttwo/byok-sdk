@@ -16,7 +16,10 @@ invocation is done:
 - `createPostgresCoreStores` and `createPostgresCloudStores` from `@byok-sdk/cloud-dataplane/runtime`, and
   `createByokCloud` with H's message consumer and a new in-process mailbox wake with a 1 s fallback;
 - `HostedCollaborationStore` and its passes: the routine scheduler (`start()` and `run()`), the reconciler, the composed
-  sync of each changed scope (reply checker, device observer, `store.sync`), the due scheduler and the submitter.
+  sync of each changed scope (reply checker, device observer, `store.sync`), the due scheduler and the submitter, then
+  the composed sync of each scope where the submitter concluded an intent with no SDK call (its `changed` option: the
+  queued expiry, or a sealed row with no sealed lane), so that Turn settles in the same pass. The task port has both
+  lanes: `submit` is `submitAgentExecution`, and `submitSealed` is `submitSealedAgentExecution`.
 
 A device response keeps its invocation's pools open until its body ends or is cancelled (`src/body-lifetime.ts`): the
 board SSE stream keeps querying after `cloud.fetch` returns its headers.
@@ -47,6 +50,8 @@ from Node before `wrangler dev` starts. The Worker never migrates.
 | --- | --- | --- |
 | `/byok/*` | device | the SDK device surface (`cloud.fetch`) |
 | `POST /host/input` | owner, with the session bearer | `HostedCommandEntry.input`: authenticate, commit, sync |
+| `POST /host/sealed-routine` | owner, with the session bearer | `HostedCommandEntry.createSealedRoutine`: the member endpoint's sealed routine (#953) |
+| `POST /host/sealed-routine/reseal` | owner, with the session bearer | `HostedCommandEntry.resealRoutine`: the next version of a sealed routine, after its Bot's Agent changed (#953) |
 | `POST /host/passes` | operator bearer | one Host pass; returns its report |
 | `POST /host/pairing-code` | operator bearer | `cloud.createPairingCode` for a provisioned scope |
 | `POST /host/board-item` | operator bearer | `cloud.createBoardItem`: the Host's own board write |
@@ -97,6 +102,12 @@ a failure (`src/ci.test.ts` pins that step). Each run has its own Postgres role 
   once) records one occurrence and makes one offer; an instance lost mid-alarm after the routine Turn's submit leaves one
   occurrence and one offer, and the next instance's stored alarm reads the offer back; a coalesced input batch seals with
   reason `window` within a minute of its seal time; dropped alarms leave a due batch open, and the next alarm seals it.
+- `sealed.test.ts` (#953): an owner creates a sealed routine through `/host/sealed-routine`, and its occurrence goes to
+  `submitSealedAgentExecution`, not `submit`. The device has no E2EE member keyring, so the SDK refuses the sealed offer
+  before its mailbox append (`sealed-payload-v1`), and no mailbox row is written. Also an untried intent that reaches
+  its wait time ends `expired` in the submitter, and its Turn ends in the same pass. A reseal through
+  `/host/sealed-routine/reseal` with no open occurrence replaces version 1 with version 2 at once. A request with no
+  session or an unknown one gets 401, and another scope's owner acts only in its own scope; neither writes anything here.
 - `faults.test.ts`: a lost notification (the alarm passes find the work); a duplicate notification (one submit, one
   outcome); an instance destroyed after the SDK accepted a submit (the next instance reads the offer back and submits
   nothing new); an instance destroyed after it read a device terminal (the next one applies the outcome once); a scope
@@ -121,7 +132,7 @@ Each row's result is recorded in its PR, with the commit and the CI run.
 | Row | Evidence here | What it still needs |
 | --- | --- | --- |
 | Node H (D2) | `examples/hosted-bot-collaboration` on Node and Postgres (D2's suites) | none from this lane |
-| Worker H, local workerd | `worker.test.ts`, `faults.test.ts`, `clock.test.ts` on wrangler 4.123.0 (workerd 1.20260811.1), Postgres 17, the compose S3 endpoint | a deployment: real Hyperdrive (transaction pooling, the connection limit per invocation), R2 over its S3 endpoint, Durable Object alarms on Cloudflare (at-least-once delivery, retries, placement), cron on Cloudflare (the clock's start and recovery path), isolate eviction by Cloudflare |
+| Worker H, local workerd | `worker.test.ts`, `faults.test.ts`, `clock.test.ts`, `sealed.test.ts` on wrangler 4.123.0 (workerd 1.20260811.1), Postgres 17, the compose S3 endpoint | a deployment: real Hyperdrive (transaction pooling, the connection limit per invocation), R2 over its S3 endpoint, Durable Object alarms on Cloudflare (at-least-once delivery, retries, placement), cron on Cloudflare (the clock's start and recovery path), isolate eviction by Cloudflare, and a sealed routine run on a device with the hosted E2EE member setup |
 | Two device processes, one Host | `two-devices.test.ts`, synthetic runtime, one computer | two physical computers (macOS and Windows), each with its own OS user and network path |
 | Real runtime delegation and reply | none: no paid runtime call is approved | one A -> B -> A chain with real runtimes, each call approved by the maintainer, recorded apart from the synthetic results |
 
