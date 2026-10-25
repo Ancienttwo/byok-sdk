@@ -68,8 +68,11 @@ a Bot's agentRef, that Bot's later Turns wait until it settles. An exact replay
 returns the same intent while K4 keeps it.
 
 A K4 terminal that K8 cannot apply leaves its intent open: a key that is neither
-a Bot Turn nor a Host intent, for example from a direct `bot.core.enqueue`, or a
-Host handler that throws or returns a promise. Then `drain()` rejects with
+a Bot Turn nor a Host intent, for example from a direct `bot.core.enqueue`
+(`unknown_intent`), a Host handler that throws or returns a promise
+(`handler_failed`), or a Bot Turn whose outcome commit throws, for example a
+document outside its frozen schema (`outcome_failed`). After the owner call, the
+next sync settles such a Bot Turn as `failed` and reports it. Then `drain()` rejects with
 `IntentOutcomeError`, and so does every API that runs a pass, including `input`
 and the `wake.consume` hook. The audit gets one row for each key and reason. The
 intent stays at the head of its FIFO until its outcome applies, for example
