@@ -300,10 +300,11 @@ turns off what it can and refuses the start when anything else is on:
 
 - It sets `GROK_CLAUDE_MCPS_ENABLED`, `GROK_CURSOR_MCPS_ENABLED` and
   `GROK_MANAGED_MCPS_ENABLED` to `0` on the Grok agent process.
-- Before the agent starts, it runs `grok inspect --json` in the task cwd with
-  the agent's environment. The start fails if inspect lists an MCP server that
-  is not `disabled`, or an enabled plugin that provides MCP servers, or if
-  inspect fails, times out (5 s) or prints output the adapter cannot read.
+- Before the agent starts, it runs `grok inspect --json` with the agent's
+  command, task cwd and environment, through the same `spawnFn`. The start
+  fails if inspect lists an MCP server that is not `disabled`, or an enabled
+  plugin that provides MCP servers, or if inspect fails, times out (5 s),
+  prints more than 16 MiB or prints output the adapter cannot read.
 
 A user who keeps all their servers in `~/.claude.json` or `~/.cursor/mcp.json`
 can run Agent tasks; any enabled server in a Grok-native source stops them.
