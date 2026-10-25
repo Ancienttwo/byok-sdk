@@ -51,6 +51,16 @@ describe('withCodexUserMcpServersExcluded', () => {
     });
   });
 
+  it('keeps the denied tools the open already sets on a user server, with the server disabled', () => {
+    const denied = { ...OPEN, config: { ...OPEN.config, mcp_servers: { ...OPEN.config.mcp_servers, probe_user: { disabled_tools: ['send'] } } } };
+    expect((withCodexUserMcpServersExcluded(denied, EFFECTIVE, ['byokagentmemory']).config as Record<string, unknown>).mcp_servers).toEqual({
+      probe_project: { enabled: false },
+      probe_user: { disabled_tools: ['send'], enabled: false },
+      'probe.dotted': { enabled: false },
+      byokagentmemory: TASK,
+    });
+  });
+
   it('adds the features to an open with no config and no configured servers', () => {
     expect(withCodexUserMcpServersExcluded({ threadId: 't' }, { config: {} }, [])).toEqual({
       threadId: 't',
@@ -107,8 +117,14 @@ describe('verifyCodexUserMcpServersExcluded', () => {
       .toBe('codex Agent thread still runs MCP servers outside the task: codex_apps, probe_plugin_srv (plugin probe-plugin@probe-market), user_notes');
   });
 
+  it('refuses a plugin server that has the name of a task server', async () => {
+    const { request } = pages({ data: [status('byokagentmemory', 'connected'), status('byokagentmemory', 'connected', 'probe-plugin@probe-market')] });
+    expect(await refusal(() => verifyCodexUserMcpServersExcluded(request, 'thread-1', ['byokagentmemory'])))
+      .toBe('codex Agent thread still runs MCP servers outside the task: byokagentmemory (plugin probe-plugin@probe-market)');
+  });
+
   it('refuses a reply it cannot read, a cursor that never ends included', async () => {
-    const replies: Record<string, unknown>[] = [{}, { data: [{ runtimeStatus: 'disabled' }] }, { data: [], nextCursor: 7 }];
+    const replies: Record<string, unknown>[] = [{}, { data: [{ runtimeStatus: 'disabled' }] }, { data: [{ ...status('x', 'disabled'), pluginId: 7 }] }, { data: [], nextCursor: 7 }];
     const requests: CodexOpenStepRequest[] = [...replies.map(reply => pages(reply).request), async () => ({ data: [], nextCursor: 'again' })];
     for (const request of requests) {
       expect(await refusal(() => verifyCodexUserMcpServersExcluded(request, 't', [])))

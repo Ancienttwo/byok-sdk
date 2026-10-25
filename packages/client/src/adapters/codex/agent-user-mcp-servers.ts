@@ -20,7 +20,8 @@ const MAX_STATUS_PAGES = 64;
  * servers are not listed in `mcp_servers`, so the thread loses its plugins
  * altogether, not only their servers. A user entry named like a task
  * server would be merged into it field by field, keeping the user's `env`,
- * `cwd` and tool filters, so it refuses the start instead.
+ * `cwd` and tool filters, so it refuses the start instead. An override the
+ * request already holds for a user entry, such as its denied tools, stays.
  */
 export function withCodexUserMcpServersExcluded(params: JsonRecord, effective: JsonRecord, taskServers: readonly string[]): JsonRecord {
   const configured = effective.config === undefined ? undefined : record(effective.config);
@@ -30,11 +31,12 @@ export function withCodexUserMcpServersExcluded(params: JsonRecord, effective: J
   const shared = names.filter(name => taskServers.includes(name)).sort();
   if (shared.length > 0) throw refuse(`${PREFIX}: user MCP servers share a name with task servers: ${shared.join(', ')}`);
   const config = record(params.config) ?? {};
+  const opened = record(config.mcp_servers) ?? {};
   return {
     ...params,
     config: {
       ...config,
-      mcp_servers: { ...Object.fromEntries(names.map(name => [name, { enabled: false }])), ...record(config.mcp_servers) },
+      mcp_servers: { ...opened, ...Object.fromEntries(names.map(name => [name, { ...record(opened[name]), enabled: false }])) },
       features: { ...record(config.features), apps: false, plugins: false },
     },
   };
@@ -54,8 +56,11 @@ export async function verifyCodexUserMcpServersExcluded(request: CodexOpenStepRe
     for (const entry of reply.data) {
       const server = record(entry);
       if (typeof server?.name !== 'string') throw refuse(UNREADABLE_STATUS);
-      if (taskServers.includes(server.name) || server.runtimeStatus === 'disabled') continue;
-      leaks.push(typeof server.pluginId === 'string' ? `${server.name} (plugin ${server.pluginId})` : server.name);
+      const plugin = server.pluginId ?? undefined;
+      if (plugin !== undefined && typeof plugin !== 'string') throw refuse(UNREADABLE_STATUS);
+      // A plugin server may carry a task server's name; only a configured server is the task's.
+      if ((plugin === undefined && taskServers.includes(server.name)) || server.runtimeStatus === 'disabled') continue;
+      leaks.push(plugin === undefined ? server.name : `${server.name} (plugin ${plugin})`);
     }
     if (reply.nextCursor === undefined || reply.nextCursor === null) {
       if (leaks.length > 0) throw refuse(`codex Agent thread still runs MCP servers outside the task: ${leaks.sort().join(', ')}`);
