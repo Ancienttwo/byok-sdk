@@ -18,7 +18,7 @@ import {
   type MemberKeys,
   type SealedContentHeaderV1,
 } from '@byok-sdk/core/sealed-payload';
-import { E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX } from '@byok-sdk/protocol';
+import { E2EE_SCOPE_ID_MAX_LENGTH, E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AuthManager } from '../daemon/auth-manager';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
@@ -26,7 +26,9 @@ import { DeviceMemberRecords } from '../daemon/device-member-custody';
 import { enrollDeviceMember, resumeDeviceMember } from '../daemon/device-member';
 import { StoredDeviceProofSigner } from '../daemon/device-proof-signer';
 import { DeviceMemberKeyring } from '../daemon/e2ee-keyring';
-import { E2eeMemberClient, MEMBER_CHAIN_PAGE_MAX_BYTES, MEMBER_OBJECT_MAX_BYTES } from '../daemon/e2ee-member-client';
+import {
+  E2eeMemberClient, MEMBER_CHAIN_PAGE_MAX_BYTES, MEMBER_OBJECT_MAX_BYTES, MEMBER_PACKAGE_PAGE_MAX_BYTES,
+} from '../daemon/e2ee-member-client';
 import { enrollmentIdentityOf } from '../daemon/store';
 import { InMemoryDeviceMemberCustody, testDeviceCredentials } from './fixtures/credential-backend';
 import type { E2eeTestHost } from './fixtures/e2ee-test-host';
@@ -264,6 +266,24 @@ describe('device member keyring (E2d-2)', () => {
     const page = await options.client.readOwnKeyPackages('scope-a', 0);
     expect([...page.packages.keys()]).toEqual([1]);
     expect(page.scopeHeadEpoch).toBe(1);
+  });
+
+  it('reads a full page of packages whose ids are the longest the Host allows, all escaped, and refuses a larger page body as final', async () => {
+    const { server, web, device, options } = await member();
+    await web.putScope('scope-a', [device]);
+    const pkg = await web.sealPackage('scope-a', device, new Uint8Array(32).fill(3));
+    // Each package repeats its ids; a control character is escaped as `\uXXXX`, six bytes per unit.
+    const packages = Array.from({ length: E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX }, (_, index) => ({
+      ...pkg, epoch: index + 1, tenantId: '\u0001'.repeat(200), scopeId: '\u0001'.repeat(E2EE_SCOPE_ID_MAX_LENGTH),
+    }));
+    server.e2ee.pageResponse = { packages, scopeHeadEpoch: E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX };
+    expect(Buffer.byteLength(JSON.stringify(server.e2ee.pageResponse))).toBeGreaterThan(64 * 1024);
+    const page = await options.client.readOwnKeyPackages('scope-a', 0);
+    expect(page.packages.size).toBe(E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX);
+    server.e2ee.pageResponse = { packages: [{ epoch: 1, pad: 'x'.repeat(MEMBER_PACKAGE_PAGE_MAX_BYTES) }], scopeHeadEpoch: 1 };
+    await expect(options.client.readOwnKeyPackages('scope-a', 0)).rejects.toMatchObject({
+      name: 'E2eeMemberClientError', final: true, message: `key package page read returned a body larger than ${MEMBER_PACKAGE_PAGE_MAX_BYTES} bytes`,
+    });
   });
 
   it('refuses a chain page body over its byte cap as final', async () => {
@@ -1277,6 +1297,31 @@ describe('device member KEM rotation (E2d-5)', () => {
     expect(added).toBe(true);
     expect(server.e2ee.devicePuts.map((put) => put[0]!.scopeId)).toEqual(['scope-a']);
     expect(logs.join('\n')).toContain('epoch 1 of scope "scope-c" holds a key package that opens only with the old KEM key');
+    expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+  });
+
+  it('keeps the old key when a policy accepts again, during the rotation, the sender of an old-key package that a re-wrapped scope skipped', async () => {
+    const { server, web, device, custody, logs, keyring } = await member();
+    const helper = await stranger();
+    await web.append('add', { member: helper.member });
+    await web.putScope('scope-c', [device, helper.member]);
+    server.e2ee.clientPutPackages(await helper.sealPackage('scope-c', device, new Uint8Array(32).fill(6), 2));
+    await web.append('scope-policy', { scopeId: 'scope-c', categories: ['task-input', 'task-output'], members: [web.member.memberId, device.memberId].sort() });
+    await web.putScope('scope-a', [device]);
+    const handle = server.e2ee.handle.bind(server.e2ee);
+    let puts = 0;
+    server.e2ee.handle = async (req, res, url) => {
+      // The first put is scope-c's re-wrap, which skipped the helper's package; the second is scope-a's.
+      if (req.method === 'POST' && url.pathname.endsWith('/key-packages') && ++puts === 2) {
+        await web.follow();
+        const members = [web.member.memberId, device.memberId, helper.member.memberId].sort();
+        await web.append('scope-policy', { scopeId: 'scope-c', categories: ['task-input', 'task-output'], members });
+      }
+      return handle(req, res, url);
+    };
+    expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'rewrap_unverified' });
+    expect(server.e2ee.devicePuts.map((put) => put[0]!.scopeId)).toEqual(['scope-c', 'scope-a']);
+    expect(logs.join('\n')).toContain('epoch 2 of scope "scope-c" holds a key package that opens only with the old KEM key');
     expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
   });
 

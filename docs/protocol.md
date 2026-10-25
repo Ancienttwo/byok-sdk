@@ -1578,8 +1578,9 @@ command and not only the string.
 - Each answer body has a byte cap, and a longer body is cut off unparsed: a
   chain page at 256 times the largest entry (`MEMBER_CHAIN_PAGE_MAX_BYTES`),
   a key package, relayed MAC or registration answer at 8 KiB
-  (`MEMBER_OBJECT_MAX_BYTES`), a page of own key packages at 32 KiB
-  (`MEMBER_PACKAGE_PAGE_MAX_BYTES`), an error body at 1 KiB. A key package
+  (`MEMBER_OBJECT_MAX_BYTES`), a page of own key packages at 96 KiB
+  (`MEMBER_PACKAGE_PAGE_MAX_BYTES`, 16 packages with the longest scope and
+  tenant ids escaped), an error body at 1 KiB. A key package
   read that returns more than one package is refused, and so is a page with
   more than 16 packages, packages not in ascending epoch order above
   `afterEpoch`, or no valid `scopeHeadEpoch`, or one below the newest
@@ -1632,17 +1633,16 @@ member's KEM key rotates by epoch; its member id does not change. The steps:
    freshness point must still be found, and no package from an accepted
    sender may still open only with the old key. Otherwise the rotation stops
    and keeps the old key.
-5. Once every scope is done, it catches up and checks every scope it may
-   use at the new head once more. For a scope step 3 re-wrapped, each epoch
-   whose key the run holds and each epoch with a freshness point must still
-   be found, also when the run opened it or gained the point during the
-   rotation; a missing one stops the rotation with `key_package_missing`.
-   A scope that became usable, or was created, during the rotation is read
-   back as in step 4: no package from an accepted sender may open only with
-   the old key, such as one put before the `rotate` that step 3 skipped.
-   Otherwise the rotation stops and keeps the old key, and the next
-   rotation re-wraps that package. Each failed check logs the scope id and
-   the epoch.
+5. Once every scope is done, it catches up and reads back every scope it
+   may use at the new head as in step 4. Each epoch whose key the run holds
+   and each epoch with a freshness point must still be found, also when the
+   run opened it or gained the point during the rotation; a missing one
+   stops the rotation with `key_package_missing`. No package from an
+   accepted sender may open only with the old key, such as one put before
+   the `rotate` that step 3 skipped because its scope or its sender was not
+   usable then. Otherwise the rotation stops and keeps the old key, and the
+   next rotation re-wraps that package. Each failed check logs the scope id
+   and the epoch.
 6. Only then does it drop the old private key from the record.
 
 A rotation reads each usable scope's pages three times (steps 3 to 5). A

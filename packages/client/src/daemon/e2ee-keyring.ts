@@ -548,18 +548,15 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     await Promise.allSettled([...this.#rotations.values()]);
     const session = this.#session;
     if (session === undefined) return 'member_lost';
-    const done = new Set<string>();
     for (const scopeId of session.state.scopes.keys()) {
-      const result = await this.#rewrapScope(scopeId, next);
-      if (typeof result === 'string') return result;
-      if (result) done.add(scopeId);
+      const failure = await this.#rewrapScope(scopeId, next);
+      if (failure !== undefined) return failure;
     }
     // The Host refuses every put wrapped to the old key once the `rotate` is
-    // on the chain (§77a), so a scope re-wrapped above needs only its held
-    // and fresh epochs to read back still. A scope that became usable, or
-    // was created, during the run is read back in full: a package put before
-    // the `rotate`, which the re-wrap skipped, must not open only with the
-    // old key; the next run's resumed rotation re-wraps it.
+    // on the chain (§77a). A package put before it that the re-wrap skipped,
+    // because its scope or its sender was not usable then, may be accepted at
+    // the caught-up head: it must not open only with the old key; the next
+    // run's resumed rotation re-wraps it.
     await this.catchUp();
     for (const scopeId of this.#session?.state.scopes.keys() ?? []) {
       const view = this.#session;
@@ -569,16 +566,14 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       const fresh = [...this.#fresh.get(scopeId)?.keys() ?? []];
       const found = await this.#readEpochs(scopeId);
       if (found === undefined) return 'scope_epochs_exceeded';
-      const failure = done.has(scopeId)
-        ? this.#missing(scopeId, found, held, fresh)
-        : await this.#readBack(view, scopeId, found, new Map(), next, view.keys.kem, held, fresh);
+      const failure = await this.#readBack(view, scopeId, found, new Map(), next, view.keys.kem, held, fresh);
       if (failure !== undefined) return failure;
     }
     return undefined;
   }
 
   /**
-   * One scope's re-wrap; `false` for a scope the member may not use. Its
+   * One scope's re-wrap; nothing for a scope the member may not use. Its
    * senders are checked against the verified view of one try; when a
    * catch-up moves the view during the try, it starts again, at most three
    * times. Every package found that `fetch` accepts, and every epoch this
@@ -586,11 +581,11 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
    * `keyId`, every epoch with a freshness point must hold a package, and no
    * package `fetch` accepts may still open only with the old key.
    */
-  async #rewrapScope(scopeId: string, next: MemberKemKey): Promise<KemRotationFailure | boolean> {
+  async #rewrapScope(scopeId: string, next: MemberKemKey): Promise<KemRotationFailure | undefined> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const view = this.#session;
       if (view === undefined) return 'member_lost';
-      if (this.#scopeFailure(view, scopeId) !== undefined) return false;
+      if (this.#scopeFailure(view, scopeId) !== undefined) return undefined;
       // Taken with the view: a catch-up drops the keys of a sender it drops in the same step.
       const held = this.#heldEpochs(scopeId);
       const fresh = [...(this.#fresh.get(scopeId)?.keys() ?? [])];
@@ -632,7 +627,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       }
       const back = await this.#readEpochs(scopeId);
       if (back === undefined) return 'scope_epochs_exceeded';
-      return await this.#readBack(this.#session ?? view, scopeId, back, expected, next, old, held, fresh) ?? true;
+      return await this.#readBack(this.#session ?? view, scopeId, back, expected, next, old, held, fresh);
     }
     return 'chain_moved';
   }
