@@ -2,6 +2,7 @@
 
 > 状态：CURRENT，人工绘制；每个节点和边都对照过源码。
 > 核对基准：commit `142acbe2`（2026-10-24）。文中 `path:line` 均指这一版，路径相对仓库根。
+> 例外：本机 journal 的部分按 #941 合入后的源码（`93b8e8ff`）改写，其中的 `path:line` 指那一版；#941 起每个 daemon 都有 journal。其余内容仍对照 `142acbe2`。
 > 与 [`sdk-architecture.md`](sdk-architecture.md) 不一致时以源码为准，已知差异由 #927 跟踪。
 > 图例：实线箭头表示运行时 import 或调用；虚线表示进程边界、网络边界或可选路径；虚线框是 SDK 不提供、需要 Host 自备的部分。图中 package 名省略 `@byok-sdk/` 前缀。
 
@@ -165,9 +166,7 @@ sequenceDiagram
     Note over K,TR: ② 投递
     K->>S: readAfter(N)<br/>记录 delivery
     K-->>CM: 返回一页 events：offer
-    opt hostedJournal
-      CM->>CM: journal 追加并 fsync
-    end
+    CM->>CM: journal 追加并 fsync
     CM->>TR: handleEnvelope
   end
 
@@ -226,7 +225,7 @@ sequenceDiagram
 ```
 
 - **参与者 H** 合并了 Host 代码与 server façade（relay、TaskHandle）。Topology H 的 Host 直接调用 `ByokCloud` 上对应的 `submitAgentExecution`、`cancelTask`、`readTaskResult`（`packages/cloud/src/cloud.ts:2339`、`:2721`、`:2827`）。
-- **ack 时机**：cursor 只在 handler 成功返回并原子落盘后前进，下一次 GET 才携带它；cloud 读取之前先 `advanceCursor`（`packages/cloud/src/handlers/events.ts:136-147`，`packages/client/src/daemon/connection-manager.ts:758-815`）。配置了 `hostedJournal` 时，offer 在 handler 里先 fsync 进 SQLite journal（`packages/client/src/daemon/create-daemon.ts:3127-3139`），没配置时没有这一步。handler 失败时 cursor 不动，mailbox 重投同一行。
+- **ack 时机**：cursor 只在 handler 成功返回并原子落盘后前进，下一次 GET 才携带它；cloud 读取之前先 `advanceCursor`（`packages/cloud/src/handlers/events.ts:136-147`，`packages/client/src/daemon/connection-manager.ts:758-815`）。每个 daemon 都有 journal（#941）：offer 在 handler 里先 fsync 进 SQLite journal，再交给 TaskRunner（`93b8e8ff` 的 `packages/client/src/daemon/create-daemon.ts:3048-3103`）。handler 失败时 cursor 不动，mailbox 重投同一行。
 - **offer handler 不等任务结束**：`task.started` 发出、事件泵启动后就返回（`packages/client/src/daemon/task-runner.ts:3254-3280`），所以 ack 发生在执行期间。
 - **批量上限**：progress 由 `ProgressBatcher` 成批发送；每次 POST 最多 256 条、2 MiB（`packages/protocol/src/http-api.ts:269-272`）。
 - **终态内容**：`task.complete` 带 summary、finalMessage、sessionRef 与 usage。`task.fail` 带 reason、retryable 与 `failure`；runtime 失败时三者由 adapter 的 `RuntimeExecutionFailure` 投影而来（`packages/client/src/runtime-failure.ts:162-188`），daemon 自己判定的失败带 `{ class: 'unknown' }`（`packages/client/src/daemon/task-failure.ts:4`）。`failure` 是封闭的失败类别，`resetsAt` 只出现在 `quota` 上（`packages/protocol/src/messages.ts:1292-1295`）；只有声明了 `runtime-failure-class` 的 server 才会收到它（`packages/protocol/src/wire-additions.ts:154`）。
@@ -342,7 +341,7 @@ storeDir 的内容（Agent home 的布局见 [`host-local-storage-layout.md`](..
 <storeDir>/                        默认 ~/.byok/<productId>
   device.json                      enrollment 的非秘密投影；私钥与 token 在 OS 凭据库
   cursor-<hash>.json               已落盘的 mailbox cursor
-  daemon.db                        hostedJournal（SQLite），可选
+  daemon.db                        本机 journal（SQLite），每个 daemon 都有
   control.sock  control.token      控制通道与 HMAC 密钥
   mutex.sock  daemon-owner.json    单 daemon 所有权
   owned-processes/                 POSIX 进程组台账

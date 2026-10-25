@@ -2512,7 +2512,7 @@ channel is an artifact, not a document.
 server-advertised `result-document` flag, because a pre-`document` server
 silently strips the field. Every v3 server keeps it, and v3 has no reader for
 another major, so the flag and its gate are gone. On the server, `document` is
-projected verbatim into `TaskResult.document` (`hub.ts`) and persists inside
+projected verbatim into `TaskResult.document` (`packages/server/src/snapshot.ts`) and persists inside
 the same `result_json` record that already carries `summary`/`artifactRefs`:
 no new column, no migration, no second authority.
 

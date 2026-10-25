@@ -901,7 +901,9 @@ export interface ByokCloud {
    * has always had (`TaskApprovePayloadSchema`, `@byok-sdk/protocol`): the
    * enqueued envelope is durable, the runtime's response to it is observable
    * only through that task's own later messages. The outgoing `approvalId` is
-   * the caller's when given, else the pending one, else omitted.
+   * the pending request's id, else omitted; `opts.approvalId` is only compared
+   * against it (gate 3) and is never sent, even when the pending request has
+   * no id.
    */
   approveTask(
     tenant: TenantId,
@@ -926,9 +928,9 @@ export interface ByokCloud {
    *
    * Gated on the claim-time capability snapshot and on nothing else — see
    * `steer-control.ts` for why that is the only admissible input and why an
-   * absent snapshot refuses. Gate order mirrors the reference server
-   * (`ConnectionHub.steerTask`, `packages/server/src/hub.ts`), and every gate is
-   * evaluated in full before a mailbox row is allocated, so a refused call has
+   * absent snapshot refuses. Gate order mirrors the old
+   * reference server's `ConnectionHub.steerTask`, and every gate is evaluated
+   * in full before a mailbox row is allocated, so a refused call has
    * zero side effects:
    *
    *   1. no such task for this tenant -> `task_not_found` ({@link ByokCloudError});

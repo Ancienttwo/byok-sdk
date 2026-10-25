@@ -2344,8 +2344,8 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
 }, z.core.$strip>;
 export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
 /**
- * `accepted` counts every envelope `ConnectionHub.handleInbound` returned
- * `'accepted'` *or* `'duplicate'` for — a deduped replay is a wire-level
+ * `accepted` counts every envelope the inbound gate (`@byok-sdk/cloud`'s
+ * `handleInboundEnvelope`) answered `'accepted'` *or* `'duplicate'` for — a deduped replay is a wire-level
  * success even though the business mutation did not run a second time.
  * `rejected` is omitted when zero. `outcomes` is required and correlates
  * exactly one result with each posted envelope; a rejected outcome carries its
@@ -5710,8 +5710,8 @@ export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
  * resolves, `docs/protocol.md`): today the server only learns of a local
  * resolution IMPLICITLY, after the fact, once the daemon's next
  * `task.progress`/`task.artifact`/`task.complete` proves the task already
- * moved on (`ConnectionHub.resumeIfImplicitlyApproved`,
- * `packages/server/src/hub.ts`) — a window in which a SaaS-side
+ * moved on (the `relay.onTaskActivity` hook in
+ * `packages/server/src/index.ts`) — a window in which a SaaS-side
  * `TaskHandle.approve()`/`.reject()` can independently decide (and win) the
  * server's own authoritative record before that evidence ever arrives. This
  * message lets the daemon report the local resolution explicitly and
@@ -6798,12 +6798,12 @@ export declare const MESSAGE_TYPES: MessageType[];
 export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "task.offer_prepared", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "provider.provisioning.available", "agent.memory.intent.available", "task.approve", "task.reject", "task.cancel", "task.steer", "task.offer_sealed", "task.offer_with_toolsets_sealed", "task.offer_for_agent_sealed", "task.offer_for_agent_with_egress_sealed", "task.offer_for_agent_with_egress_fresh_sealed", "task.steer_sealed", "e2ee.key_package.available"];
 /**
  * Message types the daemon sends to the server — the flip side of
- * {@link SERVER_TO_DAEMON_TYPES}. `conn.hello` is deliberately excluded: it's
- * only ever valid as the first frame of a WS handshake (`ws-server.ts`), not
- * as ongoing inbound traffic through `ConnectionHub.handleInbound`.
+ * {@link SERVER_TO_DAEMON_TYPES}. `conn.hello` is deliberately excluded: the
+ * inbound gate handles a bearer-authenticated `conn.hello` as a capability
+ * snapshot on its own, before the type-allow check.
  *
- * Used by `handleInbound` (`@byok-sdk/server`'s `hub.ts`) as the type-allow gate
- * for every inbound envelope, WS and `POST /byok/messages` alike (finding
+ * Used by `handleInboundEnvelope` (`@byok-sdk/cloud`'s `inbound.ts`) as the
+ * type-allow gate for every inbound `POST /byok/messages` envelope (finding
  * P2): a `type` outside this set — a server -> daemon type arriving inbound,
  * or anything unrecognized — is rejected before it's dispatched to any
  * handler or counted `accepted` on the `/byok/messages` wire.
@@ -7873,7 +7873,7 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * advertised capabilities never include it, so a new daemon talking to an old
  * server never sends `task.approval_resolved` at all (see `packages/client`'s
  * `task-runner.ts`) and falls back to the pre-existing implicit-resume inference
- * (`ConnectionHub.resumeIfImplicitlyApproved`, `packages/server/src/hub.ts`)
+ * (the `relay.onTaskActivity` hook in `packages/server/src/index.ts`)
  * unconditionally, exactly as before this flag existed. Unlike
  * `interactive-approval`, this one IS exercised the moment both sides
  * support it — there is no reserved/dormant period for it.
@@ -7890,13 +7890,14 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * by FIELD PRESENCE on the specific message at hand (does this particular
  * `task.approve`/`task.reject`/`onApprovalResolved` payload carry an
  * `approvalId`, and does a stored one exist to compare it against?), never
- * by checking this flag -- see `ConnectionHub.approveTask`/`rejectTask`/
- * `onApprovalResolved` and `TaskRunner.handleApprove`/`handleReject`
- * (`packages/client`'s `task-runner.ts`). This flag exists only so each side
- * can advertise, and an embedder/operator can observe (`ConnectionHub.
- * getDeviceCapabilities`), whether the OTHER side is new enough to
- * participate in targeting at all -- the same N/N-1-safe shape as every
- * other flag here, just consumed for observability instead of gating.
+ * by checking this flag -- see `approveTask`/`rejectTask` (`@byok-sdk/cloud`)
+ * and `TaskRunner.handleApprove`/`handleReject` (`packages/client`'s
+ * `task-runner.ts`). This flag exists only so each side can advertise
+ * whether the OTHER side is new enough to participate in targeting at all (an
+ * embedder could observe it through the old
+ * reference server's `ConnectionHub.getDeviceCapabilities`; `@byok-sdk/server`
+ * now reads it only internally) -- the same N/N-1-safe shape as every other
+ * flag here, just consumed for observability instead of gating.
  */
 /**
  * `dispatch-selection` (additive-minor) is a correctness gate for the

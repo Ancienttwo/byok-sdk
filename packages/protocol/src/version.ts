@@ -64,7 +64,7 @@ export const AGENT_HOME_READERS_CAPABILITY = 'agent-home-readers' as const;
  * advertised capabilities never include it, so a new daemon talking to an old
  * server never sends `task.approval_resolved` at all (see `packages/client`'s
  * `task-runner.ts`) and falls back to the pre-existing implicit-resume inference
- * (`ConnectionHub.resumeIfImplicitlyApproved`, `packages/server/src/hub.ts`)
+ * (the `relay.onTaskActivity` hook in `packages/server/src/index.ts`)
  * unconditionally, exactly as before this flag existed. Unlike
  * `interactive-approval`, this one IS exercised the moment both sides
  * support it — there is no reserved/dormant period for it.
@@ -81,13 +81,14 @@ export const AGENT_HOME_READERS_CAPABILITY = 'agent-home-readers' as const;
  * by FIELD PRESENCE on the specific message at hand (does this particular
  * `task.approve`/`task.reject`/`onApprovalResolved` payload carry an
  * `approvalId`, and does a stored one exist to compare it against?), never
- * by checking this flag -- see `ConnectionHub.approveTask`/`rejectTask`/
- * `onApprovalResolved` and `TaskRunner.handleApprove`/`handleReject`
- * (`packages/client`'s `task-runner.ts`). This flag exists only so each side
- * can advertise, and an embedder/operator can observe (`ConnectionHub.
- * getDeviceCapabilities`), whether the OTHER side is new enough to
- * participate in targeting at all -- the same N/N-1-safe shape as every
- * other flag here, just consumed for observability instead of gating.
+ * by checking this flag -- see `approveTask`/`rejectTask` (`@byok-sdk/cloud`)
+ * and `TaskRunner.handleApprove`/`handleReject` (`packages/client`'s
+ * `task-runner.ts`). This flag exists only so each side can advertise
+ * whether the OTHER side is new enough to participate in targeting at all (an
+ * embedder could observe it through the old
+ * reference server's `ConnectionHub.getDeviceCapabilities`; `@byok-sdk/server`
+ * now reads it only internally) -- the same N/N-1-safe shape as every other
+ * flag here, just consumed for observability instead of gating.
  */
 /**
  * `dispatch-selection` (additive-minor) is a correctness gate for the

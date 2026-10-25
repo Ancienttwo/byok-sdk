@@ -28,8 +28,8 @@ import {
  *   to its fallback interval. The mailbox stays the authority across instances.
  * - **A lost cursor fails closed.** A cursor below the mailbox's retained
  *   window is answered `409 { error: 'cursor_too_old', recoverableFrom }`, the
- *   same body the reference server returns (`packages/server/src/http.ts:386`)
- *   and the only one the daemon's transport can turn into a resync. Serving
+ *   same body the old reference server returned and the only one the
+ *   daemon's transport can turn into a resync. Serving
  *   such a caller a 200 would hand it a partial tail it has no way to tell
  *   apart from a complete one.
  */
@@ -43,27 +43,28 @@ import { authenticateDevice, type DeviceRouteDeps } from './shared';
  *
  * This response is the ONLY advertisement a long-poll daemon ever sees — there
  * is no WS `conn.ack` on this transport — and the daemon hard-gates outgoing
- * messages on it (`TaskRunner.sendApprovalResolved`,
- * `packages/client/src/daemon/task-runner.ts:3319`;
- * `AgentEgressController`,
- * `packages/client/src/daemon/agent-egress-controller.ts:122,285`). An entry
+ * messages on it (`TaskRunner.sendApprovalResolved` in
+ * `packages/client/src/daemon/task-runner.ts`;
+ * `AgentEgressController.retryableReliableRecords` in
+ * `packages/client/src/daemon/agent-egress-controller.ts`). An entry
  * missing here is therefore not cosmetic: it silently disables an inbound wire
  * path the kernel already implements.
  *
  * The list is deliberately the kernel's INBOUND acceptance set, not the union
  * of `@byok-sdk/protocol`'s `CAPABILITY_FLAGS` (which the deleted reference
- * server advertised wholesale, `packages/server/src/http.ts:382` on
- * `origin/main`). Excluded on purpose, each for a reason:
+ * server advertised wholesale). Excluded on purpose, each for a reason:
  *
  * - server-to-daemon message types the daemon never gates on — `steer`,
  *   `interactive-approval`, `approval-targeting`, `toolset-selection`;
  * - device-side flags the kernel reads off `conn.hello` instead —
- *   `strict-agent-only` (`packages/cloud/src/cloud.ts:967`),
- *   `terminal-projection-selection` (`packages/cloud/src/cloud.ts:1356`),
+ *   `strict-agent-only` (`assertLegacyAdmission` in `cloud.ts`),
+ *   `terminal-projection-selection` (a device-advertised `WIRE_ADDITIONS`
+ *   gate, read through `requiredReceiverCapabilities` in `cloud.ts`),
  *   `agent-home-readers` (the Agent offer enqueue gates in `cloud.ts`);
  * - deployment-conditional routes a static const cannot honestly promise —
  *   `blob-upload`, whose handlers mount only when the declaration carries
- *   `blobs.presigned` (`packages/cloud/src/cloud.ts:787`);
+ *   `blobs.presigned` (the `CLOUD_CAPABILITIES.blobsPresigned` route
+ *   mount in `cloud.ts`);
  * - flags with no kernel implementation at all — `dispatch-selection`,
  *   `provider-profile-binding`.
  *
@@ -75,8 +76,8 @@ import { authenticateDevice, type DeviceRouteDeps } from './shared';
 export const CLOUD_PROTOCOL_CAPABILITIES = [
   'custom-harness',
   MAILBOX_READ_AHEAD_CAPABILITY,
-  // The kernel's inbound handles `task.approval_resolved` on both the plain
-  // and the approval-timeline paths (`packages/cloud/src/inbound.ts:576,610`).
+  // The kernel's inbound handles `task.approval_resolved` on its plain and
+  // approval-timeline paths (`applyLifecycle`, `approvalTimelineAppendInput`).
   // Without this flag `TaskRunner.sendApprovalResolved` returns early and a
   // locally-resolved approval is never reported on the wire at all.
   'approval_resolved',
@@ -87,7 +88,7 @@ export const CLOUD_PROTOCOL_CAPABILITIES = [
   'agent-egress-reliable-ack',
   'agent-egress-fresh-session',
   // `handleAgentMessagePublish` accepts `agent.message_egress` gated on exactly
-  // this capability (`packages/cloud/src/inbound.ts:124`) — the same inbound
+  // this capability (`packages/cloud/src/inbound.ts`) — the same inbound
   // family as the three egress flags above, omitted by the same drift.
   'agent-message-egress',
   'agent-content-workspace-read',
@@ -160,10 +161,10 @@ export function eventsHandler(deps: EventsRouteDeps) {
           });
           // The replay floor, against the cursor the CALLER brought — never
           // `scanCursor`, which this request moves on its own. Same rule as the
-          // reference server's `assertReplayAvailable`
-          // (`packages/server/src/hub.ts:2519`): a caller at `recoverableFrom - 1`
-          // can still be handed the first retained row, anything lower has lost
-          // rows and must resync rather than silently resume from a partial tail.
+          // old reference server's `assertReplayAvailable`: a caller at
+          // `recoverableFrom - 1` can still be handed the first retained row,
+          // anything lower has lost rows and must resync rather than silently
+          // resume from a partial tail.
           // Evaluated on every read, so a sweep that lands mid-hold ends the hold
           // with the 409 the caller now deserves instead of an empty 200.
           if (cursor < page.recoverableFrom - 1) {

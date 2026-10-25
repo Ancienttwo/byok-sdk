@@ -257,9 +257,10 @@ export interface LoopbackListener {
 export declare function listenLoopback(options: LoopbackListenerOptions): Promise<LoopbackListener>;
 // ==== @byok-sdk/server dist/rate-limiter.d.ts ====
 /**
- * M4 Phase 4 (part A): per-key token bucket, used by `ConnectionHub`
- * (`hub.ts`) to rate-limit inbound daemon->server envelopes per device.
- * Framework-agnostic on purpose (no hub/transport types here) so it stays
+ * M4 Phase 4 (part A): per-key token bucket that rate-limits inbound
+ * daemon->server envelopes per device. `stores.ts` composes it into the cloud
+ * kernel, which debits it at step 0 of the inbound gate.
+ * Framework-agnostic on purpose (no kernel/transport types here) so it stays
  * unit-testable in isolation, mirroring `event-queue.ts`'s own
  * transport-agnostic split.
  *
@@ -268,10 +269,9 @@ export declare function listenLoopback(options: LoopbackListenerOptions): Promis
  * catch-up), refilling continuously at `messagesPerSecond` tokens/sec up to
  * that same `burst` ceiling. A bucket is created lazily per key on first use
  * and persists for as long as it stays active — deliberately NOT reset when
- * a device disconnects/reconnects (see `ConnectionHub`'s own use of this
- * class): resetting on reconnect would let a device that just got
- * disconnected for exceeding its budget immediately burst again on
- * reconnect, defeating the limit entirely. It IS dropped once idle long
+ * a device reconnects: resetting on reconnect would let a device that just
+ * exceeded its budget immediately burst again on reconnect, defeating the
+ * limit entirely. It IS dropped once idle long
  * enough that keeping it around would be pointless — see
  * `evictIdleBucketsIfDue`.
  *
@@ -377,9 +377,9 @@ export declare class RateLimiter {
  * Position matters and is not this adapter's choice: the kernel debits one
  * token at step 0 of its inbound gate, BEFORE the type-allow check, for every
  * envelope that reaches it. That is exactly the choke point the old
- * `ConnectionHub.handleInbound` occupied, which is why both `envelopesIn` (one
- * per envelope, every outcome) and `rateLimitEvents` (one per REJECTED
- * envelope, never coalesced) are counted here and nowhere else.
+ * reference server's `ConnectionHub.handleInbound` occupied, which is why both
+ * `envelopesIn` (one per envelope, every outcome) and `rateLimitEvents` (one
+ * per REJECTED envelope, never coalesced) are counted here and nowhere else.
  *
  * The `device.rate_limited` embedder event is the one thing that IS coalesced,
  * matching the pre-fold rule: an episode fires exactly one event, and only a

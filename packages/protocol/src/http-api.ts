@@ -278,8 +278,8 @@ export const MessagesSendRequestSchema: z.ZodObject<{ messages: z.ZodArray<typeo
 export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
 
 /**
- * `accepted` counts every envelope `ConnectionHub.handleInbound` returned
- * `'accepted'` *or* `'duplicate'` for — a deduped replay is a wire-level
+ * `accepted` counts every envelope the inbound gate (`@byok-sdk/cloud`'s
+ * `handleInboundEnvelope`) answered `'accepted'` *or* `'duplicate'` for — a deduped replay is a wire-level
  * success even though the business mutation did not run a second time.
  * `rejected` is omitted when zero. `outcomes` is required and correlates
  * exactly one result with each posted envelope; a rejected outcome carries its

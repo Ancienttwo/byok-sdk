@@ -245,10 +245,9 @@ const MAX_INLINE_ARTIFACT_BYTES = 64 * 1024;
  * for the short-lived CLI invocations M0-M2 ran as, but M3 turns the daemon
  * into a background service meant to stay up for weeks, so unbounded growth
  * here is a real, if slow, memory leak. Each collection evicts its OLDEST
- * (first-inserted) entry once over this cap — the same bounded-ring idiom
- * `ConnectionHub`'s per-device dedup window already uses server-side
- * (packages/server/src/hub.ts's `DEDUP_RING_CAPACITY`), just applied here to
- * task ids. `Map`/`Set` iterate in insertion order (ECMA-262), so "oldest"
+ * (first-inserted) entry once over this cap — the bounded-ring idiom the old
+ * reference server's per-device dedup window used, applied here to task ids
+ * (server-side dedup is now the cloud kernel's dedup store). `Map`/`Set` iterate in insertion order (ECMA-262), so "oldest"
  * always means "finished/cancelled longest ago" — neither collection is
  * touched on a read, only on insert, so eviction order depends purely on
  * insertion time. See `finishedTaskIds` and `pendingCancelled`'s own doc
@@ -5780,7 +5779,7 @@ export class TaskRunner {
     }
   }
 
-  /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap, same idiom as `ConnectionHub.checkAndRecordDuplicate` (packages/server/src/hub.ts). */
+  /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap. */
   private addFinishedTaskId(taskId: string): void {
     this.finishedTaskIds.add(taskId);
     if (this.finishedTaskIds.size > MAX_TRACKED_TASK_IDS) {
