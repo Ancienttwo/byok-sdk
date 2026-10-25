@@ -627,27 +627,6 @@ test('#884: the K4 manifest admits only the I/O-free ./canonical entry', t => {
   assert.throws(() => selectImpact([path], f), /must stay private/);
 });
 
-test('#953: the K4 manifest admits only the ./sealed-routine entry on top of the reviewed entries', t => {
-  const f = fixture(t);
-  const path = 'examples/host-execution-core/package.json';
-  const exports = { '.': './src/index.ts', './canonical': './src/canonical.ts', './test-support': './src/test-support.ts' };
-  const manifest = { name: '@byok-sdk/example-host-execution-core', private: true, version: '0.0.1', exports };
-  f.write(path, manifest);
-  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K4 without the sealed routine entry');
-  f.base = git('rev-parse', 'HEAD').trim();
-  f.write(path, { ...manifest, exports: { ...exports, './sealed-routine': './src/sealed-routine.ts' } });
-  assert.ok(selectImpact([path], f).dirs.includes('examples/host-execution-core'));
-  for (const [candidate, reason] of [
-    [{ ...manifest, exports: { ...exports, './sealed-routine': './src/model.ts' } }, 'the entry retargeted to another file'],
-    [{ ...manifest, exports: { ...exports, './sealed-routine': './src/sealed-routine.ts', './ledger': './src/ledger.ts' } }, 'a second new entry'],
-    [{ ...manifest, exports: { ...exports, './sealed-routine': './src/sealed-routine.ts' }, dependencies: { x: '1.0.0' } }, 'a dependency change'],
-  ]) {
-    f.write(path, candidate);
-    assert.throws(() => selectImpact([path], f), /more than/, reason);
-  }
-});
-
 function rebase(f, message) {
   const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', message);

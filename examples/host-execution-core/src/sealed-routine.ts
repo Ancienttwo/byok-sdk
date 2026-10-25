@@ -2,8 +2,6 @@
  * The member side of a sealed routine (#654 E3d-4, design §6.3). A member seals one routine template for one routine
  * version; the Host stores it and puts it, byte for byte, in the `sealed` member of each occurrence's offer, next to the
  * plaintext `routineRef`. The Host never sees the scope key or the instruction.
- *
- * This entry imports `@byok-sdk/core/sealed-payload`, so it is a subpath: a Host that imports the K4 root does not load it.
  */
 import { sealContent, type SealedBinding, type SealedCategory } from '@byok-sdk/core/sealed-payload';
 import { SEALED_INLINE_MAX_PADDED_LENGTH, type AgentRef, type TaskSealing } from '@byok-sdk/protocol';

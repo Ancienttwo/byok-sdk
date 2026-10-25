@@ -31,7 +31,7 @@ The crash test sends SIGKILL to a child Host during wake delivery.
 | `src/model.ts`, `src/transitions.ts` | Durable records, stable identities, atomic state changes, and the FIFO head and queued expiry rules. |
 | `src/canonical.ts` | Canonical JSON and its SHA-256. The `./canonical` entry exports only these two and imports only `node:crypto` (#884). |
 | `src/submit.ts` | The frozen-offer submit protocol: readback first, the frozen offer check and the stop hook. Shared with the hosted lane. |
-| `src/sealed-routine.ts` | The member side of a sealed routine: the template binding and `sealRoutineTemplate`. The `./sealed-routine` entry, so the root never loads `@byok-sdk/core/sealed-payload` (#953). |
+| `src/sealed-routine.ts` | The member side of a sealed routine: the template binding and `sealRoutineTemplate` (#953). |
 | `src/routines.ts` | Occurrence deduplication, next-slot commit, coalescing, lifecycle, version switches and Host occurrence transitions. |
 | `src/schedule.ts` | The default UTC interval calendar and the shared calendar callback type. |
 | `src/index.ts` | The example's copy-and-own entrypoint. This is not a published SDK package. |
@@ -345,7 +345,7 @@ chain. Let pending versions switch, or restore a backup, before you roll back to
 
 A sealed routine (#654 E3d-4, design §6.3) runs an execution whose task input only a member and
 the device can read. A member seals one routine template for one routine version with
-`sealRoutineTemplate` (`./sealed-routine`): family `routine.template`, the routine id and version
+`sealRoutineTemplate`: family `routine.template`, the routine id and version
 in place of a task id, no device, the Agent, the category list and the expiry `notAfter`. The Host
 stores the template and puts it, byte for byte, in the `sealed` member of each occurrence's
 `task.offer_for_agent_with_egress_fresh_sealed`, next to the plaintext `routineRef`. It never
