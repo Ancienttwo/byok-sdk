@@ -93,6 +93,19 @@ describe.skipIf(POSTGRES_URL === undefined)('H device binding on real Postgres (
       .toEqual([{ body: { owner: 'main', turnId: 'q1', code: DEVICE_NOT_BOUND } }]);
   });
 
+  it.each(['unbound', 'revoked', 'mode'] as const)('refuses a direct freeze for a device that is %s, the last guard behind the hold', async reason => {
+    const scope = `tenant:${randomUUID()}`;
+    await store().seed(scope, () => {});
+    if (reason !== 'unbound') await store().bindDevice(scope, 'device');
+    if (reason === 'revoked') await store().revokeDevice(scope, 'device', 5);
+    if (reason === 'mode') await opened!.pool.query(`UPDATE ${table('device_binding')} SET mode = 'L' WHERE scope = $1`, [storedKey(scope)]);
+    await expect(inSchema(opened!.pool, store().schema, async client => {
+      await lockScope(client, storedKey(scope));
+      return freezeIntent(client, scope, { key: 'q1', source: 'user', execution: template('device'), waitUntil: clock + 60_000 });
+    })).rejects.toEqual(refusal(reason));
+    expect((await opened!.pool.query(`SELECT 1 FROM ${table('intent')} WHERE scope = $1`, [storedKey(scope)])).rows).toEqual([]);
+  });
+
   /** A bound scope with one frozen intent on `device`, due now. */
   async function frozen() {
     const scope = `tenant:${randomUUID()}`;

@@ -170,11 +170,12 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
 
   it('holds the routine Turn of a device with no H binding, with no promotion (#793 D2e, #956)', async () => {
     const scope = await scoped(), id = await created(scope);
-    const { turn } = await fired(scope, id, FIRST);
+    const { key, turn } = await fired(scope, id, FIRST);
     await store().revokeDevice(scope, 'device', NOW);
     await store().sync(scope, SYNC);
-    expect((await store().read(scope)).turns[turn]).toMatchObject({ held: 'device_not_bound' });
+    expect((await store().read(scope)).turns[turn]).toMatchObject({ status: 'queued', held: 'device_not_bound' });
     expect(await intentRow(scope, turn)).toBeUndefined();
+    expect(await occurrenceRow(scope, key)).toEqual({ execution_superseded: false, conclusion: null });
   });
 
   it('settles the promotion of an occurrence that a newer slot superseded, and the next sync fails its Turn', async () => {
