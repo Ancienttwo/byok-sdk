@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fixed (client)** — the last read-back of a member KEM rotation (#654
+  E2d-5) now also requires each epoch whose key the run holds, and each
+  epoch with a freshness point, to read back, including a key the run opened
+  or a point it gained during the rotation. A Host that withholds such a row
+  now stops the rotation with `key_package_missing`, and the old key stays.
+  Before, the rotation finished and dropped that epoch. The rotation still
+  has no production caller.
 - **Fixed (examples)** — K8 counts a Bot Turn whose outcome commit throws as a
   stuck intent, with the new `IntentOutcomeError` code `outcome_failed`.
   `drain()` and every API that runs a pass reject with it, the audit gets one
