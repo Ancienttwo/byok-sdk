@@ -52,11 +52,23 @@ changes in the CHANGELOG apply only to code that copies those examples.
 
 ## Wire protocol
 
-The wire stays v3 (`PROTOCOL_VERSION = 3`). 0.30.2 adds no wire type, field
-or capability flag after 0.30.1; the change to
-`packages/protocol/src/version.ts` since `v0.30.1` is comments only. Wire v4
-(#925) comes after 0.30.2. A 0.30.2 Host and a 0.30.1 daemon speak the same
-wire, but the E2EE rules below still decide which features turn on.
+The envelope wire stays v3 (`PROTOCOL_VERSION = 3`). Since `v0.30.1`, the
+envelope types, `CAPABILITY_FLAGS` and the wire additions are unchanged:
+`packages/protocol/src/wire-additions.ts` and `capability-constants.ts` have
+no diff, and the diff of `version.ts` is comments only. Wire v4 (#925) comes
+after 0.30.2.
+
+Two things outside the envelope wire change:
+
+- The bodies of the E2EE member HTTP routes (`docs/protocol.md` §2.6). A
+  key package put takes version 2 packages only, a `rotate` chain entry
+  must have exactly the subject `{ memberId, kemPublicJwk, kemEpoch, kemSig }`,
+  and the device package read needs exactly one of `epoch` and `afterEpoch`.
+- The deployment declaration (`GET /byok/capabilities`) gains
+  `e2ee.member.kem-epoch`.
+
+The E2EE rules below decide which features turn on between a 0.30.2 Host and
+a daemon.
 
 ## Postgres migrations
 
@@ -171,7 +183,7 @@ sends one replacement terminal. It is the sealed `task.fail` with
 `task.fail` with `sealed_key_unavailable`. A refusal that a 0.30.1 daemon
 left in its journal is replaced at the next start.
 
-## Client changes that touch Host config
+## Breaking changes that touch Host config
 
 These are the eight Breaking entries of `## Unreleased`. One is in the
 private examples and is out of scope (above). The other seven:
@@ -224,6 +236,8 @@ list the full upgrade steps.
   opens. The client and cloud-do stores cannot go back to a build on Pi
   1.3.0 after that.
 - `Session.events` yields `AgentEvent | MessageDraftDelta`.
+- A preparation compiled for Pi 1.3.0 declines with
+  `preparation_runtime_identity_mismatch`; prepare it again.
 
 **From 0.29.x.** Also the 0.30.0 notes ([upgrade notes](v0.30.0.md)):
 
@@ -275,7 +289,13 @@ list the full upgrade steps.
    the previous version and restoring the kept config.
    - Postgres has no down migration. Migrations 0027 to 0029 stay; roll back
      the application only, and keep request receipts, tombstones and
-     dead-letter rows.
+     dead-letter rows. The previous version's `migrate` skips ledger rows it
+     has no file for, so it still runs. Its `verifyMigrations` reports those
+     rows as `unexpected` and throws `MigrationStateMismatchError`
+     (`packages/cloud-dataplane/src/migrate.ts` at `v0.29.0`, `v0.30.0` and
+     `v0.30.1`). No SDK package calls `verifyMigrations` on its own. A Host
+     that gates readiness on it fails closed after an application rollback,
+     so that Host restores the backup from step 1 instead.
    - A Host rolled back to 0.30.1 fails closed with
      `e2ee_member_state_unreadable` on any read that meets a stored version 2
      key package. While rolled back it takes version 1 puts again, which can

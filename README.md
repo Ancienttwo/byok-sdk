@@ -11,7 +11,7 @@ The current stable release is **0.30.1** for all nine packages. From 0.28.2,
 keys uses the release train version instead of its own version line. See the
 [release notes](docs/releases/v0.30.1.md) and
 [release process](docs/releases/README.md). A Host that moves to the next
-patch, 0.30.2, from 0.29.x or 0.30.x follows the
+patch, 0.30.2, from 0.29.x, 0.30.0 or 0.30.1 follows the
 [Host upgrade checklist](docs/releases/host-upgrade-0.30.2.md). 0.30.2 is not
 published yet.
 
