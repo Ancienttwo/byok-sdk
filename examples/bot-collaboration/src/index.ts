@@ -20,6 +20,6 @@ export { TEAM_NOTE_LIMIT } from './team';
 export { TeamModeError, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot } from './rules/team';
 export { createBotPersonaProjection } from './persona';
 export { DeviceModeError, DeviceSwitchingError, type DeviceTopology, type SwitchWork } from './topology';
-export { SWITCH_EXPORT_VERSION, SWITCH_SECTIONS, SwitchExportError, sealSwitchExport, verifySwitchExport, type ArchivedRecord, type IntentRecord, type MessageReceipt,
-  type OccurrenceRecord, type OutboxRecord, type RoutineRecord, type SlotRecord, type SwitchContent, type SwitchDevice, type SwitchExport, type SwitchExportRefusal,
+export { SWITCH_EXPORT_VERSION, SWITCH_SECTIONS, SwitchExportError, sealSwitchExport, verifySwitchExport, type ArchivedRecord, type ExecutionRecord, type IntentRecord, type MessageReceipt,
+  type OccurrenceRecord, type OutboxRecord, type RoutineRecord, type SwitchContent, type SwitchDevice, type SwitchExport, type SwitchExportRefusal,
   type SwitchManifest, type SwitchSection, type TombstoneRecord } from './migration';

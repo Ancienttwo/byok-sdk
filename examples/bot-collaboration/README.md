@@ -1039,37 +1039,66 @@ into this form, so the digest it records in its receipt is the source's. The
 digest covers the header, and `domain` is the source's tenant or scope id (a
 switch back to L opens a new tenant). So the read-back copies the document's
 header as it is and rebuilds only the sections from the target's rows. Devices
-and every section are in one order, by id, so a rebuilt list hashes the same.
+are in JS string order of their id, and each section in JS string order of
+`canonical(identity)`, so a read-back sorts that way in JS or reseals; a
+database `ORDER BY` gives `unsorted`.
 
-Each record holds only the fields that both Hosts store, with values the source
+A record holds what a target needs to rebuild the row, with values the source
 stores, never a default. Routines and occurrences carry their ordinal, intents
-their frozen input (a sealed one stays sealed). A field that the source can
-rebuild from others, such as a K4 wake key, is not in the record. Every object
-has an exact set of keys. Sections are in JS string order, so a read-back sorts
-in JS or reseals; a database `ORDER BY` under a non-C collation gives
-`unsorted`.
+their frozen input (a sealed one stays sealed). H stores only part of this
+today: the K4-only fields get H columns in the H slice that imports them.
+Every object has an exact set of keys.
+
+A value that a Host derives from others is not in a record. The source
+refuses an export where its stored copy differs, and the target derives its
+own:
+- an intent's FIFO key, K4 `agentKey(domain, execution)`, from the target's
+  own tenant or scope and the device and Agent of the frozen input;
+- the execution input of each earlier generation (`input` with that
+  generation's task id), and K4 `intent.execution` (`input` without
+  `taskId`), which hold while K4 runs without its memory option, as K8 does;
+- K4 `applied`: the current task id exactly when the intent `succeeded`;
+- a K4 occurrence's wake key and slot. Each occurrence has exactly one slot on
+  both Hosts, so the format has no slot section;
+- an occurrence's intent id, and K4 `attempts`.
+
+An intent carries the K4 execution of each earlier generation (submission,
+start, attempt, terminal and message receipt), because K4 compacts an intent
+only with the execution of every generation. After the switch, a replay of an
+earlier Agent message does not reach a stored receipt: the device sends it
+under the tenant it is enrolled with, and the target's SDK answers only from
+the task and offer binding in its own stores, which the switch does not move.
 
 The format refuses, with `SwitchExportError` and a `reason`:
 - the source's owner records (L `topology`, and L `hostIntents`, whose handler
   each intent carries);
 - a K4 message receipt, of the current generation or an earlier one, that is
   not the K8 accepted reply of the same task id, or a reply with no receipt
-  (`receipt_mismatch`). An intent carries the receipt of each earlier
-  generation that has one, so a replay of that message still gets `accepted`
-  after the switch; an earlier generation with no receipt is compacted history;
+  (`receipt_mismatch`);
 - a record that names one the export does not hold (`reference`): an
-  occurrence intent, slot or Host job outbox row without its occurrence, an
-  occurrence without its routine, or a task id that is not
-  `hash([key, generation])`;
+  occurrence intent (K4's `occurrence:<sha-256>` key) or Host job outbox row
+  without its occurrence, an occurrence without its routine, an occurrence key
+  that is not K4's hash of its routine slot and trigger, or a task id that is
+  not `hash([key, generation])`;
+- state that K4 cannot produce (`invalid`): a retry policy outside K4's
+  `validateRetry` bounds, on an intent or a routine definition; a generation at
+  or past `maxAttempts`; a `reserved` intent past generation 0 or with
+  anything from a submission; an earlier generation that was not begun; a
+  pending Host job for a concluded occurrence; and two occurrences of one slot
+  (`duplicate`);
 - a live Bot on a device the export does not move;
 - open work: an open Turn or input batch, an intent with no conclusion, or a
   card call in flight;
 - a pending Agent home write that is `sent` or has a `retryAt`, because it may
   have reached the device. An unsent one moves and is sent by the new owner;
 - rows out of identity order, a repeated identity or ordinal, a key outside the
-  format, malformed fields, a value that is not JSON by
-  K4's `validateJson` (`NaN`, `undefined`, a class instance), and a manifest
-  that does not match the content.
+  format, malformed fields, a value that is not JSON by K4's `validateJson`
+  (`NaN`, `undefined`, a class instance, checked before the seal clones the
+  content), and a manifest that does not match the content.
+
+A channel delivery moves under its id, `hash([taskId, messageId, route])`,
+which names no Host domain, so the target's readback or resend of a `sending`
+or `unknown` delivery uses the source's idempotency key.
 
 The export, the import and the commit of the switch on each Host come in
 later #975 slices. This entry has no I/O.

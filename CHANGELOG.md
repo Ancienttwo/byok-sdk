@@ -483,15 +483,17 @@
   version 1 holds one whole coordination domain (an L tenant or an H scope) in
   neutral records with exact key sets: the collaboration state without the
   source's owner records, retention rows, concluded intents (with their frozen
-  input and the message receipts of each generation that has one), routines
-  and occurrences with their ordinals, slots, unconfirmed outbox records and
-  tombstones, plus a manifest of per-section counts and digests and one digest
-  over them. `sealSwitchExport` orders and seals it; `verifySwitchExport`
-  checks a document or a target's read-back and throws `SwitchExportError` for
-  open work, a home write that may have been sent, a card call in flight, a
-  Bot on a device the export does not move, a record that names a missing
-  record, a message receipt that is not its K8 reply, or a manifest that does
-  not match. No Host uses it yet. No SDK, wire or SQL change.
+  input and the K4 execution of every earlier generation), routines and
+  occurrences with their ordinals, unconfirmed outbox records and tombstones,
+  plus a manifest of per-section counts and digests and one digest over them.
+  Values a Host derives (an intent's FIFO key, slots, wake keys) are not in
+  it. `sealSwitchExport` orders and seals it; `verifySwitchExport` checks a
+  document or a target's read-back and throws `SwitchExportError` for open
+  work, a home write that may have been sent, a card call in flight, a Bot on
+  a device the export does not move, a record that names a missing record, a
+  message receipt that is not its K8 reply, state K4 cannot produce, or a
+  manifest that does not match. No Host uses it yet. No SDK, wire or SQL
+  change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

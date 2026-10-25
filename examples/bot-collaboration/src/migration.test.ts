@@ -1,7 +1,7 @@
 import { hash } from '@byok-sdk/example-host-execution-core/canonical';
 import { describe, expect, it } from 'vitest';
-import { sealSwitchExport, SwitchExportError, verifySwitchExport, type IntentRecord, type OccurrenceRecord, type RoutineRecord, type SwitchContent,
-  type SwitchExport, type SwitchExportRefusal } from './migration';
+import { sealSwitchExport, SwitchExportError, verifySwitchExport, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type RoutineRecord,
+  type SwitchContent, type SwitchExport, type SwitchExportRefusal } from './migration';
 import { stateOf, type CollaborationState } from './model';
 import type { BotProfile, HomeOperation } from './team-model';
 
@@ -11,20 +11,30 @@ const home = (sequence: number, extra: Partial<HomeOperation> = {}) =>
   ({ sequence, botId: 'b1', request: {}, retries: [], status: 'pending', ...extra }) as unknown as HomeOperation;
 
 const SCHEDULE = { version: 1, timeZone: 'UTC', rule: { every: 'day' }, waitMs: 0, lateAfterMs: 60_000 };
-/** A Host job routine and an occurrence hook routine, each with one occurrence. The hook occurrence is promoted to an intent. */
+/**
+ * A Host job routine and an occurrence hook routine, each with one occurrence: `O1` has a pending Host job, and `O2` is
+ * promoted to an intent.
+ */
 const ROUTINES: RoutineRecord[] = [
   { id: 'r1', ordinal: 0, definition: { id: 'r1', ...SCHEDULE, hostJob: { type: 'job', input: {} } }, lifecycle: 'active', status: 'ok', nextAt: 2_000 },
   { id: 'r2', ordinal: 1, definition: { id: 'r2', ...SCHEDULE, hostOccurrence: { type: 'bot-routine', input: {} } }, lifecycle: 'active', status: 'ok', nextAt: null },
 ];
+const TRIGGER = { kind: 'scheduled', plannedAt: 900 } as const;
+/** K4's occurrence key of a routine slot and trigger. */
+const keyOf = (routineId: string, trigger: OccurrenceRecord['trigger'] = TRIGGER) => hash([routineId, 1, trigger]);
+const O1 = keyOf('r1'), O2 = keyOf('r2');
 const occurrence = (key: string, ordinal: number, routineId: string, extra: Partial<OccurrenceRecord> = {}): OccurrenceRecord => ({
-  key, ordinal, routineId, definitionVersion: 1, trigger: { kind: 'scheduled', plannedAt: 900 }, recordedAt: 900, nextAt: null, job: null,
+  key, ordinal, routineId, definitionVersion: 1, trigger: { ...TRIGGER }, recordedAt: 900, nextAt: null, job: null,
   executionSuperseded: false, ...extra });
-const OCCURRENCES = [occurrence('o1', 0, 'r1', { job: { attempts: 1, summary: { ok: true } }, conclusion: 'succeeded' }), occurrence('o2', 1, 'r2')];
+const OCCURRENCES = [occurrence(O1, 0, 'r1', { job: { attempts: 1 } }), occurrence(O2, 1, 'r2')];
+/** A generation that K4 began and that came back with a failure it retried. */
+const EARLIER: ExecutionRecord = { submission: 'delivered', started: true, attempt: { id: 'a0' }, terminal: { type: 'task.failed' } };
+const frozen = (taskId: string) => ({ taskId, deviceId: 'd1', payload: { agentRef: { agentId: 'main' } } });
 const intent = (key: string, ordinal: number, extra: Partial<IntentRecord> = {}): IntentRecord => {
-  const taskId = hash([key, extra.generation ?? 1]);
-  return { key, source: 'user', ordinal, agent: 'agent-1', taskId, generation: 1, input: { taskId, deviceId: 'd1' }, waitUntil: 5_000,
-    retry: { maxAttempts: 3, delaysMs: [300_000, 900_000], retryFailures: false }, submission: 'delivered', started: true, conclusion: 'succeeded',
-    ...extra };
+  const generation = extra.generation ?? 1, taskId = hash([key, generation]);
+  return { key, source: 'user', ordinal, taskId, generation, input: frozen(taskId), waitUntil: 5_000,
+    retry: { maxAttempts: 3, delaysMs: [300_000, 900_000], retryFailures: false }, submission: 'delivered', started: true,
+    earlierExecutions: Array.from({ length: generation }, () => structuredClone(EARLIER)), conclusion: 'succeeded', ...extra };
 };
 /** `i2` has an accepted message: its K4 receipt and its K8 reply. */
 const RECEIPT = { messageId: 'm1', contentHash: 'h1' };
@@ -40,12 +50,11 @@ function content(edit: (state: CollaborationState) => void = () => {}): SwitchCo
     collaboration: state,
     archived: [{ namespace: 'turns', id: 't2', body: { n: 2 }, expiresAt: 9_000 }, { namespace: 'commands', id: 'c1', body: { n: 1 } }],
     intents: [intent('i2', 0, { attempt: { id: 'a' }, terminal: { type: 'task.complete' }, messageReceipt: { ...RECEIPT } }),
-      intent('i1', 1, { submission: 'reserved', started: false, conclusion: 'cancelled', cancelReason: 'cancelled', handler: 'h' }),
-      intent('occurrence:o2', 2, { source: 'routine', conclusion: 'failed', retryUntil: 4_000 })],
+      intent('i1', 1, { generation: 0, submission: 'reserved', started: false, conclusion: 'cancelled', cancelReason: 'cancelled', handler: 'h' }),
+      intent(`occurrence:${O2}`, 2, { source: 'routine', conclusion: 'failed', retryUntil: 4_000 })],
     routines: structuredClone(ROUTINES),
     occurrences: structuredClone(OCCURRENCES),
-    slots: [{ slot: hash('s1'), occurrenceKey: 'o1' }],
-    outbox: [{ kind: 'projection', id: 'p1', value: { v: 1 } }, { kind: 'host-job', occurrenceKey: 'o1' }],
+    outbox: [{ kind: 'projection', id: 'p1', value: { v: 1 } }, { kind: 'host-job', occurrenceKey: O1 }],
     tombstones: [{ kind: 'row', digest: hash('r'), expiresAt: 5_000 }, { kind: 'intent', digest: hash('i0') }],
   };
 }
@@ -74,10 +83,10 @@ describe('switch export format (#975)', () => {
     expect(input).toEqual(before);
     expect(sealed.devices.map(device => device.deviceId)).toEqual(['d1', 'd2']);
     expect(sealed.archived.map(row => row.id)).toEqual(['c1', 't2']);
-    expect(sealed.intents.map(row => row.key)).toEqual(['i1', 'i2', 'occurrence:o2']);
+    expect(sealed.intents.map(row => row.key)).toEqual(['i1', 'i2', `occurrence:${O2}`]);
     expect(sealed.outbox.map(row => row.kind)).toEqual(['host-job', 'projection']);
     expect(sealed.tombstones.map(row => row.kind)).toEqual(['intent', 'row']);
-    expect(sealed.manifest.counts).toEqual({ collaboration: 1, archived: 2, intents: 3, routines: 2, occurrences: 2, slots: 1, outbox: 2, tombstones: 2 });
+    expect(sealed.manifest.counts).toEqual({ collaboration: 1, archived: 2, intents: 3, routines: 2, occurrences: 2, outbox: 2, tombstones: 2 });
     expect(sealed.manifest.digests.archived).toBe(hash(sealed.archived));
     expect(verifySwitchExport(sealed)).toEqual(sealed.manifest);
     // A target's read-back is a JSON round trip of what it wrote: the digest does not depend on key order or row order.
@@ -123,12 +132,15 @@ describe('switch export format (#975)', () => {
       value => { extra(value.devices[0]!); },
       value => { extra(value.archived[0]!); },
       value => { Object.assign(value.intents[0]!, { attempts: 1 }); },
+      // Derived by each target from its own domain (K4 `agentKey`).
+      value => { Object.assign(value.intents[0]!, { agent: hash(['tenant-1', 'd1', 'main']) }); },
+      value => { Object.assign(value.intents[0]!.earlierExecutions[0]!, { input: frozen(hash(['i2', 0])) }); },
+      value => { Object.assign(value.intents[0]!.input as object, { tenant: 'tenant-1' }); },
       value => { Object.assign(value.routines[0]!, { next: null }); },
       value => { Object.assign(value.routines[0]!.definition, { extra: 1 }); },
       value => { Object.assign(value.occurrences[0]!, { wakeKey: 'r1:1:900' }); },
       value => { Object.assign(value.occurrences[0]!.trigger, { extra: 1 }); },
       value => { Object.assign(value.occurrences[0]!.job!, { executionSuperseded: true }); },
-      value => { extra(value.slots[0]!); },
       value => { extra(value.outbox[0]!); },
       value => { extra(value.outbox[1]!); },
       value => { extra(value.tombstones[0]!); },
@@ -138,19 +150,32 @@ describe('switch export format (#975)', () => {
 
   it('refuses a record that names a record the export does not hold, or a task id that is not its key and generation', () => {
     refusesEach('reference', [
-      value => { value.intents[0]!.generation = 2; },
-      value => { value.intents[2]!.key = 'occurrence:o9'; },
-      value => { value.slots[0]!.occurrenceKey = 'o9'; },
-      value => { value.outbox[1] = { kind: 'host-job', occurrenceKey: 'o9' }; },
-      // `o2` is an occurrence hook, not a Host job.
-      value => { value.outbox[1] = { kind: 'host-job', occurrenceKey: 'o2' }; },
+      value => { value.intents[0]!.taskId = hash(['i2', 0]); },
+      value => { value.intents[2]!.key = `occurrence:${hash('o9')}`; },
+      value => { value.outbox[1] = { kind: 'host-job', occurrenceKey: hash('o9') }; },
+      // `O2` is an occurrence hook, not a Host job.
+      value => { value.outbox[1] = { kind: 'host-job', occurrenceKey: O2 }; },
       value => { value.occurrences[0]!.routineId = 'r9'; },
+      // An occurrence key is K4's hash of its routine slot and trigger.
+      value => { value.occurrences[0]!.trigger.plannedAt = 901; },
+      value => { value.occurrences[0]!.definitionVersion = 2; },
     ]);
     refusesEach('invalid', [
-      value => { value.intents[0]!.input = { taskId: hash(['other', 1]) }; },
+      value => { value.intents[0]!.input = frozen(hash(['other', 1])); },
       // A promoted occurrence's conclusion is its intent's.
       value => { value.occurrences[1]!.conclusion = 'failed'; },
+      // K4 runs a pending Host job only for an open occurrence (`core.ts` runHostJobs: `Invalid pending Host job`).
+      value => { Object.assign(value.occurrences[0]!, { job: { attempts: 1, summary: { ok: true } }, conclusion: 'succeeded' }); },
     ]);
+    // Another occurrence of the same slot: the target derives one slot from each occurrence.
+    refusesEach('duplicate', [
+      value => {
+        const trigger = { kind: 'catch_up', plannedAt: 900 } as const;
+        value.occurrences.push(occurrence(keyOf('r1', trigger), 2, 'r1', { trigger }));
+      },
+    ]);
+    // Only K4's occurrence intent key names an occurrence; any other key is a Host's own.
+    expect(() => sealSwitchExport(Object.assign(content(), { intents: [...content().intents, intent('occurrence:x', 3)] }))).not.toThrow();
   });
 
   it('carries the K4 routine schedule retry fields and slot replay count, and the intent fields only K4 keeps (#975 D2, D3, D5)', () => {
@@ -174,6 +199,15 @@ describe('switch export format (#975)', () => {
       value => { value.intents[0]!.retry = { maxAttempts: 101, delaysMs: Array(100).fill(1), retryFailures: false }; },
       value => { value.intents[0]!.retry = { maxAttempts: 2.5, delaysMs: [1, 1], retryFailures: false }; },
       value => { value.intents[0]!.retry = { maxAttempts: 3, delaysMs: [300_000], retryFailures: false }; },
+      // A routine definition's policy, current or staged, takes the same bounds (K4 `routines.ts` validateDefinition).
+      value => { Object.assign(value.routines[0]!.definition, { retry: { maxAttempts: 101, delaysMs: Array(100).fill(1), retryFailures: false } }); },
+      value => { value.routines[0]!.pending = { ...value.routines[0]!.definition, version: 2, retry: { maxAttempts: 2, delaysMs: [], retryFailures: false } }; },
+      // A `reserved` intent was never submitted: K4 begins a new generation in the transaction that opens it (`core.ts` begin).
+      value => { Object.assign(value.intents[1]!, { generation: 1, taskId: hash(['i1', 1]), input: frozen(hash(['i1', 1])), earlierExecutions: [{ ...EARLIER }] }); },
+      value => { value.intents[1]!.started = true; },
+      value => { value.intents[1]!.attempt = { id: 'a' }; },
+      value => { value.intents[1]!.terminal = { type: 'task.failed' }; },
+      value => { value.intents[1]!.messageReceipt = { messageId: 'm9', contentHash: 'h9' }; },
       value => { value.intents[0]!.preparationError = ''; },
       value => { Object.assign(value.intents[0]!, { memoryBlocked: { resume: 'inflight', reason: 'r' } }); },
       value => { Object.assign(value.intents[0]!, { messageReceipt: { messageId: 'm1' } }); },
@@ -190,33 +224,40 @@ describe('switch export format (#975)', () => {
       value => { value.intents[0]!.messageReceipt = { ...RECEIPT, contentHash: 'h2' }; },
       value => { value.intents[0]!.messageReceipt = { ...RECEIPT, messageId: 'm2' }; },
       value => { delete value.collaboration.replies[hash(['i2', 1])]; },
-      value => { value.intents[1]!.messageReceipt = { messageId: 'm9', contentHash: 'h9' }; },
+      value => { value.intents[2]!.messageReceipt = { messageId: 'm9', contentHash: 'h9' }; },
     ]);
   });
 
-  it('carries the receipts of earlier generations, each matching the K8 reply of its task id (#975 D1)', () => {
-    // `i2` is in generation 1. Generation 0 also had an accepted message, which a replay must still get `accepted` for.
+  it('carries the K4 execution facts of every earlier generation, each receipt matching the K8 reply of its task id (#975 D1)', () => {
+    // `i2` is in generation 1. Generation 0 also had an accepted message before it failed.
     const earlier = { messageId: 'm0', contentHash: 'h0' };
     const withEarlier = (edit: (state: CollaborationState) => void = () => {}) => {
       const value = content(state => { state.replies[hash(['i2', 0])] = { ...REPLY, ...earlier }; edit(state); });
-      value.intents[0]!.earlierReceipts = [{ generation: 0, messageReceipt: { ...earlier } }];
+      value.intents[0]!.earlierExecutions[0]!.messageReceipt = { ...earlier };
       return value;
     };
-    expect(verifySwitchExport(sealSwitchExport(withEarlier())).counts.intents).toBe(3);
+    const sealed = sealSwitchExport(withEarlier());
+    expect(sealed.intents.find(row => row.key === 'i2')!.earlierExecutions).toEqual([{ ...EARLIER, messageReceipt: earlier }]);
+    expect(verifySwitchExport(sealed).counts.intents).toBe(3);
     // A K8 reply of an earlier task with no receipt, a receipt with no reply, or one that differs: the fact has forked.
     refused(() => sealSwitchExport(content(state => { state.replies[hash(['i2', 0])] = { ...REPLY, ...earlier }; })), 'receipt_mismatch');
     refused(() => sealSwitchExport(withEarlier(state => { delete state.replies[hash(['i2', 0])]; })), 'receipt_mismatch');
     refused(() => sealSwitchExport(withEarlier(state => { state.replies[hash(['i2', 0])] = { ...REPLY, ...earlier, contentHash: 'other' }; })), 'receipt_mismatch');
     refusesEach('invalid', [
-      value => { value.intents[0]!.earlierReceipts = []; },
-      value => { value.intents[0]!.earlierReceipts = [{ generation: 1, messageReceipt: { ...RECEIPT } }]; },
-      value => { value.intents[0]!.earlierReceipts = [{ generation: 0, messageReceipt: { ...RECEIPT } }, { generation: 0, messageReceipt: { ...RECEIPT } }]; },
-      value => { Object.assign(value.intents[0]!, { earlierReceipts: [{ generation: 0, messageReceipt: { ...RECEIPT }, taskId: hash(['i2', 0]) }] }); },
+      // Exactly generations 0 to `generation - 1`: K4 compacts an intent only with the execution of each one.
+      value => { value.intents[0]!.earlierExecutions = []; },
+      value => { value.intents[0]!.earlierExecutions.push({ ...EARLIER }); },
+      // K4 began each earlier generation before it opened the next.
+      value => { value.intents[0]!.earlierExecutions[0]!.submission = 'reserved' as ExecutionRecord['submission']; },
+      value => { delete (value.intents[0]!.earlierExecutions[0] as { started?: boolean }).started; },
+      value => { value.intents[0]!.earlierExecutions[0]!.messageReceipt = { messageId: 'm0' } as ExecutionRecord['messageReceipt']; },
+      value => { Object.assign(value.intents[0]!.earlierExecutions[0]!, { taskId: hash(['i2', 0]) }); },
       // A generation K4 could not have opened under the intent's retry policy.
-      value => { Object.assign(value.intents[0]!, { generation: 3, taskId: hash(['i2', 3]), input: { taskId: hash(['i2', 3]) } }); },
+      value => { Object.assign(value.intents[0]!, { generation: 3, taskId: hash(['i2', 3]), input: frozen(hash(['i2', 3])),
+        earlierExecutions: [0, 1, 2].map(() => ({ ...EARLIER })) }); },
       // A policy past K4's bound is refused before the receipt check walks the generations.
       value => {
-        Object.assign(value.intents[0]!, { generation: 1e9, taskId: hash(['i2', 1e9]), input: { taskId: hash(['i2', 1e9]) },
+        Object.assign(value.intents[0]!, { generation: 1e9, taskId: hash(['i2', 1e9]), input: frozen(hash(['i2', 1e9])),
           retry: { maxAttempts: 2 ** 31, delaysMs: [], retryFailures: false } });
       },
     ]);
@@ -259,8 +300,10 @@ describe('switch export format (#975)', () => {
       value => { value.intents[0]!.taskId = 'not-a-digest'; },
       value => { (value.intents[0] as { submission: string }).submission = 'sent'; },
       value => { (value.intents[0] as { input: unknown }).input = 'frozen'; },
+      // The device and Agent from which the target derives the intent's FIFO key.
+      value => { delete (value.intents[0]!.input as { deviceId?: string }).deviceId; },
+      value => { value.intents[0]!.input = { ...frozen(value.intents[0]!.taskId), payload: {} }; },
       value => { delete (value.intents[0] as { waitUntil?: number }).waitUntil; },
-      value => { value.slots[0]!.slot = 's1'; },
       value => { value.tombstones[0]!.digest = 'short'; },
       value => { (value.tombstones[0] as { kind: string }).kind = 'other'; },
       value => { (value.outbox[1] as { kind: string }).kind = 'intent'; },
@@ -269,6 +312,8 @@ describe('switch export format (#975)', () => {
       value => { (value.collaboration.team as { bots: unknown }).bots = null; },
       value => { value.archived[0]!.body = { n: Number.NaN }; },
       value => { value.outbox[0] = { kind: 'projection', id: 'p1', value: { at: new Date(0) } as unknown as Record<string, number> }; },
+      // Checked before the seal's clone, which would turn the instance into a plain object.
+      value => { value.archived[0]!.body = new (class Body { n = 2; })() as unknown as Record<string, number>; },
       value => { (value.archived[1] as { expiresAt?: number }).expiresAt = undefined; },
       value => { value.routines[0]!.definition = { ...value.routines[0]!.definition, id: 'r9' }; },
       value => { Object.assign(value.routines[0]!.definition, { execution: {} }); },
