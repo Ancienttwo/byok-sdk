@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import { WAKE_HORIZON_MS } from '@byok-sdk/example-host-execution-core';
 import { ROUTINE_LATE_AFTER_MS } from '@byok-sdk/example-bot-collaboration/routines';
-import { DeviceBindingError } from './binding';
+import { DeviceBindingError, DeviceSwitchingError } from './binding';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { inSchema, type HostedCollaborationStore } from './store';
 
@@ -24,7 +24,10 @@ export interface SchedulerOptions {
    */
   changed?: (scope: string) => void;
 }
-/** A routine that a pass could not fire. `fenced`: its owner Bot's device has no active H binding, and nothing was written. */
+/**
+ * A routine that a pass could not fire. `fenced`: its owner Bot's device has no active H binding or is frozen for an owner
+ * switch (#957), and nothing was written.
+ */
 export interface RoutineFailure { scope: string; routineId: string; error: unknown }
 export interface SchedulerPass { fired: number; fenced: RoutineFailure[]; failed: RoutineFailure[] }
 
@@ -92,7 +95,7 @@ export class HostedRoutineScheduler {
           }
           this.retryAt.delete(retry);
         } catch (error) {
-          (error instanceof DeviceBindingError ? pass.fenced : pass.failed).push({ scope, routineId, error });
+          (error instanceof DeviceBindingError || error instanceof DeviceSwitchingError ? pass.fenced : pass.failed).push({ scope, routineId, error });
           // A throw wrote nothing. The routine keeps its old slot, which sorts ahead of healthy rows, so it waits before its
           // next try and does not run a transaction on every pass.
           this.retryAt.set(retry, at + backoffMs);

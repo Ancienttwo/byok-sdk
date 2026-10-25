@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { canonical, hash, occurrenceRun, taskId, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
   type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
@@ -11,7 +12,7 @@ import { addTurn, stateOf, type Card, type CollaborationState, type Turn } from 
 import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions,
   seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { activeBinding, bindDevice, deviceRefusals, revokeDevice } from './binding';
+import { activeBinding, beginSwitch, refusesHomeWrites, switchFence, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { cancelIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
@@ -190,6 +191,19 @@ function addedDevices(state: CollaborationState): () => string[] {
     return [...new Set(bots.flatMap(botId => state.team.bots[botId] ? [state.team.bots[botId]!.execution.deviceId] : []))];
   };
 }
+/** The open work of a device during its switch (#957), by kind. `homes`: sequences of sent Agent home writes with no terminal readback. */
+export interface DeviceWork { intents: string[]; turns: string[]; batches: string[]; homes: number[] }
+/** The open work of `deviceId` in `state` and the intent rows. The caller's transaction reads it. */
+async function openWork(client: PoolClient, scopeKey: string, state: CollaborationState, deviceId: string): Promise<DeviceWork> {
+  const bots = state.team.bots, onDevice = (botId: string) => Object.hasOwn(bots, botId) && bots[botId]!.execution.deviceId === deviceId;
+  const intents = (await client.query<{ key: string }>(`SELECT key FROM intent WHERE scope = $1 AND conclusion IS NULL AND input->>'deviceId' = $2
+    ORDER BY ordinal`, [scopeKey, deviceId])).rows.map(row => idOf(row.key));
+  return { intents,
+    turns: Object.values(state.turns).filter(turn => !turn.conclusion && onDevice(turn.botId)).map(turn => turn.id),
+    batches: Object.values(state.inputBatches ?? {}).filter(batch => batch.state === 'open' && onDevice(batch.botId)).map(batch => batch.id),
+    // A home write that was never sent is not work on the device: it moves with the exported state.
+    homes: state.team.homeOperations.filter(op => op.status === 'pending' && op.sent && op.request.deviceId === deviceId).map(op => op.sequence) };
+}
 const releasedSeats = (state: CollaborationState) => Object.values(state.team.seats).filter(seat => seat.released).length;
 const EMPTY_FRAME = split(stateOf({})).frame;
 
@@ -257,7 +271,7 @@ export class HostedCollaborationStore {
   commit(scope: string, request: CommitRequest<Command>, clock: () => number, options: { requireBinding?: boolean } = {}): Promise<CommitResult> {
     if (CALLBACK_KINDS.has(request.command.kind)) return Promise.reject(new CallbackCommandError(request.command.kind));
     if (request.command.kind === 'receive') return Promise.reject(new InboundCommandError());
-    return this.commitWith(scope, request, clock, undefined, options.requireBinding === true);
+    return this.commitWith(scope, request, clock, undefined, options.requireBinding === true ? 'binding' : undefined);
   }
 
   /**
@@ -293,15 +307,17 @@ export class HostedCollaborationStore {
       const command: Command = kind === 'owner_input'
         ? { kind: 'receive', inbound: kind, key, botId: conversation.id, request: message.text, sender: from }
         : { kind: 'receive', inbound: kind, key, roomId: conversation.id, text: message.text, mentions: message.mentions, from };
+      // Input for a Bot whose device is switching, or was switched to L, rolls back with the typed refusal (#957). Input for
+      // an unbound or revoked device is still taken and held by the sync (#956): the channel entry is not the command entry.
       const result = await this.commitWith(scope, { scope, commandId: hash(['receive', key]), command }, clock,
-        state => ({ remember: this.channel ? (root: string) => rememberInbound(state, message, root) : undefined }));
+        state => ({ remember: this.channel ? (root: string) => rememberInbound(state, message, root) : undefined }), 'switch');
       return { kind, id: turnOf(result) };
     }
     if (kind === 'bot_background') {
       // R5: a bot message is room background. Its mention entities select no seat.
       const key = inboundKey(message);
       const result = await this.commitWith(scope, { scope, commandId: hash(['room_input', conversation.id, key]),
-        command: { kind: 'room_input', key, roomId: conversation.id, text: message.text, mentions: [], from: sender!.id } }, clock);
+        command: { kind: 'room_input', key, roomId: conversation.id, text: message.text, mentions: [], from: sender!.id } }, clock, undefined, 'switch');
       return { kind, id: turnOf(result) };
     }
     const who = verified(sender) ? ` ${sender.kind}:${sender.id}` : '';
@@ -325,9 +341,10 @@ export class HostedCollaborationStore {
   /** One commit with the store's ports and `extra`, the ports that only the store's own entries add. */
   private commitWith(scope: string, request: CommitRequest<Command>, clock: () => number,
     extra?: (state: CollaborationState, ports: StorePorts) => { remember?: CommandPorts['remember']; outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
-    requireBinding = false): Promise<CommitResult> {
+    fence?: 'binding' | 'switch', guard?: (client: PoolClient) => Promise<void>): Promise<CommitResult> {
     const key = storedKey(scope);
     return this.change(scope, request.commandId, async (state, publish, client) => {
+      await guard?.(client);
       // The store admits each input with its own policy, as L does (K8 host.ts `commitOwner`), so the admission and the sync's
       // seal use one policy.
       const { manage, ...own } = this.ports(scope, state, publish, clock), head = revisionOf(state);
@@ -335,11 +352,11 @@ export class HostedCollaborationStore {
       const commands = slice && hostedRoutineCommands(slice, own.now());
       const base = { ...own, ...extra?.(state, { ...own, manage }), admitInput: (fields: InputFields) => admitUserInput(state, fields, this.coalesce, own.now()),
         routines: commands && { end: (id: string) => commands.lifecycle(endable(commands.list(), id).definition.id, 'completed') } };
-      const before = requireBinding ? addedDevices(state) : undefined;
+      const before = fence ? addedDevices(state) : undefined;
       const result = await commitStored(client, scope, state, request, base, this.channel);
       // A new commit moves the head by 1. A replay returns its first result and writes nothing.
       if (result.revision !== head + 1) return { value: result, outbox: [] };
-      if (before) for (const deviceId of before()) await activeBinding(client, key, deviceId);
+      if (before) for (const deviceId of before()) await (fence === 'binding' ? activeBinding : switchFence)(client, key, deviceId);
       const value = result.disposition.outcome === 'accepted'
         ? result.disposition.value as { target?: string; admitted?: boolean; deliver?: boolean } | undefined : undefined;
       if (request.command.kind === 'cancel_turn' && value?.admitted && value.target !== undefined) {
@@ -832,7 +849,9 @@ export class HostedCollaborationStore {
    * lock. K8 `homeHead` decides, as L's `flushHomes`: the operation must be its Bot's oldest pending one, and the Bot must have
    * no intent row with no conclusion. A pending operation that is not a head waits `backoffMs` (never earlier). A head takes
    * a lease (`next_at = now + leaseMs`); the entity is the fence, so `tries` stays 0. A row whose operation is gone or
-   * settled settles with no call.
+   * settled settles with no call. While the operation's device refuses new home writes (#957: a switch is open, or its row
+   * names mode L), an operation that was never sent waits `backoffMs` too, and a sent one is read back with no new enqueue
+   * (`settleHome`), as L's `flushHomes` does.
    */
   claimHome(scope: string, sequence: number, clock: () => number, leaseMs: number, backoffMs: number): Promise<HomeClaim> {
     const key = storedKey(scope), row = homeRowKey(sequence);
@@ -844,7 +863,9 @@ export class HostedCollaborationStore {
       }
       const busy = (await client.query<{ busy: boolean }>(`SELECT EXISTS (SELECT 1 FROM intent WHERE scope = $1 AND conclusion IS NULL
         AND input->'payload'->'agentRef'->>'agentId' = $2) AS busy`, [key, op.botId])).rows[0]!.busy;
-      if (!homeHead(state.team, sequence, botId => botId === op.botId && busy)) {
+      // A write that was never sent waits while its device refuses new home writes: it has nothing to read back.
+      const unsent = !op.sent && await refusesHomeWrites(client, key, op.request.deviceId);
+      if (unsent || !homeHead(state.team, sequence, botId => botId === op.botId && busy)) {
         await client.query('UPDATE outbox SET next_at = GREATEST(next_at, $3) WHERE scope = $1 AND key = $2 AND settled_at IS NULL', [key, row, now + backoffMs]);
         return { value: { kind: 'none' }, outbox: [] };
       }
@@ -880,7 +901,14 @@ export class HostedCollaborationStore {
       const published = new Set<string>();
       let enqueue: HomeOperation['request'] | undefined;
       if ('terminal' in step) applyHomeTerminal(state, op, step.terminal, (id, body) => { publish(id, body); published.add(id); });
-      else if ('retry' in step) enqueue = structuredClone(planHomeRetry(op, now));
+      else if ('retry' in step) {
+        // The mark comes before the first send, in the transaction that plans it, so a crash or a failed send still counts the
+        // write as sent (K8 `HomeOperation.sent`). A device that refuses new home writes gets no enqueue: the row waits.
+        if (!await refusesHomeWrites(client, key, op.request.deviceId)) {
+          op.sent = true;
+          enqueue = structuredClone(planHomeRetry(op, now));
+        }
+      }
       else failHomeFlush(op, step.error);
       return { value: { retries: op.retries.length, ...enqueue ? { enqueue } : {} }, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now };
     });
@@ -956,6 +984,90 @@ export class HostedCollaborationStore {
       await revokeDevice(client, storedKey(scope), deviceId, revokedAt);
       return { value: undefined, outbox: [] };
     });
+  }
+
+  /**
+   * Opens the owner switch of a device toward `target` (§4.1, #957): the durable freeze, on the expected mode revision. It
+   * raises the revision and returns the row read back in the same transaction. From its commit, every write that can create
+   * execution for the device throws `DeviceSwitchingError`, and the sync holds the Turns of its Bots. A device with no row
+   * (the default mode L, revision 0) starts its switch to H here; `bindDevice` is only for a device that pairs with H first.
+   */
+  beginSwitch(scope: string, deviceId: string, target: 'L' | 'H', expectedRevision: number): Promise<DeviceBinding> {
+    return this.change(scope, undefined, async (_state, _publish, client) =>
+      ({ value: await beginSwitch(client, storedKey(scope), deviceId, target, expectedRevision), outbox: [] }));
+  }
+
+  /**
+   * The drain of a device that H is switching away from (#957): its open work, and with `cancel` the cancel of each item
+   * first. It refuses with `not_owner` for a switch toward H, whose old owner L drains its own work. Open work is the
+   * open intent rows that run on the device, and for the Bots on the device the Turns that are not concluded (held, queued,
+   * routine, delegation chain and seat Turns), the open input batches and the Agent home writes to the device that were
+   * sent and have no terminal readback. A home write that was never sent, and a room seat that has no Turn yet, are state,
+   * not execution: they move with the state export. A cancel is the K8 `cancel_turn` command for a Turn or a batch, and the
+   * K4 cancel for an intent with no Turn. A tried intent concludes only from SDK evidence, so it stays open until the
+   * reconciler concludes it. A sent home write is never cancelled: its readback settles it. The drain waits for nothing: the caller syncs the scope,
+   * which concludes the cancelled Turns, and calls it again.
+   * Returns the work that is still open, and each cancel that threw.
+   */
+  async drainDevice(scope: string, deviceId: string, expectedRevision: number, options: { cancel?: boolean }, clock: () => number):
+    Promise<{ open: DeviceWork; failed: Array<{ id: string; error: unknown }> }> {
+    const key = storedKey(scope), failed: Array<{ id: string; error: unknown }> = [];
+    // Every transaction of the drain checks the open switch on its revision under the scope lock, so a drain that an abort
+    // or a commit overtook stops with the switch refusal (`not_switching`) and cancels nothing more.
+    const owned = async (client: PoolClient) => {
+      if ((await openSwitch(client, key, deviceId, expectedRevision)).mode !== 'H') {
+        throw new DeviceSwitchRefusedError(deviceId, 'not_owner', `H is not the old owner of the switch of device ${deviceId}: L drains it`);
+      }
+    };
+    const work = await this.change(scope, undefined, async (state, _publish, client) => {
+      await owned(client);
+      return { value: await openWork(client, key, state, deviceId), outbox: [] };
+    });
+    if (!options.cancel) return { open: work, failed };
+    const state = await this.read(scope);
+    const each = async (id: string, cancel: () => Promise<unknown>) => {
+      try { await cancel(); }
+      catch (error) { if (error instanceof DeviceSwitchRefusedError) throw error; failed.push({ id, error }); }
+    };
+    for (const id of [...work.turns, ...work.batches]) {
+      // `cancel_turn` is a keyless K8 command: it keeps no record, and a second cancel of a concluded Turn changes nothing.
+      await each(id, () => this.commitWith(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_turn', turnId: id } }, clock,
+        undefined, undefined, owned));
+    }
+    for (const id of work.intents.filter(id => !Object.hasOwn(state.turns, id))) {
+      await each(id, () => this.change(scope, undefined, async (_state, _publish, client) => {
+        await owned(client);
+        return { value: await cancelIntent(client, scope, id, clock()), outbox: [] };
+      }));
+    }
+    const open = await this.transaction(async client => openWork(client, key, await this.snapshot(client, key), deviceId), true);
+    return { open, failed };
+  }
+
+  /**
+   * Commits the open switch of a device on its frozen revision (#957): the target becomes the owner mode, the revision rises,
+   * and the freeze ends. Away from H, it refuses with `open_work` while the drain still finds open work, whatever its age:
+   * §4.1 gives no timeout path. Toward H, the caller commits after L's commit. After a commit to L, every H write that can
+   * create execution for the device refuses with the `mode` reason, and the Agent home flushes of its Bots back off. Cleanup
+   * of H's entries comes after and is not a safety barrier.
+   */
+  commitSwitch(scope: string, deviceId: string, expectedRevision: number): Promise<DeviceBinding> {
+    const key = storedKey(scope);
+    return this.change(scope, undefined, async (state, _publish, client) => {
+      // H checks its own open work only as the old owner. Toward H, the old owner is L: L's drain and L's commit come first,
+      // and H's held Turns of the device are the work that runs after this commit.
+      const old = (await openSwitch(client, key, deviceId, expectedRevision)).mode, work = old === 'H' ? await openWork(client, key, state, deviceId) : undefined;
+      if (work && Object.values(work).some(items => items.length)) {
+        throw new DeviceSwitchRefusedError(deviceId, 'open_work', `Device ${deviceId} still has open work: ${JSON.stringify(work)}`);
+      }
+      return { value: await endSwitch(client, key, deviceId, expectedRevision, 'commit'), outbox: [] };
+    });
+  }
+
+  /** Ends the open switch of a device on its frozen revision and keeps the old owner (#957): a failed export or verification. */
+  abortSwitch(scope: string, deviceId: string, expectedRevision: number): Promise<DeviceBinding> {
+    return this.change(scope, undefined, async (_state, _publish, client) =>
+      ({ value: await endSwitch(client, storedKey(scope), deviceId, expectedRevision, 'abort'), outbox: [] }));
   }
 
   /**

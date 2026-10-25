@@ -409,6 +409,18 @@
   routine that is not completed and whose current or pending version is
   `execution`. L now always sets `hostJobExecution: 'fail'` and
   `executionRoutines: 'refuse'`.
+- **Feature (examples)** — the hosted collaboration example runs the owner
+  switch of a device between L and H (#957, plan §4.1):
+  `beginSwitch`, `drainDevice`, `commitSwitch` and `abortSwitch`, each on
+  the expected mode revision, with the new `device_binding.switching`
+  column. During the freeze every H write that can create execution for
+  the device throws `DeviceSwitchingError` (`code: 'device_switching'`, as
+  L), the sync holds its Bots' Turns, and a commit away from H waits until
+  the drain finds no open work. After a commit to L the device refuses
+  with `mode`, and its Agent home operations back off. Switch steps that
+  the binding refuses throw `DeviceSwitchRefusedError`. The switch moves
+  no state; the export and import between H and an L ledger is a
+  follow-up.
 - **Added (examples)** — sealed Bot routines in K8 (#953, #654 E3d-4). A
   Bot routine may hold a member-sealed Turn instruction for each version:
   `sealedDefinition` and `resealDefinition` check the routine id, the version,

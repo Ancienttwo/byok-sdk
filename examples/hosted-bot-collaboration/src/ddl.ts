@@ -136,12 +136,15 @@ CREATE TABLE IF NOT EXISTS device_binding (
   -- JSON.stringify(device id).
   device         text    NOT NULL,
   ordinal        bigint  NOT NULL CHECK (ordinal >= 0),
-  -- §4.1 record shape. Until the switch slice exists, D2e writes only 'H'.
+  -- §4.1 record shape: the mode that owns the device's orchestration. A device with no row is in the default mode L.
   mode           text    NOT NULL CHECK (mode IN ('L', 'H')),
-  -- The owner revision. Every write that can create execution checks it.
+  -- The owner revision. Every write that can create execution checks it, and each switch step raises it (#957).
   mode_revision  bigint  NOT NULL CHECK (mode_revision >= 1),
   -- Set once by revoke, in the same write that raises mode_revision. The row is kept as the tombstone.
   revoked_at     bigint  CHECK (revoked_at >= 0),
+  -- The target mode while an owner switch is open (§4.1, #957): the old owner is frozen. NULL when no switch is open.
+  switching      text    CHECK (switching IN ('L', 'H')),
+  CHECK (switching IS NULL OR switching <> mode),
   PRIMARY KEY (scope, device),
   UNIQUE (scope, ordinal)
 );
