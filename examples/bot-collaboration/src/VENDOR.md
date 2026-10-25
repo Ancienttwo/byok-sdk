@@ -105,6 +105,7 @@ src/schema.ts
 src/team-model.ts
 src/team.ts
 src/toolset-policy.ts
+src/topology.ts
 @byok-sdk/client
 @byok-sdk/core
 @byok-sdk/example-host-execution-core

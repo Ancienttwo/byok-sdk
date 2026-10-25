@@ -15,7 +15,7 @@ import { commit, type CommandRecord, type CommitRequest, type CommitResult, type
 // through the commit contract. Owner commands and the K4 callbacks use the same function.
 // The Host gives ports for its own helpers. A port that a command needs and that is absent is a Host error.
 // The sync step runs beside the commands, so it is part of this entry. A store runs it under the same scope lock as a commit.
-export { DEVICE_NOT_BOUND, OFFER_WAIT_MS, syncTurn, type DeviceRefusal, type FreezeExecution, type SyncBot, type SyncFacts, type SyncOptions, type SyncState,
+export { DEVICE_NOT_BOUND, DEVICE_SWITCHING, OFFER_WAIT_MS, syncTurn, type DeviceRefusal, type FreezeExecution, type SyncBot, type SyncFacts, type SyncOptions, type SyncState,
   type SyncStep } from './sync';
 export { checkReply, delegationDue, observeDevices, replyCheckDue, settleDelegations, type DelegationTimers, type ReplyCheck,
   type ReplyReadback } from './delegation';

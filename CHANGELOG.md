@@ -317,6 +317,17 @@
   entry option, composed from `HostedReconciler.failStuckIntent`)
   reconciles that row once more and settles it `failed` with an audit
   line, so its FIFO moves on.
+- **Feature (examples)** — K8 L can be the old owner of a §4.1 device switch
+  (#957). It keeps one owner record per device and runs four steps, each on
+  the revision it expects: `freezeForSwitch` (read back from the ledger),
+  `drainForSwitch` (lists, and with `cancel` cancels, the device's open
+  intents, Turns, input batches and sent Agent home writes), and then
+  `commitSwitch` or `abortSwitch`. While the device is frozen, `input`,
+  `receive`, `roomInput` and `enqueueHostIntent` throw `DeviceSwitchingError`
+  (`device_switching`) for it. A routine slot on the device is refused, so the
+  SDK delivers its wake again, and the sync holds any other new Turn on it with
+  the new `switching` refusal of #956, under `held-switching:<turnId>`. After
+  the commit, every one of these refuses for good with `DeviceModeError`.
 
 ## 0.30.1 — 2026-10-24 (published)
 

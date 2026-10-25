@@ -27,8 +27,8 @@ export interface Turn {
   inputIds?: string[];
   /** History mode: the hash of the injected history that this Turn's offer froze (#739 Q4b), or of a seat's injected room messages (#883). */
   historyDigest?: string;
-  /** Set while the sync holds this Turn because its Bot's device has no active binding (#956). */
-  held?: 'device_not_bound';
+  /** Set while the sync holds this Turn because its Bot's device has no active binding (#956) or is frozen for an owner switch (#957). */
+  held?: 'device_not_bound' | 'device_switching';
   blockedReason?: string; profileFailure?: { sequence: number; revision: string; reason: string }; outcome?: Json; conclusion?: string; reported?: boolean;
 }
 export type Verdict = 'answered' | 'failed' | 'cancelled' | 'refused' | 'expired' | 'abandoned';

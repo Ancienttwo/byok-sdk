@@ -1,6 +1,7 @@
 import type { ByokServer } from '@byok-sdk/server';
 import { HostLedger, project } from '@byok-sdk/example-host-execution-core';
 import { stateOf } from './model';
+import { deviceRefusal } from './topology';
 import { applyHomeTerminal, checkHomeReadback, failHomeFlush, homeEnqueued, homeHead, homeRequests, planHomeRetry, type HomeReadback } from './team';
 
 export type HomeServer = Partial<Pick<ByokServer, 'enqueueAgentHomeProjection' | 'readAgentHomeProjection'>>;
@@ -27,7 +28,9 @@ export async function flushHomes(server: HomeServer, ledger: HostLedger, now: ()
         if (terminal) break;
       }
       if (!terminal) {
-        const request = ledger.transaction(s => planHomeRetry(operation(s, op.sequence), now()));
+        // #957: a device frozen for a switch, or owned by H, gets no new home write. A sent write is still read back.
+        const request = ledger.transaction(s => deviceRefusal(stateOf(s.application), op.request.deviceId) ? undefined : planHomeRetry(operation(s, op.sequence), now()));
+        if (!request) continue;
         await server.enqueueAgentHomeProjection(request);
         ledger.transaction(s => homeEnqueued(operation(s, op.sequence), now()));
         continue;
