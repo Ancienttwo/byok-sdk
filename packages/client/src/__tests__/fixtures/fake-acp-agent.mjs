@@ -12,6 +12,8 @@
 // after its two chunks and before the prompt answer.
 // FAKE_ACP_INITIALIZE=exit ends the agent on `initialize`; =error answers it
 // with an internal error.
+// `inspect --json` logs an `inspect` fact and prints FAKE_ACP_INSPECT (default:
+// no servers and no plugins); FAKE_ACP_INSPECT=fail exits 1 instead.
 import { appendFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -24,6 +26,12 @@ if (args[0] === '--version') {
 if (args.includes('--help')) {
   if (process.env.FAKE_ACP_NO_STDIO === '1') { process.stderr.write("error: unrecognized subcommand 'stdio'\n"); process.exit(2); }
   process.stdout.write('Run the agent over stdio\n');
+  process.exit(0);
+}
+if (args[0] === 'inspect') {
+  if (process.env.FAKE_ACP_LOG) appendFileSync(process.env.FAKE_ACP_LOG, `${JSON.stringify({ kind: 'inspect', argv: args, cwd: process.cwd(), env: process.env })}\n`);
+  if (process.env.FAKE_ACP_INSPECT === 'fail') { process.stderr.write('inspect failed\n'); process.exit(1); }
+  process.stdout.write(`${process.env.FAKE_ACP_INSPECT ?? '{"mcpServers":[],"plugins":[]}'}\n`);
   process.exit(0);
 }
 if (args.at(-1) !== 'stdio') { process.stderr.write(`unexpected argv ${JSON.stringify(args)}\n`); process.exit(64); }
