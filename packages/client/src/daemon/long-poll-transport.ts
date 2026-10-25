@@ -304,11 +304,11 @@ export class LongPollClient {
   /**
    * POST one batch of envelopes to `/byok/messages` (finding F6/protocol
    * §8.2) — a single attempt, no internal retry loop. Every envelope in
-   * `envelopes` is routed through the server's single inbound gate
-   * (`ConnectionHub.handleInbound`), so a resend of the SAME batch (same
-   * envelope `id`s — the caller must never rebuild them) is deduped
-   * server-side into a safe no-op rather than reprocessed (§9). Returns
-   * validated frozen-v1 counts only after a readable response body.
+   * `envelopes` is routed through the server's single inbound gate (the
+   * cloud kernel's `handleInboundEnvelope`), so a resend of the SAME batch
+   * (same envelope `id`s — the caller must never rebuild them) is deduped
+   * server-side into a safe no-op rather than reprocessed (§9). Returns the
+   * validated per-envelope outcomes only after a readable response body.
    * `signal` aborting is the caller's own lifecycle ending, not a route
    * failure: it resolves `undefined` without a warning.
    */

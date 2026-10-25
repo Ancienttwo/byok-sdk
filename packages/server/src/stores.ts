@@ -36,7 +36,8 @@ import type { ByokServerStorage } from './types';
  * - `rateLimiter` becomes this package's token bucket, which is also where
  *   `envelopesIn` and `rateLimitEvents` are counted (the kernel debits it at
  *   gate step 0, for every envelope, before any other decision — the exact
- *   choke point `ConnectionHub.handleInbound` used to be);
+ *   choke point the old reference server's `ConnectionHub.handleInbound`
+ *   used to be);
  * - `dedup` counts the already-seen answers that back `dedupDrops`;
  * - `mailbox` reports each device-scoped read, which is how a device that only
  *   ever long-polls still counts as present;

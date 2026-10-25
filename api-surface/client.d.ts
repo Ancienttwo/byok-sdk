@@ -4943,7 +4943,7 @@ export declare function createDaemon(config: DaemonConfig, overrides?: DaemonOve
  * filenames stay filesystem-safe regardless of scheme/port/path.
  *
  * Finding F5 (stale cursor across re-pair): `POST /byok/pair` always mints a
- * brand new `deviceId` (see `packages/server/src/http.ts`), including on a
+ * brand new `deviceId` (see `packages/cloud/src/auth/plane.ts`), including on a
  * re-pair against the same `serverUrl` (e.g. recovering from revocation,
  * protocol §6.3). A cursor keyed by `serverUrl` alone would hand the fresh
  * device's very first connection a stale, unrelated cursor value left over
@@ -8805,10 +8805,9 @@ export declare class NoPendingApprovalError extends Error {
  * for the short-lived CLI invocations M0-M2 ran as, but M3 turns the daemon
  * into a background service meant to stay up for weeks, so unbounded growth
  * here is a real, if slow, memory leak. Each collection evicts its OLDEST
- * (first-inserted) entry once over this cap — the same bounded-ring idiom
- * `ConnectionHub`'s per-device dedup window already uses server-side
- * (packages/server/src/hub.ts's `DEDUP_RING_CAPACITY`), just applied here to
- * task ids. `Map`/`Set` iterate in insertion order (ECMA-262), so "oldest"
+ * (first-inserted) entry once over this cap — the bounded-ring idiom the old
+ * reference server's per-device dedup window used, applied here to task ids
+ * (server-side dedup is now the cloud kernel's dedup store). `Map`/`Set` iterate in insertion order (ECMA-262), so "oldest"
  * always means "finished/cancelled longest ago" — neither collection is
  * touched on a read, only on insert, so eviction order depends purely on
  * insertion time. See `finishedTaskIds` and `pendingCancelled`'s own doc
@@ -10105,7 +10104,7 @@ export declare class TaskRunner {
      * nothing to do with.
      */
     private releasePreparationPin;
-    /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap, same idiom as `ConnectionHub.checkAndRecordDuplicate` (packages/server/src/hub.ts). */
+    /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap. */
     private addFinishedTaskId;
     private addStrictDeclinedTaskId;
     /** `reuseDir`, when set (a known sessionRef's recorded workspace), is used verbatim instead of a fresh `workspaceRoot/<taskId>` directory — `mkdir recursive` is idempotent either way, so ensuring-exists is safe to do unconditionally. */

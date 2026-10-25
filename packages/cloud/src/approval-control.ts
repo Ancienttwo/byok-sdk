@@ -2,14 +2,14 @@
  * Host-side approval resolution: the one rule that decides WHICH approval a
  * `cloud.approveTask`/`rejectTask` call is allowed to resolve.
  *
- * `@byok-sdk/server` keeps this as a single mutable slot on its task record
- * (`TaskSnapshot.pendingApprovalId`, `packages/server/src/hub.ts`) that
- * `task.await_approval` overwrites and `task.approval_resolved` clears. Cloud
- * holds no session state and no second store: the SAME two observations are
- * already durable in the `ApprovalTimelineStore` tail
+ * The old reference server kept this as a single mutable slot on its task
+ * record that `task.await_approval` overwrote and `task.approval_resolved`
+ * cleared. Cloud holds no session state and no second store: the SAME two
+ * observations are already durable in the `ApprovalTimelineStore` tail
  * (`approval-timeline.ts`), appended by the inbound gate, so the slot is
  * DERIVED from that tail on each call rather than mirrored into a record that
- * could then disagree with it.
+ * could then disagree with it. `@byok-sdk/server` projects the same fold as
+ * `TaskSnapshot.pendingApprovalId` (`packages/server/src/snapshot.ts`).
  *
  * The derivation is a fold over the tail's entries in revision order, holding
  * exactly one slot — deliberately the server's shape, not a set of concurrently

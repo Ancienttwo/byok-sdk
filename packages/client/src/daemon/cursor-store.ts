@@ -12,7 +12,7 @@ import { atomicWriteFile } from '../util/atomic-write';
  * filenames stay filesystem-safe regardless of scheme/port/path.
  *
  * Finding F5 (stale cursor across re-pair): `POST /byok/pair` always mints a
- * brand new `deviceId` (see `packages/server/src/http.ts`), including on a
+ * brand new `deviceId` (see `packages/cloud/src/auth/plane.ts`), including on a
  * re-pair against the same `serverUrl` (e.g. recovering from revocation,
  * protocol §6.3). A cursor keyed by `serverUrl` alone would hand the fresh
  * device's very first connection a stale, unrelated cursor value left over

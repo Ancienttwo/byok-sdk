@@ -709,14 +709,14 @@ export declare function readTaskAgentMessageDraft(stores: TenantStores, deviceId
  * Host-side approval resolution: the one rule that decides WHICH approval a
  * `cloud.approveTask`/`rejectTask` call is allowed to resolve.
  *
- * `@byok-sdk/server` keeps this as a single mutable slot on its task record
- * (`TaskSnapshot.pendingApprovalId`, `packages/server/src/hub.ts`) that
- * `task.await_approval` overwrites and `task.approval_resolved` clears. Cloud
- * holds no session state and no second store: the SAME two observations are
- * already durable in the `ApprovalTimelineStore` tail
+ * The old reference server kept this as a single mutable slot on its task
+ * record that `task.await_approval` overwrote and `task.approval_resolved`
+ * cleared. Cloud holds no session state and no second store: the SAME two
+ * observations are already durable in the `ApprovalTimelineStore` tail
  * (`approval-timeline.ts`), appended by the inbound gate, so the slot is
  * DERIVED from that tail on each call rather than mirrored into a record that
- * could then disagree with it.
+ * could then disagree with it. `@byok-sdk/server` projects the same fold as
+ * `TaskSnapshot.pendingApprovalId` (`packages/server/src/snapshot.ts`).
  *
  * The derivation is a fold over the tail's entries in revision order, holding
  * exactly one slot — deliberately the server's shape, not a set of concurrently
@@ -1954,7 +1954,9 @@ export interface ByokCloud {
      * has always had (`TaskApprovePayloadSchema`, `@byok-sdk/protocol`): the
      * enqueued envelope is durable, the runtime's response to it is observable
      * only through that task's own later messages. The outgoing `approvalId` is
-     * the caller's when given, else the pending one, else omitted.
+     * the pending request's id, else omitted; `opts.approvalId` is only compared
+     * against it (gate 3) and is never sent, even when the pending request has
+     * no id.
      */
     approveTask(tenant: TenantId, taskId: string, opts?: ApproveTaskOptions): Promise<EnqueuedAgentControl>;
     /**
@@ -1971,9 +1973,9 @@ export interface ByokCloud {
      *
      * Gated on the claim-time capability snapshot and on nothing else — see
      * `steer-control.ts` for why that is the only admissible input and why an
-     * absent snapshot refuses. Gate order mirrors the reference server
-     * (`ConnectionHub.steerTask`, `packages/server/src/hub.ts`), and every gate is
-     * evaluated in full before a mailbox row is allocated, so a refused call has
+     * absent snapshot refuses. Gate order mirrors the old
+     * reference server's `ConnectionHub.steerTask`, and every gate is evaluated
+     * in full before a mailbox row is allocated, so a refused call has
      * zero side effects:
      *
      *   1. no such task for this tenant -> `task_not_found` ({@link ByokCloudError});

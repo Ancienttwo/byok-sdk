@@ -1355,8 +1355,8 @@ export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
  * resolves, `docs/protocol.md`): today the server only learns of a local
  * resolution IMPLICITLY, after the fact, once the daemon's next
  * `task.progress`/`task.artifact`/`task.complete` proves the task already
- * moved on (`ConnectionHub.resumeIfImplicitlyApproved`,
- * `packages/server/src/hub.ts`) — a window in which a SaaS-side
+ * moved on (the `relay.onTaskActivity` hook in
+ * `packages/server/src/index.ts`) — a window in which a SaaS-side
  * `TaskHandle.approve()`/`.reject()` can independently decide (and win) the
  * server's own authoritative record before that evidence ever arrives. This
  * message lets the daemon report the local resolution explicitly and
@@ -1625,12 +1625,12 @@ export const SERVER_TO_DAEMON_TYPES = [
 
 /**
  * Message types the daemon sends to the server — the flip side of
- * {@link SERVER_TO_DAEMON_TYPES}. `conn.hello` is deliberately excluded: it's
- * only ever valid as the first frame of a WS handshake (`ws-server.ts`), not
- * as ongoing inbound traffic through `ConnectionHub.handleInbound`.
+ * {@link SERVER_TO_DAEMON_TYPES}. `conn.hello` is deliberately excluded: the
+ * inbound gate handles a bearer-authenticated `conn.hello` as a capability
+ * snapshot on its own, before the type-allow check.
  *
- * Used by `handleInbound` (`@byok-sdk/server`'s `hub.ts`) as the type-allow gate
- * for every inbound envelope, WS and `POST /byok/messages` alike (finding
+ * Used by `handleInboundEnvelope` (`@byok-sdk/cloud`'s `inbound.ts`) as the
+ * type-allow gate for every inbound `POST /byok/messages` envelope (finding
  * P2): a `type` outside this set — a server -> daemon type arriving inbound,
  * or anything unrecognized — is rejected before it's dispatched to any
  * handler or counted `accepted` on the `/byok/messages` wire.

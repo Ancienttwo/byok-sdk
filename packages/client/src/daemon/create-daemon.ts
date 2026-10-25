@@ -1011,12 +1011,11 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: R
  * `approvalId` on `task.await_approval`/`task.approve`/`task.reject`
  * unconditionally since M5 (see `TaskRunner.dispatchApproval`/
  * `handleApprove`/`handleReject`, `task-runner.ts`), so there is no
- * adapter-specific gate to check the way `steer` has. Without this, every
- * daemon built from this codebase advertised nothing here, so the server's
- * own `targeted` marking (`ConnectionHub.approveTask`/`rejectTask` —
- * `packages/server/src/hub.ts`'s `getDeviceCapabilities(...).includes(
- * 'approval-targeting')` check) always saw an upgraded daemon as legacy —
- * see `CAPABILITY_FLAGS`'s own doc comment (`@byok-sdk/protocol`'s `version.ts`)
+ * adapter-specific gate to check the way `steer` has. The old reference
+ * server read this flag to mark `targeted`; nothing reads it now, and the
+ * server's `task.approval_resolved` event always reports `targeted: false`
+ * (`packages/server/src/relay.ts`) — see `CAPABILITY_FLAGS`'s own doc comment
+ * (`@byok-sdk/protocol`'s `version.ts`)
  * for why this flag is purely informational/observability, not a functional
  * gate, and therefore safe to advertise unconditionally the moment a daemon
  * genuinely does what it claims (as this one already does).
