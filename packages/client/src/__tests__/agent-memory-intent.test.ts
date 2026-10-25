@@ -492,7 +492,7 @@ const itForeignHelper = isAgentMemoryFilesystemHelperSupported() && helperBin ==
 
 /** `create-daemon.ts`, then the daemon composition's modules in `create-daemon/` (#926), sorted. */
 function createDaemonSourceFiles(): string[] {
-  const modules = readdirSync(new URL('../daemon/create-daemon/', import.meta.url)).filter((name) => name.endsWith('.ts')).sort();
+  const modules = readdirSync(new URL('../daemon/create-daemon/', import.meta.url)).filter((name) => name.endsWith('.ts') && !name.endsWith('.d.ts') && !name.includes('.test.')).sort();
   return ['../daemon/create-daemon.ts', ...modules.map((name) => `../daemon/create-daemon/${name}`)];
 }
 

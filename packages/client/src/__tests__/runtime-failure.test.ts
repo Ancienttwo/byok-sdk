@@ -99,7 +99,7 @@ describe('RuntimeExecutionFailure', () => {
   it('statically guards TaskRunner against message parsing and catch-all retry defaults', async () => {
     // TaskRunner's member bodies live in daemon/task-runner/ beside the class (#926).
     const moduleDir = fileURLToPath(new URL('../daemon/task-runner/', import.meta.url));
-    const modules = (await fs.readdir(moduleDir)).filter((name) => name.endsWith('.ts')).sort();
+    const modules = (await fs.readdir(moduleDir)).filter((name) => name.endsWith('.ts') && !name.endsWith('.d.ts') && !name.includes('.test.')).sort();
     const source = [
       await fs.readFile(fileURLToPath(new URL('../daemon/task-runner.ts', import.meta.url)), 'utf8'),
       ...(await Promise.all(modules.map((name) => fs.readFile(`${moduleDir}${name}`, 'utf8')))),

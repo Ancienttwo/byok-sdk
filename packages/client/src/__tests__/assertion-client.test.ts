@@ -160,7 +160,7 @@ describe('client public surface', () => {
 /** `create-daemon.ts`, then the daemon composition's modules in `create-daemon/` (#926), sorted and joined. */
 function readCreateDaemonSources(): string {
   const moduleDir = new URL('../daemon/create-daemon/', import.meta.url);
-  const modules = readdirSync(moduleDir).filter((name) => name.endsWith('.ts')).sort();
+  const modules = readdirSync(moduleDir).filter((name) => name.endsWith('.ts') && !name.endsWith('.d.ts') && !name.includes('.test.')).sort();
   return [
     readFileSync(new URL('../daemon/create-daemon.ts', import.meta.url), 'utf8'),
     ...modules.map((name) => readFileSync(new URL(name, moduleDir), 'utf8')),
