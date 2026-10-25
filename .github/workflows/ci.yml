@@ -735,6 +735,14 @@ jobs:
       - name: Hosted Bot collaboration example suites
         run: bun run --filter @byok-sdk/example-hosted-bot-collaboration test
 
+      # #794 D3: the H Host composed as a Worker, served by wrangler dev (local
+      # workerd) over this job's Postgres and S3 endpoint, with its fault suites
+      # and two device processes. The job-level BYOK_REQUIRE_WORKER_DATAPLANE
+      # flag turns an unmet gate into a failure.
+      # examples/hosted-bot-collaboration-worker/src/ci.test.ts pins this step.
+      - name: Hosted Bot collaboration Worker suites
+        run: bun run --filter @byok-sdk/example-hosted-bot-collaboration-worker test
+
       # Issue #196 durable restart leg: the recurring packed smoke's restart
       # scenario runs against THIS job's compose Postgres from the EXACT
       # tarballs the release driver packs -- never repacked, never from a

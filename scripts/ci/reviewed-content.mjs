@@ -71,7 +71,10 @@ const plain = value => value !== null && typeof value === 'object' && !Array.isA
 // #793 D2 (owner O8): the private hosted (H) example. Its manifest has a fixed
 // shape. It may only reuse workspaces and dependency specs that another
 // workspace manifest already declares, so it adds no package and moves no version.
+// #794 D3: the private Worker composition of H follows the same rule.
 const HOSTED = Object.freeze({ dir: 'examples/hosted-bot-collaboration', name: '@byok-sdk/example-hosted-bot-collaboration' });
+const HOSTED_WORKER = Object.freeze({ dir: 'examples/hosted-bot-collaboration-worker', name: '@byok-sdk/example-hosted-bot-collaboration-worker' });
+const PRIVATE_HOSTED = Object.freeze([HOSTED, HOSTED_WORKER]);
 const HOSTED_FIELDS = new Set(['name', 'version', 'private', 'type', 'description', 'scripts', 'dependencies', 'devDependencies']);
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies'];
 // #793 D2a-0: the K8 entries that the hosted example imports. There is no root
@@ -110,25 +113,25 @@ const K8_DELIVERY_EXPORTS = Object.freeze({
   './delivery-routing': './src/delivery-routing.ts',
   './delivery-vectors': './src/delivery-vectors.test-support.ts',
 });
-function otherWorkspaceManifests(cwd) {
+function otherWorkspaceManifests(cwd, self) {
   const manifests = [];
   for (const prefix of ['packages', 'examples']) {
     if (!existsSync(resolve(cwd, prefix))) continue;
     for (const name of readdirSync(resolve(cwd, prefix))) {
       const file = resolve(cwd, prefix, name, 'package.json');
-      if (`${prefix}/${name}` !== HOSTED.dir && existsSync(file)) manifests.push(JSON.parse(readFileSync(file, 'utf8')));
+      if (`${prefix}/${name}` !== self && existsSync(file)) manifests.push(JSON.parse(readFileSync(file, 'utf8')));
     }
   }
   return manifests;
 }
-function verifyHostedManifest(manifest, cwd) {
+function verifyHostedManifest(manifest, cwd, example) {
   if (!plain(manifest) || Object.keys(manifest).some(key => !HOSTED_FIELDS.has(key))
-    || manifest.name !== HOSTED.name || manifest.private !== true || manifest.type !== 'module' || !version(manifest.version)
+    || manifest.name !== example.name || manifest.private !== true || manifest.type !== 'module' || !version(manifest.version)
     || (manifest.description !== undefined && typeof manifest.description !== 'string')
     || !isDeepStrictEqual(manifest.scripts, { typecheck: 'tsc --noEmit', test: 'vitest run' })) {
     throw new Error('Reviewed CI mapping required: the hosted example manifest has an unreviewed shape');
   }
-  const others = otherWorkspaceManifests(cwd);
+  const others = otherWorkspaceManifests(cwd, example.dir);
   for (const field of DEPENDENCY_FIELDS) {
     if (manifest[field] === undefined) continue;
     if (!plain(manifest[field])) throw new Error('Reviewed CI mapping required: the hosted example manifest has an unreviewed shape');
@@ -141,29 +144,30 @@ function verifyHostedManifest(manifest, cwd) {
   }
   return manifest;
 }
-/** Admits the hosted example's own lock rows when they match its reviewed manifest. Every other lock byte stays compared. */
-function admitHostedLock(before, after, cwd) {
-  const entry = after.workspaces?.[HOSTED.dir];
+/** Admits a private hosted example's own lock rows when they match its reviewed manifest. Every other lock byte stays compared. */
+function admitHostedLock(before, after, cwd, example) {
+  const entry = after.workspaces?.[example.dir];
   if (entry === undefined) return;
-  const manifest = verifyHostedManifest(JSON.parse(readFileSync(resolve(cwd, HOSTED.dir, 'package.json'), 'utf8')), cwd);
+  const manifest = verifyHostedManifest(JSON.parse(readFileSync(resolve(cwd, example.dir, 'package.json'), 'utf8')), cwd, example);
   const expected = { name: manifest.name, version: manifest.version };
   for (const field of DEPENDENCY_FIELDS) if (manifest[field] !== undefined) expected[field] = manifest[field];
-  const row = [`${HOSTED.name}@workspace:${HOSTED.dir}`];
-  if (!isDeepStrictEqual(entry, expected) || !isDeepStrictEqual(after.packages?.[HOSTED.name], row)
-    || (before.packages?.[HOSTED.name] !== undefined && !isDeepStrictEqual(before.packages[HOSTED.name], row))) {
+  const row = [`${example.name}@workspace:${example.dir}`];
+  if (!isDeepStrictEqual(entry, expected) || !isDeepStrictEqual(after.packages?.[example.name], row)
+    || (before.packages?.[example.name] !== undefined && !isDeepStrictEqual(before.packages[example.name], row))) {
     throw new Error('Reviewed CI mapping required: the hosted example lock rows differ from its manifest');
   }
-  delete before.workspaces[HOSTED.dir]; delete after.workspaces[HOSTED.dir];
-  if (before.packages) delete before.packages[HOSTED.name];
-  delete after.packages[HOSTED.name];
+  delete before.workspaces[example.dir]; delete after.workspaces[example.dir];
+  if (before.packages) delete before.packages[example.name];
+  delete after.packages[example.name];
 }
 
 /** Returns the workspaces whose suites must qualify a reviewed dependency move. */
 export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) {
   if (!/^[a-f0-9]{40}$/.test(base ?? '') || /^0+$/.test(base)) throw new Error('Content-sensitive impact requires exact CI_BASE');
-  if (path === `${HOSTED.dir}/package.json`) {
+  const hosted = PRIVATE_HOSTED.find(example => path === `${example.dir}/package.json`);
+  if (hosted) {
     // A new file has no base content, so the reviewed shape is the whole check.
-    verifyHostedManifest(JSON.parse(readFileSync(resolve(cwd, path), 'utf8')), cwd);
+    verifyHostedManifest(JSON.parse(readFileSync(resolve(cwd, path), 'utf8')), cwd, hosted);
     return [];
   }
   const beforeText = execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -195,7 +199,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
   const qualify = [];
   const before = parse(beforeText), after = parse(afterText);
   if (path === 'bun.lock') {
-    admitHostedLock(before, after, cwd);
+    for (const example of PRIVATE_HOSTED) admitHostedLock(before, after, cwd, example);
     const piMoved = [];
     for (const [dir, record] of Object.entries(before.workspaces)) {
       if (dir === '') continue;

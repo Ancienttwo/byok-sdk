@@ -62,6 +62,17 @@ export const workspaceGraph = {
       "@byok-sdk/example-host-execution-core"
     ]
   },
+  "examples/hosted-bot-collaboration-worker": {
+    "name": "@byok-sdk/example-hosted-bot-collaboration-worker",
+    "dependencies": [
+      "@byok-sdk/client",
+      "@byok-sdk/cloud",
+      "@byok-sdk/cloud-dataplane",
+      "@byok-sdk/example-bot-collaboration",
+      "@byok-sdk/example-host-execution-core",
+      "@byok-sdk/example-hosted-bot-collaboration"
+    ]
+  },
   "examples/live-activity-host": {
     "name": "@byok-sdk/example-live-activity-host",
     "dependencies": [
@@ -360,6 +371,11 @@ export function selectImpact(paths, context = {}) {
       verifyReviewedContent(path, context);
       dirs.add('examples/hosted-bot-collaboration'); continue;
     }
+    // #794 D3: the private Worker composition of H, checked by the same reviewed shape.
+    if (path === 'examples/hosted-bot-collaboration-worker/package.json') {
+      verifyReviewedContent(path, context);
+      dirs.add('examples/hosted-bot-collaboration-worker'); continue;
+    }
     // These root-level fixtures are executed by the relocated native SEA smoke.
     if (path === 'examples/packaging/native-assets-fixture.ts' || path === 'examples/packaging/native-assets-smoke.mjs') {
       dirs.add('examples/packaging'); families.add('packageability-smoke'); continue;
@@ -525,7 +541,9 @@ export function selectImpact(paths, context = {}) {
   }
   for (const dir of leafDirs) dirs.add(dir);
   // #793 O5: the hosted example also runs in the dataplane job, the only job with a real Postgres.
-  if (dirs.has('packages/cloud-dataplane') || dirs.has('packages/conformance') || dirs.has('examples/hosted-bot-collaboration')) families.add('dataplane');
+  // #794 D3: so does its Worker composition, which needs that Postgres and wrangler.
+  if (dirs.has('packages/cloud-dataplane') || dirs.has('packages/conformance') || dirs.has('examples/hosted-bot-collaboration')
+    || dirs.has('examples/hosted-bot-collaboration-worker')) families.add('dataplane');
   return { dirs: sorted(dirs), files: sorted(files), families: sorted(families),
     reason: dirs.size || families.size ? 'impacted' : scripts ? 'root-ci-scripts' : 'docs-only' };
 }

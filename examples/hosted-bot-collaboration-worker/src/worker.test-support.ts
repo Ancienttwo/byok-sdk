@@ -40,6 +40,7 @@ if (process.env[REQUIRE_ENV] === '1' && !RUN) {
 }
 
 const EXAMPLE_DIR = fileURLToPath(new URL('..', import.meta.url));
+const WRANGLER_CONFIG = fileURLToPath(new URL('./wrangler.json', import.meta.url));
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`;
 
 /** The run's database objects: one role and three schemas. `pool` is the role's own pool, for Node-side reads and writes. */
@@ -166,7 +167,7 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
     H_RECONCILE_POLL_MS: '0', ...(options.fault ? { H_FAULT: options.fault } : {}),
     ...options.vars };
   let output = '';
-  const child = spawn(process.execPath, [wranglerEntry(), 'dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', persist,
+  const child = spawn(process.execPath, [wranglerEntry(), 'dev', '--config', WRANGLER_CONFIG, '--port', String(port), '--ip', '127.0.0.1', '--persist-to', persist,
     '--test-scheduled', '--show-interactive-dev-session=false', ...Object.entries(vars).flatMap(([name, value]) => ['--var', `${name}:${value}`])],
   { cwd: EXAMPLE_DIR, detached: true, env: { ...process.env, CI: 'true', WRANGLER_SEND_METRICS: 'false', NO_COLOR: '1',
     CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_BYOK_PG: substrate.connectionString } });
@@ -181,6 +182,8 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
       await exited;
     }
     rmSync(persist, { recursive: true, force: true });
+    // wrangler's bundle scratch next to the config; the next instance writes it again.
+    rmSync(path.join(path.dirname(WRANGLER_CONFIG), '.wrangler'), { recursive: true, force: true });
   };
   const authorized = (body: unknown, token: string): RequestInit => ({ method: 'POST', body: JSON.stringify(body),
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } });
