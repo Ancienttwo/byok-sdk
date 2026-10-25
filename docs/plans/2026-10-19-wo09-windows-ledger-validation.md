@@ -504,13 +504,40 @@ marker is created with `fs.open(lockPath, 'wx')`, then written with
 an empty marker. On restart, `openLeaseMarker` parses it, and that fails.
 The exact-owner reclaim never runs, so every later acquire of that home
 fails. After one process crash in that window, the home can no longer be
-written. The 120-cut run above did not hit this window, because its CPU
-was not throttled.
+written. The 120-cut run above did not hit this window, most likely
+(inferred) because its CPU was not throttled.
 
 Not fixed here. `agent-home.ts` is product code outside this lane, and how
 a restart should treat an empty or unparseable marker is an owner decision.
 The process-crash case keeps its assertion. Until this is decided, it fails
 whenever a cut lands in that window.
+
+### macOS CI hang (2026-10-26)
+
+From `39816140` to `cb02228a`, the step "Run SDK helper, intent and
+capability contracts" on macos-latest (arm64) never finished once W5 was
+the last of its 14 files. Each run was cancelled after 15 to 44 minutes or
+lost its runner, and no log survived. On main, without W5, the step takes
+15 to 19 s on arm64.
+
+Probes, all on the same 14 files or on W5 alone:
+
+| Where | Configuration | Result |
+| --- | --- | --- |
+| Local, M3 Max | `bun test`; vitest under Node 24; Bun 1.4.2 as the device interpreter; `taskpolicy -b` (E-cores only); all 14 files together | never hung (about 40 runs) |
+| `bun run --filter` | a script that leaves a detached process holding stdout | returns at once, so a held pipe is not the cause |
+| CI, split | W5 alone, after the other 13 files | passed every run: arm64 3, intel 1, Windows 3; W5 takes 5 to 7 s on macOS |
+| CI, together | the earlier 14-file command | hung on arm64 about 5 times and on intel 2 times; passed 2 times on each |
+
+In the hang on intel at `0a9c8d52`, the VM stopped responding. The step's
+6-minute limit did not fire, the 30-minute job limit ended the job after
+about 35 minutes, and no log or process sample survived. So the sampler in
+the W5 step cannot explain this kind of hang.
+
+The cause is unknown. Splitting W5 into its own step is not a fix; it only
+avoids running W5 in the same vitest run as the other helper files. W5 now
+runs as its own step, and the job has a 30-minute limit. If the hang
+returns, it ends there instead of after 6 hours.
 
 ### Evaluation: a QEMU/KVM Windows guest on a GitHub-hosted Linux runner
 
@@ -745,8 +772,11 @@ macos-latest leg hung. The maintainer signs all three at review.
   it samples the vitest, bun and helper processes every 15 s into
   `$RUNNER_TEMP/w5-processes.log`. A new `if: always()` step, "Show
   processes during and after the W5 harness", prints that log and the
-  whole process table. Before this, the job had no limit, and a hung step
-  ran until it was cancelled or the runner was lost, with no log.
+  whole process table. These capture a hang only while the runner still
+  responds. In the hang seen so far the VM stops responding: the step limit
+  never fires, the 30-minute job limit ends the job, and no log survives.
+  Before this, the job had no limit, and a hung step ran until it was
+  cancelled or the runner was lost.
 - Not proposed: a standard-user Windows run of the TS harness, which would
   need a step like the Go standard-user step in
   `agent-memory-helper-non-darwin`.
