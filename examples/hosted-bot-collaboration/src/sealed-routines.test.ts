@@ -94,12 +94,14 @@ describe.skipIf(POSTGRES_URL === undefined)('H sealed Bot routines on real Postg
 
   it('fails an untried sealed intent before any SDK call on a port with no sealed lane, as L does, and its Turn fails', async () => {
     const scope = await scoped(), turn = await frozen(scope);
-    const port: FrozenSubmitPort = { submit: vi.fn(), offer: vi.fn(async () => undefined) };
-    await new HostedSubmitter(opened!.pool, store().schema, { port: () => port, now: () => FIRST }).run();
+    const port: FrozenSubmitPort = { submit: vi.fn(), offer: vi.fn(async () => undefined) }, changed: string[] = [];
+    await new HostedSubmitter(opened!.pool, store().schema, { port: () => port, now: () => FIRST, changed: at => { changed.push(at); } }).run();
     expect(port.submit).not.toHaveBeenCalled();
     expect(port.offer).not.toHaveBeenCalled();
     expect(await intentRow(scope, turn)).toMatchObject({ conclusion: 'failed', tries: 0, last_error: 'This Host has no sealed dispatch' });
-    await store().sync(scope, SYNC);
+    // The deployment syncs each scope that the submitter reports, which settles the Turn.
+    expect(changed).toEqual([scope]);
+    for (const at of changed) await store().sync(at, SYNC);
     expect((await store().read(scope)).turns[turn]).toMatchObject({ status: 'failed', conclusion: 'failed' });
   });
 

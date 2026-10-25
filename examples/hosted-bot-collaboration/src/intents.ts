@@ -230,6 +230,12 @@ export interface SubmitterOptions {
   backoffMs?: number;
   /** The most rows that one pass takes. */
   batch?: number;
+  /**
+   * Called once for each scope where this pass concluded an intent with no SDK call (the queued expiry, or a sealed row
+   * with no sealed lane), in the order of its first one, at the end of the pass. The Host syncs those scopes, so the Turn
+   * of that intent settles, as for the reconciler's `changed`. A throw from the callback propagates.
+   */
+  changed?: (scope: string) => void;
 }
 type Claim = { scopeKey: string; key: string; tries: number; input: FrozenExecutionInput; waitUntil: number; modeRevision: number };
 /** A row whose try threw outside the SDK call, for example on an unknown store version. The pass went on. */
@@ -262,15 +268,16 @@ export class HostedSubmitter {
         AND i.next_at <= $1 AND NOT EXISTS (SELECT 1 FROM intent o WHERE o.scope = i.scope AND o.agent = i.agent
           AND o.conclusion IS NULL AND o.ordinal < i.ordinal)
         ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [this.now(), this.options.batch ?? 100, [...SUPPORTED_STORE_VERSIONS]]), true);
-    const pass: SubmitPass = { tried: 0, failed: [] };
+    const pass: SubmitPass = { tried: 0, failed: [] }, changed = new Set<string>();
     for (const row of due.rows) {
-      try { if (await this.try(row.scope, row.key)) pass.tried++; }
+      try { if (await this.try(row.scope, row.key, changed)) pass.tried++; }
       catch (error) {
         pass.failed.push({ scope: JSON.parse(row.scope) as string, turnId: JSON.parse(row.key) as string, error });
         // The backoff can fail too, for example when the scope has an unknown store version. Then nothing is written.
         await this.backOff(row.scope, row.key, error).catch(() => undefined);
       }
     }
+    for (const scope of changed) this.options.changed?.(scope);
     return pass;
   }
 
@@ -285,11 +292,13 @@ export class HostedSubmitter {
     });
   }
 
-  private async try(scopeKey: string, key: string): Promise<boolean> {
-    const claim = await this.claim(scopeKey, key);
+  private async try(scopeKey: string, key: string, changed: Set<string>): Promise<boolean> {
+    const claim = await this.claim(scopeKey, key), scope = JSON.parse(scopeKey) as string;
     if (claim === 'skipped') return false;
-    if (claim === 'concluded') return true;
-    const scope = JSON.parse(scopeKey) as string;
+    if (claim === 'concluded') {
+      changed.add(scope);
+      return true;
+    }
     let outcome: 'delivered' | 'stopped' | { error: unknown };
     try { outcome = await submitFrozen(this.options.port(scope), claim.input, () => this.mayStillSubmit(claim)); }
     catch (error) { outcome = { error }; }
