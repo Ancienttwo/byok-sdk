@@ -55,7 +55,6 @@ async function cancellationFixture() {
 describe('required Agent message completion gate', () => {
   it.each(['missing', 'unreadable'] as const)('delivers the closing required reply before a %s result failure', async kind => {
     const { runner, adapter, sent, deps } = await cancellationFixture();
-    deps.terminalJournal = true;
     deps.agentResultMcpBin = { command: process.execPath, args: ['/sdk/byok-agent-result-mcp.js'] };
     deps.agentResultMcpPreflight = async () => {};
     if (kind === 'unreadable') vi.spyOn(AgentResultStore.prototype, 'get').mockRejectedValue(new Error('fake read failure'));
@@ -93,7 +92,6 @@ describe('required Agent message completion gate', () => {
 
   it.each(['empty', 'persist-failure', 'cancel-during-persist'] as const)('does not fabricate or release a required reply on %s', async mode => {
     const { runner, adapter, sent, deps } = await cancellationFixture();
-    deps.terminalJournal = true;
     deps.agentResultMcpBin = { command: process.execPath, args: ['/sdk/byok-agent-result-mcp.js'] };
     deps.agentResultMcpPreflight = async () => {};
     let release!: () => void;
@@ -615,7 +613,6 @@ describe('required Agent message completion gate', () => {
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
       agentMessageMcpPreflight: helperPreflight,
       // Configured, but a message-only offer must never use it.
-      terminalJournal: true,
       agentResultMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-result-mcp.js'] },
     });
     const taskId = 'message-task';

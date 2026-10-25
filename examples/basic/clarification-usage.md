@@ -20,7 +20,7 @@ import { SqliteClarificationStore } from './clarification-store';
 
 const store = new SqliteClarificationStore(hostDatabasePath, authenticatedTenantId, 100);
 const host = new ClarificationHost(tenantScopedByokServer, store, () => Date.now());
-// Configure agentHome and hostedJournal: { mode: 'sqlite' }; the runtime calls submit_result.
+// Configure agentHome; the runtime calls submit_result.
 // Its agentEgress.policy must exactly match target.egressPolicy; it must
 // advertise terminal-projection-selection,
 // agent-egress-fresh-session and agent-home-contract support.

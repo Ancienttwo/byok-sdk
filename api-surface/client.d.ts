@@ -25,6 +25,15 @@ export interface ClaudeAdapterOptions {
      * unchanged. Default `inherit`.
      */
     agentUserContext?: 'inherit' | 'excluded';
+    /**
+     * For an Agent task (`task.offer_for_agent`), `disabled` starts Claude with
+     * `--no-session-persistence`, so Claude does not save the session
+     * transcript under `<config dir>/projects/`. Such a session cannot be
+     * resumed: an Agent task that carries a `sessionRef` fails before Claude
+     * starts. Follow-ups in the same task still work. Other tasks are
+     * unchanged. Default `enabled`.
+     */
+    agentSessionPersistence?: 'enabled' | 'disabled';
 }
 /**
  * Claude Code stream-json adapter.
@@ -410,6 +419,23 @@ export interface CodexAdapterOptions {
     operationTimeoutMs?: number;
     /** Opt-in local Host UI; independent of the remote boolean approval lane. */
     nativeInteractions?: NativeInteractionHostOptions;
+    /**
+     * For an Agent task (`task.offer_for_agent`), `excluded` gives the Codex
+     * thread only the task's and the SDK's MCP servers. Before the thread
+     * opens, the adapter reads Codex's effective configuration for the task cwd
+     * (`config/read`), sets `enabled = false` on every other `mcp_servers`
+     * entry, and turns off the `apps` (connectors) and `plugins` features for
+     * the thread. The thread then has no plugins at all, not only no plugin
+     * MCP servers. After the open it reads the thread's MCP server status
+     * back, and the start fails if any other server is not disabled, or if a
+     * user server has the name of a task or SDK server. The user's
+     * `AGENTS.md`, login, model, sandbox setting and other configuration still
+     * apply. It covers new and resumed threads. On a resume, Codex may start a
+     * queued turn before the read-back: that turn already runs with the
+     * overrides, and a failed read-back stops the app server. Other tasks are
+     * unchanged. Default `inherit`.
+     */
+    agentUserMcpServers?: 'inherit' | 'excluded';
 }
 /** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export declare class CodexAdapter implements RuntimeAdapter {
@@ -466,6 +492,22 @@ export interface GrokAdapterOptions {
      * them. Default `inherit`: the user's Grok settings apply.
      */
     compatInstructions?: 'inherit' | 'disabled';
+    /**
+     * For an Agent task (`task.offer_for_agent`), `excluded` sets
+     * `GROK_CLAUDE_MCPS_ENABLED`, `GROK_CURSOR_MCPS_ENABLED` and
+     * `GROK_MANAGED_MCPS_ENABLED` to `0` on the Grok agent process, then runs
+     * `grok inspect --json` in the task cwd with the same environment. The
+     * start fails before the agent starts if inspect lists an MCP server that
+     * is not disabled, or an enabled plugin that provides MCP servers, or if
+     * inspect fails. Grok has no per-process switch for the servers of
+     * `~/.grok/config.toml`, project `.grok/config.toml` and `.mcp.json`, or
+     * plugins, so a user who has one enabled cannot run Agent tasks with this
+     * option. Two sources are not detected: a server turned on while the
+     * session runs (a config hot-reload, `/mcps` or `grok mcp enable`), and
+     * managed MCP that an administrator pins on. Other tasks are unchanged.
+     * Default `inherit`.
+     */
+    agentUserMcpServers?: 'inherit' | 'excluded';
     resolveBin?: () => ResolvedBin;
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
@@ -4199,7 +4241,7 @@ import { GitWorkspaceManager } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
 import { type DeviceEnrollment } from './store';
 import { type LocalTaskJournal } from './journal/journal';
-import { type JournalOpenFaultSeam } from './journal/sqlite-support';
+import type { JournalOpenFaultSeam } from './journal/sqlite-support';
 import { type StorageConfig } from './retention/config';
 import { type RetentionTimers } from './retention/sweeper';
 import { type ProgressBatcherOptions } from './progress-batcher';
@@ -4227,43 +4269,6 @@ export interface DaemonBranding {
     supportUrl?: string;
     /** Brand accent color (any CSS-color-like string — hex, name, etc.); not parsed or validated here. */
     accent?: string;
-}
-/**
- * S3b (L-002): opt-in durable local journal for hosted deployments
- * (architecture §12.7.2).
- *
- * Explicit and off by default, because it changes what an ack MEANS. With no
- * journal configured (the self-hosted default this SDK has always shipped),
- * the daemon's redelivery cursor advances on handler success exactly as
- * before. With one configured, every inbound envelope is committed and fsynced
- * to `<storeDir>/daemon.db` BEFORE the handler resolves — and since
- * `ConnectionManager` only advances the cursor once the handler resolves
- * (`connection-manager.ts`), acking before committing stops being something
- * this daemon can express, rather than something it is careful not to do.
- *
- * Turning this on when the runtime has no working `node:sqlite` is a typed
- * construction failure, not a downgrade to a file journal — see
- * `JournalUnavailableError`. That refusal is the point (§12.7.2): a journal
- * that does not fsync loses tasks only under power-cut timings, so it passes
- * every test anyone will ever run against it.
- */
-export interface HostedJournalConfig {
-    /**
-     * The backend. Only `sqlite` today, and spelled out rather than implied by
-     * the section's presence so adding a second one later is an additive change
-     * to a closed set instead of a re-interpretation of an existing config.
-     */
-    mode: 'sqlite';
-    /** Bound on waiting for the journal's write lock, ms. Defaults to the journal's own bound. */
-    busyTimeoutMs?: number;
-    /**
-     * Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated.
-     * An inbound envelope record may still reach a floor derived from the inline sealed maximum (415083 bytes),
-     * so a sealed envelope is journaled and declined, not stalled (#654). An inbound envelope above the bound is
-     * not stored and does not stall the cursor: an offer is declined (`inbound_envelope_too_large`), any other
-     * envelope is dropped (#826).
-     */
-    maxRecordBytes?: number;
 }
 export interface DaemonConfig {
     /** Absolute native asset root for SDK-created runtime adapters. Custom adapters own their option. */
@@ -4358,8 +4363,6 @@ export interface DaemonConfig {
      * execution has one canonical workspace authority.
      */
     gitWorkspace?: GitWorkspaceConfig;
-    /** Disabled by default. Enables the durable local task journal — see {@link HostedJournalConfig}. */
-    hostedJournal?: HostedJournalConfig;
     /**
      * Restricts which runtimes this daemon will ever use — enforced in two
      * places that must stay consistent: `createDaemon` (this file) builds its
@@ -4866,22 +4869,14 @@ export interface DaemonOverrides {
         store?: GitWorkspaceStore;
     };
     /**
-     * S3b: injection seam for the durable local journal, mirroring
-     * `gitWorkspace` above — used only when `config.hostedJournal` is set, so an
-     * absent journal config cannot accidentally activate a supplied object. Also
-     * the host-injected-implementation path §12.7.2 allows: a backend other than
-     * `SqliteLocalTaskJournal` is acceptable if it meets the same durability
-     * contract (a resolved `appendEnvelope` means fsynced), and unacceptable
-     * otherwise — this seam does not verify that, the host asserting it does.
-     *
-     * A journal supplied here is NOT closed by `stop()`; whoever injected it
-     * owns its lifetime.
+     * A durable local journal the host supplies instead of `SqliteLocalTaskJournal`
+     * (§12.7.2). It must meet the same contract (a resolved `appendEnvelope` is
+     * fsynced); the daemon does not check that. `stop()` does not close it:
+     * whoever injected it owns its lifetime.
      */
-    hostedJournal?: {
-        journal?: LocalTaskJournal;
-        /** Test-only post-open SQLite initialization fault seam. */
-        openFaults?: JournalOpenFaultSeam;
-    };
+    journal?: LocalTaskJournal;
+    /** Test-only post-open SQLite initialization fault seam. */
+    journalOpenFaults?: JournalOpenFaultSeam;
 }
 /**
  * Plan `device-assertion-broker` (codex round-2 F3): the internal, NON-public
@@ -7995,6 +7990,19 @@ export interface StorageConfig {
         maxPassDurationMs?: number;
         ttlMs?: Partial<Record<ExpiringClassId, number>>;
     };
+    /** Every daemon journals tasks durably in `<storeDir>/daemon.db` before it acks them. */
+    journal?: {
+        /** Bound on waiting for the journal's write lock, ms. Defaults to the journal's own bound. */
+        busyTimeoutMs?: number;
+        /**
+         * Per-record byte bound. Defaults to the journal's own bound (256 KiB); oversized records are refused, never truncated.
+         * An inbound envelope record may still reach a floor derived from the inline sealed maximum (415083 bytes),
+         * so a sealed envelope is journaled and declined, not stalled (#654). An inbound envelope above the bound is
+         * not stored and does not stall the cursor: an offer is declined (`inbound_envelope_too_large`), any other
+         * envelope is dropped (#826).
+         */
+        maxRecordBytes?: number;
+    };
 }
 export interface StorageBudget {
     readonly maxStoreBytes: number;
@@ -9150,13 +9158,6 @@ export interface TaskRunnerDeps {
         readonly taskId: string;
         readonly payload: AcceptedOfferPayload;
     }) => AdmissionGuardDecision;
-    /**
-     * True only when every terminal envelope this runner sends is recorded in
-     * the durable local journal before it reaches the transport. A
-     * result-document offer needs that persist-before-send boundary, so a
-     * runner without it declines such offers.
-     */
-    terminalJournal?: boolean;
     /** Durable normal-turn result failure intent, before handing off a required reply. */
     recordResultReplyFailure?(taskId: string, failure: ResultReplyFailure): Promise<void>;
     recordAgentMessageAccepted?(taskId: string): Promise<void>;
@@ -10610,7 +10611,6 @@ export interface DiagnosticsSnapshot {
     config: {
         serverProtocol: 'http' | 'https' | 'ws' | 'wss' | 'invalid' | 'unsupported';
         customStoreDir: boolean;
-        hostedJournal: boolean;
         runtimeAllowlistCount?: number;
     };
     device: {
@@ -10720,7 +10720,7 @@ export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, t
 export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner';
 export { LocalTeamWorkspace, LocalTeamWorkspaceService, TeamWorkspaceError, TeamWorkspaceValidationError, TeamWorkspaceNotFoundError, TeamWorkspaceConflictError, TeamWorkspaceQuotaError, TeamWorkspaceLeaseError, TeamWorkspaceReceiptError, TeamWorkspaceCorruptError, encodeTeamMemberContext, decodeTeamMemberContext, type TeamWorkspaceDefinition, type TeamWorkspaceLimits, type TeamMessage, type TeamMemberLease, type TeamWorkspaceMemberReceipt, } from './daemon/team-workspace';
 export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './bin/team-tmux-view';
-export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig, DeviceAssertionConfig, InputPreparationDaemonConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon';
+export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, DeviceAssertionConfig, InputPreparationDaemonConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon';
 export { ProviderProvisioningNoticeError, PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS, } from './daemon/provider-provisioning';
 export type { ProviderProvisioningHandler, ProviderProvisioningNotice, ProviderProvisioningNoticeFailureReason, } from './daemon/provider-provisioning';
 export { AgentMemoryIntentNoticeError, AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS, } from './daemon/agent-memory-intent';
@@ -10856,6 +10856,8 @@ export type { ExecutionScratch } from './daemon/retention/scratch';
 export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './daemon/agent-memory-helper-release';
 /** The reserved name of the SDK memory MCP server in an Agent task's MCP servers. */
 export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp';
+/** Whether `name` is the name of an MCP server the SDK owns in a task's MCP servers. */
+export { isReservedMcpServerName } from './sdk-reserved-mcp';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, type CopySdkNativeAssetsOptions } from './sdk-native-assets';
 export type { AgentMemoryExport, AgentMemoryExportOptions } from './daemon/agent-memory-export';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====

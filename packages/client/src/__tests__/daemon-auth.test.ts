@@ -11,7 +11,6 @@ import { AuthManager, DeviceRevokedError } from '../daemon/auth-manager';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DeviceStore } from '../daemon/store';
 import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../daemon/daemon-owner';
-import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { DaemonHaltError } from '../daemon/daemon-lifecycle';
 import { quarantineCorruptOperationalHealth } from '../diagnostics/diagnostics';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -625,7 +624,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
 
   // This probe tests SQLite ownership. Transfer its synthetic enrollment over
   // IPC and explicitly inject custody in the child; no OS provider is needed.
-  it.skipIf(!isSqliteAvailable())('a separate hosted daemon owns SQLite before any contender can open or quarantine it', async () => {
+  it('a separate hosted daemon owns SQLite before any contender can open or quarantine it', async () => {
     const workspaceRoot = await tmpDir('byok-client-hosted-owner-workspace-');
     const storeDir = await tmpDir('byok-client-hosted-owner-store-');
     const config = {
@@ -635,7 +634,6 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       serverUrl: server.url,
       workspaceRoot,
       storeDir,
-      hostedJournal: { mode: 'sqlite' as const },
     };
     const pairer = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
     await pairer.pair('pairing-code');
@@ -716,7 +714,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     await recovered.release();
   }, 20_000);
 
-  it.skipIf(!isSqliteAvailable())('retains the lease in a real process when a post-open SQLite fault cannot prove handle cleanup', async () => {
+  it('retains the lease in a real process when a post-open SQLite fault cannot prove handle cleanup', async () => {
     const workspaceRoot = await tmpDir('byok-client-open-cleanup-workspace-');
     const storeDir = await tmpDir('byok-client-open-cleanup-store-');
     const config = {
@@ -726,7 +724,6 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       serverUrl: server.url,
       workspaceRoot,
       storeDir,
-      hostedJournal: { mode: 'sqlite' as const },
     };
     const pairer = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
     await pairer.pair('pairing-code');
@@ -745,15 +742,13 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
         prepare: async () => ({ kind: 'prepared', operation: { start: async () => { throw new Error('not used'); } } }),
       };
       const daemon = createDaemonWithAdapters(config, [adapter], {
-        hostedJournal: {
-          openFaults: {
-            onStep(step) {
-              if (step === 'after-open') throw new Error('injected post-open failure');
-            },
-            close(db) {
-              db.close();
-              throw new Error('injected close-report failure');
-            },
+        journalOpenFaults: {
+          onStep(step) {
+            if (step === 'after-open') throw new Error('injected post-open failure');
+          },
+          close(db) {
+            db.close();
+            throw new Error('injected close-report failure');
           },
         },
       });

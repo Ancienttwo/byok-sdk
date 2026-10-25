@@ -16,11 +16,12 @@ import { commit, type CommandRecord, type CommitRequest, type CommitResult, type
 // The Host gives ports for its own helpers. A port that a command needs and that is absent is a Host error.
 // The sync step runs beside the commands, so it is part of this entry. A store runs it under the same scope lock as a commit.
 export { OFFER_WAIT_MS, syncTurn, type FreezeExecution, type SyncBot, type SyncFacts, type SyncOptions, type SyncState, type SyncStep } from './sync';
-export { checkReply, delegationDue, replyCheckDue, settleDelegations, type DelegationTimers, type ReplyCheck, type ReplyReadback } from './delegation';
+export { checkReply, delegationDue, observeDevices, replyCheckDue, settleDelegations, type DelegationTimers, type ReplyCheck,
+  type ReplyReadback } from './delegation';
 export { advanceRoomSeats, seatTurn, type SeatFacts } from './rooms';
 export { collaborationDue } from './due';
 export { compactVeto, type CompactFacts, type CompactState } from './compaction';
-export { expireCards, reportCardDecisions } from './cards';
+export { cardCallDue, expireCards, reportCardDecisions, settleCardCall } from './cards';
 
 /** Commands with a caller key or a K4 key. The store records them, so a retry replays the first result. */
 export type KeyedCommand =

@@ -2124,7 +2124,7 @@ export declare function nextRoutineOccurrence(schedule: RoutineSchedule, now: nu
 export { SEALED_CATEGORIES, SEALED_CONTENT_SUITE, SEALED_CONTENT_VERSION, SEALED_DIRECTIONS, SealedContentHeaderV1Schema, openSealedContent, sealContent, } from './sealed-content';
 export type { OpenSealedContentInput, SealContentInput, SealedBinding, SealedCategory, SealedContent, SealedContentHeaderV1, SealedContentOpenFailure, SealedContentOpenResult, SealedDirection, SealedScopePolicy, } from './sealed-content';
 export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './scope-key';
-export type { OpenScopeKeyPackageInput, ScopeKeyPackageOpenResult, ScopeKeyPackageV1, SealScopeKeyPackageInput, } from './scope-key';
+export type { OpenScopeKeyPackageInput, ScopeKeyPackage, ScopeKeyPackageOpenResult, ScopeKeyPackageV1, ScopeKeyPackageV2, SealScopeKeyPackageInput, } from './scope-key';
 export { MEMBER_CHAIN_OPS, deriveMemberId, memberChainEntryHash, signMemberChainEntry, verifyMemberChainEntry, } from './member-chain';
 export type { MemberChainEntryV1, MemberChainEntryVerifyResult, MemberChainOp, UnsignedMemberChainEntryV1, } from './member-chain';
 export { MEMBER_KEY_BUNDLE_VERSION, createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem } from './member-bundle';
@@ -2535,6 +2535,9 @@ export declare const SCOPE_KEY_PACKAGE_VERSION = 1;
 export declare const SCOPE_KEY_HPKE_INFO = "byok-sdk.scope-key.v1";
 /** Prepended to the canonical package bytes the sender signs. */
 export declare const SCOPE_KEY_PACKAGE_DOMAIN_PREFIX = "byok-scope-key-package-v1\n";
+export declare const SCOPE_KEY_PACKAGE_V2 = 2;
+export declare const SCOPE_KEY_HPKE_INFO_V2 = "byok-sdk.scope-key.v2";
+export declare const SCOPE_KEY_PACKAGE_V2_DOMAIN_PREFIX = "byok-scope-key-package-v2\n";
 /** A fresh scope key from the platform CSPRNG. */
 export declare function generateScopeKey(): Bytes;
 export declare function deriveScopeKeyId(scopeKey: Uint8Array): Promise<string>;
@@ -2563,14 +2566,22 @@ export interface ScopeKeyPackageV1 {
     /** Sender's ECDSA P-256 / SHA-256 signature, base64url of the 64-byte P1363 form. */
     readonly sig: string;
 }
+export interface ScopeKeyPackageV2 extends Omit<ScopeKeyPackageV1, 'v'> {
+    readonly v: typeof SCOPE_KEY_PACKAGE_V2;
+    /** The KEM epoch of the recipient key the package is wrapped to. */
+    readonly recipientKemEpoch: number;
+}
+export type ScopeKeyPackage = ScopeKeyPackageV1 | ScopeKeyPackageV2;
 export interface SealScopeKeyPackageInput {
     readonly scopeKey: Uint8Array;
     readonly tenantId: string;
     readonly scopeId: string;
     readonly epoch: number;
+    /** The recipient's current KEM key, with its epoch from the verified member chain. */
     readonly recipient: {
         readonly memberId: string;
         readonly kemPublicJwk: P256PublicJwk;
+        readonly kemEpoch: number;
     };
     readonly sender: {
         readonly signingPublicJwk: P256PublicJwk;
@@ -2578,11 +2589,11 @@ export interface SealScopeKeyPackageInput {
     };
 }
 /**
- * Wrap one scope key to one member and sign the package. A signing private key
- * that does not pair with `sender.signingPublicJwk` throws
- * `sealed_secret_invalid`.
+ * Wrap one scope key to one member's KEM key of `recipient.kemEpoch` and sign
+ * the version 2 package. A signing private key that does not pair with
+ * `sender.signingPublicJwk` throws `sealed_secret_invalid`.
  */
-export declare function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackageV1>;
+export declare function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackageV2>;
 export interface OpenScopeKeyPackageInput {
     readonly package: unknown;
     /** What the caller asked the Host for. A package for anything else is refused. */
@@ -2595,6 +2606,8 @@ export interface OpenScopeKeyPackageInput {
         readonly memberId: string;
         readonly kemPublicJwk: P256PublicJwk;
         readonly kemPrivateKey: WebCryptoKey;
+        /** The KEM epoch of this key pair. A version 2 package must name it. */
+        readonly kemEpoch: number;
     };
     /** The signing key the caller's verified chain holds for `package.sender`. */
     readonly senderSigningPublicJwk: P256PublicJwk;
@@ -2609,7 +2622,8 @@ export type ScopeKeyPackageOpenResult = {
 };
 /**
  * Verify and open one key package, in this order: shape; addressed to this
- * recipient for the expected tenant, scope and epoch; sender key matches the
+ * recipient (and, for version 2, its KEM epoch) for the expected tenant,
+ * scope and epoch; sender key matches the
  * sender id; sender signature; HPKE open; key length; and `keyId` equal to
  * the opened key's own id. Nothing here throws for hostile input.
  */

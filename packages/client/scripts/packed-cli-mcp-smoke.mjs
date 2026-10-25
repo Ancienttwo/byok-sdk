@@ -59,7 +59,7 @@ try {
     const audit = path.join(root, `${entry}-mcp.jsonl`);
     const config = { productId: `packed-${entry}-${randomUUID()}`, productName: 'Packed MCP', serverUrl, storeDir,
       ...(keychain === undefined ? {} : { deviceCredentials: { macosKeychainPath: keychain.path } }),
-      ...(entry === 'cli' ? { agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy }, hostedJournal: { mode: 'sqlite' } } : {}),
+      ...(entry === 'cli' ? { agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy } } : {}),
       workspaceRoot: path.join(storeDir, 'work'), runtimeAllowlist: ['codex'], serviceEnrollment: { enabled: true },
       mcpToolsets: { probe: { mcpServers: { echo: { command: process.execPath,
         args: [fileURLToPath(new URL('../src/__tests__/fixtures/toolset-echo-mcp.mjs', import.meta.url)), audit] } } } } };

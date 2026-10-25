@@ -59,20 +59,21 @@ CREATE TABLE IF NOT EXISTS outbox (
   scope       text    NOT NULL REFERENCES scope (scope),
   key         text    NOT NULL,
   ordinal     bigint  NOT NULL CHECK (ordinal >= 0),
-  kind        text    NOT NULL CHECK (kind IN ('projection', 'delivery')),
-  -- The projection value. NULL for a delivery: its content is the delivery entity.
+  kind        text    NOT NULL CHECK (kind IN ('projection', 'delivery', 'card', 'home', 'host_job')),
+  -- The projection value. NULL for every other kind: the K8 entity or the occurrence is the content.
   body        json,
-  -- #793 D2b-out. The earliest time the sender looks at the row again: 0 when new, a lease while a send
-  -- is in flight, then a backoff. For a delivery it is an index only: the entity decides what to send.
+  -- The earliest time the sender looks at the row again: 0 when new, a lease while a send or call is in flight, then a
+  -- backoff. For a delivery or a home operation it is an index only: the entity decides what to send.
   next_at     bigint  NOT NULL DEFAULT 0 CHECK (next_at >= 0),
-  -- Projection send tries. Each try raises it under the scope lock before the receiver call, and the
-  -- settle write is fenced by it. Always 0 for a delivery: the entity's \`attempts\` is the authority.
+  -- Projection send tries, connector call tries and Host job tries. Each try raises it under the scope lock before the
+  -- call, and the settle write is fenced by it. Always 0 for a delivery and a home operation: their entity is the fence.
   tries       integer NOT NULL DEFAULT 0 CHECK (tries >= 0),
   last_error  text,
-  -- Set once: the receiver confirmed the projection, or the delivery entity reached 'accepted' or 'rejected'.
+  -- Set once: the receiver confirmed the projection, the delivery reached 'accepted' or 'rejected', the card has its
+  -- result or error, the home operation is 'applied' or 'failed', or the Host job concluded its occurrence.
   settled_at  bigint  CHECK (settled_at >= 0),
   CHECK ((kind = 'projection') = (body IS NOT NULL)),
-  CHECK (kind = 'projection' OR (tries = 0 AND last_error IS NULL)),
+  CHECK (kind IN ('projection', 'card', 'host_job') OR (tries = 0 AND last_error IS NULL)),
   PRIMARY KEY (scope, key),
   UNIQUE (scope, ordinal)
 );
@@ -173,6 +174,9 @@ CREATE TABLE IF NOT EXISTS occurrence (
   next_at              bigint  CHECK (next_at >= 0),
   -- K4 hook.executionSuperseded.
   execution_superseded boolean NOT NULL DEFAULT false,
+  -- K4 occurrence.job without its attempts (outbox.tries counts them): {} while pending, { summary } once done.
+  -- NULL for a Bot routine occurrence.
+  job                  json,
   -- Only for an occurrence that the Host concludes with no intent. A promoted occurrence reads its intent's conclusion.
   conclusion           text    CHECK (conclusion IN ('succeeded', 'failed', 'declined', 'cancelled', 'expired', 'superseded')),
   PRIMARY KEY (scope, key),

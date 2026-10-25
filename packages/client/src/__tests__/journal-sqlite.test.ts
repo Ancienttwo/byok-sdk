@@ -5,11 +5,10 @@
  * for the mailbox cursor to be allowed to move: the multi-table write is
  * atomic, a replay is a no-op, a reopened database still knows everything it
  * committed, and an unreadable database is preserved rather than replaced.
+
  *
- * Skipped wholesale on a runtime without `node:sqlite` (the `isSqliteAvailable`
- * idiom `@byok-sdk/server`'s own SQLite suites use). The fail-closed CONSTRUCTION
- * behaviour that matters on those runtimes is covered by
- * `journal-unavailable.test.ts`, which does not skip.
+ * Every supported runtime has `node:sqlite` (#924). The fail-closed
+ * construction on a runtime without it is covered by `journal-unavailable.test.ts`.
  */
 import { promises as fs, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -34,7 +33,6 @@ import {
   type JournalFaultStep,
 } from '../daemon/journal/sqlite-journal';
 import {
-  isSqliteAvailable,
   openJournalDatabase,
   type JournalOpenStep,
 } from '../daemon/journal/sqlite-support';
@@ -102,11 +100,7 @@ const OPEN_STEPS: readonly JournalOpenStep[] = [
   'after-header-read',
 ];
 
-if (process.env.BYOK_REQUIRE_SQLITE === '1' && !isSqliteAvailable()) {
-  throw new Error('Required native journal acceptance cannot skip unavailable node:sqlite');
-}
-
-describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
+describe('SqliteLocalTaskJournal', () => {
   const dirs: string[] = [];
   const open: SqliteLocalTaskJournal[] = [];
 

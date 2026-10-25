@@ -582,6 +582,7 @@ export {
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
   E2EE_MEMBER_KEY_REGISTER_OPERATION,
   E2EE_SCOPE_ID_MAX_LENGTH,
+  E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX,
   E2EE_SCOPE_KEY_PACKAGE_PUT_MAX,
   E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
   E2eeClientPairingMacSchema,
@@ -591,6 +592,7 @@ export {
   E2eeKeyPackageAvailablePayloadSchema,
   E2eePairingMacSchema,
   E2eeScopeKeyPackageSchema,
+  E2eeScopeKeyPackageV2Schema,
 } from './e2ee-member';
 export type {
   E2eeClientPairingMac,

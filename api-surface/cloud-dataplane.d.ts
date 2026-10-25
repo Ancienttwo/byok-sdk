@@ -319,7 +319,7 @@ export declare function createByokPool(options: ByokPoolOptions): Pool;
  */
 export { createByokPool } from './pool';
 export type { ByokPoolOptions } from './pool';
-export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresAgentMessageDraftStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, PostgresTaskRedactionStore, createPostgresTaskRedactionStore, PostgresE2eeMemberStore, createPostgresCloudStores, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './stores/index';
+export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofReceiptRetentionAuthority, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresAgentMessageDraftStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, PostgresTaskRedactionStore, createPostgresTaskRedactionStore, PostgresE2eeMemberStore, createPostgresCloudStores, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './stores/index';
 export type { PostgresCloudStoreOptions, PostgresCloudStores, PostgresObjectStorageOptions, PostgresAgentMemoryProjectionStoreOptions, PostgresTaskRedactionStoreOptions, } from './stores/index';
 export { DEFAULT_MAX_ATTEMPTS, DEFAULT_PRESIGN_TTL_SECONDS, DEFAULT_RETRY_DELAY_MS, MAX_PRESIGN_TTL_SECONDS, MIN_PRESIGN_TTL_SECONDS, ObjectStoreRequestError, R2_BLOB_ERROR_CODES, R2BlobStoreError, R2CloudBlobStore, R2ObjectMaintenanceStore, } from './stores/index';
 export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './stores/index';
@@ -872,9 +872,9 @@ import type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMembe
 import type { Pool } from 'pg';
 /**
  * Postgres E2EE member store (`deploy/sql/0027_e2ee_member.sql`,
- * `0028_e2ee_scope_shred.sql`). Device revocation and machine supersession
- * delete a device's rows in the device transaction (`DEVICE_STATE_DELETES`
- * in `devices.ts`). A shred receipt goes to `device_request_receipts`, the
+ * `0028_e2ee_scope_shred.sql`, `0029_e2ee_member_kem_floor.sql`). Device
+ * revocation and machine supersession delete a device's rows in the device
+ * transaction (`DEVICE_STATE_DELETES` in `devices.ts`). A shred receipt goes to `device_request_receipts`, the
  * request receipt store, in the append transaction.
  */
 export declare class PostgresE2eeMemberStore implements E2eeMemberStore {
@@ -888,6 +888,15 @@ export declare class PostgresE2eeMemberStore implements E2eeMemberStore {
         readonly limit: number;
     }): Promise<readonly E2eeMemberChainRow[]>;
     putScopeKeyPackages(tenant: TenantId, { rows, proof }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult>;
+    readOwnScopeKeyPackages(tenant: TenantId, input: {
+        readonly scopeId: string;
+        readonly recipient: string;
+        readonly afterEpoch: number;
+        readonly limit: number;
+    }): Promise<{
+        readonly rows: readonly E2eeScopeKeyPackageRow[];
+        readonly scopeHeadEpoch: number | undefined;
+    }>;
     readScopeKeyPackages(tenant: TenantId, input: {
         readonly scopeId: string;
         readonly epoch?: number;
@@ -941,7 +950,7 @@ export { PostgresInboundDedupStore } from './dedup';
 export { PostgresNonceStore } from './nonces';
 export { PostgresPairingCodeStore } from './pairing-codes';
 export { PostgresRequestReceiptStore } from './receipts';
-export { PostgresProofRequestReceiptStore } from './proof-receipts';
+export { PostgresProofReceiptRetentionAuthority, PostgresProofRequestReceiptStore } from './proof-receipts';
 export { PostgresTaskAttemptStore } from './task-attempts';
 export { PostgresTaskCancellationStore } from './task-cancellations';
 export { PostgresActivityStore } from './activity';
@@ -1087,8 +1096,8 @@ export declare class PostgresPairingCodeStore implements PairingCodeStore {
     }): Promise<DeviceRecord | undefined>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/proof-receipts.d.ts ====
-import type { ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore } from '@byok-sdk/cloud';
-import type { Clock, TenantId } from '@byok-sdk/core';
+import type { ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore } from '@byok-sdk/cloud';
+import { type Clock, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 export declare class PostgresProofRequestReceiptStore implements ProofRequestReceiptStore {
     #private;
@@ -1098,6 +1107,17 @@ export declare class PostgresProofRequestReceiptStore implements ProofRequestRec
         readonly created: boolean;
     }>;
     get(tenant: TenantId, deviceId: string, requestId: string): Promise<ProofRequestReceipt | undefined>;
+}
+/**
+ * Prunes `proof_request_receipt`, which the truth put and the three E2EE member
+ * writes share. A Postgres host passes it as the cloud's
+ * `proofReceiptRetention.authority`. It is separate from the `proofReceipts`
+ * port, which keeps exactly the methods the cloud contract declares.
+ */
+export declare class PostgresProofReceiptRetentionAuthority implements ProofReceiptRetentionAuthority {
+    #private;
+    constructor(pool: Pool);
+    collectExpired(tenant: TenantId, input: ProofReceiptCollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/r2-blobs.d.ts ====
 /**
@@ -1548,7 +1568,7 @@ import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 import { type R2BlobStoreOptions, type R2ObjectMaintenance } from './stores/r2-blobs';
 /** Every tenant-owned table as of 0017, in child-before-parent deletion order. */
-export declare const TENANT_ERASURE_TABLES: readonly ['object_reference', 'object_manifest', 'storage_reservation', 'storage_usage', 'storage_entitlement', 'gc_cursor', 'cleanup_job', 'tenant_retention_policy', 'skill_pack_file', 'skill_pack', 'approval_timeline_tail', 'activity_tail', 'attested_record', 'board_item', 'tenant_stream', 'outbox', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_head', 'agent_memory_projection_erase_fence', 'agent_egress_event', 'device_request_receipts', 'proof_request_receipt', 'agent_message_draft', 'e2ee_scope_key_package', 'e2ee_scope_epoch', 'e2ee_scope_shred', 'e2ee_member_chain_entry', 'e2ee_pairing_mac', 'e2ee_member_key', 'agent_message_admission', 'task', 'device_presence', 'device_assertion_replay', 'device_stream', 'inbound_dedup', 'auth_nonce', 'pairing_code', 'device'];
+export declare const TENANT_ERASURE_TABLES: readonly ['object_reference', 'object_manifest', 'storage_reservation', 'storage_usage', 'storage_entitlement', 'gc_cursor', 'cleanup_job', 'tenant_retention_policy', 'skill_pack_file', 'skill_pack', 'approval_timeline_tail', 'activity_tail', 'attested_record', 'board_item', 'tenant_stream', 'outbox', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_head', 'agent_memory_projection_erase_fence', 'agent_egress_event', 'device_request_receipts', 'proof_request_receipt', 'agent_message_draft', 'e2ee_scope_key_package', 'e2ee_scope_epoch', 'e2ee_scope_shred', 'e2ee_member_kem_floor', 'e2ee_member_chain_entry', 'e2ee_pairing_mac', 'e2ee_member_key', 'agent_message_admission', 'task', 'device_presence', 'device_assertion_replay', 'device_stream', 'inbound_dedup', 'auth_nonce', 'pairing_code', 'device'];
 export declare const TENANT_ERASURE_ERROR_CODES: {
     readonly tenant_erasure_invalid_input: 'tenant_erasure_invalid_input';
     readonly tenant_erasure_schema_drift: 'tenant_erasure_schema_drift';

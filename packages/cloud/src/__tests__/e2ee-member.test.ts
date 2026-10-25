@@ -127,6 +127,44 @@ describe('E2EE member control plane', () => {
     expect((await cloud.readMemberChain(TENANT_A)).entries).toEqual(entries);
   });
 
+  it('raises the member KEM floor on a rotate and refuses a package wrapped below it', async () => {
+    const { cloud, store } = setup();
+    const client = await newMember();
+    const member = client.bundle.memberId;
+    const rotate = { memberId: member, kemPublicJwk: client.bundle.kemPublicJwk, kemEpoch: 2, kemSig: client.bundle.kemSig };
+    const entries = await signedChain(TENANT_A, client, [
+      { op: 'add', subject: { member: client.bundle as unknown as JsonValue } },
+      { op: 'rotate', subject: rotate as never },
+    ]);
+    const appends: Parameters<typeof store.appendChainEntries>[1][] = [];
+    const append = store.appendChainEntries.bind(store);
+    store.appendChainEntries = async (tenant, input) => {
+      appends.push(input);
+      return append(tenant, input);
+    };
+    for (const subject of [{ ...rotate, extra: true }, { ...rotate, kemEpoch: 0 }, { memberId: member, kemEpoch: 2 }]) {
+      const refused = await signedChain(TENANT_A, client, [entries[0]!, { op: 'rotate', subject: subject as never }]);
+      expect(await code(cloud.appendMemberChainEntries(TENANT_A, { entries: refused }))).toBe('coordination_input_invalid');
+    }
+    expect(await cloud.appendMemberChainEntries(TENANT_A, { entries })).toEqual({ appended: 2, replayed: 0 });
+    expect(appends.map(input => input.rotations)).toEqual([[{ seq: 2, memberId: member, kemEpoch: 2 }]]);
+    const stale = await keyPackage(TENANT_A, client, client, 1);
+    expect(stale.recipientKemEpoch).toBe(1);
+    expect(await code(cloud.putScopeKeyPackages(TENANT_A, { packages: [stale] }))).toBe('e2ee_scope_key_package_stale');
+    expect(await cloud.readScopeKeyPackages(TENANT_A, { scopeId: 'scope-1' })).toEqual({ packages: [] });
+    // Another tenant's member of the same id has no floor.
+    expect(await cloud.putScopeKeyPackages(TENANT_B, { packages: [await keyPackage(TENANT_B, client, client, 1)] }))
+      .toEqual({ stored: 1, skippedDeviceIds: [] });
+  });
+
+  it('refuses a version 1 package put as invalid input', async () => {
+    const { cloud } = setup();
+    const sender = await newMember();
+    const { recipientKemEpoch: _, ...v1 } = { ...(await keyPackage(TENANT_A, sender, sender, 1)), v: 1 };
+    expect(await code(cloud.putScopeKeyPackages(TENANT_A, { packages: [v1 as never] }))).toBe('coordination_input_invalid');
+    expect(await cloud.readScopeKeyPackages(TENANT_A, { scopeId: 'scope-1' })).toEqual({ packages: [] });
+  });
+
   it('files the shred receipt as an identity receipt that never expires', () => {
     expect(RECEIPT_RETENTION).toContainEqual({ prefix: E2EE_SCOPE_SHRED_RECEIPT_PREFIX, class: 'identity' });
   });
@@ -278,9 +316,9 @@ describe('E2EE member control plane', () => {
 
   it('fails a stored row that is not a valid value with a typed error', async () => {
     const { cloud, store, clock, registerDevice } = setup();
-    await store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{"seq":1}' }], shreds: [] });
+    await store.appendChainEntries(TENANT_A, { rows: [{ seq: 1, entry: '{"seq":1}' }], rotations: [], shreds: [] });
     expect(await code(cloud.readMemberChain(TENANT_A))).toBe('e2ee_member_state_unreadable');
-    await store.putScopeKeyPackages(TENANT_A, { rows: [{ scopeId: 'scope-1', epoch: 1, recipient: 'r', keyId: 'k', sender: 's', package: 'not json' }] });
+    await store.putScopeKeyPackages(TENANT_A, { rows: [{ scopeId: 'scope-1', epoch: 1, recipient: 'r', keyId: 'k', sender: 's', package: 'not json', recipientKemEpoch: 1 }] });
     expect(await code(cloud.readScopeKeyPackages(TENANT_A, { scopeId: 'scope-1' }))).toBe('e2ee_member_state_unreadable');
     await registerDevice(TENANT_A, 'device-1');
     await store.registerMember(TENANT_A, { deviceId: 'device-1', memberId: 'm', bundle: '{}', deviceMac: 'mac', macExpiresAt: clock.now().toISOString(), request: freshRequest() });

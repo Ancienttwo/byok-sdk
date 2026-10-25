@@ -180,6 +180,7 @@ async function seedEveryTenantTable(pool: Pool, tenant: TenantId, suffix: string
   await pool.query(`INSERT INTO e2ee_member_key (tenant_id, device_id, member_id, bundle) VALUES ($1, $2, 'member', '{}')`, [tenant, device]);
   await pool.query(`INSERT INTO e2ee_scope_epoch (tenant_id, scope_id, epoch, key_id) VALUES ($1, 'scope', 1, 'key')`, [tenant]);
   await pool.query(`INSERT INTO e2ee_scope_shred (tenant_id, scope_id, chain_seq) VALUES ($1, 'shredded-scope', 1)`, [tenant]);
+  await pool.query(`INSERT INTO e2ee_member_kem_floor (tenant_id, member_id, kem_epoch, chain_seq) VALUES ($1, 'member', 2, 1)`, [tenant]);
   await pool.query(
     `INSERT INTO e2ee_scope_key_package (tenant_id, scope_id, epoch, recipient, key_id, sender, package, updated_at)
      VALUES ($1, 'scope', 1, 'member', 'key', 'member', '{}', $2)`,

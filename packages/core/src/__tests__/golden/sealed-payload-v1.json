@@ -639,13 +639,13 @@
         },
         "values": [
           0.1,
-          1e-7,
+          1e-07,
           1e+21,
           1e+23,
           9007199254740992,
           5e-324,
           1.7976931348623157e+308,
-          -0.0000033333333333333333,
+          -3.3333333333333333e-06,
           333333333.3333333
         ]
       },
@@ -1632,6 +1632,80 @@
         "sig": "_tRtvrZaaHjWWDKAFDq_5j2Cfecxhv8Mr3F-5xY-EyCnbonmbFVGhx59LgfwIQKaQaiBSBZjsd4EG2JL89QYvg"
       },
       "expect": "key_package_invalid"
+    },
+    {
+      "name": "v2-client-to-device",
+      "sender": "client",
+      "recipient": "device",
+      "expected": {
+        "tenantId": "tenant-1",
+        "scopeId": "scope-1",
+        "epoch": 1
+      },
+      "package": {
+        "v": 2,
+        "tenantId": "tenant-1",
+        "scopeId": "scope-1",
+        "epoch": 1,
+        "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
+        "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
+        "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "recipientKemEpoch": 1,
+        "enc": "BC8SICXFThk4bE--lLY9qnDxf7gaM_7rkwEPk46RofPJ-hMUfs4YmB1W5GCzxjVZzXgpMOpQMOSnW7r0gQX5LMU",
+        "ciphertext": "T6okddIeX_7cNcL7psts75o9EDc0377BiR8ZWByckUPFjDJamzEogHuduafCIj_G",
+        "sig": "4JBhnE-b-fF3ioLdVpqGxMq6Q7pp6nIsrnbJ1dIGEj2t5NP0AWUqDf6Z1xwAtY9bihLNN_hHJGgBqLvkFbZbbg"
+      },
+      "expect": "ok"
+    },
+    {
+      "name": "v2-opened-with-another-kem-epoch",
+      "sender": "client",
+      "recipient": "device",
+      "expected": {
+        "tenantId": "tenant-1",
+        "scopeId": "scope-1",
+        "epoch": 1
+      },
+      "package": {
+        "v": 2,
+        "tenantId": "tenant-1",
+        "scopeId": "scope-1",
+        "epoch": 1,
+        "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
+        "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
+        "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "recipientKemEpoch": 1,
+        "enc": "BC8SICXFThk4bE--lLY9qnDxf7gaM_7rkwEPk46RofPJ-hMUfs4YmB1W5GCzxjVZzXgpMOpQMOSnW7r0gQX5LMU",
+        "ciphertext": "T6okddIeX_7cNcL7psts75o9EDc0377BiR8ZWByckUPFjDJamzEogHuduafCIj_G",
+        "sig": "4JBhnE-b-fF3ioLdVpqGxMq6Q7pp6nIsrnbJ1dIGEj2t5NP0AWUqDf6Z1xwAtY9bihLNN_hHJGgBqLvkFbZbbg"
+      },
+      "expect": "key_package_invalid",
+      "recipientKemEpoch": 2
+    },
+    {
+      "name": "v2-kem-epoch-changed",
+      "sender": "client",
+      "recipient": "device",
+      "expected": {
+        "tenantId": "tenant-1",
+        "scopeId": "scope-1",
+        "epoch": 1
+      },
+      "package": {
+        "v": 2,
+        "tenantId": "tenant-1",
+        "scopeId": "scope-1",
+        "epoch": 1,
+        "keyId": "Ti2Vi0zVKzqEAgr_VFA6Vw",
+        "recipient": "RDOBH8ODlyLfLBTrT7O0lD1asSm9dk_MfbPwSg1_sy4",
+        "sender": "wBcjrNHCb2hZwojjJ9LODtY_hrC-gFf_QHMno_gf7vI",
+        "recipientKemEpoch": 2,
+        "enc": "BC8SICXFThk4bE--lLY9qnDxf7gaM_7rkwEPk46RofPJ-hMUfs4YmB1W5GCzxjVZzXgpMOpQMOSnW7r0gQX5LMU",
+        "ciphertext": "T6okddIeX_7cNcL7psts75o9EDc0377BiR8ZWByckUPFjDJamzEogHuduafCIj_G",
+        "sig": "4JBhnE-b-fF3ioLdVpqGxMq6Q7pp6nIsrnbJ1dIGEj2t5NP0AWUqDf6Z1xwAtY9bihLNN_hHJGgBqLvkFbZbbg"
+      },
+      "expect": "key_package_signature_invalid",
+      "recipientKemEpoch": 2
     }
   ]
 }

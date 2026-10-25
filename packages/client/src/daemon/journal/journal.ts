@@ -332,10 +332,9 @@ export interface LocalTaskJournal {
 export class JournalUnavailableError extends Error {
   constructor(reason: string, options?: { cause?: unknown }) {
     super(
-      `hosted journal mode requires a runtime with a working node:sqlite (Node 22.5+); refusing to start: ${reason}. ` +
+      `the daemon journal requires a runtime with a working node:sqlite (Node 22.5+); refusing to start: ${reason}. ` +
         'A plain-file journal is not an acceptable substitute — it cannot honour the fsync-before-ack ordering the ' +
-        'hosted mailbox cursor depends on (architecture §12.7.2). Upgrade Node, or run this daemon in its default ' +
-        'self-hosted mode with no hostedJournal configured.',
+        'mailbox cursor depends on (architecture §12.7.2). Upgrade Node.',
     );
     this.name = 'JournalUnavailableError';
     if (options?.cause !== undefined) this.cause = options.cause;

@@ -169,9 +169,9 @@ import { StoredDeviceProofSigner } from './device-proof-signer';
 import { processE2eeKeyPackageNotice, type DeviceMemberStatus } from './e2ee-key-package-notice';
 import { DeviceMemberKeyring, type MemberFreshness } from './e2ee-keyring';
 import { E2eeMemberClient } from './e2ee-member-client';
-import { JournalRecordTooLargeError, JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord } from './journal/journal';
+import { JournalRecordTooLargeError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord } from './journal/journal';
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
-import { isSqliteAvailable, type JournalOpenFaultSeam } from './journal/sqlite-support';
+import type { JournalOpenFaultSeam } from './journal/sqlite-support';
 import { promises as fs } from 'node:fs';
 import { LocalStorageConfigError, resolveStorageConfig, type StorageConfig } from './retention/config';
 import { ScratchRoot } from './retention/scratch';
@@ -286,45 +286,6 @@ export interface DaemonBranding {
   accent?: string;
 }
 
-/**
- * S3b (L-002): opt-in durable local journal for hosted deployments
- * (architecture §12.7.2).
- *
- * Explicit and off by default, because it changes what an ack MEANS. With no
- * journal configured (the self-hosted default this SDK has always shipped),
- * the daemon's redelivery cursor advances on handler success exactly as
- * before. With one configured, every inbound envelope is committed and fsynced
- * to `<storeDir>/daemon.db` BEFORE the handler resolves — and since
- * `ConnectionManager` only advances the cursor once the handler resolves
- * (`connection-manager.ts`), acking before committing stops being something
- * this daemon can express, rather than something it is careful not to do.
- *
- * Turning this on when the runtime has no working `node:sqlite` is a typed
- * construction failure, not a downgrade to a file journal — see
- * `JournalUnavailableError`. That refusal is the point (§12.7.2): a journal
- * that does not fsync loses tasks only under power-cut timings, so it passes
- * every test anyone will ever run against it.
- */
-export interface HostedJournalConfig {
-  /**
-   * The backend. Only `sqlite` today, and spelled out rather than implied by
-   * the section's presence so adding a second one later is an additive change
-   * to a closed set instead of a re-interpretation of an existing config.
-   */
-  mode: 'sqlite';
-  /** Bound on waiting for the journal's write lock, ms. Defaults to the journal's own bound. */
-  busyTimeoutMs?: number;
-  /**
-   * Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated.
-   * An inbound envelope record may still reach a floor derived from the inline sealed maximum (415083 bytes),
-   * so a sealed envelope is journaled and declined, not stalled (#654). An inbound envelope above the bound is
-   * not stored and does not stall the cursor: an offer is declined (`inbound_envelope_too_large`), any other
-   * envelope is dropped (#826).
-   */
-  maxRecordBytes?: number;
-
-}
-
 export interface DaemonConfig {
   /** Absolute native asset root for SDK-created runtime adapters. Custom adapters own their option. */
   nativeAssetRoot?: string;
@@ -418,8 +379,6 @@ export interface DaemonConfig {
    * execution has one canonical workspace authority.
    */
   gitWorkspace?: GitWorkspaceConfig;
-  /** Disabled by default. Enables the durable local task journal — see {@link HostedJournalConfig}. */
-  hostedJournal?: HostedJournalConfig;
   /**
    * Restricts which runtimes this daemon will ever use — enforced in two
    * places that must stay consistent: `createDaemon` (this file) builds its
@@ -932,23 +891,14 @@ export interface DaemonOverrides {
     store?: GitWorkspaceStore;
   };
   /**
-   * S3b: injection seam for the durable local journal, mirroring
-   * `gitWorkspace` above — used only when `config.hostedJournal` is set, so an
-   * absent journal config cannot accidentally activate a supplied object. Also
-   * the host-injected-implementation path §12.7.2 allows: a backend other than
-   * `SqliteLocalTaskJournal` is acceptable if it meets the same durability
-   * contract (a resolved `appendEnvelope` means fsynced), and unacceptable
-   * otherwise — this seam does not verify that, the host asserting it does.
-   *
-   * A journal supplied here is NOT closed by `stop()`; whoever injected it
-   * owns its lifetime.
+   * A durable local journal the host supplies instead of `SqliteLocalTaskJournal`
+   * (§12.7.2). It must meet the same contract (a resolved `appendEnvelope` is
+   * fsynced); the daemon does not check that. `stop()` does not close it:
+   * whoever injected it owns its lifetime.
    */
-  hostedJournal?: {
-    journal?: LocalTaskJournal;
-    /** Test-only post-open SQLite initialization fault seam. */
-    openFaults?: JournalOpenFaultSeam;
-
-  };
+  journal?: LocalTaskJournal;
+  /** Test-only post-open SQLite initialization fault seam. */
+  journalOpenFaults?: JournalOpenFaultSeam;
 }
 
 /**
@@ -1345,6 +1295,9 @@ export function buildDaemonWithAdapters(
   if (Object.hasOwn(config, 'toolImplementationAuthority')) {
     throw new DaemonConfigFieldRemovedError('toolImplementationAuthority', 'DaemonConfig.toolImplementationAuthority was removed: the SDK does not attest tool or runtime executables');
   }
+  if (Object.hasOwn(config, 'hostedJournal') || Object.hasOwn(overrides, 'hostedJournal')) {
+    throw new DaemonConfigFieldRemovedError('hostedJournal', 'DaemonConfig.hostedJournal was removed: every daemon journals; tune it under storage.journal and inject a journal as overrides.journal');
+  }
   if (Object.hasOwn(config, 'resultDocument')) {
     throw new DaemonConfigFieldRemovedError('resultDocument', 'DaemonConfig.resultDocument was removed: a result-document offer carries its frozen schema and the runtime submits the outcome through the SDK-reserved submit_result tool');
   }
@@ -1421,14 +1374,12 @@ export function buildDaemonWithAdapters(
       ? 'admitted'
       : 'unavailable';
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
-  if (Object.hasOwn(config.hostedJournal ?? {}, 'storagePolicy')) throw new LocalStorageConfigError('config', 'rejects removed hostedJournal.storagePolicy; use storage.budget and storage.retention');
-  if (Object.hasOwn(overrides.hostedJournal ?? {}, 'pressureEngine')) throw new LocalStorageConfigError('config', 'rejects removed hostedJournal.pressureEngine; maintenance belongs to the daemon');
-  const suppliedJournal = overrides.hostedJournal?.journal;
+  const suppliedJournal = overrides.journal;
   if (suppliedJournal !== undefined && (typeof suppliedJournal.listPrunableConfirmedTasks !== 'function' || typeof suppliedJournal.pruneConfirmedJournalTask !== 'function')) throw new LocalStorageConfigError('config', 'requires the journal confirmed-retention ports');
   const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
   validatePiByokLauncherConfig(config.piByokLauncher);
   if (config.durablePi !== undefined && typeof config.durablePi !== 'boolean') throw new Error('durablePi must be boolean');
-  if (config.durablePi === true && (!config.agentHome || !config.hostedJournal || !config.piByokLauncher)) throw new Error('durablePi requires Agent home, hosted journal and Pi custody launcher');
+  if (config.durablePi === true && (!config.agentHome || !config.piByokLauncher)) throw new Error('durablePi requires Agent home and Pi custody launcher');
   if (config.durablePi === true && process.platform === 'win32') throw new Error('durablePi is unavailable on Windows until parent-death Job Object recovery is validated');
   // M5 batch-3 (workstream 2): validated synchronously, up front — see
   // `DaemonConfig.maxTaskOutputBytes`'s own doc comment for the full
@@ -1703,47 +1654,27 @@ export function buildDaemonWithAdapters(
   // validation above has already required workspaceRoot.
   const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot!, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
   const gitWorkspaceStore = config.gitWorkspace ? overrides.gitWorkspace?.store ?? new GitWorkspaceStore(storeDir) : undefined;
-  // S3b (L-002), same three-part shape as `gitWorkspace` above: optional
-  // config field, conditional construction, override seam. An absent
-  // `hostedJournal` constructs NOTHING — no database file, no directory, no
-  // reference — which is what keeps the default self-hosted path identical to
-  // what it was before this slice.
-  //
-  // Fail-closed on a runtime without `node:sqlite` needs no check here: this
-  // is the constructor that refuses (`JournalUnavailableError`), before any
-  // filesystem work, and it propagates straight out of `createDaemon`.
-  if (config.hostedJournal) {
-    // Validated synchronously and up front, the same way `maxTaskOutputBytes`
-    // is above — a misconfigured durability section must fail at
-    // construction, not at the first envelope that needed it.
-    if (config.hostedJournal.mode !== 'sqlite') {
-      throw new Error(`DaemonConfig.hostedJournal.mode must be "sqlite" — got ${JSON.stringify(config.hostedJournal.mode)}`);
-    }
-  }
-  // Capability detection is side-effect-free and therefore remains a
-  // construction-time failure. Opening/schema-initializing/quarantining the
-  // SQLite file is intentionally deferred until `startUnderLease` owns the
+  // Every daemon journals (#924). Opening, schema-initializing and
+  // quarantining the SQLite file waits until `startUnderLease` owns the
   // cross-process store lease; a rejected second daemon must not touch the
-  // active daemon's DB/WAL/SHM before discovering that it is rejected.
-  if (config.hostedJournal && overrides.hostedJournal?.journal === undefined && !isSqliteAvailable()) {
-    throw new JournalUnavailableError(`node:sqlite could not be loaded on Node ${process.versions.node}`);
-  }
-
+  // active daemon's DB/WAL/SHM before discovering that it is rejected. On a
+  // runtime without `node:sqlite` the journal constructor refuses
+  // (`JournalUnavailableError`) before any filesystem work.
   let ownedJournal: SqliteLocalTaskJournal | undefined;
-  let journal: LocalTaskJournal | undefined = config.hostedJournal ? overrides.hostedJournal?.journal : undefined;
+  let journal: LocalTaskJournal | undefined = overrides.journal;
   let hostedStorageInitializationBarrierComplete = true;
 
 
   /** Construct every daemon-owned hosted writer only after ownership exists. */
-  function initializeOwnedHostedStorage(): void {
-    if (!config.hostedJournal) return;
+  function initializeOwnedHostedStorage(): LocalTaskJournal {
     if (!journal) {
+      const tuning = config.storage?.journal;
       try {
         ownedJournal = new SqliteLocalTaskJournal({
           storeDir,
-          ...(config.hostedJournal.busyTimeoutMs === undefined ? {} : { busyTimeoutMs: config.hostedJournal.busyTimeoutMs }),
-          ...(config.hostedJournal.maxRecordBytes === undefined ? {} : { maxRecordBytes: config.hostedJournal.maxRecordBytes }),
-          ...(overrides.hostedJournal?.openFaults === undefined ? {} : { openFaults: overrides.hostedJournal.openFaults }),
+          ...(tuning?.busyTimeoutMs === undefined ? {} : { busyTimeoutMs: tuning.busyTimeoutMs }),
+          ...(tuning?.maxRecordBytes === undefined ? {} : { maxRecordBytes: tuning.maxRecordBytes }),
+          ...(overrides.journalOpenFaults === undefined ? {} : { openFaults: overrides.journalOpenFaults }),
         });
       } catch (err) {
         if (err instanceof JournalHandleCleanupError) hostedStorageInitializationBarrierComplete = false;
@@ -1751,6 +1682,7 @@ export function buildDaemonWithAdapters(
       }
       journal = ownedJournal;
     }
+    return journal;
   }
   const retentionRegistry = createRetentionRegistry({
     storeDir, scratch: scratchRoot, config: storageConfig, clock: retentionClock,
@@ -2215,12 +2147,11 @@ export function buildDaemonWithAdapters(
     // the filesystem. The lease was acquired above, so SQLite open/schema/
     // quarantine and every pressure-engine writer are inside the same
     // authority boundary as auth renewal and the rest of daemon lifecycle.
-    initializeOwnedHostedStorage();
+    const activeJournal = initializeOwnedHostedStorage();
     record ??= await auth.loadExisting();
     if (!record) {
       throw new DaemonHaltError('unpaired');
     }
-    const activeJournal = journal;
     const activePressureEngine = storagePressure;
     retentionIdentity = { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId };
     // Loading an existing record arms proactive token renewal, whose final
@@ -2241,9 +2172,7 @@ export function buildDaemonWithAdapters(
     }
     fleetJitter = createFleetJitter(config.productId, record.deviceId);
 
-    const journalIdentity: JournalIdentity | undefined = activeJournal
-      ? { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId }
-      : undefined;
+    const journalIdentity: JournalIdentity = { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId };
     const resultReplyRecoveryTasks = new Map<string, { agentRef: AgentRef; contract: string }>();
     // Assigned once the blob client exists. Startup recovery before that
     // writes only `daemon_interrupted`, which stays plaintext (decision 12d).
@@ -2262,41 +2191,39 @@ export function buildDaemonWithAdapters(
       }, { taskId: task.taskId });
       const envelope = sealedTasks === undefined ? failure : await sealedTasks.sealRecovered(offer, failure);
       const bytes = encodeEnvelope(envelope);
-      await activeJournal!.recordTerminal({ taskId: task.taskId, terminalType: 'failed', bytes, payloadHash: journalHash(bytes),
+      await activeJournal.recordTerminal({ taskId: task.taskId, terminalType: 'failed', bytes, payloadHash: journalHash(bytes),
         truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString(),
         recovery: { disposition: interrupted ? 'interrupted' : 'abandoned', reason } });
     };
-    if (activeJournal && journalIdentity) {
-      const durableCursor = await cursorStore.load(config.serverUrl, record.deviceId) ?? 0;
-      const recoveryTasks = await activeJournal.listRecoveryTasks(journalIdentity);
-      // Scan every stored envelope before acting on any: a row of another
-      // wire major stops startup with no journal row written, rewritten or
-      // deleted (no daemon_interrupted terminal for a v2 offer, no replay).
-      for (const task of recoveryTasks) assertJournalEnvelopeProtocol(task.envelopeBytes, task.taskId, 'recovery-offer');
-      for (const terminal of await activeJournal.listPendingTerminals(journalIdentity)) {
-        assertJournalEnvelopeProtocol(terminal.bytes, terminal.taskId, 'pending-terminal');
+    const durableCursor = await cursorStore.load(config.serverUrl, record.deviceId) ?? 0;
+    const recoveryTasks = await activeJournal.listRecoveryTasks(journalIdentity);
+    // Scan every stored envelope before acting on any: a row of another
+    // wire major stops startup with no journal row written, rewritten or
+    // deleted (no daemon_interrupted terminal for a v2 offer, no replay).
+    for (const task of recoveryTasks) assertJournalEnvelopeProtocol(task.envelopeBytes, task.taskId, 'recovery-offer');
+    for (const terminal of await activeJournal.listPendingTerminals(journalIdentity)) {
+      assertJournalEnvelopeProtocol(terminal.bytes, terminal.taskId, 'pending-terminal');
+    }
+    for (const task of recoveryTasks) {
+      // No execution commitment and no local ack: let the authoritative cloud
+      // mailbox redeliver (or suppress a cancelled offer). Never replay a cached
+      // offer independently of cancellation/placement authority.
+      if (task.localState === 'received' && task.seq > durableCursor) continue;
+      const offer = decodeEnvelope(task.envelopeBytes);
+      if (!isTaskOfferType(offer.type) || offer.task_id !== task.taskId) throw new Error('invalid durable recovery offer binding');
+      const payload = offer.payload as { agentRef?: AgentRef; messageEgress?: { mode: string; contract?: string }; terminalProjection?: { mode: string; contract?: string } };
+      const resultFailure = resultReplyFailureFromState(task.localState);
+      if (resultFailure && (payload.agentRef === undefined || payload.messageEgress?.mode !== 'required' || typeof payload.messageEgress.contract !== 'string'
+        || payload.terminalProjection?.mode !== 'result-document' || typeof payload.terminalProjection.contract !== 'string')) {
+        throw new Error('durable result-reply failure does not match its original offer');
       }
-      for (const task of recoveryTasks) {
-        // No execution commitment and no local ack: let the authoritative cloud
-        // mailbox redeliver (or suppress a cancelled offer). Never replay a cached
-        // offer independently of cancellation/placement authority.
-        if (task.localState === 'received' && task.seq > durableCursor) continue;
-        const offer = decodeEnvelope(task.envelopeBytes);
-        if (!isTaskOfferType(offer.type) || offer.task_id !== task.taskId) throw new Error('invalid durable recovery offer binding');
-        const payload = offer.payload as { agentRef?: AgentRef; messageEgress?: { mode: string; contract?: string }; terminalProjection?: { mode: string; contract?: string } };
-        const resultFailure = resultReplyFailureFromState(task.localState);
-        if (resultFailure && (payload.agentRef === undefined || payload.messageEgress?.mode !== 'required' || typeof payload.messageEgress.contract !== 'string'
-          || payload.terminalProjection?.mode !== 'result-document' || typeof payload.terminalProjection.contract !== 'string')) {
-          throw new Error('durable result-reply failure does not match its original offer');
-        }
-        // A start after a failed stop in this process: the commit queue still
-        // holds this task's real terminal and `resume()` above retries it. The
-        // journal keeps the first terminal it records, so a recovery terminal
-        // here would replace that result.
-        if (terminalCommits.hasPending(task.taskId)) continue;
-        if (resultFailure) { resultReplyRecoveryTasks.set(task.taskId, { agentRef: payload.agentRef!, contract: payload.messageEgress!.contract! }); continue; }
-        await recordRecoveryFailure(task, 'daemon_interrupted', true);
-      }
+      // A start after a failed stop in this process: the commit queue still
+      // holds this task's real terminal and `resume()` above retries it. The
+      // journal keeps the first terminal it records, so a recovery terminal
+      // here would replace that result.
+      if (terminalCommits.hasPending(task.taskId)) continue;
+      if (resultFailure) { resultReplyRecoveryTasks.set(task.taskId, { agentRef: payload.agentRef!, contract: payload.messageEgress!.contract! }); continue; }
+      await recordRecoveryFailure(task, 'daemon_interrupted', true);
     }
 
     // S3b (L-003): one measurement before this daemon can accept anything, so
@@ -2504,7 +2431,6 @@ export function buildDaemonWithAdapters(
         }
         : undefined;
       terminalCommits.enqueue(taskId, async () => {
-        if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
         let envelope: Envelope | undefined;
         if (typeof terminal === 'function') {
           envelope = await sealing;
@@ -2571,7 +2497,7 @@ export function buildDaemonWithAdapters(
       const current = latestSealedTasks!;
       if (current === owner) return owner.sealOutbound(envelope);
       if (memberResuming) throw new Error(`${envelope.type} for sealed task ${taskId} waits for this run's member`);
-      const task = await activeJournal!.readTask(taskId, journalIdentity!);
+      const task = await activeJournal.readTask(taskId, journalIdentity);
       if (!task || !('envelopeBytes' in task)) throw new Error(`missing durable offer of sealed task ${taskId}`);
       // A run under another tenant, device or member never seals this task's output.
       return current.sealRecovered(decodeEnvelope(task.envelopeBytes), envelope, ownerIdentity !== undefined && ownerIdentity === latestSealIdentity?.());
@@ -2595,8 +2521,7 @@ export function buildDaemonWithAdapters(
     // A local write failure must never bypass durability and send different truth.
     // #654: a task that seals its output sends each outbound sealed, in order.
     const sendEnvelope: TaskRunnerDeps['send'] = (envelope) => {
-      const terminal = activeJournal !== undefined && journalIdentity !== undefined && envelope.task_id !== undefined
-        && terminalKindOf(envelope.type) !== undefined;
+      const terminal = envelope.task_id !== undefined && terminalKindOf(envelope.type) !== undefined;
       if (sealedTasks?.sealsOutbound(envelope)) {
         // The local observer reads the plaintext envelope; see `plainOf`.
         observer.captureOutboundApproval(envelope);
@@ -2606,23 +2531,13 @@ export function buildDaemonWithAdapters(
           commitTerminal(envelope.task_id!, () => sealQueuedTerminal(sealedTaskOutput, ownerIdentity, envelope));
           return;
         }
-        // Without a journal no commit queue holds a terminal, so a terminal
-        // whose seal fails (its ciphertext upload) is sealed again each second
-        // here, as the queue would, until shutdown aborts the uploads.
-        const uploads = sealedUploadAbort?.signal;
-        const retries = terminalKindOf(envelope.type) !== undefined && uploads !== undefined;
-        const send = (): void => void sealedTaskOutput.sealOutbound(envelope).then(
+        void sealedTaskOutput.sealOutbound(envelope).then(
           (sealed) => { if (sealed !== undefined) connection?.send(sealed); else denyUnsentApproval(envelope); },
           (error: unknown) => {
             console.error(`[byok/client] ${envelope.type} for sealed task ${envelope.task_id} not sent`, error);
-            if (retries && !uploads.aborted) {
-              setTimeout(() => { if (!uploads.aborted) send(); }, 1_000).unref?.();
-              return;
-            }
             denyUnsentApproval(envelope);
           },
         );
-        send();
         return;
       }
       if (!terminal) {
@@ -2645,7 +2560,6 @@ export function buildDaemonWithAdapters(
     const replaceRefusedTerminal = (refused: Envelope): void => {
       const failure = opened.refusedReplacement(refused);
       if (failure === undefined) return;
-      if (!activeJournal || !journalIdentity) { sendEnvelope(failure); return; }
       const taskId = refused.task_id!;
       const refusedHash = journalHash(encodeEnvelope(refused));
       const ownerIdentity = JSON.stringify([record.tenantId, record.deviceId, (refused.payload as { sealed: { sender: string } }).sealed.sender]);
@@ -2667,7 +2581,6 @@ export function buildDaemonWithAdapters(
         console.warn(`[byok/client] dropped inbound ${envelope.type} (seq=${record.seq}): ${byteLength} bytes is over the journal record bound`);
         return;
       }
-      if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
       const { agentRef } = envelope.payload as { agentRef?: AgentRef };
       // A sealed offer this device cannot hold is one it cannot open; a device
       // with no keyring declines every sealed offer for want of a key. The
@@ -2702,7 +2615,6 @@ export function buildDaemonWithAdapters(
     };
     const recordReplyState = (taskId: string, failure?: import('./result-reply-failure').ResultReplyFailure): Promise<void> => {
       return withReplyTransition(async () => {
-        if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
         const task = await activeJournal.readTask(taskId, journalIdentity);
         if (!task || task.localState.startsWith('terminal:')) return;
         const priorFailure = resultReplyFailureFromState(task.localState);
@@ -2757,20 +2669,17 @@ export function buildDaemonWithAdapters(
       send: sendEnvelope,
       ...(config.durablePi !== true ? {} : { durablePi: true, recordDurableTransition: async (taskId: string, leaseId: string, kind: string, ordinal: number) => {
         await withReplyTransition(async () => {
-          if (!activeJournal || !journalIdentity) throw new Error('durable journal unavailable');
           const task = await activeJournal.readTask(taskId, journalIdentity);
           const to = task?.localState.startsWith('required-reply-') ? task.localState : 'running';
           await activeJournal.recordTransition({ transitionId: randomUUID(), taskId, to,
             occurredAt: new Date().toISOString(), detail: JSON.stringify({ kind, leaseId, ordinal }) });
         });
       } }),
-      ...(activeJournal === undefined ? {} : {
-        recordResultReplyFailure: (taskId, failure) => recordReplyState(taskId, failure),
-        recordAgentMessageAccepted: taskId => recordReplyState(taskId),
-        beforeClaim: async (taskId: string, runtime: string) => {
-          await activeJournal.recordAdmission({ taskId, admitted: true, claimedRuntime: runtime, decidedAt: new Date().toISOString() });
-        },
-      }),
+      recordResultReplyFailure: (taskId, failure) => recordReplyState(taskId, failure),
+      recordAgentMessageAccepted: taskId => recordReplyState(taskId),
+      beforeClaim: async (taskId: string, runtime: string) => {
+        await activeJournal.recordAdmission({ taskId, admitted: true, claimedRuntime: runtime, decidedAt: new Date().toISOString() });
+      },
       blobClient,
       batcherOptions: egressBatcherOptions,
       agentEgress,
@@ -2816,9 +2725,6 @@ export function buildDaemonWithAdapters(
       startupTimeoutMs: config.startupTimeoutMs,
       // See DaemonConfig.maxInlineEventBytes's own doc comment — already validated above.
       maxInlineEventBytes: config.maxInlineEventBytes,
-      // Result-document offers need persist-before-send (R8): only a daemon
-      // whose terminals go through the journal below may admit them.
-      terminalJournal: activeJournal !== undefined,
       ...(config.agentHome === undefined ? {} : {
         agentResultMcpBin: (() => {
           const resolved = resolveSdkReservedHelperBin('agent-result-mcp', config.sdkHelperHost);
@@ -2881,15 +2787,13 @@ export function buildDaemonWithAdapters(
     runner = new TaskRunner(deps);
     if (config.agentHome !== undefined && config.agentEgress !== undefined) {
       await runner.recoverAgentMessageOutboxes(path.join(config.agentHome.hostStorageRoot, 'agents'), resultReplyRecoveryTasks,
-        async taskId => activeJournal !== undefined && journalIdentity !== undefined
-          && (await activeJournal.readTask(taskId, journalIdentity))?.localState === 'terminal:cancelled');
+        async taskId => (await activeJournal.readTask(taskId, journalIdentity))?.localState === 'terminal:cancelled');
     }
     // Both prerequisites survive process death in their existing authorities:
     // immutable terminal bytes in the journal and exact disposition in the outbox.
     // Queueing the message first is insufficient: a failed POST must not let the
     // terminal close cloud admission while its message is still pending.
     const replayRecoveryTerminals = async (taskId?: string): Promise<void> => {
-      if (!activeJournal || !journalIdentity) return;
       for (const id of resultReplyRecoveryTasks.keys()) {
         if (taskId !== undefined && taskId !== id) continue;
         const task = await activeJournal.readTask(id, journalIdentity);
@@ -3140,89 +3044,70 @@ export function buildDaemonWithAdapters(
       // state) and before the runner, so the bytes are on disk before any
       // work is scheduled off them. A redelivered envelope is absorbed by the
       // journal's own receipt and costs one no-op transaction.
-      //
-      // The no-journal branch is the ORIGINAL closure, unchanged.
-      onEnvelope:
-        activeJournal && journalIdentity
-          ? async (envelope) => {
-              if (tenantRebinding) {
-                throw new Error('tenant enrollment is being re-paired; inbound work is blocked until restart');
-              }
-              observer.handleInboundEnvelope(envelope);
-              if (await handleAgentHomeProjectionEnvelope(envelope)) return;
-              if (await handleAgentInputPreparationEnvelope(envelope)) return;
-              if (await handleProviderProvisioningEnvelope(envelope)) return;
-              if (await handleAgentMemoryIntentEnvelope(envelope)) return;
-              if (await handleE2eeKeyPackageEnvelope(envelope)) return;
-              if (await handleAgentEgressEnvelope(envelope)) return;
-              if (await handleAgentContentReadEnvelope(envelope)) return;
-              // S3b (L-003): §12.7.2.1's `emergency` row — "fail-closed，不 ack
-              // 新 mailbox row；保留现有 recovery evidence". Throwing HERE, ahead
-              // of the append, reuses the ordering the journal branch already
-              // established: the handler rejects, so the cursor does not move,
-              // so the mailbox keeps the row and redelivers it later. The task
-              // is not lost; it is left in the one place that still has room
-              // for it. Nothing is deleted to make space.
-              activePressureEngine?.assertAckCriticalAllowed();
-              const record = toJournalEnvelopeRecord(envelope, journalIdentity);
-              try {
-                await activeJournal.appendEnvelope(record);
-              } catch (error: unknown) {
-                if (!(error instanceof JournalRecordTooLargeError)) throw error;
-                await refuseOverBoundEnvelope(envelope, record, error.actualBytes);
-                return;
-              }
-              if (isTaskOfferType(envelope.type) && envelope.task_id !== undefined) {
-                // A selected terminal fences admission even if its transaction rolled
-                // back to received. Check before reading a possibly stale task row.
-                if (terminalCommits.hasPending(envelope.task_id)) {
-                  await terminalCommits.retry(envelope.task_id);
-                  return;
-                }
-                const task = await activeJournal.readTask(envelope.task_id, journalIdentity);
-                if (!task) throw new Error('durable offer has no execution record');
-                if (task.localState !== 'received') {
-                  await terminalCommits.retry(envelope.task_id);
-                  return;
-                }
-              }
-              if (envelope.type === 'task.cancel' && envelope.task_id !== undefined && resultReplyRecoveryTasks.has(envelope.task_id)) {
-                const taskId = envelope.task_id;
-                const binding = resultReplyRecoveryTasks.get(taskId)!;
-                await runner!.cancelRecoveredAgentMessage(taskId, async () => {
-                  // Without its offer the cancel cannot tell a sealed task: it is never sent.
-                  const task = await activeJournal.readTask(taskId, journalIdentity);
-                  if (!task || !('envelopeBytes' in task)) throw new Error(`missing durable offer of recovered task ${taskId}`);
-                  const cancelled = createEnvelope('task.cancelled', { reason: envelope.payload.reason,
-                    ...terminalIdentity(task.claimedRuntime, binding.agentRef) }, { taskId });
-                  sendEnvelope(await opened.sealRecovered(decodeEnvelope(task.envelopeBytes), cancelled));
-                  await terminalCommits.receipt(taskId);
-                });
-                resultReplyRecoveryTasks.delete(taskId);
-              } else await runner?.handleEnvelope(envelope);
-              if (envelope.type === 'agent.message.disposition') {
-                // handleEnvelope fsyncs only an exact disposition before this
-                // gate opens. A crash before sending leaves the journal pending.
-                await replayRecoveryTerminals(envelope.task_id);
-              }
-              // In particular, a pre-claim decline must be durable before ack.
-              if (envelope.task_id !== undefined) await terminalCommits.receipt(envelope.task_id);
-            }
-          : (envelope) => {
-              if (tenantRebinding) {
-                return Promise.reject(new Error('tenant enrollment is being re-paired; inbound work is blocked until restart'));
-              }
-              observer.handleInboundEnvelope(envelope);
-              if (envelope.type === 'agent.home.projection') return handleAgentHomeProjectionEnvelope(envelope).then(() => undefined);
-              if (envelope.type === 'agent.input.preparation') return handleAgentInputPreparationEnvelope(envelope).then(() => undefined);
-              if (envelope.type === 'provider.provisioning.available') return handleProviderProvisioningEnvelope(envelope).then(() => undefined);
-              if (envelope.type === 'agent.memory.intent.available') return handleAgentMemoryIntentEnvelope(envelope).then(() => undefined);
-              if (envelope.type === 'e2ee.key_package.available') return handleE2eeKeyPackageEnvelope(envelope).then(() => undefined);
-              if (envelope.type === 'agent.egress.ack') return handleAgentEgressEnvelope(envelope).then(() => undefined);
-              if (envelope.type === 'agent.message.disposition') return runner?.handleEnvelope(envelope) ?? Promise.resolve();
-              if (envelope.type === 'agent.content.read') return handleAgentContentReadEnvelope(envelope).then(() => undefined);
-              return runner?.handleEnvelope(envelope) ?? Promise.resolve();
-            },
+      onEnvelope: async (envelope) => {
+        if (tenantRebinding) {
+          throw new Error('tenant enrollment is being re-paired; inbound work is blocked until restart');
+        }
+        observer.handleInboundEnvelope(envelope);
+        if (await handleAgentHomeProjectionEnvelope(envelope)) return;
+        if (await handleAgentInputPreparationEnvelope(envelope)) return;
+        if (await handleProviderProvisioningEnvelope(envelope)) return;
+        if (await handleAgentMemoryIntentEnvelope(envelope)) return;
+        if (await handleE2eeKeyPackageEnvelope(envelope)) return;
+        if (await handleAgentEgressEnvelope(envelope)) return;
+        if (await handleAgentContentReadEnvelope(envelope)) return;
+        // S3b (L-003): §12.7.2.1's `emergency` row — "fail-closed，不 ack
+        // 新 mailbox row；保留现有 recovery evidence". Throwing HERE, ahead
+        // of the append, reuses the ordering the journal branch already
+        // established: the handler rejects, so the cursor does not move,
+        // so the mailbox keeps the row and redelivers it later. The task
+        // is not lost; it is left in the one place that still has room
+        // for it. Nothing is deleted to make space.
+        activePressureEngine?.assertAckCriticalAllowed();
+        const record = toJournalEnvelopeRecord(envelope, journalIdentity);
+        try {
+          await activeJournal.appendEnvelope(record);
+        } catch (error: unknown) {
+          if (!(error instanceof JournalRecordTooLargeError)) throw error;
+          await refuseOverBoundEnvelope(envelope, record, error.actualBytes);
+          return;
+        }
+        if (isTaskOfferType(envelope.type) && envelope.task_id !== undefined) {
+          // A selected terminal fences admission even if its transaction rolled
+          // back to received. Check before reading a possibly stale task row.
+          if (terminalCommits.hasPending(envelope.task_id)) {
+            await terminalCommits.retry(envelope.task_id);
+            return;
+          }
+          const task = await activeJournal.readTask(envelope.task_id, journalIdentity);
+          if (!task) throw new Error('durable offer has no execution record');
+          if (task.localState !== 'received') {
+            await terminalCommits.retry(envelope.task_id);
+            return;
+          }
+        }
+        if (envelope.type === 'task.cancel' && envelope.task_id !== undefined && resultReplyRecoveryTasks.has(envelope.task_id)) {
+          const taskId = envelope.task_id;
+          const binding = resultReplyRecoveryTasks.get(taskId)!;
+          await runner!.cancelRecoveredAgentMessage(taskId, async () => {
+            // Without its offer the cancel cannot tell a sealed task: it is never sent.
+            const task = await activeJournal.readTask(taskId, journalIdentity);
+            if (!task || !('envelopeBytes' in task)) throw new Error(`missing durable offer of recovered task ${taskId}`);
+            const cancelled = createEnvelope('task.cancelled', { reason: envelope.payload.reason,
+              ...terminalIdentity(task.claimedRuntime, binding.agentRef) }, { taskId });
+            sendEnvelope(await opened.sealRecovered(decodeEnvelope(task.envelopeBytes), cancelled));
+            await terminalCommits.receipt(taskId);
+          });
+          resultReplyRecoveryTasks.delete(taskId);
+        } else await runner?.handleEnvelope(envelope);
+        if (envelope.type === 'agent.message.disposition') {
+          // handleEnvelope fsyncs only an exact disposition before this
+          // gate opens. A crash before sending leaves the journal pending.
+          await replayRecoveryTerminals(envelope.task_id);
+        }
+        // In particular, a pre-claim decline must be durable before ack.
+        if (envelope.task_id !== undefined) await terminalCommits.receipt(envelope.task_id);
+      },
       onOutboundQueued: (envelope) => {
         if (terminalKindOf(envelope.type) !== undefined) overrides.executionRecoveryFault?.('terminal:queued');
       },
@@ -3236,10 +3121,6 @@ export function buildDaemonWithAdapters(
         for (const settlement of settlements) {
           const { envelope } = settlement;
           if (terminalKindOf(envelope.type) === undefined || envelope.task_id === undefined) continue;
-          if (!activeJournal) {
-            if (settlement.outcome === 'rejected') replaceRefusedTerminal(envelope);
-            continue;
-          }
           const hash = journalHash(encodeEnvelope(envelope));
           if (settlement.outcome === 'rejected') {
             await activeJournal.rejectTerminal(envelope.task_id, hash, settlement.reason);
@@ -3687,11 +3568,11 @@ export function buildDaemonWithAdapters(
     // just produced may still be mid-chain right now. Awaiting the chain here
     // — before the drain wait below, which is what decides the connection is
     // idle — is what keeps that fail from being written into an outbox nobody
-    // is draining any more. Exactly a no-op when no journal is configured.
+    // is draining any more. Exactly a no-op before the journal is open.
     // #654: a sealed outbound is handed over before it is sealed. `settled()`
     // resolves once each one reached the outbox or the terminal commit queue
-    // (its sender's handler runs first). Wait for it, with or without a
-    // journal, before the drain below decides the connection is idle.
+    // (its sender's handler runs first). Wait for it before the drain below
+    // decides the connection is idle.
     await attempt(() => sealedOutputSettled?.(), false);
     const journalTailSettled = journal ? await attempt(() => terminalCommits.stop(), true) : true;
     // This run seals nothing after the barrier: no key or chain view of its

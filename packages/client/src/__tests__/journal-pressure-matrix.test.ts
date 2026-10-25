@@ -42,7 +42,7 @@ import {
   DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
   type JournalFaultStep,
 } from '../daemon/journal/sqlite-journal';
-import { isSqliteAvailable, openJournalDatabase } from '../daemon/journal/sqlite-support';
+import { openJournalDatabase } from '../daemon/journal/sqlite-support';
 import { StoragePressure, LocalStorageEmergencyError } from '../daemon/retention/pressure';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import type { StorageBudgetInput } from '../daemon/retention/config';
@@ -113,7 +113,7 @@ function freeDrivenPolicy(overrides: Partial<StorageBudgetInput> = {}): StorageB
   };
 }
 
-describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', () => {
+describe('S3.4 disk-pressure matrix, points 7-12', () => {
   // -------------------------------------------------------------------
   // 7. Soft watermark.
   // -------------------------------------------------------------------
@@ -163,10 +163,9 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
           workspaceRoot,
           storeDir,
           storage: { scratchRoot: testScratchRoot(), budget: freeDrivenPolicy() },
-          hostedJournal: { mode: 'sqlite' },
         },
         [adapter],
-        { hostedJournal: { journal }, retention: { freeBytesProvider: async () => freeBytes } },
+        { journal, retention: { freeBytesProvider: async () => freeBytes } },
       );
       const record = await daemon.pair('pairing-code');
       await daemon.start();
@@ -272,10 +271,9 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
           workspaceRoot,
           storeDir,
           storage: { scratchRoot: testScratchRoot(), budget: freeDrivenPolicy() },
-          hostedJournal: { mode: 'sqlite' },
         },
         [adapter],
-        { hostedJournal: { journal } },
+        { journal },
       );
       const record = await daemon.pair('pairing-code');
       await daemon.start();

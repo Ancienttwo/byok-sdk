@@ -44,7 +44,7 @@ adapter.prepare = async offer => {
   }
   return result;
 };
-const daemon = createDaemonWithAdapters(input.config, [adapter], { deviceCredentials: credentials, hostedJournal: { journal } });
+const daemon = createDaemonWithAdapters(input.config, [adapter], { deviceCredentials: credentials, journal });
 await daemon.start();
 // start() only schedules connection work. The parent submits a capability-gated
 // task on this signal, so wait for the server-accepted conn.hello first.
