@@ -26,6 +26,7 @@ import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime
 import { AsyncQueue } from '../../util/async-queue';
 import type { ResolvedBin } from '../codex/resolve-bin';
 import { grokAgentPersona } from './agent-persona';
+import { GROK_USER_MCP_SERVERS_OFF, grokUserMcpServersRefusal } from './agent-user-mcp-servers';
 import { GrokProjection, type GrokTurnOutcome } from './projection';
 import { resolveGrokBin } from './resolve-bin';
 import { isQualifiedGrokVersion, QUALIFIED_GROK_VERSION } from './grok-version';
@@ -57,6 +58,22 @@ export interface GrokAdapterOptions {
    * them. Default `inherit`: the user's Grok settings apply.
    */
   compatInstructions?: 'inherit' | 'disabled';
+  /**
+   * For an Agent task (`task.offer_for_agent`), `excluded` sets
+   * `GROK_CLAUDE_MCPS_ENABLED`, `GROK_CURSOR_MCPS_ENABLED` and
+   * `GROK_MANAGED_MCPS_ENABLED` to `0` on the Grok agent process, then runs
+   * `grok inspect --json` in the task cwd with the same environment. The
+   * start fails before the agent starts if inspect lists an MCP server that
+   * is not disabled, or an enabled plugin that provides MCP servers, or if
+   * inspect fails. Grok has no per-process switch for the servers of
+   * `~/.grok/config.toml`, project `.grok/config.toml` and `.mcp.json`, or
+   * plugins, so a user who has one enabled cannot run Agent tasks with this
+   * option. Two sources are not detected: a server turned on while the
+   * session runs (a config hot-reload, `/mcps` or `grok mcp enable`), and
+   * managed MCP that an administrator pins on. Other tasks are unchanged.
+   * Default `inherit`.
+   */
+  agentUserMcpServers?: 'inherit' | 'excluded';
   resolveBin?: () => ResolvedBin;
   spawnFn?: typeof nodeSpawn;
   maxRetainedBytes?: number;
@@ -96,6 +113,8 @@ export class GrokAdapter implements RuntimeAdapter {
     if (options.model !== undefined && options.model.trim() === '') throw new TypeError('GrokAdapterOptions.model must not be blank');
     if (options.compatInstructions !== undefined && options.compatInstructions !== 'inherit' && options.compatInstructions !== 'disabled')
       throw new TypeError('GrokAdapterOptions.compatInstructions must be inherit or disabled');
+    if (options.agentUserMcpServers !== undefined && options.agentUserMcpServers !== 'inherit' && options.agentUserMcpServers !== 'excluded')
+      throw new TypeError('GrokAdapterOptions.agentUserMcpServers must be inherit or excluded');
     this.options = { ...options };
   }
 
@@ -150,8 +169,17 @@ export class GrokAdapter implements RuntimeAdapter {
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('grok manifest has no sealed cwd');
     const persona = await grokAgentPersona(input.manifest);
+    const env = { ...input.env, ...input.scratch.env } as Record<string, string>;
+    const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && input.manifest.agentRef !== undefined;
     // Set on the agent; its own children may inherit them. Hosted terminal commands keep the task env.
-    const compat = this.options.compatInstructions === 'disabled' ? COMPAT_INSTRUCTIONS_OFF : undefined;
+    const agentEnv = {
+      ...(this.options.compatInstructions === 'disabled' ? COMPAT_INSTRUCTIONS_OFF : {}),
+      ...(excludeUserMcp ? GROK_USER_MCP_SERVERS_OFF : {}),
+    };
+    if (excludeUserMcp) {
+      const refusal = await grokUserMcpServersRefusal(command, cwd, { ...env, ...agentEnv });
+      if (refusal !== undefined) throw authority(refusal);
+    }
     // As OAR: the servers go in the ACP mcpServers of session/new or session/resume.
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
     const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'grok agent' });
@@ -168,7 +196,7 @@ export class GrokAdapter implements RuntimeAdapter {
     try {
       const raw = await acp.grokSession(
         (bin, args, options) => {
-          const child = spawnAgent(bin, args, compat === undefined ? options : { ...options, env: { ...options.env, ...compat } });
+          const child = spawnAgent(bin, args, { ...options, env: { ...options.env, ...agentEnv } });
           session.own(child);
           void child.exited.then(() => session.exited(), (error) => session.fail(error));
           return session.gate(child);
@@ -178,7 +206,7 @@ export class GrokAdapter implements RuntimeAdapter {
         {
           cwd,
           ...(persona === undefined ? {} : { appendSystemPrompt: persona }),
-          env: { ...input.env, ...input.scratch.env } as Record<string, string>,
+          env,
           ...(this.options.model === undefined ? {} : { model: this.options.model }),
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           ...(input.manifest.sessionRef === undefined ? {} : { resume: input.manifest.sessionRef }),
