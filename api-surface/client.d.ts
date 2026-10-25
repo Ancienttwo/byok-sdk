@@ -554,7 +554,8 @@ export interface HermesAdapterOptions {
     /**
      * Absolute path of the Hermes root that this SDK owns, for example under the
      * Host's store directory. Each execution runs in a fresh profile home below
-     * it (`hermes-home.ts`). It must not be the user's `~/.hermes`. Give each
+     * it (`hermes-home.ts`). It must not be the user's Hermes home: `~/.hermes`,
+     * or on Windows Hermes's default `%LOCALAPPDATA%\hermes`. Give each
      * Host process its own root. The first `detect()` on a new root waits while
      * Hermes builds its environment there.
      */

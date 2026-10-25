@@ -361,7 +361,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter test doubles; no daemon",
-      "budgetBytes": 399583,
+      "budgetBytes": 399736,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {

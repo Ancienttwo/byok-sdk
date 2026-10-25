@@ -82,7 +82,7 @@ describe('supported platforms', () => {
       codex: ['darwin', 'linux', 'win32'],
       pi: ['darwin', 'linux', 'win32'],
       grok: ['darwin', 'linux'],
-      hermes: ['darwin', 'linux'],
+      hermes: ['darwin', 'linux', 'win32'],
     });
     expect(new PiAdapter({ durablePi: true }).descriptor.platforms).toEqual(['darwin', 'linux']);
     expect(Object.isFrozen(adapters.grok.descriptor.platforms)).toBe(true);
@@ -93,9 +93,9 @@ describe('supported platforms', () => {
     expect(descriptor).not.toHaveProperty('platforms');
   });
 
-  it.each(['grok', 'hermes'] as const)('Windows refuses %s with platform_unsupported before any probe', async (id) => {
+  it.each(['grok'] as const)('Windows refuses %s with platform_unsupported before any probe', async (id) => {
     const resolveBin = vi.fn(() => { throw new Error('the probe must not run'); });
-    const adapter = id === 'grok' ? new GrokAdapter({ resolveBin }) : new HermesAdapter({ home: await tempDir(), resolveBin });
+    const adapter = new GrokAdapter({ resolveBin });
     const detect = vi.spyOn(adapter, 'detect');
     const detected = await onPlatform('win32', () => observeRuntimeDetection(adapter));
     expect(detected).toEqual({ kind: 'refused', reason: 'platform_unsupported' });
@@ -107,6 +107,14 @@ describe('supported platforms', () => {
   it('Windows still probes an adapter that supports it', async () => {
     const adapter = new ClaudeAdapter({ resolveBin: () => { throw new Error('resolver failed'); } });
     expect(await onPlatform('win32', () => observeRuntimeDetection(adapter))).toEqual({ kind: 'probe-failed' });
+  });
+
+  // #608: a real Hermes run on windows-latest qualified Hermes there.
+  it('Windows probes Hermes', async () => {
+    const resolveBin = vi.fn(() => { throw new Error('resolver failed'); });
+    const adapter = new HermesAdapter({ home: await tempDir(), resolveBin });
+    expect(await onPlatform('win32', () => observeRuntimeDetection(adapter))).toEqual({ kind: 'probe-failed' });
+    expect(resolveBin).toHaveBeenCalled();
   });
 
   it('the strict decoders accept the platform refusal', () => {

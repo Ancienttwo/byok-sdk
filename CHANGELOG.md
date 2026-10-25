@@ -357,6 +357,16 @@
   `create-daemon.d.ts` are unchanged. The `@byok-sdk/client` closure grows by
   20609 B and `bin:byok-agent` by 20582 B, for the scope prologues, the bound
   function wrappers and the stage hand-offs.
+- **Feature (client)** — `HermesAdapter` declares Windows (#608):
+  `descriptor.platforms` is `['darwin', 'linux', 'win32']`, so a daemon on
+  Windows detects and advertises Hermes. The evidence is a real run of the
+  qualified Hermes `0.22.2+2364.g0b10b9f` on `windows-latest` with a fake
+  model endpoint (new CI job `hermes-real-windows`, test `hermes-real.test.ts`):
+  `detect()`, `prepare()`, one custody turn through the owned gateway to
+  `turn_end`, the provider key only in the Hermes child, and the synchronous
+  pipe `WriteFile` against the real Hermes pipe server (0.29 ms at most). On
+  Windows the constructor also refuses `%LOCALAPPDATA%\hermes`, Hermes's
+  default home there, as `home`.
 
 ## 0.30.1 — 2026-10-24 (published)
 
