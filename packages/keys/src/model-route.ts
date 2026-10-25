@@ -292,8 +292,13 @@ export function applyModelRouteChange(
       return withAuthMode(draft, change.value, context);
     case 'base_url': {
       const next = { ...draft, base_url: change.value };
-      if (next.model_source !== 'catalog' && next.model_source !== 'host') return next;
-      return catalogApplies(next) ? next : { ...next, ...MANUAL_MODEL };
+      if (next.model_source === 'catalog' || next.model_source === 'host') {
+        return catalogApplies(next) ? next : { ...next, ...MANUAL_MODEL };
+      }
+      // A model left manual by another URL, with nothing entered yet, resolves as
+      // it would have if the user had picked it at this URL.
+      const untouched = next.model_source === 'manual' && (next.pi_model === null || next.pi_model === undefined);
+      return untouched && catalogApplies(next) ? withModel(next, next.model, undefined, context) : next;
     }
     case 'model':
       return withModel(draft, change.value, change.api, context);

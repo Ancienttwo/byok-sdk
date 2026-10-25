@@ -490,6 +490,27 @@ describe('acceptance review fixes', () => {
     expect(() => untyped({ field: 'unknown', value: 1 })).toThrow(/no field "unknown"/);
   });
 
+  it('5: resolves a model again when the base URL returns to the vendor URL', () => {
+    const context = modelRouteContext();
+    const pick: ModelRouteChange[] = [
+      { field: 'provider_kind', value: 'groq' },
+      { field: 'model', value: 'openai/gpt-oss-120b' },
+    ];
+    const key: ModelRouteChange = { field: 'secret', value: { replace: 'k' } };
+    const direct = named(context, ...pick, key);
+    const roundTrip = named(context, ...pick,
+      { field: 'base_url', value: 'https://gw.example.com/v1' },
+      { field: 'base_url', value: GROQ_URL },
+      key);
+    expect(roundTrip).toEqual(direct);
+    expect(validateModelRoute(roundTrip, context)).toEqual({});
+    const entered = named(context, ...pick,
+      { field: 'base_url', value: 'https://gw.example.com/v1' },
+      { field: 'pi_model', value: SYNTHETIC_CONFIG },
+      { field: 'base_url', value: GROQ_URL });
+    expect(entered).toMatchObject({ model_source: 'manual', pi_model: SYNTHETIC_CONFIG });
+  });
+
   it('1: refuses a declared api on a Host entry for an anthropic vendor', () => {
     const context = modelRouteContext({ policy: { overrides: [entry({
       provider_kind: 'minimax', api: 'anthropic-messages', config: { ...houseConfig, api: 'openai-completions' },
