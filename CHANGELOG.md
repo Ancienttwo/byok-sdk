@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example calls the
+  connector of a confirmed card (#793 S12), as L's `flushCards`, through
+  the outbox sender: a `card` outbox row claims the call (a try and a lease)
+  before it, and the settle is fenced by that try. H calls a connector at
+  most once per card: a claim whose lease passed with no settle ends the
+  card as a timeout, where L calls again after a crash. The sender takes
+  `connector`, `connectorTimeoutMs` (default 30 s) and `changed`. The outbox
+  takes the kinds `card`, `home` and `host_job`, and `occurrence` gains
+  `job`. K8 moves L's card call decision into `cardCallDue` and
+  `settleCardCall`, and its shared `cardCallVectors` run on L and H.
 - **Feature (examples)** — the hosted collaboration example observes devices
   (#793 S11), as L's `refreshDevices`. `HostedDeviceObserver.observe(scope)`
   reads the SDK readiness of the scope's tenant (1 s timeout) when a
@@ -128,6 +138,25 @@
   under `projects/`, stays on unless `agentUserContext: 'excluded'` is set
   too. `docs/adapter-capabilities.md` lists where each adapter keeps Agent
   task session records.
+
+- **Feature (cloud, cloud-dataplane, server)** — maintenance prunes the
+  receipts of used device-proof request ids in a new twelfth step,
+  `proofReceipts`. `ByokCloudOptions.proofReceiptRetention` takes an
+  `authority` and an optional deployment-level `proofReceiptRetentionMs`
+  (default 24 hours, `DEFAULT_PROOF_RECEIPT_RETENTION_MS`). `createByokCloud`
+  refuses a value below `PROOF_RECEIPT_RETENTION_FLOOR_MS` (15 minutes) with
+  `maintenance_invalid_input`: past it, the verifier refuses every proof the
+  receipt can bind. Within the retention a `requestId` is single-use; after it
+  the same `requestId` is no longer recorded. cloud-dataplane adds
+  `PostgresProofReceiptRetentionAuthority(pool)` from `./runtime`, the
+  Postgres authority over `proof_request_receipt`; a hosted Host passes it as
+  `proofReceiptRetention.authority`, otherwise the step reports
+  `not-configured`. The SQLite composition of the server wires its own store
+  and adds the index `proof_request_receipt_recorded_idx`, which an existing
+  database gains when it opens. The memory composition does not prune: the
+  step reports `not-configured` and keeps every used `requestId` for the life
+  of the process. `MAINTENANCE_STEPS` and the `not-configured` report variant
+  gain `proofReceipts`, so a pass returns twelve step results.
 
 - **Breaking (client)** — every daemon journals its tasks (#924).
   `DaemonConfig.hostedJournal` and `HostedJournalConfig` are removed, and a
