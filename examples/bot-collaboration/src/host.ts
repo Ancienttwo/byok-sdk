@@ -115,12 +115,14 @@ export interface BotOptions {
 /** Synchronous. A throw or a thenable leaves the intent open, and `drain()` rejects. */
 export type HostIntentHandler = (document: unknown, transaction: OutcomeTransaction) => void;
 /**
- * A K4 terminal that K8 cannot apply (#882 Q6f): its key is neither a Bot Turn nor a Host intent, or its Host handler
- * failed. The intent stays open at the head of its FIFO, and each pass rejects with this error, until the outcome applies
- * or the owner calls `failStuckIntent`.
+ * A K4 terminal that K8 cannot apply (#882 Q6f): its key is neither a Bot Turn nor a Host intent, its Host handler
+ * failed, or the outcome commit of its Bot Turn threw. The intent stays open at the head of its FIFO, and each pass rejects
+ * with this error, until the outcome applies or the owner calls `failStuckIntent`.
  */
 export class IntentOutcomeError extends Error {
-  constructor(readonly key: string, readonly code: 'unknown_intent' | 'handler_failed', message: string) { super(message); this.name = 'IntentOutcomeError'; }
+  constructor(readonly key: string, readonly code: 'unknown_intent' | 'handler_failed' | 'outcome_failed', message: string) {
+    super(message); this.name = 'IntentOutcomeError';
+  }
 }
 function hostIntent(state: CollaborationState, key: string): { handler: string } | undefined {
   return state.hostIntents && Object.hasOwn(state.hostIntents, key) ? state.hostIntents[key] : undefined;
@@ -369,7 +371,12 @@ export class BotCollaboration {
     if (owner) return this.applyHostOutcome(key, owner.handler, document, tx);
     // Not a key that K8 wrote. It must never settle as a success.
     if (!Object.hasOwn(state.turns, key)) throw this.intentFailure(key, 'unknown_intent', 'No Bot Turn or Host intent has this key');
-    this.commitCallback(state, taskId, { kind: 'outcome', turnId: tx.intent.key, taskId, document: document as Json }, {
+    try { this.commitBotOutcome(state, key, taskId, document, tx); } catch (cause) {
+      throw this.intentFailure(key, 'outcome_failed', cause instanceof Error ? cause.message : String(cause));
+    }
+  }
+  private commitBotOutcome(state: CollaborationState, key: string, taskId: string, document: unknown, tx: OutcomeTransaction): void {
+    this.commitCallback(state, taskId, { kind: 'outcome', turnId: key, taskId, document: document as Json }, {
       publish: tx.publish,
       ...this.deliverPort(state, taskId),
       outcome: {
