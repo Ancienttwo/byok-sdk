@@ -486,6 +486,14 @@
   now uses it, with no change in behavior. A Host wires it into
   `CommandPorts.admit`, so both Hosts refuse the same commands while a device
   switches.
+- **Changed (examples)** — H stores tombstones in K4's scheme (#975 slice 4):
+  `retired_identity` is `(scope, kind, identity, expires_at)`, as K4
+  `host_retired_identity`, with the kinds `row`, `intent`, `slot` and
+  `application`. A compacted intent's tombstone is kind `intent` with K4's
+  intent id `hash(key)`, in place of `hash(['intent', key])`, and K8 row
+  tombstones are kind `row`. Readers filter by kind. So an owner switch moves
+  tombstones between L and H as they are. H DDL change; H is unreleased, so
+  there is no migration. No SDK or wire change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

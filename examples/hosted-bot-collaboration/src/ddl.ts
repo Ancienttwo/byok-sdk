@@ -83,8 +83,8 @@ CREATE TABLE IF NOT EXISTS outbox (
 -- The sender scan: unsettled rows by due time, across scopes.
 CREATE INDEX IF NOT EXISTS outbox_due ON outbox (next_at, scope, ordinal) WHERE settled_at IS NULL;
 -- One row per Turn intent (#793 D2b) or Host intent (#955). Only operator intent compaction deletes a row (#793 S8), and it
--- writes the permanent hash(['intent', key]) row in retired_identity in the same transaction: a row deleted without it would
--- let the same key freeze again under the same task id.
+-- writes the permanent intent tombstone (kind 'intent', hash(key)) in retired_identity in the same transaction: a row
+-- deleted without it would let the same key freeze again under the same task id.
 CREATE TABLE IF NOT EXISTS intent (
   scope          text    NOT NULL REFERENCES scope (scope),
   -- JSON.stringify(turn id), or of the Host intent key: one intent per key.
@@ -198,12 +198,17 @@ CREATE TABLE IF NOT EXISTS occurrence (
   FOREIGN KEY (scope, routine_id) REFERENCES routine (scope, id)
 );
 CREATE INDEX IF NOT EXISTS occurrence_open ON occurrence (scope, routine_id) WHERE conclusion IS NULL;
--- Permanent tombstones. They never expire: K8 row tombstones (K4 kind 'row'), and compacted intents (#793 S8).
+-- Tombstones in the K4 scheme (K4 host_retired_identity, #975), so an owner switch moves them as they are.
 CREATE TABLE IF NOT EXISTS retired_identity (
-  scope     text NOT NULL REFERENCES scope (scope),
-  -- K4 hash([namespace, id]), or hash(['intent', turn id]) for a compacted intent.
-  identity  text NOT NULL,
-  PRIMARY KEY (scope, identity)
+  scope       text   NOT NULL REFERENCES scope (scope),
+  -- 'row': a K8 row that retention retired. 'intent': a compacted intent (#793 S8). 'slot' and 'application': K4's routine
+  -- slot and applied outcome tombstones, which H itself never writes.
+  kind        text   NOT NULL CHECK (kind IN ('row', 'intent', 'slot', 'application')),
+  -- A K4 digest: hash([namespace, id]) for a row, hash(key) (the K4 intent id) for an intent.
+  identity    text   NOT NULL,
+  -- NULL: permanent. Every tombstone H writes is permanent.
+  expires_at  bigint CHECK (expires_at >= 0),
+  PRIMARY KEY (scope, kind, identity)
 );
 CREATE TABLE IF NOT EXISTS archived_row (
   scope       text   NOT NULL REFERENCES scope (scope),

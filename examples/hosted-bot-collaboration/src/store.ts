@@ -427,7 +427,7 @@ export class HostedCollaborationStore {
         `SELECT key, task_id, ordinal::text, agent, source, input::text, wait_until::text, submission, tries, next_at::text, last_error,
           cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text, retry_until::text FROM intent WHERE scope = $1 ORDER BY key`,
         'SELECT device, ordinal::text, mode, mode_revision::text, revoked_at::text FROM device_binding WHERE scope = $1 ORDER BY device',
-        'SELECT identity FROM retired_identity WHERE scope = $1 ORDER BY identity',
+        'SELECT kind, identity, expires_at::text FROM retired_identity WHERE scope = $1 ORDER BY kind, identity',
         'SELECT namespace, id, body::text, expires_at::text FROM archived_row WHERE scope = $1 ORDER BY namespace, id',
         `SELECT id, ordinal::text, definition::text, pending::text, lifecycle, status, next_at::text, calendar_errors::text FROM routine
           WHERE scope = $1 ORDER BY id`,
@@ -970,9 +970,9 @@ export class HostedCollaborationStore {
   /**
    * Operator compaction of settled intent rows on `scope` (#793 S8), as K4 `compact`: never automatic. In one transaction
    * under the scope lock, the K8 veto `compactVeto` checks each acknowledged Turn, and each settled intent row leaves with a
-   * permanent `hash(['intent', turnId])` row in `retired_identity`. A Turn id with no row counts as already compacted when
-   * its intent tombstone exists. A routine intent is refused. A refusal or a throw writes nothing. A scope with no row has
-   * no intents.
+   * permanent intent tombstone (kind `intent`, `hash(turnId)`) in `retired_identity`. A Turn id with no row counts as
+   * already compacted when its intent tombstone exists. A routine intent is refused. A refusal or a throw writes nothing.
+   * A scope with no row has no intents.
    */
   compactIntents(scope: string, input: IntentCompactionInput): Promise<IntentCompaction> {
     const key = storedKey(scope);
