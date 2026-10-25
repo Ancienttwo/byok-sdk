@@ -300,7 +300,7 @@ export class SealedTasks {
       // forever. Settle it with a small sealed failure instead, and show the
       // local observer that failure, not the terminal it replaced.
       console.error(`[byok/client] ${envelope.type} for sealed task ${taskId} replaced by a sealed failure: ${error instanceof Error ? error.message : String(error)}`);
-      const failure = { reason: 'terminal_result_unsealable', retryable: false, ...this.#daemonFailure(), ...pick(payload, UNSEALABLE_FAIL_FIELDS) };
+      const failure = this.#unsealableFailure(payload);
       sealed = await this.#seal(taskId, task, 'task.fail', failure);
       plain = createEnvelope('task.fail', failure as never, { taskId });
     }
@@ -393,6 +393,18 @@ export class SealedTasks {
    */
   #daemonFailure(): { failure?: TaskFailure } {
     return taskFailureField(DAEMON_TASK_FAILURE, this.options.serverCapabilities() ?? []);
+  }
+
+  /** The failure of a terminal that cannot be sealed as it is. */
+  #unsealableFailure(payload: JsonObject): JsonObject {
+    return { reason: 'terminal_result_unsealable', retryable: false, ...this.#daemonFailure(), ...pick(payload, UNSEALABLE_FAIL_FIELDS) };
+  }
+
+  /** The failure that replaces a refused terminal sent by `ciphertextRef` (§77b); `undefined` for any other envelope. */
+  refusedReplacement(refused: Envelope): Envelope | undefined {
+    const { sealed, ...kept } = refused.payload as JsonObject & { sealed?: { ciphertextRef?: unknown } };
+    if (!isSealedMessageType(refused.type) || !TERMINAL_TYPES.has(SEALED_SPLIT_TABLE[refused.type].plainType) || sealed?.ciphertextRef === undefined) return undefined;
+    return createEnvelope('task.fail', this.#unsealableFailure(kept) as never, { taskId: refused.task_id! });
   }
 
   /** The closed plaintext form of a terminal that has no sealing key (decision 12d). */

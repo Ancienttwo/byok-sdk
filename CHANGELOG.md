@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example has its
+  authenticated product command entry (#793 S10). `HostedCommandEntry` is L's
+  owner API for requests: it takes the product's session check
+  (`authenticate`), the scope's owner principal id and the deployment's
+  composed `sync`. Each method checks the principal as L's R2 checks do
+  (with the same audit lines), commits under L's command id, syncs the scope
+  and returns L's value. It commits with the new `requireBinding` option of
+  `store.commit`: a commit that adds work for a Bot whose device has no
+  active H binding (a Turn that is not concluded, a room seat, or an input
+  batch or an input to one) throws `DeviceBindingError` and rolls back. `store.audit(scope, line, clock)` appends one audit line.
 - **Breaking (examples)** — the hosted collaboration store builds every
   command port itself, from a per-scope Host config (#793 S9).
   `new HostedCollaborationStore(pool, schema, { host })` requires
@@ -71,6 +81,23 @@
   receipt is `runtime_exited`. A run whose worker ended on its own and could
   not be recovered, or whose respawned worker ended on its own before its
   start receipt, fails as `runtime_exited` instead of `unknown` (#869).
+
+- **Breaking (client)** — a sealed terminal that the daemon sent by
+  `ciphertextRef` and that the Host refused now reaches the Host as one
+  replacement terminal (#654, owner batch §77b). The Host refuses one when it
+  no longer declares `sealed-output-ciphertext-ref`, or when orphan GC deleted
+  the blob. Before, the daemon recorded the refusal and sent nothing else, so
+  the Host got no terminal for the task. The replacement is the sealed
+  `task.fail` with `reason: 'terminal_result_unsealable'` when the member that
+  sealed the refused terminal is ready, and the plaintext `task.fail` with
+  `reason: 'sealed_key_unavailable'` otherwise. A refusal that an earlier run,
+  or a 0.30.1 daemon, left in the journal is replaced at the next start, after
+  the member resumes. A refused inline terminal is not replaced. The journal
+  replaces the refused row in place and keeps the refused hash as a task
+  transition; it adds no table or column. Compatibility: `LocalTaskJournal`
+  gets the required method `replaceRefusedTerminal`, and its `confirmTerminal`
+  and `rejectTerminal` must accept the hash of replaced bytes as a no-op. A
+  Host that injects its own journal must implement both.
 
 - **Added (client)** — `ClaudeAdapterOptions.agentSessionPersistence`
   (#936). With `'disabled'`, an Agent task (`task.offer_for_agent`) starts

@@ -5,8 +5,8 @@ commit contract (`examples/bot-collaboration`, #739 D1), on Node and Postgres.
 
 Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), the message consumer (D2c), result
 reconciliation (D2d), the device binding (D2e), retention (D2g), routines (D2f-2), their scheduler (D2f-3), the outbox
-sender (D2b-out-2), delegation settlement (D2f-5), the inbound channel entry (D2b-out-3) and the batch seal. The command
-entry comes in a later slice of #793.
+sender (D2b-out-2), delegation settlement (D2f-5), the inbound channel entry (D2b-out-3), the batch seal and the
+authenticated command entry (S10).
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -234,6 +234,31 @@ The projections that the rule publishes reach the outbox in the same transaction
 record and keeps the revision. A throw writes nothing. The rule's `executionStarted` fact is the intent's `started`
 column, which the reconciliation sets. H retires no Turn id before D2g.
 
+## Command entry
+
+`HostedCommandEntry` is the authenticated product command entry (#793 S10): L's owner API (K8 `host.ts`) for requests. It is
+a TypeScript API; the deployment mounts it on its own HTTP framework. It takes:
+
+- `authenticate(credential)`: the product's session check, which returns the scope that the caller owns and the principal of
+  the request. A throw or no result is an `UnauthenticatedError`, with nothing written. H never reads a token itself;
+- `owner(scope)`: the owner principal id of the scope, the value that the inbound entry's `InboundIdentity.owner` gives;
+- `sync(scope, now)`: the deployment's composed sync, the function that the due scheduler runs.
+
+Each method checks the principal as L's R2 checks do, commits under L's command id (`hash(['input', botId, key])`,
+`['room_input', roomId, key]`, `['answer', id]`, `['decide', id]`, a new id for each keyless command), then runs `sync`, as
+L runs its pass, and returns L's value. A refusal writes its audit line first (`Action refused not_owner: …`,
+`Action refused unverified_sender: …`) and throws `EntryRefusedError`. `roomInput` takes any verified principal and drops a
+bot principal's mentions (R5); every other method needs the scope's owner. L trusts the caller of `setMainBot`,
+`updateRoom`, `retryPersona` and its routine API; here every call comes from a request, so they need the owner too.
+`decide` throws a refusal or another decision for a decided card after the sync, as L. The Host's own calls
+(`personaReady` through `persona_ready`, a team snapshot, retention, compaction, device binding) stay store calls.
+
+The entry commits with `requireBinding`: under the scope lock, after the K8 rule, each Bot of the work that the commit
+added (a Turn that is not concluded, a room seat, a new input batch or an input added to an open one) must run on a
+device with an active H binding, or the commit throws `DeviceBindingError` and rolls back. A cancel commits on a revoked
+device: the Turn that it seals from an open batch is concluded. It reads what the rule produced, so H keeps no copy of the mention and seat selection. An error of the sync
+after a commit reaches the caller, as an error of L's pass does: the commit stays.
+
 ## Message consumer
 
 `hostedMessageConsumer(store, { scopeOf, now })` is the `agentMessage` option of `createByokCloud`. Its
@@ -299,9 +324,9 @@ mode revision in one write, and keeps the row as the tombstone.
   transaction, and a freeze for that device throws, so no Turn, cancel or projection of the scope is written. An
   accepted delegation to a Bot on an unbound or revoked device triggers it too. The owner recovers with a command that
   does not check the binding: `cancel_turn` for the Turn, `abandon_delegation` for the delegation, or a `team_snapshot`
-  that moves the Bot to a bound device. A per-device refusal (a K8 sync fact per Turn, plus a refusal at the command
-  entry) waits for owner question §55a.
-- The routine scheduler checks it before a fire (see Routines). The command entry takes the same check when it is built.
+  that moves the Bot to a bound device. The command entry refuses a commit that adds work for such a device (see Command
+  entry); the per-Turn K8 sync refusal, which would also cover an Agent's delegation, is a later issue (§55a).
+- The routine scheduler checks it before a fire (see Routines).
 
 ## Retention
 
@@ -515,7 +540,7 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   scope belongs to one SDK tenant: the submitter's, reconciler's and reply checker's `port(scope)` and the message
   consumer's `scopeOf(tenant)` are inverse maps, and that map is the tenant check (see Message consumer). A command for another
   scope is a `scope_mismatch` conflict. A K4 callback command from the entry is a `CallbackCommandError` (see Commit
-  store). The command entry comes in a later slice of #793.
+  store). `HostedCommandEntry` takes the Host's session check as `authenticate` (see Command entry).
 - **Enrollment.** A device pairs with the SDK through a pairing code (`cloud.createPairingCode(tenant, { productId })`).
   The Host then binds it to H with `bindDevice(scope, deviceId)`, and `revokeDevice` ends that binding for good (see
   Device binding). Each tenant needs a storage entitlement (`core.quota.writeEntitlement`) before a mailbox append.
@@ -612,6 +637,9 @@ three and runs these suites.
   cover a due scope whose sync clears it, the clock read for each sync, a stalled scope and a failed sync with their
   backoff, the batch in due order, the version filter, and a reply check in the deployment's `sync` that clears its
   check time.
+- The command entry tests cover L's command ids and a replay, a sync after each commit, a missing session and a session
+  check that throws, the R2 refusals with their audit lines, room input from a human and from a bot, the binding refusal
+  (unbound and revoked) that rolls back, a decision conflict after the sync, and keyless commands.
 - The sync test freezes the same Turns in an L ledger with K4 `enqueue`. Each H input is byte-equal to the K4
   execution input, and the H state bytes equal the L state bytes.
 - The submitter tests use the hosted SDK composition (`createByokCloud` over `createPostgresCloudStores`, with

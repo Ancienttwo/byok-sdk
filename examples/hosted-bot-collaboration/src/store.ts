@@ -125,6 +125,22 @@ type SendResult = Awaited<ReturnType<ChannelPort['send']>>;
 type ReadbackResult = Awaited<ReturnType<NonNullable<ChannelPort['readback']>>>;
 
 const SCHEMA = /^[a-z_][a-z0-9_]{0,62}$/;
+/**
+ * Snapshots the Turn and room seat ids of `state` and the input count of each input batch. The returned function gives the
+ * device of each Bot of a row that adds work since: a new Turn that is not concluded (a cancel concludes the Turn that it
+ * seals), a new room seat, and a new input batch or one that took another input. In insertion order, once each. A row whose
+ * Bot is not in the team is left to the rule that reads it.
+ */
+function addedDevices(state: CollaborationState): () => string[] {
+  const turns = new Set(Object.keys(state.turns)), seats = new Set(Object.keys(state.team.seats));
+  const inputs = new Map(Object.values(state.inputBatches ?? {}).map(batch => [batch.id, batch.inputIds.length]));
+  return () => {
+    const bots = [...Object.values(state.turns).filter(turn => !turns.has(turn.id) && !turn.conclusion).map(turn => turn.botId),
+      ...Object.values(state.team.seats).filter(seat => !seats.has(seat.id)).map(seat => seat.botId),
+      ...Object.values(state.inputBatches ?? {}).filter(batch => inputs.get(batch.id) !== batch.inputIds.length).map(batch => batch.botId)];
+    return [...new Set(bots.flatMap(botId => state.team.bots[botId] ? [state.team.bots[botId]!.execution.deviceId] : []))];
+  };
+}
 const releasedSeats = (state: CollaborationState) => Object.values(state.team.seats).filter(seat => seat.released).length;
 const EMPTY_FRAME = split(stateOf({})).frame;
 
@@ -177,11 +193,16 @@ export class HostedCollaborationStore {
    * gives the K8 rule its `routines` port, and a new acceptance writes the slice back.
    *
    * The store builds every command port from the scope's Host config (#793 S9). `clock` is the Host clock.
+   *
+   * With `requireBinding` (the command entry's commits, #793 S10), a new commit checks, under the scope lock, that each Bot
+   * of the work that the commit added (see `addedDevices`) runs on a device with an active H binding, and throws
+   * `DeviceBindingError` otherwise, so the commit rolls back. It reads what the K8 rule produced, so H keeps no copy of the
+   * mention and seat selection.
    */
-  commit(scope: string, request: CommitRequest<Command>, clock: () => number): Promise<CommitResult> {
+  commit(scope: string, request: CommitRequest<Command>, clock: () => number, options: { requireBinding?: boolean } = {}): Promise<CommitResult> {
     if (CALLBACK_KINDS.has(request.command.kind)) return Promise.reject(new CallbackCommandError(request.command.kind));
     if (request.command.kind === 'receive') return Promise.reject(new InboundCommandError());
-    return this.commitWith(scope, request, clock);
+    return this.commitWith(scope, request, clock, undefined, options.requireBinding === true);
   }
 
   /**
@@ -243,12 +264,13 @@ export class HostedCollaborationStore {
   protected commitIn(scope: string, request: CommitRequest<Command>, clock: () => number, outcome?: OutcomeRoutinePorts): Promise<CommitResult> {
     const command = request.command;
     return this.commitWith(scope, request, clock, (_state, ports) => outcome && command.kind === 'outcome'
-      ? { outcome: { manage: ports.manage(command.taskId), ...outcome } } : {});
+      ? { outcome: { ...outcome, manage: ports.manage(command.taskId) } } : {});
   }
 
   /** One commit with the store's ports and `extra`, the ports that only the store's own entries add. */
   private commitWith(scope: string, request: CommitRequest<Command>, clock: () => number,
-    extra?: (state: CollaborationState, ports: StorePorts) => { remember?: CommandPorts['remember']; outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> }): Promise<CommitResult> {
+    extra?: (state: CollaborationState, ports: StorePorts) => { remember?: CommandPorts['remember']; outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
+    requireBinding = false): Promise<CommitResult> {
     const key = storedKey(scope);
     return this.change(scope, request.commandId, async (state, publish, client) => {
       // The store admits each input with its own policy, as L does (K8 host.ts `commitOwner`), so the admission and the sync's
@@ -258,9 +280,11 @@ export class HostedCollaborationStore {
       const commands = slice && hostedRoutineCommands(slice, own.now());
       const base = { ...own, ...extra?.(state, { ...own, manage }), admitInput: (fields: InputFields) => admitUserInput(state, fields, this.coalesce, own.now()),
         routines: commands && { end: (id: string) => commands.lifecycle(endable(commands.list(), id).definition.id, 'completed') } };
+      const before = requireBinding ? addedDevices(state) : undefined;
       const result = await commitStored(client, scope, state, request, base, this.channel);
       // A new commit moves the head by 1. A replay returns its first result and writes nothing.
       if (result.revision !== head + 1) return { value: result, outbox: [] };
+      if (before) for (const deviceId of before()) await activeBinding(client, key, deviceId);
       const value = result.disposition.outcome === 'accepted'
         ? result.disposition.value as { target?: string; admitted?: boolean; deliver?: boolean } | undefined : undefined;
       if (request.command.kind === 'cancel_turn' && value?.admitted && value.target !== undefined) {
@@ -291,6 +315,17 @@ export class HostedCollaborationStore {
         resend: deliveryId => resendUnknown(state, deliveryId, now()).id,
       } } : {}),
       manage: taskId => (turn, outcome, managed) => applyManagement(state, turn.botId, taskId, outcome, models, managed, readOnlyToolsets) };
+  }
+
+  /**
+   * Appends one audit line to the scope's state, in its own transaction, as L's `audit` (K8 host.ts). The command entry writes
+   * an R2 refusal with it before it throws (#793 S10). Adapter data can be unverified, so a line is cut to 1024 characters.
+   */
+  async audit(scope: string, line: string, clock: () => number): Promise<void> {
+    await this.change(scope, undefined, async state => {
+      state.audit.push(line.slice(0, 1024));
+      return { value: undefined, outbox: [], now: clock() };
+    });
   }
 
   /**
