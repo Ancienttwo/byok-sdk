@@ -79,12 +79,12 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 -- The sender scan: unsettled rows by due time, across scopes.
 CREATE INDEX IF NOT EXISTS outbox_due ON outbox (next_at, scope, ordinal) WHERE settled_at IS NULL;
--- One row per Turn intent (#793 D2b). Only operator intent compaction deletes a row (#793 S8), and it writes the
--- permanent hash(['intent', turn id]) row in retired_identity in the same transaction: a row deleted without it would
--- let the same Turn freeze again under the same task id.
+-- One row per Turn intent (#793 D2b) or Host intent (#955). Only operator intent compaction deletes a row (#793 S8), and it
+-- writes the permanent hash(['intent', key]) row in retired_identity in the same transaction: a row deleted without it would
+-- let the same key freeze again under the same task id.
 CREATE TABLE IF NOT EXISTS intent (
   scope          text    NOT NULL REFERENCES scope (scope),
-  -- JSON.stringify(turn id): one intent per Turn.
+  -- JSON.stringify(turn id), or of the Host intent key: one intent per key.
   key            text    NOT NULL,
   -- K4 taskId(turn id, 0). It is never updated.
   task_id        text    NOT NULL,
@@ -94,6 +94,8 @@ CREATE TABLE IF NOT EXISTS intent (
   agent          text    NOT NULL,
   -- K4 IntentInput.source, part of the intent identity. A promoted routine occurrence is an H intent with source 'routine'.
   source         text    NOT NULL CHECK (source IN ('user', 'bot', 'routine')),
+  -- The Host intent handler name (#955). NULL for a Turn intent. Part of the intent identity.
+  handler        text,
   -- K4 Intent.retryUntil: a superseded routine version stops its intent early (K4 routines.ts:162, :177, :193).
   retry_until    bigint  CHECK (retry_until >= 0),
   -- The frozen AgentExecutionInput.
@@ -105,6 +107,7 @@ CREATE TABLE IF NOT EXISTS intent (
   tries          integer NOT NULL DEFAULT 0 CHECK (tries >= 0),
   -- The earliest time of the next submit try: a lease while a submitter is in flight, then a backoff.
   next_at        bigint  NOT NULL DEFAULT 0 CHECK (next_at >= 0),
+  -- The last failed submit try, then the last refused terminal of a delivered row: '<code>: <message>' (#955).
   last_error     text,
   cancel_reason  text    CHECK (cancel_reason IN ('expired', 'cancelled')),
   conclusion     text    CHECK (conclusion IN ('succeeded', 'failed', 'declined', 'cancelled', 'expired', 'superseded')),

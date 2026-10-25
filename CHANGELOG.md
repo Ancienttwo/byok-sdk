@@ -301,6 +301,22 @@
   `held:<turnId>` projection with a fixed body, and an audit row with the
   reason. The rest of the scope syncs, and the next sync with no refusal
   freezes the Turn. L sets no fact; H adopts it in a follow-up.
+- **Feature (examples)** — the hosted collaboration example runs the Host's
+  own intents (#955), as L's `enqueueHostIntent` (#882).
+  `HostedCollaborationStore.enqueueHostIntent(scope, input, handler, clock)`
+  saves an intent row with the handler name (new `intent.handler` column),
+  checked against the store's new `hostIntents` option. It goes through the
+  same submitter, reconciler and device binding fence as a Turn intent. At
+  `task.complete` the handler runs synchronously in the terminal transaction
+  with the document, the intent, the terminal and `publish`. A terminal that
+  H cannot apply (no Turn and no handler, a handler that throws, returns a
+  thenable or is not configured, or a Turn outcome that throws) rolls back
+  as `IntentOutcomeError` and keeps the intent open; its reason goes to
+  `last_error` with one audit line for each new reason. The owner's
+  `HostedCommandEntry.failStuckIntent` (with the new `failStuckIntent`
+  entry option, composed from `HostedReconciler.failStuckIntent`)
+  reconciles that row once more and settles it `failed` with an audit
+  line, so its FIFO moves on.
 - **Feature (examples)** — the hosted collaboration example adopts K8's
   `deviceRefusal` sync fact (#956). Each sync round reads the binding of
   each Bot's device once, so a Turn whose Bot device has no active H
