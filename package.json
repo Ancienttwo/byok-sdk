@@ -2,7 +2,7 @@
   "name": "byok-sdk-workspace",
   "version": "0.0.0",
   "private": true,
-  "description": "BYOK SDK monorepo \u2014 bring-your-own-agent task dispatch for SaaS products",
+  "description": "BYOK SDK monorepo — bring-your-own-agent task dispatch for SaaS products",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -25,9 +25,10 @@
     "check:release-graph": "node scripts/release/check-package-graph.mjs",
     "check:release-pack": "node scripts/release/pack-and-smoke.mjs",
     "check:task-sync": "repo-harness run check-task-sync",
-    "check:task-workflow": "repo-harness run check-task-workflow --strict",
     "test:scripts": "node --test --test-concurrency=1 scripts/api-surface/check-api-surface.test.mjs scripts/api-surface/entry-closure.test.mjs scripts/api-surface/check-version-authority.test.mjs scripts/release/publish.test.mjs scripts/release/publish-recovery.test.mjs scripts/release/install-matrix.test.mjs scripts/release/beta-release.test.mjs scripts/release/registry-contract.test.mjs scripts/release/registry-npm.test.mjs scripts/release/pack-and-smoke.test.mjs scripts/api-surface/check-provisioning-code-alignment.test.mjs scripts/api-surface/check-oar-bridge.test.mjs scripts/ci/check-tmpdir-leaks.test.mjs scripts/ci/require-ci-success.test.mjs scripts/vitest/tmp-root.test.mjs scripts/release/agent-memory-helper-source.test.mjs",
-    "build:release": "bun run build && bun run --filter @byok-sdk/client build:agent-memory-helper"
+    "build:release": "bun run build && bun run --filter @byok-sdk/client build:agent-memory-helper",
+    "check:brain": "repo-harness brain check",
+    "sync:brain": "repo-harness brain sync"
   },
   "devDependencies": {
     "@types/node": "^24",

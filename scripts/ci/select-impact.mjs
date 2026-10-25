@@ -454,7 +454,7 @@ export function selectImpact(paths, context = {}) {
     }
     // The cloud-dataplane invariant suites run this file after migrating.
     if (path === 'tests/sql/control_plane_invariants.sql') { dirs.add('packages/cloud-dataplane'); continue; }
-    if (rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
+    if (path === '.gitignore' || rootDocs.has(path) || /^(docs|tasks|deploy\/runbooks)\/.+\.md$/.test(path)) continue;
     // W7: a ci.yml change can change any family job, so it selects every
     // routine family. The client suite also runs: two of its tests read this
     // workflow. The complete test suite stays release-validation only.

@@ -43,6 +43,30 @@ test('root test command permits only existing additive CI tests, retaining comma
     assert.throws(() => selectImpact(['package.json'], f));
   }
 });
+test('root package.json admits only repo-harness script additions, removals and edits', t => {
+  const f = fixture(t), old = f.rootManifest.scripts['test:scripts'];
+  const scripts = extra => ({ ...f.rootManifest, scripts: { ...f.rootManifest.scripts, ...extra } });
+  const base = scripts({ 'check:old': 'repo-harness run old', 'build:x': 'tsc' });
+  f.write('package.json', base);
+  execFileSync('git', ['-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qam', 'harness scripts'], { cwd: f.cwd });
+  f.base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: f.cwd, encoding: 'utf8' }).trim();
+  const admitted = { 'build:x': 'tsc', 'check:new': 'repo-harness brain check', 'check:old': 'repo-harness run changed' };
+  f.write('package.json', { ...f.rootManifest, scripts: { 'test:scripts': old, ...admitted } });
+  assert.deepEqual(selectImpact(['package.json'], f), { dirs: [], files: ['package.json'], families: [], reason: 'root-ci-scripts' });
+  f.write('package.json', { ...f.rootManifest, scripts: { 'test:scripts': old + ' scripts/ci/new.test.mjs', 'build:x': 'tsc' } });
+  assert.equal(selectImpact(['package.json'], f).reason, 'root-ci-scripts');
+  for (const changed of [
+    { ...base, scripts: { ...base.scripts, 'build:x': 'tsc -b' } },
+    { ...base, scripts: { ...base.scripts, 'check:old': 'echo pass' } },
+    { ...base, scripts: { ...base.scripts, 'build:x': 'repo-harness run x' } },
+    { ...base, scripts: { ...base.scripts, 'check:add': 'echo pass' } },
+    { ...base, scripts: { ...base.scripts, 'check:old': 'xrepo-harness run old' } },
+    { ...base, name: 'renamed' },
+  ]) {
+    f.write('package.json', changed);
+    assert.throws(() => selectImpact(['package.json'], f), /more than the reviewed fields|Unreviewed|Only existing/);
+  }
+});
 test('API entry changes select only owner and dependents; unmapped entry is refused', t => {
   const f = fixture(t);
   f.write('api-surface/entries.json', { '@byok-sdk/client': { policy: { budgetBytes: 2 } }, '@byok-sdk/core': { policy: { budgetBytes: 1 } } });
@@ -608,27 +632,6 @@ function rebase(f, message) {
   git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', message);
   f.base = git('rev-parse', 'HEAD').trim();
 }
-
-test('#927: the root manifest drops only the three retired repo-harness scripts', t => {
-  const f = fixture(t);
-  const retired = {
-    'check:brain-manifest': 'repo-harness run check-brain-manifest',
-    'check:architecture-sync': 'repo-harness run check-architecture-sync',
-    'sync:brain-docs': 'repo-harness run sync-brain-docs --all',
-  };
-  const kept = { 'check:task-sync': 'repo-harness run check-task-sync' };
-  const scripts = { ...f.rootManifest.scripts, ...retired, ...kept };
-  f.write('package.json', { scripts }); rebase(f, 'root with the retired scripts');
-  f.write('package.json', { scripts: { ...f.rootManifest.scripts, ...kept } });
-  assert.equal(selectImpact(['package.json'], f).reason, 'root-ci-scripts');
-  for (const [candidate, reason] of [
-    [{ ...f.rootManifest.scripts }, 'a kept script removed too'],
-    [{ ...f.rootManifest.scripts, ...kept, 'check:brain-manifest': 'true' }, 'a retired script rewritten instead of removed'],
-  ]) {
-    f.write('package.json', { scripts: candidate });
-    assert.throws(() => selectImpact(['package.json'], f), /more than/, reason);
-  }
-});
 
 test('#927: the server manifest admits only the reviewed description without a protocol version', t => {
   const f = fixture(t);

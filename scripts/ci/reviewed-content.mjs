@@ -57,14 +57,8 @@ function revertPiMove(before, after, field) {
   return true;
 }
 
-// #927 retires three root scripts whose repo-harness helpers no longer exist,
-// drops the protocol version from the server description and declares the
-// cloud-do test edge to client (its tests import client source).
-const RETIRED_ROOT_SCRIPTS = Object.freeze({
-  'check:brain-manifest': 'repo-harness run check-brain-manifest',
-  'check:architecture-sync': 'repo-harness run check-architecture-sync',
-  'sync:brain-docs': 'repo-harness run sync-brain-docs --all',
-});
+// #927 drops the protocol version from the server description and declares
+// the cloud-do test edge to client (its tests import client source).
 const SERVER_DESCRIPTION = Object.freeze({
   from: 'BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, protocol v2, memory or single-process SQLite storage.',
   to: 'BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, memory or single-process SQLite storage.',
@@ -286,6 +280,16 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       after.exports = before.exports;
     }
   } else if (path === 'package.json') {
+    // repo-harness owns its generated command scripts. Admit additions, removals
+    // and edits whose old and new values both invoke repo-harness; every other
+    // script and field stays in the deep comparison below.
+    const harnessScript = value => typeof value === 'string' && value.startsWith('repo-harness ');
+    for (const name of new Set([...Object.keys(before.scripts ?? {}), ...Object.keys(after.scripts ?? {})])) {
+      const oldValue = before.scripts?.[name], newValue = after.scripts?.[name];
+      if ((oldValue === undefined || harnessScript(oldValue)) && (newValue === undefined || harnessScript(newValue))) {
+        delete before.scripts?.[name]; delete after.scripts?.[name];
+      }
+    }
     const oldCommand = before.scripts?.['test:scripts'], newCommand = after.scripts?.['test:scripts'];
     const prefix = 'node --test --test-concurrency=1 ';
     if (!oldCommand?.startsWith(prefix) || !newCommand?.startsWith(prefix)) throw new Error('Unreviewed test command');
@@ -297,9 +301,6 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     }
     if (index !== oldTests.length || new Set(newTests).size !== newTests.length) throw new Error('Existing tests must remain in order without duplicates');
     delete before.scripts['test:scripts']; delete after.scripts['test:scripts'];
-    for (const [name, command] of Object.entries(RETIRED_ROOT_SCRIPTS)) {
-      if (before.scripts[name] === command && !Object.hasOwn(after.scripts, name)) delete before.scripts[name];
-    }
     if (revertPiMove(before, after, 'overrides')) qualify.push(...Object.keys(PI_FIELDS));
   } else {
     if (!version(before.version) || !version(after.version)) throw new Error('Invalid package version');

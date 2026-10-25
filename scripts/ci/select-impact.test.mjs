@@ -39,6 +39,10 @@ test('packages/AGENTS.md and packages/CLAUDE.md are docs-only like the root agen
   });
 });
 
+test('.gitignore alone selects nothing', () => {
+  assert.deepEqual(selectImpact(['.gitignore']), { dirs: [], files: ['.gitignore'], families: [], reason: 'docs-only' });
+});
+
 test('ci.yml selects every routine family and the client suites that read it (W7)', () => {
   for (const reader of [
     'packages/cloud-dataplane/src/__tests__/constraints.test.ts',
