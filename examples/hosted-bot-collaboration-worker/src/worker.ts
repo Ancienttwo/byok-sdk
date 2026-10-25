@@ -250,6 +250,15 @@ async function serveHost(request: Request, env: Env, ctx: ExecutionContext, rout
   if (route === '/host/input') return serveInput(request, env, ctx);
   if (!await admin(request, env)) return new Response('unauthorized\n', { status: 401 });
   if (route === '/host/passes') return Response.json(await runPasses(env));
+  if (route === '/host/board-item') {
+    // The Host's own board write, as a product creates a board row for its devices.
+    const { scope, item } = await request.json() as { scope: string; item: Parameters<ByokCloud['createBoardItem']>[1] };
+    const host = await compose(env, () => {});
+    try {
+      if (!host.scopes.has(scope)) return new Response('unknown scope\n', { status: 404 });
+      return Response.json(await host.cloud.createBoardItem(tenantOf(scope), item));
+    } finally { await host.close(); }
+  }
   if (route === '/host/pairing-code') {
     const { scope } = await request.json() as { scope: string };
     const host = await compose(env, () => {});
@@ -311,7 +320,7 @@ export default {
     } catch (error) {
       return Response.json({ error: text(error) }, { status: 500 });
     }
-    return new Response('routes: /byok/* (device surface); POST /host/input /host/passes /host/pairing-code\n', { status: 404 });
+    return new Response('routes: /byok/* (device surface); POST /host/input /host/passes /host/pairing-code /host/board-item\n', { status: 404 });
   },
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     const report = await runPasses(env);

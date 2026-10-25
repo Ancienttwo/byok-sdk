@@ -2,7 +2,9 @@
  * The H Host as a Worker on local workerd (#794 D3, Worker row): the authenticated command entry, a pass, a device process, a
  * pass, and the cron trigger. One substrate, one device process and one scope for the file; each test seeds its own Agent.
  */
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createDeviceSimulator } from '../../../packages/testkit/src/index';
 import { openHome, RUN, until, type Home } from './worker.test-support';
 
 describe.skipIf(!RUN)('H Host on local workerd (#794 D3)', () => {
@@ -27,6 +29,35 @@ describe.skipIf(!RUN)('H Host on local workerd (#794 D3)', () => {
     const before = await h.substrate.store.dump(h.home);
     expect((await h.worker.input('not-a-session', 'main', 'k', 'Hello')).status).toBe(401);
     expect(await h.substrate.store.dump(h.home)).toBe(before);
+  });
+
+  it('streams a board row written after the stream opened: the pools live as long as the response body', async () => {
+    // A simulated device of the scope's tenant, which holds a device bearer.
+    const { code } = await h.worker.admin<{ code: string }>('/host/pairing-code', { scope: h.home });
+    const device = await createDeviceSimulator({ baseUrl: h.worker.base });
+    const { accessToken } = await device.pair(code);
+    const abort = new AbortController();
+    const response = await fetch(`${h.worker.base}/byok/board/stream`, { headers: { authorization: `Bearer ${accessToken}` }, signal: abort.signal });
+    try {
+      expect([response.status, response.headers.get('content-type')]).toEqual([200, 'text/event-stream; charset=utf-8']);
+      // The headers are back, so the serving invocation's fetch has returned. Only then the Host writes a row.
+      const itemId = `item-${randomUUID()}`;
+      await h.worker.admin('/host/board-item', { scope: h.home, item: { itemId, channel: 'worker', title: 'After the headers' } });
+      const reader = response.body!.getReader(), decoder = new TextDecoder();
+      let text = '';
+      const deadline = Date.now() + 30_000;
+      while (!text.includes(itemId)) {
+        if (Date.now() > deadline) throw new Error(`no board event for ${itemId}:\n${text}`);
+        const { done, value } = await reader.read();
+        if (done) throw new Error(`the stream ended before the board event:\n${text}`);
+        text += decoder.decode(value, { stream: true });
+      }
+      const event = text.split('\n\n').find(block => block.includes(itemId))!;
+      expect(event).toMatch(/^event: board\nid: \d+\ndata: /);
+      expect(JSON.parse(event.slice(event.indexOf('data: ') + 'data: '.length))).toMatchObject({ itemId, channel: 'worker' });
+    } finally {
+      abort.abort();
+    }
   });
 
   it('runs the scheduled handler on the cron route', async () => {

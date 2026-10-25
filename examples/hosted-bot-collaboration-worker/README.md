@@ -42,6 +42,7 @@ from Node before `wrangler dev` starts. The Worker never migrates.
 | `POST /host/input` | owner, with the session bearer | `HostedCommandEntry.input`: authenticate, commit, sync |
 | `POST /host/passes` | operator bearer | one Host pass; returns its report |
 | `POST /host/pairing-code` | operator bearer | `cloud.createPairingCode` for a provisioned scope |
+| `POST /host/board-item` | operator bearer | `cloud.createBoardItem`: the Host's own board write |
 | cron `* * * * *` | Cloudflare | the same pass as `/host/passes` |
 
 ### Configuration
@@ -75,7 +76,9 @@ Without the opt-in they skip. CI's `dataplane` job sets `BYOK_REQUIRE_WORKER_DAT
 a failure (`src/ci.test.ts` pins that step). Each run has its own Postgres role and schemas, and drops them.
 
 - `worker.test.ts`: one owner Turn through the command entry, a pass, a device process and a pass, with one offer row and
-  one command record; a request with no valid owner session writes nothing; the cron route runs the `scheduled` handler.
+  one command record; a request with no valid owner session writes nothing; a board row written after
+  `/byok/board/stream` returned its headers arrives as `event: board` (the stream keeps its pools); the cron route runs
+  the `scheduled` handler. `body-lifetime.test.ts` checks the release on body end, error and cancel.
 - `faults.test.ts`: a lost notification (the next cron pass finds the work); a duplicate notification (one submit, one
   outcome); an instance destroyed after the SDK accepted a submit (the next instance reads the offer back and submits
   nothing new); an instance destroyed after it read a device terminal (the next one applies the outcome once); a scope
