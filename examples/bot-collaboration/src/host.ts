@@ -13,10 +13,10 @@ import { stateOf, type CollaborationState, type Turn } from './model';
 import { contextTurns, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
-import { cardCallDue, checkReply, collaborationDue, commitCommand, expireCards, replyCheckDue, reportCardDecisions, settleCardCall,
+import { checkReply, collaborationDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, expireCards, replyCheckDue, reportCardDecisions,
   type Command, type CommandPorts, type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
-import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
+import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
   updateDefinition } from './routines';
@@ -745,7 +745,7 @@ export class BotCollaboration {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
-        const error = new Error('Connector timed out; external outcome is unknown');
+        const error = new Error(CONNECTOR_OUTCOME_UNKNOWN);
         controller.abort(error);
         reject(error);
       }, this.connectorTimeoutMs);
@@ -758,12 +758,7 @@ export class BotCollaboration {
     } finally { clearTimeout(timer); }
   }
   private async flushCards(): Promise<void> {
-    for (const card of Object.values(this.snapshot().cards)) {
-      if (!cardCallDue(card)) continue;
-      let outcome: Parameters<typeof settleCardCall>[1];
-      try { outcome = { result: await this.callConnector(card) }; } catch (error) { outcome = { error }; }
-      this.ledger.transaction(s => settleCardCall(stateOf(s.application).cards[card.id]!, outcome));
-    }
+    await callCardsInLedger(this.ledger, card => this.callConnector(card));
   }
   private async flushDeliveries(): Promise<void> {
     const port = this.options.channel?.port;

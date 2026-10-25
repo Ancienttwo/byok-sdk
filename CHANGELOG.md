@@ -287,6 +287,13 @@
   `check:architecture-sync` and `sync:brain-docs`. They called repo-harness
   helpers that no longer exist, and `repo-harness run` exits 0 on an unknown
   helper, so they passed without checking anything (#927).
+- **Fixed (examples)** — K8 L calls a connector at most once per card, as H
+  does (#958). It claims the call in the ledger before it runs and drops the
+  claim when it commits the result or error. A claim found with no result at
+  a later pass (a crash after the call, or a failed result commit) ends the
+  card `failed` with `Connector timed out; external outcome is unknown`, and
+  the connector is not called again. Before, L called the connector again with
+  the same card id.
 
 ## 0.30.1 — 2026-10-24 (published)
 
