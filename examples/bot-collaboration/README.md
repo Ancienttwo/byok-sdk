@@ -282,6 +282,14 @@ are not Bot routines. A Host job may return only a summary: L sets K4
 occurrence `failed` and promotes nothing, as H does, because no K8 Turn could
 settle that intent. K4 alone promotes it by default.
 
+K8 owns only Turn intents and Host intents (#882), so L also sets K4
+`executionRoutines: 'refuse'`; H refuses them too (#954). An `execution` routine
+is refused at creation, from `bot.core.addRoutine`, `bot.core.updateRoutine` or a
+Host intent handler's `tx.routines`, and no routine row is written. The
+constructor refuses a ledger that still holds one that is not completed. Host
+code that needs Agent work for an occurrence calls `enqueueHostIntent` itself,
+outside a Host job handler, with its own key and never `occurrence:<key>`.
+
 ### Compaction
 
 A Turn id is its K4 intent key. K8 reads the intent of a Turn after K4 settles
