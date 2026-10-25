@@ -106,6 +106,51 @@ describeSqlite('SQLite E2EE member state', () => {
     expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID' }));
   });
 
+  // Used device-proof request ids are pruned once their proof can no longer authenticate.
+  it('prunes proof receipts recorded before the cutoff, per tenant and within the limit, and keeps later ones replayable', async () => {
+    const path = tempPath();
+    const clock = createMutableClock(new Date('2026-10-25T00:00:00.000Z'));
+    const stores = createSqliteEmbeddedStores({ path }, { clock, crypto: createWebCrypto() });
+    const OTHER = tenantId('sqlite-e2ee-other');
+    const append = (tenant: typeof TENANT, requestId: string, seq: number) => stores.e2eeMember.appendChainEntries(tenant, {
+      rows: [{ seq, entry: `{"seq":${seq}}` }], shreds: [],
+      proof: { deviceId: 'device-1', request: { requestId, operation: 'e2ee-member-chain.append', resource: '/byok/e2ee/chain', bodySha256: 'sha256', bodySize: 1 } },
+    });
+    const appended = { outcome: 'appended', appended: 1, replayed: 0 };
+    try {
+      expect(await append(TENANT, 'old-1', 1)).toEqual(appended);
+      expect(await append(TENANT, 'old-2', 2)).toEqual(appended);
+      expect(await append(OTHER, 'other-old', 1)).toEqual(appended);
+      const cutoff = '2026-10-25T00:15:00.000Z';
+      clock.set(new Date(cutoff));
+      expect(await append(TENANT, 'at-cutoff', 3)).toEqual(appended);
+
+      const prune = (limit: number) => stores.proofReceiptAuthority.collectExpired(TENANT, { now: cutoff, limit, recordedBefore: cutoff });
+      expect(await prune(1)).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: true });
+      expect(await prune(5)).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: false });
+      expect(await prune(5)).toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
+
+      // The receipt recorded at the cutoff stays: the same request gets its recorded result.
+      expect(await append(TENANT, 'at-cutoff', 3)).toEqual(appended);
+      // A pruned request id is no longer recorded: the same rows replay through the chain instead.
+      expect(await append(TENANT, 'old-1', 1)).toEqual({ outcome: 'appended', appended: 0, replayed: 1 });
+      // Another tenant's receipt is untouched.
+      expect(await stores.proofReceiptAuthority.collectExpired(OTHER, { now: cutoff, limit: 5, recordedBefore: cutoff }))
+        .toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: false });
+      await expect(stores.proofReceiptAuthority.collectExpired(TENANT, { now: cutoff, limit: 5, recordedBefore: 'yesterday' }))
+        .rejects.toThrow();
+    } finally {
+      await stores.close();
+    }
+    const raw = new DatabaseSync(path);
+    try {
+      expect(raw.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'proof_request_receipt_recorded_idx'").get())
+        .toEqual({ sql: expect.stringContaining('ON proof_request_receipt (tenant_id, recorded_at)') });
+    } finally {
+      raw.close();
+    }
+  });
+
   it('refuses a replay whose stored result is not a valid result of that write', async () => {
     const path = tempPath();
     const proof = { deviceId: 'device-1', request: { requestId: 'corrupt', operation: 'e2ee-member-chain.append', resource: '/byok/e2ee/chain', bodySha256: 'sha256', bodySize: 1 } };

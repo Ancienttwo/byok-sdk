@@ -688,3 +688,78 @@ describe('Codex persistent app-server adapter', () => {
     await turn(s);
   });
 });
+
+describe('CodexAdapter agentUserMcpServers (#935)', () => {
+  // The user's effective config: a stdio server, a dotted name, a connector and a plugin.
+  const USER_CONFIG = {
+    model: 'user-model',
+    mcp_servers: { gmail: { command: 'gmail-mcp', enabled: true }, 'notes.v2': { command: 'notes-mcp' } },
+    apps: { gmail_connector: { enabled: true } },
+    plugins: { 'notion@market': { enabled: true } },
+  };
+  const HOST = { command: process.execPath, args: ['host-mcp.js'] };
+  /** An Agent writer task with one host toolset server; `rpc` lists every request the fake received. */
+  async function agentCtx(env: NodeJS.ProcessEnv = {}, agent = true) {
+    const resources = await ctx({ FAKE_CODEX_USER_CONFIG: JSON.stringify(USER_CONFIG), ...env });
+    const home = await fs.realpath(resources.workspaceDir);
+    const file = path.join(home, 'rpc.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = file;
+    const rpc = async () => (await fs.readFile(file, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+      .filter(frame => frame.id !== undefined && typeof frame.method === 'string');
+    return {
+      resources: { ...resources, workspaceDir: home, ...(agent ? { agentHome: home } : {}), mcpServers: { host: HOST }, mcpToolsetTools: observationOf({ host: ['echo'] }) },
+      rpc,
+    };
+  }
+
+  it('validates the option', () => {
+    expect(() => adapter({ agentUserMcpServers: 'strict' as never })).toThrow(new TypeError('CodexAdapterOptions.agentUserMcpServers must be inherit or excluded'));
+  });
+
+  it.each([undefined, 'fake-thread-1'])('disables every user server, connectors and plugins and reads the thread back (resume=%s)', async (sessionRef) => {
+    const { resources, rpc } = await agentCtx();
+    const s = await open(adapter({ agentUserMcpServers: 'excluded' }), { ...task, ...(sessionRef === undefined ? {} : { sessionRef }) }, resources);
+    expect((await turn(s)).at(-1)).toEqual({ type: 'turn_end' });
+    const frames = await rpc();
+    const method = sessionRef === undefined ? 'thread/start' : 'thread/resume';
+    expect(frames.map(frame => frame.method).slice(0, 4)).toEqual(['initialize', 'config/read', method, 'mcpServerStatus/list']);
+    expect(frames[1].params).toEqual({ cwd: resources.workspaceDir, includeLayers: false });
+    const open_ = frames[2].params;
+    // The user's model and sandbox still apply: the open sets neither.
+    expect(open_).not.toHaveProperty('model');
+    expect(open_.config).toEqual({
+      mcp_servers: { gmail: { enabled: false }, 'notes.v2': { enabled: false }, host: { command: process.execPath, args: ['host-mcp.js'], enabled: true } },
+      features: { apps: false, plugins: false },
+    });
+    expect(frames[3].params).toEqual({ threadId: 'fake-thread-1', detail: 'toolsAndAuthOnly' });
+  });
+
+  it('fails the start on a user server named like a task server, before the thread opens', async () => {
+    const { resources, rpc } = await agentCtx({ FAKE_CODEX_USER_CONFIG: JSON.stringify({ mcp_servers: { host: { command: 'user-host', env: { NODE_OPTIONS: '--require /x' } } } }) });
+    const error = await startPreparedOperation(adapter({ agentUserMcpServers: 'excluded' }), task, resources).catch(e => e);
+    expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(error).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', failure: { class: 'unknown' },
+      message: 'codex Agent user MCP server exclusion refused: user MCP servers share a name with task servers: host' });
+    expect((await rpc()).map(frame => frame.method)).toEqual(['initialize', 'config/read']);
+  });
+
+  it('fails the start when the thread still runs a server outside the task', async () => {
+    const extra = [{ name: 'codex_apps', runtimeStatus: 'connected', pluginId: null }, { name: 'gdrive', runtimeStatus: 'starting', pluginId: 'drive@market' }];
+    const { resources } = await agentCtx({ FAKE_CODEX_STATUS_EXTRA: JSON.stringify(extra) });
+    const error = await startPreparedOperation(adapter({ agentUserMcpServers: 'excluded' }), task, resources).catch(e => e);
+    expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(error).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', failure: { class: 'unknown' },
+      message: 'codex Agent thread still runs MCP servers outside the task: codex_apps, gdrive (plugin drive@market)' });
+  });
+
+  it('changes nothing under inherit or for a task that is not an Agent task', async () => {
+    for (const [options, agent] of [[{}, true], [{ agentUserMcpServers: 'inherit' as const }, true], [{ agentUserMcpServers: 'excluded' as const }, false]] as const) {
+      const { resources, rpc } = await agentCtx({}, agent);
+      await turn(await open(adapter(options), task, resources));
+      const frames = await rpc();
+      expect(frames.map(frame => frame.method).slice(0, 2)).toEqual(['initialize', 'thread/start']);
+      expect(frames.map(frame => frame.method)).not.toContain('mcpServerStatus/list');
+      expect(frames[1].params.config).toEqual({ mcp_servers: { host: { command: process.execPath, args: ['host-mcp.js'], enabled: true } } });
+    }
+  });
+});

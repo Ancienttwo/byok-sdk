@@ -39,6 +39,7 @@ import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
 import { resolveRuntimeInvocation, type RuntimeInvocation } from '../runtime-invocation';
 import { isQualifiedCodexVersion, QUALIFIED_CODEX_VERSION } from './codex-version';
+import { verifyCodexUserMcpServersExcluded, withCodexUserMcpServersExcluded } from './agent-user-mcp-servers';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
@@ -75,6 +76,23 @@ export interface CodexAdapterOptions {
   operationTimeoutMs?: number;
   /** Opt-in local Host UI; independent of the remote boolean approval lane. */
   nativeInteractions?: NativeInteractionHostOptions;
+  /**
+   * For an Agent task (`task.offer_for_agent`), `excluded` gives the Codex
+   * thread only the task's and the SDK's MCP servers. Before the thread
+   * opens, the adapter reads Codex's effective configuration for the task cwd
+   * (`config/read`), sets `enabled = false` on every other `mcp_servers`
+   * entry, and turns off the `apps` (connectors) and `plugins` features for
+   * the thread. The thread then has no plugins at all, not only no plugin
+   * MCP servers. After the open it reads the thread's MCP server status
+   * back, and the start fails if any other server is not disabled, or if a
+   * user server has the name of a task or SDK server. The user's
+   * `AGENTS.md`, login, model, sandbox setting and other configuration still
+   * apply. It covers new and resumed threads. On a resume, Codex may start a
+   * queued turn before the read-back: that turn already runs with the
+   * overrides, and a failed read-back stops the app server. Other tasks are
+   * unchanged. Default `inherit`.
+   */
+  agentUserMcpServers?: 'inherit' | 'excluded';
 }
 
 /**
@@ -105,6 +123,8 @@ export class CodexAdapter implements RuntimeAdapter {
   }); }
   constructor(private readonly options: CodexAdapterOptions = {}) {
     if (options.sandbox !== undefined) assertCodexSandboxSetting(options.sandbox, 'CodexAdapterOptions.sandbox');
+    if (options.agentUserMcpServers !== undefined && options.agentUserMcpServers !== 'inherit' && options.agentUserMcpServers !== 'excluded')
+      throw new TypeError('CodexAdapterOptions.agentUserMcpServers must be inherit or excluded');
     this.options = { ...options, ...(options.nativeInteractions === undefined ? {} : { nativeInteractions: snapshotNativeInteractionHostOptions(options.nativeInteractions) }) };
     if (
       !Number.isSafeInteger(options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES) ||
@@ -212,6 +232,8 @@ export class CodexAdapter implements RuntimeAdapter {
     const workspace = await fs.realpath(cwd);
     // As OAR: the servers go in the thread/start or thread/resume config.
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
+    const taskServers = mcpServers.map(server => server.name);
+    const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && input.manifest.agentRef !== undefined;
     const spawned = createOwnedLineProcessSpawn({
       nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
     });
@@ -254,6 +276,10 @@ export class CodexAdapter implements RuntimeAdapter {
         1000,
         {
           onReady: (id) => session.ready(id),
+          ...(excludeUserMcp ? {
+            beforeOpen: async (request, params) => withCodexUserMcpServersExcluded(params, await request('config/read', { cwd, includeLayers: false }), taskServers),
+            afterOpen: (request, threadId) => verifyCodexUserMcpServersExcluded(request, threadId, taskServers),
+          } : {}),
           ...(this.options.nativeInteractions === undefined ? {} : { onServerRequest: session.serverRequest.bind(session) }),
           // A kernel observer: the kernel swallows its errors, so record() fails the session itself.
           onRecord: (record) => session.record(record),

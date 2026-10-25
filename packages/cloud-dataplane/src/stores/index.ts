@@ -45,7 +45,7 @@ export { PostgresInboundDedupStore } from './dedup';
 export { PostgresNonceStore } from './nonces';
 export { PostgresPairingCodeStore } from './pairing-codes';
 export { PostgresRequestReceiptStore } from './receipts';
-export { PostgresProofRequestReceiptStore } from './proof-receipts';
+export { PostgresProofReceiptRetentionAuthority, PostgresProofRequestReceiptStore } from './proof-receipts';
 export { PostgresTaskAttemptStore } from './task-attempts';
 export { PostgresTaskCancellationStore } from './task-cancellations';
 export { PostgresActivityStore } from './activity';

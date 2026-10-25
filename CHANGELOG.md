@@ -115,6 +115,22 @@
   adapter's record consumer then fails on a record that exit produced (the
   exit record, or a control settled as exited), the task now fails as
   `runtime_exited` with the consumer's reason, instead of `unknown` (#869).
+- **Added (client)** — `agentUserMcpServers?: 'inherit' | 'excluded'` on
+  `CodexAdapterOptions` and `GrokAdapterOptions` (#935). It applies to Agent
+  tasks only, and the default `'inherit'` changes nothing. Under `'excluded'`
+  a Codex thread gets only the task's and the SDK's MCP servers: the adapter
+  reads Codex's effective config, disables every other configured server and
+  turns off apps (connectors) and plugins for the thread, then reads the
+  thread's servers back and fails the start if another one is not disabled
+  or a user server shares a task server's name. Grok has no per-process
+  switch for its native MCP sources, so the adapter turns off the Claude,
+  Cursor and managed MCP cells and fails the start before the agent starts
+  while `grok inspect --json` still lists an enabled server or a plugin that
+  provides one. A Grok server turned on mid-session and administrator-pinned
+  managed MCP are not detected. Both refusals are non-retryable `authority`
+  start failures. `isReservedMcpServerName` is now exported, so a Host can
+  tell the SDK's own servers in `event.mcp.server`. The vendored Codex
+  session gains optional `beforeOpen` and `afterOpen` steps.
 
 - **Fixed (client)** — Pi's durable lane now follows the #869 contract. A
   start failure is a typed, non-retryable `RuntimeExecutionFailure` with a
@@ -161,6 +177,25 @@
   under `projects/`, stays on unless `agentUserContext: 'excluded'` is set
   too. `docs/adapter-capabilities.md` lists where each adapter keeps Agent
   task session records.
+
+- **Feature (cloud, cloud-dataplane, server)** — maintenance prunes the
+  receipts of used device-proof request ids in a new twelfth step,
+  `proofReceipts`. `ByokCloudOptions.proofReceiptRetention` takes an
+  `authority` and an optional deployment-level `proofReceiptRetentionMs`
+  (default 24 hours, `DEFAULT_PROOF_RECEIPT_RETENTION_MS`). `createByokCloud`
+  refuses a value below `PROOF_RECEIPT_RETENTION_FLOOR_MS` (15 minutes) with
+  `maintenance_invalid_input`: past it, the verifier refuses every proof the
+  receipt can bind. Within the retention a `requestId` is single-use; after it
+  the same `requestId` is no longer recorded. cloud-dataplane adds
+  `PostgresProofReceiptRetentionAuthority(pool)` from `./runtime`, the
+  Postgres authority over `proof_request_receipt`; a hosted Host passes it as
+  `proofReceiptRetention.authority`, otherwise the step reports
+  `not-configured`. The SQLite composition of the server wires its own store
+  and adds the index `proof_request_receipt_recorded_idx`, which an existing
+  database gains when it opens. The memory composition does not prune: the
+  step reports `not-configured` and keeps every used `requestId` for the life
+  of the process. `MAINTENANCE_STEPS` and the `not-configured` report variant
+  gain `proofReceipts`, so a pass returns twelve step results.
 
 ## 0.30.1 — 2026-10-24 (published)
 

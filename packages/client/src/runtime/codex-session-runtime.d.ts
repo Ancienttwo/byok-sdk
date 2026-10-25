@@ -45,5 +45,11 @@ export declare function codexSession(
     onServerRequest?: (id: string | number, method: string, params: Record<string, unknown>, reply: {
       respond(value: Record<string, unknown>): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;
     }) => void;
+    /** Runs on the session's own app-server client before the thread open; returns the open request params. A throw kills the app-server. */
+    beforeOpen?: (request: CodexOpenStepRequest, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    /** Runs on the same client after the open reply's read-back, before `onReady`. A throw kills the app-server. */
+    afterOpen?: (request: CodexOpenStepRequest, threadId: string) => Promise<void>;
   },
 ): Promise<RawCodexSession>;
+/** One request on the session's own app-server client. */
+export type CodexOpenStepRequest = (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;

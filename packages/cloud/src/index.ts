@@ -417,8 +417,14 @@ export {
   type SealedAgentExecutionInput,
 } from './agent-execution';
 
-export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy } from './maintenance';
-export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport } from './maintenance';
+export {
+  DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy,
+  DEFAULT_PROOF_RECEIPT_RETENTION_MS, PROOF_RECEIPT_RETENTION_FLOOR_MS,
+} from './maintenance';
+export type {
+  RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport,
+  ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofReceiptRetentionOptions,
+} from './maintenance';
 export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
 export type { ReceiptRetentionClass } from './receipt-retention';
 export type { ReceiptCollectExpiredInput } from './stores/ports';
