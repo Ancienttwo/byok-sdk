@@ -122,6 +122,31 @@ describeSqlite('SQLite E2EE member state', () => {
     check.close();
   });
 
+  it.each([
+    ['refuses', '{"op":"rotate"}'],
+    ['opens', '{"op":"add"}'],
+  ] as const)('%s a chain stored before the KEM floor that holds %s', async (outcome, entry) => {
+    const path = tempPath();
+    await open(path).close();
+    const raw = new DatabaseSync(path);
+    raw.exec('DROP TABLE e2ee_member_kem_floor');
+    raw.prepare('INSERT INTO e2ee_member_chain_entry (tenant_id, seq, entry) VALUES (?, 1, ?)').run(TENANT, entry);
+    raw.close();
+    if (outcome === 'refuses') {
+      expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_MIGRATION_REFUSED', message: expect.stringContaining('rotate entries predate the KEM floor') }));
+      const check = new DatabaseSync(path);
+      expect(check.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'e2ee_member_kem_floor'").get()).toBeUndefined();
+      check.close();
+      return;
+    }
+    const reopened = open(path);
+    try {
+      expect(await reopened.e2eeMember.readChainEntries(TENANT, { afterSeq: 0, limit: 256 })).toEqual([{ seq: 1, entry }]);
+    } finally {
+      await reopened.close();
+    }
+  });
+
   it('refuses a same-named table of another shape', async () => {
     const path = tempPath();
     await open(path).close();

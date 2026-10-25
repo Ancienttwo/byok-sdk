@@ -2,6 +2,9 @@
  * The Postgres E2EE member store (#654 E2c): the shared store contract, and
  * the device cleanup that only Postgres runs inside the device transaction.
  */
+import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMutableClock, tenantId, type TenantId } from '@byok-sdk/core';
 import { runE2eeMemberStoreConformance } from '@byok-sdk/conformance';
@@ -306,6 +309,34 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres rotate serializes with package puts to
       await expect(put(store)).resolves.toEqual({ outcome: 'kem_epoch_stale', recipient: 'member', kemEpoch: 1, floor: 2 });
     } finally {
       holder.release();
+      await scope.dispose();
+    }
+  });
+});
+
+describe.skipIf(SKIP_DATAPLANE)('Postgres 0029 and the rotate entries stored before it', () => {
+  it.each([
+    ['refuses', '{"op":"rotate"}'],
+    ['applies', '{"op":"add"}'],
+  ] as const)('%s 0029 on a chain that holds %s', async (outcome, entry) => {
+    const scope = await createDataplaneScope();
+    const before = await mkdtemp(join(tmpdir(), 'byok-before-0029-'));
+    try {
+      for (const name of await readdir(DEPLOY_SQL)) {
+        if (name.endsWith('.sql') && name < '0029') await copyFile(join(DEPLOY_SQL, name), join(before, name));
+      }
+      await migrate(scope.pool, before);
+      await scope.pool.query('INSERT INTO e2ee_member_chain_entry (tenant_id, seq, entry) VALUES ($1, 1, $2)', [TENANT_A, entry]);
+      const floorTable = async () => (await scope.pool.query("SELECT to_regclass('e2ee_member_kem_floor') AS name")).rows[0].name;
+      if (outcome === 'refuses') {
+        await expect(migrate(scope.pool, DEPLOY_SQL)).rejects.toThrow(/holds rotate entries/u);
+        expect(await floorTable()).toBeNull();
+      } else {
+        await expect(migrate(scope.pool, DEPLOY_SQL)).resolves.toMatchObject({ applied: ['0029'] });
+        expect(await floorTable()).toBe('e2ee_member_kem_floor');
+      }
+    } finally {
+      await rm(before, { recursive: true, force: true });
       await scope.dispose();
     }
   });
