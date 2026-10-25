@@ -236,7 +236,7 @@ RAFT 把 agent 的创建和编辑表单拆成四层：
 | `thinking_level_unsupported` | 模型不支持该级别，和 catalog 查询的同名结果一致 |
 | `secret_required` | 需要 key 但没有 |
 | `secret_reentry_required` | 身份字段变了，原有 key 不能复用 |
-| `secret_invalid` | key 超长或含控制字符。上限在实现时与 keys 现有校验统一 |
+| `secret_invalid` | key 为空、超过长度上限，或含 `\0`、`\r`、`\n`。长度上限和字符规则都沿用 keys 现有的 secret 校验，不另设一套 |
 
 `checkProviderKey` 的结果（`PROVIDER_KEY_CHECK_OUTCOMES`）描述的是网络检查，仍然单独一套。视图把它作为状态展示，不当作字段错误。
 
