@@ -4,6 +4,7 @@
 // answers it; `mcpServerStatus/list` reports its `mcp_servers` merged with the
 // thread's, a `codex_apps` server while it has `apps` and the thread did not
 // turn the feature off, and one server per enabled plugin likewise.
+// FAKE_CODEX_STATUS_EXTRA: JSON array of more status entries, a source config/read does not show.
 import { spawn } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -306,6 +307,7 @@ function mcpStatus() {
     ...(userConfig.apps !== undefined && threadFeatures.apps !== false ? [status('codex_apps', true)] : []),
     ...Object.entries(userConfig.plugins ?? {}).filter(([, plugin]) => plugin.enabled !== false && threadFeatures.plugins !== false)
       .map(([pluginId]) => status(`${pluginId.split('@')[0]}_srv`, true, pluginId)),
+    ...JSON.parse(process.env.FAKE_CODEX_STATUS_EXTRA ?? '[]'),
   ];
 }
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
