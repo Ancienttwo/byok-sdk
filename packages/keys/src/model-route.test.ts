@@ -441,6 +441,33 @@ describe('acceptance review fixes', () => {
     expect(validateModelRoute(unlisted, context).model).toEqual({ code: 'not_a_choice' });
   });
 
+  it('3: refuses a policy that lists one Host entry twice', () => {
+    const twice = { overrides: [
+      entry({ provider_kind: 'groq', api: 'openai-completions', config: houseConfig }),
+      entry({ provider_kind: 'groq', api: 'openai-completions', config: { ...houseConfig, reasoning: true } }),
+    ] };
+    expect(() => modelRouteContext({ policy: twice })).toThrow(/groq openai-completions house twice/);
+    const handBuilt: ModelRouteContext = { catalog: {}, stored: null, policy: twice };
+    const groq = applyModelRouteChange(createModelRouteDraft(handBuilt), { field: 'provider_kind', value: 'groq' }, handBuilt);
+    expect(() => modelRouteView(groq, handBuilt)).toThrow(/twice/);
+    expect(() => validateModelRoute(applyModelRouteChange(groq, { field: 'model', value: 'house' }, handBuilt), handBuilt))
+      .toThrow(/twice/);
+  });
+
+  it("3: reports Pi's thinking-level refusal instead of submitting it", () => {
+    const context = modelRouteContext({ policy: { overrides: [
+      entry({ provider_kind: 'groq', api: 'openai-completions', config: houseConfig }),
+    ] } });
+    const draft = named(context,
+      { field: 'provider_kind', value: 'groq' },
+      { field: 'model', value: 'house' },
+      { field: 'thinking_level', value: 'high' },
+      { field: 'secret', value: { replace: 'k' } });
+    expect(validateModelRoute(draft, context).thinking_level).toEqual({ code: 'thinking_level_unsupported' });
+    expect(modelRouteSubmission(draft, context).ok).toBe(false);
+    assertDeviceAccepts(applyModelRouteChange(draft, { field: 'thinking_level', value: 'off' }, context), context);
+  });
+
   it('1: refuses a declared api on a Host entry for an anthropic vendor', () => {
     const context = modelRouteContext({ policy: { overrides: [entry({
       provider_kind: 'minimax', api: 'anthropic-messages', config: { ...houseConfig, api: 'openai-completions' },

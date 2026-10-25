@@ -128,12 +128,17 @@ export interface ModelRouteContext {
   readonly policy: ModelRoutePolicy;
 }
 
-/** A context over the pinned Pi catalog. */
+/**
+ * A context over the pinned Pi catalog. A policy that lists one vendor, api
+ * and model in two Host entries is a Host programming error and throws.
+ */
 export function modelRouteContext(input: {
   readonly stored?: ModelRouteStoredProfile | null;
   readonly policy?: ModelRoutePolicy;
 } = {}): ModelRouteContext {
-  return { catalog: PI_MODEL_CATALOG, stored: input.stored ?? null, policy: input.policy ?? {} };
+  const policy = input.policy ?? {};
+  assertUniqueHostEntries(policy);
+  return { catalog: PI_MODEL_CATALOG, stored: input.stored ?? null, policy };
 }
 
 /** One entry of the pinned catalog for a vendor and api. */
@@ -362,8 +367,10 @@ export function validateModelRoute(draft: ModelRouteDraft, context: ModelRouteCo
     if (!isRecord(config)) set(piField, { code: 'pi_model_invalid', paths: [] });
     else if (parsed.success) piModel = parsed.data;
     else {
-      const paths = issuePaths(parsed.error.issues).filter((path) => path !== 'thinkingLevel');
-      if (paths.length > 0) set(piField, { code: 'pi_model_invalid', paths });
+      const paths = issuePaths(parsed.error.issues);
+      if (paths.includes('thinkingLevel')) set('thinking_level', { code: 'thinking_level_unsupported' });
+      const configPaths = paths.filter((path) => path !== 'thinkingLevel');
+      if (configPaths.length > 0) set(piField, { code: 'pi_model_invalid', paths: configPaths });
     }
   }
 
@@ -528,6 +535,7 @@ function catalogApplies(draft: ModelRouteDraft): boolean {
 function modelChoices(draft: ModelRouteDraft, context: ModelRouteContext): ModelRouteModelChoice[] {
   if (draft.provider_kind === null || !catalogApplies(draft)) return [];
   const vendor = draft.provider_kind as ModelProviderVendorId;
+  assertUniqueHostEntries(context.policy);
   const overrides = (context.policy.overrides ?? []).filter((entry) => entry.provider_kind === vendor);
   const key = (api: string, model: string): string => `${api}\u0000${model}`;
   const adapter = modelProviderVendor(vendor)!.adapter;
@@ -556,6 +564,17 @@ function modelChoices(draft: ModelRouteDraft, context: ModelRouteContext): Model
  * config and the api the vendor's adapter projects for that config is the api
  * the entry is listed under, as for a catalog entry.
  */
+function assertUniqueHostEntries(policy: ModelRoutePolicy): void {
+  const seen = new Set<string>();
+  for (const entry of policy.overrides ?? []) {
+    const key = JSON.stringify([entry.provider_kind, entry.api, entry.model]);
+    if (seen.has(key)) {
+      throw new Error(`model-route policy lists the Host entry ${entry.provider_kind} ${entry.api} ${entry.model} twice`);
+    }
+    seen.add(key);
+  }
+}
+
 function hostListing(entry: ModelRouteHostEntry, adapter: ModelProviderAdapter): PiCatalogModelListing {
   const config = isRecord(entry.config) ? entry.config : undefined;
   const levels = config === undefined ? [] : manualThinkingLevels(config);
