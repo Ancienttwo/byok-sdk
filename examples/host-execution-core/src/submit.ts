@@ -65,7 +65,6 @@ export async function submitFrozen(port: FrozenSubmitPort, input: FrozenExecutio
 }
 function dispatcher(port: FrozenSubmitPort, input: FrozenExecutionInput): () => Promise<unknown> {
   if (!isSealed(input)) return () => port.submit(input);
-  const { submitSealed } = port;
-  if (!submitSealed) throw new SealedDispatchUnavailableError();
-  return () => submitSealed(input);
+  if (!port.submitSealed) throw new SealedDispatchUnavailableError();
+  return () => port.submitSealed!(input);
 }

@@ -285,7 +285,7 @@ it('does not recreate a completed routine or reapply its SDK terminal on replay 
     expect(read).not.toHaveBeenCalled(); expect(applyOutcome).toHaveBeenCalledTimes(1);
     expect(host.ledger.snapshot().application.count).toBe(1);
     expect(host.ledger.snapshot().occurrences).toEqual({}); expect(host.adapter.starts).toHaveLength(submitted);
-    await expect(host.core.enqueue({ ...input(intent.key), source: intent.source, execution: intent.execution, waitUntil: intent.waitUntil, retry: intent.retry })).rejects.toMatchObject({ name: 'RetiredIntentIdentityError', code: 'retired_intent_identity' });
+    await expect(host.core.enqueue({ ...input(intent.key), source: intent.source, execution: intent.execution as IntentInput['execution'], waitUntil: intent.waitUntil, retry: intent.retry })).rejects.toMatchObject({ name: 'RetiredIntentIdentityError', code: 'retired_intent_identity' });
   } finally { await host.close(); }
 });
 

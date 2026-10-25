@@ -1,7 +1,7 @@
 import { WAKE_MAX_FUTURE_MS, type DueWake, type WakeScheduleInput } from '@byok-sdk/server';
 import { canonical, hash, isSealed, time, validateInput, validateJson, validateRetry, type Conclusion, type HostOccurrenceRun, type IntentExecution,
   type IgnoredWakeAudit, type Intent, type LedgerState, type Occurrence, type Routine, type RoutineDefinition } from './model';
-import { cancelWake, enqueue, settle } from './transitions';
+import { admit, cancelWake, settle } from './transitions';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 
 // Use the public SDK admission limit for every Host horizon precheck.
@@ -231,7 +231,7 @@ export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWa
   } else if (definition.hostOccurrence) {
     occurrence.hook = {}; // The core runs the hook in this transaction.
   } else {
-    const intent = enqueue(state, tenant, { key: `occurrence:${key}`, source: 'routine', execution: definition.execution,
+    const intent = admit(state, tenant, { key: `occurrence:${key}`, source: 'routine', execution: definition.execution,
       waitUntil: time(now + definition.waitMs), retry: definition.retry });
     intent.occurrence = key;
     if (next) intent.retryUntil = next.availableAt;
@@ -254,7 +254,7 @@ function routineRefOf(execution: IntentExecution, routineId: string, definitionV
 export function promote(state: LedgerState, tenant: string, occurrence: Occurrence, execution: IntentExecution): Intent {
   routineRefOf(execution, occurrence.routineId, occurrence.definitionVersion);
   const routine = state.routines[hash(occurrence.routineId)]!;
-  const intent = enqueue(state, tenant, { key: `occurrence:${occurrence.key}`, source: 'routine', execution,
+  const intent = admit(state, tenant, { key: `occurrence:${occurrence.key}`, source: 'routine', execution,
     waitUntil: time(occurrence.recordedAt + routine.definition.waitMs), retry: routine.definition.retry });
   intent.occurrence = occurrence.key;
   occurrence.intentId = intent.id;
