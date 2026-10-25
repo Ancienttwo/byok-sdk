@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Breaking (examples)** — the hosted collaboration store builds every
+  command port itself, from a per-scope Host config (#793 S9).
+  `new HostedCollaborationStore(pool, schema, { host })` requires
+  `host(scope) → { models, readOnlyToolsets }`, L's `models` and
+  `readOnlyToolsets`; a model template carries the device that a new Bot runs
+  on, so each scope has its own. The store builds `updatePersona`, `teamBot`,
+  the outcome's `manage` and, with `{ channel: true }`, the push route ports,
+  as L's owner commands and outcomes do. `commit`, `receive`, `consume` and
+  `finish` take the Host clock in place of a ports factory;
+  `hostedMessageConsumer` takes `now` and `HostedReconciler` no longer takes
+  `ports`. `HostedSyncOptions` drops `models` and `readOnlyToolsets`: the sync
+  reads them from the same config. `CommitPorts`, `CommitPortsFactory`,
+  `FinishPortsFactory` and `PortsFactory` are gone.
 - **Fixed (client)** — the last read-back of a member KEM rotation (#654
   E2d-5) now also requires each epoch whose key the run holds, and each
   epoch with a freshness point, to read back, including a key the run opened
@@ -18,6 +31,14 @@
   the FIFO stayed blocked and the owner call refused the key as not stuck. A
   Host that switches exhaustively on `IntentOutcomeError.code` must add the
   `outcome_failed` case.
+- **Feature (examples)** — with `roomHistory`, K8 publishes each accepted seat
+  post as the projection `room-message:<roomId>:<messageId>` with
+  `{ roomId, id, from, text, late }`, and does not read the next seat of a room
+  while that room has an undelivered post (#883 acceptance 2). The Host's
+  `deliver` must resolve only after the write can be read back. A projection
+  that never delivers releases each later seat of its room as `busy` at its
+  deadline. The rule's new optional `OutcomePorts.roomPosts` stays unset in H,
+  so H and every Host without the option are unchanged.
 - **Fixed (examples)** — K8 L no longer leaves a room seat waiting when a Turn
   step releases the seat before it (a blocked or retired seat Turn). The L
   sync runs the room step and the Turn steps again, as H's sync does since
@@ -37,6 +58,20 @@
   bound when it became ready, so a terminal made after that member retired
   at shutdown seals with a next run of the same member instead of taking the
   closed form.
+
+- **Fixed (client)** — when a Codex app-server ends on its own and the
+  adapter's record consumer then fails on a record that exit produced (the
+  exit record, or a control settled as exited), the task now fails as
+  `runtime_exited` with the consumer's reason, instead of `unknown` (#869).
+
+- **Fixed (client)** — Pi's durable lane now follows the #869 contract. A
+  start failure is a typed, non-retryable `RuntimeExecutionFailure` with a
+  fixed reason, instead of being reported as "runtime adapter contract
+  violation during start"; a worker that ends on its own before its start
+  receipt is `runtime_exited`. A run whose worker ended on its own and could
+  not be recovered, or whose respawned worker ended on its own before its
+  start receipt, fails as `runtime_exited` instead of `unknown` (#869).
+
 - **Breaking (client)** — a sealed terminal that the daemon sent by
   `ciphertextRef` and that the Host refused now reaches the Host as one
   replacement terminal (#654, owner batch §77b). The Host refuses one when it

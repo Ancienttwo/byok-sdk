@@ -1,6 +1,5 @@
-export { CallbackCommandError, HostedCollaborationStore, HostedStoreVersionError, InboundCommandError, type CommitPorts, type CommitPortsFactory,
-  type DueReplyCheck, type FinishPortsFactory, type HostedStoreOptions, type HostedSyncOptions, type InboundIdentity, type PortsFactory, type Publish,
-  type ReplyFence, type SyncResult } from './store';
+export { CallbackCommandError, HostedCollaborationStore, HostedStoreVersionError, InboundCommandError, type DueReplyCheck, type HostConfig,
+  type HostedStoreOptions, type HostedSyncOptions, type InboundIdentity, type Publish, type ReplyFence, type StorePorts, type SyncResult } from './store';
 export { DDL, STORE_VERSION } from './ddl';
 export type { IntentCompaction, IntentCompactionInput } from './compaction';
 export { hostedMessageConsumer, type AgentMessageConsumer, type AgentMessageInput, type MessageConsumerOptions, type MessageDecision } from './messages';

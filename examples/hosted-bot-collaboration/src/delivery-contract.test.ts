@@ -3,17 +3,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { taskId, type Json } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { ChannelPort, Delivery, InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
-import { enablePush, resendUnknown, revokePush } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { FINAL_BODY, deliveryVectors, replyToken, type DeliverySubject } from '@byok-sdk/example-bot-collaboration/delivery-vectors';
 import type { KeylessCommand } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { frozenIntent } from './intents';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
+import { TEST_HOST } from './memory-subject.test-support';
 import { hostedMessageConsumer, type AgentMessageInput } from './messages';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedOutboxSender } from './sender';
-import { HostedCollaborationStore, inSchema, type CommitPorts, type CommitPortsFactory, type InboundIdentity } from './store';
+import { HostedCollaborationStore, inSchema, type InboundIdentity } from './store';
 
 // #793 D2b-out-2: the K8 delivery vectors on H, with the outbox sender on real Postgres.
 const DIRECT = { kind: 'direct', id: 'main' } as const;
@@ -43,7 +42,7 @@ async function indexDrift(db: Awaited<ReturnType<typeof openStore>>, scope: stri
 async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
   const db = await openStore();
   opened.push(db);
-  const store = new HostedCollaborationStore(db.pool, db.store.schema, { channel: true });
+  const store = new HostedCollaborationStore(db.pool, db.store.schema, { host: TEST_HOST, channel: true });
   const scope = `tenant:${randomUUID()}`;
   let now = Date.UTC(2026, 0, 1), crash = false;
   /**
@@ -69,14 +68,9 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
   await store.seed(scope, state => { seedCollaboration(state); state.team.bots.main!.execution = execution; });
   await store.bindDevice(scope, 'device');
 
-  const ports = (extra: Partial<CommitPorts> = {}): CommitPortsFactory => (state, publish) => ({ ...vectorPorts(state, publish), now: () => now,
-    routes: {
-      enable: (conversation, channel, target, owner) => enablePush(state, conversation, channel, target, owner, now).id,
-      revoke: routeId => revokePush(state, routeId, now),
-      resend: deliveryId => resendUnknown(state, deliveryId, now).id,
-    }, ...extra });
+  const clock = () => now;
   const keyless = async (command: KeylessCommand) => {
-    const result = await store.commit(scope, { scope, commandId: randomUUID(), command }, ports());
+    const result = await store.commit(scope, { scope, commandId: randomUUID(), command }, clock);
     if (result.disposition.outcome !== 'accepted') throw new Error(`Refused ${command.kind}: ${JSON.stringify(result.disposition)}`);
     return result.disposition.value;
   };
@@ -127,7 +121,7 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
     armed = hold;
     return { release: async () => { hold.open(); await hold.holder; await run(); } };
   };
-  const consume = hostedMessageConsumer(store, { scopeOf: tenant => tenant, ports: ports() });
+  const consume = hostedMessageConsumer(store, { scopeOf: tenant => tenant, now: clock });
 
   return {
     now: () => now,
@@ -136,7 +130,7 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
     publish: async (key, { replyMs = 600_000 } = {}) => {
       const message: InboundMessage = { channel: 'fake', platformMessageId: key, conversation: DIRECT, sender: { id: 'owner', kind: 'human' },
         text: 'Answer me', mentions: [], ...(replyMs === null ? {} : { replyRoute: { kind: 'reply', channel: 'fake', inboundId: key, token: replyToken(key), expiresAt: now + replyMs } }) };
-      const received = await store.receive(scope, message, IDENTITY, ports());
+      const received = await store.receive(scope, message, IDENTITY, clock);
       expect(received).toMatchObject({ kind: 'owner_input' });
       const turnId = received.id!;
       roots.set(key, turnId);
@@ -166,7 +160,7 @@ async function hostedSubject(port: ChannelPort): Promise<DeliverySubject> {
     revokePush: async id => { await keyless({ kind: 'revoke_push_route', routeId: id }); await run(); },
     echo: async (deliveryId, platformMessageId) => {
       expect(await store.receive(scope, { channel: 'fake', platformMessageId, conversation: DIRECT, sender: { id: 'own-bot', kind: 'bot' }, text: '',
-        mentions: [], deliveryId }, IDENTITY, ports())).toEqual({ kind: 'echo' });
+        mentions: [], deliveryId }, IDENTITY, clock)).toEqual({ kind: 'echo' });
       await run();
     },
     resend: async id => { const next = await keyless({ kind: 'resend_delivery', deliveryId: id }) as string; await run(); return next; },

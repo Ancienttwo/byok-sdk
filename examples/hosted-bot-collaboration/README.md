@@ -20,17 +20,21 @@ transaction. The transaction holds the state change, the command record and the 
 - The caller passes the scope that the authenticated product user owns. A request for another scope is
   a `scope_mismatch` conflict.
 - A scope row of an unknown store version is refused before any write. `read()` refuses it too.
+- The store builds every command port itself, from the scope's Host config (`host(scope)`: the model templates and the
+  read-only toolsets, L's `models` and `readOnlyToolsets`), as L `commitOwner` and `applyOutcome` build them (#793 S9):
+  `updatePersona`, `teamBot`, the outcome's `manage`, and the push route ports with `{ channel: true }`. A model template
+  carries the device that a new Bot runs on, so each scope has its own config. `commit`, `receive`, `consume` and `finish`
+  take the Host clock, not ports. The sync reads its model names and read-only toolsets from the same config.
 - A command reads the intent facts (K8 `CommandPorts.intents`) from the intent rows, under the scope lock, as L reads its
-  K4 intents in the commit transaction. A caller's ports cannot supply them. The committed intents of an outcome
+  K4 intents in the commit transaction. The committed intents of an outcome
   (`outcome.committed`, which a Main Bot cancel reads) come from the same rows.
 - A new commit that leaves a delegation cancel fact to deliver (`cancel_turn` of an open chain Turn,
   `cancel_delegation`, `abandon_delegation`) delivers it in the same transaction, as L `settleChain` runs
   `deliverCancels` after its commit: the K4 cancel of the fact's frozen target, then `delivered`.
 - `commit()` is the command entry's call, so it refuses the K4 callback commands (`outcome`, `message`, `occurrence`)
   with `CallbackCommandError`, before it reads or writes anything: no scope row and no command record, so a retry gets
-  the same refusal (#793 D2f-6). They come only from `finish`, `consume` and `fire`. Its ports (`CommitPortsFactory`)
-  carry no outcome or occurrence port. `finish` takes the commit ports and `manage` (`FinishPortsFactory`); the store
-  builds the committed intents and the routine ports of the outcome.
+  the same refusal (#793 D2f-6). They come only from `finish`, `consume` and `fire`. The store builds the committed
+  intents, `manage` and the routine ports of an outcome.
 - The shared K8 commit vectors send an `outcome`. H runs them through the protected `commitIn`, which a test subclass
   (`VectorStore`) exposes, as L's vector subject commits through `commitInLedger`. Host code is trusted: the boundary is
   that the command entry calls `commit()`.
@@ -149,7 +153,7 @@ sync of every scope throws and no Turn freezes. L checks the budget once, when i
 H takes the budget in each sync's `limits`, so give the store a policy built for the smallest budget that its syncs use.
 
 - The store admits each input itself (K8 `admitUserInput`), with its own policy, as L's owner commands do. So the
-  admission and the seal use one policy. `CommitPorts` carries no `admitInput`, and the store sets the port on every commit.
+  admission and the seal use one policy. No caller supplies a port, and the store sets the admission on every commit.
 - Each sync round first runs K8 `sealDueBatches`, as L's sync does, so a sealed batch's Turn gets its step in that round.
   A later round of the same sync seals again, so a Bot that an earlier round made idle gets its batch sealed in that sync.
 - The sync runs K8 `projectInputBatches` last, after the reply token cleanup, as L's sync does.
@@ -232,7 +236,7 @@ column, which the reconciliation sets. H retires no Turn id before D2g.
 
 ## Message consumer
 
-`hostedMessageConsumer(store, { scopeOf, ports })` is the `agentMessage` option of `createByokCloud`. Its
+`hostedMessageConsumer(store, { scopeOf, now })` is the `agentMessage` option of `createByokCloud`. Its
 `consume` decides each Agent message in one transaction under the scope lock, in the order of K4
 `consumeMessage`:
 
@@ -468,11 +472,11 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
   gets its row too. A seed writes no outbox row.
 - **The store owns the channel outbox port.** With `{ channel: true }`, a K4 callback (an Agent message or an outcome)
   queues its deliveries with K8 `queueDelivery`, which reads the intent conclusions of the scope as they were before
-  the transaction wrote, as L reads its committed ledger. A caller's ports cannot supply `deliver`.
+  the transaction wrote, as L reads its committed ledger. No caller supplies `deliver`.
 - The sync and each delivery settle drop expired or unneeded reply tokens (`cleanReplyTokens`). L's sync does it too;
   L's call in each flush pass is a call in each delivery settle here. H drops an expired token at the next sync or settle
   of its scope.
-- **Inbound** (`receive(scope, message, identity, ports)`, #793 D2b-out-3) is L `receive()`. K8 `classifyInbound` sorts
+- **Inbound** (`receive(scope, message, identity, clock)`, #793 D2b-out-3) is L `receive()`. K8 `classifyInbound` sorts
   the message by the Host's channel identity (`owner`, and the Host's own bot ids by channel in `self`). The identity is
   Host configuration from verified identity, never a field of the message:
   - an `echo` settles the one delivery it names, by `deliveryId` or by platform message id (K8 `echoCandidates` and
@@ -483,8 +487,7 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
     `rememberInbound`);
   - `bot_background` runs the K8 `room_input` command of a bot with no mention, as L `roomInput` does for a bot;
   - any other kind writes only an audit line, one for each delivery, as L.
-  The store owns the `remember` port: `commit()` refuses the `receive` command with `InboundCommandError`, and its ports
-  carry no `remember` port.
+  The store owns the `remember` port: `commit()` refuses the `receive` command with `InboundCommandError`.
 - An unsettled delivery row whose entity is not in the state fails as drift (`Delivery outbox row unsettled for an
   archived entity`) and waits `backoffMs`, as a row with no entity anywhere does (`Delivery not found`). Nothing is
   settled for it.
@@ -500,9 +503,11 @@ composes the SDK side (the Postgres and object stores, the token signer and a pa
 message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMessageConsumer` themselves.
 
 - **Database.** One Postgres database. The store takes its own `pg.Pool` and its own schema
-  (`new HostedCollaborationStore(pool, schema)`), and `migrate()` creates the H tables there. The SDK tables come from
+  (`new HostedCollaborationStore(pool, schema, { host })`), and `migrate()` creates the H tables there. The SDK tables come from
   the `@byok-sdk/cloud-dataplane` migrations (`migrate(pool, migrationsDir())`), in the same database or another one.
   No path assumes one atomic commit across the two (see Database). A scope row of an unknown store version is refused.
+- **Host config.** `host(scope)` returns the scope's model templates (each with the user's own device) and read-only
+  toolsets, as L's `models` and `readOnlyToolsets`. Every store over one schema must be built with the same `host`.
 - **Object storage.** The SDK stores need an S3-compatible endpoint: `objectStorage` with `endpoint`, `bucket`,
   `accessKeyId`, `secretAccessKey`, `region` and a `signingClock`, passed to `createPostgresCoreStores` and
   `createPostgresCloudStores`. H stores no objects itself.
