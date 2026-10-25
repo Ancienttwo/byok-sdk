@@ -18,6 +18,16 @@
   the FIFO stayed blocked and the owner call refused the key as not stuck. A
   Host that switches exhaustively on `IntentOutcomeError.code` must add the
   `outcome_failed` case.
+- **Fixed (examples)** — K8 L no longer leaves a room seat waiting when a Turn
+  step releases the seat before it (a blocked or retired seat Turn). The L
+  sync runs the room step and the Turn steps again, as H's sync does since
+  #876, so the next seat gets its Turn in the same sync. Before, a round whose
+  seat Turns all blocked stopped after four seats, with no timer for the next.
+  A shared room vector holds both Hosts to this.
+- **Fixed (examples)** — K8 bounds the `history` and `roomHistory` reads with
+  the new `historyTimeoutMs` option (default 10 seconds). A read still open
+  after it counts as failed: the Turn stays queued and the timer reads again.
+  Before, a stalled `history` authority held the Host queue with no bound.
 - **Fixed (client)** — the #866 review of a sealed terminal that the commit
   queue holds past a failed stop (#654). When the next run has another
   tenant, device or member, a terminal that already is a closed plaintext
