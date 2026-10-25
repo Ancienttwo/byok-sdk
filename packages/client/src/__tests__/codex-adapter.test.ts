@@ -19,6 +19,7 @@ import {
 import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
 import { CodexProjection } from '../adapters/codex/projection';
+import * as vendoredProjection from '../../vendor/oar/c88a514/runtimes/codex/projection';
 const fixture = fileURLToPath(
   new URL('./fixtures/fake-codex.mjs', import.meta.url),
 );
@@ -227,6 +228,18 @@ describe('Codex persistent app-server adapter', () => {
       ),
     ).rejects.toBeInstanceOf(RuntimeExecutionFailure);
   });
+  it('marks an app-server exit during the open runtime_exited, and an open it did not end unknown (#869)', async () => {
+    await expect(open(adapter(), task, await ctx({ FAKE_CODEX_CRASH_WITH_STDERR: 'crash' }))).rejects.toMatchObject({
+      phase: 'start', message: expect.stringMatching(/crash/), failure: { class: 'runtime_exited' },
+    });
+    // The kernel kills the app-server itself when the open reply has no thread id.
+    await expect(open(adapter(), task, await ctx({ FAKE_CODEX_NO_THREAD_STARTED: '1' }))).rejects.toMatchObject({
+      phase: 'start', message: expect.stringMatching(/no thread id/), failure: { class: 'unknown' },
+    });
+    await expect(open(adapter({ operationTimeoutMs: 300 }), task, await ctx({ FAKE_CODEX_HANG_BEFORE_THREAD: '1' }))).rejects.toMatchObject({
+      phase: 'start', message: expect.stringMatching(/timed out/), failure: { class: 'unknown' },
+    });
+  });
   it('plain and prepared Git workspaces use the same sealed cwd, with no exec skip-git arguments', async () => {
     for (const git of [false, true]) {
       const captures: string[][] = [];
@@ -375,6 +388,43 @@ describe('Codex persistent app-server adapter', () => {
     );
     await expect(turn(s)).rejects.toMatchObject({ category: 'infrastructure' });
   });
+  it.each([
+    ['usageLimitExceeded', '"usageLimitExceeded"', { class: 'quota' }],
+    ['rateLimitExceeded', '"rateLimitExceeded"', { class: 'rate_limited' }],
+    ['unauthorized', '"unauthorized"', { class: 'unknown' }],
+    ['a 404 transport failure', '{"responseStreamConnectionFailed":{"httpStatusCode":404}}', { class: 'model_unavailable' }],
+    ['no codexErrorInfo', undefined, { class: 'unknown' }],
+  ] as const)('classifies a failed turn with %s from codexErrorInfo, reason unchanged (#869)', async (_label, info, failure) => {
+    const s = await open(adapter(), task, await ctx({
+      FAKE_CODEX_TURN_FAILS: '1',
+      FAKE_CODEX_FAIL_MESSAGE: 'provider said no',
+      ...(info === undefined ? {} : { FAKE_CODEX_ERROR_INFO: info }),
+    }));
+    const thrown = await turn(s).then(() => undefined, (error: unknown) => error);
+    expect(thrown).toBeInstanceOf(RuntimeExecutionFailure);
+    expect((thrown as RuntimeExecutionFailure).failure).toEqual(failure);
+    expect((thrown as RuntimeExecutionFailure).message).toBe('provider said no');
+  });
+  it.each([
+    ['Anthropic limit wording', { type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' } }, { class: 'unknown' }],
+    ['an invalid_request_error type', { type: 'error', error: { type: 'invalid_request_error', message: 'prompt is too long' } }, { class: 'invalid_request' }],
+    ['an error code', { error: { code: 'insufficient_quota', message: 'You exceeded your current quota.' } }, { class: 'quota' }],
+  ] as const)('classifies codexErrorInfo other with %s from the body, sending unknown for a text rule (#869)', async (_label, body, failure) => {
+    const message = JSON.stringify(body);
+    const s = await open(adapter(), task, await ctx({
+      FAKE_CODEX_TURN_FAILS: '1',
+      FAKE_CODEX_FAIL_MESSAGE: message,
+      FAKE_CODEX_ERROR_INFO: '"other"',
+    }));
+    const thrown = await turn(s).then(() => undefined, (error: unknown) => error);
+    expect(thrown).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(thrown).toMatchObject({ retry: 'non-retryable', message });
+    expect((thrown as RuntimeExecutionFailure).failure).toEqual(failure);
+  });
+  it('marks an app-server exit before the terminal runtime_exited (#869)', async () => {
+    const s = await open(adapter(), task, await ctx({ FAKE_CODEX_EXIT_NO_TERMINAL: '1' }));
+    await expect(turn(s)).rejects.toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });
+  });
   it('file changes produce real workspace-relative artifacts', async () => {
     const resources = await ctx({
       FAKE_CODEX_ARTIFACT_NAME: 'result.md',
@@ -473,6 +523,28 @@ describe('Codex persistent app-server adapter', () => {
     await s.close();
     await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
   });
+  it('a vendored fold failure during a turn kills the app-server and keeps the fold reason, unknown (#869)', async () => {
+    const { pids, spawnFn } = tracked();
+    const s = await open(adapter({ spawnFn }), task, await ctx({ FAKE_CODEX_HANG: '1' }));
+    vi.spyOn(vendoredProjection, 'foldCodexNotification').mockImplementation(() => { throw new Error('projection failed'); });
+    await s.steer('next').catch(() => {});
+    const failure = await turn(s).then(() => undefined, (error) => error);
+    expect(failure).toMatchObject({ category: 'infrastructure', message: 'projection failed', failure: { class: 'unknown' } });
+    await s.close();
+    await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
+  });
+  it('a record consumer that fails on the record of an exit the app-server made on its own keeps runtime_exited (#869)', async () => {
+    const consume = CodexProjection.prototype.consume;
+    vi.spyOn(CodexProjection.prototype, 'consume').mockImplementation(function (this: CodexProjection, ...args: Parameters<CodexProjection['consume']>) {
+      const record = args[1] as { kind: string; body: { kind?: string } };
+      if (record.kind === 'response' && record.body.kind === 'exited') throw new Error('projection failed on the exit record');
+      return consume.apply(this, args);
+    });
+    const s = await open(adapter(), task, await ctx({ FAKE_CODEX_EXIT_NO_TERMINAL: '1' }));
+    await expect(turn(s)).rejects.toMatchObject({
+      category: 'infrastructure', message: 'projection failed on the exit record', failure: { class: 'runtime_exited' },
+    });
+  });
   it('rejects an invalid operation timeout', () => {
     for (const operationTimeoutMs of [0, -1, Infinity, Number.NaN, 2_147_483_648])
       expect(() => adapter({ operationTimeoutMs })).toThrow('invalid Codex operation timeout');
@@ -494,6 +566,24 @@ describe('Codex persistent app-server adapter', () => {
     expect(Date.now() - started).toBeLessThan(operationTimeoutMs + 10_000);
     expect(pids).toHaveLength(1);
     await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
+  });
+  it('keeps the class of a failure that halted the record stream during the start (#869)', async () => {
+    const consume = CodexProjection.prototype.consume;
+    let failedTurnSeen = false;
+    // The consumer fails on the first record after the failed turn, which has already classed the session.
+    vi.spyOn(CodexProjection.prototype, 'consume').mockImplementation(function (this: CodexProjection, ...args: Parameters<CodexProjection['consume']>) {
+      if (failedTurnSeen) throw new Error('projection failed');
+      const result = consume.apply(this, args);
+      const body = (args[1] as { body?: { origin?: string; type?: string } }).body;
+      if (body?.origin === 'byok-native' && body.type === 'turn/completed') failedTurnSeen = true;
+      return result;
+    });
+    const error = await open(adapter({ operationTimeoutMs: 3000 }), task, await ctx({
+      FAKE_CODEX_FAIL_IN_START: '1',
+      FAKE_CODEX_ERROR_INFO: '"usageLimitExceeded"',
+    })).catch((caught) => caught);
+    expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(error).toMatchObject({ phase: 'start', category: 'semantic', failure: { class: 'quota' } });
   });
   it('fails the session and kills the app-server when a steer gets no reply within the deadline', async () => {
     const { pids, spawnFn } = tracked();
@@ -596,5 +686,80 @@ describe('Codex persistent app-server adapter', () => {
     resources.mcpToolsetTools = observationOf({ host: ['echo'] });
     const s = await open(adapter(), task, resources);
     await turn(s);
+  });
+});
+
+describe('CodexAdapter agentUserMcpServers (#935)', () => {
+  // The user's effective config: a stdio server, a dotted name, a connector and a plugin.
+  const USER_CONFIG = {
+    model: 'user-model',
+    mcp_servers: { gmail: { command: 'gmail-mcp', enabled: true }, 'notes.v2': { command: 'notes-mcp' } },
+    apps: { gmail_connector: { enabled: true } },
+    plugins: { 'notion@market': { enabled: true } },
+  };
+  const HOST = { command: process.execPath, args: ['host-mcp.js'] };
+  /** An Agent writer task with one host toolset server; `rpc` lists every request the fake received. */
+  async function agentCtx(env: NodeJS.ProcessEnv = {}, agent = true) {
+    const resources = await ctx({ FAKE_CODEX_USER_CONFIG: JSON.stringify(USER_CONFIG), ...env });
+    const home = await fs.realpath(resources.workspaceDir);
+    const file = path.join(home, 'rpc.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = file;
+    const rpc = async () => (await fs.readFile(file, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+      .filter(frame => frame.id !== undefined && typeof frame.method === 'string');
+    return {
+      resources: { ...resources, workspaceDir: home, ...(agent ? { agentHome: home } : {}), mcpServers: { host: HOST }, mcpToolsetTools: observationOf({ host: ['echo'] }) },
+      rpc,
+    };
+  }
+
+  it('validates the option', () => {
+    expect(() => adapter({ agentUserMcpServers: 'strict' as never })).toThrow(new TypeError('CodexAdapterOptions.agentUserMcpServers must be inherit or excluded'));
+  });
+
+  it.each([undefined, 'fake-thread-1'])('disables every user server, connectors and plugins and reads the thread back (resume=%s)', async (sessionRef) => {
+    const { resources, rpc } = await agentCtx();
+    const s = await open(adapter({ agentUserMcpServers: 'excluded' }), { ...task, ...(sessionRef === undefined ? {} : { sessionRef }) }, resources);
+    expect((await turn(s)).at(-1)).toEqual({ type: 'turn_end' });
+    const frames = await rpc();
+    const method = sessionRef === undefined ? 'thread/start' : 'thread/resume';
+    expect(frames.map(frame => frame.method).slice(0, 4)).toEqual(['initialize', 'config/read', method, 'mcpServerStatus/list']);
+    expect(frames[1].params).toEqual({ cwd: resources.workspaceDir, includeLayers: false });
+    const open_ = frames[2].params;
+    // The user's model and sandbox still apply: the open sets neither.
+    expect(open_).not.toHaveProperty('model');
+    expect(open_.config).toEqual({
+      mcp_servers: { gmail: { enabled: false }, 'notes.v2': { enabled: false }, host: { command: process.execPath, args: ['host-mcp.js'], enabled: true } },
+      features: { apps: false, plugins: false },
+    });
+    expect(frames[3].params).toEqual({ threadId: 'fake-thread-1', detail: 'toolsAndAuthOnly' });
+  });
+
+  it('fails the start on a user server named like a task server, before the thread opens', async () => {
+    const { resources, rpc } = await agentCtx({ FAKE_CODEX_USER_CONFIG: JSON.stringify({ mcp_servers: { host: { command: 'user-host', env: { NODE_OPTIONS: '--require /x' } } } }) });
+    const error = await startPreparedOperation(adapter({ agentUserMcpServers: 'excluded' }), task, resources).catch(e => e);
+    expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(error).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', failure: { class: 'unknown' },
+      message: 'codex Agent user MCP server exclusion refused: user MCP servers share a name with task servers: host' });
+    expect((await rpc()).map(frame => frame.method)).toEqual(['initialize', 'config/read']);
+  });
+
+  it('fails the start when the thread still runs a server outside the task', async () => {
+    const extra = [{ name: 'codex_apps', runtimeStatus: 'connected', pluginId: null }, { name: 'gdrive', runtimeStatus: 'starting', pluginId: 'drive@market' }];
+    const { resources } = await agentCtx({ FAKE_CODEX_STATUS_EXTRA: JSON.stringify(extra) });
+    const error = await startPreparedOperation(adapter({ agentUserMcpServers: 'excluded' }), task, resources).catch(e => e);
+    expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(error).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', failure: { class: 'unknown' },
+      message: 'codex Agent thread still runs MCP servers outside the task: codex_apps, gdrive (plugin drive@market)' });
+  });
+
+  it('changes nothing under inherit or for a task that is not an Agent task', async () => {
+    for (const [options, agent] of [[{}, true], [{ agentUserMcpServers: 'inherit' as const }, true], [{ agentUserMcpServers: 'excluded' as const }, false]] as const) {
+      const { resources, rpc } = await agentCtx({}, agent);
+      await turn(await open(adapter(options), task, resources));
+      const frames = await rpc();
+      expect(frames.map(frame => frame.method).slice(0, 2)).toEqual(['initialize', 'thread/start']);
+      expect(frames.map(frame => frame.method)).not.toContain('mcpServerStatus/list');
+      expect(frames[1].params.config).toEqual({ mcp_servers: { host: { command: process.execPath, args: ['host-mcp.js'], enabled: true } } });
+    }
   });
 });

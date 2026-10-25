@@ -31,6 +31,7 @@ import { createClaudeControlChannel } from './control-channel';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
 import { AssistantMessageTracker, createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './events';
+import { ClaudeFailureEvidence } from './failure-evidence';
 import { ClaudeProcessClient, type SpawnFn } from './process-client';
 
 
@@ -41,6 +42,11 @@ const DETECT_TIMEOUT_MS = 5000;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** A start step claude's own exit ended, before any adoption, transport or spawn failure, is `runtime_exited`. */
+function startupExit(client: ClaudeProcessClient) {
+  return client.processExited ? { class: 'runtime_exited' as const } : undefined;
 }
 
 /** One owner covers process teardown and task config on every failed start. */
@@ -102,6 +108,15 @@ export interface ClaudeAdapterOptions {
    * unchanged. Default `inherit`.
    */
   agentUserContext?: 'inherit' | 'excluded';
+  /**
+   * For an Agent task (`task.offer_for_agent`), `disabled` starts Claude with
+   * `--no-session-persistence`, so Claude does not save the session
+   * transcript under `<config dir>/projects/`. Such a session cannot be
+   * resumed: an Agent task that carries a `sessionRef` fails before Claude
+   * starts. Follow-ups in the same task still work. Other tasks are
+   * unchanged. Default `enabled`.
+   */
+  agentSessionPersistence?: 'enabled' | 'disabled';
 }
 
 /**
@@ -128,6 +143,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
     if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 2_147_483_647) throw new TypeError('invalid Claude interrupt timeout');
     if (options.agentUserContext !== undefined && options.agentUserContext !== 'inherit' && options.agentUserContext !== 'excluded')
       throw new TypeError('ClaudeAdapterOptions.agentUserContext must be inherit or excluded');
+    if (options.agentSessionPersistence !== undefined && options.agentSessionPersistence !== 'enabled' && options.agentSessionPersistence !== 'disabled')
+      throw new TypeError('ClaudeAdapterOptions.agentSessionPersistence must be enabled or disabled');
     this.nativeOptions = options.nativeInteractions === undefined ? undefined : snapshotNativeInteractionHostOptions(options.nativeInteractions);
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id: 'claude',
@@ -248,6 +265,15 @@ export class ClaudeAdapter implements RuntimeAdapter {
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
       throwIfCancelled();
+      const persistSession = startInput.manifest.agentRef === undefined || this.options.agentSessionPersistence !== 'disabled';
+      // With persistence off, Claude saved no transcript to resume. Refused
+      // before any write, so the task never runs as a silent fresh session.
+      if (!persistSession && startInput.manifest.sessionRef !== undefined) {
+        throw new RuntimeExecutionFailure({
+          phase: 'start', category: 'authority', retry: 'non-retryable',
+          reason: 'claude Agent session persistence is disabled, so the task cannot resume a session',
+        });
+      }
       // Built before any write, so a refusal leaves no file behind.
       const userContextSettings = this.options.agentUserContext === 'excluded' && startInput.manifest.agentRef !== undefined
         ? claudeAgentUserContextSettings(startInput.manifest, startInput.env, process.platform, os.homedir, dir => {
@@ -323,6 +349,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         '--verbose',
         // Text deltas for the display-only draft (`stream_event` frames).
         '--include-partial-messages',
+        ...(persistSession ? [] : ['--no-session-persistence']),
         ...(manifestModelId ? ['--model', manifestModelId] : []),
         ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
         // YOLO by default, as in OAR (`runtimes/claude/session.ts`): no human
@@ -372,6 +399,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         if (!initialized) throw new RuntimeExecutionFailure({
           phase: 'start', category: 'infrastructure', retry: 'retryable',
           reason: 'Claude native control initialization failed',
+          failure: startupExit(client),
         });
         throwIfCancelled();
         native.beginTurn();
@@ -391,6 +419,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         throw new RuntimeExecutionFailure({
           phase: 'start', category: 'infrastructure', retry: 'retryable',
           reason: 'claude initial instruction transport failed',
+          failure: startupExit(client),
         }, { cause });
       }
 
@@ -417,6 +446,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         throw new RuntimeExecutionFailure({
           phase: 'start', category: 'infrastructure', retry: 'retryable',
           reason: `claude exited before yielding an authoritative session id: ${errorMessage(err)}`,
+          failure: startupExit(client),
         }, { cause: err });
       }
 
@@ -516,6 +546,7 @@ class ClaudeSession implements Session {
   declare readonly interactions?: NativeInteractionChannel;
   private readonly correlation: ToolUseCorrelation;
   private readonly assistantMessages = new AssistantMessageTracker();
+  private readonly failureEvidence = new ClaudeFailureEvidence();
   private closeAttempt: Promise<void> | undefined;
   /** Filled once from Claude's own `mcp_status` answer (`./mcp-identity.ts`). */
   private readonly mcpIdentities = new Map<string, McpEventIdentity>();
@@ -538,6 +569,7 @@ class ClaudeSession implements Session {
     const client = this.client;
     const correlation = this.correlation;
     const assistantMessages = this.assistantMessages;
+    const failureEvidence = this.failureEvidence;
     const workspaceDir = this.workspaceDir;
     const control = this.control;
     const toolsetServers = this.toolsetServers;
@@ -610,10 +642,12 @@ class ClaudeSession implements Session {
                   category: 'infrastructure',
                   retry: 'retryable',
                   reason: 'claude runtime process ended before a terminal result frame',
+                  failure: { class: client.processExited ? 'runtime_exited' : 'unknown' },
                 }, { cause: client.terminalError });
               }
 
               if (value.type === 'result') turnSettled = true;
+              failureEvidence.observe(value);
 
               if (!session.mcpStatusRequested && toolsetServers.size > 0 && callsUnresolvedMcpTool(value, correlation)) {
                 // Asked at the first MCP call, when Claude has connected its
@@ -633,7 +667,7 @@ class ClaudeSession implements Session {
                 }
               }
               assistantMessages.observe(value, mapped.events);
-              terminalFailure = mapped.terminalFailure ?? terminalFailure;
+              if (mapped.terminalFailure !== undefined) terminalFailure = failureEvidence.attach(value, mapped.terminalFailure);
               if (mapped.unmappedLabel) {
                 client.recordUnmappedFrame(mapped.unmappedLabel);
               }

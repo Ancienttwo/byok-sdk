@@ -371,6 +371,17 @@ describe('HermesAdapter session', () => {
     expect(failure).toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable', message: 'hermes turn failed' });
   });
 
+  it('reports unknown for a failed turn and runtime_exited for a gateway exit (#869)', async () => {
+    const failed = await setup({ FAKE_HERMES_FAIL_DETAILS: 'admitted_turn_failed' });
+    const failure = await turn(await failed.open()).then(() => undefined, (error: unknown) => error);
+    expect((failure as RuntimeExecutionFailure).failure).toEqual({ class: 'unknown' });
+    const exited = await setup({ FAKE_HERMES_KILL_GATEWAY_ON_PROMPT: '1' });
+    const session = await exited.open();
+    const exit = await turn(session).then(() => undefined, (error: unknown) => error);
+    expect(exit).toMatchObject({ category: 'infrastructure', message: 'hermes gateway exited', failure: { class: 'runtime_exited' } });
+    await session.close();
+  });
+
   it('refuses to start when another gateway serves the execution profile', async () => {
     const { open, root, entries } = await setup({ FAKE_HERMES_GATEWAY_WRONG_PID: '1' });
     await expect(open()).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', message: 'another Hermes gateway serves the execution profile' });
@@ -421,6 +432,25 @@ describe('HermesAdapter session', () => {
     // The viewer never started, so it could not start a gateway of its own.
     expect(log.map((entry) => entry.mode)).toEqual(['gateway']);
     expect(alive(log[0]!.pid)).toBe(false);
+  });
+
+  it('keeps the runtime_exited class when the gateway exits before it reports ready (#869)', async () => {
+    const { open } = await setup({ FAKE_HERMES_GATEWAY_EXIT_BEFORE_READY: '1' });
+    const failure = await open().then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', message: 'hermes gateway exited', failure: { class: 'runtime_exited' } });
+  });
+
+  it('keeps the runtime_exited class when the ACP viewer exits before it answers initialize (#869)', async () => {
+    const { open } = await setup({ FAKE_HERMES_VIEWER_EXIT_ON_INITIALIZE: '1' });
+    const failure = await open().then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', message: 'hermes acp viewer exited', failure: { class: 'runtime_exited' } });
+  });
+
+  it('keeps an ownership start failure unknown (#869)', async () => {
+    const { open } = await setup({ FAKE_HERMES_GATEWAY_WRONG_PID: '1' });
+    await expect(open()).rejects.toMatchObject({ phase: 'start', message: 'another Hermes gateway serves the execution profile', failure: { class: 'unknown' } });
   });
 
   it('stops startup on an abort signal and disposes the owned gateway', async () => {

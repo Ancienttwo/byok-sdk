@@ -332,6 +332,24 @@ information in runtime/harness discovery and the claim snapshot. The three
 paths name one shared field in `WIRE_ADDITIONS`. See the
 [Agent message draft lane](spec.md#agent-message-draft-lane).
 
+**Landed additive minor: `task.fail.failure` (#869).** `task.fail`, and so
+`task.fail_sealed`, gains an OPTIONAL strict `failure: { class, resetsAt? }`.
+`class` is a closed `RuntimeFailureClass` value: the vendored OAR
+`FailureClass` (`auth`, `quota`, `rate_limited`, `billing`,
+`model_unavailable`, `input_too_large`, `invalid_request`, `overloaded`,
+`provider`, `runtime_exited`, `limit_reached`, `output_schema`, `unknown`).
+`resetsAt` is an ISO 8601 UTC time, only on `quota`, and only when the runtime
+reported when the limit resets. Adapters classify from structured runtime
+fields only and never parse `reason`, which stays display text. `unknown`
+means the runtime gave no structured evidence; a failure the daemon makes
+itself is `unknown`. The field is gated on the server's new
+`runtime-failure-class` flag, because `task.fail_sealed` is strict: a daemon
+sends it only to a server that advertises the flag. Server flags are
+live-only, so a terminal built while the daemon had no connection carries no
+field. `failure` stays plaintext on `task.fail_sealed`. The reference server
+and the hosted cloud advertise the flag and project the field as
+`TaskResult.failure` and `TerminalResult.failure`.
+
 ## 1. Envelope
 
 Every wire message is a single-line NDJSON envelope:
@@ -469,7 +487,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
 | `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId?` (M5, additive — §5.3) | Runtime raised `needs_approval` |
 | `task.complete` | D→S | **required** | optional | `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` (additive — §2.2) | Runtime reached `turn_end` |
-| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends in error |
+| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `failure?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends in error; `failure` is gated on the server's `runtime-failure-class` flag |
 | `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends `Cancelled` (server- or daemon-initiated) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
 | `agent.message.draft` | D→S | **required** | optional | `agentRef`, `revision`, UTF-8 `offset`, `text` (≤ 16 KiB), `overflow?: true` | Display-only snapshot frames; server-advertised `agent-message-draft` gate |
@@ -1161,7 +1179,9 @@ refreshed hello adds it, and removes it again when the member is lost.
   header's `chainHead` must be on the verified chain (the daemon catches up
   when it is ahead), and its `sender` a current member in the scope policy
   at that head. Else the offer is declined with `sealed_open_failed`, and a
-  steer is dropped.
+  steer is dropped. The usable-scope and policy-floor checks then run again
+  against the caught-up view, with the same codes; a steer that fails them
+  is dropped.
 - **Freshness (owner §50d).** Each accepted header records its `chainHead` as
   the freshness point of its scope epoch. The daemon seals output at the
   newest epoch, at or after the offer's `epoch`, that has a point with no
@@ -1206,11 +1226,15 @@ refreshed hello adds it, and removes it again when the member is lost.
   `daemon_interrupted` stays as it is, and a result-reply failure becomes
   `task.fail` with `reason` `sealed_key_unavailable`. The replay runs before
   the member resumes, and the freshness points live in memory, so the Host
-  never learns the real failure reason. A terminal that the same process
+  never learns the real failure reason. The replacement of a refused terminal
+  (below) waits for the member instead. A terminal that the same process
   still holds for commit after a failed stop seals with the next run's
   member, once that run's start and member resume are over, and only when
   that run has the same tenant, device and member as the run that owned the
-  task; otherwise it is in the closed form.
+  task; otherwise it is in the closed form, and a terminal that already is a
+  closed plaintext form keeps its fields. The owning run's member is the one it
+  bound when the member became ready, so a terminal made after that member
+  retired at shutdown still seals with the next run's same member.
 - A key is fetched on its first miss, so a notice that came before the
   advertisement needs no redelivery.
 
@@ -1367,11 +1391,22 @@ expire, so the cloud refuses either one with `ciphertextRef`
 (`sealed_payload_unsupported`). The device uploads a ciphertext blob first.
 If the device sends the terminal more than one day after the upload, orphan
 GC may have deleted the blob, and the Host then refuses the terminal.
-When the Host refuses a terminal sent by reference for good, because it no
-longer declares `sealed-output-ciphertext-ref` or orphan GC has deleted the
-blob, the daemon settles that terminal once and sends no other terminal, so
-the Host receives none for the task. This is a known limit of this version; a
-later version is to replace the queued terminal with a closed form.
+When the Host refuses a terminal sent by `ciphertextRef` (a `rejected`
+outcome, for example because it no longer declares
+`sealed-output-ciphertext-ref`, or because orphan GC has deleted the blob after
+the device was offline for more than 24 hours), the daemon replaces that
+terminal once and sends the replacement (owner batch §77b). The Host records
+nothing for a refused terminal, so it receives exactly one terminal for the
+task. The replacement is the sealed `task.fail` with `reason`
+`terminal_result_unsealable` when the member that sealed the refused terminal
+is ready in this run. Otherwise it is the closed plaintext form, `task.fail`
+with `reason` `sealed_key_unavailable`. The journal replaces the refused
+terminal in place, keeps its hash as a transition of the task, and ignores a
+late acknowledgement of the refused bytes. A refusal journaled before a restart
+is replaced after the start and the member resume. The replacement is inline, so a refused
+replacement settles once, and a refused inline terminal is not replaced. No
+answer, or a non-2xx answer, of `POST /byok/messages` is not a refusal: the
+daemon sends the same bytes again.
 
 The cloud advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`,
 because it accepts all seven sealed output types. It also advertises
@@ -1402,6 +1437,12 @@ composition supplies an `E2eeMemberStore`. Declaring `e2ee.member` without a
 store fails at construction. `fullCapabilityDeclaration()` leaves it out
 unless `includeE2eeMember` is set.
 
+`e2ee.member.kem-epoch` (#654 E5b-2, owner batch §77a) is declared exactly
+when `e2ee.member` is. It says the Host takes version 2 key packages only,
+keeps a KEM floor per member from `rotate` entries, and serves the paged
+package read with the scope head. A 0.30.1 or older Host declares
+`e2ee.member` without it.
+
 The three writes are device-proof routes (`x-byok-device-proof`). The proof's
 `operation` is the constant in the table, and its `resource` is the route path.
 The tenant and device come from the proven device row. The body may be at most
@@ -1415,6 +1456,7 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
 | `POST /byok/e2ee/key-packages` | proof | `e2ee-scope-key-package.put` | `{ packages }` | `{ stored, skippedDeviceIds }` |
 | `GET /byok/e2ee/chain?afterSeq=&limit=` | device | — | — | `{ entries }` |
 | `GET /byok/e2ee/key-packages?scopeId=&epoch=` | device | — | — | `{ packages }` |
+| `GET /byok/e2ee/key-packages?scopeId=&afterEpoch=` | device | — | — | `{ packages, scopeHeadEpoch }` |
 | `GET /byok/e2ee/pairing-mac` | device | — | — | `{ mac, member, chainHead }` |
 
 - **Registration.** `member` is the device's own member key bundle, so its
@@ -1441,6 +1483,22 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   verifies no signature, so any paired device of the tenant can shred a
   scope on the Host ([security](security.md#deletion-paths)). The Host
   control plane `appendMemberChainEntries` does the same.
+- **Package version and KEM floor.** A put takes version 2 packages only,
+  which carry the signed `recipientKemEpoch`; a version 1 package gets 400
+  like any other bad shape. Reads return stored version 1 packages as they
+  are. A chain entry with `op: 'rotate'` must have exactly the subject
+  `{ memberId, kemPublicJwk, kemEpoch, kemSig }`; any other subject gets
+  400. When the append newly stores a `rotate` entry, the Host raises that
+  member's KEM floor to its `kemEpoch` in the same transaction; a floor never
+  falls, and a replayed entry raises nothing. A package put in which any
+  package has a `recipientKemEpoch` below its recipient's floor gets 409
+  `e2ee_scope_key_package_stale` and stores nothing: the sender reads the
+  chain again and seals again. The shred check runs first, then the floor
+  check, then the `keyId` check. In Postgres a `rotate` and a put to its
+  member take the same member lock, after the scope locks, so a put commits
+  either before the floor rises or not at all. The Host verifies no
+  signature, so any paired device of the tenant can raise a member's floor
+  with a well-shaped `rotate`, as it can shred a scope.
 - **Proof replay.** The proof's `requestId` is single-use per device on the
   three writes, as on the truth put (owner batch §41a A). The Host records
   the `requestId` with its binding (`operation`, `resource`, `bodySha256`,
@@ -1455,13 +1513,28 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   recorded `requestId` with another binding gets 409 `proof_request_conflict`
   and writes nothing. A refused write (any 4xx) records nothing, so the same
   request can succeed later. A Host control-plane write has no proof and
-  records nothing.
+  records nothing. A `requestId` is single-use within the deployment's
+  proof receipt retention (24 hours by default, at least 15 minutes). The
+  verifier refuses every proof a receipt can bind before that retention ends,
+  so maintenance then deletes the receipt. The memory composition keeps
+  every receipt for the life of the process.
 - **Reads.** A device route checks the bearer against the device row, so a
   revoked or superseded device gets 401. The package read returns only the
   packages addressed to the device's registered member; a query names no
   recipient. A query accepts only the names in the table, each once. The
   package read checks its query before the registration, so a bad query gets
   400 also from an unregistered device.
+- **Package reads.** The package read takes `scopeId` and exactly one of
+  `epoch` (a positive safe integer: the package of that epoch, or none) and
+  `afterEpoch` (a nonnegative safe integer, starting at 0). A read with
+  neither or both gets 400. The paged form returns this member's packages
+  with `epoch > afterEpoch`, ascending, at most 16
+  (`E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX`); fewer than 16 means the last page.
+  `scopeHeadEpoch` is the newest epoch of the scope, whoever its packages
+  are for, or `null` when the scope has no epoch, also after a shred. The
+  two parts are read without one snapshot, so the head can be newer than the
+  page; a put of an epoch someone else took gets 409
+  `e2ee_scope_key_conflict`.
 - **Errors.** Every error body is `{ error }`:
 
   | Status | `error` |
@@ -1469,7 +1542,7 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   | 400 | `coordination_input_invalid`, or an unreadable body |
   | 401 | `unauthorized` |
   | 404 | `e2ee_pairing_mac_not_found` |
-  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_scope_shredded`, `e2ee_member_key_conflict`, `e2ee_member_not_registered`, `proof_request_conflict` |
+  | 409 | `e2ee_member_chain_conflict`, `e2ee_scope_key_conflict`, `e2ee_scope_shredded`, `e2ee_scope_key_package_stale`, `e2ee_member_key_conflict`, `e2ee_member_not_registered`, `proof_request_conflict` |
   | 413 | the body is over `maxE2eeRequestBytes` |
   | 500 | `e2ee_member_state_unreadable` |
 
@@ -1517,7 +1590,97 @@ command and not only the string.
   per device, so the recovery is a re-pair, which mints a new device id.
 - The device signs `e2ee-member-key.register`, and
   `e2ee-scope-key-package.put` when it rotates a scope epoch (§2.5, device
-  rules). It appends no chain entry.
+  rules) or re-wraps its packages. It appends only the `rotate` entry of its
+  own KEM rotation (`e2ee-member-chain.append`).
+
+**Device KEM rotation (#654 E2d-5, design §7.5).** The device member's KEM key
+rotates by epoch; its member id does not change. No daemon path starts a
+rotation yet. The steps:
+
+1. The device stores a next KEM key at `kemEpoch + 1` in its member key
+   record, beside the current key. A crash leaves both, and the next
+   rotation resumes with the same next key.
+2. It signs `rotate { memberId, kemPublicJwk, kemEpoch, kemSig }`, walks it
+   on its verified chain first, and appends it. A seq conflict is caught up
+   and tried once more. If the verified chain already names the next key,
+   it appends nothing.
+3. For each scope it may use now (device rules, §2.5), it reads its own
+   package of each epoch (`GET /byok/e2ee/key-packages?scopeId=&epoch=`),
+   four reads at a time, from epoch 1 up to 256 (`KEM_REWRAP_MAX_EPOCHS`).
+   The verified chain holds no scope epochs, so the device cannot prove that
+   no higher epoch holds its package, and every pass reads to the bound: up
+   to 64 batches of 4 reads per scope per pass. The rotation stops, and keeps
+   the old key, when epoch 256 holds a package, or when an epoch the run
+   knows for the scope (one it opened, holds a freshness point for, or found
+   taken) is above 256. It re-wraps to the next key each package that
+   opens with the old key and whose sender is a current member of the scope
+   policy, the rule a fetch applies, with the device as the sender, and puts
+   them. A package from a removed member or another sender, or one that
+   opens with neither key, stays as it is, so it never gains the device's
+   signature. After step 6 the device no longer opens it. Each epoch whose
+   key the run holds (it opened it, or rotated to it) must be found and
+   opened, and each epoch with a freshness point must be found; otherwise
+   the rotation stops before any put of that scope. A package found at a
+   fresh epoch from a sender a fetch refuses does not stop it: that epoch
+   gives the device no key either way. The senders are checked against one
+   verified view; when a catch-up moves the view before the put, the scope
+   starts again, at most three times.
+4. It reads the scope's epochs again, with the same range and stops. Each
+   epoch it re-wrapped or found already wrapped to the next key must open
+   with the next key under its `keyId`, the epochs of step 3 whose key the
+   run holds or that have a freshness point must still be found, and no
+   package from an accepted sender may still open only with the old key.
+   Otherwise the rotation stops and keeps the old key.
+5. Once every scope is done, it catches up and reads back, the same way,
+   every scope it may use at the new head, including one that became usable
+   or was created during the rotation. Each epoch of step 4 must still open
+   with the next key under its `keyId`. Each epoch whose key the run holds
+   at the new head must be found and open with the next key, and each epoch
+   with a freshness point must be found, also when the run opened it or
+   gained the point during the rotation; a missing one stops the rotation
+   with `key_package_missing`. No package from an accepted sender at any
+   epoch may open only with the old key, such as a new epoch that a client
+   which has not seen the `rotate` wrapped to the old key. Otherwise the
+   rotation stops and keeps the old key. Each failed read-back logs the
+   scope id and the epoch.
+6. Only then does it drop the old private key from the record.
+
+A rotation reads every usable scope three times (steps 3 to 5), each up to
+256 reads in batches of 4. A scope that starts step 3 again after the chain
+moved is read once more each time, so the worst case is five passes (1,280
+reads) for that scope. Every Host request of the rotation, the reads,
+the `rotate` append and the puts, is cut off after
+`MEMBER_REQUEST_TIMEOUT_MS`; a cut-off request throws and leaves the
+rotation to resume.
+
+Known limitation: step 5 is an interim measure until the recipient
+`kemEpoch` lands (the E5b-2 prerequisite). A package wrapped to the old key
+that lands late (a held-back or retried put, a put that timed out at the
+device and still landed, or a new epoch from a client that has not seen the
+`rotate`) replaces or adds a row. Step 5 catches one that lands before its
+read of that scope, but such a put can still land between that read and
+step 6, and the device then loses that epoch. The complete fix carries the
+recipient `kemEpoch` in the signed package fields and in the Host row, and
+the Host refuses a put older than the stored one. It is a prerequisite
+before a production path starts a rotation (E5b-2). Step 5 also does not
+read a scope that is created after its catch-up; that scope is in the same
+window.
+
+Known limitation: the device reads no epoch above 256. When all its
+packages of a scope are above epoch 256 and none is at 256 (for example a
+device added to the scope after epoch 256), steps 3 to 5 find nothing and
+the device loses those epochs at step 6. The recipient `kemEpoch` does not
+close this; it needs a Host read of the scope's newest epoch, which is
+deferred. A scope that the device may not use during the rotation (for
+example one shared with another device at that time) is not read or
+re-wrapped, so its packages wrapped to the old key do not open if the scope
+becomes usable again.
+
+Until step 6, a package opens with either key, so a client that already
+wraps to the new key loses nothing. Each start checks that the record holds
+the KEM key the verified chain names for the device: the current key, or the
+next key of a rotation whose `rotate` entry is on the chain. Otherwise E2EE
+stays off for that run.
 
 ### 2.7 E2EE key package notice (#654 E2c-3)
 
@@ -3305,7 +3468,7 @@ does not add a second transport semantics.
 
 ### Durable terminal delivery and execution restart
 
-With hostedJournal enabled, canonical terminal bytes and their hash projection
+Every daemon journals (#924). Canonical terminal bytes and their hash projection
 are committed before entering ConnectionManager's existing authenticated
 `POST /byok/messages` queue. The accepted batch disposition is awaited through
 local `confirmed` persistence. A lost HTTP response or failed confirmation
@@ -3372,7 +3535,7 @@ Deploy the supporting server before using these recovery reports. Migration
 0021 remains required for custom claims; the recovery object lives in existing
 immutable terminal receipts and requires no additional database migration.
 
-For hosted journal replay, a selected but uncommitted terminal blocks admission
+For journal replay, a selected but uncommitted terminal blocks admission
 even when SQLite rolled the task row back to `received`. SDK-generated oversize
 failures project the admitted execution identity, including automatically
 selected custom adapters, through the same identity projection as other SDK

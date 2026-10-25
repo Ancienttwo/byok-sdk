@@ -108,6 +108,13 @@ export const CLOUD_CAPABILITIES = {
    * construction.
    */
   e2eeMember: 'e2ee.member',
+  /**
+   * The member KEM epoch rules of #654 E5b-2 (owner batch §77a): v2 key
+   * packages only, the per-member KEM floor from `rotate` entries, and the
+   * paged own-package read with the scope head. Declared exactly when
+   * `e2ee.member` is.
+   */
+  e2eeMemberKemEpoch: 'e2ee.member.kem-epoch',
 } as const;
 
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];
@@ -163,7 +170,9 @@ export function fullCapabilityDeclaration(
       if (capability === CLOUD_CAPABILITIES.hostMcpTaskContext) {
         return options.includeHostMcpTaskContext === true;
       }
-      if (capability === CLOUD_CAPABILITIES.e2eeMember) return options.includeE2eeMember === true;
+      if (capability === CLOUD_CAPABILITIES.e2eeMember || capability === CLOUD_CAPABILITIES.e2eeMemberKemEpoch) {
+        return options.includeE2eeMember === true;
+      }
       return true;
     }),
   };

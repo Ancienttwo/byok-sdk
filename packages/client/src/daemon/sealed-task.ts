@@ -31,10 +31,12 @@ import {
   type MessageType,
   type SealedMessageType,
   type SealedSplitEntry,
+  type TaskFailure,
   type TaskSealing,
 } from '@byok-sdk/protocol';
 import { BlobHttpError } from './blob-http-error';
 import { routineTemplateBinding, routineTemplateExpired, type RoutineRef } from './sealed-routine-template';
+import { DAEMON_TASK_FAILURE, taskFailureField } from './task-failure';
 
 type JsonObject = { [key: string]: unknown };
 
@@ -185,9 +187,6 @@ export class SealedTasks {
         return { ok: false, code: 'sealing_policy_mismatch' };
       }
       payload = { ...plain, ...opened.plaintext };
-      // The open can move the chain view forward; the floor holds against the view the task runs under.
-      const moved = await this.#belowPolicy(sealing);
-      if (moved !== undefined) return { ok: false, code: moved };
     }
     if (sealing.categories.includes('task-output') && await this.#sealingKey(sealing) === undefined) {
       return { ok: false, code: 'sealed_key_unavailable' };
@@ -301,7 +300,7 @@ export class SealedTasks {
       // forever. Settle it with a small sealed failure instead, and show the
       // local observer that failure, not the terminal it replaced.
       console.error(`[byok/client] ${envelope.type} for sealed task ${taskId} replaced by a sealed failure: ${error instanceof Error ? error.message : String(error)}`);
-      const failure = { reason: 'terminal_result_unsealable', retryable: false, ...pick(payload, UNSEALABLE_FAIL_FIELDS) };
+      const failure = this.#unsealableFailure(payload);
       sealed = await this.#seal(taskId, task, 'task.fail', failure);
       plain = createEnvelope('task.fail', failure as never, { taskId });
     }
@@ -387,6 +386,27 @@ export class SealedTasks {
     }
   }
 
+  /**
+   * A replacement failure is the daemon's own, so it never keeps the runtime's
+   * class. It carries `unknown` when the current server advertises
+   * runtime-failure-class; between sessions no flag is known, so it carries none.
+   */
+  #daemonFailure(): { failure?: TaskFailure } {
+    return taskFailureField(DAEMON_TASK_FAILURE, this.options.serverCapabilities() ?? []);
+  }
+
+  /** The failure of a terminal that cannot be sealed as it is. */
+  #unsealableFailure(payload: JsonObject): JsonObject {
+    return { reason: 'terminal_result_unsealable', retryable: false, ...this.#daemonFailure(), ...pick(payload, UNSEALABLE_FAIL_FIELDS) };
+  }
+
+  /** The failure that replaces a refused terminal sent by `ciphertextRef` (§77b); `undefined` for any other envelope. */
+  refusedReplacement(refused: Envelope): Envelope | undefined {
+    const { sealed, ...kept } = refused.payload as JsonObject & { sealed?: { ciphertextRef?: unknown } };
+    if (!isSealedMessageType(refused.type) || !TERMINAL_TYPES.has(SEALED_SPLIT_TABLE[refused.type].plainType) || sealed?.ciphertextRef === undefined) return undefined;
+    return createEnvelope('task.fail', this.#unsealableFailure(kept) as never, { taskId: refused.task_id! });
+  }
+
   /** The closed plaintext form of a terminal that has no sealing key (decision 12d). */
   unsealable(envelope: Envelope): Envelope | undefined {
     const taskId = envelope.task_id!;
@@ -395,7 +415,7 @@ export class SealedTasks {
     switch (envelope.type) {
       case 'task.complete':
       case 'task.fail':
-        return createEnvelope('task.fail', { reason: code, retryable: false, ...pick(payload, UNSEALABLE_FAIL_FIELDS) } as never, { taskId });
+        return createEnvelope('task.fail', { reason: code, retryable: false, ...this.#daemonFailure(), ...pick(payload, UNSEALABLE_FAIL_FIELDS) } as never, { taskId });
       case 'task.cancelled':
         return createEnvelope('task.cancelled', omit(payload, ['reason']) as never, { taskId });
       case 'task.decline':
@@ -448,6 +468,9 @@ export class SealedTasks {
     if (!opened.ok) return { ok: false, code: opened.reason };
     // A stale or foreign sender view fails closed (E2d-e4).
     if (await this.#keyring(() => this.options.keyring.acceptHeader(opened.header)) !== true) return { ok: false, code: 'sealed_open_failed' };
+    // The sender-view check can move the chain view forward; the floor holds against the view the task runs under.
+    const moved = await this.#belowPolicy(sealing);
+    if (moved !== undefined) return { ok: false, code: moved };
     return { ok: true, plaintext: opened.plaintext };
   }
 }

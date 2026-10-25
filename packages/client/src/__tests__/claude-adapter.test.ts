@@ -425,6 +425,39 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(session.sessionRef).toBe('fake-claude-session-1');
   });
 
+  it('classifies a failed turn from the frames, per turn, with the reason unchanged (#869)', async () => {
+    const resetsAt = 1_792_832_400;
+    const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_FAILURES: JSON.stringify([
+      { rateLimit: { status: 'rejected', resetsAt, rateLimitType: 'five_hour' }, error: 'rate_limit', status: 429 },
+      { error: 'model_not_found', status: 404 },
+    ]) });
+    const session = await startAdapter(fakeClaudeAdapter(), baseTask, ctx);
+    openSessions.push(session);
+    const failedTurn = async () => takeTurn(session).then(() => undefined, (error: unknown) => error);
+
+    const first = await failedTurn();
+    expect(first).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(first).toMatchObject({ message: 'claude reported terminal task failure', failure: { class: 'quota', resetsAt: new Date(resetsAt * 1000).toISOString() } });
+
+    await session.followUp({ instruction: 'again' });
+    const second = await failedTurn();
+    expect((second as RuntimeExecutionFailure).failure).toEqual({ class: 'model_unavailable' });
+  });
+
+  it('marks a process exit before the result frame runtime_exited (#869)', async () => {
+    const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_FAILURES: JSON.stringify([{ exit: true }]) });
+    const session = await startAdapter(fakeClaudeAdapter(), baseTask, ctx);
+    openSessions.push(session);
+    await expect(takeTurn(session)).rejects.toMatchObject({ category: 'infrastructure', failure: { class: 'runtime_exited' } });
+  });
+
+  it('marks claude exiting before system/init on a --resume of a missing session runtime_exited (#869)', async () => {
+    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
+    await expect(startAdapter(fakeClaudeAdapter(), task, await makeCtx())).rejects.toMatchObject({
+      phase: 'start', category: 'infrastructure', message: expect.stringMatching(/No conversation found/), failure: { class: 'runtime_exited' },
+    });
+  });
+
   it('followUp() fails closed on a blob-ref instruction, same as start()', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
@@ -692,6 +725,131 @@ describe('ClaudeAdapter agentUserContext', () => {
     expect((failure as Error).message).not.toContain(path.basename(ctx.workspaceDir));
     expect(spawned).toEqual([]);
     expect(filesAtRelease).toEqual([]);
+  });
+});
+
+describe('ClaudeAdapter agentSessionPersistence', () => {
+  const openSessions: Session[] = [];
+  afterEach(async () => { await Promise.all(openSessions.splice(0).map((s) => s.close())); });
+
+  function recordingAdapter(options: Pick<ConstructorParameters<typeof ClaudeAdapter>[0] & object, 'agentSessionPersistence' | 'agentUserContext'> = {}): { adapter: ClaudeAdapter; spawned: string[][] } {
+    const spawned: string[][] = [];
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      ...options,
+      spawnFn: ((command: string, args: readonly string[] = [], spawnOptions: object = {}) => {
+        spawned.push([...args]);
+        return realSpawn(command, [...args], spawnOptions);
+      }) as unknown as SpawnFn,
+    });
+    return { adapter, spawned };
+  }
+
+  /** The fixture saves each turn under `<configDir>/projects/` unless argv turns persistence off. */
+  async function persistingAgentCtx(extraEnv: NodeJS.ProcessEnv = {}): Promise<PreparedOperationResources & { configDir: string }> {
+    const ctx = await makeCtx();
+    const configDir = path.join(ctx.workspaceDir, '..', `${path.basename(ctx.workspaceDir)}-config`);
+    return {
+      ...ctx,
+      env: { ...process.env, CLAUDE_CONFIG_DIR: configDir, FAKE_CLAUDE_PERSIST_SESSIONS: '1', ...extraEnv },
+      agentHome: ctx.workspaceDir,
+      configDir,
+    };
+  }
+
+  async function projectFiles(configDir: string): Promise<string[]> {
+    try {
+      return (await fs.readdir(path.join(configDir, 'projects'), { recursive: true, withFileTypes: true }))
+        .filter(entry => entry.isFile()).map(entry => entry.name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+  }
+
+  async function runTwoTurns(session: Session): Promise<void> {
+    await takeTurn(session);
+    await session.followUp({ instruction: 'say bye' });
+    await takeTurn(session);
+    await session.close();
+  }
+
+  it('rejects an unknown option value', () => {
+    expect(() => new ClaudeAdapter({ agentSessionPersistence: 'off' as never })).toThrow(TypeError);
+  });
+
+  it('saves the Agent session by default, with no persistence flag', async () => {
+    const { adapter, spawned } = recordingAdapter();
+    const ctx = await persistingAgentCtx();
+    await runTwoTurns(await startAdapter(adapter, baseTask, ctx));
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]).not.toContain('--no-session-persistence');
+    expect(await projectFiles(ctx.configDir)).toEqual(['fake-claude-session-1.jsonl']);
+  });
+
+  it('starts an Agent task with --no-session-persistence on its one process, and a follow-up saves nothing either', async () => {
+    const { adapter, spawned } = recordingAdapter({ agentSessionPersistence: 'disabled' });
+    const ctx = await persistingAgentCtx();
+    await runTwoTurns(await startAdapter(adapter, baseTask, ctx));
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]).toContain('--no-session-persistence');
+    expect(await projectFiles(ctx.configDir)).toEqual([]);
+  });
+
+  it('applies both options together', async () => {
+    const { adapter, spawned } = recordingAdapter({ agentSessionPersistence: 'disabled', agentUserContext: 'excluded' });
+    const ctx = await persistingAgentCtx();
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+    const args = spawned[0] ?? [];
+    expect(args).toEqual(expect.arrayContaining(['--no-session-persistence', '--strict-mcp-config', '--settings']));
+    const settings = JSON.parse(await fs.readFile(args[args.indexOf('--settings') + 1] ?? '', 'utf8')) as { env: unknown };
+    expect(settings.env).toEqual({ CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' });
+    openSessions.pop();
+    await runTwoTurns(session);
+    expect(await projectFiles(ctx.configDir)).toEqual([]);
+  });
+
+  it('still resumes an Agent session by default', async () => {
+    const { adapter, spawned } = recordingAdapter();
+    const ctx = await persistingAgentCtx({ FAKE_CLAUDE_SESSION_ID: 'agent-session-1' });
+    const session = await startAdapter(adapter, { ...baseTask, sessionRef: 'agent-session-1' }, ctx);
+    openSessions.push(session);
+    expect(session.sessionRef).toBe('agent-session-1');
+    expect(spawned[0]).toEqual(expect.arrayContaining(['--resume', 'agent-session-1']));
+  });
+
+  it('leaves an ordinary task unchanged, including its resume', async () => {
+    const { adapter, spawned } = recordingAdapter({ agentSessionPersistence: 'disabled' });
+    const session = await startAdapter(adapter, { ...baseTask, sessionRef: 'resume-me-123' }, await makeCtx({ ...process.env, FAKE_CLAUDE_SESSION_ID: 'resume-me-123' }));
+    openSessions.push(session);
+    expect(session.sessionRef).toBe('resume-me-123');
+    expect(spawned[0]).toEqual(expect.arrayContaining(['--resume', 'resume-me-123']));
+    expect(spawned[0]).not.toContain('--no-session-persistence');
+  });
+
+  it.each([
+    ['an Agent writer', async (ctx: PreparedOperationResources) => ctx],
+    ['a memory reader', async (ctx: PreparedOperationResources) => {
+      const runDir = path.join(ctx.workspaceDir, '.byok', 'runs', 't1');
+      await fs.mkdir(runDir, { recursive: true });
+      return { ...ctx, workspaceDir: runDir, agentHome: undefined, reader: { canonicalHome: ctx.workspaceDir } };
+    }],
+  ])('refuses to resume %s before spawning or writing any file', async (_label, shape) => {
+    const { adapter, spawned } = recordingAdapter({ agentSessionPersistence: 'disabled', agentUserContext: 'excluded' });
+    const ctx = await persistingAgentCtx({ FAKE_CLAUDE_SESSION_ID: 'agent-session-1' });
+    ctx.mcpServers = { salesko: { command: process.execPath, args: ['/opt/salesko/fake-mcp.mjs'] } };
+    ctx.mcpToolsetTools = observationOf({ salesko: ['find_leads'] });
+    const owned = await testExecutionScratch();
+    let filesAtRelease: string[] | undefined;
+    const scratch = { ...owned, release: async () => { filesAtRelease ??= await fs.readdir(owned.sdkDir); await owned.release(); } };
+    const failure = await startAdapter(adapter, { ...baseTask, sessionRef: 'agent-session-1' }, { ...await shape(ctx), scratch }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
+    expect((failure as Error).message).toBe('claude Agent session persistence is disabled, so the task cannot resume a session');
+    expect(spawned).toEqual([]);
+    expect(filesAtRelease).toEqual([]);
+    expect(await projectFiles(ctx.configDir)).toEqual([]);
   });
 });
 

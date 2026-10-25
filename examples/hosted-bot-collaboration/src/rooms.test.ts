@@ -4,7 +4,7 @@ import type { FrozenInput } from '@byok-sdk/example-host-execution-core';
 import { ROOM_GRACE_MS, roomVectors, seedCollaboration, seedRoom, SYNC_OPTIONS, VECTOR_NOW, type RoomSubject,
   type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
+import { vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 
 // #793 S6: the K8 room step in the H sync, with the seat facts from the intent rows.
@@ -24,7 +24,7 @@ async function hostedRooms(): Promise<RoomSubject> {
   [storedKey(scope), storedKey(turnId)])).rows[0];
   return {
     scope,
-    commit: request => store().commit(scope, request, vectorPorts),
+    commit: request => store().commit(scope, request, vectorClock),
     stored: () => store().dump(scope),
     state: () => store().read(scope),
     change: edit => store().seed(scope, edit),

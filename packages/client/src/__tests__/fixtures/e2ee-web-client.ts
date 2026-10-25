@@ -21,7 +21,7 @@ import {
   type MemberChainOp,
   type MemberKeyBundleV1,
   type MemberKeys,
-  type ScopeKeyPackageV1,
+  type ScopeKeyPackageV2,
   type SealedCategory,
 } from '@byok-sdk/core/sealed-payload';
 import type { E2eeTestHost } from './e2ee-test-host';
@@ -48,6 +48,12 @@ export class E2eeWebClient {
   /** The base32 `pv` the device is given after the pairing code. */
   get verificationSecret(): string {
     return encodePairingVerificationSecret(this.pv);
+  }
+
+  /** Take the host chain's last entry as the head, after another member appended. */
+  async follow(): Promise<void> {
+    const { sig: _sig, ...unsigned } = this.host.chain.at(-1) as MemberChainEntryV1;
+    this.head = { seq: unsigned.seq, hash: await memberChainEntryHash(unsigned) };
   }
 
   /** Sign the next chain entry and append it. */
@@ -98,10 +104,10 @@ export class E2eeWebClient {
   }
 
   /** One key package of `scopeKey`, from this client to `recipient`. */
-  sealPackage(scopeId: string, recipient: MemberKeyBundleV1, scopeKey: Uint8Array, epoch = 1): Promise<ScopeKeyPackageV1> {
+  sealPackage(scopeId: string, recipient: MemberKeyBundleV1, scopeKey: Uint8Array, epoch = 1): Promise<ScopeKeyPackageV2> {
     return sealScopeKeyPackage({
       scopeKey, tenantId: this.tenantId, scopeId, epoch,
-      recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk },
+      recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk, kemEpoch: recipient.kemEpoch },
       sender: { signingPublicJwk: this.keys.signing.publicJwk, signingPrivateKey: this.keys.signing.privateKey },
     });
   }
@@ -112,7 +118,7 @@ export class E2eeWebClient {
     const opened = await openScopeKeyPackage({
       package: pkg,
       expected: { tenantId: this.tenantId, scopeId, epoch },
-      recipient: { memberId: this.member.memberId, kemPublicJwk: this.keys.kem.publicJwk, kemPrivateKey: this.keys.kem.privateKey },
+      recipient: { memberId: this.member.memberId, kemPublicJwk: this.keys.kem.publicJwk, kemPrivateKey: this.keys.kem.privateKey, kemEpoch: this.keys.kem.epoch },
       senderSigningPublicJwk: sender.signingPublicJwk,
     });
     if (!opened.ok) throw new Error(`the package of epoch ${epoch} does not open: ${opened.reason}`);

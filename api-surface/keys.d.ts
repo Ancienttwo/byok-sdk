@@ -789,7 +789,7 @@ export declare function classifyPiCatalogModel(model: Readonly<Record<string, un
 // ==== @byok-sdk/keys dist/pi-model-catalog.generated.d.ts ====
 import type { PiModelCatalogTable } from './pi-model-catalog';
 /** The pi-ai version this table and the thinking levels were generated from. */
-export declare const PI_MODEL_CATALOG_PI_AI_VERSION = "1.3.0";
+export declare const PI_MODEL_CATALOG_PI_AI_VERSION = "1.4.0";
 /** Pi's `MODEL_THINKING_LEVELS`, in Pi's order. */
 export declare const PI_THINKING_LEVELS: readonly ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 /** Every chat model of each vendor in `MODEL_PROVIDER_VENDORS`, for the Pi apis a profile projects. */

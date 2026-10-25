@@ -235,9 +235,9 @@ and `@byok-sdk/keys`. Before 1.0, PATCH is limited to corrections with no new
 public behavior, API, persistence, or security authority; MINOR covers additive
 public API/features, new forward migrations/authority, and any pre-1.0
 breaking cut. A version bump does not authorize publish. The current
-aligned release is `0.30.0`; publication requires separate release
+aligned release is `0.30.1`; publication requires separate release
 authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current release, `0.30.0`, proven from
+`@byok-sdk/core` edge must be the exact current release, `0.30.1`, proven from
 an isolated standard npm install rather than the workspace graph.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -248,9 +248,16 @@ in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
-0.30.0 is a MINOR under the general policy above, with no exception. It adds gated wire types
-and public API, and it has pre-1.0 breaking cuts in protocol, server, cloud and
-client. See the [0.30.0 release notes](releases/v0.30.0.md).
+0.30.1 uses a one-release exception. The owner's 2026-10-24 instruction
+selected PATCH (0.30.x instead of 0.31.0) despite the new public API, the
+gated wire additions, Postgres migration 0028 and the pre-1.0 breaking changes
+in cloud, client and cloud-do. This explicit exception does not change the
+general policy above or waive validation, publication authorization, or
+registry readback. See the [0.30.1 release notes](releases/v0.30.1.md).
+
+0.30.0 was a MINOR under the general policy above, with no exception. It added
+gated wire types and public API, and it had pre-1.0 breaking cuts in protocol,
+server, cloud and client. See the [0.30.0 release notes](releases/v0.30.0.md).
 
 0.29.0 was a MINOR under the general policy above, with no exception. It added
 public API and behavior and had pre-1.0 breaking cuts in client and keys. See
@@ -271,19 +278,20 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-Public registry metadata read on 2026-10-24 at 07:39 UTC reports `latest`
-0.30.0 for all nine packages. The keys 0.30.0 package depends on exactly
-`@byok-sdk/core` 0.30.0. The same read lists 0.29.0, 0.28.3, 0.28.2, 0.28.1 /
-keys 0.13.1 and 0.28.0 / keys 0.13.0 as the earlier published versions. The
-registry publication times are 2026-10-20 (UTC) for 0.28.0 / keys 0.13.0,
-2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22 (UTC) for 0.28.2 and
-0.28.3, 2026-10-23 (UTC) for 0.29.0, and 2026-10-24 (UTC) for 0.30.0. The tag
-`v0.30.0` and its GitHub Release point to `6b779cff`, the merge of #837. The
-tag `v0.29.0` points to `df0c91d2`, the merge of #773. The 0.28.0 to 0.30.0
-source-candidate notes are preparation history. They are not publication
-records. This read confirms registry availability. It does not establish
-isolated-install qualification. A later release needs the accepted
-final-commit CI artifact and separate owner authorization.
+Public registry metadata read on 2026-10-24 at 19:19 UTC reports `latest`
+0.30.1 for all nine packages. The keys 0.30.1 package depends on exactly
+`@byok-sdk/core` 0.30.1. The same read lists 0.30.0, 0.29.0, 0.28.3, 0.28.2,
+0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0 as the earlier published
+versions. The registry publication times are 2026-10-20 (UTC) for 0.28.0 /
+keys 0.13.0, 2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22 (UTC) for
+0.28.2 and 0.28.3, 2026-10-23 (UTC) for 0.29.0, and 2026-10-24 (UTC) for
+0.30.0 and 0.30.1. The tag `v0.30.1` and its GitHub Release point to
+`142acbe2`, the merge of #916. The tag `v0.30.0` points to `6b779cff`, the
+merge of #837. The 0.28.0 to 0.30.1 source-candidate notes are preparation
+history. They are not publication records. This read confirms registry
+availability. It does not establish isolated-install qualification. A later
+release needs the accepted final-commit CI artifact and separate owner
+authorization.
 
 0.27.0 / keys 0.12.0 was published on `latest` from `v0.27.0` (`cd977261`). It
 was `latest` until 0.28.0.
@@ -1342,6 +1350,33 @@ TaskRunner projects the typed retry disposition onto the existing
 event variants do not change. Interruption/close evidence is a separate
 teardown lifecycle and cannot rewrite an already established semantic result.
 
+A `RuntimeExecutionFailure` also carries `failure`, a closed runtime failure
+class with an optional quota `resetsAt` (#869). An adapter sets it from
+structured runtime fields only, never from prose; without one the class is
+`unknown`. A class the vendored OAR derives from error text is marked, and the
+adapter sends it as `unknown`. TaskRunner copies it to `task.fail.failure`
+when the server advertises `runtime-failure-class`, and gives a failure it
+makes itself `unknown`. The class never changes `retry`.
+
+| Runtime | Evidence |
+|---|---|
+| Claude | the turn's last `assistant.error`; a `rate_limit` with a `rejected` `rate_limit_event` is `quota` with its `resetsAt`, otherwise `rate_limited`; else `result.api_error_status` |
+| Codex | `turn.error.codexErrorInfo`, through the vendored OAR table; `unauthorized` stays `unknown`, and an `other` class OAR takes from Anthropic's error wording is sent as `unknown` |
+| Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
+| Pi, Hermes | no structured field: `unknown` |
+
+Claude, Codex, Grok, Pi (the rpc, prepared and durable lanes) and Hermes report a
+runtime process that ends on its own before its terminal, during start or a turn,
+as `runtime_exited`; an exit the SDK or the vendored session asked for is not one.
+Pi's durable lane recovers a worker that ends on its own during a run (within its
+respawn limit). When that recovery is refused, the worker ends on its own while
+the daemon awaits its reply to a tool or shell acknowledgement, or a respawned
+worker ends on its own before its start receipt, the run fails as
+`runtime_exited`; a reported worker
+failure, a refused or changed start receipt and a protocol violation are `unknown`.
+Its start failures are typed and not retryable: a worker that ends on its own
+before its start receipt is `runtime_exited`, any other is `unknown`.
+
 ### Terminal inference usage observation
 
 The three terminal messages may carry one bounded `TerminalInferenceUsage`
@@ -1445,10 +1480,10 @@ remain the only device protocol.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. The SDK pins the official unmodified
-`@earendil-works/pi-coding-agent@1.3.0` plus chord, pi-agent-core, pi-ai and
-pi-durable to exactly 1.3.0 (upstream commit
-`71023aec1546d6d677a65669c5665c0927ce0dd0`, closureDigest
-`7950a1f4a0e34241c861ca5d9ba566ad3255ed493b8b5c17c39f32587962bede`). pi-codemode, pi-mcp,
+`@earendil-works/pi-coding-agent@1.4.0` plus chord, pi-agent-core, pi-ai and
+pi-durable to exactly 1.4.0 (upstream commit
+`4a080252f06caf63a525d7873c5d94d3c23887e0`, closureDigest
+`79c414be071768df15f0a107595564b11c67d904c601e7b2ccf1495fc3053fcc`). pi-codemode, pi-mcp,
 pi-telemetry and pi-tui reach an install only through the caret ranges of the
 coding agent and pi-ai, so npm installs the newest compatible release of each.
 The SDK reads their installed version and does not gate it. Fork aliases and dual runtimes are
@@ -1479,8 +1514,8 @@ single-file product (`sdkHelperHost`). A client pin that does not name the
 recorded release is a refusal. The SDK does not attest the runtime executable at
 launch (ADR-037).
 
-Official coding-agent 1.3.0, like 1.0.4, ships no npm shrinkwrap. The npm
-physical root count has not been re-measured for 1.3.0. The local Bun install
+Official coding-agent 1.4.0, like 1.0.4, ships no npm shrinkwrap. The npm
+physical root count has not been re-measured for 1.4.0. The local Bun install
 has eleven resolved physical roots across nine official package names.
 The release check verifies all direct instances; no singleton guarantee is claimed.
 The scripted workflow probe covers the vendored arbiter's built-in
@@ -2708,6 +2743,15 @@ cannot erase prior committed counts. Observers receive the same report.
 An eleventh step sweeps the ephemeral Agent message draft snapshots with
 `sweepExpired(now)`. This sweep is global. Its success report has no row or
 byte counts because that port returns no counts.
+A twelfth step, `proofReceipts`, deletes the receipts of used device-proof
+request ids recorded more than `proofReceiptRetentionMs` before `now`. The
+deployment sets that value once in `ByokCloudOptions.proofReceiptRetention`
+(default 24h); it is not part of the per-tenant policy. Construction refuses a
+value below 15 minutes: a receipt recorded at R binds a proof issued no later
+than R + 5 min of clock skew, and the verifier refuses that proof after
+R + 10 min. Within the retention a `requestId` is single-use. Without an
+authority the step reports `not-configured`; the reference server wires the
+SQLite store and leaves the memory composition unpruned.
 
 The reference server always schedules one non-overlapping pass every five
 minutes with ±20% jitter, defaults to 500 rows/objects per step, and exposes
@@ -2737,7 +2781,7 @@ retention and cloud-do alarms retain their own ownership boundaries.
 
 ## Durable execution recovery
 
-For a daemon configured with hostedJournal, the existing tenant-scoped taskId is an immutable execution identity reserved by cloud dispatch. Omitted IDs are minted by cloud; explicit host IDs are idempotency inputs, never permission to reopen or retarget an execution. Delivery retirement survives mailbox retention. Every lifecycle message is bound to the authenticated tenant, exact offered device and, for Agent executions, the exact AgentRef. Retry is an explicit new execution; daemon restart never reruns committed runtime side effects.
+Every daemon journals its tasks durably (#924). The existing tenant-scoped taskId is an immutable execution identity reserved by cloud dispatch. Omitted IDs are minted by cloud; explicit host IDs are idempotency inputs, never permission to reopen or retarget an execution. Delivery retirement survives mailbox retention. Every lifecycle message is bound to the authenticated tenant, exact offered device and, for Agent executions, the exact AgentRef. Retry is an explicit new execution; daemon restart never reruns committed runtime side effects.
 
 On the durable Pi lane, checkpointed continuation is permitted only within one execution while the daemon still holds that execution's home lease (for example a crash of the `byok-pi-durable` child). It never survives a daemon restart as the same execution: the existing `daemon_interrupted` terminal rule applies, and any continuation is an explicit new Host execution with a new taskId. After a terminal that includes `daemon_interrupted`, the next execution MUST NOT resume leftover pending, running, or queued work from prior replica storage: use a fresh per-execution storage file, adjudicate leftovers before opening it, and discard unknown submissions before any `submit` or `resume`. Opening a replica whose last execution is terminal in the journal MUST NOT start the scheduler before the replica is reset. The durable submission `requestId` equals the execution taskId. Tool replay is off by default. Only tools on a frozen read-only allowlist may declare `replay: "safe"`; shell and every tool with write or external effects may not. Two layers: (1) the harness never auto-reruns a committed non-replayable tool call; (2) any model re-issue after an `interrupted` tool result is model behavior and is not covered by this daemon-restart promise. For slice 1, if the child crashes with an in-flight non-replay-safe tool, the execution ends in `task.fail` without `resume`. Slice 1 also sets harness `retry.maxRetries: 0` and `compaction.enabled: false`, which disables normal auto-retry but does not disable checkpoint model-request resends. Owner permits those resends only within the same execution and current lease, with no in-flight tool; usage is reported as ordinary observed usage, including any reported spend of the interrupted attempt, without a prepared charge-once guarantee. The daemon records a durable respawn-intent before relaunch, retains the execution lease through confirmed child disposal, and permits at most two child respawns in slice 1. Only the same taskId and leaseId with no in-flight tool may resume; unknown replica submissions are rejected before scheduling. A daemon restart during respawn still resolves to daemon_interrupted. Retrying produces no intermediate terminal error followed by success; exhausted recovery produces one terminal failure.
 
@@ -2914,7 +2958,9 @@ Cloud `readTaskResult` and the embedded `TaskResult` (`tasks.get().result`,
 `handle.result()`) copy the code verbatim (#496). If the code is absent, these
 projections omit it. Hosts classify busy through this code on the cloud result,
 the embedded `TaskResult` or the canonical `tasks.deviceTerminal` envelope.
-Hosts never parse `reason` for classification. The `task.decline.code` field
+Hosts never parse `reason` for classification. A failed task's runtime
+failure class is copied the same way, as `TerminalResult.failure` and
+`TaskResult.failure` (#869). The `task.decline.code` field
 landed as an additive optional field on wire v2 and is carried unchanged on
 wire v3 (K7 moved `PROTOCOL_VERSION` to 3).
 Host cancellation alone returns no device terminal.
@@ -3048,7 +3094,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.3.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.70.0 source at `packages/client/vendor/oar/44d7d61/`, from upstream commit `44d7d61c558eef8ac3e61ecc54a8d4962eacadbd`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.4.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.71.0 source at `packages/client/vendor/oar/c88a514/`, from upstream commit `c88a514458b3d80f18d32f29863f2b8fea5b1c96`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 
@@ -3063,6 +3109,8 @@ Pi 1.1.0 ruling (2026-10-09, requested by the owner: 「我要升1.1」): all ni
 Pi 1.2.0 ruling (2026-10-13, requested by the owner: 「基本上按上游的来，我们可以少造轮子就不要自己维护，可重构尽量重构」/「你选继续吧」): all nine official packages are pinned at exactly 1.2.0 (upstream commit `06a466935536f8c9bcacb2d5efc0fc021be1bdff`, closureDigest `99b01e3c2e80412e1a09afcd5289d1ed0297bfbfed37ef59dadf30783baab0d1`). The 1.2.0 breaking changes that touch the SDK: pi-durable `ToolExecutionResult.content` is renamed `output` (cloud-do adapted; no public API change); `ToolTaskInput` and `ToolTaskResult` become tagged unions (test fixtures only); a Storage error now fails the whole Session (both consumers already fail closed, and cloud-do now drops a failed Session and reopens it from storage, so the interrupted run settles as `interrupted / CLOUD_EXECUTION_INTERRUPTED` and later submits run; the failed model turn is not resent); a bash or powershell nonzero exit returns an error result; `before_agent_start` fires for `triggerTurn` runs (the vendored pi-subagents watchdog is unaffected beyond a state reset); display-only write submissions are not used by the SDK. Known open item: a storage failure inside cloud-do `open()` still requires an isolate restart (existing contract at `packages/cloud-do/src/agent-do.ts:146`). The closureDigest change makes a preparation compiled for 1.1.0 decline with `preparation_runtime_identity_mismatch`; prepare it again.
 
 Pi 1.3.0 ruling (2026-10-18, requested by the owner: 「查一下OAR最新的版本是否支持pi 1.3，如果是，则我们一起升级依赖」): OAR 0.67.0 pins Pi 1.3.0, so all nine official packages are pinned at exactly 1.3.0 (upstream commit `71023aec1546d6d677a65669c5665c0927ce0dd0`, closureDigest `7950a1f4a0e34241c861ca5d9ba566ad3255ed493b8b5c17c39f32587962bede`). Upstream now pins its internal dependencies exactly, and the closure keeps the same nine package names. The 1.3.0 changes that touch the SDK: a resumed default-tools session restores the transcript's active tools, so a tool that this open's extensions register stays inactive; `resetResumedPiTools` restores the current native defaults and the default-active extension tools before `session_start`, in the RPC host and the subagent print host. It also clears the transcript's pending tool names, so a tool registered during `session_start` keeps its own `defaultActive` and exposure; OAR 0.67.0 sets the loadout once and keeps that gap. When Pi activates none of the registered tools, Pi 1.3.0 has no public way to clear them, so that resume fails. `resolveCliModel` reports a bare model id that more than one provider offers as ambiguous instead of picking by catalog order; the BYOK lanes always pass the provider. pi-ai no longer exports `utils/assistant-message-frame` (the SDK did not use it). A tool call whose arguments are not valid JSON now fails validation. pi-durable adds an optional SQLite table prefix; without one the schema is unchanged, and 1.3.0 opens a 1.2.0 database without migration. The `kimi-coding` built-in moves to OpenAI Chat Completions; SDK keys projections use their own provider ids and are unaffected. The closureDigest change makes a preparation compiled for 1.2.0 decline with `preparation_runtime_identity_mismatch`; prepare it again. The Summary and main-execution C calibrations were measured under the 1.2.0 identity and need a fresh ruling.
+
+Pi 1.4.0 ruling (2026-10-24, requested by the owner: 「你来并行开一个PR，提升 pi依赖到1.4.0 OAR到 0.71.0」/「开始前先查一下有没有API发生变化」): OAR 0.71.0 pins Pi 1.4.0, so all nine official packages are pinned at exactly 1.4.0 (upstream commit `4a080252f06caf63a525d7873c5d94d3c23887e0`, closureDigest `79c414be071768df15f0a107595564b11c67d904c601e7b2ccf1495fc3053fcc`). No symbol or subpath the SDK imports changed. The 1.4.0 changes that touch the SDK: HTML export reads a sixth asset, `vendor/marked-cjk-friendly.min.js`, which the export inventory now lists; pi-ai sends `pi/<version> (<platform>; <runtime>; <arch>)` as `User-Agent` and owns provider attribution, which coding-agent sessions still gate on install telemetry; the A1' compile closure reaches `@earendil-works/pi-telemetry` through pi-ai's request span schema with its no-op context, and call-time purity is unchanged; a resumed session now activates a load-time extension tool the transcript did not declare, while `resetResumedPiTools` still drops pending transcript tools. The owner ruled on three pi-durable 1.4.0 changes (2026-10-24): D2 「接受迁移」: opening a SQLite store migrates it to schema version 2, which a 1.3.0 build cannot open, so a deployment cannot roll back past this release; D3 「关掉 attribution」: the client durable lane passes `identity: { attribution: null }` to `Harness.open`, so it sends no provider attribution headers, as with 1.3.0 (cloud-do rebuilds requests with a fixed header set); D4 「设为 Infinity」: `CLOUD_HARNESS_SETTINGS` and the client durable engine set `restartLimit: Infinity`, so a task that a crash, eviction or reset cut off runs again on the next open and is never parked, as with 1.3.0. The closureDigest change makes a preparation compiled for 1.3.0 decline with `preparation_runtime_identity_mismatch`; prepare it again. The Summary and main-execution C calibrations were measured under an earlier identity and need a fresh ruling; no paid re-probe ran.
 
 Exactness of the direct pins has three independent checks: bun.lock exact versions and sha512 integrity under frozen install (the root `overrides` also hold the repo's own install of the indirect packages at the pin); the build entry check that each installed direct package is at the pin; release-pack and registry-readback isolated installs, which require the direct pins with the locked integrities and prove the coding agent against its official tarball. The indirect packages are read, not gated: the release gates log their installed version, and input preparation does not read them. The SDK does not attest the Pi executable at launch (ADR-037).
 
@@ -3110,7 +3158,7 @@ retain the existing fail-closed behavior.
 
 Codex reports `tokenUsage.last.totalTokens` against `modelContextWindow`;
 its cumulative `total` remains the provider cost authority. Claude reports
-`result.modelUsage`'s window using the init model identity. Official Pi 1.3.0
+`result.modelUsage`'s window using the init model identity. Official Pi 1.4.0
 reports `get_session_stats.contextUsage` as an estimate before task settlement;
 null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.
@@ -3129,6 +3177,8 @@ draft frames.
 
 The daemon reconciles the draft to the published body with a final revision
 before `agent.message.publish` when the text differs.
+The draft and the closing reply share one message-boundary decision for each
+progress event.
 An adapter may also stream text for the draft only. The adapter's own message
 tracker sets those boundaries, and each later progress event is the authority
 that reconciles the draft.

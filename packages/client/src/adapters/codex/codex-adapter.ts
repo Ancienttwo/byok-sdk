@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import type {
   AgentEvent,
+  TaskFailure,
   TaskOfferPayload,
 } from '@byok-sdk/protocol';
 import {
@@ -32,11 +33,13 @@ import {
   SessionNotFoundError,
   type RawCodexSession,
 } from '../../runtime/codex-session-runtime';
+import { codexFailure } from '../../runtime/oar-failure-runtime';
 import { CodexProjection, type CodexRecord } from './projection';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
 import { resolveRuntimeInvocation, type RuntimeInvocation } from '../runtime-invocation';
 import { isQualifiedCodexVersion, QUALIFIED_CODEX_VERSION } from './codex-version';
+import { verifyCodexUserMcpServersExcluded, withCodexUserMcpServersExcluded } from './agent-user-mcp-servers';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
@@ -73,6 +76,23 @@ export interface CodexAdapterOptions {
   operationTimeoutMs?: number;
   /** Opt-in local Host UI; independent of the remote boolean approval lane. */
   nativeInteractions?: NativeInteractionHostOptions;
+  /**
+   * For an Agent task (`task.offer_for_agent`), `excluded` gives the Codex
+   * thread only the task's and the SDK's MCP servers. Before the thread
+   * opens, the adapter reads Codex's effective configuration for the task cwd
+   * (`config/read`), sets `enabled = false` on every other `mcp_servers`
+   * entry, and turns off the `apps` (connectors) and `plugins` features for
+   * the thread. The thread then has no plugins at all, not only no plugin
+   * MCP servers. After the open it reads the thread's MCP server status
+   * back, and the start fails if any other server is not disabled, or if a
+   * user server has the name of a task or SDK server. The user's
+   * `AGENTS.md`, login, model, sandbox setting and other configuration still
+   * apply. It covers new and resumed threads. On a resume, Codex may start a
+   * queued turn before the read-back: that turn already runs with the
+   * overrides, and a failed read-back stops the app server. Other tasks are
+   * unchanged. Default `inherit`.
+   */
+  agentUserMcpServers?: 'inherit' | 'excluded';
 }
 
 /**
@@ -103,6 +123,8 @@ export class CodexAdapter implements RuntimeAdapter {
   }); }
   constructor(private readonly options: CodexAdapterOptions = {}) {
     if (options.sandbox !== undefined) assertCodexSandboxSetting(options.sandbox, 'CodexAdapterOptions.sandbox');
+    if (options.agentUserMcpServers !== undefined && options.agentUserMcpServers !== 'inherit' && options.agentUserMcpServers !== 'excluded')
+      throw new TypeError('CodexAdapterOptions.agentUserMcpServers must be inherit or excluded');
     this.options = { ...options, ...(options.nativeInteractions === undefined ? {} : { nativeInteractions: snapshotNativeInteractionHostOptions(options.nativeInteractions) }) };
     if (
       !Number.isSafeInteger(options.maxRetainedBytes ?? DEFAULT_RETAINED_BYTES) ||
@@ -210,6 +232,8 @@ export class CodexAdapter implements RuntimeAdapter {
     const workspace = await fs.realpath(cwd);
     // As OAR: the servers go in the thread/start or thread/resume config.
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
+    const taskServers = mcpServers.map(server => server.name);
+    const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && input.manifest.agentRef !== undefined;
     const spawned = createOwnedLineProcessSpawn({
       nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
     });
@@ -252,6 +276,10 @@ export class CodexAdapter implements RuntimeAdapter {
         1000,
         {
           onReady: (id) => session.ready(id),
+          ...(excludeUserMcp ? {
+            beforeOpen: async (request, params) => withCodexUserMcpServersExcluded(params, await request('config/read', { cwd, includeLayers: false }), taskServers),
+            afterOpen: (request, threadId) => verifyCodexUserMcpServersExcluded(request, threadId, taskServers),
+          } : {}),
           ...(this.options.nativeInteractions === undefined ? {} : { onServerRequest: session.serverRequest.bind(session) }),
           // A kernel observer: the kernel swallows its errors, so record() fails the session itself.
           onRecord: (record) => session.record(record),
@@ -292,6 +320,9 @@ export class CodexAdapter implements RuntimeAdapter {
           : 'infrastructure',
         retry: isRuntimeExecutionFailure(error) ? error.retry : 'retryable',
         reason: error instanceof Error ? error.message : 'codex open failed',
+        failure: isRuntimeExecutionFailure(error)
+          ? error.failure
+          : { class: session.exitedOnItsOwn ? 'runtime_exited' : 'unknown' },
       });
     }
   }
@@ -303,12 +334,13 @@ const authority = (reason: string) =>
     retry: 'non-retryable',
     reason,
   });
-const infrastructure = (reason: string) =>
+const infrastructure = (reason: string, failure?: TaskFailure) =>
   new RuntimeExecutionFailure({
     phase: 'run',
     category: 'infrastructure',
     retry: 'non-retryable',
     reason,
+    failure,
   });
 /** An open that timed out may succeed on a fresh app-server, as before the deadline moved here. */
 const retryable = (reason: string) =>
@@ -322,6 +354,7 @@ class CodexSession implements Session {
   sessionRef = '';
   private raw?: RawCodexSession;
   private child?: { dispose(): Promise<void>; kill(): void };
+  private exit?: { readonly exitedOnItsOwn: boolean };
   private projection?: CodexProjection;
   private readonly stream = {};
   private readonly queue = new AsyncQueue<AgentEvent | MessageDraftDelta>();
@@ -354,8 +387,12 @@ class CodexSession implements Session {
   serverRequest(id: string | number, method: string, params: Record<string, unknown>, reply: import('./native-interactions').CodexNativeReply): void {
     this.native!.receive(id, method, params, reply);
   }
-  own(child: { dispose(): Promise<void>; kill(): void }): void {
+  own(child: { dispose(): Promise<void>; kill(): void; readonly exitedOnItsOwn: boolean }): void {
     this.child = child;
+    this.exit = child;
+  }
+  get exitedOnItsOwn(): boolean {
+    return this.exit?.exitedOnItsOwn === true;
   }
   /** The app-server's lines stop at the transport once the record stream halted. */
   gate<T extends { onLine(handler: (line: string) => void): void }>(child: T): T {
@@ -413,7 +450,7 @@ class CodexSession implements Session {
         type?: string;
         native?: {
           threadId?: string;
-          turn?: { status?: string; error?: { message?: string } };
+          turn?: { status?: string; error?: { message?: string; codexErrorInfo?: unknown } };
         };
       };
       if (
@@ -425,18 +462,28 @@ class CodexSession implements Session {
       ) {
         this.active = false;
         for (const resolve of this.interruptWaiters) resolve();
-        if (body.native?.turn?.status === 'failed')
+        if (body.native?.turn?.status === 'failed') {
+          const reason = body.native.turn.error?.message ?? 'codex turn failed';
+          // The native frame precedes the fold, which classifies the same `turn.error`.
+          // A class OAR took from error text is not structured evidence: send `unknown`.
+          const classified = codexFailure(reason, body.native.turn.error);
           this.fail(
             new RuntimeExecutionFailure({
               phase: 'run',
               category: 'semantic',
               retry: 'non-retryable',
-              reason: body.native.turn.error?.message ?? 'codex turn failed',
+              reason,
+              failure: { class: classified.fromText ? 'unknown' : classified.failure },
             }),
           );
+        }
       }
     } catch (error) {
-      this.fail(error);
+      // After an exit the app-server made on its own, a failing record is one that exit produced
+      // (its exit record, or a control it settled as exited): the exit stays the class.
+      this.fail(this.exitedOnItsOwn
+        ? infrastructure(error instanceof Error ? error.message : 'codex runtime failed', { class: 'runtime_exited' })
+        : error);
       this.halted = this.failure;
       throw error;
     }
@@ -453,7 +500,9 @@ class CodexSession implements Session {
     void this.close().catch(() => {});
   }
   exited(): void {
-    if (!this.stopping) this.fail(infrastructure('codex app-server exited'));
+    if (!this.stopping) {
+      this.fail(infrastructure('codex app-server exited', { class: this.exitedOnItsOwn ? 'runtime_exited' : 'unknown' }));
+    }
   }
   get events(): AsyncIterable<AgentEvent | MessageDraftDelta> {
     const self = this;

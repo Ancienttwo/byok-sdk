@@ -33,6 +33,12 @@ test('docs and known CI contracts select light checks, not release families', ()
   }
 });
 
+test('packages/AGENTS.md and packages/CLAUDE.md are docs-only like the root agent files', () => {
+  assert.deepEqual(selectImpact(['packages/AGENTS.md', 'packages/CLAUDE.md']), {
+    dirs: [], files: ['packages/AGENTS.md', 'packages/CLAUDE.md'], families: [], reason: 'docs-only',
+  });
+});
+
 test('.gitignore alone selects nothing', () => {
   assert.deepEqual(selectImpact(['.gitignore']), { dirs: [], files: ['.gitignore'], families: [], reason: 'docs-only' });
 });

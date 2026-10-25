@@ -39,6 +39,7 @@ import {
   type TerminalProjectionSelection,
   type TaskOfferPayload,
   type TaskDeclinePayload,
+  type TaskFailure,
   type TaskOfferForAgentPayload,
   type TaskOfferForAgentWithEgressPayload,
   type TaskOfferForAgentWithEgressFreshPayload,
@@ -101,6 +102,7 @@ import {
 import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { SealedTasks } from './sealed-task';
+import { DAEMON_TASK_FAILURE, taskFailureField } from './task-failure';
 import type {
   AgentResultDescribeParams,
   AgentResultDescribeResult,
@@ -655,13 +657,6 @@ export interface TaskRunnerDeps {
    * behaves exactly as it did before this seam existed.
    */
   admissionGuard?: (offer: { readonly taskId: string; readonly payload: AcceptedOfferPayload }) => AdmissionGuardDecision;
-  /**
-   * True only when every terminal envelope this runner sends is recorded in
-   * the durable local journal before it reaches the transport. A
-   * result-document offer needs that persist-before-send boundary, so a
-   * runner without it declines such offers.
-   */
-  terminalJournal?: boolean;
   /** Durable normal-turn result failure intent, before handing off a required reply. */
   recordResultReplyFailure?(taskId: string, failure: ResultReplyFailure): Promise<void>;
   recordAgentMessageAccepted?(taskId: string): Promise<void>;
@@ -2092,6 +2087,7 @@ export class TaskRunner {
       return createEnvelope('task.fail', {
         reason,
         retryable,
+        ...this.failurePayload(DAEMON_TASK_FAILURE),
         ...this.terminalInferenceUsagePayload(active),
         ...this.preparedObservationPayload(active),
         ...this.agentTerminalPayload(active),
@@ -2365,12 +2361,6 @@ export class TaskRunner {
       return;
     }
     if (terminalProjection?.mode === 'result-document') {
-      // Persist-before-send: without the journal there is no store that makes
-      // a delivered outcome durable before the transport sees it.
-      if (this.deps.terminalJournal !== true) {
-        decline('offer requires a result document but this daemon has no durable terminal journal', false);
-        return;
-      }
       if (agentRef === undefined || this.deps.tenantId === undefined || this.deps.agentResultMcpBin === undefined) {
         decline('offer requires a result document but this daemon cannot host the submit_result channel: it needs an Agent offer, an enrolled tenant and the SDK result helper', false);
         return;
@@ -3075,12 +3065,12 @@ export class TaskRunner {
         await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed', 'repository-invalid');
         gitLease?.release();
         if (agentBinding === undefined) {
-          await this.fail(taskId, failure.reason, failure.retryable);
+          await this.fail(taskId, failure.reason, failure.retryable, failure.failure);
         } else {
           await this.failClaimedAgent(taskId, failure.reason, failure.retryable, {
             binding: agentBinding,
             runtimeId: pick.descriptor.id,
-          });
+          }, failure.failure);
         }
         return;
       }
@@ -4448,7 +4438,7 @@ export class TaskRunner {
       active.executionRecord.streamEnded();
       const failure = projectRuntimeBoundaryFailure(undefined, 'run');
       console.error('[byok/client] runtime adapter events iterable ended without terminal authority');
-      await this.fail(active.taskId, failure.reason, failure.retryable);
+      await this.fail(active.taskId, failure.reason, failure.retryable, failure.failure);
     } catch (err) {
       if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
       active.batcher.flush();
@@ -4470,7 +4460,7 @@ export class TaskRunner {
           `[byok/client] runtime adapter ${active.adapter.descriptor.id} events iterable returned an untyped failure for task ${active.taskId}`,
         );
       }
-      await this.fail(active.taskId, failure.reason, failure.retryable);
+      await this.fail(active.taskId, failure.reason, failure.retryable, failure.failure);
     }
   }
 
@@ -5151,6 +5141,7 @@ export class TaskRunner {
       await this.persistAgentTerminalEvidence(active, 'failed', reason ?? 'rejected');
       return createEnvelope('task.fail', {
         reason: reason ?? 'rejected', retryable: false,
+        ...this.failurePayload(DAEMON_TASK_FAILURE),
         ...this.terminalInferenceUsagePayload(active),
         ...this.preparedObservationPayload(active),
         ...this.agentTerminalPayload(active),
@@ -5185,6 +5176,10 @@ export class TaskRunner {
     }
   }
 
+  private failurePayload(failure: TaskFailure): { failure?: TaskFailure } {
+    return taskFailureField(failure, this.deps.getServerCapabilities?.() ?? []);
+  }
+
   private sealedCodesAllowed(): boolean {
     const capabilities = this.deps.getServerCapabilities?.() ?? [];
     return requiredReceiverCapabilities('task.decline', { reason: 'sealed_open_failed', code: 'sealed_open_failed' })
@@ -5217,7 +5212,7 @@ export class TaskRunner {
     ));
   }
 
-  private async fail(taskId: string, reason: string, retryable: boolean): Promise<void> {
+  private async fail(taskId: string, reason: string, retryable: boolean, failure = DAEMON_TASK_FAILURE): Promise<void> {
     const active = this.tasks.get(taskId);
     if (active !== undefined) {
       await this.settleSemanticTerminal(active, async () => {
@@ -5226,6 +5221,7 @@ export class TaskRunner {
         return createEnvelope('task.fail', {
           reason,
           retryable,
+          ...this.failurePayload(failure),
           ...this.terminalInferenceUsagePayload(active),
           ...this.preparedObservationPayload(active),
           ...this.agentTerminalPayload(active),
@@ -5234,7 +5230,7 @@ export class TaskRunner {
       return;
     }
     this.deps.send(createEnvelope('task.fail', {
-      reason, retryable, ...terminalIdentity(this.claimedHarnesses.get(taskId)),
+      reason, retryable, ...this.failurePayload(failure), ...terminalIdentity(this.claimedHarnesses.get(taskId)),
     }, { taskId }));
     await this.finish(taskId);
   }
@@ -5251,6 +5247,7 @@ export class TaskRunner {
     reason: string,
     retryable: boolean,
     context: ClaimedAgentFailureContext,
+    failure = DAEMON_TASK_FAILURE,
   ): Promise<boolean> {
     await this.pendingMessageTasks.get(taskId)?.outbox.revoke(taskId);
     const agentRef = context.binding.resolution.agentRef;
@@ -5281,7 +5278,7 @@ export class TaskRunner {
     }
     this.deps.send(createEnvelope(
       'task.fail',
-      { reason, retryable, ...terminalIdentity(context.runtimeId, agentRef) },
+      { reason, retryable, ...this.failurePayload(failure), ...terminalIdentity(context.runtimeId, agentRef) },
       { taskId },
     ));
     return result.ok;

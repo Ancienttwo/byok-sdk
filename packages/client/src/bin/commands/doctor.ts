@@ -1,4 +1,3 @@
-import { collectLegacyTemp } from '../../diagnostics/legacy-temp';
 import type { DaemonConfig } from '../../index';
 import {
   collectDiagnostics,
@@ -93,13 +92,11 @@ export async function runDoctorCommand(config: DaemonConfig, options: DoctorOpti
     fixResult = await quarantineCorruptOperationalHealth(storeDir, { clock: options.clock });
     snapshot = await collectDiagnostics(config, storeDir, options);
   }
-  const legacyTemp = await collectLegacyTemp({ fix: options.fix, now: options.clock?.() });
   const log = options.log ?? ((line: string) => console.log(line));
   const environment = snapshot.environment.status === 'unknown' ? undefined : snapshot.environment;
   if (options.json) {
-    log(JSON.stringify({ diagnostics: snapshot, legacyTemp, environment: environment ?? { status: 'unknown' }, ...(fixResult ? { fix: fixResult } : {}) }, null, 2));
+    log(JSON.stringify({ diagnostics: snapshot, environment: environment ?? { status: 'unknown' }, ...(fixResult ? { fix: fixResult } : {}) }, null, 2));
     return;
   }
   for (const line of formatDoctorLines(snapshot, environment, fixResult)) log(line);
-  log(`legacy-temp: found=${legacyTemp.found} deleted=${legacyTemp.deleted} failures=${legacyTemp.failures} truncated=${legacyTemp.truncated}`);
 }

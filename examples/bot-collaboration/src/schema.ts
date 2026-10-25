@@ -4,7 +4,7 @@ import * as rules from './rules/context';
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './rules/history';
 
 // K8 adapter for the pure schema and ContextPack rules in `rules/`. The device ledger is the history authority here.
-export { DEFAULT_CONFIRMABLE, DEFAULT_TIME_ZONES, MAIN_ACTIONS, NEW_BOTS, NEW_ROOMS, outcomeOffer, outcomeSchema, ROOM_SYSTEM_PROMPT, SYSTEM_PROMPT, TIME_ZONES_MAX,
+export { CONFIRMABLE_MAX, DEFAULT_CONFIRMABLE, DEFAULT_TIME_ZONES, MAIN_ACTIONS, NEW_BOTS, NEW_ROOMS, outcomeOffer, outcomeSchema, ROOM_SYSTEM_PROMPT, SYSTEM_PROMPT, TIME_ZONES_MAX,
   TURN_ACTIONS, type CheckedOffer, type ConfirmableSpec, type MainAction, type OutcomeOffer, type TurnAction } from './rules/schema';
 export { contextTurns, DEFAULT_CONTEXT_MAX_BYTES, DEFAULT_CONTEXT_TURN_LIMIT, type ContextHistory, type ContextTurn, type InstructionLimits } from './rules/context';
 

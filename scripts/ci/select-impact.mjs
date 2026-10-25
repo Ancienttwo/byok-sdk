@@ -110,6 +110,7 @@ export const workspaceGraph = {
   "packages/cloud-do": {
     "name": "@byok-sdk/cloud-do",
     "dependencies": [
+      "@byok-sdk/client",
       "@byok-sdk/keys"
     ]
   },
@@ -294,7 +295,7 @@ function oarSnapshotListed(path, { base, cwd = process.cwd() } = {}) {
   return manifest.format === 'byok.vendor-source' && manifest.package === '@botiverse/oar'
     && Array.isArray(manifest.files) && manifest.files.some(row => row.path === match[2]);
 }
-const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
+const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'packages/AGENTS.md', 'packages/CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
 const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml']);
 const sorted = values => [...values].sort();
 // An unmapped path is a selector gap. Fix it with a reviewed mapping; a
@@ -375,6 +376,10 @@ export function selectImpact(paths, context = {}) {
     if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts') {
       dirs.add('examples/basic'); continue;
     }
+    // The usage notes of the clarification and goal/btw examples.
+    if (path === 'examples/basic/clarification-usage.md' || path === 'examples/basic/goal-btw-usage.md') { dirs.add('examples/basic'); continue; }
+    // The Salesko recovery integration fixture runs the client daemon; no CI job runs scripts/integration.
+    if (path === 'scripts/integration/fixtures/salesko-recurring-daemon.ts') { dirs.add('packages/client'); continue; }
     if (path === 'api-surface/entries.json') {
       for (const dir of changedApiOwners(context)) {
         if (!workspaceGraph[dir]) requireMapping(path);
@@ -392,6 +397,8 @@ export function selectImpact(paths, context = {}) {
     // #654: the core sealed-payload subpath entry.
     if (path === 'packages/core/tsup.config.ts') { dirs.add('packages/core'); families.add('npm-release-pack'); continue; }
     if (path === 'scripts/keys/generate-pi-model-catalog.ts') { dirs.add('packages/keys'); dirs.add('packages/client'); continue; }
+    // pack-and-smoke.mjs runs it against the packed client.
+    if (path === 'packages/client/scripts/packed-cli-mcp-smoke.mjs') { dirs.add('packages/client'); families.add('npm-release-pack'); continue; }
     if (path === 'packages/client/scripts/packed-agent-memory-helper-smoke.mjs'
       || path === 'scripts/release/agent-memory-helper-source.test.mjs') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
@@ -403,7 +410,7 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     // #652 trims these reviewed files in the pinned OAR snapshot.
-    if (/^packages\/client\/vendor\/oar\/44d7d61\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
+    if (/^packages\/client\/vendor\/oar\/c88a514\/(?:runtimes\/codex\/(?:app-server-client|rpc-control|session)|shared\/(?:acp\/session|session-kernel))\.ts$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
     if (/^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:PROVENANCE\.md|source-manifest\.json|runtimes\/grok\/session\.ts)$/.test(path)) {
@@ -411,7 +418,7 @@ export function selectImpact(paths, context = {}) {
     }
     if (oarSnapshotListed(path, context)) { dirs.add('packages/client'); continue; }
     // The client build copies vendor notices and OAR provenance into dist.
-    if (path === 'packages/client/scripts/build-todo-assets.mjs' || path === 'packages/client/vendor/THIRD-PARTY.md') {
+    if (path === 'packages/client/scripts/build-todo-assets.mjs' || path === 'packages/client/vendor/THIRD-PARTY.md' || path === 'packages/client/vendor/third-party-manifest.json') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
     }
     // The OAR bridge contract: run-targeted runs check-oar-bridge.test.mjs

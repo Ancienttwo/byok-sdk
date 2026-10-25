@@ -80,7 +80,7 @@ async function setup(type: string) {
   const config: DaemonConfig = {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Journal test', productId: 'journal-test',
     serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
-    hostedJournal: { mode: 'sqlite' }, agentHome: { hostStorageRoot },
+    agentHome: { hostStorageRoot },
     agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
   };
   if (type === 'task.offer_for_agent_with_egress') {

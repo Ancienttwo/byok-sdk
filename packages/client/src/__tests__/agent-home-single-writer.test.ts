@@ -368,8 +368,7 @@ describe('canonical Agent home single writer (WP0)', () => {
       workspaceRoot,
       storeDir,
       agentHome: { hostStorageRoot },
-      hostedJournal: { mode: 'sqlite' },
-    }, [pi], { hostedJournal: { journal }, retention: { freeBytesProvider: async () => 50 * 1024 * 1024 } });
+    }, [pi], { journal, retention: { freeBytesProvider: async () => 50 * 1024 * 1024 } });
     daemon = started;
     try {
       await started.pair('pairing-code');

@@ -4,13 +4,15 @@ This package hosts a pi-durable session in a Cloudflare Durable Object.
 It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
-The current stable release is 0.30.0, in the nine-package release set,
+The current stable release is 0.30.1, in the nine-package release set,
 published on npm `latest`. From 0.28.2, keys carries the same version. The npm
-registry read on 2026-10-24 at 07:39 UTC lists 0.30.0 as `latest` for all nine
-packages. See the [release notes](../../docs/releases/v0.30.0.md).
-The earlier stable releases were 0.29.0 (published 2026-10-23, UTC), 0.28.3
-and 0.28.2 (published 2026-10-22, UTC), 0.28.1 / keys 0.13.1 (published
-2026-10-21, UTC) and 0.28.0 / keys 0.13.0 (published 2026-10-20, UTC); see the
+registry read on 2026-10-24 at 19:19 UTC lists 0.30.1 as `latest` for all nine
+packages. See the [release notes](../../docs/releases/v0.30.1.md).
+The earlier stable releases were 0.30.0 (published 2026-10-24, UTC), 0.29.0
+(published 2026-10-23, UTC), 0.28.3 and 0.28.2 (published 2026-10-22, UTC),
+0.28.1 / keys 0.13.1 (published 2026-10-21, UTC) and 0.28.0 / keys 0.13.0
+(published 2026-10-20, UTC); see the
+[0.30.0 release notes](../../docs/releases/v0.30.0.md), the
 [0.29.0 release notes](../../docs/releases/v0.29.0.md), the
 [0.28.3 release notes](../../docs/releases/v0.28.3.md), the
 [0.28.2 release notes](../../docs/releases/v0.28.2.md), the
@@ -38,11 +40,11 @@ The package needs Node 24.22.1 or later for build tooling.
 
 ## Install and subclass
 
-The following install example names the current stable release, 0.30.0.
+The following install example names the current stable release, 0.30.1.
 Use an installed package to verify the consumer path.
 
 ~~~sh
-npm install @byok-sdk/cloud-do@0.30.0
+npm install @byok-sdk/cloud-do@0.30.1
 npm install --save-dev @cloudflare/workers-types
 ~~~
 
@@ -132,13 +134,13 @@ openDurableObjectStorage has the local structural factory type
 (location: DurableObjectStorage) => Promise<Storage>.
 Storage is pi-durable's native interface. The package does not import client
 source or keys types. Its three runtime dependencies are pi-durable, pi-ai,
-and chord, each pinned to 1.3.0.
+and chord, each pinned to 1.4.0.
 
 The Durable Object owns the physical connection. Closing the adapter
 invalidates that adapter. It does not close the Durable Object database.
 
 This follows the async adapter in [Cloudflare Agents d6656161](https://github.com/cloudflare/agents/blob/d6656161/packages/agents/src/harness/pi/session-store.ts).
-Current upstream uses a different synchronous pi contract. Pinned pi 1.3.0 takes
+Current upstream uses a different synchronous pi contract. Pinned pi 1.4.0 takes
 async callbacks, so `transactionSync()` cannot host its transaction callback.
 Cloudflare documents async SQL transactions on the
 [SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/).

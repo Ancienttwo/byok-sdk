@@ -43,6 +43,7 @@ const ERROR_STATUS: Partial<Record<CloudErrorCode, 400 | 409 | 500>> = {
   e2ee_member_chain_conflict: 409,
   e2ee_scope_key_conflict: 409,
   e2ee_scope_shredded: 409,
+  e2ee_scope_key_package_stale: 409,
   proof_request_conflict: 409,
   e2ee_member_key_conflict: 409,
   e2ee_member_not_registered: 409,
@@ -146,9 +147,9 @@ export function e2eeMemberChainReadHandler(deps: E2eeMemberRouteDeps) {
     e2eeMember.readMemberChain(context, query));
 }
 
-/** `GET /byok/e2ee/key-packages?scopeId=&epoch=`: only packages addressed to this device's member. */
+/** `GET /byok/e2ee/key-packages?scopeId=&epoch=` or `?scopeId=&afterEpoch=`: only packages addressed to this device's member. */
 export function e2eeScopeKeyPackageReadHandler(deps: E2eeMemberRouteDeps) {
-  return deviceReadHandler(deps, ['scopeId', 'epoch'], ['epoch'], (context, deviceId, query) =>
+  return deviceReadHandler(deps, ['scopeId', 'epoch', 'afterEpoch'], ['epoch', 'afterEpoch'], (context, deviceId, query) =>
     e2eeMember.readDeviceScopeKeyPackages(context, deviceId, query as never));
 }
 

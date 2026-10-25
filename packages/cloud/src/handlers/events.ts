@@ -2,6 +2,7 @@ import {
   isTaskOfferType,
   MAILBOX_READ_AHEAD_CAPABILITY,
   MAILBOX_READ_AHEAD_MAX_SEQS,
+  RUNTIME_FAILURE_CLASS_CAPABILITY,
   SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY,
   SEALED_PAYLOAD_CAPABILITY,
 } from '@byok-sdk/protocol';
@@ -98,6 +99,9 @@ export const CLOUD_PROTOCOL_CAPABILITIES = [
   // A sealed terminal or artifact may name its ciphertext blob, which the
   // task holds while it lives (#654 §58a).
   SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY,
+  // The inbound gate parses `task.fail.failure` and `task.fail_sealed.failure`,
+  // and `projectTerminalResult` copies it (#869).
+  RUNTIME_FAILURE_CLASS_CAPABILITY,
 ];
 
 export interface EventsRouteDeps extends DeviceRouteDeps {

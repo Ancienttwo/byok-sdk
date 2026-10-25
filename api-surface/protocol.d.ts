@@ -1665,6 +1665,18 @@ export declare const SEALED_PAYLOAD_CAPABILITY: 'sealed-payload-v1';
  * inline. The server then holds the blob for the life of the task.
  */
 export declare const SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY: 'sealed-output-ciphertext-ref';
+/**
+ * A server advertises it before a device may send `task.fail.failure`, the
+ * machine-readable runtime failure class (#869).
+ */
+export declare const RUNTIME_FAILURE_CLASS_CAPABILITY: 'runtime-failure-class';
+/**
+ * The closed classes of `task.fail.failure.class`: the vendored OAR
+ * `FailureClass` values. `unknown` means the runtime gave no structured
+ * evidence. Single value authority shared by schema validation and
+ * schema-free consumers.
+ */
+export declare const RUNTIME_FAILURE_CLASSES: readonly ['auth', 'quota', 'rate_limited', 'billing', 'model_unavailable', 'input_too_large', 'invalid_request', 'overloaded', 'provider', 'runtime_exited', 'limit_reached', 'output_schema', 'unknown'];
 /** Single value authority shared by schema validation and schema-free consumers. */
 export declare const PREPARED_AGENT_MEMORY_MODES: readonly ['none', 'read', 'read-write'];
 export declare function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREPARED_AGENT_MEMORY_MODES)[number];
@@ -1936,6 +1948,8 @@ export declare const E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES = 65536;
 export declare const E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES = 256;
 /** The most scope key packages one put accepts. */
 export declare const E2EE_SCOPE_KEY_PACKAGE_PUT_MAX = 256;
+/** The most packages one paged device read returns. */
+export declare const E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX = 16;
 /**
  * The longest scope id, in UTF-16 code units, as for other opaque Host ids.
  * Core sets no maximum, so the scope key package shape (which the parity test
@@ -1993,8 +2007,22 @@ export declare const E2eeMemberChainEntrySchema: z.ZodObject<{
     sig: z.ZodString;
 }, z.core.$strict>;
 export type E2eeMemberChainEntry = z.infer<typeof E2eeMemberChainEntrySchema>;
-/** One scope key wrapped to one member (§7.4). */
-export declare const E2eeScopeKeyPackageSchema: z.ZodObject<{
+/** One scope key wrapped to one member's KEM key of `recipientKemEpoch` (§7.4, §77a). A put takes version 2 only. */
+export declare const E2eeScopeKeyPackageV2Schema: z.ZodObject<{
+    tenantId: z.ZodString;
+    scopeId: z.ZodString;
+    epoch: z.ZodNumber;
+    keyId: z.ZodString;
+    recipient: z.ZodString;
+    sender: z.ZodString;
+    enc: z.ZodString;
+    ciphertext: z.ZodString;
+    sig: z.ZodString;
+    v: z.ZodLiteral<2>;
+    recipientKemEpoch: z.ZodNumber;
+}, z.core.$strict>;
+/** A stored package as a read returns it: version 1 from before `e2ee.member.kem-epoch`, version 2 after. */
+export declare const E2eeScopeKeyPackageSchema: z.ZodUnion<readonly [z.ZodObject<{
     v: z.ZodLiteral<1>;
     tenantId: z.ZodString;
     scopeId: z.ZodString;
@@ -2005,7 +2033,19 @@ export declare const E2eeScopeKeyPackageSchema: z.ZodObject<{
     enc: z.ZodString;
     ciphertext: z.ZodString;
     sig: z.ZodString;
-}, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    tenantId: z.ZodString;
+    scopeId: z.ZodString;
+    epoch: z.ZodNumber;
+    keyId: z.ZodString;
+    recipient: z.ZodString;
+    sender: z.ZodString;
+    enc: z.ZodString;
+    ciphertext: z.ZodString;
+    sig: z.ZodString;
+    v: z.ZodLiteral<2>;
+    recipientKemEpoch: z.ZodNumber;
+}, z.core.$strict>]>;
 export type E2eeScopeKeyPackage = z.infer<typeof E2eeScopeKeyPackageSchema>;
 /** A pairing MAC (§7.2 steps 3 and 4): HMAC-SHA-256 under `pv`, which the Host never holds. */
 export declare const E2eePairingMacSchema: z.ZodString;
@@ -2929,8 +2969,8 @@ export { RESULT_SCHEMA_MAX_BYTES, RESULT_OUTCOME_MAX_BYTES, RESULT_SCHEMA_MAX_DE
 export type { ResultSchema, ResultSchemaKeyword, ResultSchemaInstanceType, ResultIssue, ResultDocumentFailureReason, ResultSchemaCheck, ResultOutcomeCheck, } from './result-schema';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, TaskOfferSealedPayload, TaskOfferWithToolsetsSealedPayload, TaskOfferForAgentSealedPayload, TaskOfferForAgentWithEgressSealedPayload, TaskOfferForAgentWithEgressFreshSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
+export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, TaskOfferSealedPayload, TaskOfferWithToolsetsSealedPayload, TaskOfferForAgentSealedPayload, TaskOfferForAgentWithEgressSealedPayload, TaskOfferForAgentWithEgressFreshSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, TaskFailure, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -2942,7 +2982,7 @@ export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';
 export { CUSTOM_HARNESS_CAPABILITY } from './version';
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
-export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_APPEND_OPERATION, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_MEMBER_KEY_REGISTER_OPERATION, E2EE_SCOPE_ID_MAX_LENGTH, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eeMemberKeyRegisterRequestSchema, E2eeKeyPackageAvailablePayloadSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, } from './e2ee-member';
+export { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_MEMBER_CHAIN_APPEND_OPERATION, E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES, E2EE_MEMBER_CHAIN_OPS, E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES, E2EE_MEMBER_KEY_REGISTER_OPERATION, E2EE_SCOPE_ID_MAX_LENGTH, E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, E2eeClientPairingMacSchema, E2eeMemberChainEntrySchema, E2eeMemberKeyBundleSchema, E2eeMemberKeyRegisterRequestSchema, E2eeKeyPackageAvailablePayloadSchema, E2eePairingMacSchema, E2eeScopeKeyPackageSchema, E2eeScopeKeyPackageV2Schema, } from './e2ee-member';
 export type { E2eeClientPairingMac, E2eeKeyPackageAvailablePayload, E2eeMemberChainEntry, E2eeMemberKeyBundle, E2eeMemberKeyRegisterRequest, E2eeScopeKeyPackage, } from './e2ee-member';
 export * from './bot-turn-outcome';
 export { resultOutcomeMaxBytes } from './result-schema';
@@ -5488,6 +5528,48 @@ export declare const TaskCompletePayloadSchema: z.ZodObject<{
     }, z.core.$strict>], "outcome">>;
 }, z.core.$strip>;
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
+/** A closed runtime failure class (#869). `unknown` means the runtime gave no structured evidence. */
+export declare const RuntimeFailureClassSchema: z.ZodEnum<{
+    auth: "auth";
+    billing: "billing";
+    input_too_large: "input_too_large";
+    invalid_request: "invalid_request";
+    limit_reached: "limit_reached";
+    model_unavailable: "model_unavailable";
+    output_schema: "output_schema";
+    overloaded: "overloaded";
+    provider: "provider";
+    quota: "quota";
+    rate_limited: "rate_limited";
+    runtime_exited: "runtime_exited";
+    unknown: "unknown";
+}>;
+export type RuntimeFailureClass = z.infer<typeof RuntimeFailureClassSchema>;
+/**
+ * The machine-readable failure of a `task.fail` (#869); `reason` stays display
+ * text. `resetsAt` (ISO 8601 UTC) exists only on `quota`, and only when the
+ * runtime reported when the limit resets.
+ */
+export declare const TaskFailureSchema: z.ZodUnion<readonly [z.ZodObject<{
+    class: z.ZodLiteral<"quota">;
+    resetsAt: z.ZodOptional<z.ZodISODateTime>;
+}, z.core.$strict>, z.ZodObject<{
+    class: z.ZodEnum<{
+        auth: "auth";
+        billing: "billing";
+        input_too_large: "input_too_large";
+        invalid_request: "invalid_request";
+        limit_reached: "limit_reached";
+        model_unavailable: "model_unavailable";
+        output_schema: "output_schema";
+        overloaded: "overloaded";
+        provider: "provider";
+        rate_limited: "rate_limited";
+        runtime_exited: "runtime_exited";
+        unknown: "unknown";
+    }>;
+}, z.core.$strict>]>;
+export type TaskFailure = z.infer<typeof TaskFailureSchema>;
 /** daemon -> server: task failed. */
 export declare const TaskFailPayloadSchema: z.ZodObject<{
     sealed: z.ZodOptional<z.ZodNever>;
@@ -5499,6 +5581,25 @@ export declare const TaskFailPayloadSchema: z.ZodObject<{
     harnessId: z.ZodOptional<z.ZodString>;
     reason: z.ZodString;
     retryable: z.ZodOptional<z.ZodBoolean>;
+    failure: z.ZodOptional<z.ZodUnion<readonly [z.ZodObject<{
+        class: z.ZodLiteral<"quota">;
+        resetsAt: z.ZodOptional<z.ZodISODateTime>;
+    }, z.core.$strict>, z.ZodObject<{
+        class: z.ZodEnum<{
+            auth: "auth";
+            billing: "billing";
+            input_too_large: "input_too_large";
+            invalid_request: "invalid_request";
+            limit_reached: "limit_reached";
+            model_unavailable: "model_unavailable";
+            output_schema: "output_schema";
+            overloaded: "overloaded";
+            provider: "provider";
+            rate_limited: "rate_limited";
+            runtime_exited: "runtime_exited";
+            unknown: "unknown";
+        }>;
+    }, z.core.$strict>]>>;
     usage: z.ZodOptional<z.ZodObject<{
         runtime: z.ZodEnum<{
             claude: "claude";
@@ -6322,6 +6423,25 @@ export declare const TaskFailSealedPayloadSchema: z.ZodObject<{
     }, z.core.$strict>>;
     harnessId: z.ZodOptional<z.ZodString>;
     retryable: z.ZodOptional<z.ZodBoolean>;
+    failure: z.ZodOptional<z.ZodUnion<readonly [z.ZodObject<{
+        class: z.ZodLiteral<"quota">;
+        resetsAt: z.ZodOptional<z.ZodISODateTime>;
+    }, z.core.$strict>, z.ZodObject<{
+        class: z.ZodEnum<{
+            auth: "auth";
+            billing: "billing";
+            input_too_large: "input_too_large";
+            invalid_request: "invalid_request";
+            limit_reached: "limit_reached";
+            model_unavailable: "model_unavailable";
+            output_schema: "output_schema";
+            overloaded: "overloaded";
+            provider: "provider";
+            rate_limited: "rate_limited";
+            runtime_exited: "runtime_exited";
+            unknown: "unknown";
+        }>;
+    }, z.core.$strict>]>>;
     usage: z.ZodOptional<z.ZodObject<{
         runtime: z.ZodEnum<{
             claude: "claude";
@@ -7736,9 +7856,10 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  */
 export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
 /**
- * Capability flags exchanged during the connection handshake (`conn.hello` /
- * `conn.ack`). Additional flags may be introduced without a protocol version
- * bump; unrecognized flags must be ignored by both sides.
+ * Capability flags. The daemon sends its flags in `conn.hello`; the server
+ * sends its own on every long-poll response (`EventsPollResponse`). Additional
+ * flags may be introduced without a protocol version bump; unrecognized flags
+ * must be ignored by both sides.
  *
  * `interactive-approval` is RESERVED as of this addition: it gates the
  * (currently unexercised) approval seam — a server must not route an
@@ -7749,10 +7870,9 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * `approval_resolved` (additive-minor): a SERVER-advertised flag meaning
  * "I understand the `task.approval_resolved` message" (`messages.ts`). This
  * is the N/N-1 answer for that new daemon -> server message: an old server's
- * `CAPABILITY_FLAGS`/`conn.ack.capabilities` never includes it, so a new
- * daemon talking to an old server never sends `task.approval_resolved` at
- * all (see `packages/client`'s `task-runner.ts`) and falls back to the
- * pre-existing implicit-resume inference
+ * advertised capabilities never include it, so a new daemon talking to an old
+ * server never sends `task.approval_resolved` at all (see `packages/client`'s
+ * `task-runner.ts`) and falls back to the pre-existing implicit-resume inference
  * (`ConnectionHub.resumeIfImplicitlyApproved`, `packages/server/src/hub.ts`)
  * unconditionally, exactly as before this flag existed. Unlike
  * `interactive-approval`, this one IS exercised the moment both sides
@@ -7793,7 +7913,7 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", 'agent-message-draft', "sealed-payload-v1", "sealed-output-ciphertext-ref"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", 'agent-message-draft', "sealed-payload-v1", "sealed-output-ciphertext-ref", "runtime-failure-class"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 /**

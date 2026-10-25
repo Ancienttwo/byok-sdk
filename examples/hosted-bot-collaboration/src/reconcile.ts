@@ -9,7 +9,7 @@ import { deliverCancels } from './intents';
 import { commitStored } from './retention';
 import { storedKey } from './layout';
 import { loadSlice, outcomeRoutinePorts, switchDueVersions, writeSlice } from './routines';
-import { inSchema, lockScope, type Decision, type FinishPortsFactory, type HostedCollaborationStore, type Publish } from './store';
+import { inSchema, lockScope, type Decision, type HostedCollaborationStore, type StorePorts } from './store';
 
 /** The SDK calls of one tenant that the reconciliation uses, as L binds them to its `ByokServer` tasks. */
 export interface HostedTaskPort extends Pick<FrozenSubmitPort, 'offer'> {
@@ -23,8 +23,7 @@ export interface TaskEvidence { terminal: DeviceTerminal; attempt: TaskAttempt }
 export interface ReconcilerOptions {
   /** The SDK calls of the tenant that owns `scope`. */
   port: (scope: string) => HostedTaskPort;
-  /** The command ports of the terminal transaction. The store builds the other outcome ports. */
-  ports: FinishPortsFactory;
+  /** The Host clock. The terminal transaction reads it too; the store builds its command ports (#793 S9). */
   now?: () => number;
   /** The wait before the next readback of a row that has no terminal yet. */
   pollMs?: number;
@@ -117,7 +116,7 @@ export class HostedReconciler {
       // Read the cancellation again after the terminal. A late success must not apply an outcome.
       attempt = verified(row.input, await port.attempt(task));
       if (!attempt) throw new Error('Device terminal has no attempt');
-      return (await this.store.finish(JSON.parse(scopeKey) as string, JSON.parse(key) as string, { terminal, attempt }, this.options.ports)) !== undefined;
+      return (await this.store.finish(JSON.parse(scopeKey) as string, JSON.parse(key) as string, { terminal, attempt }, this.now)) !== undefined;
     }
     await this.later(scopeKey, key);
     return false;
@@ -207,8 +206,8 @@ function verified(input: FrozenInput, attempt: TaskAttempt | undefined): TaskAtt
  * The store owns the routine ports: the outcome's routine actions run the K4 rules on the scope's routines before the
  * conclusion, as K4 runs `applyOutcome` before `settle` (#793 D2f). Then a staged version that is due switches.
  */
-export async function decideFinish(client: PoolClient, scope: string, turnId: string, state: CollaborationState, publish: Publish,
-  { terminal, attempt }: TaskEvidence, ports: FinishPortsFactory, channel: boolean): Promise<Decision<Conclusion | undefined>> {
+export async function decideFinish(client: PoolClient, scope: string, turnId: string, state: CollaborationState,
+  { terminal, attempt }: TaskEvidence, ports: StorePorts, channel: boolean): Promise<Decision<Conclusion | undefined>> {
   const scopeKey = storedKey(scope), key = storedKey(turnId);
   const found = await client.query<{ task_id: string; concluded: boolean }>(
     'SELECT task_id, conclusion IS NOT NULL AS concluded FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
@@ -218,14 +217,14 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
   const envelope = terminal.envelope;
   if (envelope.task_id !== row.task_id) throw new Error('Terminal identity conflict');
   let conclusion: Conclusion, outbox: OutboxIntent[] = [];
-  const { manage, ...base } = ports(state, publish), now = base.now();
+  const { manage, ...base } = ports, now = base.now();
   if (attempt.cancellation || envelope.type === 'task.cancelled') conclusion = 'cancelled';
   else if (envelope.type === 'task.complete') {
     // commitStored reads the committed intents before this row concludes, as L reads its ledger before the terminal transaction writes.
     const slice = await loadSlice(client, scopeKey), head = revisionOf(state);
     const result = await commitStored(client, scope, state, { scope, commandId: row.task_id,
       command: { kind: 'outcome', turnId, taskId: row.task_id, document: envelope.payload.document as Json } },
-    { ...base, outcome: { manage, ...outcomeRoutinePorts(slice, now, row.task_id) } }, channel);
+    { ...base, outcome: { manage: manage(row.task_id), ...outcomeRoutinePorts(slice, now, row.task_id) } }, channel);
     await writeSlice(client, scopeKey, slice);
     outbox = result.revision === head + 1 ? result.outbox : [];
     conclusion = 'succeeded';

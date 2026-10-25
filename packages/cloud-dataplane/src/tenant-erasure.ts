@@ -50,6 +50,7 @@ export const TENANT_ERASURE_TABLES = [
   'e2ee_scope_key_package',
   'e2ee_scope_epoch',
   'e2ee_scope_shred',
+  'e2ee_member_kem_floor',
   'e2ee_member_chain_entry',
   'e2ee_pairing_mac',
   'e2ee_member_key',

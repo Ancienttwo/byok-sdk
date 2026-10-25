@@ -80,12 +80,14 @@ async function resumedAndFresh(
 
 const DEFAULTS = ['read', 'bash', 'edit', 'write'];
 
-describe('resumed Pi session tools (Pi 1.3)', () => {
-  it('without the reset, native Pi 1.3 offers only the transcript loadout', async () => {
+describe('resumed Pi session tools (Pi 1.4)', () => {
+  // Pi 1.3 kept a load-time tool the transcript did not declare inactive;
+  // Pi 1.4 (upstream #11062) activates it natively.
+  it('without the reset, native Pi 1.4 offers a load-time tool the transcript did not declare', async () => {
     const { resumed, fresh } = await resumedAndFresh(dirs(), [...DEFAULTS, 'mcp_A'],
       { atLoad: [{ name: 'mcp_A' }, { name: 'mcp_B' }] }, { reset: false });
     expect(fresh).toContain('mcp_B');
-    expect(resumed).not.toContain('mcp_B');
+    expect(resumed).toEqual(fresh);
   });
 
   it('offers a tool this open registers that the resumed transcript did not declare', async () => {

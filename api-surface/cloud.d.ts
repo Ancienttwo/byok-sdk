@@ -1329,6 +1329,13 @@ export declare const CLOUD_CAPABILITIES: {
      * construction.
      */
     readonly e2eeMember: 'e2ee.member';
+    /**
+     * The member KEM epoch rules of #654 E5b-2 (owner batch §77a): v2 key
+     * packages only, the per-member KEM floor from `rotate` entries, and the
+     * paged own-package read with the scope head. Declared exactly when
+     * `e2ee.member` is.
+     */
+    readonly e2eeMemberKemEpoch: 'e2ee.member.kem-epoch';
 };
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];
 /** The wire DTO for `GET /byok/capabilities` — core's shape, bound to a cloud-owned route. */
@@ -1371,8 +1378,9 @@ export interface FullCapabilityDeclarationOptions {
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
 export declare function declares(declaration: CapabilityDeclaration, capability: CloudCapability): boolean;
 // ==== @byok-sdk/cloud dist/cloud.d.ts ====
+import type { z } from 'zod';
 import { type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft';
-import { type MaintenanceInput, type MaintenanceReport } from './maintenance';
+import { type MaintenanceInput, type MaintenanceReport, type ProofReceiptRetentionOptions } from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { type TaskAgentMessage } from './task-agent-message';
 import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agent-execution';
@@ -1395,7 +1403,7 @@ import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agen
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskOfferSealedPayload, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type TaskOfferWithToolsetsPayload, type TaskOfferWithToolsetsSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskOfferSealedPayload, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type TaskOfferWithToolsetsPayload, type TaskOfferWithToolsetsSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageV2Schema } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1419,6 +1427,12 @@ export declare const DEFAULT_EVENTS_PAGE_LIMIT = 50;
 export declare const AGENT_HOME_CONTRACT_CAPABILITY = "agent-home-contract";
 export interface ByokCloudOptions {
     readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
+    /**
+     * Prunes used device-proof request ids in maintenance. Absent, the
+     * `proofReceipts` step reports `not-configured` and every used `requestId`
+     * stays single-use for as long as its receipt is kept.
+     */
+    readonly proofReceiptRetention?: ProofReceiptRetentionOptions;
     readonly mailboxWake: MailboxWake;
     readonly core: CoreStores;
     readonly cloud: CloudStores;
@@ -1861,6 +1875,8 @@ export interface ByokCloud {
      * A newly stored `shred` entry, whose subject must be exactly `{ scopeId }`,
      * deletes that scope's key packages and epochs in the same write, marks the
      * scope shredded, and records an `e2ee-scope-shred:<scopeId>` receipt.
+     * A newly stored `rotate` entry raises its member's KEM floor to its
+     * `kemEpoch` in the same write; a floor never falls.
      */
     appendMemberChainEntries(tenant: TenantId, input: {
         readonly entries: readonly E2eeMemberChainEntry[];
@@ -1876,10 +1892,12 @@ export interface ByokCloud {
         readonly entries: readonly E2eeMemberChainEntry[];
     }>;
     /**
-     * Host control plane: store scope key packages. The first package of a
-     * scope epoch fixes its `keyId`; a package with another `keyId` throws
+     * Host control plane: store version 2 scope key packages. The first package
+     * of a scope epoch fixes its `keyId`; a package with another `keyId` throws
      * `e2ee_scope_key_conflict`, and the call stores nothing. A package of a
-     * shredded scope throws `e2ee_scope_shredded`, and the call stores nothing.
+     * shredded scope throws `e2ee_scope_shredded`, and one whose
+     * `recipientKemEpoch` is below its recipient's KEM floor throws
+     * `e2ee_scope_key_package_stale`; either way the call stores nothing.
      *
      * After the commit, each recipient that is a registered device gets one
      * `e2ee.key_package.available` notice per scope epoch, also on a replay.
@@ -1887,7 +1905,7 @@ export interface ByokCloud {
      * listed in `skippedDeviceIds`; its packages are stored all the same.
      */
     putScopeKeyPackages(tenant: TenantId, input: {
-        readonly packages: readonly E2eeScopeKeyPackage[];
+        readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageV2Schema>[];
     }): Promise<{
         readonly stored: number;
         readonly skippedDeviceIds: readonly string[];
@@ -2341,7 +2359,8 @@ export declare function createWebCrypto(): CloudCrypto;
  * bytes the writer sent.
  */
 import { type TenantId } from '@byok-sdk/core';
-import { type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { E2eeScopeKeyPackageV2Schema, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage } from '@byok-sdk/protocol';
+import { z } from 'zod';
 import type { DeviceDirectory } from './stores/ports';
 /** One stored chain entry: its seq and its canonical JSON. */
 export interface E2eeMemberChainRow {
@@ -2384,6 +2403,12 @@ export interface E2eeMemberChainAppendInput {
     readonly rows: readonly E2eeMemberChainRow[];
     /** The `shred` entries among `rows`, in seq order. */
     readonly shreds: readonly E2eeScopeShred[];
+    /** The `rotate` entries among `rows`, in seq order: each raises its member's KEM floor (owner batch §77a). */
+    readonly rotations: readonly {
+        readonly seq: number;
+        readonly memberId: string;
+        readonly kemEpoch: number;
+    }[];
     /** Set for a device write, absent for a Host control-plane write. */
     readonly proof?: E2eeProvenWrite;
 }
@@ -2427,8 +2452,14 @@ export interface E2eeScopeKeyPackageRow {
     readonly package: string;
 }
 export interface E2eeScopeKeyPackagePutInput {
-    /** Sorted by `(scopeId, epoch, recipient)` in code point order, one row per scope epoch and recipient. */
-    readonly rows: readonly E2eeScopeKeyPackageRow[];
+    /**
+     * Sorted by `(scopeId, epoch, recipient)` in code point order, one row per
+     * scope epoch and recipient. `recipientKemEpoch` is the package's own field,
+     * for the floor check only; the store keeps it in `package` and nowhere else.
+     */
+    readonly rows: readonly (E2eeScopeKeyPackageRow & {
+        readonly recipientKemEpoch: number;
+    })[];
     /** Set for a device write, absent for a Host control-plane write. */
     readonly proof?: E2eeProvenWrite;
 }
@@ -2447,6 +2478,13 @@ export type E2eeScopeKeyPackagePutResult = {
  | {
     readonly outcome: 'scope_shredded';
     readonly scopeId: string;
+}
+/** A package is wrapped to an older KEM epoch than its recipient's floor. Nothing was written. */
+ | {
+    readonly outcome: 'kem_epoch_stale';
+    readonly recipient: string;
+    readonly kemEpoch: number;
+    readonly floor: number;
 }
 /** The device already used this `requestId` with another binding. Nothing was written. */
  | {
@@ -2501,6 +2539,11 @@ export interface E2eeMemberStore {
      * already there. A replayed row shreds nothing again. A refused append
      * deletes nothing. A store that has concurrent writers serializes each
      * shred with every package put of the same scope.
+     *
+     * For each rotation whose row this call newly stores, in the same atomic
+     * write: raise the member's KEM floor to `kemEpoch`; a floor never falls.
+     * A store that has concurrent writers serializes it with every package put
+     * to that member.
      */
     appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult>;
     /** Entries with `seq > afterSeq`, ascending, at most `limit`. */
@@ -2509,12 +2552,24 @@ export interface E2eeMemberStore {
         readonly limit: number;
     }): Promise<readonly E2eeMemberChainRow[]>;
     /**
-     * A row of a shredded scope refuses the whole put. The first package of a
+     * A row of a shredded scope refuses the whole put. Then a row whose
+     * `recipientKemEpoch` is below its recipient's KEM floor refuses the whole
+     * put, naming the first such row. The first package of a
      * `(scopeId, epoch)` fixes its `keyId`, also within this call: a second
      * `keyId` for that scope epoch refuses the whole put. A package with that
      * `keyId` inserts or replaces the row of its recipient.
      */
     putScopeKeyPackages(tenant: TenantId, input: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult>;
+    /** This recipient's packages of one scope with `epoch > afterEpoch`, by epoch, at most `limit`; and the scope's newest epoch. */
+    readOwnScopeKeyPackages(tenant: TenantId, input: {
+        readonly scopeId: string;
+        readonly recipient: string;
+        readonly afterEpoch: number;
+        readonly limit: number;
+    }): Promise<{
+        readonly rows: readonly E2eeScopeKeyPackageRow[];
+        readonly scopeHeadEpoch: number | undefined;
+    }>;
     /** Ordered by epoch, then recipient. */
     readScopeKeyPackages(tenant: TenantId, input: {
         readonly scopeId: string;
@@ -2572,7 +2627,7 @@ export declare function readMemberChain(ctx: E2eeMemberContext, input?: {
     readonly entries: readonly E2eeMemberChainEntry[];
 }>;
 export declare function putScopeKeyPackages(ctx: E2eeMemberContext, input: {
-    readonly packages: readonly E2eeScopeKeyPackage[];
+    readonly packages: readonly z.infer<typeof E2eeScopeKeyPackageV2Schema>[];
 }, writer: E2eeMemberWriter): Promise<{
     readonly stored: number;
     readonly skippedDeviceIds: readonly string[];
@@ -2603,12 +2658,18 @@ export declare function relayClientPairingMac(ctx: E2eeMemberContext, deviceId: 
 export declare function registerDeviceMemberKey(ctx: E2eeMemberContext, proof: E2eeProvenWrite, input: unknown): Promise<{
     readonly memberId: string;
 }>;
-/** The scope key packages addressed to the device's own registered member. */
+/**
+ * The scope key packages addressed to the device's own registered member,
+ * with exactly one of `epoch` (that epoch) or `afterEpoch` (one page after
+ * it, by epoch, and the scope's newest epoch or `null`).
+ */
 export declare function readDeviceScopeKeyPackages(ctx: E2eeMemberContext, deviceId: string, input: {
     readonly scopeId: string;
     readonly epoch?: number;
+    readonly afterEpoch?: number;
 }): Promise<{
     readonly packages: readonly E2eeScopeKeyPackage[];
+    readonly scopeHeadEpoch?: number | null;
 }>;
 /** The client pairing MAC relayed to the device, while its pairing window is open. */
 export declare function readDeviceClientPairingMac(ctx: E2eeMemberContext, deviceId: string): Promise<E2eeClientPairingMac | undefined>;
@@ -2672,6 +2733,8 @@ export declare const CLOUD_ERROR_CODES: {
     readonly e2ee_scope_key_conflict: 'e2ee_scope_key_conflict';
     /** The member chain shredded that scope (design §11.2), so the Host stores no more key packages for it. */
     readonly e2ee_scope_shredded: 'e2ee_scope_shredded';
+    /** A package is wrapped to an older KEM epoch than its recipient's latest `rotate` on the member chain. Read the chain again and seal again. */
+    readonly e2ee_scope_key_package_stale: 'e2ee_scope_key_package_stale';
     /** The device already used this device-proof `requestId` with another request. A proof is single-use. */
     readonly proof_request_conflict: 'proof_request_conflict';
     /** The device has not registered a member key bundle. */
@@ -3122,8 +3185,8 @@ export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlob
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
 export type { DeviceTerminal } from './terminal-result';
 export { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput, type SealedAgentExecutionInput, } from './agent-execution';
-export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy } from './maintenance';
-export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport } from './maintenance';
+export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy, DEFAULT_PROOF_RECEIPT_RETENTION_MS, PROOF_RECEIPT_RETENTION_FLOOR_MS, } from './maintenance';
+export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport, ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofReceiptRetentionOptions, } from './maintenance';
 export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
 export type { ReceiptRetentionClass } from './receipt-retention';
 export type { ReceiptCollectExpiredInput } from './stores/ports';
@@ -3189,7 +3252,7 @@ export interface MailboxWakeSubscription {
     close(): void;
 }
 // ==== @byok-sdk/cloud dist/maintenance.d.ts ====
-import { type CollectExpiredCounts, type CollectExpiredResult, type CoreStores, type DeviceAssertionReplayAuthority, type Clock, type TenantId } from '@byok-sdk/core';
+import { type CollectExpiredCounts, type CollectExpiredInput, type CollectExpiredResult, type CoreStores, type DeviceAssertionReplayAuthority, type Clock, type TenantId } from '@byok-sdk/core';
 import type { CloudStores } from './stores/ports';
 export interface RetentionPolicy {
     readonly mailboxAckedRetentionMs: bigint;
@@ -3199,7 +3262,33 @@ export interface RetentionPolicy {
 }
 export declare const DEFAULT_RETENTION_POLICY: RetentionPolicy;
 export declare const DEFAULT_MAINTENANCE_LIMIT = 500;
-export declare const MAINTENANCE_STEPS: readonly ["mailbox", "receipts", "nonces", "pairingCodes", "presence", "activity", "approvals", "agentMessageDraft", "deviceAssertionReplay", "quota", "objects"];
+export declare const MAINTENANCE_STEPS: readonly ["mailbox", "receipts", "nonces", "pairingCodes", "presence", "activity", "approvals", "agentMessageDraft", "deviceAssertionReplay", "quota", "objects", "proofReceipts"];
+/** Receipts of used device-proof request ids recorded before `recordedBefore` are removed. */
+export interface ProofReceiptCollectExpiredInput extends CollectExpiredInput {
+    readonly recordedBefore: string;
+}
+/** The one owner of a deployment's used device-proof request ids (`proof_request_receipt`). */
+export interface ProofReceiptRetentionAuthority {
+    collectExpired(tenant: TenantId, input: ProofReceiptCollectExpiredInput): Promise<CollectExpiredResult>;
+}
+export interface ProofReceiptRetentionOptions {
+    readonly authority: ProofReceiptRetentionAuthority;
+    /** How long a used `requestId` stays single-use. Default 24 hours; at least {@link PROOF_RECEIPT_RETENTION_FLOOR_MS}. */
+    readonly proofReceiptRetentionMs?: bigint;
+}
+/**
+ * A receipt recorded at R binds a proof issued no later than R + skew, which
+ * authenticates no later than R + 2 x skew at the largest allowed skew. Five
+ * more minutes cover clock differences between Host nodes. After that, a
+ * replay of the same proof gets 401 before any receipt is read.
+ */
+export declare const PROOF_RECEIPT_RETENTION_FLOOR_MS: bigint;
+export declare const DEFAULT_PROOF_RECEIPT_RETENTION_MS = 86400000n;
+export interface ResolvedProofReceiptRetention {
+    readonly authority: ProofReceiptRetentionAuthority;
+    readonly proofReceiptRetentionMs: bigint;
+}
+export declare function resolveProofReceiptRetention(input: ProofReceiptRetentionOptions): ResolvedProofReceiptRetention;
 export type MaintenanceStep = typeof MAINTENANCE_STEPS[number];
 export type MaintenanceStepReport = ({
     readonly step: MaintenanceStep;
@@ -3214,7 +3303,7 @@ export type MaintenanceStepReport = ({
     /** Absent when a failed remainder probe left this unknown. */
     readonly more?: boolean;
 } | {
-    readonly step: 'deviceAssertionReplay';
+    readonly step: 'deviceAssertionReplay' | 'proofReceipts';
     readonly status: 'not-configured';
 } | {
     readonly step: 'agentMessageDraft';
@@ -3240,6 +3329,7 @@ export declare function runMaintenanceSteps(ports: {
     readonly cloud: CloudStores;
     readonly clock: Clock;
     readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
+    readonly proofReceiptRetention?: ResolvedProofReceiptRetention;
 }, input: MaintenanceInput): Promise<MaintenanceReport>;
 // ==== @byok-sdk/cloud dist/receipt-retention.d.ts ====
 export type ReceiptRetentionClass = 'identity' | 'request';
@@ -3652,6 +3742,15 @@ export declare class InMemoryE2eeMemberStore implements E2eeMemberStore {
         readonly limit: number;
     }): Promise<readonly E2eeMemberChainRow[]>;
     putScopeKeyPackages(tenant: TenantId, { rows, proof }: E2eeScopeKeyPackagePutInput): Promise<E2eeScopeKeyPackagePutResult>;
+    readOwnScopeKeyPackages(tenant: TenantId, input: {
+        readonly scopeId: string;
+        readonly recipient: string;
+        readonly afterEpoch: number;
+        readonly limit: number;
+    }): Promise<{
+        readonly rows: readonly E2eeScopeKeyPackageRow[];
+        readonly scopeHeadEpoch: number | undefined;
+    }>;
     readScopeKeyPackages(tenant: TenantId, input: {
         readonly scopeId: string;
         readonly epoch?: number;
@@ -4929,7 +5028,7 @@ export interface CloudRootStores {
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
-import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TaskFailPayload, type TaskDeclinePayload } from '@byok-sdk/protocol';
+import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TaskFailPayload, type TaskFailure, type TaskDeclinePayload } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports';
 declare const DEVICE_TERMINAL_TYPES: readonly ['task.complete', 'task.fail', 'task.decline', 'task.cancelled', 'task.complete_sealed', 'task.fail_sealed', 'task.decline_sealed', 'task.cancelled_sealed'];
 /**
@@ -5008,6 +5107,13 @@ export interface TerminalResult {
     /** Terminal cause projection; currently the protocol's terminal reason. */
     readonly terminalCause?: string;
     readonly retryable?: boolean;
+    /**
+     * The machine-readable runtime failure class, verbatim `task.fail.failure`
+     * (plaintext on `task.fail_sealed` too). Read the class here, never from
+     * `reason`. Absent when the daemon or the server predates the field, or the
+     * daemon built the terminal while it had no live connection.
+     */
+    readonly failure?: TaskFailure;
     /** When the receipt store wrote the terminal fact — the first one, by its own first-write-wins rule. */
     readonly recordedAt: string;
 }

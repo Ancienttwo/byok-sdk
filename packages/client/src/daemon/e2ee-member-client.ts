@@ -4,20 +4,22 @@
  * The registration and the key package put are device-proof writes: the
  * device signs the exact body with its enrollment key, for the route's one
  * operation, and sends no bearer token. The reads use the bearer token. The
- * device puts key packages only when it rotates a scope epoch (E2d-4), and
- * appends no chain entry.
+ * device puts key packages when it rotates a scope epoch (E2d-4) or re-wraps
+ * its own packages, and appends only the `rotate` entry of its own KEM
+ * rotation (E2d-5).
  *
  * The Host checks shapes only. Every value read here is untrusted: core
  * verifies the pairing MAC, the chain walk and each key package.
  */
 import { randomUUID } from 'node:crypto';
 import { DEVICE_PROOF_HEADER } from '@byok-sdk/core';
-import type { MemberKeyBundleV1, ScopeKeyPackageV1 } from '@byok-sdk/core/sealed-payload';
+import type { MemberChainEntryV1, MemberKeyBundleV1, ScopeKeyPackageV2 } from '@byok-sdk/core/sealed-payload';
 import {
   BYOK_E2EE_CHAIN_PATH,
   BYOK_E2EE_KEY_PACKAGES_PATH,
   BYOK_E2EE_MEMBER_KEY_PATH,
   BYOK_E2EE_PAIRING_MAC_PATH,
+  E2EE_MEMBER_CHAIN_APPEND_OPERATION,
   E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
   E2EE_MEMBER_KEY_REGISTER_OPERATION,
@@ -144,9 +146,18 @@ export class E2eeMemberClient {
    * Put the key packages of one new scope epoch (E2d-4). A Host that holds
    * the epoch under another `keyId` answers 409 `e2ee_scope_key_conflict`.
    */
-  async putKeyPackages(packages: readonly ScopeKeyPackageV1[], signal?: AbortSignal): Promise<void> {
+  async putKeyPackages(packages: readonly ScopeKeyPackageV2[], signal?: AbortSignal): Promise<void> {
     const response = await this.#proofPost(BYOK_E2EE_KEY_PACKAGES_PATH, E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION, { packages }, 'key package put', signal);
     // The device does not use the result; a 2xx is the Host's acknowledgement, so the body is not read.
+    await response.body?.cancel();
+  }
+
+  /**
+   * Append signed chain entries (E2d-5). A Host that holds another entry at
+   * one of their seqs answers 409 `e2ee_member_chain_conflict`.
+   */
+  async appendChain(entries: readonly MemberChainEntryV1[], signal?: AbortSignal): Promise<void> {
+    const response = await this.#proofPost(BYOK_E2EE_CHAIN_PATH, E2EE_MEMBER_CHAIN_APPEND_OPERATION, { entries }, 'member chain append', signal);
     await response.body?.cancel();
   }
 

@@ -81,6 +81,7 @@ export class ClaudeProcessClient {
   private readonly eventQueue = new AsyncQueue<ClaudeStreamMessage>();
   private closed = false;
   private exitError: Error | undefined;
+  private exited = false;
   private transportError: Error | undefined;
   private readonly pendingWrites = new Set<(error: Error) => void>();
   private readonly closedPromise: Promise<void>;
@@ -112,10 +113,10 @@ export class ClaudeProcessClient {
       // process wrote has already been delivered, so a bad-flag/auth-failure
       // exit error always carries the complete stderr tail.
       this.child.on('close', (code, signal) => {
-        this.onClosed(this.buildExitError(code, signal));
+        this.onClosed(this.buildExitError(code, signal), true);
       });
       this.child.on('error', (err) => {
-        this.onClosed(err);
+        this.onClosed(err, false);
       });
       // A Writable emits its own error even when its write callback handles it.
       // Own that event for the full stream lifetime, including after child close.
@@ -230,6 +231,11 @@ export class ClaudeProcessClient {
   /** Local transport diagnostic retained when the process closes; consumers classify it at the session boundary. */
   get terminalError(): Error | undefined {
     return this.exitError;
+  }
+
+  /** The child process closed on its own (a `close` event, not a spawn error), and no adoption or transport failure outranked that exit; consumers classify it at the session boundary. */
+  get processExited(): boolean {
+    return this.exited;
   }
 
   /**
@@ -380,7 +386,7 @@ export class ClaudeProcessClient {
     return new Error(parts.join('; '));
   }
 
-  private onClosed(err: Error): void {
+  private onClosed(err: Error, exited: boolean): void {
     if (this.closed) return;
     this.closed = true;
     controls.get(this)?.closed();
@@ -390,6 +396,7 @@ export class ClaudeProcessClient {
     // the only reason anyone can act on.
     const terminal = this.adoptionFailure ?? this.transportError ?? err;
     this.exitError = terminal;
+    this.exited = exited && terminal === err;
     for (const reject of [...this.pendingWrites]) reject(terminal);
     this.resolveClosed();
     this.initWaiter?.reject(terminal);

@@ -68,12 +68,31 @@ a Bot's agentRef, that Bot's later Turns wait until it settles. An exact replay
 returns the same intent while K4 keeps it.
 
 A K4 terminal that K8 cannot apply leaves its intent open: a key that is neither
-a Bot Turn nor a Host intent, for example from a direct `bot.core.enqueue`, or a
-Host handler that throws or returns a promise. Then `drain()` rejects with
+a Bot Turn nor a Host intent, for example from a direct `bot.core.enqueue`
+(`unknown_intent`), a Host handler that throws or returns a promise
+(`handler_failed`), or a Bot Turn whose outcome commit throws, for example a
+document outside its frozen schema (`outcome_failed`). After the owner call, the
+next sync settles such a Bot Turn as `failed` and reports it. Then `drain()` rejects with
 `IntentOutcomeError`, and so does every API that runs a pass, including `input`
 and the `wake.consume` hook. The audit gets one row for each key and reason. The
-intent stays at the head of its FIFO until its outcome applies. `BotOptions`
-passes `reconcileMs` (default 100) and `onOutbox` to the K4 core.
+intent stays at the head of its FIFO until its outcome applies, for example
+after a restart with a fixed handler, or until the owner calls
+`failStuckIntent(key)`. That call runs a K4 drain first, so it also works right
+after a restart. If that drain refuses the intent's terminal again, one
+transaction settles the intent as `failed` with the K4 `settle` transition and
+adds the audit row `Intent failed by owner <code>: <key> <reason>`. The settle
+runs no handler, and the intent records no terminal; the server task keeps it.
+The drain before the settle applies the terminal once more, so a `handler_failed`
+handler runs once inside the call. If that drain applies the outcome, the call
+refuses with `Intent already settled`. If that drain rejects and the intent has
+no refusal of its own, the call throws the drain error. Later drains move past
+the intent. The call settles the key first. Its closing pass, like every API
+that runs a pass, rejects if another intent is stuck, and a retry for this key
+then says `Intent already settled`. A Host intent keeps its `hostIntents` record until K4 compacts it,
+so an exact replay of `enqueueHostIntent` returns the failed intent. The call
+refuses an unknown key, a settled intent, and an intent whose terminal K8 did not
+refuse, such as one still running. `BotOptions` passes `reconcileMs` (default
+100) and `onOutbox` to the K4 core.
 
 ## Actions and context
 
@@ -99,14 +118,24 @@ extra actions of an owner Main Bot Turn, from the Bot and room management
 actions, `team_note` and `cancel_delegation`. A list only removes actions, and
 an empty list removes all of that kind. `timeZones` holds 1 to 8 IANA zones for
 `create_routine` and `update_routine`, checked by the `@byok-sdk/core` routine
-calendar. The default is `UTC` and `America/New_York`. `confirmable` holds the
-`confirmable_action` branches, each an action name and its draft schema. The
+calendar. The default is `UTC` and `America/New_York`. `confirmable` holds 1 to
+16 `confirmable_action` branches, each an action name and its draft schema. The
 default is `send_message`, and the connector receives only the offered names.
+Sixteen branches with the `send_message` draft and 64-byte names fit both
+bounds with eight long time zones at the eight-routine limit, with room for
+heavier drafts (`CONFIRMABLE_MAX`).
 The constructor checks the offer and composes one schema with it. Turns that
 froze before keep their schema. A room seat always gets `speech`. A schema
 that is over budget even in the flat shape blocks its Turn, as before. The H
 sync takes the same offer as `SyncOptions.offer`, a value from `outcomeOffer`.
-The system prompt does not change with the offer.
+An offer with `actions.turn` also narrows the system
+prompt of a Bot Turn: it keeps only the sentences for every Bot Turn and for the
+actions in that Turn's frozen schema (`systemPrompt`, `promptActions`). With only
+`delegate`, the prompt names no `ask_user`, `confirmable_action` or routine.
+A narrowed prompt never names `speech` or `room_call`, which only a room seat
+gets. An offer without `actions.turn` keeps
+`SYSTEM_PROMPT`. A narrowed prompt is shorter, so the
+`minimumInstructionBytes(SYSTEM_PROMPT)` check still bounds it.
 
 Questions support text and single choice. An answer creates an `answer` turn.
 It is a new user input with its own stable budget root. Replaying the same
@@ -198,7 +227,10 @@ command needs the Main Bot role and gets the K4 rows through the
 occurrence through its intent key, and a concluded occurrence through its
 occurrence key. `botRoutines` reads the Bot routine views from the K4 rows.
 Other K4 routines of the Host, for example Host jobs from `BotOptions.hostJobs`,
-are not Bot routines.
+are not Bot routines. A Host job may return only a summary: L sets K4
+`hostJobExecution: 'fail'`, so a result with `execution` concludes its
+occurrence `failed` and promotes nothing, as H does, because no K8 Turn could
+settle that intent. K4 alone promotes it by default.
 
 ### Compaction
 
@@ -416,8 +448,11 @@ The room step of a Host sync is `advanceRoomSeats(state, facts, now, add)` in
 fails a seat Turn whose work was not admitted, queues each new seat Turn
 through `add` (`seatTurn` gives its fields), and returns the seats whose
 admitted work the Host cancels. `src/rules/commands.ts` exports both. L builds
-the facts from its K4 intents; H builds them from its intent rows. The
-`roomVectors` run on both.
+the facts from its K4 intents; H builds them from its intent rows. A Turn
+step can release a seat (a blocked or retired seat Turn). Both Hosts then run
+the room step and the Turn steps again in the same sync, so the next seat gets
+its Turn: L in `advanceRoomsAndTurns` (`src/rooms.ts`), H in its sync loop.
+The `roomVectors` run on both.
 
 `checkReply(state, d, check, now, emit, uncertainAfterMs)` in
 `src/rules/delegation.ts` decides one reply check of a `reply_pending`
@@ -454,6 +489,10 @@ transaction freezes only a Turn that still has no offer.
   messages, so they read no history.
 - A read that throws or returns another shape leaves the Turn queued. The
   timer reads again after about one second.
+- A read still open after `historyTimeoutMs` (default 10 seconds) counts as
+  failed, so a stalled authority cannot hold the Host queue. The Host does
+  not abort the read. Reads run one after another, so a pass waits at most
+  `historyTimeoutMs` for each Turn that reads.
 
 With the `roomHistory` option, the room messages of a seat ContextPack come
 from an external authority too (#883). Before a seat Turn freezes its offer,
@@ -470,11 +509,28 @@ transaction, in the same phase as `history`.
 - K8 still writes `room.messages`. Round counts, mention seats and the seat
   request text read it.
 - A read that throws or returns another shape leaves the seat queued, and the
-  timer reads again. A read still open at the seat deadline counts as failed.
+  timer reads again. A read still open after `historyTimeoutMs` or at the
+  seat deadline counts as failed.
   The seat deadline still applies, so a seat whose read never succeeds is
   released as `busy` and its Turn expires.
-- No projection carries an accepted room post yet. The Host reads posts from
-  `snapshot().team.rooms` to write them to its authority.
+- Each accepted seat post also publishes the projection
+  `room-message:<roomId>:<messageId>` with `{ roomId, id, from, text, late }`,
+  the row that `room.messages` stores. The message id is the seat id, so a
+  replay has the same id and body; the uploader delivers it at least once, and
+  the Host deduplicates by id. A `pass` and a refused post publish nothing.
+  Without the option, no `room-message:` projection exists.
+- The next seat of a room is not read while that room has an undelivered
+  `room-message:` projection. K4 drops a projection only after the Host
+  uploader's `deliver` resolved, so the Host's `deliver` must resolve only
+  after its write can be read back from the authority. The held seat waits
+  like a failed read, and its deadline still applies: a projection that never
+  delivers releases each later seat of its room as `busy` at its deadline.
+- Room input that the Host gives K8 (`roomInput`, or `receive` for a group
+  message) is not projected. The Host writes it to its authority first, then
+  calls K8, so the next seat reads it.
+- The ledger does not store the mode. Each time a Host turns the option on, it
+  first writes the posts made while it was off from `snapshot().team.rooms` to
+  its authority, deduplicated by id.
 
 The team comes from this ledger, unless the `team: 'external'` option is set.
 

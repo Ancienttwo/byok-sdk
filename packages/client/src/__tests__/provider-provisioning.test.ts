@@ -13,7 +13,6 @@ import {
 } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { CursorStore } from '../daemon/cursor-store';
-import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import {
   ProviderProvisioningNoticeError,
   createProviderProvisioningNoticeProcessor,
@@ -179,7 +178,6 @@ type Identity = { tenantId: string; deviceId: string };
 /** `handler` is built from the paired identity, so its readbacks can name this exact tenant and device. */
 async function startDaemon(options: {
   handler?: (identity: Identity) => ProviderProvisioningHandler;
-  journal?: boolean;
 } = {}) {
   const server = await TestServer.start();
   servers.push(server);
@@ -204,7 +202,6 @@ async function startDaemon(options: {
       workspaceRoot,
       storeDir,
       ...(handler === undefined ? {} : { providerProvisioning: handler }),
-      ...(options.journal === true ? { hostedJournal: { mode: 'sqlite' as const } } : {}),
     },
     [adapter],
     { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } },
@@ -352,13 +349,12 @@ describe('createDaemon providerProvisioning seam', () => {
     }, { timeout: 5_000 });
   });
 
-  it.skipIf(!isSqliteAvailable())(
+  it(
     'never journals the notice, and a ciphertext-carrying notice never reaches the handler or disk',
     async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       const seen: ProviderProvisioningNotice[] = [];
       const { server, cursor, storeDir, daemon } = await startDaemon({
-        journal: true,
         handler: (identity: Identity) => async (notice: ProviderProvisioningNotice) => {
           seen.push(notice);
           return readbackFor(identity, notice.requestId, 'applied');

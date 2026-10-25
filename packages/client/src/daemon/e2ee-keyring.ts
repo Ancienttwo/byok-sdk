@@ -34,15 +34,29 @@
  * point. Such an epoch is also stale after a member is added to the scope
  * policy or rotates its KEM key, counted from the seq it was wrapped at; a
  * carried point keeps that seq.
+ *
+ * KEM rotation (E2d-5, §7.5): the member stores a next KEM key beside the
+ * current one, appends its `rotate` entry after a local walk (§7.9
+ * requirement 2), re-wraps each of its own packages that it may use now to
+ * the next key, reads them back, catches up and reads every usable scope
+ * back once more, and only then drops the old private key. Until then a
+ * package opens with either key, and a resumed rotation picks up where it
+ * stopped.
  */
 import {
   applyMemberChainEntries,
+  createMemberKeyBundle,
   generateScopeKey,
   memberChainScopeRecipients,
   openScopeKeyPackage,
   sealScopeKeyPackage,
+  signMemberChainEntry,
   type MemberChainEntryV1,
   type MemberChainScope,
+  type MemberKemKey,
+  type MemberKeyBundleV1,
+  type MemberKeys,
+  type ScopeKeyPackageV2,
   type ScopeKeyPackageOpenResult,
   type SealedCategory,
   type SealedContentHeaderV1,
@@ -65,6 +79,13 @@ const MAX_ROTATION_ROUNDS = 3;
  */
 const ROTATION_EPOCH_READS = 4;
 
+/**
+ * The epochs of one scope a KEM rotation reads in each pass, from epoch 1:
+ * 64 batches of {@link ROTATION_EPOCH_READS}. A scope that needs more stops
+ * the rotation, and the old key stays.
+ */
+const KEM_REWRAP_MAX_EPOCHS = 256;
+
 export interface ScopeKey {
   readonly scopeKey: Uint8Array;
   readonly keyId: string;
@@ -83,6 +104,27 @@ export type ScopeKeyFetchFailure =
 export type ScopeKeyFetchResult =
   | { readonly ok: true; readonly key: ScopeKey }
   | { readonly ok: false; readonly reason: ScopeKeyFetchFailure };
+
+type P256PublicJwk = MemberKeyBundleV1['signingPublicJwk'];
+
+export type KemRotationFailure =
+  | 'member_lost'
+  /** The verified chain holds a KEM epoch of this member that its custody does not. */
+  | 'kem_epoch_unknown'
+  /** The `rotate` entry does not walk on the verified chain, or the Host did not keep it. */
+  | 'rotate_entry_invalid'
+  /** A scope's epochs pass {@link KEM_REWRAP_MAX_EPOCHS}, or the top epoch the rotation reads holds a package. */
+  | 'scope_epochs_exceeded'
+  /** The Host read no package at an epoch whose key this run holds. */
+  | 'key_package_missing'
+  /** A package to keep does not read back with the next key under its `keyId`, or the package of an epoch whose key this run holds does not open. */
+  | 'rewrap_unverified'
+  /** The verified chain moved during each try of a scope's re-wrap. */
+  | 'chain_moved';
+
+export type KemRotationResult =
+  | { readonly ok: true; readonly epoch: number }
+  | { readonly ok: false; readonly reason: KemRotationFailure };
 
 /** The freshness points of a retired keyring, for the next run of the same process. Memory only. */
 export interface MemberFreshness {
@@ -139,6 +181,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
   readonly #fresh = new Map<string, Map<number, MemberChainPoint>>();
   /** The rotation in flight per scope, so concurrent seals rotate once. */
   readonly #rotations = new Map<string, Promise<void>>();
+  #kemRotation: Promise<KemRotationResult> | undefined;
   /** Aborted at retire, so no Host request of this run outlives it. */
   readonly #retired = new AbortController();
   #tail: Promise<void> = Promise.resolve();
@@ -193,7 +236,6 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     if (failure !== undefined) return { ok: false, reason: failure };
     const known = this.cached(scopeId, epoch);
     if (known !== undefined) return { ok: true, key: own(known) };
-    const self = session.member.memberId;
     const packages = await this.options.client.readKeyPackages(scopeId, epoch, this.#requestSignal());
     if (packages.length === 0) return { ok: false, reason: 'key_package_missing' };
     const pkg: unknown = packages[0];
@@ -201,12 +243,11 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     const senderId = (pkg as { readonly sender?: unknown }).sender;
     const sender = typeof senderId === 'string' && this.#scopeFailure(session, scopeId, senderId) === undefined ? session.state.members.get(senderId) : undefined;
     if (sender === undefined) return { ok: false, reason: 'key_package_sender_invalid' };
-    const opened = await openScopeKeyPackage({
-      package: pkg,
-      expected: { tenantId: this.options.tenantId, scopeId, epoch },
-      recipient: { memberId: self, kemPublicJwk: session.keys.kem.publicJwk, kemPrivateKey: session.keys.kem.privateKey },
-      senderSigningPublicJwk: sender.signingPublicJwk,
-    });
+    const read = this.#session;
+    if (read === undefined) return { ok: false, reason: 'member_lost' };
+    // A package opens with any KEM key the member held while it was read.
+    const kems = [...kemKeys(read.keys), ...kemKeys(session.keys)].filter((kem, index, all) => all.findIndex((other) => other.epoch === kem.epoch) === index);
+    const opened = await this.#openOwn(read, scopeId, epoch, pkg, sender.signingPublicJwk, kems);
     if (!opened.ok) return opened;
     // A concurrent fetch may have settled this epoch, or a catch-up moved the view, while the package was read and opened.
     const raced = this.cached(scopeId, epoch);
@@ -348,7 +389,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     try {
       const packages = await Promise.all(recipients.map((recipient) => sealScopeKeyPackage({
         scopeKey, tenantId: this.options.tenantId, scopeId, epoch,
-        recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk }, sender,
+        recipient: { memberId: recipient.memberId, kemPublicJwk: recipient.kemPublicJwk, kemEpoch: recipient.kemEpoch }, sender,
       })));
       // The Host takes at most this many per put; the epoch is fresh only after every put.
       for (let at = 0; at < packages.length; at += E2EE_SCOPE_KEY_PACKAGE_PUT_MAX) {
@@ -369,7 +410,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       this.options.log(`rotated scope ${JSON.stringify(scopeId)} to epoch ${epoch} for ${recipients.length} members`);
     } catch (error) {
       scopeKey.fill(0);
-      // A key the notice cached for the abandoned epoch must not outlive it.
+      // Zero a key the notice cached for the abandoned epoch. A notice may cache it again; no seal uses it without a freshness point.
       this.#drop(keyOf(scopeId, epoch));
       if (!(error instanceof E2eeMemberClientError && error.code === 'e2ee_scope_key_conflict')) throw error;
       // Another client may hold the epoch without a package for this member, so a read would show it free again.
@@ -404,8 +445,16 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
 
   /** The epochs of a scope this run holds a key of, a freshness point for, or found taken. */
   #knownEpochs(scopeId: string): number[] {
-    const opened = [...this.#keys.keys()].filter((at) => at.slice(at.indexOf('\0') + 1) === scopeId).map((at) => Number(at.slice(0, at.indexOf('\0'))));
-    return [...opened, ...(this.#fresh.get(scopeId)?.keys() ?? []), this.#taken.get(scopeId) ?? 0];
+    return [...scopeEpochs(this.#keys.keys(), scopeId), ...(this.#fresh.get(scopeId)?.keys() ?? []), this.#taken.get(scopeId) ?? 0];
+  }
+
+  /**
+   * The epochs of a scope whose package this member holds from a sender
+   * `fetch` accepts: the keys this run opened, which a catch-up drops with
+   * their sender, and the epochs it rotated to with its own package.
+   */
+  #heldEpochs(scopeId: string): Set<number> {
+    return new Set([...scopeEpochs(this.#keys.keys(), scopeId), ...scopeEpochs(this.#rotated.keys(), scopeId)]);
   }
 
   /** Zero and remove the cached key at `at`, if any. */
@@ -416,6 +465,266 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
 
   #take(scopeId: string, epoch: number): void {
     this.#taken.set(scopeId, Math.max(this.#taken.get(scopeId) ?? 0, epoch));
+  }
+
+  /**
+   * Rotate this member's KEM key (§7.5). Calls share one rotation. A
+   * transport failure throws and leaves the rotation to resume: the next key
+   * stays in custody beside the old one, so every package still opens.
+   */
+  rotateKem(): Promise<KemRotationResult> {
+    this.#kemRotation ??= this.#rotateKem().finally(() => {
+      this.#kemRotation = undefined;
+    });
+    return this.#kemRotation;
+  }
+
+  async #rotateKem(): Promise<KemRotationResult> {
+    const { records, tenantId, deviceId, log } = this.options;
+    await this.catchUp();
+    if (this.#session === undefined) return { ok: false, reason: 'member_lost' };
+    const keys = await records.keys.beginKemRotation({ tenantId, deviceId });
+    const next = keys.nextKem!;
+    await this.#useKeys(keys);
+    // A run retired after its last read-back leaves the old key for the next run's resumed rotation.
+    const failure = await this.#registerKem(next) ?? await this.#rewrap(next) ?? (this.#session === undefined ? 'member_lost' : undefined);
+    if (failure !== undefined) {
+      log(`the KEM rotation to epoch ${next.epoch} stopped (${failure}); the old key stays`);
+      return { ok: false, reason: failure };
+    }
+    await this.#useKeys(await records.keys.finishKemRotation({ tenantId, deviceId }, next.epoch));
+    log(`rotated the member KEM key to epoch ${next.epoch}`);
+    return { ok: true, epoch: next.epoch };
+  }
+
+  /** Swap the session's keys in the catch-up queue, so a catch-up in flight does not put the old ones back. */
+  #useKeys(keys: MemberKeys): Promise<void> {
+    const run = this.#tail.then(() => {
+      if (this.#session !== undefined) this.#session = { ...this.#session, keys };
+    });
+    this.#tail = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Append the `rotate` entry of `next`, unless the verified chain has it. One seq conflict is retried after a catch-up. */
+  async #registerKem(next: MemberKemKey): Promise<KemRotationFailure | undefined> {
+    for (let attempt = 0; ; attempt += 1) {
+      const session = this.#session;
+      if (session === undefined) return 'member_lost';
+      const self = session.member.memberId;
+      const current = session.state.members.get(self)!;
+      if (current.kemEpoch === next.epoch && sameJwk(current.kemPublicJwk, next.publicJwk)) return undefined;
+      if (current.kemEpoch !== next.epoch - 1) return 'kem_epoch_unknown';
+      if (attempt === 2) return 'rotate_entry_invalid';
+      const { signing } = session.keys;
+      const { kemSig } = await createMemberKeyBundle({
+        signingPublicJwk: signing.publicJwk, signingPrivateKey: signing.privateKey, kemPublicJwk: next.publicJwk, kemEpoch: next.epoch,
+        ...(current.deviceId === undefined ? {} : { deviceId: current.deviceId }),
+      });
+      const head = session.state.head!;
+      const entry = await signMemberChainEntry({
+        v: 1, tenantId: this.options.tenantId, seq: head.seq + 1, prev: head.hash, op: 'rotate', signer: self,
+        subject: { memberId: self, kemPublicJwk: next.publicJwk, kemEpoch: next.epoch, kemSig },
+      }, signing);
+      if (!(await applyMemberChainEntries(session.state, [entry])).ok) return 'rotate_entry_invalid';
+      try {
+        await this.options.client.appendChain([entry], this.#requestSignal());
+      } catch (error) {
+        if (!(error instanceof E2eeMemberClientError && error.code === 'e2ee_member_chain_conflict')) throw error;
+      }
+      await this.catchUp();
+    }
+  }
+
+  /**
+   * Re-wrap to `next` each own package that `fetch` accepts now: of a usable
+   * scope, from a current member of its policy. The re-wrap names this
+   * member as the sender, so a package from any other sender, such as a
+   * removed member, is left as it is and never gains this member's
+   * signature. Then read them back, and once every scope is done, read back
+   * every scope usable at the caught-up head.
+   */
+  async #rewrap(next: MemberKemKey): Promise<KemRotationFailure | undefined> {
+    // An epoch rotation that read the scope members before the `rotate` may still wrap to the old key: let it land first.
+    await Promise.allSettled([...this.#rotations.values()]);
+    const session = this.#session;
+    if (session === undefined) return 'member_lost';
+    const confirmed = new Map<string, ReadonlyMap<number, string>>();
+    for (const scopeId of session.state.scopes.keys()) {
+      const result = await this.#rewrapScope(scopeId, next);
+      if (typeof result === 'string') return result;
+      confirmed.set(scopeId, result);
+    }
+    // A package wrapped to the old key can land after its scope's read-back:
+    // a late or retried put, or a new epoch from a client that has not seen
+    // the `rotate`. A scope can also become usable, or be created, during the
+    // run. So every scope usable at the caught-up head is read back once
+    // more. This interim pass narrows the window but does not close it: a put
+    // can still land between it and the custody write. The fix is the
+    // recipient `kemEpoch` in the signed package and the Host row, with the
+    // Host refusing an older one; it must land before a production path
+    // starts a rotation (E5b-2).
+    await this.catchUp();
+    for (const scopeId of this.#session?.state.scopes.keys() ?? []) {
+      const view = this.#session;
+      if (view === undefined) return 'member_lost';
+      if (this.#scopeFailure(view, scopeId) !== undefined) continue;
+      const failure = await this.#readBack(view, scopeId, confirmed.get(scopeId) ?? new Map(), next, view.keys.kem, this.#heldEpochs(scopeId), [...this.#fresh.get(scopeId)?.keys() ?? []]);
+      if (failure !== undefined) return failure;
+    }
+    return undefined;
+  }
+
+  /**
+   * One scope's re-wrap; the result maps each epoch to re-wrap or that opens
+   * with `next` to its `keyId`, empty for a scope the member may not use. Its
+   * senders are checked against the verified view of one try; when a
+   * catch-up moves the view during the try, it starts again, at most three
+   * times. Every package found that `fetch` accepts, and every epoch this
+   * run holds a key of, must then read back and open with `next` under its
+   * `keyId`, every epoch with a freshness point must hold a package, and no
+   * package `fetch` accepts may still open only with the old key.
+   */
+  async #rewrapScope(scopeId: string, next: MemberKemKey): Promise<KemRotationFailure | ReadonlyMap<number, string>> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const view = this.#session;
+      if (view === undefined) return 'member_lost';
+      if (this.#scopeFailure(view, scopeId) !== undefined) return new Map();
+      // Taken with the view: a catch-up drops the keys of a sender it drops in the same step.
+      const held = this.#heldEpochs(scopeId);
+      const fresh = [...(this.#fresh.get(scopeId)?.keys() ?? [])];
+      const { kem: old, signing } = view.keys;
+      const found = await this.#readEpochs(scopeId);
+      if (found === undefined) return 'scope_epochs_exceeded';
+      const expected = new Map<number, string>();
+      const rewrapped: ScopeKeyPackageV2[] = [];
+      for (const [epoch, pkg] of found) {
+        const current = await this.#openAccepted(view, scopeId, epoch, pkg, next);
+        current?.scopeKey.fill(0);
+        if (current !== undefined) {
+          expected.set(epoch, current.keyId);
+          continue;
+        }
+        const opened = await this.#openAccepted(view, scopeId, epoch, pkg, old);
+        if (opened === undefined) {
+          this.options.log(`a key package of scope ${JSON.stringify(scopeId)} is not re-wrapped: its sender is not a current member of the scope policy, or no member KEM key opens it`);
+          continue;
+        }
+        const sealed = await sealScopeKeyPackage({
+          scopeKey: opened.scopeKey, tenantId: this.options.tenantId, scopeId, epoch,
+          recipient: { memberId: view.member.memberId, kemPublicJwk: next.publicJwk, kemEpoch: next.epoch },
+          sender: { signingPublicJwk: signing.publicJwk, signingPrivateKey: signing.privateKey },
+        });
+        opened.scopeKey.fill(0);
+        rewrapped.push(sealed);
+        expected.set(epoch, sealed.keyId);
+      }
+      if (this.#session !== view) continue;
+      // A row found at a fresh epoch from a sender `fetch` refuses gives no key to keep, so only a missing one stops the rotation.
+      const unopened = [...held].find((epoch) => !expected.has(epoch)) ?? fresh.find((epoch) => !found.has(epoch));
+      if (unopened !== undefined) {
+        this.options.log(`epoch ${unopened} of scope ${JSON.stringify(scopeId)} is held but its key package was not ${found.has(unopened) ? 'opened' : 'read'}`);
+        return found.has(unopened) ? 'rewrap_unverified' : 'key_package_missing';
+      }
+      for (let at = 0; at < rewrapped.length; at += E2EE_SCOPE_KEY_PACKAGE_PUT_MAX) {
+        await this.options.client.putKeyPackages(rewrapped.slice(at, at + E2EE_SCOPE_KEY_PACKAGE_PUT_MAX), this.#requestSignal());
+      }
+      return await this.#readBack(this.#session ?? view, scopeId, expected, next, old, held, fresh) ?? expected;
+    }
+    return 'chain_moved';
+  }
+
+  /**
+   * Read the scope's epochs again: each epoch of `expected` must open with
+   * `next` under its `keyId`, each `held` epoch must read back and open with
+   * `next`, each `fresh` epoch must read back, and a package that landed
+   * since, such as one a client that has not walked the `rotate` yet wrapped
+   * to `old`, must not open only with `old`.
+   */
+  async #readBack(
+    view: DeviceMemberSession, scopeId: string, expected: ReadonlyMap<number, string>, next: MemberKemKey, old: MemberKemKey,
+    held: ReadonlySet<number>, fresh: readonly number[],
+  ): Promise<KemRotationFailure | undefined> {
+    const found = await this.#readEpochs(scopeId);
+    if (found === undefined) return 'scope_epochs_exceeded';
+    const unverified = (epoch: number, why: string): KemRotationFailure => {
+      this.options.log(`epoch ${epoch} of scope ${JSON.stringify(scopeId)} ${why}`);
+      return 'rewrap_unverified';
+    };
+    for (const epoch of expected.keys()) if (!found.has(epoch)) return unverified(epoch, 'was re-wrapped but no key package reads back');
+    const missing = [...held, ...fresh].find((epoch) => !found.has(epoch));
+    if (missing !== undefined) {
+      this.options.log(`epoch ${missing} of scope ${JSON.stringify(scopeId)} is held but its key package was not read`);
+      return 'key_package_missing';
+    }
+    for (const [epoch, pkg] of found) {
+      const current = await this.#openAccepted(view, scopeId, epoch, pkg, next);
+      current?.scopeKey.fill(0);
+      if (current !== undefined) {
+        if (expected.has(epoch) && expected.get(epoch) !== current.keyId) return unverified(epoch, 'reads back under another key id');
+        continue;
+      }
+      if (expected.has(epoch) || held.has(epoch)) return unverified(epoch, 'reads back with a key package the next KEM key does not open');
+      const stale = await this.#openAccepted(view, scopeId, epoch, pkg, old);
+      stale?.scopeKey.fill(0);
+      if (stale !== undefined) return unverified(epoch, 'holds a key package that opens only with the old KEM key');
+    }
+    return undefined;
+  }
+
+  /**
+   * The key package of each epoch of a scope from 1 up to
+   * {@link KEM_REWRAP_MAX_EPOCHS}, {@link ROTATION_EPOCH_READS} at a time.
+   * The verified chain holds no scope epochs, so no read stops early: the
+   * device's packages may start above the epochs this run knows, after a
+   * restart or past a gap. `undefined` when an epoch this run knows passes
+   * the bound, or the top epoch holds a package: the scope is further ahead
+   * than the device can see.
+   */
+  async #readEpochs(scopeId: string): Promise<Map<number, unknown> | undefined> {
+    const top = KEM_REWRAP_MAX_EPOCHS;
+    if (Math.max(...this.#knownEpochs(scopeId)) > top) {
+      this.options.log(`scope ${JSON.stringify(scopeId)} has epochs past the ${top} a KEM rotation reads`);
+      return undefined;
+    }
+    const found = new Map<number, unknown>();
+    for (let from = 1; from <= top; from += ROTATION_EPOCH_READS) {
+      const epochs = Array.from({ length: Math.min(ROTATION_EPOCH_READS, top - from + 1) }, (_, index) => from + index);
+      const reads = await Promise.all(epochs.map((epoch) => this.options.client.readKeyPackages(scopeId, epoch, this.#requestSignal())));
+      reads.forEach((packages, index) => {
+        if (packages.length > 0) found.set(epochs[index]!, packages[0]);
+      });
+    }
+    if (found.has(top)) {
+      this.options.log(`the Host holds epoch ${top} of scope ${JSON.stringify(scopeId)}, beyond the epochs a KEM rotation reads`);
+      return undefined;
+    }
+    return found;
+  }
+
+  /** Open an own package of `epoch` with `kem`, when `fetch` would accept its sender in `view`. */
+  async #openAccepted(view: DeviceMemberSession, scopeId: string, epoch: number, pkg: unknown, kem: MemberKemKey) {
+    const sender = senderOf(pkg);
+    if (sender === undefined || this.#scopeFailure(view, scopeId, sender) !== undefined) return undefined;
+    const result = await this.#openOwn(view, scopeId, epoch, pkg, view.state.members.get(sender)!.signingPublicJwk, [kem]);
+    return result.ok ? { keyId: result.keyId, scopeKey: result.scopeKey } : undefined;
+  }
+
+  /** Open a package addressed to this member with the first of `kems` that opens it. */
+  async #openOwn(
+    session: DeviceMemberSession, scopeId: string, epoch: number, pkg: unknown, senderSigningPublicJwk: P256PublicJwk, kems: readonly MemberKemKey[],
+  ): Promise<ScopeKeyPackageOpenResult> {
+    let opened!: ScopeKeyPackageOpenResult;
+    for (const kem of kems) {
+      opened = await openScopeKeyPackage({
+        package: pkg,
+        expected: { tenantId: this.options.tenantId, scopeId, epoch },
+        recipient: { memberId: session.member.memberId, kemPublicJwk: kem.publicJwk, kemPrivateKey: kem.privateKey, kemEpoch: kem.epoch },
+        senderSigningPublicJwk,
+      });
+      if (opened.ok) break;
+    }
+    return opened;
   }
 
   /**
@@ -563,4 +872,24 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
     this.options.log(message);
     this.options.onLost?.();
   }
+}
+
+/** The KEM keys a package may be wrapped to: during a rotation, the next one first. */
+function kemKeys(keys: MemberKeys): readonly MemberKemKey[] {
+  return keys.nextKem === undefined ? [keys.kem] : [keys.nextKem, keys.kem];
+}
+
+function sameJwk(left: P256PublicJwk, right: P256PublicJwk): boolean {
+  return left.x === right.x && left.y === right.y;
+}
+
+function senderOf(pkg: unknown): string | undefined {
+  if (typeof pkg !== 'object' || pkg === null) return undefined;
+  const { sender } = pkg as { readonly sender?: unknown };
+  return typeof sender === 'string' ? sender : undefined;
+}
+
+/** The epochs of one scope among `keyOf` keys. */
+function scopeEpochs(keys: Iterable<string>, scopeId: string): number[] {
+  return [...keys].filter((at) => at.slice(at.indexOf('\0') + 1) === scopeId).map((at) => Number(at.slice(0, at.indexOf('\0'))));
 }

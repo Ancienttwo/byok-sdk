@@ -1,0 +1,181 @@
+{
+ "_comment": "grok inspect --json 1.0.52 in a synthetic HOME (/home/user) with the network denied, trimmed to the fields the adapter reads plus context. default: no variables; off: GROK_CLAUDE_MCPS_ENABLED=0 GROK_CURSOR_MCPS_ENABLED=0 GROK_MANAGED_MCPS_ENABLED=0. 1.0.62 printed the same servers and plugins.",
+ "default": {
+  "grokVersion": "1.0.52",
+  "cwd": "/home/user/work",
+  "projectRoot": "/home/user/work/",
+  "projectTrusted": false,
+  "plugins": [
+   {
+    "name": "probe-plugin",
+    "scope": "user",
+    "path": "/home/user/.grok/plugins/probe-plugin",
+    "enabled": true,
+    "provides": {
+     "skills": 0,
+     "agents": 0,
+     "hooks": false,
+     "mcpServers": 1
+    }
+   }
+  ],
+  "mcpServers": [
+   {
+    "name": "probe_grok_project",
+    "transport": "stdio",
+    "target": "/usr/bin/true",
+    "source": {
+     "type": "configToml",
+     "path": "/home/user/.grok/config.toml"
+    }
+   },
+   {
+    "name": "probe_grok_user",
+    "transport": "stdio",
+    "target": "/usr/bin/true",
+    "source": {
+     "type": "configToml",
+     "path": "/home/user/.grok/config.toml"
+    }
+   },
+   {
+    "name": "probe_claude_user",
+    "transport": "stdio",
+    "target": "/usr/bin/true",
+    "source": {
+     "type": "claudeJson",
+     "path": "/home/user/.claude.json"
+    },
+    "compatibilityStatus": "enabled",
+    "vendor": "claude"
+   },
+   {
+    "name": "probe_cursor_user",
+    "transport": "stdio",
+    "target": "/usr/bin/true",
+    "source": {
+     "type": "mcpJson",
+     "path": "/home/user/.cursor/mcp.json"
+    },
+    "compatibilityStatus": "enabled",
+    "vendor": "cursor"
+   },
+   {
+    "name": "probe_mcpjson_project",
+    "transport": "stdio",
+    "target": "/usr/bin/true",
+    "source": {
+     "type": "mcpJson",
+     "path": "/home/user/work/.mcp.json"
+    }
+   }
+  ],
+  "externalCompat": {
+   "remoteSettingsLoaded": false,
+   "cells": [
+    {
+     "vendor": "cursor",
+     "surface": "mcps",
+     "enabled": true,
+     "source": "default"
+    },
+    {
+     "vendor": "claude",
+     "surface": "mcps",
+     "enabled": true,
+     "source": "default"
+    }
+   ]
+  }
+ },
+ "off": {
+  "grokVersion": "1.0.52",
+  "cwd": "/home/user/work",
+  "projectRoot": "/home/user/work/",
+  "projectTrusted": false,
+  "plugins": [
+   {
+    "name": "probe-plugin",
+    "scope": "user",
+    "path": "/home/user/.grok/plugins/probe-plugin",
+    "enabled": true,
+    "provides": {
+     "skills": 0,
+     "agents": 0,
+     "hooks": false,
+     "mcpServers": 1
+    }
+   }
+  ],
+  "mcpServers": [
+   {
+    "name": "probe_grok_project",
+    "transport": "stdio",
+    "target": "/usr/bin/true",
+    "source": {
+     "type": "configToml",
+     "path": "/home/user/.grok/config.toml"
+    }
+   },
+   {
+    "name": "probe_grok_user",
+    "transport": "stdio",
+    "target": "/usr/bin/true",
+    "source": {
+     "type": "configToml",
+     "path": "/home/user/.grok/config.toml"
+    }
+   },
+   {
+    "name": "probe_claude_user",
+    "transport": "stdio",
+    "target": "/usr/bin/true",
+    "source": {
+     "type": "claudeJson",
+     "path": "/home/user/.claude.json"
+    },
+    "disabled": true,
+    "compatibilityStatus": "disabled",
+    "vendor": "claude"
+   },
+   {
+    "name": "probe_cursor_user",
+    "transport": "stdio",
+    "target": "/usr/bin/true",
+    "source": {
+     "type": "mcpJson",
+     "path": "/home/user/.cursor/mcp.json"
+    },
+    "disabled": true,
+    "compatibilityStatus": "disabled",
+    "vendor": "cursor"
+   },
+   {
+    "name": "probe_mcpjson_project",
+    "transport": "stdio",
+    "target": "/usr/bin/true",
+    "source": {
+     "type": "mcpJson",
+     "path": "/home/user/work/.mcp.json"
+    }
+   }
+  ],
+  "externalCompat": {
+   "remoteSettingsLoaded": false,
+   "cells": [
+    {
+     "vendor": "cursor",
+     "surface": "mcps",
+     "enabled": false,
+     "source": "env"
+    },
+    {
+     "vendor": "claude",
+     "surface": "mcps",
+     "enabled": false,
+     "source": "env"
+    }
+   ]
+  }
+ }
+}

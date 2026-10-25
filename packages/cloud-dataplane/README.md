@@ -42,6 +42,9 @@ createByokCloud({
   // core, cloud: stores, crypto, tokenSigner, clock, capabilities, ...
   truthCommitter,
   truthObjectDownloads: stores.blobs,
+  // From '@byok-sdk/cloud-dataplane/runtime'. Without it, maintenance keeps
+  // every used device-proof requestId in proof_request_receipt.
+  proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) },
 });
 ```
 
@@ -302,6 +305,13 @@ holds no key and verifies no signature; members do.
 Device revocation and machine supersession delete the device's registration,
 MACs and the packages addressed to its member in the device transaction.
 Tenant erasure deletes all five tables.
+
+Migration `0029_e2ee_member_kem_floor.sql` adds `e2ee_member_kem_floor`: an
+append that stores a `rotate` entry raises its member's KEM floor, and a
+package put refuses a package below its recipient's floor with
+`e2ee_scope_key_package_stale`. Both take the member's transaction lock after
+the scope locks. It also adds the index of the device's paged read of its own
+packages. Tenant erasure deletes the floor table too.
 
 ## Task redaction
 

@@ -1,4 +1,5 @@
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
+import { DaemonConfigFieldRemovedError } from '../daemon/daemon-errors';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { describe, expect, it } from 'vitest';
 import { LocalStorageConfigError, resolveStorageConfig, resolveStorageBudget, DEFAULT_RETENTION_TTL_MS } from '../daemon/retention/config';
@@ -32,9 +33,9 @@ describe('storage configuration and protected authority', () => {
   });
   it('rejects removed configuration and old journal ports instead of silently disabling retention', () => {
     const config = { localAgentRelease: { version: '0.0.0-test' }, productName:'Retention',productId:'retention-policy',serverUrl:'http://127.0.0.1:1',workspaceRoot:testScratchRoot(),storeDir:testScratchRoot(),storage:{scratchRoot:testScratchRoot()} };
-    expect(() => createDaemonWithAdapters({ ...config, hostedJournal: { mode:'sqlite',storagePolicy:BASE } as never },[new StubRuntimeAdapter()])).toThrow(LocalStorageConfigError);
-    expect(() => createDaemonWithAdapters(config,[new StubRuntimeAdapter()],{hostedJournal:{pressureEngine:{}}} as never)).toThrow(LocalStorageConfigError);
-    expect(() => createDaemonWithAdapters({ ...config, hostedJournal:{mode:'sqlite'} },[new StubRuntimeAdapter()],{hostedJournal:{journal:{} as never}})).toThrow(/confirmed-retention ports/);
+    expect(() => createDaemonWithAdapters({ ...config, hostedJournal: { mode:'sqlite',storagePolicy:BASE } } as never,[new StubRuntimeAdapter()])).toThrow(DaemonConfigFieldRemovedError);
+    expect(() => createDaemonWithAdapters(config,[new StubRuntimeAdapter()],{hostedJournal:{pressureEngine:{}}} as never)).toThrow(DaemonConfigFieldRemovedError);
+    expect(() => createDaemonWithAdapters(config,[new StubRuntimeAdapter()],{journal:{} as never})).toThrow(/confirmed-retention ports/);
   });
   it('has no type-level deletion spelling for protected classes', () => {
     const protectedId: ProtectedClassId = 'quarantine';

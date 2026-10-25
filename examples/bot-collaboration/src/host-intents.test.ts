@@ -13,6 +13,8 @@ import { botCompactVeto } from './compaction';
  */
 const submitted = new Map<string, { taskId: string; deviceId: string; payload: { agentRef: unknown; terminalProjection: { contract: string } } }>();
 let paused = false;
+/** When set, a Bot Turn task completes with the result document that it returns for the task id. */
+let botDocument: ((taskId: string) => unknown) | undefined;
 const server = {
   executions: { submit: async (input: { taskId: string; deviceId: string; payload: { agentRef: unknown; terminalProjection: { contract: string } } }) => {
     submitted.set(input.taskId, input); return {};
@@ -24,8 +26,12 @@ const server = {
     },
     deviceTerminal: async (taskId: string) => {
       const input = submitted.get(taskId);
-      return input && !paused && input.payload.terminalProjection.contract === 'host-core-test-v1'
-        ? { envelope: { type: 'task.complete', task_id: taskId, payload: { document: { summary: 'host research done' } } } } : undefined;
+      if (!input || paused) return undefined;
+      if (input.payload.terminalProjection.contract === 'host-core-test-v1') {
+        return { envelope: { type: 'task.complete', task_id: taskId, payload: { document: { summary: 'host research done' } } } };
+      }
+      const document = botDocument?.(taskId);
+      return document === undefined ? undefined : { envelope: { type: 'task.complete', task_id: taskId, payload: { document } } };
     },
     attempt: async (taskId: string) => {
       const input = submitted.get(taskId);
@@ -40,7 +46,7 @@ let root: string | undefined, ledger: HostLedger | undefined, bot: BotCollaborat
 afterEach(async () => {
   await bot?.close(); ledger?.close();
   if (root) rmSync(root, { recursive: true, force: true });
-  root = ledger = bot = undefined; paused = false;
+  root = ledger = bot = undefined; paused = false; botDocument = undefined;
   submitted.clear();
 });
 function openBot(hostIntents: Record<string, HostIntentHandler>, extra: Partial<BotOptions> = {}): BotCollaboration {
@@ -112,6 +118,105 @@ it('keeps a failed handler intent open across a restart, and a fixed handler set
   await bot.recover();
   await bot.drain();
   expect({ conclusion: bot.core.intent(KEY)?.conclusion, seen }).toEqual({ conclusion: 'succeeded', seen: [{ summary: 'host research done' }] });
+});
+
+const ownerFailures = () => bot!.snapshot().audit.filter(row => row.startsWith('Intent failed by owner'));
+
+it('fails a stuck intent on an owner call, so drain moves past it and the Bot FIFO runs', async () => {
+  bot = openBot({});
+  // A direct `core.enqueue` on the Main Bot's agentRef: its refused terminal holds the Bot's FIFO.
+  await bot.core.enqueue(input({ execution: template('device') }));
+  await expect(bot.input('k1', 'hello')).rejects.toMatchObject({ code: 'unknown_intent' });
+  const turnIntent = () => Object.values(ledger!.snapshot().intents).find(row => row.key !== KEY);
+  // Without the owner call, the intent stays and each drain rejects.
+  await expect(bot.drain()).rejects.toMatchObject({ code: 'unknown_intent' });
+  expect({ host: bot.core.intent(KEY)?.conclusion, turn: turnIntent()?.phase }).toEqual({ host: undefined, turn: 'queued' });
+  await bot.failStuckIntent(KEY);
+  expect({ host: bot.core.intent(KEY)?.conclusion, turn: turnIntent()?.phase }).toEqual({ host: 'failed', turn: 'inflight' });
+  await expect(bot.drain()).resolves.toBeUndefined();
+  expect(ownerFailures()).toEqual([`Intent failed by owner unknown_intent: ${KEY} No Bot Turn or Host intent has this key`]);
+});
+
+it('fails a failed handler intent after a restart, and only the probe drain of the call runs the handler', async () => {
+  let calls = 0;
+  const failing: HostIntentHandler = () => { calls++; throw new Error('research store offline'); };
+  bot = openBot({ research: failing });
+  await expect(bot.enqueueHostIntent(input(), 'research')).rejects.toMatchObject({ code: 'handler_failed' });
+  // A fresh process has no refusal yet; the call drains first to find it.
+  bot = await restart({ research: failing });
+  const before = calls;
+  await bot.failStuckIntent(KEY);
+  // The drain inside the call applies the terminal once more; the settle and later drains run no handler.
+  expect({ conclusion: bot.core.intent(KEY)?.conclusion, calls }).toEqual({ conclusion: 'failed', calls: before + 1 });
+  await expect(bot.drain()).resolves.toBeUndefined();
+  expect(calls).toBe(before + 1);
+  expect(ownerFailures()).toEqual([`Intent failed by owner handler_failed: ${KEY} research store offline`]);
+  // The ownership record stays until K4 compacts the intent, so an exact replay returns the failed intent.
+  expect(bot.snapshot().hostIntents).toEqual({ [KEY]: { handler: 'research' } });
+  expect((await bot.enqueueHostIntent(input(), 'research')).conclusion).toBe('failed');
+  // A settled intent needs no handler at a restart.
+  bot = await restart({});
+});
+
+it('refuses to fail an unknown key, an intent that can still settle, a settled intent and a non-owner', async () => {
+  paused = true;
+  bot = openBot({ research: () => {} });
+  await expect(bot.failStuckIntent('missing')).rejects.toThrow('Unknown intent: missing');
+  await bot.enqueueHostIntent(input(), 'research');
+  await expect(bot.failStuckIntent(KEY)).rejects.toThrow(`Intent is not stuck: ${KEY} has no refused terminal`);
+  const turnId = await bot.input('k1', 'hello');
+  await expect(bot.failStuckIntent(turnId)).rejects.toThrow(`Intent is not stuck: ${turnId}`);
+  await expect(bot.failStuckIntent(KEY, { id: 'guest', kind: 'human' })).rejects.toThrow('not_owner: failStuckIntent needs the owner principal');
+  paused = false;
+  await bot.drain();
+  await expect(bot.failStuckIntent(KEY)).rejects.toThrow(`Intent already settled: ${KEY}`);
+  expect(bot.core.intent(KEY)?.conclusion).toBe('succeeded');
+  expect(ownerFailures()).toEqual([]);
+});
+
+it('throws the error of a drain that stopped before it reached the intent', async () => {
+  paused = true;
+  bot = openBot({ research: () => {} });
+  await bot.enqueueHostIntent(input(), 'research');
+  const drain = vi.spyOn(bot.core, 'drain').mockRejectedValueOnce(new Error('scan stopped'));
+  onTestFinished(() => { drain.mockRestore(); });
+  await expect(bot.failStuckIntent(KEY)).rejects.toThrow('scan stopped');
+  expect(drain).toHaveBeenCalledTimes(1);
+  expect(bot.core.intent(KEY)?.conclusion).toBeUndefined();
+  expect(ownerFailures()).toEqual([]);
+});
+
+it('refuses to fail a Bot Turn that is only queued behind another stuck intent', async () => {
+  bot = openBot({});
+  // The stuck direct intent holds the head of the Bot FIFO, so the queued Turn has no refusal of its own.
+  await bot.core.enqueue(input({ execution: template('device') }));
+  await expect(bot.input('k1', 'hello')).rejects.toMatchObject({ code: 'unknown_intent' });
+  const turnId = Object.values(ledger!.snapshot().intents).find(row => row.key !== KEY)!.key;
+  await expect(bot.failStuckIntent(turnId)).rejects.toThrow(`Intent is not stuck: ${turnId} has no refused terminal`);
+  expect(ownerFailures()).toEqual([]);
+});
+
+it('fails a Bot Turn whose outcome commit throws on an owner call, so its FIFO moves on and the Turn ends failed', async () => {
+  // The first Bot Turn task completes with a document outside its frozen schema, so K8's outcome commit throws in the K4
+  // terminal transaction. Later tasks stay in flight.
+  let first: string | undefined;
+  botDocument = taskId => (first ??= taskId) === taskId ? { summary: 'not a Bot Turn outcome' } : undefined;
+  bot = openBot({});
+  const refused = { name: 'IntentOutcomeError', code: 'outcome_failed', message: 'Outcome differs from the frozen schema' };
+  await expect(bot.input('k1', 'hello')).rejects.toMatchObject(refused);
+  const turnId = Object.keys(bot.snapshot().turns)[0]!;
+  await expect(bot.drain()).rejects.toMatchObject({ ...refused, key: turnId });
+  expect(bot.core.intent(turnId)).toMatchObject({ phase: 'inflight' });
+  expect(refusals()).toEqual([`Intent outcome refused outcome_failed: ${turnId} Outcome differs from the frozen schema`]);
+  // The next Turn of the Bot waits behind it.
+  await expect(bot.input('k2', 'next')).rejects.toMatchObject(refused);
+  const next = () => Object.values(ledger!.snapshot().intents).find(row => row.key !== turnId)!;
+  expect(next().phase).toBe('queued');
+  await bot.failStuckIntent(turnId);
+  expect(bot.core.intent(turnId)?.conclusion).toBe('failed');
+  expect(bot.snapshot().turns[turnId]).toMatchObject({ status: 'failed', conclusion: 'failed', reported: true });
+  expect(ownerFailures()).toEqual([`Intent failed by owner outcome_failed: ${turnId} Outcome differs from the frozen schema`]);
+  expect(next().phase).toBe('inflight');
 });
 
 it('refuses an async handler, and consumes its rejection', async () => {

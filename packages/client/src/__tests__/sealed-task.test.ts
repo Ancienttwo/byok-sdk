@@ -10,7 +10,7 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import vm from 'node:vm';
 import { generateScopeKey } from '@byok-sdk/core/sealed-payload';
-import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, decodeEnvelope, encodeEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentHomeManager } from '../agent-home';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -154,5 +154,104 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
     const { sent } = await runEgressTask({ scopeId: 'scope-a', epoch: 1, categories: ['task-output'] });
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(sent.filter((envelope) => envelope.type === 'agent.message.draft')).toEqual([]);
+  });
+});
+
+describe('the failure class of a sealed task (#869)', () => {
+  const sealedTasks = async (keyring: SealedScopeKeyring, taskId: string, flags: readonly string[] = []) => {
+    const tasks = new SealedTasks({ keyring, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } }, serverCapabilities: () => flags });
+    await tasks.openOffer(createEnvelope('task.offer_sealed', {
+      instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+    } as never, { taskId, seq: 1 }));
+    return tasks;
+  };
+  const failure = { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' } as const;
+
+  it('stays plaintext on task.fail_sealed', async () => {
+    const tasks = await sealedTasks(new GatedKeyring(), 'sealed-fail');
+    const sealed = await tasks.sealOutbound(createEnvelope('task.fail', { reason: 'secret reason', retryable: false, failure }, { taskId: 'sealed-fail' }));
+    expect(sealed?.type).toBe('task.fail_sealed');
+    // The strict sealed decoder accepts it.
+    expect(decodeEnvelope(encodeEnvelope(sealed!)).payload).toMatchObject({ retryable: false, failure });
+    expect(JSON.stringify(sealed!.payload)).not.toContain('secret reason');
+  });
+
+  it('is unknown on a replacement failure the daemon makes, whatever the replaced task.fail carried', async () => {
+    // The key is there when the offer opens and gone when the terminal seals.
+    const keyless: SealedScopeKeyring = new GatedKeyring();
+    const tasks = await sealedTasks(keyless, 'keyless', ['runtime-failure-class']);
+    const other = await sealedTasks(keyless, 'keyless-2', ['runtime-failure-class']);
+    keyless.sealingKey = async () => undefined;
+    const withClass = await tasks.sealOutbound(createEnvelope('task.fail', { reason: 'r', retryable: false, failure }, { taskId: 'keyless' }));
+    expect(withClass?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' } });
+    const withoutClass = await other.sealOutbound(createEnvelope('task.fail', { reason: 'r', retryable: false }, { taskId: 'keyless-2' }));
+    expect(withoutClass?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' } });
+  });
+
+  it('carries no class on a replacement failure when the server does not advertise the flag', async () => {
+    const keyless: SealedScopeKeyring = new GatedKeyring();
+    const tasks = await sealedTasks(keyless, 'keyless-no-flag');
+    keyless.sealingKey = async () => undefined;
+    const replaced = await tasks.sealOutbound(createEnvelope('task.fail', { reason: 'r', retryable: false, failure }, { taskId: 'keyless-no-flag' }));
+    expect(replaced?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false });
+  });
+
+  it('gives a sealed task.complete that cannot be sealed a class by the live server flags', async () => {
+    const keyless: SealedScopeKeyring = new GatedKeyring();
+    let flags: readonly string[] | undefined = ['runtime-failure-class'];
+    const open = async (taskId: string) => {
+      const tasks = new SealedTasks({ keyring: keyless, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } }, serverCapabilities: () => flags });
+      await tasks.openOffer(createEnvelope('task.offer_sealed', {
+        instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+      } as never, { taskId, seq: 1 }));
+      return tasks;
+    };
+    const advertised = await open('complete-flag');
+    const without = await open('complete-no-flag');
+    const between = await open('complete-between');
+    keyless.sealingKey = async () => undefined;
+    const complete = (taskId: string) => createEnvelope('task.complete', { summary: 'done', sessionRef: 'session' }, { taskId });
+
+    expect((await advertised.sealOutbound(complete('complete-flag')))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' } });
+    flags = [];
+    expect((await without.sealOutbound(complete('complete-no-flag')))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false });
+    flags = undefined;
+    expect((await between.sealOutbound(complete('complete-between')))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false });
+  });
+});
+
+describe('a terminal built for a sealed task in a run that may not seal it (#866 R1, R2)', () => {
+  const tasks = () => new SealedTasks({
+    keyring: new GatedKeyring(), tenantId: 'tenant-test', deviceId: 'dev_1',
+    blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
+    serverCapabilities: () => [],
+  });
+  const sealedOffer = createEnvelope('task.offer_sealed', {
+    instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+  } as never, { taskId: 'recovered', seq: 1 });
+
+  it.each([
+    ['an interrupted task.fail with its recovery', createEnvelope('task.fail', {
+      reason: 'daemon_interrupted', retryable: false, recovery: { kind: 'daemon_interrupted', offerId: sealedOffer.id },
+    } as never, { taskId: 'recovered' })],
+    ['a task.decline with its sealed code', createEnvelope('task.decline', { reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false } as never, { taskId: 'recovered' })],
+    ['a task.cancelled without a reason', createEnvelope('task.cancelled', {} as never, { taskId: 'recovered' })],
+  ])('keeps %s, which is already a closed plaintext form', async (_label, terminal) => {
+    expect(await tasks().sealRecovered(sealedOffer, terminal, false)).toBe(terminal);
+  });
+
+  it('gives any other terminal its closed plaintext form, with no free text', async () => {
+    const fail = createEnvelope('task.fail', { reason: 'secret reason', retryable: true, agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } } as never, { taskId: 'recovered' });
+    const closed = await tasks().sealRecovered(sealedOffer, fail, false);
+    expect(closed.type).toBe('task.fail');
+    expect(closed.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } });
+    const cancelled = await tasks().sealRecovered(sealedOffer, createEnvelope('task.cancelled', { reason: 'secret reason' } as never, { taskId: 'recovered' }), false);
+    expect(cancelled.payload).toEqual({});
+  });
+
+  it('keeps every terminal of a task whose offer does not seal output', async () => {
+    const plainOffer = createEnvelope('task.offer', { instruction: 'plain instruction' }, { taskId: 'recovered', seq: 1 });
+    const fail = createEnvelope('task.fail', { reason: 'plain reason', retryable: false }, { taskId: 'recovered' });
+    expect(await tasks().sealRecovered(plainOffer, fail, false)).toBe(fail);
   });
 });

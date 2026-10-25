@@ -153,6 +153,14 @@
 //                                          `--mcp-config` server's tools.
 //   FAKE_CLAUDE_MCP_STATUS_NO_ACK=1     -> never answer `mcp_status`.
 //   FAKE_CLAUDE_MCP_STATUS_RECEIPT=<path> -> append each `mcp_status` request.
+//   FAKE_CLAUDE_FAILURES=<json array>   -> entry N fails turn N+1 the way an
+//                                          API error does: an optional
+//                                          `rate_limit_event` with
+//                                          `rateLimit` as its info, an
+//                                          assistant frame with `error`, then
+//                                          an `is_error` result with
+//                                          `api_error_status: status`.
+//                                          `{ "exit": true }` exits instead.
 //   FAKE_CLAUDE_RESULT_MALFORMED=1      -> cross-model re-review (P1
 //                                          regression): the turn's `result`
 //                                          frame is sent with `is_error`
@@ -171,6 +179,17 @@
 //                                          "wait for the process to exit" —
 //                                          the process staying alive is the
 //                                          whole point of this toggle.
+//   FAKE_CLAUDE_PERSIST_SESSIONS=1      -> stands in for Claude's session
+//                                          transcript: each turn appends its
+//                                          instruction to
+//                                          `$CLAUDE_CONFIG_DIR/projects/<cwd
+//                                          with every non-alphanumeric
+//                                          character as '-'>/<session>.jsonl`,
+//                                          unless argv has
+//                                          `--no-session-persistence`. It
+//                                          requires CLAUDE_CONFIG_DIR, so a
+//                                          test never writes the real
+//                                          `~/.claude`.
 
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -385,6 +404,7 @@ function runProbeOrTurnFlow() {
     '--mcp-config': true,
     '--strict-mcp-config': false,
     '--settings': true,
+    '--no-session-persistence': false,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -505,6 +525,16 @@ function runProbeOrTurnFlow() {
 
   async function runTurn(incomingText) {
     turn += 1;
+    if (process.env.FAKE_CLAUDE_PERSIST_SESSIONS === '1' && !argv.includes('--no-session-persistence')) {
+      const configDir = process.env.CLAUDE_CONFIG_DIR;
+      if (!configDir) {
+        process.stderr.write('FAKE_CLAUDE_PERSIST_SESSIONS requires CLAUDE_CONFIG_DIR\n');
+        process.exit(1);
+      }
+      const projectDir = path.join(configDir, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'));
+      mkdirSync(projectDir, { recursive: true });
+      appendFileSync(path.join(projectDir, `${reportedSessionId}.jsonl`), `${JSON.stringify({ type: 'user', text: incomingText })}\n`);
+    }
 
     send({
       type: 'system',
@@ -592,6 +622,24 @@ function runProbeOrTurnFlow() {
 
     if (process.env.FAKE_CLAUDE_HANG_AFTER_TOOL === '1') {
       return; // stay "running" indefinitely — see the toggle's doc comment above
+    }
+
+    const failure = JSON.parse(process.env.FAKE_CLAUDE_FAILURES ?? '[]')[turn - 1];
+    if (failure) {
+      if (failure.exit === true) process.exit(1);
+      if (failure.rateLimit !== undefined) send({ type: 'rate_limit_event', rate_limit_info: failure.rateLimit, session_id: reportedSessionId });
+      const text = failure.text ?? 'API Error: fixture failure';
+      send({
+        type: 'assistant',
+        message: { model: '<synthetic>', id: `msg_${turn}e`, role: 'assistant', content: [{ type: 'text', text }] },
+        ...(failure.error === undefined ? {} : { error: failure.error }),
+        session_id: reportedSessionId,
+      });
+      send({
+        type: 'result', subtype: 'success', is_error: true, duration_ms: 10, duration_api_ms: 8, num_turns: turn,
+        session_id: reportedSessionId, total_cost_usd: 0, usage: {}, result: text, api_error_status: failure.status ?? null, permission_denials: [],
+      });
+      return;
     }
 
     const finalText = `reply-${turn}:${mcpResultText ?? incomingText}`;

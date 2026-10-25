@@ -397,17 +397,38 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       if (keepPoisoning) server.pushRawLongPollEvent(poison);
     }, 10);
 
+    // Counts poll RESPONSES that carried seq=1, not seq=1 entries: one page can
+    // hold many queued copies, and the warn-once Set would hide a per-poll warn
+    // inside a single page. The loop sends its next poll only after it has
+    // processed the previous page, so a counted response implies every earlier
+    // counted one has already been through the warn path.
+    const realFetch = globalThis.fetch;
+    let poisonPagesDelivered = 0;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const res = await realFetch(input, init);
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname === '/byok/events' && res.ok) {
+        const page = (await res.clone().json()) as { events?: Array<{ seq?: unknown }> };
+        if (page.events?.some((event) => event.seq === 1)) poisonPagesDelivered += 1;
+      }
+      return res;
+    });
+    const warnCallsForSeq1 = () => warnSpy.mock.calls.filter((args) => String(args[0]).includes('seq=1'));
+
     try {
-      // Many retry cycles' worth of real time — the SAME seq=1 failure is
-      // rediscovered on every single one of them.
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await vi.waitFor(() => expect(warnCallsForSeq1().length).toBeGreaterThanOrEqual(1), { timeout: 5_000 });
+      // The SAME seq=1 failure must be rediscovered on several later polls; +6
+      // leaves at least 5 fully processed redeliveries after the first warn.
+      const deliveredAtFirstWarn = poisonPagesDelivered;
+      await vi.waitFor(() => expect(poisonPagesDelivered).toBeGreaterThanOrEqual(deliveredAtFirstWarn + 6), { timeout: 5_000 });
       expect(received).toEqual([]); // never becomes a real envelope
 
-      const warnCallsForThisSeq = warnSpy.mock.calls.filter((args) => String(args[0]).includes('seq=1'));
-      expect(warnCallsForThisSeq).toHaveLength(1); // exactly once despite many redeliveries across ~15 cycles
+      const warnCallsForThisSeq = warnCallsForSeq1();
+      expect(warnCallsForThisSeq).toHaveLength(1); // exactly once despite many separate redeliveries
     } finally {
       keepPoisoning = false;
       clearInterval(poisonTimer);
+      fetchSpy.mockRestore();
       warnSpy.mockRestore();
     }
   });

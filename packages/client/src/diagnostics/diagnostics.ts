@@ -595,7 +595,7 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
     {
       id: 'config',
       status: snapshot.config.serverProtocol === 'invalid' ? 'fail' : 'pass',
-      summary: `server protocol=${snapshot.config.serverProtocol}; hostedJournal=${snapshot.config.hostedJournal}`,
+      summary: `server protocol=${snapshot.config.serverProtocol}`,
     },
     {
       id: 'device',
@@ -756,7 +756,6 @@ export async function collectDiagnostics(
     config: {
       serverProtocol: safeProtocol(config.serverUrl),
       customStoreDir: config.storeDir !== undefined,
-      hostedJournal: config.hostedJournal !== undefined,
       ...(config.runtimeAllowlist ? { runtimeAllowlistCount: config.runtimeAllowlist.length } : {}),
     },
     device,

@@ -2,13 +2,11 @@ import { testScratchRoot, testScratchOwner } from "./fixtures/execution-scratch"
 /**
  * L-002: the durable journal wired into the daemon.
  *
- * Two claims are under test, and they pull in opposite directions on purpose:
+ * Two claims are under test:
  *
- * 1. **Opt-in means opt-in.** With no `hostedJournal` config, NO journal object
- *    is constructed, no database file appears, and the envelope/send closures
- *    are the originals. This is the contract's own falsifier — if the default
- *    path had to change to make hosted mode work, "opt-in" was never true.
- * 2. **In hosted mode, the ack cannot outrun the commit.** Not by discipline —
+ * 1. **Every daemon journals (#924).** The default config constructs exactly
+ *    one journal, rooted at `storeDir`.
+ * 2. **The ack cannot outrun the commit.** Not by discipline —
  *    structurally. `ConnectionManager.process` advances the redelivery cursor
  *    only once `onEnvelope` resolves (unchanged by this slice; transport
  *    untouched), and `onEnvelope` does not resolve until the journal
@@ -27,8 +25,9 @@ import { CursorStore } from '../daemon/cursor-store';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type AdmissionGuardDecision, type TaskRunnerDeps } from '../daemon/task-runner';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
+import { DaemonConfigFieldRemovedError } from '../daemon/daemon-errors';
 import { DEFAULT_JOURNAL_BUSY_TIMEOUT_MS, JOURNAL_DB_FILENAME } from '../daemon/journal/sqlite-journal';
-import { isSqliteAvailable, openJournalDatabase } from '../daemon/journal/sqlite-support';
+import { openJournalDatabase } from '../daemon/journal/sqlite-support';
 import type { JournalIdentity, JournalReceipt, LocalTaskJournal, LocalTerminalRecord, ReceivedEnvelopeRecord, RecoverableTask } from '../daemon/journal/journal';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -132,6 +131,11 @@ class RecordingJournal implements LocalTaskJournal {
     if (!terminal) throw new Error('terminal acknowledgement does not match durable terminal');
     this.terminals[this.terminals.indexOf(terminal)] = { ...terminal, truthState: 'failed', lastError: reason };
   }
+  async replaceRefusedTerminal(taskId: string, refusedPayloadHash: string, record: LocalTerminalRecord): Promise<void> {
+    const terminal = this.terminals.find((candidate) => candidate.taskId === taskId && candidate.payloadHash === refusedPayloadHash && candidate.truthState === 'failed');
+    if (!terminal) throw new Error('terminal replacement does not match a refused durable terminal');
+    this.terminals[this.terminals.indexOf(terminal)] = record;
+  }
   async listRecoveryTasks(): Promise<[]> { return []; }
   async readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | undefined> {
     const task = this.tasks.get(taskId);
@@ -186,7 +190,7 @@ describe('hosted journal integration (L-002)', () => {
         ...configOverrides,
       },
       [adapter],
-      journal ? { hostedJournal: { journal } } : {},
+      journal ? { journal } : {},
     );
     const record = await daemon.pair('pairing-code');
     await daemon.start();
@@ -204,7 +208,7 @@ describe('hosted journal integration (L-002)', () => {
           ? { id: envelope.id, outcome: 'rejected' as const, reason: 'state_conflict' }
           : { id: envelope.id, outcome: 'accepted' as const }) };
     });
-    const { adapter, storeDir } = await startDaemon({ hostedJournal: { mode: 'sqlite' } }, journal);
+    const { adapter, storeDir } = await startDaemon({}, journal);
     const rejected: import('../daemon/observer').DaemonEvent[] = [];
     daemon!.subscribe((event) => {
       if (event.kind === 'outbound-rejected') {
@@ -238,7 +242,7 @@ describe('hosted journal integration (L-002)', () => {
       if (unavailable) throw new Error('EIO');
       await recordTerminal(record);
     });
-    const { adapter } = await startDaemon({ hostedJournal: { mode: 'sqlite' } }, journal);
+    const { adapter } = await startDaemon({}, journal);
     server.send(createEnvelope('task.offer', { instruction: 'unique result' },
       { taskId: 'terminal-retry', seq: server.nextSeq() }));
     await server.waitFor(e => e.type === 'task.started');
@@ -264,7 +268,7 @@ describe('hosted journal integration (L-002)', () => {
       if (unavailable) throw new Error('ENOSPC');
       await recordTerminal(record);
     });
-    const { adapter, storeDir, deviceId } = await startDaemon({ hostedJournal: { mode: 'sqlite' } }, journal);
+    const { adapter, storeDir, deviceId } = await startDaemon({}, journal);
     const seq = server.nextSeq();
     const offer = createEnvelope('task.offer', { instruction: 'invalid limit', limits: { maxTokens: 1 } },
       { taskId: 'decline-retry', seq });
@@ -279,35 +283,15 @@ describe('hosted journal integration (L-002)', () => {
     expect(adapter.startCalls).toHaveLength(0);
   });
 
-  describe('the default path', () => {
-    it('constructs no journal object and creates no database, through a full task lifecycle', async () => {
-      const { adapter, storeDir } = await startDaemon({});
-
-      server.send(
-        createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-default-1', seq: server.nextSeq() }),
-      );
-      await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-default-1');
-      adapter.sessions[0]?.emit({ type: 'turn_end' });
-      await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-default-1');
-
-      // The evidence that matters: not "the file is missing" (a constructed
-      // journal that never wrote would also look like that) but "the
-      // constructor was never reached".
-      expect(journalConstructions.storeDirs).toEqual([]);
-      expect(await exists(path.join(storeDir, JOURNAL_DB_FILENAME))).toBe(false);
-    });
-  });
-
   describe('configuration', () => {
-    it('constructs exactly one journal, rooted at storeDir, when hostedJournal is set', async () => {
-      if (!isSqliteAvailable()) return; // the real class is under test here; see journal-unavailable.test.ts for the Node 20 half
-      const { storeDir } = await startDaemon({ hostedJournal: { mode: 'sqlite' } });
+    it('constructs exactly one journal, rooted at storeDir, with the default config', async () => {
+      const { storeDir } = await startDaemon({});
 
       expect(journalConstructions.storeDirs).toEqual([storeDir]);
       expect(await exists(path.join(storeDir, JOURNAL_DB_FILENAME))).toBe(true);
     });
 
-    it('rejects an unknown mode at construction, before any daemon exists', async () => {
+    it('refuses the removed hostedJournal field at construction, before any daemon exists', async () => {
       const base: DaemonConfig = {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-journal',
@@ -317,8 +301,8 @@ describe('hosted journal integration (L-002)', () => {
       };
 
       expect(() =>
-        createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  ...base, hostedJournal: { mode: 'jsonl' as 'sqlite' } }, []),
-      ).toThrow(/must be "sqlite"/);
+        createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...base, hostedJournal: { mode: 'sqlite' } } as DaemonConfig, []),
+      ).toThrow(DaemonConfigFieldRemovedError);
       // Nothing was constructed on the rejected path.
       expect(journalConstructions.storeDirs).toEqual([]);
     });
@@ -327,10 +311,7 @@ describe('hosted journal integration (L-002)', () => {
   describe('ack ordering', () => {
     it('holds the whole envelope chain — and the cursor — behind the journal commit', async () => {
       const journal = new RecordingJournal();
-      const { adapter, storeDir, deviceId } = await startDaemon(
-        { hostedJournal: { mode: 'sqlite' } },
-        journal,
-      );
+      const { adapter, storeDir, deviceId } = await startDaemon({}, journal);
       const cursorStore = new CursorStore(storeDir);
       // The handshake's own inbound envelope (`conn.ack`) is journaled too —
       // EVERY inbound envelope is, since every one of them can move the
@@ -371,7 +352,7 @@ describe('hosted journal integration (L-002)', () => {
 
     it('records the terminal in the journal before it reaches the wire', async () => {
       const journal = new RecordingJournal();
-      const { adapter } = await startDaemon({ hostedJournal: { mode: 'sqlite' } }, journal);
+      const { adapter } = await startDaemon({}, journal);
 
       server.send(
         createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-terminal-1', seq: server.nextSeq() }),
@@ -391,7 +372,6 @@ describe('hosted journal integration (L-002)', () => {
 
   describe('recovery scan on start', () => {
     it('marks tasks the previous run left open, without resuming or deleting them', async () => {
-      if (!isSqliteAvailable()) return;
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const { SqliteLocalTaskJournal } = await import('../daemon/journal/sqlite-journal');
       const { journalHash } = await import('../daemon/journal/journal');
@@ -425,7 +405,6 @@ describe('hosted journal integration (L-002)', () => {
             serverUrl: server.url,
             workspaceRoot: await tmpDir('byok-journal-recover-workspace-'),
             storeDir,
-            hostedJournal: { mode: 'sqlite' },
           },
           [adapter],
         );

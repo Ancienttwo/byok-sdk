@@ -41,6 +41,7 @@ const EXPECTED_CAPABILITIES = [
   'agent-content-artifact-read',
   'sealed-payload-v1',
   'sealed-output-ciphertext-ref',
+  'runtime-failure-class',
 ];
 
 describe('GET /byok/events protocol capability advertisement', () => {

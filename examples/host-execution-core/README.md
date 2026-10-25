@@ -77,6 +77,11 @@ Keep one FIFO per `(tenant, deviceId, agentId)`. Profile changes do not create a
 Use the embedded wake queue for execution deadlines and backoff.
 An out-of-horizon routine candidate uses process-local backoff until K2 can accept it.
 Keep outcome semantics in a synchronous injected callback. K8 actions are outside K4.
+A callback that throws rolls the terminal transaction back. The intent stays open at the head
+of its FIFO, its outbox row keeps `lastError`, and each scan applies the terminal again. To end
+such an intent without its outcome, the Host calls the exported `settle(state, intent, conclusion)`
+transition inside `ledger.transaction`. The settled intent records no terminal; the server task
+keeps it. K8 `failStuckIntent` does this.
 
 The owner resolved the initial expiry blocker on 2026-10-18.
 The allowed readbacks now include `tasks.attempt` and `tasks.get`.
@@ -184,6 +189,11 @@ the summary and creates the existing FIFO intent. Its waiting deadline is measur
 from occurrence admission (`recordedAt + waitMs`), not handler completion. A newer
 committed slot supersedes a late escalation; pause removes the cancelled successor
 cutoff. Normal Agent validation, retry and terminal settlement then apply.
+
+Promotion is the default (`hostJobExecution: 'promote'`). A Host with no owner for
+such an intent sets `hostJobExecution: 'fail'`: a result with `execution` then stores
+its summary and concludes the occurrence `failed`, with no promotion and no retry, and
+the drain rejects with `host_job_execution_unsupported`. K8's L and H Hosts do not promote.
 
 Committed results are never rerun on wake replay or `recover()`. On handler failure
 or invalid output, the pending outbox retains `lastError`, `job.attempts` increases,

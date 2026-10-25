@@ -26,6 +26,45 @@ function revertUndiciMove(before, after, field) {
   return true;
 }
 
+// The Pi 1.4.0 ruling (docs/spec.md) moves the nine official Pi packages from
+// exactly 1.3.0 to exactly 1.4.0 together: the root overrides, the client and
+// cloud-do dependencies (with byok.piRuntimePin) and bun.lock. PI_LOCK holds the
+// reviewed 1.4.0 lock rows, plus pi-tui's one new dependency.
+const PI_MOVE = { from: '1.3.0', to: '1.4.0' };
+export const PI_PACKAGES = ['chord', 'pi-agent-core', 'pi-ai', 'pi-codemode', 'pi-coding-agent', 'pi-durable', 'pi-mcp', 'pi-telemetry', 'pi-tui']
+  .map(name => `@earendil-works/${name}`);
+const PI_FIELDS = { 'packages/client': 'dependencies', 'packages/cloud-do': 'dependencies' };
+export const PI_LOCK = {
+  '@earendil-works/chord': ['@earendil-works/chord@1.4.0','',{'dependencies':{'@earendil-works/pi-telemetry':'1.4.0','typebox':'1.3.27'}},'sha512-dTbgyz4xgDS5KAUFx1bFENqj0Cr1N3tYxJJOYStc6g6HS78FSBZydyoCwLoddiQRF+VgRS0fpgAi+iKxjZ3BQA=='],
+  '@earendil-works/pi-agent-core': ['@earendil-works/pi-agent-core@1.4.0','',{'dependencies':{'@earendil-works/pi-ai':'1.4.0','typebox':'1.3.27'}},'sha512-PoKY84SKUwnt7S5QBZaGUqfNO1kjP3KHpHUA9QpFTj4cOjaVWMYIcBPJ6FDRCdE8Zen9OSECQUd0uUfVgtSmgA=='],
+  '@earendil-works/pi-ai': ['@earendil-works/pi-ai@1.4.0','',{'dependencies':{'@anthropic-ai/sdk':'0.129.0','@aws-sdk/client-bedrock-runtime':'3.1127.0','@earendil-works/pi-telemetry':'1.4.0','@google/genai':'2.21.0','@smithy/node-http-handler':'4.12.1','http-proxy-agent':'9.1.0','https-proxy-agent':'9.1.0','openai':'7.19.0','partial-json':'0.1.7','typebox':'1.3.27'},'bin':{'pi-ai':'dist/cli.js'}},'sha512-hQM/C4+1w8rHYACzDDf+0vQMnEnpzIop1tptIERVgR3ZeT/hHSzBNG8PaWPgxWQjqSeKCyBZSyp8uTT6eKK1pQ=='],
+  '@earendil-works/pi-codemode': ['@earendil-works/pi-codemode@1.4.0','',{'dependencies':{'quickjs-wasi':'3.6.2'}},'sha512-23CNAXpS9DuLzPMyYuvrXVVio46x4YhffCgCqaWmF7F5H8PooqjrQvX4ucF6M0BhUd+x2tV6r1J0dv8cCME4Cg=='],
+  '@earendil-works/pi-coding-agent': ['@earendil-works/pi-coding-agent@1.4.0','',{'dependencies':{'@earendil-works/pi-agent-core':'1.4.0','@earendil-works/pi-ai':'1.4.0','@earendil-works/pi-codemode':'1.4.0','@earendil-works/pi-mcp':'1.4.0','@earendil-works/pi-tui':'1.4.0','@silvia-odwyer/photon-node':'0.3.4','brace-expansion':'5.0.12','chalk':'6.0.0','cross-spawn':'7.0.6','diff':'8.0.4','grok-mermaid':'0.2.3','highlight.js':'10.7.3','hosted-git-info':'9.0.3','ignore':'7.0.8','jiti':'2.7.0','minimatch':'10.2.6','proper-lockfile':'4.1.2','quickjs-wasi':'3.6.2','semver':'7.8.5','typebox':'1.3.27','undici':'8.10.2','yaml':'2.9.0'},'bin':{'pi':'dist/bundle/cli.js'}},'sha512-Z41LpZ3yYHSC/UUps6Mr39UMFPwH8elhJBG9DY1P7kuzsE5qSK/6eMj2EHzO5evJRQWLbKSqUMw+4nCNtIyiQg=='],
+  '@earendil-works/pi-durable': ['@earendil-works/pi-durable@1.4.0','',{'dependencies':{'@earendil-works/chord':'1.4.0','@earendil-works/pi-ai':'1.4.0','@earendil-works/pi-codemode':'1.4.0','@earendil-works/pi-telemetry':'1.4.0','@silvia-odwyer/photon':'0.3.3','diff':'8.0.4','typebox':'1.3.27'}},'sha512-EtIyXH1MBSXdJSkodmy+CYXuwfve3gPrD4GNCZ0XmuRWLPupwRlNQ7fdaXjRcLoKb6SWkT/yEzK+sMmrqvYK+Q=='],
+  '@earendil-works/pi-mcp': ['@earendil-works/pi-mcp@1.4.0','',{'dependencies':{'cross-spawn':'7.0.6'}},'sha512-92aZmmGsUpHHknYuKXZHRINQfahntw5hU9If0I0ZM49GojOaFHpkl5/GF3/aatqpt7v7GjZbBfpfSygGKW+pnw=='],
+  '@earendil-works/pi-telemetry': ['@earendil-works/pi-telemetry@1.4.0','',{},'sha512-MLIfowwUYIY65jSjMX82paZOrX/NTvLk6D08h+3Jq42a99RzUOewzuCR0zOlPul3D6UBfddat76VT6LvsHEs1w=='],
+  '@earendil-works/pi-tui': ['@earendil-works/pi-tui@1.4.0','',{'dependencies':{'get-east-asian-width':'1.6.0','marked':'18.0.11','marked-cjk-friendly':'0.1.2'}},'sha512-4obPOjgOD7g4mGSlngIvxyujC1UPdmyI9zdVthbr8GufacFEX+Ce0+scPgHg++k2xj5+QjESM2d5TxvIuzCVmg=='],
+  'marked-cjk-friendly': ['marked-cjk-friendly@0.1.2','',{'peerDependencies':{'marked':'>=15.0.0'}},'sha512-GUj8HjiEbur9yhgUo52FBgKizggF1QtT6gVdrYdWW6ZB4lVVjgS3EyyXPyfyRD0V4ghGRPlO7MO80rgSWbm0eA=='],
+};
+const PI_ADDED = ['marked-cjk-friendly'];
+// Restore the old pins only when every Pi package in this field moves exactly.
+function revertPiMove(before, after, field) {
+  const from = before?.[field], to = after?.[field];
+  if (!plain(from) || !plain(to)) return false;
+  const names = PI_PACKAGES.filter(name => name in from || name in to);
+  if (!names.length || names.some(name => from[name] !== PI_MOVE.from || to[name] !== PI_MOVE.to)) return false;
+  for (const name of names) to[name] = PI_MOVE.from;
+  return true;
+}
+
+// #927 drops the protocol version from the server description and declares
+// the cloud-do test edge to client (its tests import client source).
+const SERVER_DESCRIPTION = Object.freeze({
+  from: 'BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, protocol v2, memory or single-process SQLite storage.',
+  to: 'BYOK SDK server: single-product, single-tenant embedded coordinator over @byok-sdk/cloud — wake-driven HTTP long-poll, memory or single-process SQLite storage.',
+});
+const CLOUD_DO_CLIENT_EDGE = '@byok-sdk/client';
+
 const version = value => typeof value === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -157,6 +196,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
   const before = parse(beforeText), after = parse(afterText);
   if (path === 'bun.lock') {
     admitHostedLock(before, after, cwd);
+    const piMoved = [];
     for (const [dir, record] of Object.entries(before.workspaces)) {
       if (dir === '') continue;
       const current = after.workspaces?.[dir];
@@ -180,8 +220,16 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
         && manifest.devDependencies?.esbuild === '0.28.1') {
         delete current.devDependencies.esbuild;
       }
+      if (dir === 'packages/cloud-do'
+        && record.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === undefined
+        && current.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === 'workspace:*'
+        && manifest.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === 'workspace:*') {
+        delete current.devDependencies[CLOUD_DO_CLIENT_EDGE];
+      }
       const undiciField = UNDICI_FIELDS[dir];
       if (undiciField && manifest[undiciField]?.undici === UNDICI_MOVE.to && revertUndiciMove(record, current, undiciField)) qualify.push(dir);
+      const piField = PI_FIELDS[dir];
+      if (piField && manifest[piField]?.['@earendil-works/pi-ai'] === PI_MOVE.to && revertPiMove(record, current, piField)) piMoved.push(dir);
       delete record.version; delete current.version;
     }
     // Both workspace pins and the resolved package move together, or nothing moves.
@@ -191,6 +239,17 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
         throw new Error('Reviewed CI mapping required: bun.lock must move both undici pins and the resolved undici entry together');
       }
       after.packages.undici = before.packages.undici;
+    }
+    // Every Pi pin, the overrides and the reviewed rows move together, or nothing moves.
+    if (piMoved.length) {
+      const rows = PI_PACKAGES.every(name => before.packages?.[name]?.[0] === `${name}@${PI_MOVE.from}` && isDeepStrictEqual(after.packages?.[name], PI_LOCK[name]))
+        && PI_ADDED.every(name => before.packages?.[name] === undefined && isDeepStrictEqual(after.packages?.[name], PI_LOCK[name]));
+      if (piMoved.length !== Object.keys(PI_FIELDS).length || !revertPiMove(before, after, 'overrides') || !rows) {
+        throw new Error('Reviewed CI mapping required: bun.lock must move every Pi pin, the overrides and the reviewed Pi lock rows together');
+      }
+      for (const name of PI_PACKAGES) after.packages[name] = before.packages[name];
+      for (const name of PI_ADDED) delete after.packages[name];
+      qualify.push(...piMoved);
     }
   } else if (path === 'examples/bot-collaboration/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The bot collaboration fixture must stay private');
@@ -242,6 +301,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     }
     if (index !== oldTests.length || new Set(newTests).size !== newTests.length) throw new Error('Existing tests must remain in order without duplicates');
     delete before.scripts['test:scripts']; delete after.scripts['test:scripts'];
+    if (revertPiMove(before, after, 'overrides')) qualify.push(...Object.keys(PI_FIELDS));
   } else {
     if (!version(before.version) || !version(after.version)) throw new Error('Invalid package version');
     if (path === 'packages/client/package.json'
@@ -271,6 +331,16 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       const entry = { types: './dist/sealed-payload/index.d.ts', import: './dist/sealed-payload/index.js' };
       if (before.exports?.[key] === undefined && isDeepStrictEqual(after.exports?.[key], entry)) delete after.exports[key];
     }
+    if (path === 'packages/server/package.json'
+      && before.description === SERVER_DESCRIPTION.from && after.description === SERVER_DESCRIPTION.to) {
+      after.description = before.description;
+    }
+    if (path === 'packages/cloud-do/package.json'
+      && before.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === undefined
+      && after.devDependencies?.[CLOUD_DO_CLIENT_EDGE] === 'workspace:*') {
+      delete after.devDependencies[CLOUD_DO_CLIENT_EDGE];
+      qualify.push('packages/cloud-do');
+    }
     // #702 raises the public Node floor with the Node 24.22.1 pin. Admit only
     // this exact engines.node edit in a public manifest. Any other engines value
     // or key, and any other field, still fails the comparison below.
@@ -281,6 +351,15 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     }
     const dir = path.slice(0, -'/package.json'.length);
     if (UNDICI_FIELDS[dir] && revertUndiciMove(before, after, UNDICI_FIELDS[dir])) qualify.push(dir);
+    if (PI_FIELDS[dir] && revertPiMove(before, after, PI_FIELDS[dir])) {
+      qualify.push(dir);
+      if (dir === 'packages/client') {
+        if (before.byok?.piRuntimePin !== PI_MOVE.from || after.byok?.piRuntimePin !== PI_MOVE.to) {
+          throw new Error('Reviewed CI mapping required: packages/client/package.json must move byok.piRuntimePin with the Pi pins');
+        }
+        after.byok.piRuntimePin = PI_MOVE.from;
+      }
+    }
     delete before.version; delete after.version;
   }
   if (!isDeepStrictEqual(before, after)) throw new Error(`Reviewed CI mapping required: ${path} changes more than the reviewed fields`);

@@ -53,6 +53,12 @@ export interface MessageTransaction {
 }
 export interface HostOptions {
   hostJobs?: Readonly<Record<string, HostJobHandler>>;
+  /**
+   * What a Host job result with `execution` does. `promote` (default) adds its intent to the FIFO. `fail` stores the summary,
+   * concludes the occurrence `failed` with no promotion and no retry, and the drain reports `host_job_execution_unsupported`,
+   * for a Host that has no owner for such an intent (K8 L and H).
+   */
+  hostJobExecution?: 'promote' | 'fail';
   occurrenceHooks?: Readonly<Record<string, OccurrenceHook>>;
   memory?: HostMemoryPage;
   now?: () => number;
@@ -97,6 +103,7 @@ export class HostExecutionCore {
   private readonly jobAbort = new AbortController();
   constructor(readonly server: ExecutionServer, readonly ledger: HostLedger, private readonly options: HostOptions = {}) {
     this.hostJobs = new Map(Object.entries(options.hostJobs ?? {}));
+    if (![undefined, 'promote', 'fail'].includes(options.hostJobExecution)) throw new Error('Invalid hostJobExecution');
     this.occurrenceHooks = new Map(Object.entries(options.occurrenceHooks ?? {}));
     if (options.memory && options.memory.ledger.tenant !== ledger.tenant) throw new Error('Memory tenant must match execution tenant');
     this.now = () => time((options.now ?? Date.now)());
@@ -443,13 +450,16 @@ export class HostExecutionCore {
         this.jobAbort.signal.throwIfAborted();
         if (!result || !Object.hasOwn(result, 'summary')) throw new Error('Host job result requires a summary');
         validateJson(result.summary);
+        const unsupported = result.execution !== undefined && this.options.hostJobExecution === 'fail';
         this.ledger.transaction(state => {
           const occurrence = state.occurrences[row.occurrenceKey]!;
           occurrence.job!.summary = structuredClone(result.summary);
-          if (result.execution !== undefined) promote(state, this.ledger.tenant, occurrence, result.execution);
-          else occurrence.conclusion = 'succeeded';
+          if (result.execution !== undefined && !unsupported) promote(state, this.ledger.tenant, occurrence, result.execution);
+          else occurrence.conclusion = unsupported ? 'failed' : 'succeeded';
           delete state.outbox[key];
         });
+        // The occurrence is concluded, so this run's error is reported only by the drain.
+        if (unsupported) failures.push(new Error('host_job_execution_unsupported'));
       } catch (error) {
         // Shutdown leaves the occurrence pending for recovery, without turning
         // cooperative cancellation into a dispatch failure. Preserve other errors.

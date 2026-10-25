@@ -20,7 +20,7 @@ async function config(serverUrl: string): Promise<DaemonConfig> {
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   return { serverUrl, productId: 'terminal-boundaries', productName: 'Terminal boundaries',
     localAgentRelease: { version: '0.0.0-test' }, workspaceRoot: path.join(root, 'work'),
-    storeDir: path.join(root, 'store'), hostedJournal: { mode: 'sqlite', maxRecordBytes: 2048 } };
+    storeDir: path.join(root, 'store'), storage: { journal: { maxRecordBytes: 2048 } } };
 }
 async function post(url: string, token: string, envelope: Envelope) {
   const response = await fetch(`${url}/byok/messages`, { method: 'POST',
@@ -46,7 +46,7 @@ describe('terminal durability and actual harness boundaries', () => {
     const candidates: LocalTerminalRecord[] = [];
     const write = journal.recordTerminal.bind(journal);
     vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => { candidates.push(record); return write(record); });
-    const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter], { hostedJournal: { journal }, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
+    const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
     cleanup.push(async () => { fail = false; await daemon.stop(); await journal.close(); });
     await daemon.pair('pairing-code');
     const record = (await createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
@@ -87,7 +87,7 @@ describe('terminal durability and actual harness boundaries', () => {
     const candidates: LocalTerminalRecord[] = [];
     const write = journal.recordTerminal.bind(journal);
     vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => { candidates.push(record); return write(record); });
-    const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter], { hostedJournal: { journal }, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
+    const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
     cleanup.push(async () => { fail = false; await daemon.stop().catch(() => undefined); await journal.close(); });
     await daemon.pair('pairing-code');
     await daemon.start();
@@ -117,7 +117,7 @@ describe('terminal durability and actual harness boundaries', () => {
         const cloud = await startRealCloud({ productId: 'terminal-boundaries' }); cleanup.push(() => cloud.close());
         const cfg = await config(cloud.url);
         const adapter = new StubRuntimeAdapter('acme-harness');
-        const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter]); cleanup.push(() => daemon.stop());
+        const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter]); cleanup.push(() => daemon.stop());
         const pairing = await cloud.createPairingCode();
         await daemon.pair(pairing.code);
         const device = (await createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
@@ -149,7 +149,7 @@ describe('terminal durability and actual harness boundaries', () => {
       const cloud = await startRealCloud({ productId: 'terminal-boundaries' }); cleanup.push(() => cloud.close());
       const cfg = await config(cloud.url);
       const adapter = new StubRuntimeAdapter('acme-harness');
-      const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter]); cleanup.push(() => daemon.stop());
+      const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter]); cleanup.push(() => daemon.stop());
       const device = await daemon.pair((await cloud.createPairingCode()).code); await daemon.start();
       await vi.waitFor(async () => expect((await cloud.cloud.listDevices(cloud.tenant))[0]?.harnesses?.[0]?.id).toBe('acme-harness'));
       const offer = await cloud.cloud.enqueueOffer(cloud.tenant, device.deviceId, { payload: {
@@ -178,7 +178,7 @@ it('R1/R6: committed decline settles its failed receipt after cancellation filte
   const candidates: LocalTerminalRecord[] = [];
   const recordTerminal = journal.recordTerminal.bind(journal);
   vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => { candidates.push(record); return recordTerminal(record); });
-  const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter], { hostedJournal: { journal }, longPoll: { retryDelayMs: 5, idleDelayMs: 5 } });
+  const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 5, idleDelayMs: 5 } });
   cleanup.push(async () => { fail = false; await daemon.stop(); await journal.close(); });
   const device = await daemon.pair((await cloud.createPairingCode()).code);
   const a = await cloud.enqueueOffer(device.deviceId, 'declined while temporarily unavailable');

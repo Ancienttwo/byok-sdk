@@ -1,3 +1,6 @@
+import type { RuntimeFailureClass, TaskFailure } from '@byok-sdk/protocol';
+import { RUNTIME_FAILURE_CLASSES } from '@byok-sdk/protocol/constants';
+
 /** Closed lifecycle phases for failures after an offer has been admitted. */
 export type RuntimeFailurePhase = 'start' | 'run';
 
@@ -22,6 +25,12 @@ export interface RuntimeExecutionFailureInput {
   retry: RuntimeRetryDisposition;
   /** Stable operator-facing reason. Provider diagnostics may be included, but are never parsed by TaskRunner. */
   reason: string;
+  /**
+   * The runtime's failure class, from structured runtime evidence only (#869);
+   * omitted means `unknown`. `resetsAt` exists only on `quota`, only when the
+   * runtime reported it, written as `Date#toISOString` writes it.
+   */
+  failure?: TaskFailure;
 }
 
 // Both public package entries are emitted as independent ESM bundles. A
@@ -77,13 +86,16 @@ export class RuntimeExecutionFailure extends Error {
   readonly phase: RuntimeFailurePhase;
   readonly category: RuntimeFailureCategory;
   readonly retry: RuntimeRetryDisposition;
+  readonly failure: TaskFailure;
 
   constructor(input: RuntimeExecutionFailureInput, options?: ErrorOptions) {
+    const failure = input.failure ?? UNKNOWN_FAILURE;
     if (!isRuntimeFailurePhase(input.phase)
       || !isRuntimeFailureCategory(input.category)
       || !isRuntimeRetryDisposition(input.retry)
       || typeof input.reason !== 'string'
-      || input.reason.length === 0) {
+      || input.reason.length === 0
+      || !isTaskFailure(failure)) {
       throw new TypeError('invalid RuntimeExecutionFailure input');
     }
     super(input.reason, options);
@@ -91,9 +103,29 @@ export class RuntimeExecutionFailure extends Error {
     this.phase = input.phase;
     this.category = input.category;
     this.retry = input.retry;
+    this.failure = Object.freeze({ ...failure });
     Object.defineProperty(this, RUNTIME_EXECUTION_FAILURE_BRAND, { value: true });
     Object.freeze(this);
   }
+}
+
+const UNKNOWN_FAILURE: TaskFailure = Object.freeze({ class: 'unknown' });
+
+/** A class string a runtime reported, or `unknown` when it is none of the closed classes. */
+export function runtimeFailureClassOf(value: unknown): RuntimeFailureClass {
+  return (RUNTIME_FAILURE_CLASSES as readonly unknown[]).includes(value) ? value as RuntimeFailureClass : 'unknown';
+}
+
+const WIRE_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+/** The wire's strict `TaskFailureSchema`, without zod: adapter bundles carry none. */
+function isTaskFailure(value: unknown): value is TaskFailure {
+  if (typeof value !== 'object' || value === null) return false;
+  const { class: failureClass, resetsAt, ...rest } = value as Record<string, unknown>;
+  return Object.keys(rest).length === 0
+    && runtimeFailureClassOf(failureClass) === failureClass
+    && (resetsAt === undefined || (failureClass === 'quota' && typeof resetsAt === 'string'
+      && WIRE_DATETIME.test(resetsAt) && !Number.isNaN(Date.parse(resetsAt)) && new Date(resetsAt).toISOString() === resetsAt));
 }
 
 function isRuntimeFailurePhase(value: unknown): value is RuntimeFailurePhase {
@@ -115,12 +147,14 @@ export function isRuntimeExecutionFailure(value: unknown): value is RuntimeExecu
     readonly phase?: unknown;
     readonly category?: unknown;
     readonly retry?: unknown;
+    readonly failure?: unknown;
     readonly message?: unknown;
   };
   return candidate[RUNTIME_EXECUTION_FAILURE_BRAND] === true
     && isRuntimeFailurePhase(candidate.phase)
     && isRuntimeFailureCategory(candidate.category)
     && isRuntimeRetryDisposition(candidate.retry)
+    && isTaskFailure(candidate.failure)
     && typeof candidate.message === 'string'
     && candidate.message.length > 0;
 }
@@ -128,6 +162,7 @@ export function isRuntimeExecutionFailure(value: unknown): value is RuntimeExecu
 export interface RuntimeFailureProjection {
   reason: string;
   retryable: boolean;
+  failure: TaskFailure;
 }
 
 function retryableFromDisposition(disposition: RuntimeRetryDisposition): boolean {
@@ -148,6 +183,7 @@ export function projectRuntimeExecutionFailure(failure: RuntimeExecutionFailure)
   return {
     reason: failure.message,
     retryable: retryableFromDisposition(failure.retry),
+    failure: failure.failure,
   };
 }
 
@@ -171,6 +207,7 @@ export function projectRuntimeBoundaryFailure(
   return {
     reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON[expectedPhase],
     retryable: false,
+    failure: UNKNOWN_FAILURE,
     contractViolation: true,
   };
 }
