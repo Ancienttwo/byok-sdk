@@ -96,7 +96,7 @@ import { assertServerUrlAllowed, formatServerUrl, InsecureServerUrlError, toHttp
 import { mintDeviceAssertion, mintTaskAssertion } from './device-assertion-signer';
 import { DaemonHaltError, type DaemonHaltReason, type DaemonLifecycle } from './daemon-lifecycle';
 import { AnotherControlServerRunningError, startControlServer } from './control-server';
-import type { ControlMethods, ControlServerHandle } from './control-server';
+import type { ControlMethods } from './control-server';
 import {
   ControlError,
   ENROLLMENT_PAIRING_CODE_MAX_BYTES,
@@ -153,9 +153,9 @@ import { createPiInputPreparationCompiler, resolvePinnedPiRuntimeIdentity } from
 import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
 import { ConnectionManager } from './connection-manager';
-import { createFleetJitter, deterministicJitterMs, type FleetJitter } from './deterministic-jitter';
+import { createFleetJitter, deterministicJitterMs } from './deterministic-jitter';
 import { OperationalHealthTracker, type OperationalHealthSnapshot } from './operational-health';
-import { acquireDaemonOwner, DaemonOwnerActiveError, type DaemonOwnerLease } from './daemon-owner';
+import { acquireDaemonOwner, DaemonOwnerActiveError } from './daemon-owner';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import { CursorStore } from './cursor-store';
 import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
@@ -169,7 +169,7 @@ import { DeviceMemberRecords } from './device-member-custody';
 import { checkVerificationSecret, enrollDeviceMember, resumeDeviceMember } from './device-member';
 import { StoredDeviceProofSigner } from './device-proof-signer';
 import { processE2eeKeyPackageNotice, type DeviceMemberStatus } from './e2ee-key-package-notice';
-import { DeviceMemberKeyring, type MemberFreshness } from './e2ee-keyring';
+import { DeviceMemberKeyring } from './e2ee-keyring';
 import { E2eeMemberClient } from './e2ee-member-client';
 import { JournalRecordTooLargeError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord } from './journal/journal';
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
@@ -239,6 +239,7 @@ import {
   type AgentContentReadSurface,
   type AgentContentSessionIdentity,
 } from './agent-content-read';
+import type { DaemonState } from './create-daemon/state';
 
 /**
  * M4 Phase 2 (originally control-socket-only). M5 batch-3 (workstream 2):
@@ -1479,25 +1480,12 @@ export function buildDaemonWithAdapters(
   // or a different TTL than the one that was validated.
   const deviceAssertionAudiences = resolveDeviceAssertionAudiences(config.deviceAssertion);
   const deviceAssertionTtlMs = resolveDeviceAssertionTtlMs(config.deviceAssertion);
-  /**
-   * Set SYNCHRONOUSLY by `performControlShutdown`, before the shutdown RPC's
-   * own response is even written — see that function and the `shutting_down`
-   * gate for the ~10s minting window this closes.
-   *
-   * Latched: nothing ever sets it back to `false`, including a later
-   * `start()` on this same instance. A daemon that has been told to shut down
-   * does not get to mint credentials again in this process, and "fail closed
-   * until restart" is the correct posture for the one flag whose entire job is
-   * to stop issuance during teardown.
-   */
-  let shuttingDown = false;
 
   const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
   const storageConfig = resolveStorageConfig(storeDir, config.storage);
   const retentionClock = overrides.retention?.clock ?? (() => new Date());
   const scratchRoot = new ScratchRoot(storageConfig.scratchRoot, retentionClock);
   const storagePressure = new StoragePressure(storageConfig.budget);
-  let retentionIdentity: JournalIdentity | undefined;
 
   /**
    * B-P2 local primitive. Three facts are resolved here, once, at construction:
@@ -1534,25 +1522,11 @@ export function buildDaemonWithAdapters(
     runtimeEnv: preparationRuntimeEnv,
     ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribe: agentMemoryDescribeBin }),
   });
-  let inputPreparationService: InputPreparationService | undefined;
-  let inputPreparationInitialization: Promise<void> | undefined;
-  /**
-   * Set when the input-preparation lane is OFF for a reason the operator must
-   * resolve, while the rest of the daemon runs: today only a durable record
-   * log holding a record from an older record schema version. Fail closed and
-   * scoped — the lane refuses typed (local control calls, remote completions,
-   * no advertised capability, no prepared-offer lane) and nothing else is
-   * affected. Nothing is migrated, read forward or deleted; the message names
-   * the record log the operator archives.
-   */
-  let inputPreparationLaneOff:
-    | { readonly code: 'input_preparation_record_log_unsupported'; readonly message: string }
-    | undefined;
   function initializeInputPreparation(): Promise<void> {
-    return inputPreparationInitialization ??= (async () => {
+    return daemonState.inputPreparationInitialization ??= (async () => {
       if (config.inputPreparation === undefined || inputPreparationLimits === undefined) return;
       const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
-      inputPreparationService = createInputPreparationService({
+      daemonState.inputPreparationService = createInputPreparationService({
         storeDir, limits: inputPreparationLimits,
         authorityResolver: config.inputPreparation.authorityResolver,
         ...(config.inputPreparation.counter === undefined ? {} : { counter: config.inputPreparation.counter }),
@@ -1572,15 +1546,15 @@ export function buildDaemonWithAdapters(
       );
     }
     await initializeInputPreparation();
-    if (inputPreparationLaneOff !== undefined) {
-      throw new ControlError(inputPreparationLaneOff.code, inputPreparationLaneOff.message);
+    if (daemonState.inputPreparationLaneOff !== undefined) {
+      throw new ControlError(daemonState.inputPreparationLaneOff.code, daemonState.inputPreparationLaneOff.message);
     }
-    if (inputPreparationService === undefined) throw new ControlError('runtime_identity_unavailable', 'input preparation initialization did not produce a service');
-    if (shuttingDown) {
+    if (daemonState.inputPreparationService === undefined) throw new ControlError('runtime_identity_unavailable', 'input preparation initialization did not produce a service');
+    if (daemonState.shuttingDown) {
       throw new ControlError('shutting_down', 'this daemon is shutting down and will not prepare new input');
     }
     try {
-      return { receipt: await call(inputPreparationService) };
+      return { receipt: await call(daemonState.inputPreparationService) };
     } catch (error) {
       if (error instanceof InputPreparationRequestError) throw new ControlError(error.code, error.message);
       throw error;
@@ -1597,36 +1571,25 @@ export function buildDaemonWithAdapters(
   const memberRecords = overrides.deviceCredentials === undefined
     ? new DeviceMemberRecords(createDeviceMemberCustody({ productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials }))
     : undefined;
-  /** This run's verified member, once the background resume finds one. */
-  let deviceMember: DeviceMemberKeyring | undefined;
-  let memberResuming = false;
-  /** Set by each start: binds that run's sealed tasks to a ready member. */
-  let activateSealedTasks: ((keyring: DeviceMemberKeyring) => void) | undefined;
-  /** The freshness points a retired keyring left for the next run's member (§50d); a new enrollment voids them. */
-  let carriedFreshness: MemberFreshness | undefined;
   const sealIdentityOf = (record: DeviceRecord, member: DeviceMemberKeyring | undefined): string | undefined => {
     const memberId = member?.session?.member.memberId;
     return memberId === undefined ? undefined : JSON.stringify([record.tenantId, record.deviceId, memberId]);
   };
-  const memberStatus = (): DeviceMemberStatus => deviceMember ?? (memberResuming ? 'resuming' : 'none');
-  let memberAbort: AbortController | undefined;
-  let memberResume: Promise<void> | undefined;
+  const memberStatus = (): DeviceMemberStatus => daemonState.deviceMember ?? (daemonState.memberResuming ? 'resuming' : 'none');
   const logMember = (message: string): void => console.warn(`[byok/client] ${message}`);
   function memberClient(record: DeviceRecord, signal?: AbortSignal): E2eeMemberClient {
     const identity = enrollmentIdentityOf(record);
     return new E2eeMemberClient({
       serverUrl: config.serverUrl,
-      auth,
+      auth: daemonState.auth,
       signer: new StoredDeviceProofSigner({
-        auth, tenantId: identity.tenantId, productId: config.productId, keyId: identity.proofKeyId, keyEpoch: identity.proofKeyEpoch,
+        auth: daemonState.auth, tenantId: identity.tenantId, productId: config.productId, keyId: identity.proofKeyId, keyEpoch: identity.proofKeyEpoch,
       }),
       ...(signal === undefined ? {} : { signal }),
     });
   }
   const operationalHealth = new OperationalHealthTracker(storeDir);
   const ownedProcessLedger = new OwnedProcessLedger(storeDir);
-  let detachOwnedProcessGroupLedger: (() => void) | undefined;
-  let fleetJitter: FleetJitter | undefined;
   let maintenanceSequence = 0;
   const cursorStore = new CursorStore(storeDir);
   const sessionWorkspaces = new SessionWorkspaceStore(storeDir);
@@ -1648,46 +1611,37 @@ export function buildDaemonWithAdapters(
   // Before authenticated enrollment is loaded, egress is deliberately unable
   // to persist or acknowledge tenant-scoped records. startUnderLease replaces
   // this with the exact loaded DeviceRecord binding before it accepts work.
-  let agentEgress = new AgentEgressController({
+  const initialAgentEgress = new AgentEgressController({
     policy: egressPolicy,
   });
   // Git workspace mode excludes agentHome, so it is never strict and the
   // validation above has already required workspaceRoot.
   const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot!, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
   const gitWorkspaceStore = config.gitWorkspace ? overrides.gitWorkspace?.store ?? new GitWorkspaceStore(storeDir) : undefined;
-  // Every daemon journals (#924). Opening, schema-initializing and
-  // quarantining the SQLite file waits until `startUnderLease` owns the
-  // cross-process store lease; a rejected second daemon must not touch the
-  // active daemon's DB/WAL/SHM before discovering that it is rejected. On a
-  // runtime without `node:sqlite` the journal constructor refuses
-  // (`JournalUnavailableError`) before any filesystem work.
-  let ownedJournal: SqliteLocalTaskJournal | undefined;
-  let journal: LocalTaskJournal | undefined = overrides.journal;
-  let hostedStorageInitializationBarrierComplete = true;
 
 
   /** Construct every daemon-owned hosted writer only after ownership exists. */
   function initializeOwnedHostedStorage(): LocalTaskJournal {
-    if (!journal) {
+    if (!daemonState.journal) {
       const tuning = config.storage?.journal;
       try {
-        ownedJournal = new SqliteLocalTaskJournal({
+        daemonState.ownedJournal = new SqliteLocalTaskJournal({
           storeDir,
           ...(tuning?.busyTimeoutMs === undefined ? {} : { busyTimeoutMs: tuning.busyTimeoutMs }),
           ...(tuning?.maxRecordBytes === undefined ? {} : { maxRecordBytes: tuning.maxRecordBytes }),
           ...(overrides.journalOpenFaults === undefined ? {} : { openFaults: overrides.journalOpenFaults }),
         });
       } catch (err) {
-        if (err instanceof JournalHandleCleanupError) hostedStorageInitializationBarrierComplete = false;
+        if (err instanceof JournalHandleCleanupError) daemonState.hostedStorageInitializationBarrierComplete = false;
         throw err;
       }
-      journal = ownedJournal;
+      daemonState.journal = daemonState.ownedJournal;
     }
-    return journal;
+    return daemonState.journal;
   }
   const retentionRegistry = createRetentionRegistry({
     storeDir, scratch: scratchRoot, config: storageConfig, clock: retentionClock,
-    journal: () => journal, identity: () => retentionIdentity, preparation: () => inputPreparationService,
+    journal: () => daemonState.journal, identity: () => daemonState.retentionIdentity, preparation: () => daemonState.inputPreparationService,
     ...(agentHomeManager === undefined ? {} : { home: agentHomeManager }),
     ...(agentSessionHandoffs === undefined ? {} : { handoffs: agentSessionHandoffs }),
     ...(config.workspaceRoot === undefined ? {} : { workspaceRoot: config.workspaceRoot }),
@@ -1717,8 +1671,8 @@ export function buildDaemonWithAdapters(
    * mid-chain while the connection closes out from under it.
    */
   const terminalCommits = new TerminalCommitQueue(taskId => {
-    connection?.retryTaskReceipts(taskId);
-    void runner?.retryTerminalFinalization(taskId).catch(error => {
+    daemonState.connection?.retryTaskReceipts(taskId);
+    void daemonState.runner?.retryTerminalFinalization(taskId).catch(error => {
       console.error('[byok/client] terminal finalization still requires recovery', error);
     });
   });
@@ -1734,85 +1688,10 @@ export function buildDaemonWithAdapters(
   // only needs to add producers.
   const approvalRegistry = new ApprovalRegistry();
 
-  let connection: ConnectionManager | undefined;
-  let blobLifecycleAbort: AbortController | undefined;
-  // #654: sealed output uploads its ciphertext through its own blob client,
-  // which shutdown aborts only after the terminal commit barrier. A queued
-  // terminal can outlive its run, so its upload reads the current client.
-  let sealedUploadAbort: AbortController | undefined;
-  let sealedUploads: BlobClient | undefined;
-  // A start under way opens a session, so a sealed output waits for its flags.
-  let startInProgress = false;
-  // The latest run's sealed tasks. A terminal the commit queue holds past a
-  // failed stop seals through the run it runs in, never through the stopped
-  // run's keyring, which its shutdown retires.
-  let latestSealedTasks: SealedTasks | undefined;
-  /** The latest run's (tenant, device, member); `undefined` while it has no usable member. */
-  let latestSealIdentity: (() => string | undefined) | undefined;
-  /** Set by each start: retires that run's member keyring at shutdown. */
-  let retireSealedMember: (() => void) | undefined;
-  let sealedOutputSettled: (() => Promise<void>) | undefined;
-  let inputPreparationStatusAbort: AbortController | undefined;
-  let lifecycle: DaemonLifecycle = { phase: 'stopped' };
-  // A successful start owns tenant-bound egress and journal composition. A
-  // re-pair during that lifetime is refused rather than leaving any active
-  // closure on the previous record; stop() must complete first.
-  let daemonStarted = false;
-  // Once an active daemon begins an explicit re-pair, no inbound envelope or
-  // host reliable append may observe the old binding after the new record is
-  // committed. A failed replacement before commit clears this; a failed
-  // shutdown after commit remains fail-closed.
-  let tenantRebinding = false;
-  let runner: TaskRunner | undefined;
-  // M4 Phase 2: local control socket (see `control-server.ts`) — started in
-  // `start()`, closed in `stop()`. `undefined` whenever the daemon isn't
-  // running, or when binding it failed non-fatally (see `start()`'s own
-  // try/catch below).
-  let controlServerHandle: ControlServerHandle | undefined;
-  let serviceEnrollmentWaiting = false;
-  let serviceEnrollmentTransitioning = false;
-  let daemonOwnerLease: DaemonOwnerLease | undefined;
-  // Presence and task context share one deployment declaration. Discovery is
-  // asynchronous to start(); only Agent offers with host toolsets wait for it.
-  let presencePublisher: PresencePublisher | undefined;
-  let detectedRuntimeFacts: readonly RuntimeInfo[] = [];
-  let runtimeObservations: RuntimeObservation[] = [];
-  let resolvedEnvironment: ServiceEnvironmentStatus = serviceEnvironmentStatus();
-  let environmentResolvedAt: string | undefined;
-  let presenceDiscovery: AbortController | undefined;
-  // One active read per connection generation; stale completions cannot publish.
-  let presenceDiscoveryPass: {
-    controller: AbortController;
-    completion: Promise<void>;
-    outcome: 'pending' | 'read' | 'failed' | 'timeout' | 'aborted';
-  } | undefined;
   // Both network reads and individual offer waits are bounded. Reconnects do
   // not extend an offer's deadline. This is an operational wait, not token TTL.
   const capabilityDiscoveryTimeoutMs = 5_000;
-  /**
-   * The deployment declaration this daemon last READ (ADR-010), or `undefined`
-   * when it has read none — which is what a failed read leaves behind too, on
-   * purpose: a declaration that could not be read is exactly as informative as
-   * one that declares nothing.
-   *
-   * Contract §8.1 is why this is now stored rather than consumed and dropped
-   * inside the discovery pass. The task lane's capability gate has TWO channels
-   * and both must hold, so the deployment-level answer has to outlive the read
-   * that produced it — see {@link taskContextCapabilityAvailable}.
-   */
-  let deploymentDeclaration: CapabilityDeclaration | undefined;
-  /**
-   * The exact `CapabilityFlag[]` instance handed to `ConnectionManager`, which
-   * reads it afresh for every `conn.hello` it builds. Held here so the one
-   * capability whose answer arrives asynchronously can be added to (or removed
-   * from) the advertisement a running daemon publishes, via `refreshHello()` —
-   * the same mechanism an `mcpToolsets` reload already uses.
-   */
-  let helloCapabilities: CapabilityFlag[] = [];
-  let shutdownPromise: Promise<void> | undefined;
   const pendingLateMutationBarriers = new Set<Promise<void>>();
-  /** M4 Phase 2: when this `start()` began — backs the control socket's `status.uptimeMs`. */
-  let startedAt: number | undefined;
 
   // M3-2a: `let`, not `const` — `unpair()` below rebuilds this from scratch
   // (fresh, no cached in-memory `record`) rather than mutating the existing
@@ -1832,10 +1711,59 @@ export function buildDaemonWithAdapters(
       deviceName: config.deviceName,
       machineId: config.machineId ?? (() => resolveMachineId({ productId: config.productId })),
       // A proactive renewal can find the revocation while the poll is held.
-      onRevoked: () => connection?.noteDeviceRevoked(),
+      onRevoked: () => daemonState.connection?.noteDeviceRevoked(),
     });
   }
-  let auth = buildAuthManager();
+  const daemonState: DaemonState = {
+    shuttingDown: false,
+    retentionIdentity: undefined,
+    inputPreparationService: undefined,
+    inputPreparationInitialization: undefined,
+    inputPreparationLaneOff: undefined,
+    deviceMember: undefined,
+    memberResuming: false,
+    activateSealedTasks: undefined,
+    carriedFreshness: undefined,
+    memberAbort: undefined,
+    memberResume: undefined,
+    detachOwnedProcessGroupLedger: undefined,
+    fleetJitter: undefined,
+    agentEgress: initialAgentEgress,
+    ownedJournal: undefined,
+    journal: overrides.journal,
+    hostedStorageInitializationBarrierComplete: true,
+    connection: undefined,
+    blobLifecycleAbort: undefined,
+    sealedUploadAbort: undefined,
+    sealedUploads: undefined,
+    startInProgress: false,
+    latestSealedTasks: undefined,
+    latestSealIdentity: undefined,
+    retireSealedMember: undefined,
+    sealedOutputSettled: undefined,
+    inputPreparationStatusAbort: undefined,
+    lifecycle: { phase: 'stopped' },
+    daemonStarted: false,
+    tenantRebinding: false,
+    runner: undefined,
+    controlServerHandle: undefined,
+    serviceEnrollmentWaiting: false,
+    serviceEnrollmentTransitioning: false,
+    daemonOwnerLease: undefined,
+    presencePublisher: undefined,
+    detectedRuntimeFacts: [],
+    runtimeObservations: [],
+    resolvedEnvironment: serviceEnvironmentStatus(),
+    environmentResolvedAt: undefined,
+    presenceDiscovery: undefined,
+    presenceDiscoveryPass: undefined,
+    deploymentDeclaration: undefined,
+    helloCapabilities: [],
+    shutdownPromise: undefined,
+    startedAt: undefined,
+    auth: buildAuthManager(),
+    lifecycleMutationTail: Promise.resolve(),
+  };
 
   /**
    * M5: `assertServerUrlAllowed`'s call site — see that function's own doc
@@ -1881,12 +1809,11 @@ export function buildDaemonWithAdapters(
     }
   }
 
-  let lifecycleMutationTail: Promise<void> = Promise.resolve();
 
   async function runLifecycleMutation<T>(operation: () => Promise<T>): Promise<T> {
-    const predecessor = lifecycleMutationTail;
+    const predecessor = daemonState.lifecycleMutationTail;
     let release!: () => void;
-    lifecycleMutationTail = new Promise<void>((resolve) => {
+    daemonState.lifecycleMutationTail = new Promise<void>((resolve) => {
       release = resolve;
     });
     await predecessor;
@@ -1912,13 +1839,13 @@ export function buildDaemonWithAdapters(
   }
 
   async function pairUnderLease(pairingCode: string, verificationSecret?: string): Promise<DeviceRecord> {
-    const wasRunning = daemonStarted;
-    if (wasRunning) tenantRebinding = true;
+    const wasRunning = daemonState.daemonStarted;
+    if (wasRunning) daemonState.tenantRebinding = true;
     // Pairing persists device.json. It intentionally does not arm proactive
     // renewal (AuthManager.loadExisting does that under start()'s lease), so a
     // short-lived pair command can release ownership once the write lands.
-    const acquiredHere = daemonOwnerLease === undefined;
-    if (acquiredHere) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
+    const acquiredHere = daemonState.daemonOwnerLease === undefined;
+    if (acquiredHere) daemonState.daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     // Finding F5: capture whatever device is currently on disk for this
     // serverUrl (if any) BEFORE pairing — `auth.pair()` mints/persists a
     // brand new deviceId (the server always does, even on a same-keypair
@@ -1930,13 +1857,13 @@ export function buildDaemonWithAdapters(
     try {
       let previous: DeviceRecord | undefined;
       try {
-        previous = await auth.readCurrent();
+        previous = await daemonState.auth.readCurrent();
       } catch (error) {
         // Pairing may replace a legacy/tampered record, but must not derive a
         // cursor/device identity from an untrusted file.
         if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
       }
-      const record = await auth.pair(pairingCode);
+      const record = await daemonState.auth.pair(pairingCode);
       replacementPersisted = true;
       // No stopped daemon operation may continue using a superseded binding
       // between re-pair and the next start. startUnderLease will construct the
@@ -1945,8 +1872,8 @@ export function buildDaemonWithAdapters(
         // TaskRunner owns the previous controller by reference for this run;
         // deactivate it before the new record can be followed by shutdown
         // terminal/progress activity.
-        agentEgress.deactivate();
-        agentEgress = new AgentEgressController({ policy: egressPolicy });
+        daemonState.agentEgress.deactivate();
+        daemonState.agentEgress = new AgentEgressController({ policy: egressPolicy });
       }
       if (wasRunning) {
         // The pair response has replaced device.json, so the running daemon's
@@ -1954,14 +1881,14 @@ export function buildDaemonWithAdapters(
         // Completing this shutdown before pair() resolves makes restart an
         // explicit, fresh load of the new authenticated binding.
         await runShutdownSequence('re-pairing enrollment binding');
-        tenantRebinding = false;
+        daemonState.tenantRebinding = false;
       }
       if (previous && previous.deviceId !== record.deviceId) {
         await cursorStore.clear(config.serverUrl, previous.deviceId);
       }
       observer.notePaired(record.deviceId);
       // A new enrollment is a new member (§7.5); the previous one's entries are void (10b).
-      carriedFreshness = undefined;
+      daemonState.carriedFreshness = undefined;
       try {
         await memberRecords?.clear();
       } catch (error) {
@@ -1978,24 +1905,24 @@ export function buildDaemonWithAdapters(
         }
       }
       if (acquiredHere) {
-        await daemonOwnerLease?.release();
-        daemonOwnerLease = undefined;
+        await daemonState.daemonOwnerLease?.release();
+        daemonState.daemonOwnerLease = undefined;
       }
       return record;
     } catch (err) {
-      if (wasRunning && !replacementPersisted) tenantRebinding = false;
+      if (wasRunning && !replacementPersisted) daemonState.tenantRebinding = false;
       if (acquiredHere) {
-        await daemonOwnerLease?.release();
-        daemonOwnerLease = undefined;
+        await daemonState.daemonOwnerLease?.release();
+        daemonState.daemonOwnerLease = undefined;
       }
       throw err;
     }
   }
 
   async function replaceControlServer(required: boolean, enrollmentOnly = false): Promise<void> {
-    if (controlServerHandle) {
-      await controlServerHandle.close();
-      controlServerHandle = undefined;
+    if (daemonState.controlServerHandle) {
+      await daemonState.controlServerHandle.close();
+      daemonState.controlServerHandle = undefined;
     }
     try {
       const methods = enrollmentOnly
@@ -2007,20 +1934,20 @@ export function buildDaemonWithAdapters(
             stream: {},
           }
         : controlMethods;
-      controlServerHandle = await startControlServer({ storeDir, productId: config.productId, methods });
+      daemonState.controlServerHandle = await startControlServer({ storeDir, productId: config.productId, methods });
     } catch (err) {
       if (required || err instanceof AnotherControlServerRunningError) throw err;
       console.warn(
         `[byok/client] control socket failed to start (continuing without it): ${err instanceof Error ? err.message : String(err)}`,
       );
-      controlServerHandle = undefined;
+      daemonState.controlServerHandle = undefined;
     }
   }
 
   /** One report path per lifecycle fact: `status().lifecycle` and the `lifecycle` event change together. */
   function setLifecycle(next: DaemonLifecycle): void {
-    if (JSON.stringify(next) === JSON.stringify(lifecycle)) return;
-    lifecycle = next;
+    if (JSON.stringify(next) === JSON.stringify(daemonState.lifecycle)) return;
+    daemonState.lifecycle = next;
     observer.noteLifecycle(next);
   }
 
@@ -2064,21 +1991,21 @@ export function buildDaemonWithAdapters(
   }
 
   async function startUnderLease(): Promise<void> {
-    startInProgress = true;
+    daemonState.startInProgress = true;
     try {
       await runStartUnderLease();
     } finally {
-      startInProgress = false;
+      daemonState.startInProgress = false;
     }
   }
 
   async function runStartUnderLease(): Promise<void> {
     terminalCommits.resume();
     // A new run begins; a previous run's halt or crash no longer describes it.
-    if (lifecycle.phase === 'halted' || lifecycle.phase === 'crashed') setLifecycle({ phase: 'stopped' });
-    if (!daemonOwnerLease) {
+    if (daemonState.lifecycle.phase === 'halted' || daemonState.lifecycle.phase === 'crashed') setLifecycle({ phase: 'stopped' });
+    if (!daemonState.daemonOwnerLease) {
       try {
-        daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
+        daemonState.daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
       } catch (err) {
         if (err instanceof DaemonOwnerActiveError) throw new DaemonHaltError('store_owned', { cause: err });
         throw err;
@@ -2101,8 +2028,8 @@ export function buildDaemonWithAdapters(
       );
     }
     await scratchRoot.open(storeDir);
-    detachOwnedProcessGroupLedger?.();
-    detachOwnedProcessGroupLedger = attachOwnedProcessGroupLedger(ownedProcessLedger);
+    daemonState.detachOwnedProcessGroupLedger?.();
+    daemonState.detachOwnedProcessGroupLedger = attachOwnedProcessGroupLedger(ownedProcessLedger);
     // Initialization is one instance promise, including refusal. Even the
     // enrollment-only control endpoint must not expose a half-initialized service.
     await initializeInputPreparation();
@@ -2115,11 +2042,11 @@ export function buildDaemonWithAdapters(
     // ordinary tasks keep running while the operator archives the log. Every
     // other open failure still fails startup, exactly as before.
     try {
-      await inputPreparationService?.open();
+      await daemonState.inputPreparationService?.open();
     } catch (error) {
       if (!(error instanceof InputPreparationUnsupportedRecordVersionError)) throw error;
-      inputPreparationLaneOff = { code: 'input_preparation_record_log_unsupported', message: error.message };
-      inputPreparationService = undefined;
+      daemonState.inputPreparationLaneOff = { code: 'input_preparation_record_log_unsupported', message: error.message };
+      daemonState.inputPreparationService = undefined;
       console.error(`[byok/client] input preparation is disabled on this daemon: ${error.message}`);
     }
     // Only the explicitly enabled service-enrollment path resolves credential
@@ -2130,11 +2057,11 @@ export function buildDaemonWithAdapters(
     // below: acquire the lease, initialize hosted storage, then load identity.
     let record: DeviceRecord | undefined;
     if (config.serviceEnrollment?.enabled === true) {
-      record = await auth.loadExisting();
+      record = await daemonState.auth.loadExisting();
       if (!record) {
-        startedAt = Date.now();
-        serviceEnrollmentWaiting = true;
-        serviceEnrollmentTransitioning = false;
+        daemonState.startedAt = Date.now();
+        daemonState.serviceEnrollmentWaiting = true;
+        daemonState.serviceEnrollmentTransitioning = false;
         await retentionSweeper.runPass('startup');
         retentionSweeper.start();
         await replaceControlServer(true, true);
@@ -2142,24 +2069,24 @@ export function buildDaemonWithAdapters(
         return;
       }
     }
-    serviceEnrollmentWaiting = false;
-    serviceEnrollmentTransitioning = false;
+    daemonState.serviceEnrollmentWaiting = false;
+    daemonState.serviceEnrollmentTransitioning = false;
     // This is the first point at which daemon-owned hosted storage may touch
     // the filesystem. The lease was acquired above, so SQLite open/schema/
     // quarantine and every pressure-engine writer are inside the same
     // authority boundary as auth renewal and the rest of daemon lifecycle.
     const activeJournal = initializeOwnedHostedStorage();
-    record ??= await auth.loadExisting();
+    record ??= await daemonState.auth.loadExisting();
     if (!record) {
       throw new DaemonHaltError('unpaired');
     }
     const activePressureEngine = storagePressure;
-    retentionIdentity = { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId };
+    daemonState.retentionIdentity = { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId };
     // Loading an existing record arms proactive token renewal, whose final
     // step writes device.json. Acquire the store mutation lease first so a
     // rejected second daemon can never leave that timer behind as a writer.
     if (config.agentEgress !== undefined) {
-      agentEgress = new AgentEgressController({
+      daemonState.agentEgress = new AgentEgressController({
         policy: egressPolicy,
         tenantId: record.tenantId,
       });
@@ -2169,9 +2096,9 @@ export function buildDaemonWithAdapters(
     // mutated. A configured-but-unusable root must never admit cloud work.
     await agentHomeManager?.preflight();
     if (config.agentEgress !== undefined && config.agentHome !== undefined) {
-      await agentEgress.recover(path.join(config.agentHome.hostStorageRoot, 'agents'));
+      await daemonState.agentEgress.recover(path.join(config.agentHome.hostStorageRoot, 'agents'));
     }
-    fleetJitter = createFleetJitter(config.productId, record.deviceId);
+    daemonState.fleetJitter = createFleetJitter(config.productId, record.deviceId);
 
     const journalIdentity: JournalIdentity = { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId };
     const resultReplyRecoveryTasks = new Map<string, { agentRef: AgentRef; contract: string }>();
@@ -2186,7 +2113,7 @@ export function buildDaemonWithAdapters(
       const offer = decodeEnvelope(task.envelopeBytes);
       const { agentRef } = offer.payload as { agentRef?: AgentRef };
       const failure = createEnvelope('task.fail', { reason, retryable: false,
-        ...taskFailureField(DAEMON_TASK_FAILURE, connection?.getServerCapabilities() ?? []),
+        ...taskFailureField(DAEMON_TASK_FAILURE, daemonState.connection?.getServerCapabilities() ?? []),
         ...terminalIdentity(task.claimedRuntime, agentRef),
         ...(interrupted ? { recovery: { kind: 'daemon_interrupted' as const, offerId: offer.id } } : {}),
       }, { taskId: task.taskId });
@@ -2238,7 +2165,7 @@ export function buildDaemonWithAdapters(
     await retentionSweeper.runPass('startup');
     retentionSweeper.start();
 
-    startedAt = Date.now();
+    daemonState.startedAt = Date.now();
     // M4 Phase 2: a second start() on THIS SAME Daemon instance (e.g. the
     // revoke -> re-pair -> start() again recovery flow) restarts its own
     // control socket rather than colliding with itself — `stop()` was not
@@ -2260,12 +2187,12 @@ export function buildDaemonWithAdapters(
     await operationalHealth.startRun();
     // The owner alone publishes this host-process observation into the event
     // stream. CLI audit persistence uses that same event, with no second writer.
-    resolvedEnvironment = { ...serviceEnvironmentStatus() };
-    environmentResolvedAt = new Date().toISOString();
+    daemonState.resolvedEnvironment = { ...serviceEnvironmentStatus() };
+    daemonState.environmentResolvedAt = new Date().toISOString();
     // A later start() (re-pair) detects again: until it does, report nothing
     // rather than the previous start's outcomes.
-    runtimeObservations = [];
-    observer.noteEnvironmentResolved({ ...resolvedEnvironment }, environmentResolvedAt);
+    daemonState.runtimeObservations = [];
+    observer.noteEnvironmentResolved({ ...daemonState.resolvedEnvironment }, daemonState.environmentResolvedAt);
 
     if (gitWorkspaceManager) {
       await gitWorkspaceManager.preflight();
@@ -2273,16 +2200,16 @@ export function buildDaemonWithAdapters(
       await gitWorkspaceStore?.reconcile();
     }
 
-    blobLifecycleAbort = new AbortController();
+    daemonState.blobLifecycleAbort = new AbortController();
     const [{ runtimes, harnesses, observations }, blobClient] = await Promise.all([
       detectRuntimes(adapters),
-      Promise.resolve(new BlobClient(config.serverUrl, auth, { signal: blobLifecycleAbort.signal })),
+      Promise.resolve(new BlobClient(config.serverUrl, daemonState.auth, { signal: daemonState.blobLifecycleAbort.signal })),
     ]);
     // Startup owns detection: local status keeps every outcome, while
     // conn.hello advertises only available runtimes. Neither re-probes.
-    runtimeObservations = observations.map(observation => Object.freeze({ ...observation }));
-    observer.noteRuntimesDetected(runtimeObservations.map(observation => ({ ...observation })));
-    detectedRuntimeFacts = runtimes;
+    daemonState.runtimeObservations = observations.map(observation => Object.freeze({ ...observation }));
+    observer.noteRuntimesDetected(daemonState.runtimeObservations.map(observation => ({ ...observation })));
+    daemonState.detectedRuntimeFacts = runtimes;
     const agentMemoryIntentBackend = await provenAgentMemoryIntentBackend();
     const capabilities = computeCapabilities(
       adapters,
@@ -2292,14 +2219,14 @@ export function buildDaemonWithAdapters(
       config.agentEgress !== undefined,
       agentContentReadPolicies,
       config.piByokLauncher !== undefined,
-      inputPreparationService !== undefined,
+      daemonState.inputPreparationService !== undefined,
       config.providerProvisioning !== undefined,
       agentMemoryIntentBackend !== undefined,
     );
     const agentHomeProjectionCompletion = agentHomeManager?.supportsTaskFreeProjection() === true
       ? new AgentHomeProjectionCompletionClient({
           serverUrl: config.serverUrl,
-          auth,
+          auth: daemonState.auth,
           tenantId: record.tenantId,
           deviceId: record.deviceId,
         })
@@ -2341,26 +2268,26 @@ export function buildDaemonWithAdapters(
      * Nothing here touches the local control socket — see
      * `input-preparation-remote.ts` for why that is the point.
      */
-    inputPreparationStatusAbort = new AbortController();
+    daemonState.inputPreparationStatusAbort = new AbortController();
     const inputPreparationCompletion = new InputPreparationCompletionClient({
       serverUrl: config.serverUrl,
-      auth,
+      auth: daemonState.auth,
       tenantId: record.tenantId,
       deviceId: record.deviceId,
-      statusReadSignal: inputPreparationStatusAbort.signal,
+      statusReadSignal: daemonState.inputPreparationStatusAbort.signal,
     });
     const handleRemoteInputPreparation = createRemoteInputPreparationHandler({
       deviceId: record.deviceId,
-      service: inputPreparationService,
+      service: daemonState.inputPreparationService,
       limits: inputPreparationLimits,
       // The two absences are different facts and the Host is told which:
       // "this daemon does not do preparation" versus "its native closure did
       // not verify". Neither is ever widened into a compiled artifact.
-      ...(config.inputPreparation !== undefined && inputPreparationService === undefined
-        ? { unavailableReason: inputPreparationLaneOff?.code ?? 'runtime_identity_unavailable' }
+      ...(config.inputPreparation !== undefined && daemonState.inputPreparationService === undefined
+        ? { unavailableReason: daemonState.inputPreparationLaneOff?.code ?? 'runtime_identity_unavailable' }
         : {}),
       completion: inputPreparationCompletion,
-      signal: blobLifecycleAbort.signal,
+      signal: daemonState.blobLifecycleAbort.signal,
       resolveBlobText: (blobRef, signal) => blobClient.resolveInstruction(blobRef, { signal }),
     });
 
@@ -2370,8 +2297,8 @@ export function buildDaemonWithAdapters(
     // until the member is ready, so a recovered sealed terminal is sealed or
     // one of the closed plaintext forms (decision 74e). The member stays bound
     // after a loss: a sealed task must never fall back to plaintext output.
-    sealedUploadAbort = new AbortController();
-    sealedUploads = new BlobClient(config.serverUrl, auth, { signal: sealedUploadAbort.signal });
+    daemonState.sealedUploadAbort = new AbortController();
+    daemonState.sealedUploads = new BlobClient(config.serverUrl, daemonState.auth, { signal: daemonState.sealedUploadAbort.signal });
     const opened = new SealedTasks({
       keyring: {
         scopeCategories: async (scopeId) => sealedMember?.scopeCategories(scopeId),
@@ -2382,29 +2309,29 @@ export function buildDaemonWithAdapters(
       tenantId: record.tenantId,
       deviceId: record.deviceId,
       blobs: {
-        download: (ref) => blobClient.downloadBlob(ref, { signal: blobLifecycleAbort?.signal }),
-        upload: (ciphertext) => sealedUploads!.uploadArtifact(ciphertext, 'application/octet-stream'),
+        download: (ref) => blobClient.downloadBlob(ref, { signal: daemonState.blobLifecycleAbort?.signal }),
+        upload: (ciphertext) => daemonState.sealedUploads!.uploadArtifact(ciphertext, 'application/octet-stream'),
       },
       // Between sessions, and while a start is under way, the next
       // session's flags are unknown. Once the daemon stopped, halted or
       // crashed with no start under way, no session will advertise any.
       serverCapabilities: () => {
-        if (lifecycle.phase === 'halted' || lifecycle.phase === 'crashed') return [];
-        if (lifecycle.phase === 'running') return connection?.isOpen() === true ? connection.getServerCapabilities() : undefined;
-        return startInProgress ? undefined : [];
+        if (daemonState.lifecycle.phase === 'halted' || daemonState.lifecycle.phase === 'crashed') return [];
+        if (daemonState.lifecycle.phase === 'running') return daemonState.connection?.isOpen() === true ? daemonState.connection.getServerCapabilities() : undefined;
+        return daemonState.startInProgress ? undefined : [];
       },
     });
     sealedTasks = opened;
-    latestSealedTasks = opened;
-    sealedOutputSettled = () => opened.settled();
-    activateSealedTasks = (keyring) => {
+    daemonState.latestSealedTasks = opened;
+    daemonState.sealedOutputSettled = () => opened.settled();
+    daemonState.activateSealedTasks = (keyring) => {
       if (sealedMember !== undefined) return;
       sealedMember = keyring;
       ownSealIdentity = sealIdentityOf(record, keyring);
     };
     // Only the next run receives this run's points, so a run with no member leaves none.
-    retireSealedMember = () => { carriedFreshness = sealedMember?.retire(); };
-    latestSealIdentity = () => sealIdentityOf(record, sealedMember);
+    daemonState.retireSealedMember = () => { daemonState.carriedFreshness = sealedMember?.retire(); };
+    daemonState.latestSealIdentity = () => sealIdentityOf(record, sealedMember);
     // Contract §8.1 / §8.3: the device-level capability string is NOT computed
     // here. It is the one flag whose answer depends on a deployment fact this
     // daemon has not read yet at this point in `start()`, so it is added (and
@@ -2413,8 +2340,8 @@ export function buildDaemonWithAdapters(
     // reaches the server through `refreshHello()`. Reset to "no declaration
     // read" first: a restart must not inherit the previous run's answer about a
     // deployment it has not spoken to yet.
-    deploymentDeclaration = undefined;
-    helloCapabilities = capabilities;
+    daemonState.deploymentDeclaration = undefined;
+    daemonState.helloCapabilities = capabilities;
 
     /** With `replaces`, the terminal replaces the refused terminal of that hash (#654 §77b). */
     const commitTerminal = (taskId: string, terminal: Envelope | (() => Promise<Envelope | undefined>), replaces?: string): void => {
@@ -2448,7 +2375,7 @@ export function buildDaemonWithAdapters(
           const durable = decodeEnvelope(durableTerminal.bytes);
           overrides.executionRecoveryFault?.('terminal:before-send');
           observer.captureOutboundApproval(durable);
-          connection?.send(durable);
+          daemonState.connection?.send(durable);
         } catch (error: unknown) {
           if (!(error instanceof JournalRecordTooLargeError)) throw error;
           // A completed result can exceed the journal's bounded record size.
@@ -2463,12 +2390,12 @@ export function buildDaemonWithAdapters(
           const offerPayload = offer.payload as { agentRef?: AgentRef };
           const plainFailure = createEnvelope('task.fail', {
             reason: 'terminal_result_too_large', retryable: false,
-            ...taskFailureField(DAEMON_TASK_FAILURE, connection?.getServerCapabilities() ?? []),
+            ...taskFailureField(DAEMON_TASK_FAILURE, daemonState.connection?.getServerCapabilities() ?? []),
             ...terminalIdentity(task.claimedRuntime, offerPayload.agentRef),
           }, { taskId });
           // Only the owner run's tenant, device and member seal this failure.
-          const sameIdentity = ownerIdentity !== undefined && ownerIdentity === latestSealIdentity?.();
-          const failure = await latestSealedTasks!.sealRecovered(offer, plainFailure, sameIdentity);
+          const sameIdentity = ownerIdentity !== undefined && ownerIdentity === daemonState.latestSealIdentity?.();
+          const failure = await daemonState.latestSealedTasks!.sealRecovered(offer, plainFailure, sameIdentity);
           const failureBytes = encodeEnvelope(failure);
           await activeJournal.recordTerminal({ taskId, terminalType: 'failed', bytes: failureBytes,
             payloadHash: journalHash(failureBytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
@@ -2476,7 +2403,7 @@ export function buildDaemonWithAdapters(
           if (!durableFailure || durableFailure.truthState !== 'pending') return;
           const decoded = decodeEnvelope(durableFailure.bytes);
           observer.captureOutboundApproval(decoded);
-          connection?.send(decoded);
+          daemonState.connection?.send(decoded);
           // Never recurse through arbitrary fallback terminals. A storage or
           // canonicalization failure remains visible and requires operator
           // recovery; the oversized result itself is never silently dropped.
@@ -2494,14 +2421,14 @@ export function buildDaemonWithAdapters(
      */
     const sealQueuedTerminal = async (owner: SealedTasks | undefined, ownerIdentity: string | undefined, envelope: Envelope): Promise<Envelope | undefined> => {
       const taskId = envelope.task_id!;
-      if (startInProgress) throw new Error(`${envelope.type} for sealed task ${taskId} waits for the start under way`);
-      const current = latestSealedTasks!;
+      if (daemonState.startInProgress) throw new Error(`${envelope.type} for sealed task ${taskId} waits for the start under way`);
+      const current = daemonState.latestSealedTasks!;
       if (current === owner) return owner.sealOutbound(envelope);
-      if (memberResuming) throw new Error(`${envelope.type} for sealed task ${taskId} waits for this run's member`);
+      if (daemonState.memberResuming) throw new Error(`${envelope.type} for sealed task ${taskId} waits for this run's member`);
       const task = await activeJournal.readTask(taskId, journalIdentity);
       if (!task || !('envelopeBytes' in task)) throw new Error(`missing durable offer of sealed task ${taskId}`);
       // A run under another tenant, device or member never seals this task's output.
-      return current.sealRecovered(decodeEnvelope(task.envelopeBytes), envelope, ownerIdentity !== undefined && ownerIdentity === latestSealIdentity?.());
+      return current.sealRecovered(decodeEnvelope(task.envelopeBytes), envelope, ownerIdentity !== undefined && ownerIdentity === daemonState.latestSealIdentity?.());
     };
 
     // #654: a task waits on its approval request. One that cannot be sealed
@@ -2533,7 +2460,7 @@ export function buildDaemonWithAdapters(
           return;
         }
         void sealedTaskOutput.sealOutbound(envelope).then(
-          (sealed) => { if (sealed !== undefined) connection?.send(sealed); else denyUnsentApproval(envelope); },
+          (sealed) => { if (sealed !== undefined) daemonState.connection?.send(sealed); else denyUnsentApproval(envelope); },
           (error: unknown) => {
             console.error(`[byok/client] ${envelope.type} for sealed task ${envelope.task_id} not sent`, error);
             denyUnsentApproval(envelope);
@@ -2543,7 +2470,7 @@ export function buildDaemonWithAdapters(
       }
       if (!terminal) {
         observer.captureOutboundApproval(envelope);
-        connection?.send(envelope);
+        daemonState.connection?.send(envelope);
         return;
       }
       commitTerminal(envelope.task_id!, envelope);
@@ -2587,7 +2514,7 @@ export function buildDaemonWithAdapters(
       // with no keyring declines every sealed offer for want of a key. The
       // closed code is a value gate on the server's `sealed-payload-v1`.
       const code = sealedMember === undefined ? 'sealed_key_unavailable' : 'sealed_open_failed';
-      const serverCapabilities = connection?.getServerCapabilities() ?? [];
+      const serverCapabilities = daemonState.connection?.getServerCapabilities() ?? [];
       const closedCode = isSealedMessageType(envelope.type)
         && requiredReceiverCapabilities('task.decline', { reason: code, code }).every((flag) => serverCapabilities.includes(flag));
       const decline = createEnvelope('task.decline', {
@@ -2647,19 +2574,19 @@ export function buildDaemonWithAdapters(
       // the store because this file already owns them: re-deriving the
       // installed runtime identity or the operator's policy revision inside the
       // task runner would be a second opinion about the same configuration.
-      ...(inputPreparationService === undefined || inputPreparationLimits === undefined
+      ...(daemonState.inputPreparationService === undefined || inputPreparationLimits === undefined
         ? {}
         : {
           inputPreparationLane: {
-            store: inputPreparationService.store,
+            store: daemonState.inputPreparationService.store,
             // The service's own once-only open latch. The task runner awaits
             // it before its first record read so a restarted daemon that has
             // served no control call yet still sees its durable records; the
             // replay behind it stays the service's single authority.
-            open: inputPreparationService.open,
-            runtime: inputPreparationService.runtime,
+            open: daemonState.inputPreparationService.open,
+            runtime: daemonState.inputPreparationService.runtime,
             policyRevision: inputPreparationLimits.revision,
-            authorizeAgentMemory: (binding) => inputPreparationService!.authorizeAgentMemory(binding),
+            authorizeAgentMemory: (binding) => daemonState.inputPreparationService!.authorizeAgentMemory(binding),
             toolsetDefinitionRevisions: () => new Map(
               toolsetRegistry.status().toolsets.map((row) => [row.id as string, row.definitionRevision]),
             ),
@@ -2683,7 +2610,7 @@ export function buildDaemonWithAdapters(
       },
       blobClient,
       batcherOptions: egressBatcherOptions,
-      agentEgress,
+      agentEgress: daemonState.agentEgress,
       ...(config.agentEgress === undefined ? {} : { agentEgressPolicy: egressPolicy }),
       sessionWorkspaces,
       gitWorkspaceManager,
@@ -2764,13 +2691,13 @@ export function buildDaemonWithAdapters(
       // relies on) rather than captured once here, since the negotiated
       // capability is only known once the handshake completes, strictly
       // after this `deps` object is constructed.
-      getServerCapabilities: () => connection?.getServerCapabilities() ?? [],
+      getServerCapabilities: () => daemonState.connection?.getServerCapabilities() ?? [],
       sealedTasks: opened,
       // Same late-binding closure as `getServerCapabilities`; with no
       // connection yet there is no advertisement, and that is an error.
       getIngressBudget: () => {
-        if (connection === undefined) throw new Error('no activity ingress has been advertised; the connection is not started');
-        return connection.getIngressBudget();
+        if (daemonState.connection === undefined) throw new Error('no activity ingress has been advertised; the connection is not started');
+        return daemonState.connection.getIngressBudget();
       },
       // Contract §8.1: the nonce injection asks the SAME gate the RPC and the
       // hello advertisement ask, read fresh at offer time for the same reason
@@ -2785,9 +2712,9 @@ export function buildDaemonWithAdapters(
       // daemon that does not opt in.
       ...(activePressureEngine ? { admissionGuard: () => activePressureEngine.admissionGuard() } : {}),
     };
-    runner = new TaskRunner(deps);
+    daemonState.runner = new TaskRunner(deps);
     if (config.agentHome !== undefined && config.agentEgress !== undefined) {
-      await runner.recoverAgentMessageOutboxes(path.join(config.agentHome.hostStorageRoot, 'agents'), resultReplyRecoveryTasks,
+      await daemonState.runner.recoverAgentMessageOutboxes(path.join(config.agentHome.hostStorageRoot, 'agents'), resultReplyRecoveryTasks,
         async taskId => (await activeJournal.readTask(taskId, journalIdentity))?.localState === 'terminal:cancelled');
     }
     // Both prerequisites survive process death in their existing authorities:
@@ -2800,7 +2727,7 @@ export function buildDaemonWithAdapters(
         const task = await activeJournal.readTask(id, journalIdentity);
         const failure = task && resultReplyFailureFromState(task.localState);
         if (!task || !failure || !('envelopeBytes' in task)) { resultReplyRecoveryTasks.delete(id); continue; }
-        const state = runner?.recoveredAgentMessageState(id);
+        const state = daemonState.runner?.recoveredAgentMessageState(id);
         const accepted = task.localState.endsWith('-accepted');
         if (!accepted && state !== 'refused') continue;
         const offer = decodeEnvelope(task.envelopeBytes);
@@ -2814,7 +2741,7 @@ export function buildDaemonWithAdapters(
         // A refusal recorded before its replacement committed (#654 §77b).
         if (terminal.truthState === 'failed' && !terminalCommits.hasPending(terminal.taskId)) replaceRefusedTerminal(decodeEnvelope(terminal.bytes));
         if (terminal.truthState !== 'pending') continue;
-        if (runner?.hasPendingRecoveredAgentMessage(terminal.taskId)) continue;
+        if (daemonState.runner?.hasPendingRecoveredAgentMessage(terminal.taskId)) continue;
         assertJournalEnvelopeProtocol(terminal.bytes, terminal.taskId, 'pending-terminal');
         const envelope = decodeEnvelope(terminal.bytes);
         if (envelope.task_id !== terminal.taskId || terminalKindOf(envelope.type) !== terminal.terminalType) {
@@ -2822,7 +2749,7 @@ export function buildDaemonWithAdapters(
         }
         overrides.executionRecoveryFault?.('terminal:before-send');
         observer.captureOutboundApproval(envelope);
-        connection?.send(envelope);
+        daemonState.connection?.send(envelope);
       }
     };
 
@@ -2878,7 +2805,7 @@ export function buildDaemonWithAdapters(
     const handleAgentEgressEnvelope = async (envelope: Envelope): Promise<boolean> => {
       if (envelope.type !== 'agent.egress.ack') return false;
       if (config.agentEgress === undefined) return true;
-      await agentEgress.acknowledge({ ...envelope.payload, tenantId: record.tenantId });
+      await daemonState.agentEgress.acknowledge({ ...envelope.payload, tenantId: record.tenantId });
       return true;
     };
     const handleAgentContentReadEnvelope = async (envelope: Envelope): Promise<boolean> => {
@@ -2970,7 +2897,7 @@ export function buildDaemonWithAdapters(
       const appendAndDispatchContentReceipt = async (
         contentReceipt: AgentContentReceiptWithoutReliableIdentity,
       ): Promise<void> => {
-        const appended = await agentEgress.appendContentReceipt({
+        const appended = await daemonState.agentEgress.appendContentReceipt({
           homeDir: canonicalHome,
           agentRef: payload.agentRef,
           payload: contentReceipt,
@@ -3009,7 +2936,7 @@ export function buildDaemonWithAdapters(
       return true;
     };
 
-    connection = new ConnectionManager({
+    daemonState.connection = new ConnectionManager({
       serverUrl: config.serverUrl,
       deviceId: record.deviceId,
       productId: config.productId,
@@ -3018,7 +2945,7 @@ export function buildDaemonWithAdapters(
       runtimes,
       harnesses,
       getConfiguredToolsets: () => toolsetRegistry.snapshot().configuredToolsets,
-      auth,
+      auth: daemonState.auth,
       cursorStore,
       // Finding F3: return (not void-and-forget) so ConnectionManager can
       // await this handler and only advance/persist its redelivery cursor
@@ -3046,7 +2973,7 @@ export function buildDaemonWithAdapters(
       // work is scheduled off them. A redelivered envelope is absorbed by the
       // journal's own receipt and costs one no-op transaction.
       onEnvelope: async (envelope) => {
-        if (tenantRebinding) {
+        if (daemonState.tenantRebinding) {
           throw new Error('tenant enrollment is being re-paired; inbound work is blocked until restart');
         }
         observer.handleInboundEnvelope(envelope);
@@ -3090,7 +3017,7 @@ export function buildDaemonWithAdapters(
         if (envelope.type === 'task.cancel' && envelope.task_id !== undefined && resultReplyRecoveryTasks.has(envelope.task_id)) {
           const taskId = envelope.task_id;
           const binding = resultReplyRecoveryTasks.get(taskId)!;
-          await runner!.cancelRecoveredAgentMessage(taskId, async () => {
+          await daemonState.runner!.cancelRecoveredAgentMessage(taskId, async () => {
             // Without its offer the cancel cannot tell a sealed task: it is never sent.
             const task = await activeJournal.readTask(taskId, journalIdentity);
             if (!task || !('envelopeBytes' in task)) throw new Error(`missing durable offer of recovered task ${taskId}`);
@@ -3100,7 +3027,7 @@ export function buildDaemonWithAdapters(
             await terminalCommits.receipt(taskId);
           });
           resultReplyRecoveryTasks.delete(taskId);
-        } else await runner?.handleEnvelope(envelope);
+        } else await daemonState.runner?.handleEnvelope(envelope);
         if (envelope.type === 'agent.message.disposition') {
           // handleEnvelope fsyncs only an exact disposition before this
           // gate opens. A crash before sending leaves the journal pending.
@@ -3152,7 +3079,7 @@ export function buildDaemonWithAdapters(
         // Every open replaces the read, so rollout/reconnect facts cannot be
         // borrowed from a previous connection generation.
         if (state === 'open') {
-          runner?.retryRecoveredAgentMessages();
+          daemonState.runner?.retryRecoveredAgentMessages();
           runPresenceDiscovery();
         }
       },
@@ -3162,14 +3089,14 @@ export function buildDaemonWithAdapters(
       // advertisement carries the ack capability — on every reconnect, not
       // only at start.
       onCapabilitiesAdvertised: (added) => {
-        if (!added.includes(AGENT_EGRESS_RELIABLE_ACK_CAPABILITY) || connection === undefined) return;
-        for (const record of agentEgress.retryableReliableRecords(connection.getServerCapabilities())) {
+        if (!added.includes(AGENT_EGRESS_RELIABLE_ACK_CAPABILITY) || daemonState.connection === undefined) return;
+        for (const record of daemonState.agentEgress.retryableReliableRecords(daemonState.connection.getServerCapabilities())) {
           dispatchReliableRecord(record);
         }
       },
       longPollRetryDelayMs: overrides.longPoll?.retryDelayMs,
       longPollIdleDelayMs: overrides.longPoll?.idleDelayMs,
-      fleetJitter,
+      fleetJitter: daemonState.fleetJitter,
       onOperationalOutcome: (outcome, source) => {
         const write = outcome === 'success'
           ? operationalHealth.recordSuccess(source)
@@ -3183,12 +3110,12 @@ export function buildDaemonWithAdapters(
     startPresenceProducer();
     // Before the connection, so a key package notice in the first poll waits for the resume.
     startDeviceMember(record);
-    await connection.start();
-    daemonStarted = true;
+    await daemonState.connection.start();
+    daemonState.daemonStarted = true;
     } catch (err) {
       // A failed start opens no session: its teardown settles a queued
       // terminal as a stop does.
-      startInProgress = false;
+      daemonState.startInProgress = false;
       const haltReason = startupHaltReason(err);
       if (haltReason === undefined) {
         // #394: a crash, the one start failure a restart may fix. Recorded so
@@ -3239,8 +3166,8 @@ export function buildDaemonWithAdapters(
    */
   function taskContextCapabilityAvailable(): boolean {
     if (deviceAssertionAudiences === undefined) return false;
-    if (deploymentDeclaration === undefined) return false;
-    return declares(deploymentDeclaration, HOST_MCP_TASK_CONTEXT_CAPABILITY);
+    if (daemonState.deploymentDeclaration === undefined) return false;
+    return declares(daemonState.deploymentDeclaration, HOST_MCP_TASK_CONTEXT_CAPABILITY);
   }
 
   /**
@@ -3258,29 +3185,29 @@ export function buildDaemonWithAdapters(
    * `refreshHello()` is how the answer reaches the server once it exists.
    */
   function applyCapabilityDeclaration(declaration: CapabilityDeclaration | undefined): void {
-    deploymentDeclaration = declaration;
+    daemonState.deploymentDeclaration = declaration;
     const taskContext = setHelloCapability(HOST_MCP_TASK_CONTEXT_CAPABILITY, taskContextCapabilityAvailable());
     // #654 E2d-e5, E5b-2: only a verified member on a Host with the E2EE member routes and their KEM epoch rules.
-    const member = deviceMember?.session !== undefined && declaration !== undefined && declares(declaration, E2EE_MEMBER_CAPABILITY);
+    const member = daemonState.deviceMember?.session !== undefined && declaration !== undefined && declares(declaration, E2EE_MEMBER_CAPABILITY);
     const kemEpoch = member && declares(declaration!, E2EE_MEMBER_KEM_EPOCH_CAPABILITY);
     if (member && !kemEpoch) logMember(`the Host does not declare ${E2EE_MEMBER_KEM_EPOCH_CAPABILITY}; E2EE stays off until the Host is upgraded`);
     const sealedPayload = setHelloCapability(SEALED_PAYLOAD_CAPABILITY, kemEpoch);
-    if (taskContext || sealedPayload) connection?.refreshHello();
-    if (kemEpoch) deviceMember!.checkKemRotation();
+    if (taskContext || sealedPayload) daemonState.connection?.refreshHello();
+    if (kemEpoch) daemonState.deviceMember!.checkKemRotation();
   }
 
   /** Whether the advertisement changed. */
   function setHelloCapability(flag: CapabilityFlag, wanted: boolean): boolean {
-    const index = helloCapabilities.indexOf(flag);
+    const index = daemonState.helloCapabilities.indexOf(flag);
     if (wanted === (index !== -1)) return false;
-    if (wanted) helloCapabilities.push(flag);
-    else helloCapabilities.splice(index, 1);
+    if (wanted) daemonState.helloCapabilities.push(flag);
+    else daemonState.helloCapabilities.splice(index, 1);
     return true;
   }
 
   /** Arm before connection.start(); its first open callback starts the read. */
   function startPresenceProducer(): void {
-    presenceDiscovery = new AbortController();
+    daemonState.presenceDiscovery = new AbortController();
   }
 
   async function waitForHostTaskContext(taskId: string, signal: AbortSignal): Promise<void> {
@@ -3293,16 +3220,16 @@ export function buildDaemonWithAdapters(
     try {
       // A reconnect replaces the pass. Re-read that identity after each await,
       // under this ONE offer deadline, rather than admitting on an old answer.
-      while (!signal.aborted && !timedOut && presenceDiscoveryPass?.outcome === 'pending') {
-        await Promise.race([presenceDiscoveryPass.completion, interrupted]);
+      while (!signal.aborted && !timedOut && daemonState.presenceDiscoveryPass?.outcome === 'pending') {
+        await Promise.race([daemonState.presenceDiscoveryPass.completion, interrupted]);
       }
     } finally {
       clearTimeout(timer);
       signal.removeEventListener('abort', interrupt);
     }
-    if (signal.aborted || shuttingDown) return;
+    if (signal.aborted || daemonState.shuttingDown) return;
     if (!taskContextCapabilityAvailable()) {
-      const outcome = timedOut ? 'timeout' : presenceDiscoveryPass?.outcome;
+      const outcome = timedOut ? 'timeout' : daemonState.presenceDiscoveryPass?.outcome;
       const reason = outcome === 'read' ? 'capability_undeclared'
         : outcome === 'timeout' ? 'capability_discovery_timeout'
         : outcome === 'failed' ? 'capability_discovery_failed'
@@ -3313,9 +3240,9 @@ export function buildDaemonWithAdapters(
 
   /** Each connection open starts a fresh, bounded declaration read. */
   function runPresenceDiscovery(): void {
-    const lifecycle = presenceDiscovery;
+    const lifecycle = daemonState.presenceDiscovery;
     if (!lifecycle || lifecycle.signal.aborted) return;
-    presenceDiscoveryPass?.controller.abort();
+    daemonState.presenceDiscoveryPass?.controller.abort();
     const controller = new AbortController();
     const abort = (): void => controller.abort();
     lifecycle.signal.addEventListener('abort', abort, { once: true });
@@ -3324,11 +3251,11 @@ export function buildDaemonWithAdapters(
       completion: Promise.resolve(),
       outcome: 'pending' as 'pending' | 'read' | 'failed' | 'timeout' | 'aborted',
     };
-    presenceDiscoveryPass = pass;
+    daemonState.presenceDiscoveryPass = pass;
     // A previous connection's declaration cannot authorize a new offer while
     // this deployment is still unknown. Existing nonces are never re-minted.
     applyCapabilityDeclaration(undefined);
-    presencePublisher?.stop();
+    daemonState.presencePublisher?.stop();
     let rejectAbort!: () => void;
     const aborted = new Promise<never>((_, reject) => {
       rejectAbort = () => reject(new Error('capability discovery aborted'));
@@ -3343,24 +3270,24 @@ export function buildDaemonWithAdapters(
         const declaration = await Promise.race([
           fetchCapabilityDeclaration(config.serverUrl, { signal: controller.signal }), aborted,
         ]);
-        if (controller.signal.aborted || presenceDiscoveryPass !== pass) return;
+        if (controller.signal.aborted || daemonState.presenceDiscoveryPass !== pass) return;
         applyCapabilityDeclaration(declaration);
         pass.outcome = 'read';
         if (declares(declaration, PRESENCE_HINTS_CAPABILITY)) {
-          presencePublisher ??= new PresencePublisher({
+          daemonState.presencePublisher ??= new PresencePublisher({
             serverUrl: config.serverUrl,
-            auth,
+            auth: daemonState.auth,
             getConfiguredToolsets: () => toolsetRegistry.snapshot().configuredToolsets,
             clientVersion: localAgentRelease.version,
             protocolVersions: [PROTOCOL_VERSION],
-            runtimes: detectedRuntimeFacts,
+            runtimes: daemonState.detectedRuntimeFacts,
             ...presenceCadence,
             onDegraded: (reason) => console.warn(`[byok/client] ${reason}`),
           });
-          presencePublisher.start();
+          daemonState.presencePublisher.start();
         }
       } catch (err) {
-        if (presenceDiscoveryPass !== pass || lifecycle.signal.aborted) {
+        if (daemonState.presenceDiscoveryPass !== pass || lifecycle.signal.aborted) {
           pass.outcome = 'aborted';
           return;
         }
@@ -3430,35 +3357,35 @@ export function buildDaemonWithAdapters(
   /** Resume this enrollment's member off the start path; shutdown and re-pair abort it. */
   function startDeviceMember(record: DeviceRecord): void {
     // Points pass to the immediately next run only, even when its resume finds no member.
-    const carried = carriedFreshness;
-    carriedFreshness = undefined;
+    const carried = daemonState.carriedFreshness;
+    daemonState.carriedFreshness = undefined;
     if (memberRecords === undefined) return;
     const abort = new AbortController();
     const options = {
       records: memberRecords, client: memberClient(record, abort.signal), tenantId: record.tenantId, deviceId: record.deviceId, log: logMember,
       signal: abort.signal,
     };
-    memberAbort = abort;
-    memberResuming = true;
-    memberResume = resumeDeviceMember(options).then((session) => {
+    daemonState.memberAbort = abort;
+    daemonState.memberResuming = true;
+    daemonState.memberResume = resumeDeviceMember(options).then((session) => {
       if (abort.signal.aborted) return;
-      memberResuming = false;
+      daemonState.memberResuming = false;
       if (session === undefined) return;
       const member = new DeviceMemberKeyring(session, {
         ...options,
         carried,
-        kemRotation: () => deploymentDeclaration !== undefined && declares(deploymentDeclaration, E2EE_MEMBER_KEM_EPOCH_CAPABILITY),
+        kemRotation: () => daemonState.deploymentDeclaration !== undefined && declares(daemonState.deploymentDeclaration, E2EE_MEMBER_KEM_EPOCH_CAPABILITY),
         onLost: () => {
-          if (deviceMember === member) applyCapabilityDeclaration(deploymentDeclaration);
+          if (daemonState.deviceMember === member) applyCapabilityDeclaration(daemonState.deploymentDeclaration);
         },
       });
-      deviceMember = member;
-      activateSealedTasks?.(member);
-      applyCapabilityDeclaration(deploymentDeclaration);
+      daemonState.deviceMember = member;
+      daemonState.activateSealedTasks?.(member);
+      applyCapabilityDeclaration(daemonState.deploymentDeclaration);
       console.info(`[byok/client] E2EE member ${session.member.memberId} verified at chain seq ${session.state.head!.seq}`);
     }, (error: unknown) => {
       if (abort.signal.aborted) return;
-      memberResuming = false;
+      daemonState.memberResuming = false;
       logMember(`E2EE member resume failed; E2EE stays off: ${error instanceof Error ? error.message : String(error)}`);
     });
   }
@@ -3474,26 +3401,26 @@ export function buildDaemonWithAdapters(
     // `controlMethods.shutdown`) so a pipelined `shutdown`+`assertion.issue`
     // batch cannot mint in the gap between the RPC returning and this function
     // being scheduled. Latched, never cleared.
-    shuttingDown = true;
+    daemonState.shuttingDown = true;
     // Release status waits before service/connection drain. Their mailbox rows
     // remain unacknowledged for a fresh lifecycle to recover authoritatively.
-    inputPreparationStatusAbort?.abort();
-    inputPreparationStatusAbort = undefined;
-    blobLifecycleAbort?.abort();
-    blobLifecycleAbort = undefined;
+    daemonState.inputPreparationStatusAbort?.abort();
+    daemonState.inputPreparationStatusAbort = undefined;
+    daemonState.blobLifecycleAbort?.abort();
+    daemonState.blobLifecycleAbort = undefined;
     // The member resume and a background KEM rotation write custody entries; they end before this run releases ownership.
-    const member = deviceMember;
-    memberAbort?.abort();
-    memberAbort = undefined;
-    deviceMember = undefined;
-    memberResuming = false;
-    activateSealedTasks = undefined;
-    await memberResume;
-    memberResume = undefined;
+    const member = daemonState.deviceMember;
+    daemonState.memberAbort?.abort();
+    daemonState.memberAbort = undefined;
+    daemonState.deviceMember = undefined;
+    daemonState.memberResuming = false;
+    daemonState.activateSealedTasks = undefined;
+    await daemonState.memberResume;
+    daemonState.memberResume = undefined;
     await member?.kemRotationSettled();
     const errors: unknown[] = [];
-    let mutationBarrierComplete = hostedStorageInitializationBarrierComplete;
-    if (!hostedStorageInitializationBarrierComplete) {
+    let mutationBarrierComplete = daemonState.hostedStorageInitializationBarrierComplete;
+    if (!daemonState.hostedStorageInitializationBarrierComplete) {
       errors.push(new Error('hosted storage initialization left an unclosed SQLite handle; ownership lease retained'));
     }
     const attempt = async (operation: () => void | Promise<void>, mutationBarrier: boolean): Promise<boolean> => {
@@ -3537,21 +3464,21 @@ export function buildDaemonWithAdapters(
     // offline signal: the hosted hint carries a TTL and expiry means absence,
     // so no `offline` publish is (or may be) issued here. Both are idempotent,
     // like every other step in this sequence.
-    presenceDiscovery?.abort();
-    presenceDiscovery = undefined;
+    daemonState.presenceDiscovery?.abort();
+    daemonState.presenceDiscovery = undefined;
     // Detached reads cannot publish into a later daemon lifecycle.
-    presenceDiscoveryPass = undefined;
-    presencePublisher?.stop();
-    presencePublisher = undefined;
+    daemonState.presenceDiscoveryPass = undefined;
+    daemonState.presencePublisher?.stop();
+    daemonState.presencePublisher = undefined;
     // B-P2: abort every counter call this daemon owns. Their outcomes stay
     // observable in the durable record — an aborted call becomes
     // `counter_interrupted`, never a silent cancellation and never an automatic
     // second call on restart (§10.3.5).
-    await attempt(() => inputPreparationService?.stop(), false);
-    const stoppingOwnedJournal = ownedJournal;
+    await attempt(() => daemonState.inputPreparationService?.stop(), false);
+    const stoppingOwnedJournal = daemonState.ownedJournal;
     const maintenanceStopped = retentionSweeper.stop();
-    await attempt(() => runner?.stopAcceptingOffers(), true);
-    const activeTeardown = runner?.shutdownActiveTasks(reason) ?? Promise.resolve();
+    await attempt(() => daemonState.runner?.stopAcceptingOffers(), true);
+    const activeTeardown = daemonState.runner?.shutdownActiveTasks(reason) ?? Promise.resolve();
     const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
     let activeTeardownSettled = false;
     const observedActiveTeardown = activeTeardown.then(
@@ -3580,13 +3507,13 @@ export function buildDaemonWithAdapters(
     // resolves once each one reached the outbox or the terminal commit queue
     // (its sender's handler runs first). Wait for it before the drain below
     // decides the connection is idle.
-    await attempt(() => sealedOutputSettled?.(), false);
-    const journalTailSettled = journal ? await attempt(() => terminalCommits.stop(), true) : true;
+    await attempt(() => daemonState.sealedOutputSettled?.(), false);
+    const journalTailSettled = daemonState.journal ? await attempt(() => terminalCommits.stop(), true) : true;
     // This run seals nothing after the barrier: no key or chain view of its
     // member outlives it.
-    retireSealedMember?.();
-    retireSealedMember = undefined;
-    sealedUploadAbort?.abort();
+    daemonState.retireSealedMember?.();
+    daemonState.retireSealedMember = undefined;
+    daemonState.sealedUploadAbort?.abort();
     // stop() cleared the maintenance timer synchronously above. Await the pass
     // that may already have been inside SQLite only here, immediately before
     // closing the owned journal, so task interruption is not held behind a
@@ -3600,7 +3527,7 @@ export function buildDaemonWithAdapters(
     // comment for the honest-audit read a caller may take afterward.
     const drainTimeoutMs =
       opts.drainTimeoutMs ?? overrides.shutdown?.outboxDrainTimeoutMs ?? DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS;
-    const connectionStopped = await attempt(() => connection?.stop(drainTimeoutMs), true);
+    const connectionStopped = await attempt(() => daemonState.connection?.stop(drainTimeoutMs), true);
     // Close the owned journal only after every producer has stopped: active
     // task teardown and its terminal tail settled, maintenance settled, and
     // the connection can no longer deliver a new inbound envelope. Closing it
@@ -3609,15 +3536,15 @@ export function buildDaemonWithAdapters(
     if (activeTeardownSettled && journalTailSettled && maintenanceSettled && connectionStopped) {
       const journalClosed = await attempt(() => stoppingOwnedJournal?.close(), true);
       if (journalClosed) {
-        if (journal === stoppingOwnedJournal) journal = undefined;
-        if (ownedJournal === stoppingOwnedJournal) ownedJournal = undefined;
+        if (daemonState.journal === stoppingOwnedJournal) daemonState.journal = undefined;
+        if (daemonState.ownedJournal === stoppingOwnedJournal) daemonState.ownedJournal = undefined;
       }
     } else if (stoppingOwnedJournal) {
       mutationBarrierComplete = false;
     }
-    await attempt(() => auth.stop(), true);
+    await attempt(() => daemonState.auth.stop(), true);
     // A halt or crash stays visible after teardown, until the next start().
-    if (lifecycle.phase !== 'halted' && lifecycle.phase !== 'crashed') setLifecycle({ phase: 'stopped' });
+    if (daemonState.lifecycle.phase !== 'halted' && daemonState.lifecycle.phase !== 'crashed') setLifecycle({ phase: 'stopped' });
     // M4 Phase 2: stop the control socket in every shutdown path — this is
     // the single lifecycle choke point every caller (a foreground abort via
     // `bin/commands/start.ts`, `unpair()` below, and the control socket's
@@ -3642,15 +3569,15 @@ export function buildDaemonWithAdapters(
     // against this store, i.e. a possible residual writer, and the lease
     // must be retained for it.
     await attempt(async () => {
-      await controlServerHandle?.stopServing();
+      await daemonState.controlServerHandle?.stopServing();
     }, true);
-    detachOwnedProcessGroupLedger?.();
-    detachOwnedProcessGroupLedger = undefined;
-    if (mutationBarrierComplete && daemonOwnerLease) {
+    daemonState.detachOwnedProcessGroupLedger?.();
+    daemonState.detachOwnedProcessGroupLedger = undefined;
+    if (mutationBarrierComplete && daemonState.daemonOwnerLease) {
       await attempt(() => operationalHealth.markCleanStop(), false);
       await attempt(async () => {
-        await daemonOwnerLease?.release();
-        daemonOwnerLease = undefined;
+        await daemonState.daemonOwnerLease?.release();
+        daemonState.daemonOwnerLease = undefined;
       }, false);
     }
     // Stage 2, the last observable act of this daemon, and gated on the ONE
@@ -3664,10 +3591,10 @@ export function buildDaemonWithAdapters(
     // exit poll times out and fails closed with its own typed error, exactly
     // as its "unknown state is unsafe" contract intends. Same gate covers a
     // failed `release()`: the lease is still held, so nothing is published.
-    if (daemonOwnerLease === undefined) {
+    if (daemonState.daemonOwnerLease === undefined) {
       await attempt(async () => {
-        await controlServerHandle?.close();
-        controlServerHandle = undefined;
+        await daemonState.controlServerHandle?.close();
+        daemonState.controlServerHandle = undefined;
       }, false);
     }
     if (errors.length === 1) throw errors[0];
@@ -3680,7 +3607,7 @@ export function buildDaemonWithAdapters(
       // doctor or a second daemon to overlap a residual writer.
       throw new Error('daemon shutdown mutation barrier is incomplete; ownership lease retained');
     }
-    daemonStarted = false;
+    daemonState.daemonStarted = false;
   }
 
   /**
@@ -3701,16 +3628,16 @@ export function buildDaemonWithAdapters(
     // `pair()` would otherwise leave the control socket minting with
     // `shuttingDown === false` for the whole duration of that predecessor.
     // Setting it here, synchronously, before the first await, closes that gap.
-    shuttingDown = true;
+    daemonState.shuttingDown = true;
     await requestShutdown(opts.reason ?? 'operator', { drainTimeoutMs: opts.drainTimeoutMs });
   }
 
   function requestShutdown(reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {
-    if (shutdownPromise) return shutdownPromise;
+    if (daemonState.shutdownPromise) return daemonState.shutdownPromise;
     const current = runLifecycleMutation(() => runShutdownSequence(reason, opts));
-    shutdownPromise = current;
+    daemonState.shutdownPromise = current;
     void current.finally(() => {
-      if (shutdownPromise === current) shutdownPromise = undefined;
+      if (daemonState.shutdownPromise === current) daemonState.shutdownPromise = undefined;
     }).catch(() => undefined);
     return current;
   }
@@ -3737,7 +3664,7 @@ export function buildDaemonWithAdapters(
     // exact path where this matters most: it tears the daemon down and then
     // clears `device.json`, so any assertion minted in the queue-wait window
     // would be for a device that is being unpaired.
-    shuttingDown = true;
+    daemonState.shuttingDown = true;
     await runLifecycleMutation(unpairUnderLease);
   }
 
@@ -3757,13 +3684,13 @@ export function buildDaemonWithAdapters(
       // wholly after it; stale pre-lease identity can never drive cleanup.
       let current: DeviceRecord | undefined;
       try {
-        current = await auth.readCurrent();
+        current = await daemonState.auth.readCurrent();
       } catch (error) {
         if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
       }
       // The member entries go first: if their deletion fails, the device
       // stays paired, and the unpair reports the failure.
-      carriedFreshness = undefined;
+      daemonState.carriedFreshness = undefined;
       await memberRecords?.clear();
       try {
         await store.credentials.clear();
@@ -3779,14 +3706,14 @@ export function buildDaemonWithAdapters(
         // Secret clearance won but metadata cleanup lost. Rebuild auth so this
         // process cannot continue with the previous cache; the surviving
         // projection subsequently reads as re-pair-required.
-        auth = buildAuthManager();
+        daemonState.auth = buildAuthManager();
         throw error;
       }
       if (current) await cursorStore.clear(config.serverUrl, current.deviceId);
     } finally {
       await cleanupLease.release();
     }
-    auth = buildAuthManager();
+    daemonState.auth = buildAuthManager();
     observer.noteUnpaired();
   }
 
@@ -3804,13 +3731,13 @@ export function buildDaemonWithAdapters(
    * `task_id`/`payload` off an approve/reject envelope, never `seq`.
    */
   async function approve(taskId: string): Promise<void> {
-    if (!runner) throw new Error('daemon is not started; call start() first');
-    await runner.handleEnvelope(createEnvelope('task.approve', {}, { taskId, seq: 0 }));
+    if (!daemonState.runner) throw new Error('daemon is not started; call start() first');
+    await daemonState.runner.handleEnvelope(createEnvelope('task.approve', {}, { taskId, seq: 0 }));
   }
 
   async function reject(taskId: string, reason?: string): Promise<void> {
-    if (!runner) throw new Error('daemon is not started; call start() first');
-    await runner.handleEnvelope(createEnvelope('task.reject', { reason }, { taskId, seq: 0 }));
+    if (!daemonState.runner) throw new Error('daemon is not started; call start() first');
+    await daemonState.runner.handleEnvelope(createEnvelope('task.reject', { reason }, { taskId, seq: 0 }));
   }
 
   // -------------------------------------------------------------------------
@@ -3843,21 +3770,21 @@ export function buildDaemonWithAdapters(
     return {
       localAgentRelease,
       pid: process.pid,
-      uptimeMs: startedAt !== undefined ? Date.now() - startedAt : 0,
-      paired: auth.deviceId !== undefined,
-      deviceId: auth.deviceId,
-      lifecycle,
+      uptimeMs: daemonState.startedAt !== undefined ? Date.now() - daemonState.startedAt : 0,
+      paired: daemonState.auth.deviceId !== undefined,
+      deviceId: daemonState.auth.deviceId,
+      lifecycle: daemonState.lifecycle,
       activeTasks,
-      environment: { ...resolvedEnvironment },
-      ...(environmentResolvedAt === undefined ? {} : { environmentResolvedAt }),
-      runtimes: runtimeObservations.map(observation => ({ ...observation })),
+      environment: { ...daemonState.resolvedEnvironment },
+      ...(daemonState.environmentResolvedAt === undefined ? {} : { environmentResolvedAt: daemonState.environmentResolvedAt }),
+      runtimes: daemonState.runtimeObservations.map(observation => ({ ...observation })),
       // M4 Phase 4 (part B.3): queue watermarks come from TaskRunner's own
       // active-task map (distinct from `observer.tasks()` above, which is
       // derived from the envelope feed) — see `TaskRunner.getQueueWatermarks`'s
       // own doc comment for why this is a progress-batcher-backlog +
       // in-flight-approval-count proxy rather than the adapter's own event
       // queue depth.
-      queueWatermarks: runner?.getQueueWatermarks() ?? [],
+      queueWatermarks: daemonState.runner?.getQueueWatermarks() ?? [],
       approvals: pendingApprovals,
       approvalsPending: pendingApprovals.length,
       // S3b (L-003): the storage section, present only when a policy is
@@ -3915,7 +3842,7 @@ export function buildDaemonWithAdapters(
     // (called below, via `requestShutdown`) sets it again — but re-asserting it
     // here keeps this function correct on its own terms regardless of how it is
     // reached, and setting an already-`true` boolean is free.
-    shuttingDown = true;
+    daemonState.shuttingDown = true;
     observer.noteShutdownRequested(effectiveReason);
     // Hardening finding (P2 re-gate): `noteShutdownComplete` now fires in a
     // `finally` — `start.ts`'s own wait for THIS event (see the doc comment
@@ -3938,7 +3865,7 @@ export function buildDaemonWithAdapters(
       // record that this many envelopes (almost certainly including a
       // task.fail shutdownActiveTasks just sent) never actually left the
       // outbox, rather than the audit log silently implying full delivery.
-      observer.noteShutdownComplete(effectiveReason, connection?.outboxLength() ?? 0);
+      observer.noteShutdownComplete(effectiveReason, daemonState.connection?.outboxLength() ?? 0);
     }
   }
 
@@ -3965,13 +3892,13 @@ export function buildDaemonWithAdapters(
         if (verificationSecret !== undefined && memberRecords === undefined) {
           throw new ControlError('bad_request', 'an E2EE pairing needs the OS credential custody; this daemon uses an injected credential backend');
         }
-        if (!serviceEnrollmentWaiting || daemonStarted) {
+        if (!daemonState.serviceEnrollmentWaiting || daemonState.daemonStarted) {
           throw new ControlError('already_paired', 'this service daemon is not waiting for initial enrollment');
         }
-        if (serviceEnrollmentTransitioning) {
+        if (daemonState.serviceEnrollmentTransitioning) {
           throw new ControlError('pairing_in_progress', 'service enrollment is already in progress');
         }
-        serviceEnrollmentTransitioning = true;
+        daemonState.serviceEnrollmentTransitioning = true;
         // `control-server.ts` writes this handler's result in the current
         // microtask. Starting on the next macrotask lets that persisted-id
         // receipt leave before normal startup replaces the enrollment-only
@@ -3993,7 +3920,7 @@ export function buildDaemonWithAdapters(
         } catch (err) {
           // The pairing is saved, so the service starts as a device without E2EE.
           if (err instanceof PairedWithoutMemberError) startAfterEnrollment();
-          else serviceEnrollmentTransitioning = false;
+          else daemonState.serviceEnrollmentTransitioning = false;
           throw err;
         }
         startAfterEnrollment();
@@ -4072,8 +3999,8 @@ export function buildDaemonWithAdapters(
       'approvals.request': (params) => {
         const parsed = parseApprovalsRequestParams(params);
         if (!parsed) throw new ControlError('bad_request', 'approvals.request requires {taskId, summary}');
-        if (!runner) throw new ControlError('not_found', 'daemon is not started');
-        return runner.requestApproval(parsed.taskId, parsed.summary);
+        if (!daemonState.runner) throw new ControlError('not_found', 'daemon is not started');
+        return daemonState.runner.requestApproval(parsed.taskId, parsed.summary);
       },
       'team_workspaces.create': async (params) => {
         const parsed = parseTeamWorkspaceCreateParams(params);
@@ -4121,32 +4048,32 @@ export function buildDaemonWithAdapters(
       'agent_messages.publish': (params) => {
         const parsed = parseAgentMessagePublishParams(params);
         if (!parsed) throw new ControlError('bad_request', 'agent_messages.publish requires exactly {contextToken,contentType,body}');
-        if (!runner) throw new ControlError('not_found', 'daemon is not started');
-        return runner.publishAgentMessage(parsed);
+        if (!daemonState.runner) throw new ControlError('not_found', 'daemon is not started');
+        return daemonState.runner.publishAgentMessage(parsed);
       },
       'agent_results.describe': (params) => {
         const parsed = parseAgentResultDescribeParams(params);
         if (!parsed) throw new ControlError('bad_request', 'agent_results.describe requires exactly {contextToken}');
-        if (!runner) throw new ControlError('not_found', 'daemon is not started');
-        return runner.describeAgentResult(parsed);
+        if (!daemonState.runner) throw new ControlError('not_found', 'daemon is not started');
+        return daemonState.runner.describeAgentResult(parsed);
       },
       'agent_results.submit': (params) => {
         const parsed = parseAgentResultSubmitParams(params);
         if (!parsed) throw new ControlError('bad_request', 'agent_results.submit requires exactly {contextToken,outcome}');
-        if (!runner) throw new ControlError('not_found', 'daemon is not started');
-        return runner.submitAgentResult(parsed);
+        if (!daemonState.runner) throw new ControlError('not_found', 'daemon is not started');
+        return daemonState.runner.submitAgentResult(parsed);
       },
       'agent_memory.recall': (params) => {
         const parsed = parseAgentMemoryRecallParams(params);
         if (!parsed) throw new ControlError('bad_request', 'agent_memory.recall requires exactly {contextToken,path,ifRevision?}');
-        if (!runner) throw new ControlError('not_found', 'daemon is not started');
-        return runner.recallAgentMemory(parsed);
+        if (!daemonState.runner) throw new ControlError('not_found', 'daemon is not started');
+        return daemonState.runner.recallAgentMemory(parsed);
       },
       'agent_memory.save': (params) => {
         const parsed = parseAgentMemorySaveParams(params);
         if (!parsed) throw new ControlError('bad_request', 'agent_memory.save requires exactly {contextToken,op,path,expectedRevision,content?}');
-        if (!runner) throw new ControlError('not_found', 'daemon is not started');
-        return runner.saveAgentMemory(parsed);
+        if (!daemonState.runner) throw new ControlError('not_found', 'daemon is not started');
+        return daemonState.runner.saveAgentMemory(parsed);
       },
       /**
        * Plan `device-assertion-broker`: mint one short-lived, audience-scoped
@@ -4216,19 +4143,19 @@ export function buildDaemonWithAdapters(
           throw new ControlError('audience_denied', 'the requested audience is not allowed by this daemon');
         }
         // Gate 4.
-        if (shuttingDown) {
+        if (daemonState.shuttingDown) {
           observer.noteDeviceAssertion({ result: 'denied', reason: 'shutting_down', audience: parsed.audience });
           throw new ControlError('shutting_down', 'this daemon is shutting down and will not issue new assertions');
         }
         // Gate 5.
-        if (auth.isRevoked()) {
+        if (daemonState.auth.isRevoked()) {
           observer.noteDeviceAssertion({ result: 'denied', reason: 'revoked', audience: parsed.audience });
           throw new ControlError('revoked', 'this device has been revoked by the server; re-pair required');
         }
         // Gate 6. Read from disk every time — never a cached record.
         let record: DeviceRecord | undefined;
         try {
-          record = await auth.readCurrent();
+          record = await daemonState.auth.readCurrent();
         } catch (error) {
           if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
         }
@@ -4251,11 +4178,11 @@ export function buildDaemonWithAdapters(
         // credential authority, so unpair cannot leave a stale signer cache.
         // Shutdown and revocation are in-memory flags, so they are re-read
         // here explicitly.
-        if (shuttingDown) {
+        if (daemonState.shuttingDown) {
           observer.noteDeviceAssertion({ result: 'denied', reason: 'shutting_down', audience: parsed.audience });
           throw new ControlError('shutting_down', 'this daemon is shutting down and will not issue new assertions');
         }
-        if (auth.isRevoked()) {
+        if (daemonState.auth.isRevoked()) {
           observer.noteDeviceAssertion({ result: 'denied', reason: 'revoked', audience: parsed.audience });
           throw new ControlError('revoked', 'this device has been revoked by the server; re-pair required');
         }
@@ -4359,19 +4286,19 @@ export function buildDaemonWithAdapters(
           throw new ControlError('audience_denied', 'the requested audience is not allowed by this daemon');
         }
         // Gate 5.
-        if (shuttingDown) {
+        if (daemonState.shuttingDown) {
           observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'shutting_down', audience: parsed.audience });
           throw new ControlError('shutting_down', 'this daemon is shutting down and will not issue new assertions');
         }
         // Gate 6.
-        if (auth.isRevoked()) {
+        if (daemonState.auth.isRevoked()) {
           observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'revoked', audience: parsed.audience });
           throw new ControlError('revoked', 'this device has been revoked by the server; re-pair required');
         }
         // Gate 7. Read from disk every time — never a cached record.
         let record: DeviceRecord | undefined;
         try {
-          record = await auth.readCurrent();
+          record = await daemonState.auth.readCurrent();
         } catch (error) {
           if (!(error instanceof DeviceRecordRePairRequiredError)) throw error;
         }
@@ -4386,7 +4313,7 @@ export function buildDaemonWithAdapters(
         // registry at all, which is indistinguishable from an unknown token —
         // deliberately, so "is this daemon started" is not answerable here
         // either.
-        const context = runner?.hostToolsetContext(parsed.contextToken) ?? { status: 'unknown' as const };
+        const context = daemonState.runner?.hostToolsetContext(parsed.contextToken) ?? { status: 'unknown' as const };
         if (context.status === 'unknown') {
           observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'context_token_invalid', audience: parsed.audience });
           throw new ControlError('context_token_invalid', 'no live host toolset context matches this token');
@@ -4400,11 +4327,11 @@ export function buildDaemonWithAdapters(
         // shutdown and revocation are in-memory flags re-read at the signing
         // point itself, and `auth.readCurrent()` returning a record is itself
         // the fresh not-paired re-check.
-        if (shuttingDown) {
+        if (daemonState.shuttingDown) {
           observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'shutting_down', audience: parsed.audience, taskId: context.taskId });
           throw new ControlError('shutting_down', 'this daemon is shutting down and will not issue new assertions');
         }
-        if (auth.isRevoked()) {
+        if (daemonState.auth.isRevoked()) {
           observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason: 'revoked', audience: parsed.audience, taskId: context.taskId });
           throw new ControlError('revoked', 'this device has been revoked by the server; re-pair required');
         }
@@ -4438,7 +4365,7 @@ export function buildDaemonWithAdapters(
         // registry entry existed and its task's authority ended), and answering
         // the wrong one from a defensive `?.` would teach a caller that its
         // still-valid nonce had been withdrawn.
-        const stillActive = runner?.hostToolsetContext(parsed.contextToken) ?? { status: 'unknown' as const };
+        const stillActive = daemonState.runner?.hostToolsetContext(parsed.contextToken) ?? { status: 'unknown' as const };
         if (stillActive.status !== 'active') {
           const reason = stillActive.status === 'unknown' ? 'context_token_invalid' : 'context_revoked';
           observer.noteDeviceAssertion({ result: 'denied', lane: 'task', reason, audience: parsed.audience, taskId: context.taskId });
@@ -4475,7 +4402,7 @@ export function buildDaemonWithAdapters(
         // closes that exact window. `runShutdownSequence` sets it again
         // (idempotent) so the non-RPC `stop()`/`unpair()` paths are covered
         // too.
-        shuttingDown = true;
+        daemonState.shuttingDown = true;
         const { reason } = parseShutdownParams(params);
         // Fire-and-forget, deliberately AFTER this handler's own return
         // value has been serialized and written to the socket (see
@@ -4519,14 +4446,14 @@ export function buildDaemonWithAdapters(
 
   function dispatchReliableRecord(record: AgentReliableEgressRecord): void {
     if (record.sessionRef === undefined) {
-      agentEgress.noteTransportDrop('invalid_envelope', record.agentRef);
+      daemonState.agentEgress.noteTransportDrop('invalid_envelope', record.agentRef);
       return;
     }
-    if (!connection?.getServerCapabilities().includes(AGENT_EGRESS_RELIABLE_ACK_CAPABILITY)) {
+    if (!daemonState.connection?.getServerCapabilities().includes(AGENT_EGRESS_RELIABLE_ACK_CAPABILITY)) {
       // The append stays durable and is retried when an advertisement next
       // carries the ack capability (`onCapabilitiesAdvertised`). It is never
       // republished through latest-value activity.
-      agentEgress.noteTransportDrop('capability_missing', record.agentRef);
+      daemonState.agentEgress.noteTransportDrop('capability_missing', record.agentRef);
       return;
     }
     const envelope = reliableEnvelopes.get(record) ?? (record.wireType === 'agent.egress.reliable'
@@ -4552,14 +4479,14 @@ export function buildDaemonWithAdapters(
           },
         ));
     reliableEnvelopes.set(record, envelope);
-    connection.send(envelope);
+    daemonState.connection.send(envelope);
   }
 
   async function publishReliableAgentEgress(input: AgentReliableEgressInput): Promise<AgentEgressReliableAppendResult> {
     if (config.agentEgress === undefined || agentHomeManager === undefined || agentSessionHandoffs === undefined) {
       throw new Error('Agent reliable egress is not configured');
     }
-    if (tenantRebinding) {
+    if (daemonState.tenantRebinding) {
       throw new Error('tenant enrollment is being re-paired; reliable egress is blocked until restart');
     }
     const binding = await agentHomeManager.acquire(input.agentRef);
@@ -4574,7 +4501,7 @@ export function buildDaemonWithAdapters(
       if (handoff.taskId !== input.taskId) {
         throw new Error('Agent reliable egress taskId does not match the durable session handoff');
       }
-      const appended = await agentEgress.appendReliable({
+      const appended = await daemonState.agentEgress.appendReliable({
         homeDir: binding.resolution.canonicalHome,
         agentRef: binding.resolution.agentRef,
         sessionRef: input.sessionRef,
@@ -4647,21 +4574,21 @@ export function buildDaemonWithAdapters(
 
   function status(): DaemonStatus {
     return {
-      environment: { ...resolvedEnvironment },
-      ...(environmentResolvedAt === undefined ? {} : { environmentResolvedAt }),
-      runtimes: runtimeObservations.map(observation => ({ ...observation })),
+      environment: { ...daemonState.resolvedEnvironment },
+      ...(daemonState.environmentResolvedAt === undefined ? {} : { environmentResolvedAt: daemonState.environmentResolvedAt }),
+      runtimes: daemonState.runtimeObservations.map(observation => ({ ...observation })),
       storage: buildStorageStatus(),
       localAgentRelease,
-      paired: auth.deviceId !== undefined,
-      lifecycle,
-      deviceId: auth.deviceId,
-      activeTaskCount: runner?.activeTaskCount ?? 0,
+      paired: daemonState.auth.deviceId !== undefined,
+      lifecycle: daemonState.lifecycle,
+      deviceId: daemonState.auth.deviceId,
+      activeTaskCount: daemonState.runner?.activeTaskCount ?? 0,
       pendingTerminalCommits: terminalCommits.pendingCount,
       branding: config.branding,
       operationalHealth: operationalHealth.snapshot(),
       outbound: outboundStatus(),
       toolsets: toolsetRegistry.status(),
-      egress: agentEgress.status(),
+      egress: daemonState.agentEgress.status(),
       agentHomeExecution: agentHomeExecutionStatus(),
       agentMemoryMcp: agentMemoryMcpAdmission,
     };
@@ -4672,7 +4599,7 @@ export function buildDaemonWithAdapters(
     expectedRevision: string,
   ): McpToolsetReloadReceipt {
     const receipt = toolsetRegistry.reload(mcpToolsets, expectedRevision);
-    if (daemonStarted) connection?.refreshHello();
+    if (daemonState.daemonStarted) daemonState.connection?.refreshHello();
     return receipt;
   }
 
