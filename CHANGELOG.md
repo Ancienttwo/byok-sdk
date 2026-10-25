@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example observes devices
+  (#793 S11), as L's `refreshDevices`. `HostedDeviceObserver.observe(scope)`
+  reads the SDK readiness of the scope's tenant (1 s timeout) when a
+  delegation can change, then `store.observeDevices` runs the K8
+  `observeDevices` rule under the scope lock: a delegation whose delivered,
+  unclaimed offer is on a disconnected device shows `waiting_device`, and
+  `queued` again once it connects. The deployment's composed `sync` runs it
+  before `store.sync`. K8 re-exports `observeDevices` from `rules/commands`,
+  and its shared `deviceVectors` run on L and H.
 - **Feature (examples)** — the hosted collaboration example has its
   authenticated product command entry (#793 S10). `HostedCommandEntry` is L's
   owner API for requests: it takes the product's session check
@@ -152,6 +161,20 @@
   must stop reading it, and the text output drops its `legacy-temp:` line.
   `doctor --fix` no longer deletes those directories; any left on a machine
   have to be removed by hand.
+
+- **Added (client)** — `ClaudeAdapterOptions.agentSessionPersistence`
+  (#936). With `'disabled'`, an Agent task (`task.offer_for_agent`) starts
+  Claude with `--no-session-persistence`, so Claude does not save the session
+  transcript under `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/`, outside the
+  Agent home. Such a session cannot be resumed: an Agent task that carries a
+  `sessionRef` (a resume, an Agent handoff or a memory-reader resume) fails
+  before Claude starts, as a non-retryable `authority` failure with the
+  reason `claude Agent session persistence is disabled, so the task cannot
+  resume a session`. Follow-ups in the same task still work. Other tasks and
+  the default, `'enabled'`, are unchanged. Auto memory, which also writes
+  under `projects/`, stays on unless `agentUserContext: 'excluded'` is set
+  too. `docs/adapter-capabilities.md` lists where each adapter keeps Agent
+  task session records.
 
 ## 0.30.1 — 2026-10-24 (published)
 
