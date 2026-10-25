@@ -553,8 +553,9 @@ H has no SDK wake. `HostedRoutineScheduler` finds due slots in `routine_due` and
 `run()` is one pass. It reads due rows in slot order in keyset pages. Only fires count against `batch` (default 100),
 so fenced rows and failed rows cannot fill it. A fenced fire (`pass.fenced`: no active binding, or a device frozen for a
 switch) and a fire that throws (`pass.failed`) write
-nothing, and the routine waits `backoffMs` (default 60 s, in memory only) before its next try: a stuck row keeps its
-old slot, which sorts ahead of every healthy row. A wait that has ended is dropped at the start of a pass. Each fire
+nothing but the routine's `retry_at`: it waits `backoffMs` (default 60 s) before its next try, because a stuck row
+keeps its old slot, which sorts ahead of every healthy row. The wait is in Postgres (#794 H1), so every scheduler
+instance and process keeps it. It holds only for that slot: the store write that moves `next_at` clears it. Each fire
 reads the clock, as K4 does when it consumes a wake; the pass time only selects the due rows. The pass also sets `ok` on
 a `schedule_retrying` routine once its slot is within the K4 horizon, as K4 `scheduleNext`.
 
@@ -565,8 +566,8 @@ H has no timer. The deployment reads `scheduler.intervalMs` and runs `run()` at 
 the constructor refuses an interval at or above the K8 late bound (`ROUTINE_LATE_AFTER_MS`, 60 s): with a longer
 interval every slot would fire as `catch_up`, and its occurrence key would differ from L's.
 
-- Each pass reads the fenced and failed due rows again, and skips them while they wait. Their fire transactions run
-  once per `backoffMs`.
+- The due query leaves out the rows that wait, so they cannot fill a page. Postgres still reads them through
+  `routine_due` and drops them by `retry_at`. Their fire transactions run once per `backoffMs`.
 - A routine that waits fires late. Its next try records `catch_up` when the wait ends past the K8 late bound.
 - A promoted occurrence keeps `conclusion IS NULL` for good, so `occurrence_open` holds every promoted occurrence of a
   routine. The slice load still scans that history for the unpromoted open rows, so a fire costs more as the routine
@@ -589,8 +590,10 @@ clock for each sync; the pass time only selects the scopes. Only syncs that reso
   `sync` does not run `HostedReplyChecker` first. A sync that
   throws is reported in `failed`. With the composed `sync` (the reply checker, the device observer, then
   `store.sync`), each reply settle and the device observation commit in their own transactions: if a later step or
-  `store.sync` throws, the earlier steps of that pass stay committed, and one step never writes partly. Either scope waits `backoffMs` (default 60 s, in memory only)
-  before its next sync, so it is synced at most once per backoff, and each pass reports it again when it is retried.
+  `store.sync` throws, the earlier steps of that pass stay committed, and one step never writes partly. Either scope waits `backoffMs` (default 60 s)
+  before its next sync, so it is synced at most once per backoff, and each pass reports it again when it is retried. The
+  wait is `scope.retry_at` (#794 H1), keyed on the due time the scope still has, so every scheduler instance and process
+  keeps it. A store transaction that moves `due_at` clears it, so the new work is due at once.
 - H has no timer. The deployment runs `run()` on its own interval, which bounds how late a due step runs in a scope that
   is not stalled. A stalled scope keeps the due time that H cannot clear, so each of its other due times can run up to
   `backoffMs` late.
@@ -598,8 +601,8 @@ clock for each sync; the pass time only selects the scopes. Only syncs that reso
   sync resolves, so it counts. Once there are about `batch × backoffMs / interval` of them (1,200 with the defaults and
   a 5 s interval), each pass spends its whole batch on them, and a fresh due scope waits. A failed scope (a sync that
   throws, for example a settle that keeps throwing) does not count, so the pass pages on to the fresh due scopes. It is
-  retried once per `backoffMs`, and each retry adds the time of a failing sync to the pass. Each pass also reads every
-  backed-off due row. So H must run every step that clears a due time before it deploys.
+  retried once per `backoffMs`, and each retry adds the time of a failing sync to the pass. Postgres also reads every
+  backed-off due row through `scope_due` and drops it by `retry_at`. So H must run every step that clears a due time before it deploys.
 
 ## Outbox sender
 
