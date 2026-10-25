@@ -2,7 +2,8 @@ export { HostExecutionCore } from './core';
 export type { ExecutionServer, HostOptions, OutcomeTransaction, OccurrenceHook, OccurrenceTransaction, AgentMessageInput, MessageDecision,
   MessageTransaction } from './core';
 export { CompactVetoError, HostLedger, OutboxFullError, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './ledger';
-export type { ApplicationRows, CompactionOptions, CompactionResult, CompactVeto, TombstoneKind, HostLedgerOptions, ProjectionOutboxLimits, ProjectionOutboxUsage } from './ledger';
+export type { ApplicationRows, CompactionOptions, CompactionResult, CompactVeto, TombstoneKind, HostLedgerOptions, ProjectionOutboxLimits, ProjectionOutboxUsage,
+  LedgerDump, LedgerDumpMemoryTombstone, LedgerDumpRow, LedgerDumpTombstone } from './ledger';
 export { nextIntervalOccurrence } from './schedule';
 export type { NextOccurrence } from './schedule';
 export { DEFAULT_RETRY, taskId } from './model';
