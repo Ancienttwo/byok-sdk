@@ -158,6 +158,26 @@ describe.skipIf(POSTGRES_URL === undefined)('H Host intents on real Postgres (#9
     expect({ conclusion: (await row(scope))?.conclusion, seen }).toEqual({ conclusion: 'succeeded', seen: [RESULT] });
   });
 
+  it('refuses a published value that conflicts with a stored projection, so the owner can fail the intent', async () => {
+    const store = hostStore({ research: (document, tx) => { tx.publish('research', document as never); } }), scope = await scoped(store);
+    const second = 'host-research-2', secondTask = taskId(second, 0);
+    await store.enqueueHostIntent(scope, input(), 'research', Date.now);
+    await store.enqueueHostIntent(scope, input({ key: second }), 'research', Date.now);
+    await submit();
+    documents.set(TASK, RESULT);
+    expect(await reconciler(store).run()).toEqual({ concluded: 1, failed: [] });
+    await submit();
+    documents.set(secondTask, { summary: 'another result' });
+    // The store writes the outbox after the terminal decides, so the terminal checks the stored row itself.
+    const refused = { name: 'IntentOutcomeError', key: second, code: 'handler_failed', message: 'Projection identity conflict' };
+    expect(await reconciler(store).run()).toMatchObject({ concluded: 0, failed: [{ turnId: second, error: refused }] });
+    expect(await refusals(store, scope)).toEqual([`Intent outcome refused handler_failed: ${second} Projection identity conflict`]);
+    await reconciler(store).failStuckIntent(scope, second);
+    expect((await row(scope, second))?.conclusion).toBe('failed');
+    expect((await opened!.pool.query(`SELECT body FROM ${table('outbox')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey('research')])).rows)
+      .toEqual([{ body: RESULT }]);
+  });
+
   it('refuses an async handler, and consumes its rejection', async () => {
     const unhandled: unknown[] = [], record = (reason: unknown) => { unhandled.push(reason); };
     process.on('unhandledRejection', record);
@@ -262,6 +282,17 @@ describe.skipIf(POSTGRES_URL === undefined)('H Host intents on real Postgres (#9
       await expect(call.failStuckIntent(owner(scope), KEY)).rejects.toThrow(`Intent already settled: ${KEY}`);
       expect(await ownerFailures(store, scope)).toEqual([]);
       expect(await audit(store, scope, 'Action refused not_owner')).toEqual([`Action refused not_owner: failStuckIntent ${KEY} human:guest`]);
+    });
+
+    it('reports the scope of a probe that settles the intent, so the Host syncs it before the refusal', async () => {
+      const store = hostStore({}), scope = await scoped(store), changed: string[] = [];
+      await turn(store, scope, 'u1');
+      await submit();
+      // A document that the frozen outcome schema of a Main Bot user Turn accepts.
+      documents.set(taskId('u1', 0), { confirmable_action: [{ action: 'send_message', summary: 'Send', draft: { text: 'hello' } }] });
+      const probe = new HostedReconciler(opened!.pool, store.schema, store, { port: () => port, pollMs: 0, changed: found => { changed.push(found); } });
+      await expect(probe.failStuckIntent(scope, 'u1')).rejects.toThrow('Intent already settled: u1');
+      expect({ changed, conclusion: (await row(scope, 'u1'))?.conclusion }).toEqual({ changed: [scope], conclusion: 'succeeded' });
     });
 
     it('refuses to fail a Bot Turn that is only queued behind another stuck intent', async () => {

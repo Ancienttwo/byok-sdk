@@ -56,7 +56,8 @@ export interface ReconcilerOptions {
    * Called once for each scope where this pass committed a conclusion or a first claim (`started`), in the order of its first
    * one, at the end of the pass before it returns (#793 D2f-5). The Host syncs those scopes, so the steps that follow, such as
    * a delegation verdict, a unit spend or a freeze, run at once, as L syncs after the drain that saw them. Work that threw or
-   * rolled back reports nothing. A throw from the callback propagates.
+   * rolled back reports nothing. A throw from the callback propagates. The probe of `failStuckIntent` (#955) reports its
+   * scope the same way, also when the call then refuses.
    */
   changed?: (scope: string) => void;
 }
@@ -122,14 +123,15 @@ export class HostedReconciler {
     const row = found.rows[0];
     if (!row) throw new Error(`Unknown intent: ${key}`);
     if (row.concluded) throw new Error(`Intent already settled: ${key}`);
-    let refused: IntentOutcomeError | undefined;
+    let refused: IntentOutcomeError | undefined, concluded = false, claimed = false;
     if (row.tried) {
-      try {
-        if (await this.reconcile(scopeKey, stored, () => {})) throw new Error(`Intent already settled: ${key}`);
-      } catch (error) {
+      try { concluded = await this.reconcile(scopeKey, stored, () => { claimed = true; }); } catch (error) {
         if (!(error instanceof IntentOutcomeError) || error.key !== key) throw error;
         refused = error;
       }
+      // The probe committed a conclusion or a first claim, as a pass does, so the Host syncs the scope before the refusal.
+      if (concluded || claimed) this.options.changed?.(scope);
+      if (concluded) throw new Error(`Intent already settled: ${key}`);
     }
     if (!refused) throw new Error(`Intent is not stuck: ${key} has no refused terminal`);
     await this.store.failIntent(scope, refused, this.now);
@@ -274,16 +276,19 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
   const envelope = terminal.envelope;
   if (envelope.task_id !== row.task_id) throw new Error('Terminal identity conflict');
   let conclusion: Conclusion, outbox: OutboxIntent[] = [];
-  const { manage, ...base } = ports, now = base.now();
+  const { manage, ...given } = ports, now = given.now();
+  // The published values of this commit, so a conflict with a stored projection row is refused below as the outcome's own.
+  const published = new Map<string, Json>();
+  const base = { ...given, publish: (id: string, value: Json) => { given.publish(id, value); published.set(id, value); } };
   if (attempt.cancellation || envelope.type === 'task.cancelled') conclusion = 'cancelled';
   else if (envelope.type === 'task.complete') {
     const document = envelope.payload.document;
     if (row.handler !== null) {
-      // As K4 `publish`: each value is a projection row of this commit.
-      const published = new Set<string>();
       applyHostOutcome(turnId, hostIntents.get(row.handler), row.handler, document, { intent: { key: turnId, taskId: row.task_id }, terminal,
-        publish: (id, value) => { base.publish(id, value); published.add(id); } });
-      outbox = [...published].map(id => ({ kind: 'projection', id }));
+        publish: base.publish });
+      // As K4 `publish`: each value is a projection row of this commit.
+      outbox = [...published.keys()].map(id => ({ kind: 'projection', id }));
+      await refuseStoredConflicts(client, scopeKey, turnId, 'handler_failed', outbox, published);
     } else {
       // Not a key that K8 wrote. It must never settle as a success.
       if (!Object.hasOwn(state.turns, turnId)) throw new IntentOutcomeError(turnId, 'unknown_intent', 'No Bot Turn or Host intent has this key');
@@ -299,6 +304,7 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
       }
       await writeSlice(client, scopeKey, slice);
       outbox = result.revision === head + 1 ? result.outbox : [];
+      await refuseStoredConflicts(client, scopeKey, turnId, 'outcome_failed', outbox, published);
     }
     conclusion = 'succeeded';
   } else conclusion = envelope.type === 'task.decline' ? 'declined' : 'failed';
@@ -309,6 +315,24 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
   await deliverCancels(client, scope, state, now);
   await switchDueVersions(client, scopeKey, now);
   return { value: conclusion, outbox, now };
+}
+
+/**
+ * The store writes the outbox after `decide` returns, so it would find a projection that conflicts with a stored row only
+ * then, as a plain error. The terminal checks those rows first, so the conflict is a refused outcome that the reconciler
+ * audits and the owner can fail.
+ */
+async function refuseStoredConflicts(client: PoolClient, scopeKey: string, key: string, code: IntentOutcomeError['code'],
+  outbox: readonly OutboxIntent[], published: ReadonlyMap<string, Json>): Promise<void> {
+  for (const intent of outbox) {
+    const value = published.get(intent.id);
+    if (intent.kind !== 'projection' || value === undefined) continue;
+    const stored = (await client.query<{ kind: string; body: string | null }>('SELECT kind, body::text AS body FROM outbox WHERE scope = $1 AND key = $2',
+      [scopeKey, storedKey(intent.id)])).rows[0];
+    if (stored && (stored.kind !== 'projection' || canonical(JSON.parse(stored.body!) as Json) !== canonical(value))) {
+      throw new IntentOutcomeError(key, code, 'Projection identity conflict');
+    }
+  }
 }
 
 /** Runs the handler of a Host intent in the terminal transaction, as L's `applyHostOutcome` (K8 host.ts). */
