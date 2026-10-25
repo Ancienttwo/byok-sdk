@@ -5,21 +5,25 @@ import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaborati
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import type { SeatFacts, settleDelegations, SyncFacts, SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
-import { activeBinding, DeviceBindingError } from './binding';
+import { activeBinding, DeviceBindingError, deviceRefusals } from './binding';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { idOf, storedKey } from './layout';
 import { retiredIntents, retiredTurns } from './retention';
 import { switchDueVersions, type RoutineSlice } from './routines';
 import { inSchema, lockScope } from './store';
 
-/** What a Turn freezes: the `freeze` step input of the sync rule, or a promoted routine occurrence. `key` is the Turn id. */
-export interface IntentFreeze { key: string; source: 'user' | 'bot' | 'routine'; waitUntil: number; execution: ExecutionTemplate }
+/**
+ * What a Turn freezes: the `freeze` step input of the sync rule, or a promoted routine occurrence. `key` is the Turn id.
+ * A Host intent (#955) has its own key and the name of its handler.
+ */
+export interface IntentFreeze { key: string; source: 'user' | 'bot' | 'routine'; waitUntil: number; execution: ExecutionTemplate; handler?: string }
 /** The K4 times of a promoted routine intent (#793 D2f): its retry bound, and `superseded` when a newer slot already exists. */
 export interface RoutineTimes { retryUntil?: number; conclusion?: Conclusion }
 
 /**
  * Saves one intent with its frozen input and its stable task id, `taskId(key, 0)`. The caller holds the scope lock.
  * A second freeze of the same Turn with the same identity changes nothing; another identity throws, as in K4 `enqueue`.
+ * The handler is part of the identity, so a Turn never takes over a Host intent row, and a Host intent never a Turn's.
  * A Turn whose intent compaction retired throws `RetiredIntentIdentityError`, as K4 `enqueue` refuses a retired key (#793 S8).
  */
 export async function freezeIntent(client: PoolClient, scope: string, freeze: IntentFreeze, routine: RoutineTimes = {}): Promise<FrozenInput> {
@@ -27,11 +31,12 @@ export async function freezeIntent(client: PoolClient, scope: string, freeze: In
   if ((freeze as IntentFreeze & { retry?: unknown }).retry !== undefined) throw new Error('H intents have no retry policy');
   const scopeKey = storedKey(scope), key = storedKey(freeze.key);
   const input: FrozenInput = { ...structuredClone(freeze.execution), taskId: taskId(freeze.key, 0) };
-  const prior = await client.query<{ source: string; input: string; wait_until: string }>(
-    'SELECT source, input::text AS input, wait_until::text FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
+  const prior = await client.query<{ source: string; handler: string | null; input: string; wait_until: string }>(
+    'SELECT source, handler, input::text AS input, wait_until::text FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
   if (prior.rows[0]) {
     const row = prior.rows[0];
-    if (row.source !== freeze.source || canonical(JSON.parse(row.input)) !== canonical(input) || Number(row.wait_until) !== freeze.waitUntil) {
+    if (row.source !== freeze.source || row.handler !== (freeze.handler ?? null) || canonical(JSON.parse(row.input)) !== canonical(input)
+      || Number(row.wait_until) !== freeze.waitUntil) {
       throw new Error('Intent identity conflict');
     }
     return input;
@@ -39,10 +44,10 @@ export async function freezeIntent(client: PoolClient, scope: string, freeze: In
   if ((await retiredIntents(client, scopeKey, [freeze.key])).size) throw new RetiredIntentIdentityError();
   // A new intent can create execution, so its device must have an active H binding (#793 D2e).
   await activeBinding(client, scopeKey, freeze.execution.deviceId);
-  await client.query(`INSERT INTO intent (scope, key, task_id, ordinal, agent, source, input, wait_until, submission, retry_until, conclusion)
-    SELECT $1, $2, $3, coalesce(max(ordinal) + 1, 0), $4, $5, $6::json, $7, 'reserved', $8, $9 FROM intent WHERE scope = $1`,
+  await client.query(`INSERT INTO intent (scope, key, task_id, ordinal, agent, source, handler, input, wait_until, submission, retry_until, conclusion)
+    SELECT $1, $2, $3, coalesce(max(ordinal) + 1, 0), $4, $5, $10, $6::json, $7, 'reserved', $8, $9 FROM intent WHERE scope = $1`,
   [scopeKey, key, input.taskId, agentKey(scope, freeze.execution), freeze.source, JSON.stringify(input), freeze.waitUntil,
-    routine.retryUntil ?? null, routine.conclusion ?? null]);
+    routine.retryUntil ?? null, routine.conclusion ?? null, freeze.handler ?? null]);
   return input;
 }
 
@@ -100,13 +105,17 @@ export async function seatFacts(client: PoolClient, scope: string, seatIds: read
 /**
  * The sync rule facts of these Turns, read in the sync transaction. `started` is the reconciliation's attempt fact
  * (D2d). `retired` reads the intent tombstones of compaction (S8) and the Turn tombstones of retention (D2g).
+ * `deviceRefusal` (#956) reads the binding of each Bot's current device once, so the K8 step holds a Turn whose device a
+ * freeze would refuse, and the rest of the scope syncs. The freeze still checks the binding as the last guard.
  */
-export async function syncFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<SyncFacts> {
+export async function syncFacts(client: PoolClient, scope: string, turnIds: readonly string[], bots: CollaborationState['team']['bots']): Promise<SyncFacts> {
   const { intent, started } = await loadIntentFacts(client, scope, turnIds);
   // Retention retires Turn ids (#793 D2g). Compaction retires intents (#793 S8): a compacted intent comes first, as in L's sync.
   const retired = await retiredTurns(client, storedKey(scope), turnIds), compacted = await retiredIntents(client, storedKey(scope), turnIds);
+  const devices = await deviceRefusals(client, storedKey(scope), [...new Set(Object.values(bots).map(bot => bot.execution.deviceId))]);
   return { intent, executionStarted: turnId => started.has(storedKey(turnId)),
-    retired: turnId => compacted.has(turnId) ? 'result_retired' : retired.has(turnId) ? 'turn_retired' : undefined };
+    retired: turnId => compacted.has(turnId) ? 'result_retired' : retired.has(turnId) ? 'turn_retired' : undefined,
+    deviceRefusal: botId => Object.hasOwn(bots, botId) ? devices.get(bots[botId]!.execution.deviceId) : undefined };
 }
 
 /**

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FrozenInput, FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
+import { DEVICE_NOT_BOUND } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collaboration/test-support';
 import { DeviceBindingError } from './binding';
 import { freezeIntent, HostedSubmitter } from './intents';
@@ -78,15 +79,31 @@ describe.skipIf(POSTGRES_URL === undefined)('H device binding on real Postgres (
     expect(await store().bindDevice(scope, 'other')).toBe(1);
   });
 
-  it.each(['unbound', 'revoked', 'mode'] as const)('refuses a sync freeze for a device that is %s, and writes nothing', async reason => {
+  it.each(['unbound', 'revoked', 'mode'] as const)('holds the Turn of a device that is %s with no intent, and the sync goes on (#956)', async reason => {
     const scope = `tenant:${randomUUID()}`;
     await store().seed(scope, queued);
     if (reason !== 'unbound') await store().bindDevice(scope, 'device');
     if (reason === 'revoked') await store().revokeDevice(scope, 'device', 5);
     if (reason === 'mode') await opened!.pool.query(`UPDATE ${table('device_binding')} SET mode = 'L' WHERE scope = $1`, [storedKey(scope)]);
-    const before = await store().dump(scope);
-    await expect(store().sync(scope, SYNC)).rejects.toEqual(refusal(reason));
-    expect(await store().dump(scope)).toBe(before);
+    expect(await store().sync(scope, SYNC)).toEqual({ dueAt: null });
+    const state = await store().read(scope);
+    expect([state.turns.q1!.held, state.audit]).toEqual([DEVICE_NOT_BOUND, [`Turn held ${DEVICE_NOT_BOUND} ${reason}: q1`]]);
+    expect((await opened!.pool.query(`SELECT key FROM ${table('intent')} WHERE scope = $1`, [storedKey(scope)])).rows).toEqual([]);
+    expect((await opened!.pool.query(`SELECT body FROM ${table('outbox')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey('held:q1')])).rows)
+      .toEqual([{ body: { owner: 'main', turnId: 'q1', code: DEVICE_NOT_BOUND } }]);
+  });
+
+  it.each(['unbound', 'revoked', 'mode'] as const)('refuses a direct freeze for a device that is %s, the last guard behind the hold', async reason => {
+    const scope = `tenant:${randomUUID()}`;
+    await store().seed(scope, () => {});
+    if (reason !== 'unbound') await store().bindDevice(scope, 'device');
+    if (reason === 'revoked') await store().revokeDevice(scope, 'device', 5);
+    if (reason === 'mode') await opened!.pool.query(`UPDATE ${table('device_binding')} SET mode = 'L' WHERE scope = $1`, [storedKey(scope)]);
+    await expect(inSchema(opened!.pool, store().schema, async client => {
+      await lockScope(client, storedKey(scope));
+      return freezeIntent(client, scope, { key: 'q1', source: 'user', execution: template('device'), waitUntil: clock + 60_000 });
+    })).rejects.toEqual(refusal(reason));
+    expect((await opened!.pool.query(`SELECT 1 FROM ${table('intent')} WHERE scope = $1`, [storedKey(scope)])).rows).toEqual([]);
   });
 
   /** A bound scope with one frozen intent on `device`, due now. */

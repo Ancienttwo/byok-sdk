@@ -301,6 +301,31 @@
   `held:<turnId>` projection with a fixed body, and an audit row with the
   reason. The rest of the scope syncs, and the next sync with no refusal
   freezes the Turn. L sets no fact; H adopts it in a follow-up.
+- **Feature (examples)** — the hosted collaboration example runs the Host's
+  own intents (#955), as L's `enqueueHostIntent` (#882).
+  `HostedCollaborationStore.enqueueHostIntent(scope, input, handler, clock)`
+  saves an intent row with the handler name (new `intent.handler` column),
+  checked against the store's new `hostIntents` option. It goes through the
+  same submitter, reconciler and device binding fence as a Turn intent. At
+  `task.complete` the handler runs synchronously in the terminal transaction
+  with the document, the intent, the terminal and `publish`. A terminal that
+  H cannot apply (no Turn and no handler, a handler that throws, returns a
+  thenable or is not configured, or a Turn outcome that throws) rolls back
+  as `IntentOutcomeError` and keeps the intent open; its reason goes to
+  `last_error` with one audit line for each new reason. The owner's
+  `HostedCommandEntry.failStuckIntent` (with the new `failStuckIntent`
+  entry option, composed from `HostedReconciler.failStuckIntent`)
+  reconciles that row once more and settles it `failed` with an audit
+  line, so its FIFO moves on.
+- **Feature (examples)** — the hosted collaboration example adopts K8's
+  `deviceRefusal` sync fact (#956). Each sync round reads the binding of
+  each Bot's device once, so a Turn whose Bot device has no active H
+  binding is held (`held: 'device_not_bound'`) instead of stalling the
+  sync of its whole scope. The scope's due time is 0 while a held Turn's
+  device is bound again or its Bot is archived, so the due scheduler
+  releases it at once; `bindDevice` and `revokeDevice` now write the due
+  time in their transaction. H's card claim uses K8's
+  `CONNECTOR_OUTCOME_UNKNOWN` in place of its own copy of the text.
 - **Changed (client, internal)** — `TaskRunner`'s method bodies now live in
   `daemon/task-runner/`, one module per stage (#926). `handleOffer` and
   `pump` are split along their existing stages, and no function is over 300

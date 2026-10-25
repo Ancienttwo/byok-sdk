@@ -7,7 +7,7 @@ Status: the commit store, the intent submitter (D2b-1), the sync step (D2b-2), t
 reconciliation (D2d), the device binding (D2e), retention (D2g), routines (D2f-2), their scheduler (D2f-3), the outbox
 sender (D2b-out-2), delegation settlement (D2f-5), the inbound channel entry (D2b-out-3), the batch seal, the
 authenticated command entry (S10), the device observation (S11), the connector card calls (S12), the Agent home
-flush (S13) and summary-only Host job routines (S14).
+flush (S13), summary-only Host job routines (S14) and Host intents (#955).
 Do not use this example as a deployed Host yet.
 
 ## Commit store
@@ -84,7 +84,7 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `entry` | element of a list (audit, rejected, team note, home operation, room message), keyed by position |
 | `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
 | `outbox` | work for the sender: a projection's value and send state, a delivery's scan index (owner §54a, signed), a card's connector call claim, an Agent home operation's scan index, or a Host job's claim (#793 §6, signed) |
-| `intent` | Turn intent: the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
+| `intent` | Turn intent or Host intent (with its handler name, #955): the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
 | `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision and its revoke time |
 | `retired_identity` | K8 identity that retention retired for good, `hash([namespace, id])`, or a compacted intent, `hash(['intent', turnId])` |
 | `archived_row` | row that retention moved out of the state, by namespace and id; a command record has an expiry |
@@ -266,7 +266,9 @@ a TypeScript API; the deployment mounts it on its own HTTP framework. It takes:
 - `authenticate(credential)`: the product's session check, which returns the scope that the caller owns and the principal of
   the request. A throw or no result is an `UnauthenticatedError`, with nothing written. H never reads a token itself;
 - `owner(scope)`: the owner principal id of the scope, the value that the inbound entry's `InboundIdentity.owner` gives;
-- `sync(scope, now)`: the deployment's composed sync, the function that the due scheduler runs.
+- `sync(scope, now)`: the deployment's composed sync, the function that the due scheduler runs;
+- `failStuckIntent(scope, key)` (optional): the reconciler's `failStuckIntent` for the scope's tenant. Without it, the
+  entry's `failStuckIntent` refuses.
 
 Each method checks the principal as L's R2 checks do, commits under L's command id (`hash(['input', botId, key])`,
 `['room_input', roomId, key]`, `['answer', id]`, `['decide', id]`, a new id for each keyless command), then runs `sync`, as
@@ -325,6 +327,33 @@ of K4 `reconcile` and `finish`. It reads `readTaskOffer`, `readDeviceTerminal` a
 - Each SDK call runs outside the scope lock. Each write takes the lock and is fenced on `conclusion IS NULL`.
 - A row with no terminal is read again after `pollMs`. The SDK task observer does not wake the reconciler yet.
 
+### Host intents
+
+L lets the Host run its own work on the K4 core (`enqueueHostIntent`, #882). H does it on the intent table (#955):
+
+- `HostedCollaborationStore.enqueueHostIntent(scope, input, handler, clock)` is a Host call, not an entry method. One
+  transaction under the scope lock saves an intent row with the handler name in `intent.handler`, through `freezeIntent`.
+  The row then goes through the same submitter, reconciler and binding fence as a Turn intent, and shares the FIFO of its
+  agentRef. It refuses, with nothing written, a handler that the store's `hostIntents` option lacks, connector toolsets
+  that the Host config does not declare read-only, a key that is a Bot Turn, a key whose row has another handler or
+  none, and each `freezeIntent` refusal. An exact replay returns `{ key, taskId, conclusion? }` until compaction removes
+  the row. The handler is part of the row's identity, so a Turn freeze never takes a Host intent row over.
+- At `task.complete`, the terminal transaction runs the handler synchronously with the result document and
+  `{ intent: { key, taskId }, terminal, publish }`. `publish` writes a projection row in the same commit. The handler sees
+  no K8 state, so the K8 revision stays. Other terminals conclude the row with no handler call.
+- A terminal that H cannot apply throws `IntentOutcomeError` (L's codes), and the terminal transaction rolls back, so the
+  row stays open at the head of its FIFO: `unknown_intent` for a row with no handler whose key is no Bot Turn,
+  `handler_failed` for a handler that throws, returns a thenable or is not configured in this process (L refuses to start
+  instead; H has no startup scan over every scope), and `outcome_failed` for a Bot Turn whose outcome commit throws. The
+  reconciler then writes `<code>: <message>` to the row's `last_error` and one audit line
+  (`Intent outcome refused <code>: <key> <message>`) when that value changed, so several processes add one line.
+- `HostedReconciler.failStuckIntent(scope, key)` is L's owner `failStuckIntent`. It reconciles that one row again, and
+  only when that throws `IntentOutcomeError` for the key, one transaction under the scope lock concludes the row `failed`
+  with no terminal, writes `Intent failed by owner <code>: <key> <message>` and runs the version switch. It refuses an
+  unknown key, a settled row (also one that this reconciliation concluded), and a row with no refused terminal; another
+  error of the reconciliation is thrown as it is. The entry's `failStuckIntent` checks the owner, calls it, then syncs,
+  so a Bot Turn ends `failed`.
+
 ## Device binding
 
 The mode binding of plan §4.1 is a Host record, not an SDK field. `HostedCollaborationStore.bindDevice(scope, deviceId)`
@@ -336,20 +365,28 @@ mode revision in one write, and keeps the row as the tombstone.
   tombstone row in the default mode L at revision 2 (creating the scope row if needed), so a later bind of the id is
   refused.
 - Each write that can create execution checks the binding under the scope lock, and throws `DeviceBindingError`
-  unless the device has an active binding in mode H: the freeze of a new intent (so a sync that would freeze a Turn
-  for such a device throws and writes nothing), and the submit claim (the row backs off with the error).
+  unless the device has an active binding in mode H: the freeze of a new intent and the submit claim (the row backs off
+  with the error). The freeze check is the last guard: the sync reads the bindings first (next bullet).
 - Right before the SDK call, the submitter reads the binding again. A revoked or changed binding throws, so the try
   backs off with the error. It does not record an expiry.
 - The reconciliation and the message consumer do not check the binding: the result of work that started still lands
   under its own identity. A revoke does not cancel the open intents of the device. One that was not delivered concludes
   `expired` at its `wait_until`, through the claim's queued expiry or through the reconciliation, with the revoke
   reason in `last_error`. A delivered task keeps reconciling under its own identity.
-- One device with no active H binding stalls the sync of its whole scope. The sync writes every Turn of a scope in one
-  transaction, and a freeze for that device throws, so no Turn, cancel or projection of the scope is written. An
-  accepted delegation to a Bot on an unbound or revoked device triggers it too. The owner recovers with a command that
-  does not check the binding: `cancel_turn` for the Turn, `abandon_delegation` for the delegation, or a `team_snapshot`
-  that moves the Bot to a bound device. The command entry refuses a commit that adds work for such a device (see Command
-  entry); the per-Turn K8 sync refusal, which would also cover an Agent's delegation, is a later issue (§55a).
+- The sync holds a Turn whose Bot's device has no active H binding (#956, §55a). Each sync round reads, in one query,
+  the binding of each Bot's current device and answers K8's `deviceRefusal(botId)` (`unbound`, `revoked` or `mode`).
+  The K8 step then holds that Bot's Turns that have no intent: `held: 'device_not_bound'`, one `held:<turnId>`
+  projection with a fixed body, and an audit line with the reason. The rest of the scope syncs, an Agent's delegation to
+  such a Bot included. A Turn that already has an intent is not checked: its work lands under its own identity.
+- A held Turn is released by the next sync that does not hold it. The scope's due time (`scope.due_at`, written in each
+  transaction) is 0 while a held Turn's Bot device has an active binding or its Bot is archived or gone, so the due
+  scheduler syncs it at once:
+  - after `bindDevice` of that device, which writes the due time in the same transaction, the Turn freezes;
+  - after a `team_snapshot` without the Bot (or `delete_bot`), which archives it, the Turn ends `cancelled`.
+
+  A snapshot cannot move a Bot to another device: K8 keeps the device when the model changes. A held Turn on a
+  refused device adds no due time, so a revoked device does not make the scope spin. The owner can also end the Turn
+  with `cancel_turn`. The command entry still refuses a commit that adds work for a refused device (see Command entry).
 - The routine scheduler checks it before a fire (see Routines).
 
 ## Retention
@@ -554,11 +591,10 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
     `store.settleCard` writes its result or error (cut to 1024 characters) and conclusion, fenced by that try and by the
     card still waiting. A connector error or timeout is the card's outcome, as in L, not a failed step. A settle that
     finds another claim's try changes nothing.
-  - **H calls a connector at most once per card; L may call it twice.** A row that already had a try belongs to a claim
+  - **A connector runs at most once per card, in H as in L (#958).** A row that already had a try belongs to a claim
     whose lease passed with no settle (the sender stopped after the call, or its settle failed). The call may have run,
-    so the next claim ends the card with L's timeout error, `Connector timed out; external outcome is unknown`, and
-    never calls again (owner Q3 A). L records nothing before its call, so after a crash L calls the connector again at
-    its next pass.
+    so the next claim ends the card with K8's `CONNECTOR_OUTCOME_UNKNOWN`, `Connector timed out; external outcome is
+    unknown`, and never calls again (owner Q3 A).
   - **With a connector, the lease must be longer than `connectorTimeoutMs`** (the constructor refuses it otherwise). A
     Host with no connector fails a card row and waits `backoffMs`. A row whose card is gone settles with no call.
   - Each settle, and each claim that ends a card, reports its scope once per pass through the `changed` option, so the
@@ -695,6 +731,9 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
 - **Host jobs.** The store takes the Host job handlers (`{ host, hostJobs: { watchlist } }`), and the sender takes their
   deadline (`hostJobTimeoutMs`). Host code adds each routine once with `addHostJobRoutine`. Every store over one schema
   that a sender or the scheduler uses must have the same handlers.
+- **Host intents.** The store takes the Host intent handlers (`{ host, hostIntents: { research } }`). Every store that a
+  reconciler uses must have them; a missing one keeps the row open as `handler_failed`. The command entry takes
+  `failStuckIntent: (scope, key) => reconciler.failStuckIntent(scope, key)`.
 
 ## Tests
 
@@ -712,7 +751,9 @@ three and runs these suites.
 - The D1 commit vectors run on the store and on a reference subject (the pure rules in memory).
 - The D2b sync vectors run on the store.
 - The message consumer tests port the K4 Host-side message vectors (`host-execution-core/src/message.test.ts`).
-- The device binding tests use an SDK tenant in memory for the submit checks.
+- The device binding tests use an SDK tenant in memory for the submit checks. The device hold tests (`device-hold.test.ts`,
+  #956) cover a refused Bot's Turn held while another Bot's Turn freezes in the same sync, the due time at once after a bind
+  that survives another transaction, and a `team_snapshot` that archives the Bot of a held Turn.
 - The K8 retention vectors (`retentionVectors`) run on the store, with H tests for message replays after retention.
 - The compaction tests cover a settled intent and its tombstone, a repeated call, a refused freeze of a retired Turn, a
   K8 veto, an unsettled row, an unknown Turn id, a routine intent, and the sync's `result_retired`.
@@ -774,6 +815,11 @@ three and runs these suites.
   the home row of a committed operation (`retry_persona`) with its lease and settle, the row at `retryAt` after an
   enqueue, the lease kept through a retry enqueue, no call after the lease has passed, two senders on one operation, the wait of a busy Bot, a read timeout, a Host with no home port, and, on the
   hosted SDK with a paired daemon, a Bot readied through the real `enqueueAgentHomeProjection` whose Turn then freezes.
+- The Host intent tests (`host-intents.test.ts`) port the cases of L's `host-intents.test.ts`: a handler run once in the
+  terminal transaction with its projection and the K8 revision kept, and a replay; the enqueue refusals with nothing
+  written; an `unknown_intent` row refused and audited once; a failed, an unconfigured and an async handler; the Main Bot
+  FIFO held until the Host intent settles; `failStuckIntent` through the entry for a stuck row, a failed handler (run once,
+  in the probe), and a Bot Turn whose outcome throws, with its refusals and a probe error; and compaction of a Host intent.
 - The Host job tests (`host-jobs.test.ts`) port the cases of K4 `host-jobs.test.ts` through the scheduler and the sender:
   a summary stored once with a settled row and no intent; the Bot policy kept apart from Host code, and the definition
   checks; a handler throw with its backoff and a retry with the same occurrence key; a missing and a non-JSON summary;

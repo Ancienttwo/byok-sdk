@@ -105,10 +105,11 @@ describe.skipIf(POSTGRES_URL === undefined)('H authenticated command entry on re
       await expect(entry.roomInput(as(), 'r1', 'k1', 'Main?', ['main'])).rejects.toBeInstanceOf(DeviceBindingError);
       expect(await store().dump(scope)).toBe(before);
       expect(synced).toEqual([]);
-      // An answer adds a Turn too. A command that adds none commits; the sync after it still stops at the seeded Turn `t1` of
-      // that Bot, the whole-scope stall that README Device binding describes (§55a), and its error reaches the caller, as L's pass.
+      // An answer adds a Turn too. A command that adds none commits, and the sync after it holds the seeded Turn `t1` of that
+      // Bot (#956) instead of stopping the scope.
       await expect(entry.answer(as(), 'q1', 'Yes')).rejects.toBeInstanceOf(DeviceBindingError);
-      await expect(entry.setMainBot(as(), 'main', true)).rejects.toBeInstanceOf(DeviceBindingError);
+      await entry.setMainBot(as(), 'main', true);
+      expect((await store().read(scope)).turns.t1).toMatchObject({ held: 'device_not_bound' });
       expect((await store().read(scope)).revision).toBe(1);
       expect(synced).toEqual([scope]);
     });

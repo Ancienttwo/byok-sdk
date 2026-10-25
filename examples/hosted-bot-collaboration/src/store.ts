@@ -1,22 +1,22 @@
 import type { Pool, PoolClient } from 'pg';
 import { canonical, hash, occurrenceRun, taskId, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
-  type HostJobRun, type HostJobRoutineDefinition, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
+  type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
 import { botRoutines, endable, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
-import { applyHomeTerminal, applyManagement, failHomeFlush, homeEnqueued, homeHead, planHomeRetry, requireMain, updateBot, writeSnapshotBot,
-  type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
+import { admitBotToolsets, applyHomeTerminal, applyManagement, failHomeFlush, homeEnqueued, homeHead, planHomeRetry, requireMain, updateBot,
+  writeSnapshotBot, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { addTurn, stateOf, type Card, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { advanceRoomSeats, cardCallDue, checkReply, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions,
+import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions,
   seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { activeBinding, bindDevice, revokeDevice } from './binding';
+import { activeBinding, bindDevice, deviceRefusals, revokeDevice } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
-import { cancelIntent, deliverCancels, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
+import { cancelIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
-import { decideFinish, type TaskEvidence } from './reconcile';
+import { decideFinish, type HostedIntentHandler, type IntentOutcomeError, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
 import { dueRoutine, hostedRoutineCommands, hostJobCommands, hostJobRowKey, loadSlice, planSlice, recordDue, switchDueVersions,
   writeSlice } from './routines';
@@ -101,7 +101,14 @@ export interface HostedStoreOptions {
    * concludes its occurrence `failed` (owner Q4 A).
    */
   hostJobs?: Readonly<Record<string, HostJobHandler>>;
+  /**
+   * The handlers of the Host's own intents (#955), by name, as L's `hostIntents`. `enqueueHostIntent` stores the name on the
+   * intent row, and the terminal transaction of a `task.complete` result runs that handler.
+   */
+  hostIntents?: Readonly<Record<string, HostedIntentHandler>>;
 }
+/** A Host intent (#955): its key, its stable task id, and its conclusion once it has one. */
+export interface HostIntent { key: string; taskId: string; conclusion?: Conclusion }
 /** The delegation fields that a reply check read. A settle applies only while they are unchanged. */
 export interface ReplyFence { checks?: number; nextCheckAt: number }
 /**
@@ -151,8 +158,6 @@ export type HomeStep = { terminal: HomeReadback } | { retry: true } | { error: u
 export const homeRowKey = (sequence: number): string => JSON.stringify(['home', sequence]);
 /** The outbox key of a card's connector call row. An array key never equals a projection id. */
 export const cardRowKey = (cardId: string): string => JSON.stringify(['card', cardId]);
-/** L's connector timeout error (K8 host.ts `callConnector`). An expired H claim ends its card with it too. */
-export const CONNECTOR_TIMEOUT = 'Connector timed out; external outcome is unknown';
 /** The error of a Host job result that carries `execution` (owner Q4 A): its occurrence concludes `failed` with it. */
 export const HOST_JOB_EXECUTION_UNSUPPORTED = 'host_job_execution_unsupported';
 /**
@@ -200,10 +205,13 @@ export class HostedCollaborationStore {
   private readonly host: (scope: string) => HostConfig;
   /** The Host job handlers by type (#793 S14). */
   readonly hostJobs: ReadonlyMap<string, HostJobHandler>;
+  /** The Host intent handlers by name (#955). */
+  private readonly hostIntents: ReadonlyMap<string, HostedIntentHandler>;
   constructor(private readonly pool: Pool, readonly schema: string, options: HostedStoreOptions) {
     if (typeof options?.host !== 'function') throw new Error('The Host config of each scope is required');
     this.host = options.host;
     this.hostJobs = new Map(Object.entries(options.hostJobs ?? {}));
+    this.hostIntents = new Map(Object.entries(options.hostIntents ?? {}));
     this.channel = options.channel === true;
     // The ContextPack budget comes with each sync, so the construction checks every bound except that one.
     if (options.coalesce) this.coalesce = coalescePolicy(options.coalesce, Number.MAX_SAFE_INTEGER);
@@ -450,7 +458,7 @@ export class HostedCollaborationStore {
           await cancelIntent(client, scope, seatId, options.now);
         }
         const released = releasedSeats(state);
-        const facts = await syncFacts(client, scope, Object.keys(state.turns));
+        const facts = await syncFacts(client, scope, Object.keys(state.turns), state.team.bots);
         const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
         for (const turn of Object.values(state.turns)) {
           const step = syncTurn(state, turn, facts, { ...options, models, readOnlyToolsets, routines, history: options.history?.get(turn.id) }, emit);
@@ -471,7 +479,7 @@ export class HostedCollaborationStore {
       if (state.channel) cleanReplyTokens(await intentConclusions(client, scope), state, options.now);
       // Last, as in L's sync: it sees every seal of this sync and of earlier transactions.
       projectInputBatches(state, emit);
-      return { value: { dueAt: this.dueAt(state) }, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now: options.now };
+      return { value: { dueAt: await this.dueAt(client, key, state) }, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now: options.now };
     });
   }
 
@@ -603,7 +611,62 @@ export class HostedCollaborationStore {
    */
   finish(scope: string, turnId: string, evidence: TaskEvidence, clock: () => number): Promise<Conclusion | undefined> {
     return this.transaction(client => this.decideIn(client, storedKey(scope), evidence.terminal.envelope.task_id,
-      (state, publish) => decideFinish(client, scope, turnId, state, evidence, this.ports(scope, state, publish, clock), this.channel)), false);
+      (state, publish) => decideFinish(client, scope, turnId, state, evidence, this.ports(scope, state, publish, clock), this.channel,
+        this.hostIntents)), false);
+  }
+
+  /**
+   * Host API (#955), as L's `enqueueHostIntent` (K8 host.ts): the Host's own work in the scope's FIFOs, with Host authority.
+   * One transaction under the scope lock saves the intent row with its handler name. Its outcome goes to that handler, never
+   * to a Bot Turn. On a Bot's agentRef, it shares that Bot's FIFO. An exact replay returns the same intent, until compaction
+   * removes the row. It refuses, with nothing written, a handler that the store does not have, connector toolsets that the
+   * scope's Host config does not declare read-only, a key that is a Bot Turn, a key whose row has another handler or none,
+   * and every refusal of `freezeIntent`: another identity, a retired key, a retry policy, and a device with no active H binding.
+   */
+  enqueueHostIntent(scope: string, input: IntentInput, handler: string, clock: () => number): Promise<HostIntent> {
+    if (!this.hostIntents.has(handler)) return Promise.reject(new Error(`Unknown Host intent handler: ${handler}`));
+    try { admitBotToolsets(input.execution, this.host(scope).readOnlyToolsets ?? []); } catch (error) { return Promise.reject(error); }
+    const scopeKey = storedKey(scope), key = storedKey(input.key);
+    return this.change(scope, undefined, async (state, _publish, client) => {
+      if (Object.hasOwn(state.turns, input.key)) throw new Error('Host intent identity conflict: the key is a Bot Turn');
+      const prior = (await client.query<{ handler: string | null }>('SELECT handler FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key])).rows[0];
+      if (prior && prior.handler !== handler) throw new Error('Host intent identity conflict');
+      const frozen = await freezeIntent(client, scope, { ...input, handler });
+      const row = (await client.query<{ conclusion: Conclusion | null }>('SELECT conclusion FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key])).rows[0]!;
+      return { value: { key: input.key, taskId: frozen.taskId, ...(row.conclusion ? { conclusion: row.conclusion } : {}) }, outbox: [], now: clock() };
+    });
+  }
+
+  /**
+   * Records a terminal of `scope` that the reconciliation refused (#955), as L's `reportIntentFailures`: the reason goes to
+   * the open intent's `last_error`, and a reason that differs from the stored one writes one audit line, so a stuck intent
+   * adds one line and not one for each pass, in any number of processes.
+   */
+  async refuseTerminal(scope: string, error: IntentOutcomeError, clock: () => number): Promise<void> {
+    await this.change(scope, undefined, async (state, _publish, client) => {
+      const changed = await client.query(`UPDATE intent SET last_error = $3 WHERE scope = $1 AND key = $2 AND conclusion IS NULL
+        AND last_error IS DISTINCT FROM $3`, [storedKey(scope), storedKey(error.key), `${error.code}: ${error.message}`]);
+      if (changed.rowCount) state.audit.push(`Intent outcome refused ${error.code}: ${error.key} ${error.message}`.slice(0, 1024));
+      return { value: undefined, outbox: [], now: clock() };
+    });
+  }
+
+  /**
+   * The settle of the owner's `failStuckIntent` (#955), after the reconciliation refused the terminal of `error.key`: in one
+   * transaction under the scope lock, the open intent concludes `failed` with no terminal, its audit line is written, and a
+   * staged routine version that is now due switches. A settled intent refuses with `Intent already settled`.
+   */
+  failIntent(scope: string, error: IntentOutcomeError, clock: () => number): Promise<void> {
+    const scopeKey = storedKey(scope);
+    return this.change(scope, undefined, async (state, _publish, client) => {
+      const now = clock();
+      const settled = await client.query(`UPDATE intent SET conclusion = 'failed', last_error = NULL WHERE scope = $1 AND key = $2
+        AND conclusion IS NULL`, [scopeKey, storedKey(error.key)]);
+      if (!settled.rowCount) throw new Error(`Intent already settled: ${error.key}`);
+      state.audit.push(`Intent failed by owner ${error.code}: ${error.key} ${error.message}`.slice(0, 1024));
+      await switchDueVersions(client, scopeKey, now);
+      return { value: undefined, outbox: [], now };
+    });
   }
 
   /**
@@ -668,8 +731,8 @@ export class HostedCollaborationStore {
    * Claims the connector call of card `cardId` (#793 S12), in one transaction under the scope lock, at the clock read after
    * the lock. A due row of a card that K8 `cardCallDue` still selects takes a try and a lease (`next_at = now + leaseMs`).
    * A row that already had a try belongs to a claim whose lease passed with no settle: the call may have run, so the claim
-   * ends the card with `CONNECTOR_TIMEOUT` through K8 `settleCardCall` and never calls again (owner Q3 A; L calls again
-   * after a crash). A row whose card is gone, or has its outcome, settles with no call.
+   * ends the card with K8's `CONNECTOR_OUTCOME_UNKNOWN` through `settleCardCall` and never calls again (owner Q3 A), as L
+   * does since #958. A row whose card is gone, or has its outcome, settles with no call.
    */
   claimCard(scope: string, cardId: string, clock: () => number, leaseMs: number): Promise<CardClaim> {
     const key = storedKey(scope), row = cardRowKey(cardId);
@@ -684,7 +747,7 @@ export class HostedCollaborationStore {
       const tries = claimed.rows[0]?.tries;
       if (tries === undefined) return { value: { kind: 'none' }, outbox: [] };
       if (tries > 1) {
-        settleCardCall(card, { error: new Error(CONNECTOR_TIMEOUT) });
+        settleCardCall(card, { error: new Error(CONNECTOR_OUTCOME_UNKNOWN) });
         return { value: { kind: 'ended' }, outbox: [], now };
       }
       return { value: { kind: 'call', tries, action: card.action.action, draft: card.action.draft }, outbox: [] };
@@ -880,12 +943,8 @@ export class HostedCollaborationStore {
    * device id throws `DeviceBindingError` (#793 O1 option A).
    */
   bindDevice(scope: string, deviceId: string): Promise<number> {
-    const key = storedKey(scope);
-    return this.transaction(async client => {
-      await this.upsertScope(client, key);
-      await lockScope(client, key);
-      return bindDevice(client, key, deviceId);
-    }, false);
+    // Through the state transaction, so a bind that frees a held Turn writes the scope's due time with it (#956).
+    return this.change(scope, undefined, async (_state, _publish, client) => ({ value: await bindDevice(client, storedKey(scope), deviceId), outbox: [] }));
   }
 
   /**
@@ -893,12 +952,10 @@ export class HostedCollaborationStore {
    * never bound, also in a new scope, gets a revoked tombstone row.
    */
   revokeDevice(scope: string, deviceId: string, revokedAt: number): Promise<void> {
-    const key = storedKey(scope);
-    return this.transaction(async client => {
-      await this.upsertScope(client, key);
-      await lockScope(client, key);
-      await revokeDevice(client, key, deviceId, revokedAt);
-    }, false);
+    return this.change(scope, undefined, async (_state, _publish, client) => {
+      await revokeDevice(client, storedKey(scope), deviceId, revokedAt);
+      return { value: undefined, outbox: [] };
+    });
   }
 
   /**
@@ -1054,7 +1111,7 @@ export class HostedCollaborationStore {
     }
     await this.writeOutbox(client, key, outbox, published);
     // The scope's due time is a projection of the state that this transaction commits (#793 S4).
-    await client.query('UPDATE scope SET due_at = $2 WHERE scope = $1 AND due_at IS DISTINCT FROM $2', [key, this.dueAt(state)]);
+    await client.query('UPDATE scope SET due_at = $2 WHERE scope = $1 AND due_at IS DISTINCT FROM $2', [key, await this.dueAt(client, key, state)]);
     return value;
   }
 
@@ -1066,9 +1123,21 @@ export class HostedCollaborationStore {
     return stateOf({ collaboration: assemble(rows) as unknown as Json });
   }
 
-  /** The earliest time that the K8 rule `collaborationDue` gives for `state`, or null for none. */
-  private dueAt(state: CollaborationState): number | null {
-    const due = collaborationDue(state, this.timers);
+  /**
+   * The earliest time that the K8 rule `collaborationDue` gives for `state`, or null for none. A held Turn (#956) that the
+   * next sync would no longer hold is due at once (0): its Bot's device now has an active binding (after `bindDevice`), or
+   * its Bot is archived or gone (for example after a `team_snapshot` without it), so the sync ends it. A held Turn on a
+   * refused device adds no time, so it never makes the scope spin.
+   */
+  private async dueAt(client: PoolClient, key: string, state: CollaborationState): Promise<number | null> {
+    const due = collaborationDue(state, this.timers), bots = state.team.bots;
+    const held = Object.values(state.turns).filter(turn => turn.held && !turn.conclusion)
+      .map(turn => Object.hasOwn(bots, turn.botId) && !bots[turn.botId]!.archived ? bots[turn.botId]!.execution.deviceId : undefined);
+    if (held.length) {
+      const devices = [...new Set(held.filter(device => device !== undefined))];
+      const refused = await deviceRefusals(client, key, devices);
+      if (held.some(device => device === undefined || !refused.has(device))) due.push(0);
+    }
     return due.length ? Math.min(...due) : null;
   }
 

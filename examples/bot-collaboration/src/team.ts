@@ -8,7 +8,7 @@ import { roomFields, roomVisibility } from './rules/rooms';
 import { NEW_BOTS, NEW_ROOMS } from './rules/schema';
 import { activeBot, admitBotToolsets, archiveBot, profileProjection, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team';
 
-export { activeBot, NEW_BOTS, NEW_ROOMS, requireMain, roomFields };
+export { activeBot, admitBotToolsets, NEW_BOTS, NEW_ROOMS, requireMain, roomFields };
 export const TEAM_NOTE_LIMIT = 20;
 export function projectionRequestId(value: unknown): string {
   const digest = hash(value);

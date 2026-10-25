@@ -168,13 +168,14 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
     expect(await intentRow(scope, turn)).toMatchObject({ source: 'routine', retry_until: null, conclusion: null });
   });
 
-  it('refuses the promotion of a routine Turn for a device with no H binding, and writes nothing (#793 D2e)', async () => {
+  it('holds the routine Turn of a device with no H binding, with no promotion (#793 D2e, #956)', async () => {
     const scope = await scoped(), id = await created(scope);
-    await fired(scope, id, FIRST);
+    const { key, turn } = await fired(scope, id, FIRST);
     await store().revokeDevice(scope, 'device', NOW);
-    const before = await store().dump(scope);
-    await expect(store().sync(scope, SYNC)).rejects.toMatchObject({ name: 'DeviceBindingError', reason: 'revoked' });
-    expect(await store().dump(scope)).toBe(before);
+    await store().sync(scope, SYNC);
+    expect((await store().read(scope)).turns[turn]).toMatchObject({ status: 'queued', held: 'device_not_bound' });
+    expect(await intentRow(scope, turn)).toBeUndefined();
+    expect(await occurrenceRow(scope, key)).toEqual({ execution_superseded: false, conclusion: null });
   });
 
   it('settles the promotion of an occurrence that a newer slot superseded, and the next sync fails its Turn', async () => {

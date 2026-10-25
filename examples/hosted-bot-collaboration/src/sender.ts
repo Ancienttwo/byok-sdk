@@ -1,9 +1,10 @@
 import type { Pool } from 'pg';
 import { validateJson, type Json } from '@byok-sdk/example-host-execution-core';
 import type { ChannelPort } from '@byok-sdk/example-bot-collaboration/channel';
+import { CONNECTOR_OUTCOME_UNKNOWN } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
 import { checkHomeReadback, homeRequests, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
-import { CONNECTOR_TIMEOUT, errorText, HOST_JOB_EXECUTION_UNSUPPORTED, inSchema, lockScope, type DeliveryTimes, type HomeClaim, type HomeStep,
+import { errorText, HOST_JOB_EXECUTION_UNSUPPORTED, inSchema, lockScope, type DeliveryTimes, type HomeClaim, type HomeStep,
   type HostedCollaborationStore, type HostJobOutcome } from './store';
 
 /**
@@ -229,7 +230,7 @@ export class HostedOutboxSender {
 
   /** A connector call with an abort signal, which rejects with L's timeout error after `connectorTimeoutMs`. */
   private callDeadline<T>(call: (signal: AbortSignal) => Promise<T>): Promise<T> {
-    return this.within(this.connectorTimeoutMs, CONNECTOR_TIMEOUT, call);
+    return this.within(this.connectorTimeoutMs, CONNECTOR_OUTCOME_UNKNOWN, call);
   }
   /** Runs `call` with an abort signal, and aborts it and rejects with `Error(timeout)` after `ms`. */
   private async within<T>(ms: number, timeout: string, call: (signal: AbortSignal) => Promise<T>): Promise<T> {
