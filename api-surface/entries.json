@@ -1733,7 +1733,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 288693,
+      "budgetBytes": 288927,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1786,11 +1786,58 @@
       ]
     }
   },
+  "@byok-sdk/keys/model-route": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Headless Pi model route: choices, linkage, field errors and submission",
+      "budgetBytes": 221194,
+      "zod": true,
+      "codegen": true,
+      "nodeBuiltins": {
+        "workspace": false,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/keys/dist/model-route.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/keys/dist/model-route.d.ts"
+      ],
+      "bareImports": [
+        "zod"
+      ],
+      "lazyImports": [],
+      "thirdParty": [
+        "zod"
+      ],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [],
+        "thirdParty": []
+      },
+      "codegen": [
+        {
+          "file": "zod/v4/core/doc.js",
+          "line": 28,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/util.js",
+          "line": 156,
+          "rule": "Function reference"
+        }
+      ]
+    }
+  },
   "@byok-sdk/keys/package.json": {
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1466,
+      "budgetBytes": 1553,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
