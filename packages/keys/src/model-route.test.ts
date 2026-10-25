@@ -468,6 +468,28 @@ describe('acceptance review fixes', () => {
     assertDeviceAccepts(applyModelRouteChange(draft, { field: 'thinking_level', value: 'off' }, context), context);
   });
 
+  it('4: maps change values of the wrong type to field codes', () => {
+    const context = modelRouteContext();
+    const groq = named(context, { field: 'provider_kind', value: 'groq' });
+    const untyped = (change: { field: string; value: unknown }) =>
+      applyModelRouteChange(groq, change as ModelRouteChange, context);
+    for (const value of [{ replace: 123 }, 'garbage', { replace: null }, null]) {
+      const draft = untyped({ field: 'secret', value });
+      expect(validateModelRoute(draft, context).secret).toEqual({ code: 'secret_invalid' });
+      expect(field(draft, context, 'secret').value).toBe('replace');
+      expect(JSON.stringify(modelRouteView(draft, context))).not.toContain('garbage');
+      expect(modelRouteSubmission(draft, context).ok).toBe(false);
+    }
+    expect(validateModelRoute(untyped({ field: 'display_name', value: 42 }), context).display_name).toEqual({ code: 'invalid_value' });
+    expect(validateModelRoute(untyped({ field: 'profile_ref', value: 42 }), context).profile_ref).toEqual({ code: 'invalid_value' });
+    expect(validateModelRoute(untyped({ field: 'base_url', value: 42 }), context).base_url).toEqual({ code: 'invalid_url' });
+    expect(validateModelRoute(untyped({ field: 'model', value: 42 }), context).model).toEqual({ code: 'invalid_value' });
+    const manual = applyModelRouteChange(groq, { field: 'model', value: 'not-listed' }, context);
+    const capabilities = applyModelRouteChange(manual, { field: 'capabilities', value: 'image-input' } as unknown as ModelRouteChange, context);
+    expect(validateModelRoute(capabilities, context).capabilities).toEqual({ code: 'invalid_value' });
+    expect(() => untyped({ field: 'unknown', value: 1 })).toThrow(/no field "unknown"/);
+  });
+
   it('1: refuses a declared api on a Host entry for an anthropic vendor', () => {
     const context = modelRouteContext({ policy: { overrides: [entry({
       provider_kind: 'minimax', api: 'anthropic-messages', config: { ...houseConfig, api: 'openai-completions' },

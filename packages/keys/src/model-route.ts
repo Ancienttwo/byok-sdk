@@ -299,6 +299,8 @@ export function applyModelRouteChange(
       return withModel(draft, change.value, change.api, context);
     case 'pi_model':
       return withDefaultThinking({ ...draft, pi_model: change.value }, manualThinkingLevels(change.value), true);
+    default:
+      throw new Error(`model-route has no field ${JSON.stringify((change as { field?: unknown }).field)}`);
   }
 }
 
@@ -333,7 +335,8 @@ export function validateModelRoute(draft: ModelRouteDraft, context: ModelRouteCo
   const shape = ModelProviderProfileSchema.shape;
   if (draft.profile_ref === '') set('profile_ref', { code: 'required' });
   else if (!shape.profile_ref.safeParse(draft.profile_ref).success) set('profile_ref', { code: 'invalid_value' });
-  if (draft.display_name.trim() === '') set('display_name', { code: 'required' });
+  if (typeof draft.display_name !== 'string') set('display_name', { code: 'invalid_value' });
+  else if (draft.display_name.trim() === '') set('display_name', { code: 'required' });
   else if (!shape.display_name.safeParse(draft.display_name).success) set('display_name', { code: 'invalid_value' });
   if (draft.provider_kind === null) set('provider_kind', { code: 'required' });
   else if (!offeredKinds(context.policy).includes(draft.provider_kind)) set('provider_kind', { code: 'not_a_choice' });
@@ -342,7 +345,8 @@ export function validateModelRoute(draft: ModelRouteDraft, context: ModelRouteCo
   if (draft.auth_mode === null) set('auth_mode', { code: 'required' });
   if (draft.base_url === '') set('base_url', { code: 'required' });
   else if (normalizedUrl(draft.base_url) === undefined) set('base_url', { code: 'invalid_url' });
-  if (draft.model.trim() === '') set('model', { code: 'required' });
+  if (typeof draft.model !== 'string') set('model', { code: 'invalid_value' });
+  else if (draft.model.trim() === '') set('model', { code: 'required' });
   else if (!shape.model.safeParse(draft.model).success) set('model', { code: 'invalid_value' });
   else if (draft.model_source === null || !modelAllowed(draft, draft.model, context.policy)) set('model', { code: 'not_a_choice' });
   if (!shape.capabilities.safeParse(draft.capabilities).success
@@ -442,6 +446,7 @@ function withAuthMode(draft: ModelRouteDraft, mode: ProviderAuthMode | null, con
 }
 
 function withModel(draft: ModelRouteDraft, model: string, api: PiModelApi | undefined, context: ModelRouteContext): ModelRouteDraft {
+  if (typeof model !== 'string') return { ...draft, ...NO_MODEL, model };
   if (model.trim() === '') return { ...draft, ...NO_MODEL };
   if (!modelAllowed(draft, model, context.policy)) return { ...draft, ...NO_MODEL, model };
   const matches = modelChoices(draft, context).filter((entry) => entry.value === model && (api === undefined || entry.api === api));
@@ -475,7 +480,7 @@ function visibleFields(draft: ModelRouteDraft): Set<ModelRouteField> {
   if (draft.provider_kind === null) return visible;
   for (const field of ['adapter', 'auth_mode', 'base_url', 'model'] as const) visible.add(field);
   if (draft.auth_mode !== null && draft.auth_mode !== 'none') visible.add('secret');
-  if (draft.model.trim() === '' || draft.model_source === null) return visible;
+  if (typeof draft.model !== 'string' || draft.model.trim() === '' || draft.model_source === null) return visible;
   visible.add('thinking_level');
   if (draft.model_source === 'manual') {
     visible.add('pi_model');
@@ -656,6 +661,7 @@ function secretFieldError(draft: ModelRouteDraft, context: ModelRouteContext): M
   const secret = draft.secret;
   if (secret === 'none') return { code: 'secret_required' };
   if (secret !== 'keep') {
+    if (!isRecord(secret) || typeof secret.replace !== 'string') return { code: 'secret_invalid' };
     if (secret.replace.trim() === '') return { code: 'secret_required' };
     const bytes = new TextEncoder().encode(secret.replace).byteLength;
     return isSharedSecretValue(secret.replace) && bytes <= PROVIDER_PROVISIONING_SECRET_MAX_BYTES
@@ -686,8 +692,9 @@ function issuePaths(issues: readonly { readonly code: string; readonly path: rea
   return [...new Set(paths)].sort();
 }
 
+/** Any value other than `keep` or `none` is an attempted new key, and is never echoed. */
 function secretState(secret: ModelRouteSecret): 'keep' | 'none' | 'replace' {
-  return typeof secret === 'string' ? secret : 'replace';
+  return secret === 'keep' || secret === 'none' ? secret : 'replace';
 }
 
 function capabilitiesFor(input: readonly PiCatalogModelInput[]): ProviderModelCapability[] {
@@ -695,6 +702,7 @@ function capabilitiesFor(input: readonly PiCatalogModelInput[]): ProviderModelCa
 }
 
 function normalizedUrl(value: string): string | undefined {
+  if (typeof value !== 'string') return undefined;
   try {
     return normalizeProviderUrl(value);
   } catch {
