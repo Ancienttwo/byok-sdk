@@ -668,7 +668,10 @@ export class AgentHomeLeaseManager {
       } finally {
         await fs.rm(temp, { force: true });
       }
-      await syncDirectoryParent(lockPath);
+      // No directory sync: the marker excludes live writers only. A process
+      // crash keeps the link visible, and after a power loss no writer is
+      // alive; a lost link frees the home and a revived temp file goes on the
+      // next acquire.
       await rootGate.release();
       rootGate = undefined;
     } catch (error) {
