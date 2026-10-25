@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FrozenInput } from '@byok-sdk/example-host-execution-core';
+import { CONNECTOR_OUTCOME_UNKNOWN } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { cardCallVectors, seedCollaboration, SYNC_OPTIONS, VECTOR_NOW, type CardCallSubject, type SyncIntentRecord } from '@byok-sdk/example-bot-collaboration/test-support';
 import { storedKey } from './layout';
 import { vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedOutboxSender, type CardConnector, type SenderOptions } from './sender';
-import { cardRowKey, CONNECTOR_TIMEOUT } from './store';
+import { cardRowKey } from './store';
 
 // #793 S12: the connector call of a confirmed card, through the H outbox sender.
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
@@ -106,7 +107,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H card calls on real Postgres (#793
     let signal: AbortSignal | undefined;
     await sender({ connectorTimeoutMs: 20, connector: (_id, _action, _draft, given) => { signal = given; return new Promise(() => {}); } }).run();
     expect(signal?.aborted).toBe(true);
-    expect(await h.card()).toMatchObject({ error: CONNECTOR_TIMEOUT, conclusion: 'failed' });
+    expect(await h.card()).toMatchObject({ error: CONNECTOR_OUTCOME_UNKNOWN, conclusion: 'failed' });
   });
 
   it('ends the card as a timeout, with no call, when an earlier claim\'s lease passed with no settle (owner Q3 A)', async () => {
@@ -121,7 +122,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H card calls on real Postgres (#793
     const changed: string[] = [];
     expect(await sender({ connector, changed: scope => { changed.push(scope); } }).run()).toEqual({ steps: 1, failed: [] });
     expect(calls).toBe(0);
-    expect(await h.card()).toMatchObject({ error: CONNECTOR_TIMEOUT, conclusion: 'failed' });
+    expect(await h.card()).toMatchObject({ error: CONNECTOR_OUTCOME_UNKNOWN, conclusion: 'failed' });
     expect(await h.row()).toEqual([{ next_at: String(VECTOR_NOW + 40_000), tries: 2, settled_at: String(VECTOR_NOW + 20_000) }]);
     expect(changed).toEqual([h.subject.scope]);
   });
@@ -134,11 +135,11 @@ describe.skipIf(POSTGRES_URL === undefined)('H card calls on real Postgres (#793
     await expect.poll(() => calls).toBe(1);
     clock = VECTOR_NOW + 20_000;
     await sender({ connector: slow }).run();
-    expect(await h.card()).toMatchObject({ error: CONNECTOR_TIMEOUT });
+    expect(await h.card()).toMatchObject({ error: CONNECTOR_OUTCOME_UNKNOWN });
     release();
     await first;
     expect(calls).toBe(1);
-    expect(await h.card()).toMatchObject({ error: CONNECTOR_TIMEOUT, conclusion: 'failed' });
+    expect(await h.card()).toMatchObject({ error: CONNECTOR_OUTCOME_UNKNOWN, conclusion: 'failed' });
     expect(await h.card()).not.toHaveProperty('result');
   });
 
