@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { spawn, type SpawnOptions } from 'node:child_process';
 import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -315,5 +316,76 @@ describe('GrokAdapter sessions', () => {
     await s.close();
     const [started] = facts(resources.log).filter(fact => fact.kind === 'start');
     if (process.platform !== 'win32') expect(() => process.kill(started!.pid, 0)).toThrow();
+  });
+});
+
+describe('GrokAdapter agentUserMcpServers (#935)', () => {
+  const MCP_OFF = { GROK_CLAUDE_MCPS_ENABLED: '0', GROK_CURSOR_MCPS_ENABLED: '0', GROK_MANAGED_MCPS_ENABLED: '0' };
+  /** An Agent writer task: the cwd is the sealed home, by its real path. */
+  async function agentCtx(env: NodeJS.ProcessEnv = {}): Promise<PreparedOperationResources & { log: string }> {
+    const resources = await ctx(env);
+    const home = await fs.realpath(resources.workspaceDir);
+    return { ...resources, workspaceDir: home, agentHome: home };
+  }
+  const kinds = (log: string) => facts(log).map(fact => fact.kind).filter(kind => kind === 'inspect' || kind === 'start');
+
+  it('validates the option', () => {
+    expect(() => adapter({ agentUserMcpServers: 'strict' as never })).toThrow(new TypeError('GrokAdapterOptions.agentUserMcpServers must be inherit or excluded'));
+  });
+
+  it('inspects with the agent cwd and env, then starts the agent with the three variables', async () => {
+    const resources = await agentCtx();
+    const s = await open(adapter({ agentUserMcpServers: 'excluded', compatInstructions: 'disabled' }), { instruction: 'hello' }, resources);
+    expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, usage, { type: 'turn_end' }]);
+    expect(kinds(resources.log)).toEqual(['inspect', 'start']);
+    const [inspect, started] = [facts(resources.log).find(fact => fact.kind === 'inspect')!, facts(resources.log).find(fact => fact.kind === 'start')!];
+    expect(inspect.argv).toEqual(['inspect', '--json']);
+    expect(await fs.realpath(inspect.cwd)).toBe(resources.workspaceDir);
+    for (const env of [inspect.env, started.env]) {
+      expect(env).toMatchObject({ ...MCP_OFF, GROK_CLAUDE_RULES_ENABLED: '0', FAKE_ACP_LOG: resources.log });
+    }
+  });
+
+  it('runs inspect through a custom spawnFn with the command, cwd and env of the agent', async () => {
+    const resources = await agentCtx();
+    const calls: { command: string; args: readonly string[]; cwd: unknown; env: unknown }[] = [];
+    const spawnFn: typeof spawn = ((command: string, args: readonly string[], options: SpawnOptions) => {
+      calls.push({ command, args, cwd: options.cwd, env: options.env });
+      return spawn(command, args, options);
+    }) as typeof spawn;
+    await turn(await open(adapter({ agentUserMcpServers: 'excluded', spawnFn }), { instruction: 'hello' }, resources));
+    const [inspect, agent] = [calls.find(call => call.args[0] === 'inspect')!, calls.find(call => call.args[0] === 'agent')!];
+    expect(calls.indexOf(inspect)).toBeLessThan(calls.indexOf(agent));
+    expect(inspect).toEqual({ command: agent.command, args: ['inspect', '--json'], cwd: agent.cwd, env: agent.env });
+    expect(inspect.env).toMatchObject(MCP_OFF);
+  });
+
+  it('fails before the agent starts when inspect lists a server outside the task, or fails', async () => {
+    const listed = JSON.stringify({
+      mcpServers: [
+        { name: 'gmail', transport: 'stdio', target: 'gmail-mcp', source: { type: 'configToml', path: '/home/user/.grok/config.toml' } },
+        { name: 'claude_notes', transport: 'stdio', target: 'n', source: { type: 'claudeJson', path: '/home/user/.claude.json' }, disabled: true, compatibilityStatus: 'disabled', vendor: 'claude' },
+      ],
+      plugins: [],
+    });
+    for (const [inspect, reason] of [
+      [listed, 'grok Agent user MCP server exclusion refused: Grok still loads MCP servers outside the task: gmail (configToml)'],
+      ['fail', 'grok Agent user MCP server exclusion refused: grok inspect failed'],
+    ] as const) {
+      const resources = await agentCtx({ FAKE_ACP_INSPECT: inspect });
+      const error = await startPreparedOperation(adapter({ agentUserMcpServers: 'excluded' }), { instruction: 'hello' }, resources).catch(e => e);
+      expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+      expect(error).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable', message: reason, failure: { class: 'unknown' } });
+      expect(kinds(resources.log)).toEqual(['inspect']);
+    }
+  });
+
+  it('changes nothing under inherit or for a task that is not an Agent task', async () => {
+    for (const [options, agent] of [[{}, true], [{ agentUserMcpServers: 'inherit' as const }, true], [{ agentUserMcpServers: 'excluded' as const }, false]] as const) {
+      const resources = agent ? await agentCtx() : await ctx();
+      await turn(await open(adapter(options), { instruction: 'hello' }, resources));
+      expect(kinds(resources.log)).toEqual(['start']);
+      expect(Object.keys(facts(resources.log).find(fact => fact.kind === 'start')!.env).filter(name => name.startsWith('GROK_'))).toEqual([]);
+    }
   });
 });
