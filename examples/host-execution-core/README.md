@@ -352,12 +352,18 @@ stores the template and puts it, byte for byte, in the `sealed` member of each o
 sees the scope key or the instruction.
 
 - An intent or routine `execution` is a plain `ExecutionTemplate` or a `SealedExecutionTemplate`
-  (the payload has `sealing`). A sealed one must parse as the sealed offer payload. Its `sealed`
-  member must be inline: between occurrences no task holds a `ciphertextRef` blob, so orphan GC
-  could delete it. `sealRoutineTemplate` refuses a template above the inline limit.
+  (the payload has `sealing`). A sealed one must parse as the sealed offer payload, and K4 takes it
+  only as a routine template occurrence that seals `task-input` alone:
+  - It must carry `routineRef` and come from a routine. A task-bound ciphertext names one task id,
+    and a retry generation gets a new one, so only the template binding, which names no task, can
+    be resubmitted unchanged.
+  - Its `sealing.categories` is exactly `['task-input']`: the core settles from the plaintext
+    terminal and reads its outcome.
+  - Its `sealed` member is inline: between occurrences no task holds a `ciphertextRef` blob, so
+    orphan GC could delete it. `sealRoutineTemplate` refuses a template above the inline limit.
 - `routineRef` must name the routine's own id and version: `addRoutine`, `updateRoutine` and
   `promoteOccurrence` refuse another one. Every version needs its own template, and a retry
-  generation reuses the frozen bytes. Only a routine occurrence carries `routineRef`.
+  generation reuses the frozen bytes.
 - The Host does not check `notAfter`; the device declines a passed one (#843).
 - A sealed intent takes no memory ContextPack: with `options.memory` it fails with
   `A sealed execution takes no Host memory ContextPack`, and no plaintext is written next to the

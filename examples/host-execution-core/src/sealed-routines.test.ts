@@ -14,18 +14,26 @@ import type { ExecutionServer, FrozenOffer } from './index';
 
 let host: TestHost | undefined;
 afterEach(async () => { vi.useRealTimers(); await host?.close(); host = undefined; });
+const intents = () => Object.values(host!.ledger.snapshot().intents);
 
 const sealing = { scopeId: 'scope-1', epoch: 2, categories: ['task-input' as const] };
 const scopeKey = Uint8Array.from({ length: 32 }, (_, index) => index + 3);
 const agentRef = { agentId: 'main', profileRevision: '1' };
 const notAfter = '2099-12-31T00:00:00.000Z';
 
-async function sealedTemplate(deviceId: string, routineRef?: RoutineRef): Promise<SealedExecutionTemplate> {
+async function sealedTemplate(deviceId: string, routineRef: RoutineRef, taskSealing: SealedExecutionTemplate['payload']['sealing'] = sealing):
+  Promise<SealedExecutionTemplate> {
   const { payload } = template(deviceId);
   const { instruction: _, ...plain } = payload;
-  const sealed = await sealRoutineTemplate({ tenantId: 'product:host-core-test', scopeKey, sealing, chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
-    sender: 'A'.repeat(43), routineRef: routineRef ?? { routineId: 'none', definitionVersion: 1, notAfter }, agentRef, instruction: 'Check the watchlist.' });
-  return { deviceId, payload: { ...plain, sealing, sealed, ...(routineRef ? { routineRef } : {}) } };
+  const sealed = await sealRoutineTemplate({ tenantId: 'product:host-core-test', scopeKey, sealing: taskSealing,
+    chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` }, sender: 'A'.repeat(43), routineRef, agentRef, instruction: 'Check the watchlist.' });
+  return { deviceId, payload: { ...plain, sealing: taskSealing, sealed, routineRef } };
+}
+const watch = { routineId: 'watch', definitionVersion: 1, notAfter };
+/** Routine `watch` version 1 with a sealed template; its first slot is due at once. */
+async function sealedRoutine(deviceId: string): Promise<AgentRoutineDefinition> {
+  return { id: 'watch', version: 1, timeZone: 'UTC', rule: { anchorMs: Date.now() + 30, everyMs: 86_400_000 }, execution: await sealedTemplate(deviceId, watch),
+    waitMs: 60_000, lateAfterMs: 1000 };
 }
 
 /**
@@ -80,7 +88,7 @@ describe('a sealed routine on the K4 core (#953)', () => {
     expect(host.adapter.starts).toHaveLength(0);
   });
 
-  it('refuses a routineRef of another routine or version, a ciphertextRef template, and a routineRef outside a routine', async () => {
+  it('refuses a routineRef of another routine or version, output sealing, a ciphertextRef template, and a sealed execution outside a routine', async () => {
     host = await openHost({ wrapServer: sealedLane().wrap });
     const base = { timeZone: 'UTC', rule: { anchorMs: Date.now() + 60_000, everyMs: 86_400_000 }, waitMs: 60_000, lateAfterMs: 1000 };
     for (const routineRef of [{ routineId: 'other', definitionVersion: 1, notAfter }, { routineId: 'watch', definitionVersion: 2, notAfter }]) {
@@ -95,28 +103,41 @@ describe('a sealed routine on the K4 core (#953)', () => {
     const byReference = { ...inline, payload: { ...inline.payload, sealed: { ...large.header, ciphertextRef: { blobId: 'blob-1',
       contentHash: `sha256:${'b'.repeat(64)}`, size: large.ciphertext.byteLength, contentType: 'application/octet-stream' } } } };
     await expect(host.core.addRoutine({ ...base, id: 'watch', version: 1, execution: byReference as never })).rejects.toThrow('must be inline');
-    await expect(host.core.enqueue({ key: 'bot-turn', source: 'bot', execution: inline, waitUntil: Date.now() + 60_000 }))
-      .rejects.toThrow('Only a routine occurrence carries routineRef');
+    // K4 settles from the plaintext terminal, so a sealed execution never seals its output.
+    const both = await sealedTemplate(host.deviceId, watch, { ...sealing, categories: ['task-input', 'task-output'] });
+    await expect(host.core.addRoutine({ ...base, id: 'watch', version: 1, execution: both })).rejects.toThrow('A sealed execution seals task-input only');
+    // An output-only sealing has no template, so it cannot be a routine template occurrence either.
+    const { sealed: _sealed, routineRef: _ref, ...outputOnly } = inline.payload;
+    const output = { ...inline, payload: { ...outputOnly, instruction: 'plain', sealing: { ...sealing, categories: ['task-output'] } } };
+    await expect(host.core.addRoutine({ ...base, id: 'watch', version: 1, execution: output as never }))
+      .rejects.toThrow('A sealed execution must be a routine template occurrence');
+    // A task-bound ciphertext names one task id, so a retry generation could not open it: only a routine template runs.
+    const { routineRef: _, ...unbound } = inline.payload;
+    for (const execution of [inline, { ...inline, payload: unbound }]) {
+      await expect(host.core.enqueue({ key: 'bot-turn', source: 'bot', execution: execution as never, waitUntil: Date.now() + 60_000 }))
+        .rejects.toThrow('A sealed execution must be a routine template occurrence');
+    }
     expect(Object.keys(host.ledger.snapshot().routines)).toEqual([]);
   });
 
-  it('fails a sealed intent before any submit on a server with no sealed lane', async () => {
+  it('fails a sealed occurrence before any submit on a server with no sealed lane', async () => {
     host = await openHost();
-    const intent = await host.core.enqueue({ key: 'sealed-turn', source: 'bot', execution: await sealedTemplate(host.deviceId), waitUntil: Date.now() + 60_000 });
-    await vi.waitFor(() => expect(host!.core.intent('sealed-turn')).toMatchObject({ conclusion: 'failed', preparationError: 'sealed_dispatch_unavailable' }));
-    expect(await host.server.tasks.offer(intent.taskId)).toBeUndefined();
+    await host.core.addRoutine(await sealedRoutine(host.deviceId));
+    await vi.waitFor(async () => { await host!.core.drain(); expect(intents()[0]).toMatchObject({ conclusion: 'failed', preparationError: 'sealed_dispatch_unavailable' }); },
+      { timeout: 5000 });
+    expect(await host.server.tasks.offer(intents()[0]!.taskId)).toBeUndefined();
   });
 
-  it('fails a sealed intent with memory on, and writes no instruction next to the sealed one', async () => {
+  it('fails a sealed occurrence with memory on, and writes no instruction next to the sealed one', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'sealed-memory-'));
     const ledger = new HostLedger(path.join(root, 'ledger.sqlite'), 'product:host-core-test');
     try {
       const page = new HostMemoryPage(ledger, { now: () => Date.now(), isCurrent: () => true, notify: async () => {}, authorizeProjection: () => true });
       const lane = sealedLane();
       host = await openHost({ memory: page, wrapServer: lane.wrap });
-      await host.core.enqueue({ key: 'sealed-turn', source: 'bot', execution: await sealedTemplate(host.deviceId), waitUntil: Date.now() + 60_000 });
-      await vi.waitFor(() => expect(host!.core.intent('sealed-turn')).toMatchObject({ conclusion: 'failed',
-        preparationError: 'A sealed execution takes no Host memory ContextPack' }));
+      await host.core.addRoutine(await sealedRoutine(host.deviceId));
+      await vi.waitFor(async () => { await host!.core.drain(); expect(intents()[0]).toMatchObject({ conclusion: 'failed',
+        preparationError: 'A sealed execution takes no Host memory ContextPack' }); }, { timeout: 5000 });
       expect(lane.submitted).toEqual([]);
       const { input } = Object.values(host.ledger.snapshot().executions)[0]!;
       expect(input.payload).not.toHaveProperty('instruction');

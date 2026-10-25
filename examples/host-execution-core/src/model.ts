@@ -158,13 +158,18 @@ export function validateInput(input: IntentInput): void {
   validateRetry(input.retry ?? DEFAULT_RETRY);
 }
 /**
- * A sealed template must be a valid sealed offer payload. Its `routineRef` belongs to a routine occurrence only. Its
- * `sealed` member must be inline: between occurrences no task holds a `ciphertextRef` blob, so orphan GC may delete it.
+ * K4 runs a sealed execution only as a routine template that seals task input alone:
+ * - A task-bound ciphertext names one task id, and a retry generation gets a new one, so only the routine template binding,
+ *   which names no task, survives a retry.
+ * - K4 settles from the plaintext terminal and reads its outcome, so the output stays plaintext.
+ * - The template must be inline: between occurrences no task holds a `ciphertextRef` blob, so orphan GC may delete it.
  */
 function validateSealed(execution: SealedExecutionTemplate, source: IntentInput['source']): void {
   if (!SEALED_EXECUTION_PAYLOAD.safeParse(execution.payload).success) throw new Error('Supply a valid sealed execution template');
-  if (execution.payload.routineRef !== undefined && source !== 'routine') throw new Error('Only a routine occurrence carries routineRef');
-  if (execution.payload.sealed !== undefined && 'ciphertextRef' in execution.payload.sealed) throw new Error('A sealed execution template must be inline');
+  const { sealing, sealed, routineRef } = execution.payload;
+  if (routineRef === undefined || source !== 'routine') throw new Error('A sealed execution must be a routine template occurrence');
+  if (sealing.categories.length !== 1 || sealing.categories[0] !== 'task-input') throw new Error('A sealed execution seals task-input only');
+  if (sealed !== undefined && 'ciphertextRef' in sealed) throw new Error('A sealed execution template must be inline');
 }
 export function validateRetry(retry: RetryPolicy): void {
   if (!Number.isSafeInteger(retry.maxAttempts) || retry.maxAttempts < 1 || retry.maxAttempts > 100
