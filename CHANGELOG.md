@@ -431,6 +431,16 @@
   ContextPack. A missing template or a changed Agent ends the Turn `failed`
   and never blocks it. The outcome schema offers `update_routine` for no
   sealed routine. L has no sealed dispatch. No wire, SDK or SQL change.
+- **Feature (examples)** — the Worker H Host runs its passes from a clock
+  (#794 D3, H4): one Durable Object for the deployment whose alarm re-arms
+  every `H_CLOCK_MS` (10 s by default, 15 s at most) and then runs one pass, so
+  routine slots and due steps run inside the K8 60 s late bound. The cron
+  trigger runs no pass any more: once a minute it only arms the clock if it has
+  no alarm. The alarm keeps no Host state, so a lost, repeated or cut-off
+  alarm is made up from Postgres by the next one. Local workerd tests cover a
+  routine slot and a coalesced batch seal from alarm passes alone, a duplicate
+  alarm, an instance lost mid-alarm, and dropped alarms. No H, SDK, wire or SQL
+  change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

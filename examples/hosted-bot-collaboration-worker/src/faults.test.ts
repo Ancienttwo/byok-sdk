@@ -6,39 +6,36 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout';
-import { openHome, RUN, until, type Home } from './worker.test-support';
+import { alarmReports, openHome, RUN, until, type Home } from './worker.test-support';
 
 /** A wait long enough for any notified pass of a local instance to have run. Nothing may change in it. */
 const QUIET_MS = 3_000;
 const quiet = () => new Promise(resolve => setTimeout(resolve, QUIET_MS));
-const NOTIFIED = '[h-worker] notified pass', SCHEDULED = '[h-worker] scheduled pass';
+const NOTIFIED = '[h-worker] notified pass';
 
 describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
   let h: Home;
-  beforeAll(async () => { h = await openHome(); });
+  // The clock runs from the start. A restart keeps the storage dir, so each instance has the alarm without a new arm.
+  beforeAll(async () => { h = await openHome(); await h.worker.armClock(); });
   afterAll(async () => { await h?.close(); });
 
-  it('a lost notification delays the work to the next cron pass, which finds it in Postgres', async () => {
+  it('a lost notification delays the work to the next alarm pass, which finds it in Postgres', async () => {
     const worker = await h.restart({ fault: 'drop-notify' });
     const { token } = await h.bot();
     const { turnId, task } = await h.input(token);
-    await quiet();
-    expect(await h.intent(turnId)).toMatchObject({ tries: 0, conclusion: null });
-    await worker.cron();
     await until(async () => (await h.intent(turnId))?.submission === 'delivered' || undefined);
     await h.device.waitForStart(task);
     await h.device.finish(task, {});
-    // The device terminal committed in the SDK; its notification was lost.
-    await until(async () => await h.taskStatus(task) === 'complete' || undefined);
-    await quiet();
-    expect(await h.intent(turnId)).toMatchObject({ conclusion: null });
-    expect(await h.commands()).not.toContain(task);
-    await worker.cron();
+    // The device terminal committed in the SDK; its notification was lost too.
     await until(async () => (await h.turn(turnId))?.status === 'succeeded' || undefined);
     expect((await h.commands()).filter(id => id === task)).toHaveLength(1);
-    // Only the two explicit cron calls ran a pass: no notified pass, and no cron of its own.
+    // One try: no other path tried first and failed before an alarm pass retried it.
+    expect(await h.intent(turnId)).toMatchObject({ tries: 1, conclusion: 'succeeded' });
+    // No notified pass ran, and nothing called /host/passes: the alarm passes offered the Turn and applied its terminal.
     expect(worker.lines(NOTIFIED)).toEqual([]);
-    expect(worker.lines(SCHEDULED)).toHaveLength(2);
+    const reports = alarmReports(worker);
+    expect(reports.some(report => report.submit.tried > 0)).toBe(true);
+    expect(reports.some(report => report.reconcile.concluded > 0)).toBe(true);
   });
 
   it('a duplicate notification runs two passes at once: one submit, one outcome, and later passes change nothing', async () => {
@@ -51,8 +48,10 @@ describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
     await until(async () => (await h.turn(turnId))?.conclusion === 'succeeded' || undefined);
     await quiet();
     const stored = await h.substrate.store.dump(h.home);
-    // Two more notified-style passes at once, and a cron pass: the rows are settled, so nothing changes.
-    await Promise.all([worker.passes(), worker.passes(), worker.cron()]);
+    // Two more notified-style passes at once, and an alarm pass that started after the dump: alarms never overlap, so the
+    // second report from here on comes from one. The rows are settled, so nothing changes.
+    const alarms = alarmReports(worker).length;
+    await Promise.all([worker.passes(), worker.passes(), until(async () => alarmReports(worker).length >= alarms + 2 || undefined)]);
     expect(await h.substrate.store.dump(h.home)).toBe(stored);
     expect(await h.intent(turnId)).toMatchObject({ tries: 1, conclusion: 'succeeded' });
     expect((await h.commands()).filter(id => id === task)).toHaveLength(1);
@@ -63,7 +62,6 @@ describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
     const ids = new Set(notified.map(line => line.split(' ')[0]));
     expect(ids.size).toBeGreaterThanOrEqual(2);
     for (const id of ids) expect(notified.filter(line => line.startsWith(`${id} `)).sort()).toEqual([`${id} 1/2`, `${id} 2/2`]);
-    expect(worker.lines(SCHEDULED)).toHaveLength(1);
   });
 
   it('an instance destroyed after the SDK accepted a submit: the next instance reads the offer back and submits nothing new', async () => {

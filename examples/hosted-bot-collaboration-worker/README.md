@@ -7,7 +7,7 @@ Do not use this example as a deployed Host. It has never run on Cloudflare: see 
 
 ## Composition
 
-`src/worker.ts` composes the whole Host for each invocation (a request or a `scheduled` event) and ends it before the
+`src/worker.ts` composes the whole Host for each invocation (a request or a clock alarm) and ends it before the
 invocation is done:
 
 - two new pools over the Hyperdrive binding `BYOK_PG`: the SDK pool from `createByokPool` (its int8 parser, `max: 3`),
@@ -24,12 +24,19 @@ board SSE stream keeps querying after `cloud.fetch` returns its headers.
 Module scope holds no mutable state. Postgres is the only memory between invocations: no `LISTEN`, no timer that
 outlives an invocation, no session map.
 
-- The Host passes run from the cron trigger (`scheduled`) and from `POST /host/passes`. Both call the same function.
+- The Host passes run from the clock and from `POST /host/passes`. Both call the same function. The cron trigger runs no
+  pass: it only arms the clock.
+- The clock is one Durable Object for the deployment, `HostClock` (`idFromName('deployment')`). Its `alarm()` first sets
+  the next alarm `H_CLOCK_MS` later (10 s by default, 15 s at most), then runs one pass in its own composition. A failed
+  pass is logged, not thrown; `alarm()` throws only when `H_CLOCK_MS` or `H_FAULT` is invalid, before it sets the next
+  alarm. The alarm keeps no Host state, only its next time, so a lost, repeated or cut-off alarm is made up by the next
+  one, which rereads Postgres. The cron trigger (`* * * * *`) asks the clock to arm itself if it has no alarm, so a new
+  deployment starts its clock, and a clock whose alarm is gone starts again, within a minute and with no request.
 - A notification only schedules one more pass with `ctx.waitUntil`. A notification is an SDK observer call after a device
   commit, or a product command. That pass rereads Postgres. A lost notification delays work to the next pass, and a
   repeated one changes nothing.
 - `HostedRoutineScheduler.start()` is K4 `recover`. It reads the routine rows, so it runs on every pass: a Worker has no
-  process start.
+  process start. The scheduler gets `H_CLOCK_MS` as its `intervalMs`, so H's own check against the K8 late bound runs.
 
 Node migrates and provisions; the Worker serves. The SDK migrations, the H DDL and the `host_scope` table are created
 from Node before `wrangler dev` starts. The Worker never migrates.
@@ -43,19 +50,23 @@ from Node before `wrangler dev` starts. The Worker never migrates.
 | `POST /host/passes` | operator bearer | one Host pass; returns its report |
 | `POST /host/pairing-code` | operator bearer | `cloud.createPairingCode` for a provisioned scope |
 | `POST /host/board-item` | operator bearer | `cloud.createBoardItem`: the Host's own board write |
-| cron `* * * * *` | Cloudflare | the same pass as `/host/passes` |
+| `HostClock` alarm | Cloudflare | the same pass as `/host/passes`, every `H_CLOCK_MS` |
+| cron `* * * * *` | Cloudflare | arms `HostClock` if it has no alarm; runs no pass |
 
 ### Configuration
 
 | Name | Kind | Meaning |
 | --- | --- | --- |
 | `BYOK_PG` | Hyperdrive binding | the database of the SDK, H and `host_scope` schemas |
+| `HOST_CLOCK` | Durable Object binding | the namespace of `HostClock` (SQLite-backed class, migration `v1`) |
 | `H_SCHEMA`, `HOST_SCHEMA` | var | the H store's schema; the schema of `host_scope` |
 | `BYOK_TOKEN_SECRET` | secret | lowercase hex HMAC key of the SDK token signer |
 | `HOST_ADMIN_TOKEN` | secret | the operator bearer |
 | `BYOK_S3_ENDPOINT`, `BYOK_S3_BUCKET`, `BYOK_S3_ACCESS_KEY_ID`, `BYOK_S3_SECRET_ACCESS_KEY`, `BYOK_S3_REGION` | var, secret | the S3 API of the object store (R2's S3 endpoint in a deployment) |
 | `H_SUBMIT_LEASE_MS`, `H_RECONCILE_POLL_MS` | var, optional | the submitter lease and the reconciler's wait between readbacks |
-| `H_FAULT` | var, tests only | one fault of `drop-notify`, `duplicate-notify`, `hang-after-submit`, `hang-after-terminal-read`, `hang-after-consume` |
+| `H_CLOCK_MS` | var, optional | the clock's alarm interval, from 1 to 15 000 ms; 10 000 when unset |
+| `H_COALESCE_WINDOW_MS` | var, optional | input coalescing (the H store's `coalesce` option) with this window and the K8 defaults; off when unset |
+| `H_FAULT` | var, tests only | a comma-separated list of `drop-notify`, `duplicate-notify`, `drop-alarm`, `duplicate-alarm`, `hang-after-submit`, `hang-after-terminal-read`, `hang-after-consume` |
 
 One scope is one SDK tenant, and the scope string is the tenant id. `host_scope` holds each scope's owner session hash,
 owner principal and H Host config. It stands in for a product's own user and device tables.
@@ -77,9 +88,16 @@ a failure (`src/ci.test.ts` pins that step). Each run has its own Postgres role 
 
 - `worker.test.ts`: one owner Turn through the command entry, a pass, a device process and a pass, with one offer row and
   one command record; a request with no valid owner session writes nothing; a board row written after
-  `/byok/board/stream` returned its headers arrives as `event: board` (the stream keeps its pools); the cron route runs
-  the `scheduled` handler. `body-lifetime.test.ts` checks the release on body end, error and cancel.
-- `faults.test.ts`: a lost notification (the next cron pass finds the work); a duplicate notification (one submit, one
+  `/byok/board/stream` returned its headers arrives as `event: board` (the stream keeps its pools); requests do not
+  arm the clock, the cron trigger does, and then its alarm runs passes. `body-lifetime.test.ts` checks the release on
+  body end, error and cancel.
+- `clock.test.ts` (H4): each test arms the clock once through the cron route, then reaches its subject with notifications
+  dropped and no `/host/passes` call, so only an alarm pass can do the work. A
+  routine slot fires as `scheduled` within the K8 late bound and its Turn is offered; a duplicate alarm (two passes at
+  once) records one occurrence and makes one offer; an instance lost mid-alarm after the routine Turn's submit leaves one
+  occurrence and one offer, and the next instance's stored alarm reads the offer back; a coalesced input batch seals with
+  reason `window` within a minute of its seal time; dropped alarms leave a due batch open, and the next alarm seals it.
+- `faults.test.ts`: a lost notification (the alarm passes find the work); a duplicate notification (one submit, one
   outcome); an instance destroyed after the SDK accepted a submit (the next instance reads the offer back and submits
   nothing new); an instance destroyed after it read a device terminal (the next one applies the outcome once); a scope
   whose sync throws is retried on every pass while the other scopes go on.
@@ -88,7 +106,9 @@ a failure (`src/ci.test.ts` pins that step). Each run has its own Postgres role 
   on its Bot's device, with one outcome and one reply record. Also an instance destroyed after the consumer committed a
   reply: the decision and its record stay.
 
-A kill is SIGKILL to wrangler and workerd with no grace, so nothing in the Worker runs after it. The device processes
+A kill is SIGKILL to wrangler and workerd with no grace, so nothing in the Worker runs after it. A restart of the same
+scope keeps the local storage dir (`--persist-to`), so the clock keeps its alarm, as Durable Object storage does on
+Cloudflare: local workerd fires a stored alarm after a restart with no request. The device processes
 (`src/device.child.ts`) run the K8 stub adapter as a synthetic runtime. Their machine identities are synthetic.
 
 ## Evidence
@@ -101,7 +121,7 @@ Each row's result is recorded in its PR, with the commit and the CI run.
 | Row | Evidence here | What it still needs |
 | --- | --- | --- |
 | Node H (D2) | `examples/hosted-bot-collaboration` on Node and Postgres (D2's suites) | none from this lane |
-| Worker H, local workerd | `worker.test.ts`, `faults.test.ts` on wrangler 4.123.0 (workerd 1.20260811.1), Postgres 17, the compose S3 endpoint | a deployment: real Hyperdrive (transaction pooling, the connection limit per invocation), R2 over its S3 endpoint, cron on Cloudflare, isolate eviction by Cloudflare, and a routine driver below 60 s (Limits) |
+| Worker H, local workerd | `worker.test.ts`, `faults.test.ts`, `clock.test.ts` on wrangler 4.123.0 (workerd 1.20260811.1), Postgres 17, the compose S3 endpoint | a deployment: real Hyperdrive (transaction pooling, the connection limit per invocation), R2 over its S3 endpoint, Durable Object alarms on Cloudflare (at-least-once delivery, retries, placement), cron on Cloudflare (the clock's start and recovery path), isolate eviction by Cloudflare |
 | Two device processes, one Host | `two-devices.test.ts`, synthetic runtime, one computer | two physical computers (macOS and Windows), each with its own OS user and network path |
 | Real runtime delegation and reply | none: no paid runtime call is approved | one A -> B -> A chain with real runtimes, each call approved by the maintainer, recorded apart from the synthetic results |
 
@@ -126,11 +146,13 @@ Proposed text for lane K8 or the coordinator to apply. The status stays OPEN:
 - H keeps the due scheduler's and the routine scheduler's backoff in memory. Each invocation starts with an empty map, so
   a failing scope or routine is retried on every pass (`faults.test.ts` shows it). Correctness does not depend on it;
   load does. A durable backoff is an H change.
-- Routine timing is not met on a cron trigger. H's routine scheduler must run more often than the K8 late bound
-  (`ROUTINE_LATE_AFTER_MS`, 60 s), or every slot fires as `catch_up` with an occurrence key that differs from L's. A
-  Cloudflare cron fires at most once a minute, and a notification does not come from a slot's time. The due steps (batch
-  seals, card expiries, reply checks) run up to a minute late for the same reason. A sub-minute driver, for example a
-  Durable Object alarm, is a design choice that this example does not make. No test here runs a routine.
+- One clock for the whole deployment. Each alarm pass reads every scope's due rows: at most 100 routine fires and 100 due
+  syncs a pass, so about 10 of each a second at the default 10 s. A slot or due step is late by up to `H_CLOCK_MS` plus
+  the time of the pass before it. At 10x scopes the pass grows (the `host_scope` read below, the due scan, one sync per
+  due scope), so lateness climbs toward the K8 late bound (60 s), past which a slot fires as `catch_up` with an
+  occurrence key that differs from L's. Requests never reach the clock object: only the alarm and the once-a-minute
+  arm-only cron do, so an alarm that is gone is replaced within a minute, with or without traffic. The next step is an
+  alarm per scope: each scope's object sets its alarm to its own next due time and passes only its own rows.
 - H's `host(scope)` is synchronous, so each invocation reads every `host_scope` row before it runs. At 10x scopes that
   read grows with them; a per-pass read of only the due scopes needs an H change.
 - The H bundle pulls `node:sqlite` and `node:http` through the K4 index. workerd loads them today, and H never calls
