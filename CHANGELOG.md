@@ -9,6 +9,30 @@
   now stops the rotation with `key_package_missing`, and the old key stays.
   Before, the rotation finished and dropped that epoch. The rotation still
   has no production caller.
+- **Fixed (examples)** — K8 counts a Bot Turn whose outcome commit throws as a
+  stuck intent, with the new `IntentOutcomeError` code `outcome_failed`.
+  `drain()` and every API that runs a pass reject with it, the audit gets one
+  row, and `failStuckIntent(key)` ends it: the intent settles `failed`, the
+  next sync fails the Turn and reports it, and the Bot's FIFO moves on. Before,
+  K4 kept the error only as the outbox row's `lastError`, `drain()` resolved,
+  the FIFO stayed blocked and the owner call refused the key as not stuck. A
+  Host that switches exhaustively on `IntentOutcomeError.code` must add the
+  `outcome_failed` case.
+- **Fixed (examples)** — K8 L no longer leaves a room seat waiting when a Turn
+  step releases the seat before it (a blocked or retired seat Turn). The L
+  sync runs the room step and the Turn steps again, as H's sync does since
+  #876, so the next seat gets its Turn in the same sync. Before, a round whose
+  seat Turns all blocked stopped after four seats, with no timer for the next.
+  A shared room vector holds both Hosts to this.
+- **Fixed (examples)** — K8 bounds the `history` and `roomHistory` reads with
+  the new `historyTimeoutMs` option (default 10 seconds). A read still open
+  after it counts as failed: the Turn stays queued and the timer reads again.
+  Before, a stalled `history` authority held the Host queue with no bound.
+
+- **Fixed (client)** — when a Codex app-server ends on its own and the
+  adapter's record consumer then fails on a record that exit produced (the
+  exit record, or a control settled as exited), the task now fails as
+  `runtime_exited` with the consumer's reason, instead of `unknown` (#869).
 - **Added (client)** — `agentUserMcpServers?: 'inherit' | 'excluded'` on
   `CodexAdapterOptions` and `GrokAdapterOptions` (#935). It applies to Agent
   tasks only, and the default `'inherit'` changes nothing. Under `'excluded'`

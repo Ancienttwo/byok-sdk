@@ -9,11 +9,11 @@ import { enqueue, HostExecutionCore, settle, type ExecutionServer, type HostOpti
 import type { HostJobHandler, Routine } from '@byok-sdk/example-host-execution-core';
 import { HostLedger } from '@byok-sdk/example-host-execution-core';
 import { canonical, hash, project, setLifecycle, time, type ApplicationRows, type ExecutionTemplate, type Json, type LedgerState } from '@byok-sdk/example-host-execution-core';
-import { addTurn, json, stateOf, type CollaborationState, type Turn } from './model';
+import { json, stateOf, type CollaborationState, type Turn } from './model';
 import { contextTurns, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedOffer, type ContextTurn, type OutcomeOffer } from './schema';
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
-import { checkReply, collaborationDue, commitCommand, expireCards, replyCheckDue, reportCardDecisions, seatTurn, type Command, type CommandPorts,
+import { checkReply, collaborationDue, commitCommand, expireCards, replyCheckDue, reportCardDecisions, type Command, type CommandPorts,
   type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
 import { CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
@@ -24,7 +24,7 @@ import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCale
 import { applyManagement, updateBot, writeSnapshotBot } from './team';
 import { botCompactVeto } from './compaction';
 import { teamSnapshot, TeamModeError, type TeamSnapshot } from './rules/team';
-import { advanceRooms, roomMessages, type Mentions, type RoomMessage } from './rooms';
+import { advanceRoomsAndTurns, roomMessages, type Mentions, type RoomMessage } from './rooms';
 import type { RoomFields } from '@byok-sdk/protocol';
 
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
@@ -80,7 +80,8 @@ export interface BotOptions {
    * Present: before a Bot Turn freezes its offer, the Host reads the Bot's earlier history here, oldest first,
    * in the ContextPack row shape. The rows replace the stored Turns in that ContextPack and are not stored;
    * the Turn keeps only their hash. Cards, questions and rejected actions stay Host state. Room seats read `roomHistory`.
-   * A read that throws or returns another shape leaves the Turn queued, and the timer tries again.
+   * A read that throws, returns another shape or is still open after `historyTimeoutMs` leaves the Turn queued, and the timer
+   * tries again.
    */
   history?: (input: { botId: string; turnId: string }) => Promise<readonly ContextTurn[]>;
   /**
@@ -88,10 +89,15 @@ export interface BotOptions {
    * Present: before a seat Turn freezes its offer, the Host reads here the room messages that the seat's Bot can see,
    * oldest first. The authority selects them for that Bot. The rows replace `room.messages` in that ContextPack and are
    * not stored; the seat Turn keeps only their hash. `room.messages` is still written, for the request text and mentions.
-   * A read that throws, returns another shape or is still open at the seat deadline leaves the seat queued, and the timer
-   * tries again until the seat deadline.
+   * A read that throws, returns another shape or is still open after `historyTimeoutMs` or at the seat deadline leaves the seat
+   * queued, and the timer tries again until the seat deadline.
    */
   roomHistory?: (input: { roomId: string; botId: string; turnId: string }) => Promise<readonly RoomMessage[]>;
+  /**
+   * How long a `history` or `roomHistory` read may stay open before it counts as failed. The reads run one after another
+   * in the Host queue, so this bounds how long a stalled authority holds it. The read is not aborted. Default 10_000.
+   */
+  historyTimeoutMs?: number;
   /**
    * External team authority (#739 Q4c). Absent: this Host creates the Main Bot and owns its local team.
    * `external`: the constructor creates no Bot. `applyTeam` writes the authority's Bot snapshots, and
@@ -115,12 +121,14 @@ export interface BotOptions {
 /** Synchronous. A throw or a thenable leaves the intent open, and `drain()` rejects. */
 export type HostIntentHandler = (document: unknown, transaction: OutcomeTransaction) => void;
 /**
- * A K4 terminal that K8 cannot apply (#882 Q6f): its key is neither a Bot Turn nor a Host intent, or its Host handler
- * failed. The intent stays open at the head of its FIFO, and each pass rejects with this error, until the outcome applies
- * or the owner calls `failStuckIntent`.
+ * A K4 terminal that K8 cannot apply (#882 Q6f): its key is neither a Bot Turn nor a Host intent, its Host handler
+ * failed, or the outcome commit of its Bot Turn threw. The intent stays open at the head of its FIFO, and each pass rejects
+ * with this error, until the outcome applies or the owner calls `failStuckIntent`.
  */
 export class IntentOutcomeError extends Error {
-  constructor(readonly key: string, readonly code: 'unknown_intent' | 'handler_failed', message: string) { super(message); this.name = 'IntentOutcomeError'; }
+  constructor(readonly key: string, readonly code: 'unknown_intent' | 'handler_failed' | 'outcome_failed', message: string) {
+    super(message); this.name = 'IntentOutcomeError';
+  }
 }
 function hostIntent(state: CollaborationState, key: string): { handler: string } | undefined {
   return state.hostIntents && Object.hasOwn(state.hostIntents, key) ? state.hostIntents[key] : undefined;
@@ -141,10 +149,10 @@ interface InjectedHistory {
 export type MessageServer = { tasks: Partial<Pick<ByokServer['tasks'], 'agentMessage'>> };
 export type AgentMessageInput = Parameters<NonNullable<CreateByokServerOptions['agentMessage']>['consume']>[0];
 
-/** A room read still open at the seat deadline counts as a failed read, so the sync can expire the seat (#883). */
-function byDeadline<T>(read: Promise<T>, ms: number): Promise<T> {
+/** A history read still open after `ms` counts as a failed read, so a stalled authority cannot hold the Host queue. */
+function bounded<T>(read: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Room history read passed the seat deadline')), Math.max(0, ms)); });
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('History read timed out')), Math.max(0, ms)); });
   return Promise.race([read, late]).finally(() => clearTimeout(timer));
 }
 /** A Turn that has no offer yet and can freeze one: not concluded or failed, and its Bot is active with its profile applied. */
@@ -171,6 +179,7 @@ export class BotCollaboration {
   private readonly now: () => number;
   private readonly connectorTimeoutMs: number;
   private readonly deliveryTimeoutMs: number;
+  private readonly historyTimeoutMs: number;
   private readonly contextMaxBytes: number;
   private readonly contextTurnLimit: number;
   private readonly instructionMaxBytes: number;
@@ -231,6 +240,8 @@ export class BotCollaboration {
     if (this.connectorTimeoutMs < 1 || this.connectorTimeoutMs > 2_147_483_647) throw new Error('Invalid connector timeout');
     this.deliveryTimeoutMs = time(options.channel?.sendTimeoutMs ?? 15_000);
     if (this.deliveryTimeoutMs < 1 || this.deliveryTimeoutMs > 2_147_483_647) throw new Error('Invalid delivery timeout');
+    this.historyTimeoutMs = time(options.historyTimeoutMs ?? 10_000);
+    if (this.historyTimeoutMs < 1 || this.historyTimeoutMs > 2_147_483_647) throw new Error('Invalid history timeout');
     this.contextMaxBytes = time(options.contextMaxBytes ?? HISTORY_MAX_BYTES);
     this.contextTurnLimit = time(options.contextTurnLimit ?? HISTORY_MAX_ITEMS);
     if (this.contextMaxBytes < 1 || this.contextTurnLimit < 1) throw new Error('Invalid ContextPack limits');
@@ -369,7 +380,12 @@ export class BotCollaboration {
     if (owner) return this.applyHostOutcome(key, owner.handler, document, tx);
     // Not a key that K8 wrote. It must never settle as a success.
     if (!Object.hasOwn(state.turns, key)) throw this.intentFailure(key, 'unknown_intent', 'No Bot Turn or Host intent has this key');
-    this.commitCallback(state, taskId, { kind: 'outcome', turnId: tx.intent.key, taskId, document: document as Json }, {
+    try { this.commitBotOutcome(state, key, taskId, document, tx); } catch (cause) {
+      throw this.intentFailure(key, 'outcome_failed', cause instanceof Error ? cause.message : String(cause));
+    }
+  }
+  private commitBotOutcome(state: CollaborationState, key: string, taskId: string, document: unknown, tx: OutcomeTransaction): void {
+    this.commitCallback(state, taskId, { kind: 'outcome', turnId: key, taskId, document: document as Json }, {
       publish: tx.publish,
       ...this.deliverPort(state, taskId),
       outcome: {
@@ -692,15 +708,12 @@ export class BotCollaboration {
     sealDueBatches(state, this.coalesce, this.now());
     // Refresh passive state before any new offer freezes its ContextPack.
     expireCards(state, this.now());
-    let materialized = false;
     const routines = botRoutines(Object.values(s.routines));
-    advanceRooms(s, state, this.now(), (id, botId, request) => addTurn(state, seatTurn(id, botId, request)));
     const limits = { turnLimit: this.contextTurnLimit, contextMaxBytes: this.contextMaxBytes, instructionMaxBytes: this.instructionMaxBytes };
-    for (const turn of Object.values(state.turns)) {
-      materialized = syncTurnInLedger(this.ledger, s, rows, turn, { now: this.now(), models: Object.keys(this.models()),
-        readOnlyToolsets: this.options.readOnlyToolsets ?? [], limits, historyMode: !!this.options.history, history: injected?.turns.get(turn.id),
-        roomHistoryMode: !!this.options.roomHistory, roomHistory: injected?.rooms.get(turn.id), routines, offer: this.offer }) || materialized;
-    }
+    const materialized = advanceRoomsAndTurns(s, state, this.now(), turn => syncTurnInLedger(this.ledger, s, rows, turn, { now: this.now(),
+      models: Object.keys(this.models()), readOnlyToolsets: this.options.readOnlyToolsets ?? [], limits, historyMode: !!this.options.history,
+      history: injected?.turns.get(turn.id), roomHistoryMode: !!this.options.roomHistory, roomHistory: injected?.rooms.get(turn.id), routines,
+      offer: this.offer }));
     settleDelegations(s, state, this.now(), (key, value) => project(s, key, value), this.timers);
     reportCardDecisions(state, (key, value) => project(s, key, value));
     cleanReplyTokens(s, state, this.now());
@@ -809,11 +822,12 @@ export class BotCollaboration {
       const seat = turn.source === 'room_slot' ? state.team.seats[turn.id] : undefined;
       try {
         if (seat && readRoom && !seat.released) {
-          const pending = readRoom({ roomId: state.team.rounds[seat.roundId]!.roomId, botId: turn.botId, turnId: turn.id });
-          const rows = roomMessages(await (seat.deadline === undefined ? pending : byDeadline(pending, seat.deadline - this.now())));
+          // A read still open at the seat deadline fails too, so the sync can expire the seat (#883).
+          const ms = Math.min(this.historyTimeoutMs, seat.deadline === undefined ? Infinity : seat.deadline - this.now());
+          const rows = roomMessages(await bounded(readRoom({ roomId: state.team.rounds[seat.roundId]!.roomId, botId: turn.botId, turnId: turn.id }), ms));
           injected.rooms.set(turn.id, { rows, digest: hash(canonical(rows)) });
         } else if (turn.source !== 'room_slot' && read) {
-          const rows = contextTurns(await read({ botId: turn.botId, turnId: turn.id }));
+          const rows = contextTurns(await bounded(read({ botId: turn.botId, turnId: turn.id }), this.historyTimeoutMs));
           injected.turns.set(turn.id, { rows, digest: hash(canonical(rows)) });
         }
       } catch { this.unread.add(turn.id); }

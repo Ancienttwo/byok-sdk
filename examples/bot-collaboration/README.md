@@ -68,8 +68,11 @@ a Bot's agentRef, that Bot's later Turns wait until it settles. An exact replay
 returns the same intent while K4 keeps it.
 
 A K4 terminal that K8 cannot apply leaves its intent open: a key that is neither
-a Bot Turn nor a Host intent, for example from a direct `bot.core.enqueue`, or a
-Host handler that throws or returns a promise. Then `drain()` rejects with
+a Bot Turn nor a Host intent, for example from a direct `bot.core.enqueue`
+(`unknown_intent`), a Host handler that throws or returns a promise
+(`handler_failed`), or a Bot Turn whose outcome commit throws, for example a
+document outside its frozen schema (`outcome_failed`). After the owner call, the
+next sync settles such a Bot Turn as `failed` and reports it. Then `drain()` rejects with
 `IntentOutcomeError`, and so does every API that runs a pass, including `input`
 and the `wake.consume` hook. The audit gets one row for each key and reason. The
 intent stays at the head of its FIFO until its outcome applies, for example
@@ -442,8 +445,11 @@ The room step of a Host sync is `advanceRoomSeats(state, facts, now, add)` in
 fails a seat Turn whose work was not admitted, queues each new seat Turn
 through `add` (`seatTurn` gives its fields), and returns the seats whose
 admitted work the Host cancels. `src/rules/commands.ts` exports both. L builds
-the facts from its K4 intents; H builds them from its intent rows. The
-`roomVectors` run on both.
+the facts from its K4 intents; H builds them from its intent rows. A Turn
+step can release a seat (a blocked or retired seat Turn). Both Hosts then run
+the room step and the Turn steps again in the same sync, so the next seat gets
+its Turn: L in `advanceRoomsAndTurns` (`src/rooms.ts`), H in its sync loop.
+The `roomVectors` run on both.
 
 `checkReply(state, d, check, now, emit, uncertainAfterMs)` in
 `src/rules/delegation.ts` decides one reply check of a `reply_pending`
@@ -480,6 +486,10 @@ transaction freezes only a Turn that still has no offer.
   messages, so they read no history.
 - A read that throws or returns another shape leaves the Turn queued. The
   timer reads again after about one second.
+- A read still open after `historyTimeoutMs` (default 10 seconds) counts as
+  failed, so a stalled authority cannot hold the Host queue. The Host does
+  not abort the read. Reads run one after another, so a pass waits at most
+  `historyTimeoutMs` for each Turn that reads.
 
 With the `roomHistory` option, the room messages of a seat ContextPack come
 from an external authority too (#883). Before a seat Turn freezes its offer,
@@ -496,7 +506,8 @@ transaction, in the same phase as `history`.
 - K8 still writes `room.messages`. Round counts, mention seats and the seat
   request text read it.
 - A read that throws or returns another shape leaves the seat queued, and the
-  timer reads again. A read still open at the seat deadline counts as failed.
+  timer reads again. A read still open after `historyTimeoutMs` or at the
+  seat deadline counts as failed.
   The seat deadline still applies, so a seat whose read never succeeds is
   released as `busy` and its Turn expires.
 - No projection carries an accepted room post yet. The Host reads posts from
