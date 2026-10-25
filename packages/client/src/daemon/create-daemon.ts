@@ -2250,6 +2250,8 @@ export function buildDaemonWithAdapters(
     let sealedTasks: SealedTasks | undefined;
     /** This run's verified member, bound when it is first ready; a loss leaves it bound and keyless. */
     let sealedMember: DeviceMemberKeyring | undefined;
+    /** The (tenant, device, member) of {@link sealedMember}, taken when it is bound, so retiring the member at shutdown keeps it. */
+    let ownSealIdentity: string | undefined;
     const recordRecoveryFailure = async (task: import('./journal/journal').RecoverableTask, reason: string, interrupted = false) => {
       const offer = decodeEnvelope(task.envelopeBytes);
       const { agentRef } = offer.payload as { agentRef?: AgentRef };
@@ -2467,7 +2469,11 @@ export function buildDaemonWithAdapters(
     sealedTasks = opened;
     latestSealedTasks = opened;
     sealedOutputSettled = () => opened.settled();
-    activateSealedTasks = (keyring) => { sealedMember ??= keyring; };
+    activateSealedTasks = (keyring) => {
+      if (sealedMember !== undefined) return;
+      sealedMember = keyring;
+      ownSealIdentity = sealIdentityOf(record, keyring);
+    };
     // Only the next run receives this run's points, so a run with no member leaves none.
     retireSealedMember = () => { carriedFreshness = sealedMember?.retire(); };
     latestSealIdentity = () => sealIdentityOf(record, sealedMember);
@@ -2483,7 +2489,7 @@ export function buildDaemonWithAdapters(
     helloCapabilities = capabilities;
 
     const commitTerminal = (taskId: string, terminal: Envelope | (() => Promise<Envelope | undefined>)): void => {
-      const ownerIdentity = sealIdentityOf(record, sealedMember);
+      const ownerIdentity = ownSealIdentity;
       const plainBytes = typeof terminal === 'function' ? undefined : encodeEnvelope(terminal);
       // A sealed terminal is sealed once and its bytes are journaled; a retry
       // of the commit reuses them and never seals or uploads again (§9.2).
@@ -2562,11 +2568,10 @@ export function buildDaemonWithAdapters(
       const current = latestSealedTasks!;
       if (current === owner) return owner.sealOutbound(envelope);
       if (memberResuming) throw new Error(`${envelope.type} for sealed task ${taskId} waits for this run's member`);
-      // A run under another tenant, device or member never seals this task's output.
-      if (ownerIdentity === undefined || ownerIdentity !== latestSealIdentity?.()) return current.unsealable(envelope);
       const task = await activeJournal!.readTask(taskId, journalIdentity!);
       if (!task || !('envelopeBytes' in task)) throw new Error(`missing durable offer of sealed task ${taskId}`);
-      return current.sealRecovered(decodeEnvelope(task.envelopeBytes), envelope);
+      // A run under another tenant, device or member never seals this task's output.
+      return current.sealRecovered(decodeEnvelope(task.envelopeBytes), envelope, ownerIdentity !== undefined && ownerIdentity === latestSealIdentity?.());
     };
 
     // #654: a task waits on its approval request. One that cannot be sealed
@@ -2594,7 +2599,7 @@ export function buildDaemonWithAdapters(
         observer.captureOutboundApproval(envelope);
         const sealedTaskOutput = sealedTasks;
         if (terminal) {
-          const ownerIdentity = sealIdentityOf(record, sealedMember);
+          const ownerIdentity = ownSealIdentity;
           commitTerminal(envelope.task_id!, () => sealQueuedTerminal(sealedTaskOutput, ownerIdentity, envelope));
           return;
         }

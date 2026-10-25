@@ -202,6 +202,10 @@ export function advanceRooms(team: RoomsState, facts: Readonly<Record<string, Se
   }
   return result;
 }
+/** The projection id of an accepted seat post in room history mode (#883): one per message, so a replay is identical. */
+export function roomMessageProjection(roomId: string, messageId: string): string {
+  return `room-message:${roomId}:${messageId}`;
+}
 /** The fields of a seat Turn. Seats never manage or delegate (§5), so no seat Turn carries owner authority. */
 export function seatTurn(id: string, botId: string, request: string): TurnFields {
   return { id, root: id, source: 'room_slot', request, botId, hop: 0, authority: 'bot' };
