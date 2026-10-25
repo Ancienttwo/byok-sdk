@@ -32,10 +32,11 @@ const IDENTIFY = `${JSON.stringify({ protocol: 1, id: 1, verb: 'identify' })}\n`
 const dirs: string[] = [];
 const cleanups: Array<() => Promise<void>> = [];
 
+// The root holds the Python environment Hermes built (hundreds of MB): its removal takes a while on Windows.
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup().catch(() => {});
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
-});
+}, 600_000);
 
 /** Output of a Hermes command with `home` as HERMES_HOME, for a failure message. */
 function hermesDiagnostic(home: string, args: string[]): Promise<string> {
@@ -122,12 +123,13 @@ try { await runHermesProviderLauncher(request,{createSecretStore:()=>store}); } 
     expect(events.map((event) => event.type), summary()).toContain('turn_end');
     expect(events.flatMap((event) => event.type === 'progress' ? [event.text] : []).join(''), summary()).toContain(reply);
 
-    // The key reached the Hermes child that called the model, and only the fake endpoint saw it.
-    const posts = endpoint.requests.filter((request) => request.method === 'POST');
-    expect(posts.length, summary()).toBeGreaterThan(0);
-    for (const request of posts) {
-      expect(request.path, summary()).toBe('/v1/chat/completions');
-      expect(request.authorization, summary()).toBe(`Bearer ${fakeKey}`);
+    // The key reached the Hermes child that called the model. Hermes also probes the endpoint for model
+    // metadata (`/v1/models/<id>`, `/api/show`); every request that carries a credential carries this key.
+    const completions = endpoint.requests.filter((request) => request.method === 'POST' && request.path === '/v1/chat/completions');
+    expect(completions.length, summary()).toBeGreaterThan(0);
+    for (const request of completions) expect(request.authorization, summary()).toBe(`Bearer ${fakeKey}`);
+    for (const request of endpoint.requests) {
+      if (request.authorization !== undefined) expect(request.authorization, summary()).toBe(`Bearer ${fakeKey}`);
     }
     expect(process.env.SDK_HERMES_PROVIDER_KEY).toBeUndefined();
     expect(Object.values(process.env)).not.toContain(fakeKey);
