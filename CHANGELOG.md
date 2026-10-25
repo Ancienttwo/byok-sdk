@@ -326,6 +326,18 @@
   releases it at once; `bindDevice` and `revokeDevice` now write the due
   time in their transaction. H's card claim uses K8's
   `CONNECTOR_OUTCOME_UNKNOWN` in place of its own copy of the text.
+- **Feature (examples)** — the hosted collaboration example runs the owner
+  switch of a device between L and H (#957, plan §4.1):
+  `beginSwitch`, `drainDevice`, `commitSwitch` and `abortSwitch`, each on
+  the expected mode revision, with the new `device_binding.switching`
+  column. During the freeze every H write that can create execution for
+  the device throws `DeviceSwitchingError` (`code: 'device_switching'`, as
+  L), the sync holds its Bots' Turns, and a commit away from H waits until
+  the drain finds no open work. After a commit to L the device refuses
+  with `mode`, and its Agent home operations back off. Switch steps that
+  the binding refuses throw `DeviceSwitchRefusedError`. The switch moves
+  no state; the export and import between H and an L ledger is a
+  follow-up.
 
 ## 0.30.1 — 2026-10-24 (published)
 
