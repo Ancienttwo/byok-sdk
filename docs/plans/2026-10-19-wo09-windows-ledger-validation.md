@@ -437,7 +437,8 @@ verified the darwin pin.
   invariant fails, but nothing removes them either. Not fixed here.
 
 This is process-crash evidence on APFS. It is not NTFS evidence. The
-Windows legs of existing CI do not run the new test file; see Sign-off.
+windows-latest NTFS run comes from the `agent-memory-helper` job once the
+Sign-off wiring runs.
 
 ### Evaluation: a QEMU/KVM Windows guest on a GitHub-hosted Linux runner
 
@@ -624,24 +625,46 @@ Only the place where the image lives changes.
 - A7. Whether W5 power-loss runs start before W2 scheme B (to measure the
   gap) or only after it.
 
+#### Owner decisions (2026-10-26)
+
+- A1, accepted as written. Any W5 power-loss claim names this storage
+  profile: the disk honors every flush and loses everything after its last
+  completed flush or FUA. Reordering, subsets of unflushed writes, torn
+  sectors and lying firmware are out of scope.
+- A5, accepted as written. Runs publish invariant results only, with no
+  timing figures, until the benchmark clause of the governing evaluation
+  terms is checked.
+- A6, accepted. The two CI wiring items below are in this change.
+- A2 and A3, accepted. One `workflow_dispatch`-only probe workflow on
+  `ubuntu-latest` reads `/dev/kvm`, `nproc`, `free -g`, `df -h / /mnt`,
+  `uname -r`, `modprobe dm-log-writes`, and the qemu and nbdkit package
+  versions. It installs only `qemu-system-x86` and `nbdkit` and downloads no
+  image. It lands in a separate change after this one.
+- A7: run both. Power loss runs once on the current code to measure the W2
+  gap, and again after W2 scheme B. W6 uses only the second result.
+- A4 stays open. The guest media and its licence stay with the owner, who
+  reads the Windows Server 2025 evaluation terms first. Until then there is
+  no image download, no guest work and no FUA probe, because the probe needs
+  a guest.
+- The helper temp-file leftovers are tracked on #605 with W6, outside W5.
+
 ### Sign-off
 
-Not made in this change. Each needs the maintainer's approval.
+Made in this change under A6. The maintainer signs both at review.
 
 - `.github/workflows/ci.yml`, job `agent-memory-helper`, step "Run SDK
-  helper, intent and capability contracts": add
-  `src/__tests__/agent-memory-powercut.test.ts`. It then runs on
+  helper, intent and capability contracts": adds
+  `src/__tests__/agent-memory-powercut.test.ts`. It now runs on
   macos-latest, macos-15-intel and windows-latest (NTFS, administrator
-  token). That leg already sets `BYOK_TEST_BUN_BIN` and `BYOK_REQUIRE_BUN=1`
-  on Windows and builds the helper. The test skips without the helper build,
-  so the step should also fail when its process-crash case reports a skip.
-- `scripts/ci/select-impact.mjs`, family `agent-memory-helper`: add
+  token). That leg sets `BYOK_TEST_BUN_BIN` and `BYOK_REQUIRE_BUN=1` on
+  Windows and builds the helper. On macOS a missing Bun or helper build
+  would make the process-crash case skip; the job log must be read for a
+  pass, as for the other listed files.
+- `scripts/ci/select-impact.mjs`, family `agent-memory-helper`: adds
   `/^packages\/client\/src\/__tests__\/agent-memory-powercut\//`. The
-  current pattern ends in `[^/]*$` and does not match the harness directory.
-- A standard-user Windows run of the TS harness would need a step like the
-  Go standard-user step in `agent-memory-helper-non-darwin`. Not proposed
-  until A6 is decided.
-
-This change's own CI evidence can only be Linux: build-test runs the new
-test file with the procfs backend under Bun. The macOS and Windows legs do
-not run it until the Sign-off items land.
+  older pattern ends in `[^/]*$` and did not match the harness directory.
+  `select-impact.test.mjs` adds a case for one path in each place; it fails
+  without the new pattern.
+- Not proposed: a standard-user Windows run of the TS harness, which would
+  need a step like the Go standard-user step in
+  `agent-memory-helper-non-darwin`.

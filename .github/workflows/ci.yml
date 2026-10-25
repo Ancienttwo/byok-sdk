@@ -468,7 +468,7 @@ jobs:
 
       - name: Run SDK helper, intent and capability contracts
         run: |
-          bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-asset-root-daemon.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-mcp-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts src/__tests__/agent-memory-helper-identity.test.ts src/__tests__/agent-memory-windows-gate.test.ts
+          bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-asset-root-daemon.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-mcp-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts src/__tests__/agent-memory-helper-identity.test.ts src/__tests__/agent-memory-windows-gate.test.ts src/__tests__/agent-memory-powercut.test.ts
 
       - name: Qualify task-free export against the release helper
         env:
