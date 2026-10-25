@@ -213,12 +213,10 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
     });
 
     client.start();
-    // Real wall-clock window, deliberately short relative to retryDelayMs
-    // (2000ms) but generous relative to idleDelayMs (20ms): a non-empty,
-    // not-stalled batch must never gate behind the LARGE retryDelayMs, so
-    // well over one call must have landed by now. (Not asserting an EXACT
-    // count on purpose — the precise number depends on how many idle-cycle
-    // empty polls fit in the window, which isn't this test's concern.)
+    // Wait for the first batch's skip, then hold a window that is short
+    // relative to retryDelayMs (2000ms) but generous relative to idleDelayMs
+    // (20ms): the unacknowledged batch must back off, so no second poll lands.
+    await vi.waitFor(() => expect(onValidationFailedSeq).toHaveBeenCalledWith(1), { timeout: 5000 });
     await delay(200);
     expect(fetchMock.mock.calls.length).toBe(1);
     expect(onValidationFailedSeq).toHaveBeenCalledWith(1);

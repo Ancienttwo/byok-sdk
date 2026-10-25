@@ -13,6 +13,8 @@ import { botCompactVeto } from './compaction';
  */
 const submitted = new Map<string, { taskId: string; deviceId: string; payload: { agentRef: unknown; terminalProjection: { contract: string } } }>();
 let paused = false;
+/** When set, a Bot Turn task completes with the result document that it returns for the task id. */
+let botDocument: ((taskId: string) => unknown) | undefined;
 const server = {
   executions: { submit: async (input: { taskId: string; deviceId: string; payload: { agentRef: unknown; terminalProjection: { contract: string } } }) => {
     submitted.set(input.taskId, input); return {};
@@ -24,8 +26,12 @@ const server = {
     },
     deviceTerminal: async (taskId: string) => {
       const input = submitted.get(taskId);
-      return input && !paused && input.payload.terminalProjection.contract === 'host-core-test-v1'
-        ? { envelope: { type: 'task.complete', task_id: taskId, payload: { document: { summary: 'host research done' } } } } : undefined;
+      if (!input || paused) return undefined;
+      if (input.payload.terminalProjection.contract === 'host-core-test-v1') {
+        return { envelope: { type: 'task.complete', task_id: taskId, payload: { document: { summary: 'host research done' } } } };
+      }
+      const document = botDocument?.(taskId);
+      return document === undefined ? undefined : { envelope: { type: 'task.complete', task_id: taskId, payload: { document } } };
     },
     attempt: async (taskId: string) => {
       const input = submitted.get(taskId);
@@ -40,7 +46,7 @@ let root: string | undefined, ledger: HostLedger | undefined, bot: BotCollaborat
 afterEach(async () => {
   await bot?.close(); ledger?.close();
   if (root) rmSync(root, { recursive: true, force: true });
-  root = ledger = bot = undefined; paused = false;
+  root = ledger = bot = undefined; paused = false; botDocument = undefined;
   submitted.clear();
 });
 function openBot(hostIntents: Record<string, HostIntentHandler>, extra: Partial<BotOptions> = {}): BotCollaboration {
@@ -188,6 +194,29 @@ it('refuses to fail a Bot Turn that is only queued behind another stuck intent',
   const turnId = Object.values(ledger!.snapshot().intents).find(row => row.key !== KEY)!.key;
   await expect(bot.failStuckIntent(turnId)).rejects.toThrow(`Intent is not stuck: ${turnId} has no refused terminal`);
   expect(ownerFailures()).toEqual([]);
+});
+
+it('fails a Bot Turn whose outcome commit throws on an owner call, so its FIFO moves on and the Turn ends failed', async () => {
+  // The first Bot Turn task completes with a document outside its frozen schema, so K8's outcome commit throws in the K4
+  // terminal transaction. Later tasks stay in flight.
+  let first: string | undefined;
+  botDocument = taskId => (first ??= taskId) === taskId ? { summary: 'not a Bot Turn outcome' } : undefined;
+  bot = openBot({});
+  const refused = { name: 'IntentOutcomeError', code: 'outcome_failed', message: 'Outcome differs from the frozen schema' };
+  await expect(bot.input('k1', 'hello')).rejects.toMatchObject(refused);
+  const turnId = Object.keys(bot.snapshot().turns)[0]!;
+  await expect(bot.drain()).rejects.toMatchObject({ ...refused, key: turnId });
+  expect(bot.core.intent(turnId)).toMatchObject({ phase: 'inflight' });
+  expect(refusals()).toEqual([`Intent outcome refused outcome_failed: ${turnId} Outcome differs from the frozen schema`]);
+  // The next Turn of the Bot waits behind it.
+  await expect(bot.input('k2', 'next')).rejects.toMatchObject(refused);
+  const next = () => Object.values(ledger!.snapshot().intents).find(row => row.key !== turnId)!;
+  expect(next().phase).toBe('queued');
+  await bot.failStuckIntent(turnId);
+  expect(bot.core.intent(turnId)?.conclusion).toBe('failed');
+  expect(bot.snapshot().turns[turnId]).toMatchObject({ status: 'failed', conclusion: 'failed', reported: true });
+  expect(ownerFailures()).toEqual([`Intent failed by owner outcome_failed: ${turnId} Outcome differs from the frozen schema`]);
+  expect(next().phase).toBe('inflight');
 });
 
 it('refuses an async handler, and consumes its rejection', async () => {
