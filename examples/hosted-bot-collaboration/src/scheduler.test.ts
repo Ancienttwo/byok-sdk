@@ -239,6 +239,19 @@ describe.skipIf(POSTGRES_URL === undefined)('H routine scheduler on real Postgre
     expect(await routineRow(scope, id)).toMatchObject({ next_at: String(SECOND), retry_at: null });
   });
 
+  it('backs off only the slot it read: a fire that throws after its slot moved leaves no backoff (#794 H1)', async () => {
+    const scope = await scoped(), id = await created(scope), base = store();
+    const moving = Object.create(base) as typeof base;
+    moving.fire = async () => {
+      await query(`UPDATE ${table('routine')} SET next_at = $3 WHERE scope = $1 AND id = $2`, [storedKey(scope), storedKey(id), SECOND]);
+      throw new Error('boom');
+    };
+    clock = FIRST;
+    expect(await new HostedRoutineScheduler(opened!.pool, moving, { now: () => clock, backoffMs: 1000 }).run())
+      .toMatchObject({ fired: 0, failed: [{ scope, routineId: id }] });
+    expect(await routineRow(scope, id)).toMatchObject({ next_at: String(SECOND), retry_at: null });
+  });
+
   it('reports each scope where the pass committed a fire, in fire order, and no fenced or failed routine (#793 D2f-5)', async () => {
     const [failing, fenced, first, second] = [await scoped('a'), await scoped('b'), await scoped('c'), await scoped('d')];
     const failingId = await created(failing);

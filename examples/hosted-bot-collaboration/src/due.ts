@@ -55,18 +55,22 @@ export class HostedDueScheduler {
         cursor = [Number(row.due), row.scope];
         if (pass.synced >= batch) break;
         const scope = JSON.parse(row.scope) as string, at = this.now();
+        // The due time that a backoff is keyed on, or none. The write comes after the try, so a failed backoff write
+        // propagates and never reports one scope both synced and failed.
+        let retryOn: number | undefined;
         try {
           const { dueAt } = await this.options.sync(scope, at);
           pass.synced++;
           if (dueAt !== null && dueAt <= at) {
             // The sync left the scope due, so every pass would sync it again and write nothing.
             pass.stalled.push(scope);
-            await this.backOff(row.scope, dueAt, at + backoffMs);
+            retryOn = dueAt;
           }
         } catch (error) {
           pass.failed.push({ scope, error });
-          await this.backOff(row.scope, Number(row.due), at + backoffMs);
+          retryOn = Number(row.due);
         }
+        if (retryOn !== undefined) await this.backOff(row.scope, retryOn, at + backoffMs);
       }
       if (due.rows.length < batch) break;
     }

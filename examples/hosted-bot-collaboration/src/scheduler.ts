@@ -87,6 +87,7 @@ export class HostedRoutineScheduler {
         cursor = [Number(row.next_at), row.scope, Number(row.ordinal)];
         if (pass.fired >= batch) break;
         const scope = JSON.parse(row.scope) as string, routineId = JSON.parse(row.id) as string, at = this.now();
+        let threw = false;
         try {
           if (await this.store.fire(scope, routineId, at) === 'fired') {
             pass.fired++;
@@ -94,9 +95,12 @@ export class HostedRoutineScheduler {
           }
         } catch (error) {
           (error instanceof DeviceBindingError || error instanceof DeviceSwitchingError ? pass.fenced : pass.failed).push({ scope, routineId, error });
-          // A throw wrote nothing. The routine keeps its old slot, which sorts ahead of healthy rows, so it waits before its
-          // next try and does not run a transaction on every pass. Keyed on that slot: a write that moved it has cleared
-          // `retry_at`, and this one then matches no row.
+          threw = true;
+        }
+        // A throw wrote nothing. The routine keeps its old slot, which sorts ahead of healthy rows, so it waits before its
+        // next try and does not run a transaction on every pass. Keyed on that slot: a write that moved it has cleared
+        // `retry_at`, and this one then matches no row.
+        if (threw) {
           await inSchema(this.pool, this.store.schema, client => client.query(
             'UPDATE routine SET retry_at = $4 WHERE scope = $1 AND id = $2 AND next_at = $3', [row.scope, row.id, Number(row.next_at), at + backoffMs]));
         }
