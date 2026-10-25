@@ -1158,7 +1158,10 @@ diluted by the mere presence of a key-management package in the same repo:
   the API key. A host that wants a settings UI renders its own and calls
   `ProviderRegistry` directly — which also means the guarantee that the key
   never leaves the machine is underwritten by that host page, not by this
-  package. Local control-plane traffic in this repo is not HTTP at all: it runs
+  package. `@byok-sdk/keys/model-route` gives that page the choices, linkage,
+  field errors and submission as pure functions; it listens on nothing, renders
+  nothing, imports no custody module and never returns a stored key, so it
+  changes neither the three reasons nor who underwrites the key. Local control-plane traffic in this repo is not HTTP at all: it runs
   over `@byok-sdk/client`'s Unix domain control socket
   (`packages/client/src/daemon/control-server.ts`), whose threat model is
   section [*2. Control socket (local IPC)*](#2-control-socket-local-ipc) above.

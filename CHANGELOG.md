@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Feature (keys)** — add `@byok-sdk/keys/model-route`, the headless logic
+  of a Pi model route page (#986 S2). It loads in a browser: no Node builtins,
+  no custody module, no network. `listPiCatalogModels` lists the pinned
+  catalog entries of a vendor; `createModelRouteDraft`,
+  `applyModelRouteChange`, `modelRouteView`, `validateModelRoute` and
+  `modelRouteSubmission` give a Host the choices, field linkage, field error
+  codes and the submission, and the Host renders the page. Catalog and Host
+  policy entries apply only at the vendor's own base URL, because the pinned
+  Pi fills undeclared `compat` keys from the endpoint URL.
+  `PI_DEFAULT_THINKING_LEVEL` (`medium`) is generated from the pinned
+  pi-coding-agent; a model without that level needs an explicit level.
+  `providerSecretReusable` reuses a stored key only while the profile ref,
+  kind, adapter, auth mode and normalized base URL are unchanged. JSON fixture
+  vectors cover the functions for Hosts in other languages.
+  `exactProviderProfileBinding` moves to its own module so the profile schema
+  has no `node:crypto` dependency; the root exports are unchanged.
 - **Feature (examples)** — the hosted collaboration example runs
   summary-only Host job routines (#793 S14), as L's `hostJobs`. Host code
   adds them with `addHostJobRoutine`, `updateHostJobRoutine` and

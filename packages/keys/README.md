@@ -257,6 +257,52 @@ and calls `applySealedProviderProvisioning`.
   A marker left by a crash is never resolved by guessing; only a change that
   supplies a new key (or a delete) clears it.
 
+## Model route
+
+`@byok-sdk/keys/model-route` holds the headless logic of a Pi model route page:
+vendor, model, thinking level and key. It loads in a browser. The host renders
+the page; the functions give it everything else.
+
+```ts
+import {
+  applyModelRouteChange, createModelRouteDraft, modelRouteContext,
+  modelRouteSubmission, modelRouteView,
+} from '@byok-sdk/keys/model-route';
+
+const context = modelRouteContext({ stored, policy }); // stored: the device's public profile state
+let draft = createModelRouteDraft(context);
+draft = applyModelRouteChange(draft, { field: 'provider_kind', value: 'zai' }, context);
+draft = applyModelRouteChange(draft, { field: 'model', value: 'glm-4.7' }, context);
+const view = modelRouteView(draft, context); // fields: visible, required, value, choices, error
+const submission = modelRouteSubmission(draft, context);
+if (submission.ok) {
+  // On the device: parse submission.profile with ModelProviderProfileSchema
+  // (adding enabled and the timestamps), then pass a `replace` key to
+  // ProviderRegistry.configure.
+}
+```
+
+- `listPiCatalogModels({ provider, api })` lists the pinned catalog entries.
+  An entry is `representable` (input, reasoning, thinking levels) or
+  `unrepresentable` (blocking paths). Model ids are the default labels.
+- Choosing a vendor fills its adapter, auth mode and base URL and resets the
+  model. `custom` gets no defaults unless the policy's `custom_defaults` sets
+  them.
+- Choosing a representable entry sets `model_source: 'catalog'` (or `'host'`
+  for a policy override). The thinking level becomes
+  `PI_DEFAULT_THINKING_LEVEL`, generated from the pinned pi-coding-agent,
+  when the model supports it; otherwise the user picks one. Any other model is
+  `manual`: the user supplies `pi_model`, checked by `PiModelConfigSchema`.
+- Catalog and policy entries apply only at the vendor's own base URL: the
+  pinned Pi fills undeclared `compat` keys from the endpoint URL.
+- Errors are codes from `MODEL_ROUTE_ERROR_CODES`, one per visible field.
+- The key is write-only. A view shows `keep`, `none` or `replace`, never the
+  key. `providerSecretReusable` keeps a stored key only while `profile_ref`,
+  `provider_kind`, `adapter`, `auth_mode` and the normalized `base_url` are
+  unchanged; the device rechecks a save with it.
+- `src/fixtures/model-route/*.json` are vectors (draft and change to new draft,
+  view and submission) for a host that reimplements the functions.
+
 ## Not in this package
 
 **There is no settings-page HTTP server here, and there will not be one.** The
@@ -287,6 +333,14 @@ it, resolve a client and call `testConnection()` on it. The registry never
 returns the secret — `ProviderStatus` reports `secret_configured: boolean` and
 nothing more — so a host can serve that object to its own UI without a
 redaction step.
+
+**The page logic: `@byok-sdk/keys/model-route`.** The rules behind a Pi model
+route page are pure functions: the vendor and catalog choices, field linkage,
+field error codes, the stored-key reuse rule and the submission. The host calls
+them in its page or on the device, renders the result and writes its own copy.
+The entry listens on nothing and imports no custody module, so the three
+reasons above stand, and the host page still underwrites the key. See
+[Model route](#model-route).
 
 ### What this transfers to you
 
@@ -411,13 +465,17 @@ whatever `index.ts` re-exports; nothing here is reachable by deep import.
 | --- | --- |
 | `index.ts` | The package barrel — the single public entry point, and the only supported import path |
 | `errors.ts` | `ByokKeysError` (`code` + message) and `BYOK_KEYS_ERROR_CODES`, the code strings consumers branch on |
-| `provider-profile.ts` | zod schema plus exact credential-free revision/hash binding for the model provider profile |
+| `provider-profile.ts` | zod schema for the model provider profile and its cross-field rules as pure functions; no Node dependency |
+| `provider-profile-binding.ts` | Exact credential-free revision/hash binding for a validated profile (`node:crypto`) |
+| `model-route.ts` | The `@byok-sdk/keys/model-route` entry: catalog view, draft functions, field error codes and the stored-key reuse rule; browser-safe |
+| `pi-runtime-defaults.generated.ts` | `PI_DEFAULT_THINKING_LEVEL`, generated from the pinned pi-coding-agent |
 | `headers.ts` | `providerHeaders()` and fail-closed `requiredProviderSecret()` |
 | `url.ts` | `normalizeProviderUrl()` with the HTTPS / loopback / private-network guard |
 | `http.ts` | Shared transport guards: injectable `fetch`, total request deadline (default `PROVIDER_TIMEOUT_MS`, 15 s), bounded JSON, HTTP error classification |
 | `openai-client.ts` | `OpenAiCompatibleChatClient` — chat/completions, injected `fetchImpl`, `requestTimeoutMs` for long non-streaming generations |
 | `anthropic-client.ts` | `AnthropicMessagesClient` — Messages API, injected `fetchImpl`, `requestTimeoutMs` for long non-streaming generations |
 | `secret-store.ts` | The `SecretStore` contract one credential entry is read and written through, plus the shared value/encoding guards |
+| `secret-value.ts` | The secret shape rule both OS backends share and the 2560-byte ceiling, with no Node dependency |
 | `secret-name.ts` | Runtime validation of secret entry names and namespaces, including the dot exclusion that stops one scope from spelling out another's storage key |
 | `secret-scope.ts` | `SecretScope` and the envelope-scoped store that partitions a credential store by account and workspace |
 | `macos-keychain.ts` | `SecretStore` backed by the macOS Keychain via the `security` CLI |

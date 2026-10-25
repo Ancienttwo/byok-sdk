@@ -218,6 +218,41 @@ is a value the Host stores in the local profile, and the same schema validates
 it. A catalog entry that the schema cannot express exactly is refused with its
 blocking fields, never narrowed.
 
+`@byok-sdk/keys/model-route` is the headless configuration logic for a Pi model
+route: vendor, model, thinking level and key. It is pure functions; the Host
+renders the page, writes the copy and owns the transport. The entry loads in a
+browser: its closure has no Node builtins, and it imports no `SecretStore`,
+OS credential store, SQLite store or `ProviderRegistry`, reads no environment
+and makes no network request.
+
+- `listPiCatalogModels` lists the pinned catalog entries of a vendor and api,
+  each `representable` (with input, reasoning and thinking levels) or
+  `unrepresentable` (with its blocking paths).
+- `PI_DEFAULT_THINKING_LEVEL` is generated from the pinned
+  `@earendil-works/pi-coding-agent`; a client test fails on drift. Selecting a
+  model sets this level only when the model supports it. Otherwise the level
+  stays unset and required.
+- `createModelRouteDraft`, `applyModelRouteChange`, `modelRouteView`,
+  `validateModelRoute` and `modelRouteSubmission` take a draft and a context
+  (catalog, stored public profile state, Host policy). Errors are field codes
+  from `MODEL_ROUTE_ERROR_CODES`; the profile cross-field rules are the ones
+  `ModelProviderProfileSchema` applies, from one implementation. A submission
+  is profile input for that schema plus a separate secret action (`keep`,
+  `none` or `replace`).
+- A catalog or Host entry applies only when the draft's base URL normalizes to
+  the vendor's own base URL, because the pinned Pi fills each undeclared
+  `compat` key from the endpoint URL. At any other URL the model is manual.
+- The `custom` kind has no adapter, auth mode or base URL of its own; a Host
+  passes defaults in its policy. A Host entry is marked `host`, must pass
+  `PiModelConfigSchema`, and is offered as unrepresentable otherwise.
+- A stored key is reused only while `profile_ref`, `provider_kind`, `adapter`,
+  `auth_mode` and the normalized `base_url` are unchanged
+  (`providerSecretReusable`); otherwise the draft reports
+  `secret_reentry_required`. The device rechecks a save with the same
+  functions. No view contains a key.
+- JSON fixture vectors under `packages/keys/src/fixtures/model-route/` give
+  draft, change, new draft, view and submission for Hosts in other languages.
+
 The launcher accepts the adapter's bounded absolute extension paths and an
 absolute `--config` path. Provider/model/thinking selection remains local
 profile authority; delegated flags cannot override it. The Pi child gets a
