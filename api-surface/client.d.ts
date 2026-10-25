@@ -25,6 +25,15 @@ export interface ClaudeAdapterOptions {
      * unchanged. Default `inherit`.
      */
     agentUserContext?: 'inherit' | 'excluded';
+    /**
+     * For an Agent task (`task.offer_for_agent`), `disabled` starts Claude with
+     * `--no-session-persistence`, so Claude does not save the session
+     * transcript under `<config dir>/projects/`. Such a session cannot be
+     * resumed: an Agent task that carries a `sessionRef` fails before Claude
+     * starts. Follow-ups in the same task still work. Other tasks are
+     * unchanged. Default `enabled`.
+     */
+    agentSessionPersistence?: 'enabled' | 'disabled';
 }
 /**
  * Claude Code stream-json adapter.

@@ -7,8 +7,8 @@ import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, ty
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { addTurn, stateOf, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
-import { advanceRoomSeats, checkReply, collaborationDue, commitCommand, expireCards, replyCheckDue, reportCardDecisions, seatTurn, settleDelegations,
-  syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { advanceRoomSeats, checkReply, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions, seatTurn,
+  settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
 import { activeBinding, bindDevice, revokeDevice } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
@@ -557,6 +557,30 @@ export class HostedCollaborationStore {
       const published = new Set<string>();
       checkReply(state, d, check, now, (id, body) => { publish(id, body); published.add(id); }, this.timers?.uncertainAfterMs);
       return { value: true, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now };
+    }), false);
+  }
+
+  /**
+   * Whether `scope` has a delegation that a device observation can change (#793 S11), as L's `refreshDevices` checks before
+   * its discovery read: no verdict, no cancel, and `queued` or `waiting_device`. Read in one snapshot with no lock.
+   */
+  async awaitsDevice(scope: string): Promise<boolean> {
+    const state = await this.transaction(client => this.snapshot(client, storedKey(scope)), true);
+    return Object.values(state.delegations).some(d => !d.verdict && !d.cancel && (d.status === 'queued' || d.status === 'waiting_device'));
+  }
+
+  /**
+   * Applies one device observation (#793 S11), the K8 `observeDevices` rule on the intent facts, in one transaction under the
+   * scope lock, as L's `refreshDevices` runs it in one ledger transaction. `devices` maps a device id to its `connected` fact;
+   * a device that it lacks gives no fact. The rule only switches a delegation between `queued` and `waiting_device`, and
+   * publishes it. Returns how many delegations changed. A throw writes nothing.
+   */
+  observeDevices(scope: string, devices: ReadonlyMap<string, boolean>, clock: () => number): Promise<number> {
+    return this.transaction(client => this.decideIn(client, storedKey(scope), undefined, async (state, publish) => {
+      const ends = Object.values(state.delegations).flatMap(d => d.chainTurnIds.length ? [d.chainTurnIds.at(-1)!] : []);
+      const published = new Set<string>();
+      observeDevices(state, await settleFacts(client, scope, ends), devices, (id, body) => { publish(id, body); published.add(id); });
+      return { value: published.size, outbox: [...published].map(id => ({ kind: 'projection' as const, id })), now: clock() };
     }), false);
   }
 
