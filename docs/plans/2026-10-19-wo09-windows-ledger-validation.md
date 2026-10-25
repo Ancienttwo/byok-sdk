@@ -424,12 +424,16 @@ verified the darwin pin.
   missing home, memory without `applying`, a foreign record and recovery.
   The QEMU driver cases run against a fake QMP monitor, not QEMU.
 - `bun src/__tests__/agent-memory-powercut/cli.ts process-kill --rounds 120 --seed 21 --max-delay-ms 600`:
-  exit 0, 120 cuts, 169 intents, 57 new homes, 0 violations, 120 recoveries
-  held, 96 s. Windows: `no-record` 73, `receipt-without-ack` 35, `applying` 6,
-  `terminal-without-receipt` 4, `acked` 2. 110 cuts landed while a home lease
-  was held; every restart reclaimed its own marker.
+  exit 0, 120 cuts, 167 intents, 56 new homes, 0 violations, 120 recoveries
+  held, 96 s. Windows: `no-record` 61, `receipt-without-ack` 37, `applying`
+  11, `terminal-without-receipt` 9, `acked` 2. 110 cuts landed while a home
+  lease was held; every restart reclaimed its own marker. Intent ids are
+  random, so a rerun with the same seed gives a similar, not equal, spread.
+- The test file passed 15 consecutive runs after one fix: a delay cut could
+  land while the Host wrote to the killed device, and that EPIPE was
+  unhandled. The Host now drops write errors on a cut link.
 - Observation: helper temp files of killed writes stay in the home. The
-  count only grows (up to 8 in that run). Nothing reads them, so no
+  count only grows (up to 9 in that run). Nothing reads them, so no
   invariant fails, but nothing removes them either. Not fixed here.
 
 This is process-crash evidence on APFS. It is not NTFS evidence. The
