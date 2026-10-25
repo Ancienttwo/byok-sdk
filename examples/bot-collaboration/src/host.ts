@@ -14,7 +14,7 @@ import { contextTurns, outcomeOffer, outcomeSchema, SYSTEM_PROMPT, type CheckedO
 import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
   intentRows, minimumInstructionBytes, observeDevices, REPLY_UNCERTAIN_AFTER_MS, settleDelegations, type DelegationTimers } from './delegation';
 import { checkReply, collaborationDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, expireCards, replyCheckDue, reportCardDecisions,
-  type Command, type CommandPorts, type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
+  commandBots, type Command, type CommandPorts, type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
 import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
@@ -29,7 +29,7 @@ import type { RoomFields } from '@byok-sdk/protocol';
 
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
 import { flushHomes, type HomeServer } from './home-projections';
-import { admitBot, admitDevice, admitRoom, checkTopology, deviceRefusal, deviceTopology, homeSent, switchStep, switchWork, type DeviceTopology,
+import { admitBot, admitDevice, checkTopology, deviceRefusal, deviceTopology, homeSent, switchStep, switchWork, type DeviceTopology,
   type SwitchWork } from './topology';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy } from './coalesce';
 import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
@@ -162,22 +162,9 @@ function awaitsOffer(ledger: LedgerState, state: CollaborationState, turn: Turn)
   const bot = state.team.bots[turn.botId];
   return !turn.conclusion && !turn.held && !ledger.intents[hash(turn.id)] && turn.status !== 'failed' && !!bot && !bot.archived && bot.readyRevision === bot.revision;
 }
-/**
- * #957: a new owner command that adds a Turn refuses while a device it would run on is frozen or owned by H. An answer adds
- * a Turn for the question's Bot, and a decided card adds an `action_result` Turn for the card's Bot.
- */
+/** #957: a new owner command refuses while a device it would create work on is frozen or owned by H (`commandBots`). */
 function admitCommand(state: CollaborationState, command: Command): void {
-  const turnBot = (turnId: string | undefined) => turnId !== undefined && Object.hasOwn(state.turns, turnId) ? state.turns[turnId]!.botId : undefined;
-  let botId: string | undefined;
-  switch (command.kind) {
-    case 'input': botId = command.botId; break;
-    case 'receive': if (command.inbound === 'owner_input') botId = command.botId; else admitRoom(state, command.roomId); break;
-    case 'room_input': admitRoom(state, command.roomId); break;
-    case 'answer': botId = turnBot(Object.hasOwn(state.questions, command.questionId) ? state.questions[command.questionId]!.turnId : undefined); break;
-    case 'decide': botId = turnBot(Object.hasOwn(state.cards, command.cardId) ? state.cards[command.cardId]!.turnId : undefined); break;
-    default: return;
-  }
-  if (botId !== undefined) admitBot(state, botId);
+  for (const botId of commandBots(state, command)) admitBot(state, botId);
 }
 /** The value of an accepted disposition. Keyless commands refuse by throwing, so they always accept. */
 function valueOf<T>(result: CommitResult): T {

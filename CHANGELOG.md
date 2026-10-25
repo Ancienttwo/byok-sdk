@@ -478,6 +478,14 @@
   due time or slot it was set on: the store write that moves `due_at` or
   `next_at` clears it. The in-memory maps are gone. H DDL adds the two columns;
   no SDK or wire change.
+- **Feature (examples)** — K8 exports the pure rule for which Bots a new
+  command reaches, `commandBots(state, command)` with its `CommandScopeState`
+  type, from `./rules/commands` (#975 slice 6). It names the Bot of `input` and
+  owner `receive`, every Bot member of the room for room input, and the Bot of
+  the question's or card's Turn for `answer` and `decide`. L's freeze admission
+  now uses it, with no change in behavior. A Host wires it into
+  `CommandPorts.admit`, so both Hosts refuse the same commands while a device
+  switches.
 - **Feature (examples)** — K8 gains the owner switch format (#975 slice 2):
   the `./migration` entry, also exported from the K8 root. `SwitchExport`
   version 1 holds one whole coordination domain (an L tenant or an H scope) in

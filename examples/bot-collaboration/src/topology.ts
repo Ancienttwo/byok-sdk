@@ -67,10 +67,6 @@ export function admitBot(state: CollaborationState, botId: string): void {
   const bot = state.team.bots[botId];
   if (bot) admitDevice(state, bot.execution.deviceId);
 }
-/** A room input can seat any Bot member, so every Bot member's device must admit work. */
-export function admitRoom(state: CollaborationState, roomId: string): void {
-  for (const member of state.team.rooms[roomId]?.members ?? []) admitBot(state, member);
-}
 
 export function switchWork(s: LedgerState, deviceId: string): SwitchWork {
   const state = stateOf(s.application), onDevice = (botId: string) => state.team.bots[botId]?.execution.deviceId === deviceId;
