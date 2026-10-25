@@ -287,6 +287,13 @@
   `check:architecture-sync` and `sync:brain-docs`. They called repo-harness
   helpers that no longer exist, and `repo-harness run` exits 0 on an unknown
   helper, so they passed without checking anything (#927).
+- **Feature (examples)** — the K8 sync step takes an optional
+  `deviceRefusal(botId)` fact (#956, §55a). A Host that binds devices answers
+  it for the Bot's device, and the step holds that Bot's Turns that have no
+  intent instead of freezing them: `held: 'device_not_bound'`, one
+  `held:<turnId>` projection with a fixed body, and an audit row with the
+  reason. The rest of the scope syncs, and the next sync with no refusal
+  freezes the Turn. L sets no fact; H adopts it in a follow-up.
 - **Feature (examples)** — the hosted collaboration example runs the Host's
   own intents (#955), as L's `enqueueHostIntent` (#882).
   `HostedCollaborationStore.enqueueHostIntent(scope, input, handler, clock)`
