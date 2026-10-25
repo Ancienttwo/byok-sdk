@@ -217,7 +217,7 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
     passes: () => instance.admin<PassReport>('/host/passes', {}),
     async armClock() {
       const response = await fetch(`${base}/__scheduled?cron=*+*+*+*+*`);
-      if (!response.ok) throw new Error(`/__scheduled: HTTP ${response.status} ${await response.text()}`);
+      if (!response.ok) throw new Error(`/__scheduled: HTTP ${response.status} ${await response.text()}\n${output}`);
       await instance.waitForOutput('[h-clock] cron');
     },
     input: (token, botId, key, request) => fetch(`${base}/host/input`, authorized({ botId, key, request }, token)),

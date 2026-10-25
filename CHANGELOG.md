@@ -452,6 +452,24 @@
   fails before any SDK call, as in L. `freezeIntent` takes a sealed execution
   only from a routine occurrence with no Host handler. No DDL, SDK or wire
   change.
+- **Feature (examples)** — the Worker H Host has the sealed lane (#953): its
+  task port's `submitSealed` is the cloud's `submitSealedAgentExecution`, and an
+  owner route creates a sealed routine and another reseals it through H's
+  command entry. Each pass
+  syncs the scopes that the submitter reports for an intent it concluded with no
+  SDK call, so a queued expiry ends its Turn in the same pass. Local workerd
+  tests cover both; the synthetic device has no E2EE member keyring, so the SDK
+  refuses the sealed offer before its mailbox append.
+- **Feature (examples)** — the K4 `HostLedger` can move a whole tenant for a
+  topology switch (#975 slice 1). `dumpForSwitch()` returns a `LedgerDump`: the
+  ledger body, every tombstone and application row with its expiry as stored,
+  and the retired memory intents. `loadForSwitch(dump)` writes one into an
+  empty tenant in one transaction, keeps every expiry, runs the intent identity
+  checks of `transaction()`, and refuses while a core is bound. It loads only a
+  dump bound to the tenant: each intent's `agent` is `agentKey(tenant, …)`, a
+  scan wake key names the tenant, and there is no memory state. `discard()`
+  deletes every row of a tenant and closes the ledger, for an aborted import.
+  The K4 index exports `LedgerDump` and its row types.
 
 ## 0.30.1 — 2026-10-24 (published)
 
