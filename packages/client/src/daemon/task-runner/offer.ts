@@ -10,7 +10,6 @@ import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import { bindOfferWorkspace } from './offer-workspace';
 import { sealOfferManifest, claimOffer, startOfferRuntime } from './offer-launch';
-import { activateOffer } from './offer-activation';
 
 /** What the offer's `finally` releases. The stage that acquires a lease records it here at once, so a throw still releases it. */
 export interface OfferHeld {
@@ -194,15 +193,12 @@ export async function handleOffer(
     const { resolvedInstruction } = claimed;
     ({ workspaceDir, gitWorkspaceId, gitBaseline, taskMcpServers } = claimed);
 
-    const session = await startOfferRuntime.call(this, phase, held, {
+    await startOfferRuntime.call(this, phase, held, {
       agentBinding, gitLease, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, pick, prepared, scratch, manifest,
       preparedLaunch, runtimeLaunch, resolvedInstruction, gitWorkspaceId, taskMcpServers, blobAbort, startupDeadline,
-    });
-    if (session === undefined) return;
-
-    await activateOffer.call(this, phase, held, {
+    }, {
       agentBinding, gitLease, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
-      workspaceDir, gitWorkspaceId, gitBaseline, blobAbort, payload, session, messageRequirement, terminalProjection,
+      workspaceDir, gitWorkspaceId, gitBaseline, blobAbort, payload, messageRequirement, terminalProjection,
     });
   } finally {
     clearTimeout(startupTimer);

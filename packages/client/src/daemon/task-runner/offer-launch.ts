@@ -25,6 +25,7 @@ import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import { DEFAULT_APPROVAL_TIMEOUT_MS, NoPendingApprovalError } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import type { OfferClaim, OfferHeld, OfferLimits, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
+import { activateOffer, type OfferActivationInput } from './offer-activation';
 
 export interface OfferManifestInput
   extends Pick<OfferRequest, 'agentRef' | 'agentMemory' | 'preparation' | 'preparedMemorySelected' | 'readerAttempt' | 'sessionRef'>,
@@ -415,8 +416,18 @@ export interface OfferStartInput
   readonly startupDeadline: number;
 }
 
-/** Starts the runtime session and hands it, or a start that failed or raced a cancel, to startup ownership. */
-export async function startOfferRuntime(this: TaskRunner, phase: OfferPhaseContext, held: OfferHeld, input: OfferStartInput) {
+/**
+ * Starts the runtime session. A start that failed or raced a cancel goes to
+ * startup ownership; a started session goes to startup ownership and then to
+ * {@link activateOffer} on the same synchronous path.
+ */
+export async function startOfferRuntime(
+  this: TaskRunner,
+  phase: OfferPhaseContext,
+  held: OfferHeld,
+  input: OfferStartInput,
+  activation: Omit<OfferActivationInput, 'session'>,
+): Promise<void> {
   const { taskId } = phase;
   const {
     agentBinding, gitLease, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, pick, prepared, scratch, manifest,
@@ -567,5 +578,5 @@ export async function startOfferRuntime(this: TaskRunner, phase: OfferPhaseConte
     },
   });
   held.owner = 'startup';
-  return session;
+  await activateOffer.call(this, phase, held, { ...activation, session });
 }
