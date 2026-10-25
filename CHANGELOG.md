@@ -470,6 +470,14 @@
   scan wake key names the tenant, and there is no memory state. `discard()`
   deletes every row of a tenant and closes the ledger, for an aborted import.
   The K4 index exports `LedgerDump` and its row types.
+- **Feature (examples)** — K8 exports the pure rule for which Bots a new
+  command reaches, `commandBots(state, command)` with its `CommandScopeState`
+  type, from `./rules/commands` (#975 slice 6). It names the Bot of `input` and
+  owner `receive`, every Bot member of the room for room input, and the Bot of
+  the question's or card's Turn for `answer` and `decide`. L's freeze admission
+  now uses it, with no change in behavior. A Host wires it into
+  `CommandPorts.admit`, so both Hosts refuse the same commands while a device
+  switches.
 
 ## 0.30.1 — 2026-10-24 (published)
 
