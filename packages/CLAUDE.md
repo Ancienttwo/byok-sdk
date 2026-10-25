@@ -7,10 +7,6 @@
 - Architecture domain: `sdk`
 - Architecture capability: `sdk-root`
 - Architecture module: `docs/architecture/sdk-architecture.md`
-- Last architecture event: 2026-09-12T15:39:01+0800
-- Last changed path: `packages/keys/src/provider-profile-binding.test.ts`
-- Severity: low
-- Change type: source-change
 - Module responsibility: Keep this block aligned with the local boundary described by surrounding human-owned context.
 - Entrypoints: `packages`
 - Allowed dependencies: Follow root `AGENTS.md` / `CLAUDE.md` and this local contract.
@@ -18,9 +14,7 @@
 - Runtime path: `packages`
 - LSP/tooling profile: `typescript-lsp`
 - Verification: Use root required checks plus local commands recorded in this capability contract.
-- Latest snapshot: `(none yet)`
 - Semantic diagram source: `docs/architecture/sdk-architecture.md`
-- Pending architecture request: `(none)`
 
 ## Active Workstreams
 

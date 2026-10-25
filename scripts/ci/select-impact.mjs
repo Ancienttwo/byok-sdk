@@ -295,7 +295,7 @@ function oarSnapshotListed(path, { base, cwd = process.cwd() } = {}) {
   return manifest.format === 'byok.vendor-source' && manifest.package === '@botiverse/oar'
     && Array.isArray(manifest.files) && manifest.files.some(row => row.path === match[2]);
 }
-const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
+const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'packages/AGENTS.md', 'packages/CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
 const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml']);
 const sorted = values => [...values].sort();
 // An unmapped path is a selector gap. Fix it with a reviewed mapping; a

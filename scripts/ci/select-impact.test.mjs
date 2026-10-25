@@ -33,6 +33,12 @@ test('docs and known CI contracts select light checks, not release families', ()
   }
 });
 
+test('packages/AGENTS.md and packages/CLAUDE.md are docs-only like the root agent files', () => {
+  assert.deepEqual(selectImpact(['packages/AGENTS.md', 'packages/CLAUDE.md']), {
+    dirs: [], files: ['packages/AGENTS.md', 'packages/CLAUDE.md'], families: [], reason: 'docs-only',
+  });
+});
+
 test('ci.yml selects every routine family and the client suites that read it (W7)', () => {
   for (const reader of [
     'packages/cloud-dataplane/src/__tests__/constraints.test.ts',
