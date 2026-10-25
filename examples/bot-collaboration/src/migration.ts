@@ -33,13 +33,14 @@ import type { CollaborationState } from './model';
  * The digest covers the header too: `domain` is the source's tenant or scope id, never the target's (a switch back to L
  * opens a new tenant). So the target's read-back copies the document's header as it is and rebuilds only the sections
  * from its own rows. Devices are in JS string order of `deviceId`, and each section in JS string order of
- * `canonical(identity)`, so a read-back sorts that way in JS or reseals; a database `ORDER BY` would give `unsorted`.
+ * `canonical(identity)`, so a read-back sorts that way in JS or reseals; a database `ORDER BY` may give `unsorted`.
  *
- * A channel delivery moves under its id, `hash([taskId, messageId, route])` (`delivery.ts`), which names no domain, so
- * the target's readback or resend of a `sending` or `unknown` delivery uses the source's idempotency key. Whether a
- * platform honors that key is its adapter's concern (`docs/host-im-adapter.md`), and the switch does not change it. A
- * projection does not move: H's receiver deduplicates by `(scope, id)` (H `sender.ts` ProjectionPort), and neither Host
- * records whether a pending projection was sent, so the source flushes its projections before the export.
+ * A channel delivery moves under its id, `hash([taskId, messageId, routeKey, nonce?])` (`delivery.ts` deliveryId), which
+ * names no domain, so the target's readback or resend of a `sending` or `unknown` delivery uses the source's idempotency
+ * key. Whether a platform honors that key is its adapter's concern (`docs/host-im-adapter.md`), and the switch does not
+ * change it. A projection does not move: H's receiver deduplicates by `(scope, id)` (H `sender.ts` ProjectionPort), and L
+ * does not record whether a pending projection was sent (H does: it raises `tries` before the send), so the source
+ * flushes its projections before the export.
  */
 export const SWITCH_EXPORT_VERSION = 1;
 export const SWITCH_SECTIONS = ['collaboration', 'archived', 'intents', 'routines', 'occurrences', 'outbox', 'tombstones'] as const;
@@ -53,7 +54,7 @@ export interface ArchivedRecord { namespace: string; id: string; body: Json; exp
 export interface MessageReceipt { messageId: string; contentHash: string }
 /** The K4 execution facts of one earlier generation of an intent. K4 begins each generation before it opens the next. */
 export interface ExecutionRecord {
-  submission: 'uncertain' | 'delivered'; started: boolean; attempt?: Json; terminal?: Json; messageReceipt?: MessageReceipt;
+  submission: 'uncertain' | 'delivered'; started: boolean; attempt: Json; terminal: Json; messageReceipt?: MessageReceipt;
 }
 /**
  * A concluded intent, moved as a row: L K4 `intents` and `executions[taskId]` with K8 `hostIntents`, H `intent`. `input` is
@@ -121,7 +122,7 @@ export interface SwitchManifest { counts: Record<SwitchSection, number>; digests
 export interface SwitchExport extends SwitchContent { manifest: SwitchManifest }
 
 export type SwitchExportRefusal = 'invalid' | 'unsorted' | 'duplicate' | 'reference' | 'receipt_mismatch' | 'owner_record' | 'device_missing' | 'open_work'
-  | 'home_sent' | 'projection_pending' | 'card_call' | 'manifest';
+  | 'home_sent' | 'projection_pending' | 'card_call' | 'execution_routine' | 'manifest';
 /** An export that the format refuses. Nothing may be imported or committed from it. */
 export class SwitchExportError extends Error {
   readonly code = 'switch_export_refused' as const;
@@ -287,7 +288,8 @@ function intentRecord(row: unknown): boolean {
     && (row.submission !== 'reserved' || row.generation === 0 && !row.started && row.attempt === undefined && row.terminal === undefined
       && row.messageReceipt === undefined)
     && Array.isArray(row.earlierExecutions) && row.earlierExecutions.length === row.generation
-    && row.earlierExecutions.every(entry => keys(entry, ['submission', 'started'], ['attempt', 'terminal', 'messageReceipt'])
+    // K4 opens the next generation only from backoff, which `finish` enters after it stores the terminal and attempt.
+    && row.earlierExecutions.every(entry => keys(entry, ['submission', 'started', 'attempt', 'terminal'], ['messageReceipt'])
       && oneOf(['uncertain', 'delivered'])(entry.submission) && executionShape(entry))
     && optional(row.preparationError, text)
     && optional(row.memoryBlocked, blocked => keys(blocked, ['resume', 'reason']) && oneOf(['queued', 'backoff'])(blocked.resume)
@@ -319,7 +321,13 @@ function checkContent(content: SwitchContent, top: readonly string[]): void {
     if (object(row) && row.conclusion === undefined) throw new SwitchExportError('open_work', `Switch export has an open intent: ${String(row.key)}`);
     ensure(intentRecord(row), 'intent');
   }
-  for (const row of content.routines) ensure(routineRecord(row), 'routine');
+  for (const row of content.routines) {
+    ensure(routineRecord(row), 'routine');
+    // K8 holds only Turn and Host intents (#954 C): L refuses execution routines (`host.ts` executionRoutines), H at create.
+    if (row.definition.execution !== undefined || row.pending?.execution !== undefined) {
+      throw new SwitchExportError('execution_routine', `Switch export has an execution routine, which K8 domains do not run: ${row.id}`);
+    }
+  }
   for (const row of content.occurrences) ensure(occurrenceRecord(row), 'occurrence');
   for (const row of content.outbox as unknown[]) {
     if (object(row) && row.kind === 'projection') {
@@ -340,7 +348,6 @@ function checkReferences(content: SwitchContent): void {
     const ordinals = content[section].map(row => row.ordinal);
     if (new Set(ordinals).size !== ordinals.length) throw new SwitchExportError('duplicate', `Switch export ${section} repeats an ordinal`);
   }
-  const routines = new Set(content.routines.map(row => row.id));
   const occurrences = new Map(content.occurrences.map(row => [row.key, row]));
   const promoted = new Set<string>();
   for (const row of content.intents) {
@@ -353,9 +360,12 @@ function checkReferences(content: SwitchContent): void {
       promoted.add(key);
     }
   }
+  const routineById = new Map(content.routines.map(row => [row.id, row]));
+  const pendingJobs = new Set(content.outbox.map(row => row.occurrenceKey));
   const slots = new Set<string>();
   for (const row of content.occurrences) {
-    reference(routines.has(row.routineId), `occurrence ${row.key} names no routine of the export: ${row.routineId}`);
+    const routine = routineById.get(row.routineId);
+    reference(routine !== undefined, `occurrence ${row.key} names no routine of the export: ${row.routineId}`);
     reference(row.key === hash([row.routineId, row.definitionVersion, row.trigger]), `occurrence ${row.key} is not the key of its routine slot and trigger`);
     // One occurrence per slot: the target derives the slot from it.
     const slot = `${row.routineId}:${row.definitionVersion}:${row.trigger.plannedAt}`;
@@ -363,6 +373,12 @@ function checkReferences(content: SwitchContent): void {
     slots.add(slot);
     // A promoted occurrence's conclusion is its intent's, which K4 copies and H does not store.
     ensure(!(promoted.has(row.key) && row.conclusion !== undefined), `occurrence ${row.key} has an intent and its own conclusion`);
+    // By the routine's run kind, which a version cannot change (K4 `routines.ts` updateRoutine). A Host job's outbox row
+    // goes in the step that concludes or promotes its occurrence (K4 `core.ts` runHostJobs, `routines.ts`; H `store.ts`).
+    if (routine!.definition.hostJob) {
+      ensure(row.job !== null && pendingJobs.has(row.key) === (row.conclusion === undefined && !promoted.has(row.key)),
+        `Host job occurrence ${row.key} has a pending job exactly when it is open and not promoted`);
+    } else ensure(row.job === null, `occurrence ${row.key} has a Host job, but its routine runs a hook`);
   }
   // The K8 accepted reply of a task, live or retained (#798), is the same fact as the K4 message receipt of that task.
   const archivedReplies = new Map(content.archived.filter(row => row.namespace === 'replies').map(row => [row.id, row.body]));
@@ -379,13 +395,8 @@ function checkReferences(content: SwitchContent): void {
       }
     }
   }
-  const routineById = new Map(content.routines.map(row => [row.id, row]));
   for (const row of content.outbox) {
-    const occurrence = occurrences.get(row.occurrenceKey);
-    reference(occurrence?.job != null, `Host job ${row.occurrenceKey} names no Host job occurrence`);
-    // K4 runs a pending Host job only for an open, unpromoted occurrence of a Host job routine (`core.ts` runHostJobs).
-    ensure(occurrence!.conclusion === undefined && !promoted.has(occurrence!.key)
-      && routineById.get(occurrence!.routineId)!.definition.hostJob !== undefined, `Host job ${row.occurrenceKey} is pending for a concluded occurrence`);
+    reference(occurrences.get(row.occurrenceKey)?.job != null, `Host job ${row.occurrenceKey} names no Host job occurrence`);
   }
 }
 

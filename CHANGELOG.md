@@ -499,9 +499,9 @@
   document or a target's read-back and throws `SwitchExportError` for open
   work, a home write that may have been sent, a pending projection, a card
   call in flight, a Bot on a device the export does not move, a record that
-  names a missing record, a message receipt that is not its K8 reply, state K4
-  cannot produce, or a manifest that does not match. No Host uses it yet. No
-  SDK, wire or SQL change.
+  names a missing record, a message receipt that is not its K8 reply, an
+  execution routine, state K4 cannot produce, or a manifest that does not
+  match. No Host uses it yet. No SDK, wire or SQL change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

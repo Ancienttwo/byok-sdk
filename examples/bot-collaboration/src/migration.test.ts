@@ -103,7 +103,7 @@ describe('switch export format (#975)', () => {
     refused(() => verifySwitchExport({ ...sealed, archived: [{ ...sealed.archived[0]!, body: { n: 9 } }, sealed.archived[1]!] }), 'manifest');
     refused(() => verifySwitchExport({ ...sealed, exportedAt: 1_001 }), 'manifest');
     refused(() => verifySwitchExport({ ...sealed, devices: [{ deviceId: 'd1', frozenRevision: 4 }, sealed.devices[1]!] }), 'manifest');
-    refused(() => verifySwitchExport({ ...sealed, outbox: [] }), 'manifest');
+    refused(() => verifySwitchExport({ ...sealed, tombstones: sealed.tombstones.slice(1) }), 'manifest');
     refused(() => verifySwitchExport({ ...sealed, routines: [{ ...sealed.routines[0]!, ordinal: 7 }, sealed.routines[1]!] }), 'manifest');
   });
 
@@ -149,11 +149,14 @@ describe('switch export format (#975)', () => {
   it('refuses a record that names a record the export does not hold, or a task id that is not its key and generation', () => {
     refusesEach('reference', [
       value => { value.intents[0]!.taskId = hash(['i2', 0]); },
-      value => { value.intents[2]!.key = `occurrence:${hash('o9')}`; },
-      value => { value.outbox[0] = { kind: 'host-job', occurrenceKey: hash('o9') }; },
+      value => {
+        const key = `occurrence:${hash('o9')}`, taskId = hash([key, 1]);
+        Object.assign(value.intents[2]!, { key, taskId, input: frozen(taskId) });
+      },
+      value => { value.outbox.push({ kind: 'host-job', occurrenceKey: hash('o9') }); },
       // `O2` is an occurrence hook, not a Host job.
-      value => { value.outbox[0] = { kind: 'host-job', occurrenceKey: O2 }; },
-      value => { value.occurrences[0]!.routineId = 'r9'; },
+      value => { value.outbox.push({ kind: 'host-job', occurrenceKey: O2 }); },
+      value => { value.occurrences.push(occurrence(keyOf('r9'), 2, 'r9')); },
       // An occurrence key is K4's hash of its routine slot and trigger.
       value => { value.occurrences[0]!.trigger.plannedAt = 901; },
       value => { value.occurrences[0]!.definitionVersion = 2; },
@@ -164,6 +167,21 @@ describe('switch export format (#975)', () => {
       value => { value.occurrences[1]!.conclusion = 'failed'; },
       // K4 runs a pending Host job only for an open occurrence (`core.ts` runHostJobs: `Invalid pending Host job`).
       value => { Object.assign(value.occurrences[0]!, { job: { attempts: 1, summary: { ok: true } }, conclusion: 'succeeded' }); },
+      // ... and only for one with no intent.
+      value => { value.intents.push(intent(`occurrence:${O1}`, 3, { source: 'routine' })); },
+      // An open Host job occurrence without its pending job would never run or compact.
+      value => { value.outbox = []; },
+      // A Host job routine's occurrence has a job, and a hook routine's has none.
+      value => { value.occurrences[0]!.job = null; },
+      value => { value.occurrences[1]!.job = { attempts: 0 }; },
+    ]);
+    // A concluded Host job occurrence has no pending job.
+    expect(() => sealSwitchExport(Object.assign(content(), {
+      occurrences: [occurrence(O1, 0, 'r1', { job: { attempts: 1, summary: { ok: true } }, conclusion: 'succeeded' }), occurrence(O2, 1, 'r2')],
+      outbox: [] }))).not.toThrow();
+    // K8 domains hold only Turn and Host intents (#954 C), so an execution routine is not theirs.
+    refusesEach('execution_routine', [
+      value => { value.routines.push({ id: 'r3', ordinal: 2, definition: { id: 'r3', ...SCHEDULE, execution: frozen('t') }, lifecycle: 'active', status: 'ok', nextAt: null } as unknown as RoutineRecord); },
     ]);
     // Another occurrence of the same slot: the target derives one slot from each occurrence.
     refusesEach('duplicate', [
@@ -248,12 +266,16 @@ describe('switch export format (#975)', () => {
       // K4 began each earlier generation before it opened the next.
       value => { value.intents[0]!.earlierExecutions[0]!.submission = 'reserved' as ExecutionRecord['submission']; },
       value => { delete (value.intents[0]!.earlierExecutions[0] as { started?: boolean }).started; },
+      // K4 enters backoff only after it stores the generation's terminal and attempt (`core.ts` finish).
+      value => { delete (value.intents[0]!.earlierExecutions[0] as { terminal?: unknown }).terminal; },
+      value => { delete (value.intents[0]!.earlierExecutions[0] as { attempt?: unknown }).attempt; },
       value => { value.intents[0]!.earlierExecutions[0]!.messageReceipt = { messageId: 'm0' } as ExecutionRecord['messageReceipt']; },
       value => { Object.assign(value.intents[0]!.earlierExecutions[0]!, { taskId: hash(['i2', 0]) }); },
       // A generation K4 could not have opened under the intent's retry policy.
       value => { Object.assign(value.intents[0]!, { generation: 3, taskId: hash(['i2', 3]), input: frozen(hash(['i2', 3])),
         earlierExecutions: [0, 1, 2].map(() => ({ ...EARLIER })) }); },
-      // A policy past K4's bound is refused before the receipt check walks the generations.
+      // A huge generation is refused before the receipt check walks the generations: its earlier executions and delays are
+      // too few. The 100-attempt cap itself is the `maxAttempts: 101` case.
       value => {
         Object.assign(value.intents[0]!, { generation: 1e9, taskId: hash(['i2', 1e9]), input: frozen(hash(['i2', 1e9])),
           retry: { maxAttempts: 2 ** 31, delaysMs: [], retryFailures: false } });

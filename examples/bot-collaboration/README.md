@@ -1047,7 +1047,7 @@ switch back to L opens a new tenant). So the read-back copies the document's
 header as it is and rebuilds only the sections from the target's rows. Devices
 are in JS string order of their id, and each section in JS string order of
 `canonical(identity)`, so a read-back sorts that way in JS or reseals; a
-database `ORDER BY` gives `unsorted`.
+database `ORDER BY` may give `unsorted`.
 
 A record holds what a target needs to rebuild the row, with values the source
 stores, never a default. Routines and occurrences carry their ordinal, intents
@@ -1091,27 +1091,32 @@ The format refuses, with `SwitchExportError` and a `reason`:
 - state that K4 cannot produce (`invalid`): a retry policy outside K4's
   `validateRetry` bounds, on an intent or a routine definition; a generation at
   or past `maxAttempts`; a `reserved` intent past generation 0 or with
-  anything from a submission; an earlier generation that was not begun; a
-  pending Host job for a concluded occurrence; and two occurrences of one slot
-  (`duplicate`);
+  anything from a submission; an earlier generation without its terminal and
+  attempt, or that was not begun; an occurrence that does not match its
+  routine's run kind (a Host job routine's occurrence has a job, and a pending
+  job exactly while it is open and not promoted; a hook routine's has no job);
+  and two occurrences of one slot (`duplicate`);
+- an execution routine (`execution_routine`): a K8 domain holds only Turn and
+  Host intents (#954), L refuses execution routines and H refuses them at
+  create, and K8 Bot routines are occurrence hooks;
 - a live Bot on a device the export does not move;
 - open work: an open Turn or input batch, an intent with no conclusion, or a
   card call in flight;
 - a pending Agent home write that is `sent` or has a `retryAt`, because it may
   have reached the device. An unsent one moves and is sent by the new owner;
 - a pending projection (`projection_pending`): H's receiver deduplicates by
-  `(scope, id)`, and neither Host records whether it was sent, so the source
-  flushes its projections first;
+  `(scope, id)`, and L does not record whether it was sent (H raises `tries`
+  before the send), so the source flushes its projections first;
 - rows out of identity order, a repeated identity or ordinal, a key outside the
   format, malformed fields, a value that is not JSON by K4's `validateJson`
   (`NaN`, `undefined`, a class instance, checked before the seal clones the
   content), and a manifest that does not match the content.
 
-A channel delivery moves under its id, `hash([taskId, messageId, route])`,
-which names no Host domain, so the target's readback or resend of a `sending`
-or `unknown` delivery uses the source's idempotency key. Whether a platform
-honors that key is its adapter's concern (`docs/host-im-adapter.md`); the
-switch does not change it.
+A channel delivery moves under its id,
+`hash([taskId, messageId, routeKey, nonce?])`, which names no Host domain, so
+the target's readback or resend of a `sending` or `unknown` delivery uses the
+source's idempotency key. Whether a platform honors that key is its adapter's
+concern (`docs/host-im-adapter.md`); the switch does not change it.
 
 The export, the import and the commit of the switch on each Host come in
 later #975 slices. This entry has no I/O.
