@@ -1041,15 +1041,28 @@ switch back to L opens a new tenant). So the read-back copies the document's
 header as it is and rebuilds only the sections from the target's rows. Devices
 and every section are in one order, by id, so a rebuilt list hashes the same.
 
+Each record holds only the fields that both Hosts store, with values the source
+stores, never a default. Routines and occurrences carry their ordinal, intents
+their frozen input (a sealed one stays sealed). A field that the source can
+rebuild from others, such as a K4 wake key, is not in the record. Every object
+has an exact set of keys. Sections are in JS string order, so a read-back sorts
+in JS or reseals; a database `ORDER BY` under a non-C collation gives
+`unsorted`.
+
 The format refuses, with `SwitchExportError` and a `reason`:
-- the source's owner records (L `topology`);
+- the source's owner records (L `topology`, and L `hostIntents`, whose handler
+  each intent carries);
+- a record that names one the export does not hold (`reference`): an
+  occurrence intent, slot or Host job outbox row without its occurrence, an
+  occurrence without its routine, or a task id that is not
+  `hash([key, generation])`;
 - a live Bot on a device the export does not move;
 - open work: an open Turn or input batch, an intent with no conclusion, or a
   card call in flight;
 - a pending Agent home write that is `sent` or has a `retryAt`, because it may
   have reached the device. An unsent one moves and is sent by the new owner;
-- rows out of identity order or repeated, malformed fields (K4 `Routine` and
-  `Occurrence` rows are checked field by field), a value that is not JSON by
+- rows out of identity order, a repeated identity or ordinal, a key outside the
+  format, malformed fields, a value that is not JSON by
   K4's `validateJson` (`NaN`, `undefined`, a class instance), and a manifest
   that does not match the content.
 

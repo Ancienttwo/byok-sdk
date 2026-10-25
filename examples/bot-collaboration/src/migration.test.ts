@@ -1,7 +1,7 @@
 import { hash } from '@byok-sdk/example-host-execution-core/canonical';
-import type { Occurrence, Routine } from '@byok-sdk/example-host-execution-core';
 import { describe, expect, it } from 'vitest';
-import { sealSwitchExport, SwitchExportError, verifySwitchExport, type SwitchContent, type SwitchExport, type SwitchExportRefusal } from './migration';
+import { sealSwitchExport, SwitchExportError, verifySwitchExport, type IntentRecord, type OccurrenceRecord, type RoutineRecord, type SwitchContent,
+  type SwitchExport, type SwitchExportRefusal } from './migration';
 import { stateOf, type CollaborationState } from './model';
 import type { BotProfile, HomeOperation } from './team-model';
 
@@ -10,12 +10,20 @@ const bot = (id: string, deviceId: string, archived = false) =>
 const home = (sequence: number, extra: Partial<HomeOperation> = {}) =>
   ({ sequence, botId: 'b1', request: {}, retries: [], status: 'pending', ...extra }) as unknown as HomeOperation;
 
-const ROUTINE: Routine = {
-  definition: { id: 'r1', version: 1, timeZone: 'UTC', rule: { every: 'day' }, waitMs: 0, lateAfterMs: 60_000, hostJob: { type: 'job', input: {} } },
-  lifecycle: 'active', status: 'ok', next: null,
-};
-const OCCURRENCE: Occurrence = {
-  key: 'o1', routineId: 'r1', definitionVersion: 1, trigger: { kind: 'scheduled', plannedAt: 900 }, wakeKey: 'w1', recordedAt: 900, nextAt: null, attempts: 0,
+const SCHEDULE = { version: 1, timeZone: 'UTC', rule: { every: 'day' }, waitMs: 0, lateAfterMs: 60_000 };
+/** A Host job routine and an occurrence hook routine, each with one occurrence. The hook occurrence is promoted to an intent. */
+const ROUTINES: RoutineRecord[] = [
+  { id: 'r1', ordinal: 0, definition: { id: 'r1', ...SCHEDULE, hostJob: { type: 'job', input: {} } }, lifecycle: 'active', status: 'ok', nextAt: 2_000 },
+  { id: 'r2', ordinal: 1, definition: { id: 'r2', ...SCHEDULE, hostOccurrence: { type: 'bot-routine', input: {} } }, lifecycle: 'active', status: 'ok', nextAt: null },
+];
+const occurrence = (key: string, ordinal: number, routineId: string, extra: Partial<OccurrenceRecord> = {}): OccurrenceRecord => ({
+  key, ordinal, routineId, definitionVersion: 1, trigger: { kind: 'scheduled', plannedAt: 900 }, recordedAt: 900, nextAt: null, job: null,
+  executionSuperseded: false, ...extra });
+const OCCURRENCES = [occurrence('o1', 0, 'r1', { job: { attempts: 1, summary: { ok: true } }, conclusion: 'succeeded' }), occurrence('o2', 1, 'r2')];
+const intent = (key: string, ordinal: number, extra: Partial<IntentRecord> = {}): IntentRecord => {
+  const taskId = hash([key, extra.generation ?? 1]);
+  return { key, source: 'user', ordinal, agent: 'agent-1', taskId, generation: 1, input: { taskId, deviceId: 'd1' }, waitUntil: 5_000,
+    submission: 'delivered', started: true, conclusion: 'succeeded', ...extra };
 };
 
 function content(edit: (state: CollaborationState) => void = () => {}): SwitchContent {
@@ -26,10 +34,11 @@ function content(edit: (state: CollaborationState) => void = () => {}): SwitchCo
     version: 1, source: 'L', domain: 'tenant-1', devices: [{ deviceId: 'd2', frozenRevision: 1 }, { deviceId: 'd1', frozenRevision: 3 }], exportedAt: 1_000,
     collaboration: state,
     archived: [{ namespace: 'turns', id: 't2', body: { n: 2 }, expiresAt: 9_000 }, { namespace: 'commands', id: 'c1', body: { n: 1 } }],
-    intents: [{ key: 'i2', source: 'user', taskId: hash(['i2', 1]), generation: 1, deviceId: 'd1', agentId: 'main', conclusion: 'succeeded', started: true },
-      { key: 'i1', source: 'routine', taskId: hash(['i1', 1]), generation: 1, deviceId: 'd1', agentId: 'main', conclusion: 'cancelled', started: false, cancelReason: 'cancelled' }],
-    routines: [{ id: 'r1', routine: ROUTINE }],
-    occurrences: [OCCURRENCE],
+    intents: [intent('i2', 0, { attempt: { id: 'a' }, terminal: { type: 'task.complete' } }),
+      intent('i1', 1, { submission: 'reserved', started: false, conclusion: 'cancelled', cancelReason: 'cancelled', handler: 'h' }),
+      intent('occurrence:o2', 2, { source: 'routine', conclusion: 'failed', retryUntil: 4_000 })],
+    routines: structuredClone(ROUTINES),
+    occurrences: structuredClone(OCCURRENCES),
     slots: [{ slot: hash('s1'), occurrenceKey: 'o1' }],
     outbox: [{ kind: 'projection', id: 'p1', value: { v: 1 } }, { kind: 'host-job', occurrenceKey: 'o1' }],
     tombstones: [{ kind: 'row', digest: hash('r'), expiresAt: 5_000 }, { kind: 'intent', digest: hash('i0') }],
@@ -43,6 +52,14 @@ function refused(run: () => unknown, reason: SwitchExportRefusal) {
   }
   throw new Error(`expected a ${reason} refusal`);
 }
+/** Each edit, applied to fresh content, is refused for `reason` when sealed. */
+function refusesEach(reason: SwitchExportRefusal, cases: Array<(value: SwitchContent) => void>) {
+  for (const [index, edit] of cases.entries()) {
+    const value = content();
+    edit(value);
+    try { refused(() => sealSwitchExport(value), reason); } catch (error) { throw new Error(`case ${index}: ${String(error)}`); }
+  }
+}
 
 describe('switch export format (#975)', () => {
   it('seals each section in identity order with a manifest that verifies, and leaves the content unchanged', () => {
@@ -52,17 +69,19 @@ describe('switch export format (#975)', () => {
     expect(input).toEqual(before);
     expect(sealed.devices.map(device => device.deviceId)).toEqual(['d1', 'd2']);
     expect(sealed.archived.map(row => row.id)).toEqual(['c1', 't2']);
-    expect(sealed.intents.map(row => row.key)).toEqual(['i1', 'i2']);
+    expect(sealed.intents.map(row => row.key)).toEqual(['i1', 'i2', 'occurrence:o2']);
     expect(sealed.outbox.map(row => row.kind)).toEqual(['host-job', 'projection']);
     expect(sealed.tombstones.map(row => row.kind)).toEqual(['intent', 'row']);
-    expect(sealed.manifest.counts).toEqual({ collaboration: 1, archived: 2, intents: 2, routines: 1, occurrences: 1, slots: 1, outbox: 2, tombstones: 2 });
+    expect(sealed.manifest.counts).toEqual({ collaboration: 1, archived: 2, intents: 3, routines: 2, occurrences: 2, slots: 1, outbox: 2, tombstones: 2 });
     expect(sealed.manifest.digests.archived).toBe(hash(sealed.archived));
     expect(verifySwitchExport(sealed)).toEqual(sealed.manifest);
     // A target's read-back is a JSON round trip of what it wrote: the digest does not depend on key order or row order.
     const readBack = JSON.parse(JSON.stringify({ ...sealed, intents: [...sealed.intents] })) as SwitchExport;
     expect(verifySwitchExport(readBack).digest).toBe(sealed.manifest.digest);
     const shuffled = content();
-    shuffled.devices.reverse(); shuffled.archived.reverse(); shuffled.outbox.reverse(); shuffled.tombstones.reverse();
+    for (const list of [shuffled.devices, shuffled.archived, shuffled.intents, shuffled.routines, shuffled.occurrences, shuffled.outbox, shuffled.tombstones]) {
+      list.reverse();
+    }
     expect(sealSwitchExport(shuffled).manifest.digest).toBe(sealed.manifest.digest);
   });
 
@@ -72,20 +91,66 @@ describe('switch export format (#975)', () => {
     refused(() => verifySwitchExport({ ...sealed, exportedAt: 1_001 }), 'manifest');
     refused(() => verifySwitchExport({ ...sealed, devices: [{ deviceId: 'd1', frozenRevision: 4 }, sealed.devices[1]!] }), 'manifest');
     refused(() => verifySwitchExport({ ...sealed, outbox: sealed.outbox.slice(1) }), 'manifest');
+    refused(() => verifySwitchExport({ ...sealed, routines: [{ ...sealed.routines[0]!, ordinal: 7 }, sealed.routines[1]!] }), 'manifest');
   });
 
-  it('refuses rows out of identity order and repeated identities', () => {
+  it('refuses rows out of identity order and repeated identities or ordinals', () => {
     const sealed = sealSwitchExport(content());
     refused(() => verifySwitchExport({ ...sealed, intents: [...sealed.intents].reverse() }), 'unsorted');
     refused(() => verifySwitchExport({ ...sealed, devices: [...sealed.devices].reverse() }), 'unsorted');
-    const repeated = content();
-    repeated.intents.push({ ...repeated.intents[0]! });
-    refused(() => sealSwitchExport(repeated), 'duplicate');
-    refused(() => sealSwitchExport({ ...content(), devices: [{ deviceId: 'd1', frozenRevision: 3 }, { deviceId: 'd1', frozenRevision: 3 }] }), 'duplicate');
+    refusesEach('duplicate', [
+      value => { value.intents.push({ ...value.intents[0]! }); },
+      value => { value.devices = [{ deviceId: 'd1', frozenRevision: 3 }, { deviceId: 'd1', frozenRevision: 3 }]; },
+      value => { value.routines[1]!.ordinal = 0; },
+      value => { value.occurrences[1]!.ordinal = 0; },
+      value => { value.intents[1]!.ordinal = 0; },
+    ]);
+  });
+
+  it('refuses a key that no record of the format has, at every level', () => {
+    const sealed = sealSwitchExport(content());
+    refused(() => verifySwitchExport({ ...sealed, memory: [] } as SwitchExport), 'invalid');
+    refused(() => verifySwitchExport({ ...sealed, manifest: { ...sealed.manifest, extra: 1 } } as SwitchExport), 'invalid');
+    refused(() => verifySwitchExport({ ...sealed, manifest: { ...sealed.manifest, counts: { ...sealed.manifest.counts, memory: 0 } } } as SwitchExport), 'invalid');
+    const extra = (row: object) => Object.assign(row, { extra: 1 });
+    refusesEach('invalid', [
+      value => { Object.assign(value, { memory: [] }); },
+      value => { extra(value.devices[0]!); },
+      value => { extra(value.archived[0]!); },
+      value => { Object.assign(value.intents[0]!, { attempts: 1 }); },
+      value => { Object.assign(value.routines[0]!, { next: null }); },
+      value => { Object.assign(value.routines[0]!.definition, { extra: 1 }); },
+      value => { Object.assign(value.occurrences[0]!, { wakeKey: 'r1:1:900' }); },
+      value => { Object.assign(value.occurrences[0]!.trigger, { extra: 1 }); },
+      value => { Object.assign(value.occurrences[0]!.job!, { executionSuperseded: true }); },
+      value => { extra(value.slots[0]!); },
+      value => { extra(value.outbox[0]!); },
+      value => { extra(value.outbox[1]!); },
+      value => { extra(value.tombstones[0]!); },
+      value => { Object.assign(value.collaboration, { memory: {} }); },
+    ]);
+  });
+
+  it('refuses a record that names a record the export does not hold, or a task id that is not its key and generation', () => {
+    refusesEach('reference', [
+      value => { value.intents[0]!.generation = 2; },
+      value => { value.intents[2]!.key = 'occurrence:o9'; },
+      value => { value.slots[0]!.occurrenceKey = 'o9'; },
+      value => { value.outbox[1] = { kind: 'host-job', occurrenceKey: 'o9' }; },
+      // `o2` is an occurrence hook, not a Host job.
+      value => { value.outbox[1] = { kind: 'host-job', occurrenceKey: 'o2' }; },
+      value => { value.occurrences[0]!.routineId = 'r9'; },
+    ]);
+    refusesEach('invalid', [
+      value => { value.intents[0]!.input = { taskId: hash(['other', 1]) }; },
+      // A promoted occurrence's conclusion is its intent's.
+      value => { value.occurrences[1]!.conclusion = 'failed'; },
+    ]);
   });
 
   it('refuses the source owner records and a live Bot whose device the export does not move', () => {
     refused(() => sealSwitchExport(content(state => { state.topology = {}; })), 'owner_record');
+    refused(() => sealSwitchExport(content(state => { state.hostIntents = { i1: { handler: 'h' } }; })), 'owner_record');
     refused(() => sealSwitchExport(content(state => { state.team.bots.b2 = bot('b2', 'd3'); })), 'device_missing');
     expect(() => sealSwitchExport(content(state => { state.team.bots.b2 = bot('b2', 'd3', true); }))).not.toThrow();
   });
@@ -109,7 +174,7 @@ describe('switch export format (#975)', () => {
   });
 
   it('refuses malformed content', () => {
-    const cases: Array<(value: SwitchContent) => void> = [
+    refusesEach('invalid', [
       value => { (value as { version: number }).version = 2; },
       value => { (value as { source: string }).source = 'K'; },
       value => { value.domain = ''; },
@@ -118,6 +183,10 @@ describe('switch export format (#975)', () => {
       value => { value.devices = [{ deviceId: 'd1', frozenRevision: 0 }]; },
       value => { (value.collaboration as { version: number }).version = 2; },
       value => { value.intents[0]!.taskId = 'not-a-digest'; },
+      value => { (value.intents[0] as { submission: string }).submission = 'sent'; },
+      value => { (value.intents[0] as { input: unknown }).input = 'frozen'; },
+      value => { delete (value.intents[0] as { waitUntil?: number }).waitUntil; },
+      value => { value.slots[0]!.slot = 's1'; },
       value => { value.tombstones[0]!.digest = 'short'; },
       value => { (value.tombstones[0] as { kind: string }).kind = 'other'; },
       value => { (value.outbox[1] as { kind: string }).kind = 'intent'; },
@@ -127,21 +196,17 @@ describe('switch export format (#975)', () => {
       value => { value.archived[0]!.body = { n: Number.NaN }; },
       value => { value.outbox[0] = { kind: 'projection', id: 'p1', value: { at: new Date(0) } as unknown as Record<string, number> }; },
       value => { (value.archived[1] as { expiresAt?: number }).expiresAt = undefined; },
-      value => { value.routines[0]!.routine = {} as Routine; },
-      value => { value.routines[0]!.routine = { ...ROUTINE, definition: { ...ROUTINE.definition, id: 'r2' } }; },
-      value => { value.routines[0]!.routine = { ...ROUTINE, definition: { ...ROUTINE.definition, execution: {} } } as unknown as Routine; },
-      value => { value.routines[0]!.routine = { ...ROUTINE, lifecycle: 'gone' } as unknown as Routine; },
-      value => { const { wakeKey: _wakeKey, ...rest } = OCCURRENCE; value.occurrences[0] = rest as Occurrence; },
-      value => { value.occurrences[0] = { ...OCCURRENCE, trigger: { kind: 'late', plannedAt: 900 } } as unknown as Occurrence; },
-      value => { value.occurrences[0] = { ...OCCURRENCE, nextAt: -1 }; },
+      value => { value.routines[0]!.definition = { ...value.routines[0]!.definition, id: 'r9' }; },
+      value => { Object.assign(value.routines[0]!.definition, { execution: {} }); },
+      value => { (value.routines[0] as { lifecycle: string }).lifecycle = 'gone'; },
+      value => { value.routines[0]!.ordinal = -1; },
+      value => { value.routines[0]!.calendarErrors = []; },
+      value => { delete (value.occurrences[0] as { executionSuperseded?: boolean }).executionSuperseded; },
+      value => { (value.occurrences[0]!.trigger as { kind: string }).kind = 'late'; },
+      value => { value.occurrences[0]!.nextAt = -1; },
       value => { (value.collaboration.team as { homeOperations: unknown }).homeOperations = {}; },
       value => { (value.collaboration.team.bots.b1 as { execution: unknown }).execution = null; },
       value => { value.collaboration.turns.t1 = null as unknown as CollaborationState['turns'][string]; },
-    ];
-    for (const edit of cases) {
-      const value = content();
-      edit(value);
-      refused(() => sealSwitchExport(value), 'invalid');
-    }
+    ]);
   });
 });
