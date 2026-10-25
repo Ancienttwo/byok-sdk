@@ -62,6 +62,14 @@ describe('a sealed frozen input (#953)', () => {
     expect(port.submit).not.toHaveBeenCalled();
   });
 
+  it('calls submitSealed as a method of its port', async () => {
+    const sealed = await sealedInput('task-1', 'device-1');
+    const port = { sent: [] as SealedAgentExecutionInput[], offer: vi.fn(async () => undefined), submit: vi.fn(),
+      async submitSealed(input: SealedAgentExecutionInput) { this.sent.push(input); return {} as never; } };
+    expect(await submitFrozen(port, sealed, () => true)).toBe('delivered');
+    expect(port.sent).toEqual([sealed]);
+  });
+
   it('counts a delivered readback after a lost sealed submit', async () => {
     const sealed = await sealedInput('task-1', 'device-1');
     const offers = [undefined, readback(sealed, true)];

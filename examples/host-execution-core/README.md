@@ -351,10 +351,13 @@ stores the template and puts it, byte for byte, in the `sealed` member of each o
 `task.offer_for_agent_with_egress_fresh_sealed`, next to the plaintext `routineRef`. It never
 sees the scope key or the instruction.
 
-- An intent or routine `execution` is a plain `ExecutionTemplate` or a `SealedExecutionTemplate`
-  (the payload has `sealing`). A sealed one must parse as the sealed offer payload, and K4 takes it
-  only as a routine template occurrence that seals `task-input` alone:
-  - It must carry `routineRef` and come from a routine. A task-bound ciphertext names one task id,
+- A routine `execution` is a plain `ExecutionTemplate` or a `SealedExecutionTemplate` (the payload
+  has `sealing`). `enqueue`, on the core and as the exported transition, takes a plain execution
+  only and refuses a sealed one: no stored routine checks its `routineRef` there, so
+  `source: 'routine'` would be only a label. A sealed execution must parse as the sealed offer
+  payload, and K4 takes it only as a routine template occurrence that seals `task-input` alone:
+  - It must carry `routineRef` and enter as an occurrence of its routine: the routine's own
+    `execution`, or `promoteOccurrence`. A task-bound ciphertext names one task id,
     and a retry generation gets a new one, so only the template binding, which names no task, can
     be resubmitted unchanged.
   - Its `sealing.categories` is exactly `['task-input']`: the core settles from the plaintext
@@ -371,7 +374,11 @@ sees the scope key or the instruction.
 - Sealed dispatch is the optional `submitSealed` of `ExecutionServer.executions` and
   `FrozenSubmitPort`, the cloud's `submitSealedAgentExecution`. Without it, the core fails a
   sealed intent before any submit (`preparationError: 'sealed_dispatch_unavailable'`), and
-  `submitFrozen` throws `SealedDispatchUnavailableError`. The embedded `ByokServer` has none,
+  `submitFrozen` throws `SealedDispatchUnavailableError` before its readback. The core checks the
+  lane at every submit: when a server loses it while a sealed submit is uncertain, the reconcile
+  still verifies the frozen offer, but runs no submit readback and no submit until the lane
+  returns or the intent expires.
+- `sealRoutineTemplate` seals exactly `['task-input']`, the only category list K4 runs. The embedded `ByokServer` has none,
   because it declares no `e2ee.member` and so no daemon paired to it advertises `sealed-payload-v1`.
 - `sameFrozenOffer` checks the offer type of the input's lane: a plain readback never matches a
   sealed input, nor the reverse. The payload compares exactly, because the Host resubmits its

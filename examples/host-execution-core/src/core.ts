@@ -3,7 +3,7 @@ import type { ByokServer, ByokServerEvent, CreateByokServerOptions, DueWake } fr
 import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
 import { HostLedger, OutboxFullError, type ApplicationRows } from './ledger';
 import { canonical, hash, isSealed, project, taskId, time, validateJson, type HostJobHandler, type HostOccurrenceRun, type Attempt,
-  type Intent, type LedgerIntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type Terminal } from './model';
+  type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type SealedAgentExecutionInput, type Terminal } from './model';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 import { applyPlan, auditCalendarError, auditIgnoredWake, deferSchedule, nextWake, occurrenceRun, promote, recordOccurrence, routineCommands, scheduleNext,
   switchVersion, versionSwitchDue, WAKE_HORIZON_MS, type RoutineCommands } from './routines';
@@ -184,7 +184,7 @@ export class HostExecutionCore {
       return decision;
     });
   };
-  async enqueue(input: LedgerIntentInput): Promise<Intent> {
+  async enqueue(input: IntentInput): Promise<Intent> {
     this.assertOpen();
     this.ledger.transaction(state => enqueue(state, this.ledger.tenant, input));
     await this.drain();
@@ -583,28 +583,29 @@ export class HostExecutionCore {
     if (attempt && (attempt.taskId !== intent.taskId || attempt.deviceId !== intent.execution.deviceId
       || canonical(attempt.agentRef) !== canonical(intent.execution.payload.agentRef))) throw new Error('Attempt identity conflict');
   }
-  private readonly frozenPort: FrozenSubmitPort = {
-    submit: async input => {
-      const enqueued = await this.server.executions.submit(input);
-      if (this.eventsActive) this.liveTasks.add(input.taskId);
+  /**
+   * The SDK calls of one frozen submit. It has `submitSealed` only while the server has one, so `submitFrozen` refuses a
+   * sealed input before its readback on every path, the reconcile resubmit included, not only in `begin`.
+   */
+  private frozenPort(): FrozenSubmitPort {
+    const live = <T>(enqueued: T, taskId: string): T => {
+      if (this.eventsActive) this.liveTasks.add(taskId);
       return enqueued;
-    },
-    submitSealed: async input => {
-      // `begin` already fails a sealed intent when the server has no sealed lane.
-      const submitSealed = this.server.executions.submitSealed;
-      if (!submitSealed) throw new SealedDispatchUnavailableError();
-      const enqueued = await submitSealed(input);
-      if (this.eventsActive) this.liveTasks.add(input.taskId);
-      return enqueued;
-    },
-    offer: taskId => this.server.tasks.offer(taskId),
-  };
+    };
+    return {
+      submit: async input => live(await this.server.executions.submit(input), input.taskId),
+      ...this.server.executions.submitSealed && {
+        submitSealed: async (input: SealedAgentExecutionInput) => live(await this.server.executions.submitSealed!(input), input.taskId),
+      },
+      offer: taskId => this.server.tasks.offer(taskId),
+    };
+  }
   private delivered(intent: Intent): Promise<boolean> {
-    return frozenDelivered(this.frozenPort, this.ledger.snapshot().executions[intent.taskId]!.input);
+    return frozenDelivered(this.frozenPort(), this.ledger.snapshot().executions[intent.taskId]!.input);
   }
   private async submit(intent: Intent): Promise<void> {
     const input = this.ledger.snapshot().executions[intent.taskId]!.input;
-    const outcome = await submitFrozen(this.frozenPort, input, () => {
+    const outcome = await submitFrozen(this.frozenPort(), input, () => {
       const latest = this.ledger.snapshot().intents[intent.id]!;
       if (latest.conclusion || latest.cancelReason) return false;
       if (this.now() >= latest.waitUntil) {
