@@ -1024,6 +1024,32 @@ admits nothing before it knows the freeze.
 L has no step for H → L: once a device is in mode H, every step refuses. Moving
 a device back to L belongs to the state export and import work (§8).
 
+### Owner switch export format (#975)
+
+The `./migration` entry (`src/migration.ts`) is the one form in which a whole
+coordination domain moves between owners: an L ledger tenant or an H scope.
+Neither Host's storage is the format. The old owner builds a `SwitchContent`
+once every device of the domain is frozen and drained, and
+`sealSwitchExport` checks it, orders each section by its identity and adds a
+manifest. The manifest has the count and the `hash(canonical(section))` of
+each section, and one digest over them and the header (source, domain, frozen
+device revisions, export time). The new owner runs `verifySwitchExport` on
+the document before it writes anything, and again on its own rows read back
+into this form, so the digest it records in its receipt is the source's.
+
+The format refuses, with `SwitchExportError` and a `reason`:
+- the source's owner records (L `topology`);
+- a live Bot on a device the export does not move;
+- open work: an open Turn or input batch, an intent with no conclusion, or a
+  card call in flight;
+- a pending Agent home write that is `sent` or has a `retryAt`, because it may
+  have reached the device. An unsent one moves and is sent by the new owner;
+- rows out of identity order or repeated, malformed fields, and a manifest
+  that does not match the content.
+
+The export, the import and the commit of the switch on each Host come in
+later #975 slices. This entry has no I/O.
+
 ### Second-device placement and device wait
 
 One embedded server and one Host ledger can serve Bots on two enrolled

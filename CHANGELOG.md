@@ -441,6 +441,18 @@
   routine slot and a coalesced batch seal from alarm passes alone, a duplicate
   alarm, an instance lost mid-alarm, and dropped alarms. No H, SDK, wire or SQL
   change.
+- **Feature (examples)** — K8 gains the owner switch format (#975 slice 2):
+  the `./migration` entry, also exported from the K8 root. `SwitchExport`
+  version 1 holds one whole coordination domain (an L tenant or an H scope):
+  the collaboration state without the source's owner records, retention rows,
+  concluded intents, routines, occurrences, slots, unconfirmed outbox records
+  and tombstones, with a manifest of per-section counts and digests and one
+  digest over them. `sealSwitchExport` orders and seals it;
+  `verifySwitchExport` checks a document or a target's read-back and throws
+  `SwitchExportError` for open work, a home write that may have been sent, a
+  card call in flight, a Bot on a device the export does not move, or a
+  manifest that does not match. No Host uses it yet. No SDK, wire or SQL
+  change.
 
 ## 0.30.1 — 2026-10-24 (published)
 
