@@ -255,8 +255,14 @@ and makes no network request.
   drift test in `@byok-sdk/client` keeps a review list of these branches, so a
   pi-ai upgrade reviews them again.
 - The `custom` kind has no adapter, auth mode or base URL of its own; a Host
-  passes defaults in its policy. A Host entry is marked `host`, must pass
-  `PiModelConfigSchema`, and is offered as unrepresentable otherwise.
+  passes defaults in its policy. A Host entry is marked `host`. It must pass
+  `PiModelConfigSchema`, and its config must project the api it is listed
+  under; otherwise it is offered as unrepresentable. A policy that lists one
+  vendor, api and model twice throws. A vendor whose models the policy lists
+  admits only those model ids, whatever the source, so validation does not
+  depend on the order of edits.
+- Every function maps a change value of the wrong type to a field code; a
+  change naming no field throws.
 - A stored key is reused only while `profile_ref`, `provider_kind`, `adapter`,
   `auth_mode` and the normalized `base_url` are unchanged
   (`providerSecretReusable`); otherwise the draft reports

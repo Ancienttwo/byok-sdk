@@ -310,7 +310,11 @@ if (submission.ok) {
 
   The client's pinned catalog drift test keeps a review list of these
   branches.
-- Errors are codes from `MODEL_ROUTE_ERROR_CODES`, one per visible field.
+- Errors are codes from `MODEL_ROUTE_ERROR_CODES`, one per visible field. A
+  change value of the wrong type, as page JSON may carry, gets a code too.
+- Policy `models` lists the only model ids a vendor admits, from any source.
+  A Host entry must project the api it is listed under. A policy that repeats
+  a Host entry throws.
 - The key is write-only. A view shows `keep`, `none` or `replace`, never the
   key. `providerSecretReusable` keeps a stored key only while `profile_ref`,
   `provider_kind`, `adapter`, `auth_mode` and the normalized `base_url` are
