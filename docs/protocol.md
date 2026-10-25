@@ -1578,7 +1578,7 @@ command and not only the string.
 - Each answer body has a byte cap, and a longer body is cut off unparsed: a
   chain page at 256 times the largest entry (`MEMBER_CHAIN_PAGE_MAX_BYTES`),
   a key package, relayed MAC or registration answer at 8 KiB
-  (`MEMBER_OBJECT_MAX_BYTES`), a page of own key packages at 96 KiB
+  (`MEMBER_OBJECT_MAX_BYTES`), a page of own key packages at 85760 bytes
   (`MEMBER_PACKAGE_PAGE_MAX_BYTES`, 16 packages with the longest scope and
   tenant ids escaped), an error body at 1 KiB. A key package
   read that returns more than one package is refused, and so is a page with

@@ -18,6 +18,7 @@ import {
   type MemberKeys,
   type SealedContentHeaderV1,
 } from '@byok-sdk/core/sealed-payload';
+import { TENANT_ID_MAX_LENGTH } from '@byok-sdk/core';
 import { E2EE_SCOPE_ID_MAX_LENGTH, E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX, E2EE_SCOPE_KEY_PACKAGE_PUT_MAX } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AuthManager } from '../daemon/auth-manager';
@@ -274,7 +275,7 @@ describe('device member keyring (E2d-2)', () => {
     const pkg = await web.sealPackage('scope-a', device, new Uint8Array(32).fill(3));
     // Each package repeats its ids; a control character is escaped as `\uXXXX`, six bytes per unit.
     const packages = Array.from({ length: E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX }, (_, index) => ({
-      ...pkg, epoch: index + 1, tenantId: '\u0001'.repeat(200), scopeId: '\u0001'.repeat(E2EE_SCOPE_ID_MAX_LENGTH),
+      ...pkg, epoch: index + 1, tenantId: '\u0001'.repeat(TENANT_ID_MAX_LENGTH), scopeId: '\u0001'.repeat(E2EE_SCOPE_ID_MAX_LENGTH),
     }));
     server.e2ee.pageResponse = { packages, scopeHeadEpoch: E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX };
     expect(Buffer.byteLength(JSON.stringify(server.e2ee.pageResponse))).toBeGreaterThan(64 * 1024);

@@ -12,7 +12,7 @@
  * verifies the pairing MAC, the chain walk and each key package.
  */
 import { randomUUID } from 'node:crypto';
-import { DEVICE_PROOF_HEADER } from '@byok-sdk/core';
+import { DEVICE_PROOF_HEADER, TENANT_ID_MAX_LENGTH } from '@byok-sdk/core';
 import type { MemberChainEntryV1, MemberKeyBundleV1, ScopeKeyPackageV2 } from '@byok-sdk/core/sealed-payload';
 import {
   BYOK_E2EE_CHAIN_PATH,
@@ -23,6 +23,7 @@ import {
   E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES,
   E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES,
   E2EE_MEMBER_KEY_REGISTER_OPERATION,
+  E2EE_SCOPE_ID_MAX_LENGTH,
   E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX,
   E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION,
 } from '@byok-sdk/protocol';
@@ -49,11 +50,13 @@ export const MEMBER_CHAIN_PAGE_MAX_BYTES = E2EE_MEMBER_CHAIN_READ_MAX_ENTRIES * 
  */
 export const MEMBER_OBJECT_MAX_BYTES = 8 * 1024;
 /**
- * The largest page of own key packages, with the scope head: 16 packages of
- * under 6 KiB each. Each package repeats its ids, and a 512-unit scope id and
- * a 200-unit tenant id escaped as `\uXXXX` add 4.2 KiB to its 1 KiB.
+ * The largest page of own key packages, with 1 KiB for the scope head and
+ * wrapper: a full page of the largest packages the Host stores. A package is
+ * under 1 KiB besides its ids, and it repeats the scope id and the tenant id,
+ * each unit of which takes up to six bytes escaped as `\uXXXX`.
  */
-export const MEMBER_PACKAGE_PAGE_MAX_BYTES = 96 * 1024;
+export const MEMBER_PACKAGE_PAGE_MAX_BYTES =
+  E2EE_SCOPE_KEY_PACKAGE_PAGE_MAX * (1024 + 6 * (E2EE_SCOPE_ID_MAX_LENGTH + TENANT_ID_MAX_LENGTH)) + 1024;
 /** The largest error body read; it only carries a code of at most 64 characters. */
 const MEMBER_ERROR_BODY_MAX_BYTES = 1024;
 
