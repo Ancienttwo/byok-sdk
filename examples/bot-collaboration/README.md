@@ -417,6 +417,21 @@ write for the store:
 - `ended`: the Turn has no intent and is concluded. A routine Turn concludes
   its open occurrence.
 
+A Host that binds devices gives the step the optional fact
+`deviceRefusal(botId)` (#956, §55a): `unbound`, `revoked` or `mode` for the
+device of the Bot's current execution template, which a freeze would use. The
+step then holds that Bot's Turns that have no intent: it returns no write,
+sets `held: 'device_not_bound'` on the Turn, publishes `held:<turnId>` with
+`{ owner, turnId, code: 'device_not_bound' }` once per hold, and adds an audit
+row with the reason. The rest of the scope syncs. The hold comes before the
+profile check, since a refused device may never apply a profile. The next sync
+with no refusal (the device is bound, or a `team_snapshot` moved the Bot)
+clears `held` and freezes the Turn with the current template. A held room
+seat Turn waits for its seat deadline, as any seat that does not start. The
+projection body never changes, so a changed reason never conflicts. L has no
+device binding and sets no fact. `DEVICE_NOT_BOUND` is H's
+`DeviceBindingError` code.
+
 A store runs the step for each stored Turn, in insertion order, in one
 transaction under the same scope lock as a commit. It reads the facts inside
 that transaction. The projections that the step publishes reach the store's
