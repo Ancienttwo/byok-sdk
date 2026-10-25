@@ -10,8 +10,9 @@ Do not use this example as a deployed Host. It has never run on Cloudflare: see 
 `src/worker.ts` composes the whole Host for each invocation (a request or a `scheduled` event) and ends it before the
 invocation is done:
 
-- two new pools over the Hyperdrive binding `BYOK_PG`: the SDK pool from `createByokPool` (its int8 parser), and the H
-  store's own `pg.Pool`, as the H README asks;
+- two new pools over the Hyperdrive binding `BYOK_PG`: the SDK pool from `createByokPool` (its int8 parser, `max: 3`),
+  and the H store's own `pg.Pool` (`max: 2`), as the H README asks. Together they stay below the connections that one
+  Worker invocation may hold open at once;
 - `createPostgresCoreStores` and `createPostgresCloudStores` from `@byok-sdk/cloud-dataplane/runtime`, and
   `createByokCloud` with H's message consumer and a new in-process mailbox wake with a 1 s fallback;
 - `HostedCollaborationStore` and its passes: the routine scheduler (`start()` and `run()`), the reconciler, the composed
@@ -89,12 +90,14 @@ A kill is SIGKILL to wrangler and workerd with no grace, so nothing in the Worke
 Results are given per row and never merged into one PASS. `VALIDATION.md` of `examples/bot-collaboration` is not changed
 here; its two rows stay OPEN.
 
-| Row | Status | Evidence here | What it still needs |
-| --- | --- | --- | --- |
-| Node H (D2) | D2's suites | `examples/hosted-bot-collaboration` on Node and Postgres | none from this lane |
-| Worker H, local workerd | PASS locally; CI pending | `worker.test.ts`, `faults.test.ts` on wrangler 4.123.0 (workerd 1.20260811.1), Postgres 17, SeaweedFS | a deployment: real Hyperdrive (transaction pooling), R2 over its S3 endpoint, cron on Cloudflare, isolate eviction by Cloudflare |
-| Two device processes, one Host | PASS locally; CI pending | `two-devices.test.ts`, synthetic runtime, one computer | two physical computers (macOS and Windows), each with its own OS user and network path |
-| Real runtime delegation and reply | not run | none: no paid runtime call is approved | one A -> B -> A chain with real runtimes, each call approved by the maintainer, recorded apart from the synthetic results |
+Each row's result is recorded in its PR, with the commit and the CI run.
+
+| Row | Evidence here | What it still needs |
+| --- | --- | --- |
+| Node H (D2) | `examples/hosted-bot-collaboration` on Node and Postgres (D2's suites) | none from this lane |
+| Worker H, local workerd | `worker.test.ts`, `faults.test.ts` on wrangler 4.123.0 (workerd 1.20260811.1), Postgres 17, the compose S3 endpoint | a deployment: real Hyperdrive (transaction pooling, the connection limit per invocation), R2 over its S3 endpoint, cron on Cloudflare, isolate eviction by Cloudflare, and a routine driver below 60 s (Limits) |
+| Two device processes, one Host | `two-devices.test.ts`, synthetic runtime, one computer | two physical computers (macOS and Windows), each with its own OS user and network path |
+| Real runtime delegation and reply | none: no paid runtime call is approved | one A -> B -> A chain with real runtimes, each call approved by the maintainer, recorded apart from the synthetic results |
 
 ### For `examples/bot-collaboration/VALIDATION.md`
 
@@ -117,6 +120,11 @@ Proposed text for lane K8 or the coordinator to apply. The status stays OPEN:
 - H keeps the due scheduler's and the routine scheduler's backoff in memory. Each invocation starts with an empty map, so
   a failing scope or routine is retried on every pass (`faults.test.ts` shows it). Correctness does not depend on it;
   load does. A durable backoff is an H change.
+- Routine timing is not met on a cron trigger. H's routine scheduler must run more often than the K8 late bound
+  (`ROUTINE_LATE_AFTER_MS`, 60 s), or every slot fires as `catch_up` with an occurrence key that differs from L's. A
+  Cloudflare cron fires at most once a minute, and a notification does not come from a slot's time. The due steps (batch
+  seals, card expiries, reply checks) run up to a minute late for the same reason. A sub-minute driver, for example a
+  Durable Object alarm, is a design choice that this example does not make. No test here runs a routine.
 - H's `host(scope)` is synchronous, so each invocation reads every `host_scope` row before it runs. At 10x scopes that
   read grows with them; a per-pass read of only the due scopes needs an H change.
 - The H bundle pulls `node:sqlite` and `node:http` through the K4 index. workerd loads them today, and H never calls

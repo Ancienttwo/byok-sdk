@@ -100,8 +100,10 @@ interface Host {
 
 /** One invocation's Host. `notify` schedules one more pass after the invocation's own work. */
 async function compose(env: Env, notify: () => void): Promise<Host> {
-  const sdkPool = createByokPool({ connectionString: env.BYOK_PG.connectionString });
-  const hostPool = new pg.Pool({ connectionString: env.BYOK_PG.connectionString });
+  // A Worker invocation may hold only a few connections open at once (six per invocation, sockets and fetches together, at
+  // the time of writing). The two pools together stay below that, with room for the object store's fetches.
+  const sdkPool = createByokPool({ connectionString: env.BYOK_PG.connectionString, max: 3 });
+  const hostPool = new pg.Pool({ connectionString: env.BYOK_PG.connectionString, max: 2 });
   // A pg pool needs an 'error' listener, or an idle client's reset is an uncaught error (cloud-dataplane pool.ts).
   hostPool.on('error', error => { console.error('[h-worker] idle H pool client error', error); });
   const close = async () => { await Promise.all([sdkPool.end(), hostPool.end()]); };
@@ -219,9 +221,11 @@ function notifier(env: Env, ctx: ExecutionContext): () => void {
     sent = true;
     const mode = fault(env);
     if (mode === 'drop-notify') return;
-    const once = () => runPasses(env).catch(error => { console.error('[h-worker] notified pass failed', error); });
-    ctx.waitUntil(once());
-    if (mode === 'duplicate-notify') ctx.waitUntil(once());
+    const id = globalThis.crypto.randomUUID(), copies = mode === 'duplicate-notify' ? 2 : 1;
+    for (let copy = 1; copy <= copies; copy++) {
+      console.log(`[h-worker] notified pass ${id} ${copy}/${copies}`);
+      ctx.waitUntil(runPasses(env).catch(error => { console.error('[h-worker] notified pass failed', error); }));
+    }
   };
 }
 

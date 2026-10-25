@@ -11,6 +11,7 @@ import { openHome, RUN, until, type Home } from './worker.test-support';
 /** A wait long enough for any notified pass of a local instance to have run. Nothing may change in it. */
 const QUIET_MS = 3_000;
 const quiet = () => new Promise(resolve => setTimeout(resolve, QUIET_MS));
+const NOTIFIED = '[h-worker] notified pass', SCHEDULED = '[h-worker] scheduled pass';
 
 describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
   let h: Home;
@@ -35,6 +36,9 @@ describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
     await worker.cron();
     await until(async () => (await h.turn(turnId))?.status === 'succeeded' || undefined);
     expect((await h.commands()).filter(id => id === task)).toHaveLength(1);
+    // Only the two explicit cron calls ran a pass: no notified pass, and no cron of its own.
+    expect(worker.lines(NOTIFIED)).toEqual([]);
+    expect(worker.lines(SCHEDULED)).toHaveLength(2);
   });
 
   it('a duplicate notification runs two passes at once: one submit, one outcome, and later passes change nothing', async () => {
@@ -54,6 +58,12 @@ describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
     expect((await h.commands()).filter(id => id === task)).toHaveLength(1);
     expect(await h.mailbox(task)).toEqual(['task.offer_for_agent_with_egress_fresh']);
     expect(h.device.started.filter(entry => entry.taskId === task)).toHaveLength(1);
+    // Every notification of this instance (the input, the device's claim and terminal) ran two passes.
+    const notified = worker.lines(NOTIFIED).map(line => line.slice(line.indexOf(NOTIFIED) + NOTIFIED.length).trim());
+    const ids = new Set(notified.map(line => line.split(' ')[0]));
+    expect(ids.size).toBeGreaterThanOrEqual(2);
+    for (const id of ids) expect(notified.filter(line => line.startsWith(`${id} `)).sort()).toEqual([`${id} 1/2`, `${id} 2/2`]);
+    expect(worker.lines(SCHEDULED)).toHaveLength(1);
   });
 
   it('an instance destroyed after the SDK accepted a submit: the next instance reads the offer back and submits nothing new', async () => {

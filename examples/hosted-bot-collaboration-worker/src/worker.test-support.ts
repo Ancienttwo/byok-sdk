@@ -141,6 +141,8 @@ function wranglerEntry(): string {
 export interface WorkerInstance {
   readonly base: string;
   output(): string;
+  /** The lines that the instance printed with `marker`. */
+  lines(marker: string): string[];
   /** Resolves once the instance printed a line with `marker`. */
   waitForOutput(marker: string, timeoutMs?: number): Promise<void>;
   /** The instance is destroyed: SIGKILL to wrangler and workerd, with no grace and no cleanup in the Worker. */
@@ -189,6 +191,7 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } });
   const instance: WorkerInstance = {
     base, output: () => output, kill,
+    lines: marker => output.split('\n').filter(line => line.includes(marker)),
     waitForOutput: (marker, timeoutMs = 60_000) => new Promise((resolve, reject) => {
       const check = () => {
         if (output.includes(marker)) { waiters.delete(check); clearTimeout(timer); resolve(); }
