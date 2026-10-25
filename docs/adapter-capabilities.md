@@ -206,10 +206,13 @@ app server, through two caller-owned steps of the
   and tool filters into the task server.
 - After the open, `mcpServerStatus/list` with the thread id reads the
   thread's servers back. Any server outside the task that is not `disabled`
-  refuses the start. A plugin server is named with its plugin id.
+  refuses the start. A plugin server is named with its plugin id, and is
+  refused even when it has the name of a task server.
 
 Codex keeps no MCP servers per thread, so a resume carries the same `config`:
-the option also covers resumed threads.
+the option also covers resumed threads. On a resume, Codex may start a queued
+turn before the read-back. That turn already runs with the overrides, and a
+failed read-back stops the app server.
 
 `features.plugins = false` turns off the thread's plugins altogether, with
 their skills and commands, not only their MCP servers. Plugin servers are not

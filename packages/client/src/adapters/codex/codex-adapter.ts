@@ -87,8 +87,10 @@ export interface CodexAdapterOptions {
    * back, and the start fails if any other server is not disabled, or if a
    * user server has the name of a task or SDK server. The user's
    * `AGENTS.md`, login, model, sandbox setting and other configuration still
-   * apply. It covers new and resumed threads. Other tasks are unchanged.
-   * Default `inherit`.
+   * apply. It covers new and resumed threads. On a resume, Codex may start a
+   * queued turn before the read-back: that turn already runs with the
+   * overrides, and a failed read-back stops the app server. Other tasks are
+   * unchanged. Default `inherit`.
    */
   agentUserMcpServers?: 'inherit' | 'excluded';
 }
