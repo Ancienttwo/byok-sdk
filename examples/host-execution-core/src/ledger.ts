@@ -91,6 +91,38 @@ export interface CompactionResult {
   afterBytes: number;
 }
 
+/** A tombstone of `host_retired_identity`. `row` is an application row tombstone (`ApplicationRows.retire`). */
+export interface LedgerDumpTombstone { kind: TombstoneKind | 'row'; identity: string; expiresAt: number | null }
+export interface LedgerDumpRow { namespace: string; id: string; value: Json; expiresAt: number | null }
+export interface LedgerDumpMemoryTombstone { intentId: string; approval: string; row: MemoryIntentRow; expiresAt: number }
+/**
+ * Every stored row of one tenant, for a topology switch (#975). Each list is ordered by its key, and each expiry is as stored.
+ * It carries no tenant id: `loadForSwitch` writes it into another, empty tenant.
+ */
+export interface LedgerDump {
+  version: 1;
+  body: LedgerState;
+  tombstones: LedgerDumpTombstone[];
+  rows: LedgerDumpRow[];
+  memoryTombstones: LedgerDumpMemoryTombstone[];
+}
+const TOMBSTONE_KINDS: ReadonlySet<string> = new Set(['intent', 'application', 'slot', 'row']);
+const TENANT_TABLES = ['host_ledger', 'host_retired_identity', 'host_retired_memory_intent', 'host_application_row'] as const;
+const expiry = (value: unknown): number | null => value === null ? null : time(value as number);
+const text = (value: unknown, what: string): string => {
+  if (typeof value !== 'string' || !value) throw new Error(`Invalid switch dump ${what}`);
+  return value;
+};
+const record = (value: unknown, what: string): Record<string, unknown> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Invalid switch dump ${what}`);
+  return value as Record<string, unknown>;
+};
+const serialized = (value: unknown, what: string): string => {
+  const body = JSON.stringify(value);
+  if (typeof body !== 'string') throw new Error(`Invalid switch dump ${what}`);
+  return body;
+};
+
 function empty(): LedgerState {
   return { version: 1, sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {},
     occurrences: {}, slots: {}, outbox: {}, applied: {}, application: {}, scanWake: null };
@@ -371,6 +403,93 @@ export class HostLedger {
       result.afterBytes = Buffer.byteLength(JSON.stringify(state));
       return result;
     });
+  }
+  /**
+   * Reads every stored row of this tenant in one read transaction (#975): the ledger body, the tombstones and application rows
+   * with their expiry as stored, and the retired memory intents. It checks nothing else; the switch preconditions are the
+   * caller's. Call it outside `transaction()`.
+   */
+  dumpForSwitch(): LedgerDump {
+    this.db.exec('BEGIN');
+    try {
+      const dump: LedgerDump = {
+        version: 1,
+        body: this.snapshot(),
+        tombstones: this.db.prepare('SELECT kind, identity, expires_at FROM host_retired_identity WHERE tenant=? ORDER BY kind, identity')
+          .all(this.tenant).map(row => ({ kind: row.kind as LedgerDumpTombstone['kind'], identity: String(row.identity),
+            expiresAt: row.expires_at === null ? null : Number(row.expires_at) })),
+        rows: this.db.prepare('SELECT namespace, id, body, expires_at FROM host_application_row WHERE tenant=? ORDER BY namespace, id')
+          .all(this.tenant).map(row => ({ namespace: String(row.namespace), id: String(row.id), value: JSON.parse(String(row.body)) as Json,
+            expiresAt: row.expires_at === null ? null : Number(row.expires_at) })),
+        memoryTombstones: this.db.prepare('SELECT intent_id, approval, body, expires_at FROM host_retired_memory_intent WHERE tenant=? ORDER BY intent_id')
+          .all(this.tenant).map(row => ({ intentId: String(row.intent_id), approval: String(row.approval),
+            row: JSON.parse(String(row.body)) as MemoryIntentRow, expiresAt: Number(row.expires_at) })),
+      };
+      this.db.exec('COMMIT');
+      return dump;
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  /**
+   * Writes a `dumpForSwitch` result into this tenant in one transaction (#975). The tenant must be empty: the body of a new
+   * ledger and no other row. Expiry is kept, never reset. The loaded body passes the intent identity checks of `transaction()`
+   * against the dump's own tombstones. Any refusal or write failure rolls the whole load back. It runs before any core is
+   * bound to this ledger, so loaded work stays inert until the caller starts one; it sends no outbox hint.
+   */
+  loadForSwitch(dump: LedgerDump): void {
+    if (this.outboxListeners.size) throw new Error('Load a switch dump before any core is bound to this ledger');
+    const input = record(dump, 'document');
+    if (input.version !== 1) throw new Error('Unsupported switch dump version');
+    const body = record(input.body, 'body') as unknown as LedgerState;
+    if (body.version !== 1) throw new Error('Unsupported Host ledger version');
+    for (const name of ['tombstones', 'rows', 'memoryTombstones'] as const) if (!Array.isArray(input[name])) throw new Error(`Invalid switch dump ${name}`);
+    const tombstones = (input.tombstones as unknown[]).map(value => {
+      const row = record(value, 'tombstone');
+      if (!TOMBSTONE_KINDS.has(row.kind as string)) throw new Error('Invalid switch dump tombstone kind');
+      return [text(row.kind, 'tombstone kind'), text(row.identity, 'tombstone identity'), expiry(row.expiresAt)] as const;
+    });
+    const rows = (input.rows as unknown[]).map(value => {
+      const row = record(value, 'row');
+      rowNamespace(row.namespace); rowId(row.id);
+      return [row.namespace as string, row.id as string, serialized(row.value, 'row value'), expiry(row.expiresAt)] as const;
+    });
+    const memory = (input.memoryTombstones as unknown[]).map(value => {
+      const row = record(value, 'memory tombstone');
+      return [text(row.intentId, 'memory intent'), text(row.approval, 'memory approval'), serialized(record(row.row, 'memory row'), 'memory row'),
+        time(row.expiresAt as number)] as const;
+    });
+    const retired = new Set(tombstones.filter(([kind]) => kind === 'intent').map(([, identity]) => identity));
+    for (const [id, intent] of Object.entries(record(body.intents, 'intents') as LedgerState['intents'])) {
+      if (retired.has(id) || OCCURRENCE_INTENT_KEY.test(intent.key) && (intent.key !== `occurrence:${intent.occurrence}`
+        || body.occurrences?.[intent.occurrence!]?.intentId !== id)) throw new RetiredIntentIdentityError();
+    }
+    const state = serialized(body, 'body');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if (hash(this.snapshot()) !== hash(empty()) || TENANT_TABLES.slice(1).some(table =>
+        this.db.prepare(`SELECT 1 FROM ${table} WHERE tenant=? LIMIT 1`).get(this.tenant))) throw new Error('A switch dump loads only into an empty tenant');
+      this.db.prepare('UPDATE host_ledger SET body=? WHERE tenant=?').run(state, this.tenant);
+      const tombstone = this.db.prepare('INSERT INTO host_retired_identity (tenant,kind,identity,expires_at) VALUES (?,?,?,?)');
+      for (const row of tombstones) tombstone.run(this.tenant, ...row);
+      const put = this.db.prepare('INSERT INTO host_application_row (tenant,namespace,id,body,expires_at) VALUES (?,?,?,?,?)');
+      for (const row of rows) put.run(this.tenant, ...row);
+      const retire = this.db.prepare('INSERT INTO host_retired_memory_intent (tenant,intent_id,approval,body,expires_at) VALUES (?,?,?,?,?)');
+      for (const row of memory) retire.run(this.tenant, ...row);
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  /**
+   * Deletes every row of this tenant, tombstones included, in one transaction, then closes this ledger (#975). Irreversible.
+   * For a tenant that never ran work, such as an aborted switch import; the caller gates it. Refused while a core is bound.
+   * Other `HostLedger` instances on the same file stay open, and reopening the tenant id creates an empty tenant.
+   */
+  discard(): void {
+    if (this.outboxListeners.size) throw new Error('Close the core bound to this ledger before discarding it');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const table of TENANT_TABLES) this.db.prepare(`DELETE FROM ${table} WHERE tenant=?`).run(this.tenant);
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    this.db.close();
   }
   close(): void { this.db.close(); }
 }

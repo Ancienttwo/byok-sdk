@@ -441,6 +441,14 @@
   routine slot and a coalesced batch seal from alarm passes alone, a duplicate
   alarm, an instance lost mid-alarm, and dropped alarms. No H, SDK, wire or SQL
   change.
+- **Feature (examples)** — the K4 `HostLedger` can move a whole tenant for a
+  topology switch (#975 slice 1). `dumpForSwitch()` returns a `LedgerDump`: the
+  ledger body, every tombstone and application row with its expiry as stored,
+  and the retired memory intents. `loadForSwitch(dump)` writes one into an
+  empty tenant in one transaction, keeps every expiry, runs the intent identity
+  checks of `transaction()`, and refuses while a core is bound. `discard()`
+  deletes every row of a tenant and closes the ledger, for an aborted import.
+  The K4 index exports `LedgerDump` and its row types.
 
 ## 0.30.1 — 2026-10-24 (published)
 

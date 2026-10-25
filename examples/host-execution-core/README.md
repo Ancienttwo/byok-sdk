@@ -27,7 +27,7 @@ The crash test sends SIGKILL to a child Host during wake delivery.
 | File | Responsibility |
 | --- | --- |
 | `src/core.ts` | FIFO dispatch, exact recovery, cancellation, retry, outcome application, occurrence hooks and outbox scans. |
-| `src/ledger.ts` | A separate Host SQLite ledger with synchronous transactions. |
+| `src/ledger.ts` | A separate Host SQLite ledger with synchronous transactions, and the tenant dump, load and discard of a topology switch. |
 | `src/model.ts`, `src/transitions.ts` | Durable records, stable identities, atomic state changes, and the FIFO head and queued expiry rules. |
 | `src/canonical.ts` | Canonical JSON and its SHA-256. The `./canonical` entry exports only these two and imports only `node:crypto` (#884). |
 | `src/submit.ts` | The frozen-offer submit protocol: readback first, the frozen offer check and the stop hook. Shared with the hosted lane. |
@@ -563,6 +563,43 @@ K8 actions and group chat remain in their own work orders.
 P5a adds Host memory commands and Linux synthetic memory tests below.
 
 See [VALIDATION.md](VALIDATION.md) for commands, results and acceptance limits.
+
+## Topology switch dump (#975)
+
+A topology switch moves a whole coordination domain, which is one ledger tenant on L.
+The ledger copies a tenant as stored. The switch preconditions (freeze, drain, no memory
+state) and the neutral switch format belong to the caller (K8).
+
+- `ledger.dumpForSwitch()` returns a `LedgerDump` read in one transaction:
+  - the ledger `body`;
+  - `tombstones`: every `intent`, `application`, `slot` and `row` tombstone, each with its
+    `expiresAt`, or `null` for one that never expires;
+  - `rows`: every application row, with its `expiresAt` or `null`;
+  - `memoryTombstones`: every retired memory intent.
+
+  Each list is ordered by its key. Expired rows that no `compact` or `expire` has removed
+  yet are included. The dump has no tenant id.
+- `ledger.loadForSwitch(dump)` writes a dump into this tenant in one transaction:
+  - It refuses unless the tenant is empty: the body of a new ledger, and no row in the
+    other tables.
+  - It refuses while a core is bound to this ledger. Load first, then start the core. The
+    loaded work stays inert until then, and the load sends no outbox hint.
+  - It refuses a malformed dump. It also refuses a body intent that the dump's own `intent`
+    tombstones retire, and a derived `occurrence:<key>` intent outside its occurrence. These
+    are the checks of `transaction()`.
+  - Every expiry is kept, never reset, so replay evidence ends when it would have ended on
+    the source.
+  - Any failure, a duplicate key included, rolls the whole load back.
+
+  A dump loaded into an empty tenant dumps back equal.
+- `ledger.discard()` deletes every row of this tenant in one transaction, tombstones
+  included, and then closes the ledger. It cannot be undone, and the retired identities of
+  that tenant become usable again under its id.
+  - Use it only for a tenant that never ran work, such as an aborted switch import.
+  - It refuses while a core is bound.
+  - Other `HostLedger` instances open on the same tenant stay open.
+  - Reopening the tenant id creates an empty tenant, as the constructor does for any new
+    tenant.
 
 ## P5a memory page
 
