@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as protocol from '@byok-sdk/protocol';
 import { DEVICE_NOT_BOUND, DEVICE_SWITCHING, syncTurn, type DeviceRefusal, type FreezeExecution, type SealedRoutineTemplate, type SyncFacts, type SyncOptions,
   type SyncRefusal, type SyncState } from './sync';
 import type { Json, Rejection, Turn } from './turn';
@@ -201,5 +202,18 @@ describe('a sealed routine Turn (#953)', () => {
       expect(syncTurn(s, row, facts(), options, out.publish)).toEqual({ kind: 'ended' });
       expect(out.rows).toHaveLength(1);
     }
+  });
+
+  it('fails and ends a Turn whose outcome schema stays over budget, instead of blocking it', () => {
+    const compose = vi.spyOn(protocol, 'composeBotTurnOutcomeSchema').mockImplementation(() => {
+      throw new protocol.BotTurnOutcomeSchemaError('schema-over-budget', 'still too large');
+    });
+    try {
+      const s = sealedState(), out = published();
+      const row = turn(s, { id: 'occurrence:o1', root: 'occurrence:o1', source: 'routine', request: '', status: 'queued', sealedRoutine: ref });
+      expect(syncTurn(s, row, facts(), sealedOptions(), out.publish)).toEqual({ kind: 'ended' });
+      expect([row.status, row.conclusion, row.blockedReason, s.schemas['occurrence:o1']]).toEqual(['failed', 'failed', undefined, undefined]);
+      expect(out.rows).toEqual([[`sealed-routine-failed:occurrence:o1`, expect.objectContaining({ reason: 'sealed_routine_schema_over_budget' })]]);
+    } finally { compose.mockRestore(); }
   });
 });
