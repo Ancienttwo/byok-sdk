@@ -1,5 +1,6 @@
-import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, type ResultSchema } from '@byok-sdk/protocol';
-import { json, type Turn } from './turn';
+import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, type AgentRef, type ResultSchema, type TaskOfferForAgentWithEgressFreshSealedPayload,
+  type TaskSealing } from '@byok-sdk/protocol';
+import { json, type SealedRoutineRef, type Turn } from './turn';
 import { BOT_REPLY_MAX_BYTES, type IntentFacts, type Publish } from './delegation';
 import { CurrentRequestTooLargeError } from './history';
 import { outcomeSchema, promptActions, type ContextBot, type ContextRoutine, type ContextState, type CheckedOffer } from './schema';
@@ -20,8 +21,23 @@ export const OFFER_WAIT_MS = 300_000;
  */
 export interface FreezeExecution {
   readonly agentMessageContext?: { readonly freshnessCursor?: string };
-  readonly payload: { readonly requiredToolsets?: readonly string[]; readonly messageEgress?: { readonly maxBytes: number } };
+  readonly payload: { readonly requiredToolsets?: readonly string[]; readonly messageEgress?: { readonly maxBytes: number };
+    /** Read only by a sealed routine freeze, which needs the Agent its template is sealed for. */
+    readonly agentRef?: { readonly agentId: string; readonly profileRevision: string } };
 }
+/**
+ * The template of a sealed Bot routine version (#953, #654 E3d-4): the member sealed the whole Turn instruction, so the
+ * Host keeps only ciphertext. `agentRef` and `notAfter` are plaintext copies of what the template's AAD binds.
+ */
+export interface SealedRoutineTemplate {
+  sealing: TaskSealing;
+  template: NonNullable<TaskOfferForAgentWithEgressFreshSealedPayload['sealed']>;
+  agentRef: AgentRef;
+  notAfter: string;
+}
+/** A sealed routine Turn that cannot freeze ends `failed` with one of these reasons (#953). */
+export const SEALED_ROUTINE_TEMPLATE_MISSING = 'sealed_routine_template_missing';
+export const SEALED_ROUTINE_AGENT_CHANGED = 'sealed_routine_agent_changed';
 export interface SyncBot<E extends FreezeExecution> extends ContextBot { readonly revision: string; readonly execution: E }
 /** The rows that the sync step reads and changes. */
 export interface SyncState<E extends FreezeExecution> extends ContextState, BotHistoryState {
@@ -82,6 +98,8 @@ export interface SyncOptions<R extends ContextRoutine> {
   routines: readonly R[];
   /** The Host's outcome offer (#881), checked by `outcomeOffer`. Absent: every action, the default time zones and `send_message`. */
   offer?: CheckedOffer;
+  /** The template of a sealed routine version (#953). Absent: the Host keeps no sealed routine, so a sealed Turn fails. */
+  sealedTemplate?(routine: SealedRoutineRef): SealedRoutineTemplate | undefined;
 }
 /**
  * What the store writes for one Turn:
@@ -166,6 +184,7 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
     return undefined;
   }
   delete turn.profileFailure;
+  if (turn.sealedRoutine) return freezeSealed(state, turn, turn.sealedRoutine, bot, options, publish);
   // Phase 2 of a history-mode sync: a Bot Turn freezes only with the history read before this transaction.
   const history = options.historyMode && turn.source !== 'room_slot' ? options.history : undefined;
   if (options.historyMode && turn.source !== 'room_slot' && !history) return undefined;
@@ -203,4 +222,41 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   if (turn.source === 'routine') return { kind: 'routine', execution: offer };
   return { kind: 'freeze', input: { key: turn.id, source: turn.source === 'user' || turn.source === 'answer' ? 'user' : 'bot',
     waitUntil: options.now + OFFER_WAIT_MS, execution: offer } };
+}
+
+/**
+ * A sealed routine Turn (#953): the offer carries the member's template byte for byte in place of an instruction, with no
+ * ContextPack and no history, and the plaintext `bot-turn-outcome.v1` result contract. Only a reseal fixes a missing
+ * template or a Bot Agent that the template is not sealed for, so those end the Turn `failed`: a blocked routine Turn keeps
+ * its occurrence open, and an open occurrence stops the version switch that the reseal needs. An outcome schema over
+ * budget depends on the state, not on the version, so it blocks the Turn as for a plain one until the state shrinks.
+ */
+function freezeSealed<E extends FreezeExecution, R extends ContextRoutine>(state: SyncState<E>, turn: Turn, routine: SealedRoutineRef,
+  bot: SyncBot<E>, options: SyncOptions<R>, publish: Publish): SyncStep<E> | undefined {
+  const template = options.sealedTemplate?.(routine), current = bot.execution.payload.agentRef;
+  const fail = (reason: string): SyncStep<E> => {
+    turn.status = 'failed'; turn.conclusion = 'failed';
+    state.audit.push(`Sealed routine Turn failed ${reason}: ${turn.id}`);
+    publish(`sealed-routine-failed:${turn.id}`, json({ owner: turn.botId, turnId: turn.id, ...routine, reason,
+      ...(template ? { sealedAgentRef: template.agentRef } : {}), ...(current ? { agentRef: { agentId: current.agentId, profileRevision: current.profileRevision } } : {}) }));
+    return { kind: 'ended' };
+  };
+  if (!template) return fail(SEALED_ROUTINE_TEMPLATE_MISSING);
+  if (template.agentRef.agentId !== current?.agentId || template.agentRef.profileRevision !== current.profileRevision) return fail(SEALED_ROUTINE_AGENT_CHANGED);
+  let schema: ResultSchema;
+  try { schema = outcomeSchema(turn.botId, state, turn, options.models, options.routines, options.offer); }
+  catch (error) {
+    if (!(error instanceof BotTurnOutcomeSchemaError) || error.code !== 'schema-over-budget') throw error;
+    blockTurn(state, turn, `Outcome schema over budget after flat fallback: ${error.message}`, publish);
+    return undefined;
+  }
+  state.schemas[turn.id] = schema;
+  admitBotToolsets(bot.execution, options.readOnlyToolsets);
+  const { instruction: _, ...payload } = bot.execution.payload as FreezeExecution['payload'] & { instruction?: unknown };
+  const offer = { ...bot.execution, payload: { ...payload, sealing: template.sealing, sealed: template.template,
+    routineRef: { ...routine, notAfter: template.notAfter },
+    terminalProjection: { mode: 'result-document' as const, contract: BOT_TURN_OUTCOME_CONTRACT, schema } } } as unknown as E;
+  delete turn.blockedReason;
+  turn.status = 'processing';
+  return { kind: 'routine', execution: offer };
 }

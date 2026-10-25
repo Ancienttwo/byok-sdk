@@ -421,6 +421,16 @@
   the binding refuses throw `DeviceSwitchRefusedError`. The switch moves
   no state; the export and import between H and an L ledger is a
   follow-up.
+- **Added (examples)** — sealed Bot routines in K8 (#953, #654 E3d-4). A
+  Bot routine may hold a member-sealed Turn instruction for each version:
+  `sealedDefinition` and `resealDefinition` check the routine id, the version,
+  the categories (exactly `task-input`) and the Agent revision, and a sealed
+  routine never turns plain. Its occurrence Turn has no request; the sync
+  freezes it from the Host's `sealedTemplate` lookup into a sealed offer with
+  the template byte for byte and `routineRef`, and no instruction or
+  ContextPack. A missing template or a changed Agent ends the Turn `failed`
+  and never blocks it. The outcome schema offers `update_routine` for no
+  sealed routine. L has no sealed dispatch. No wire, SDK or SQL change.
 - **Feature (examples)** — the Worker H Host runs its passes from a clock
   (#794 D3, H4): one Durable Object for the deployment whose alarm re-arms
   every `H_CLOCK_MS` (10 s by default, 15 s at most) and then runs one pass, so

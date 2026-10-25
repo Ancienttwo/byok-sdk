@@ -256,7 +256,7 @@ v1 的范围（§14 D17）：只交付 C1 和 C3，C2 按需开启。下面三�
 ### 6.3 Host 发起的 routine 任务
 
 - K4 的 routine 由 Host 调度。每个 occurrence 的每次执行都是新的 SDK task，taskId 由 K4 core 分配（`docs/host-execution-core.md:13-19`、`:64`）。在 H 里，调度在 Host 服务上运行（`docs/host-execution-core.md:25`）。occurrence 发生时不一定有成员在线。AAD 和 MAC 都绑定 taskId（§8.2、§9.1），所以成员事先封装的 C1 不能在下一个 occurrence 上复用。
-- 决定：成员封装一份 routine 模板（§14 D15）。模板只含成员写的 routine 输入，例如 AiphaBee 复核提到的 S10 watchlist routine。
+- 决定：成员封装一份 routine 模板（§14 D15）。模板只含成员写的 routine 输入，例如 AiphaBee 复核提到的 S10 watchlist routine。K8 示例（#953）在 #925 加上明文 Host 字段之前，把 K8 Turn frame 一起封进模板，所以 sealed Turn 没有 ContextPack；#925 之后 frame 改放明文字段。
 - 模板身份是 `routineId` 加 `definitionVersion`，与 K4 occurrence key 用同一对值（`docs/host-execution-core.md:176`）。消息族为 `routine.template`。模板的 AAD 和 MAC 用这个身份代替 taskId，不带目标 `deviceId`。AAD 另外绑定 `agentRef`、成员设定的到期时间 `notAfter`，以及成员为这个 routine 选的类别 `categories`。
 - Host 把模板密文与 routine 定义存在一起。每次执行的 offer 把模板原样放在 `sealed` 成员里，再加一个明文的 `routineRef: { routineId, definitionVersion, notAfter }`。AAD 绑定 `notAfter`，设备要用它重建 AAD，所以它以明文传输。`definitionVersion` 是整数，`notAfter` 是 core 绑定的规范 UTC 时刻。只有 `task.offer_for_agent_with_egress_fresh_sealed` 带 `routineRef`，而且这个 offer 必须加密 `task-input`。offer 的 `sealing.epoch` 取模板的 epoch。Host 组装的内容按 §6.2 放在明文字段里。
 - 设备校验：消息族是 `routine.template`；AAD 身份等于 `routineRef`；`agentRef` 相同；offer 的 `sealing.categories` 等于模板的 `categories`，否则 AEAD 校验失败，返回 `sealed_open_failed`（与 §6.2 的降级保护相同）；没有过 `notAfter`，否则返回 `sealing_policy_mismatch`，Host 不检查这一项；解密后 MAC 相符。任何一项不符，设备做非重试 decline。

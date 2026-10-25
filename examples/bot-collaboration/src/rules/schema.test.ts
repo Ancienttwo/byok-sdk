@@ -51,3 +51,17 @@ it('#881: composes SYSTEM_PROMPT byte for byte, and a narrowed prompt names only
   expect(confirmOnly).toContain('Request external effects with confirmable_action.');
   expect(confirmOnly).not.toContain('delegate to');
 });
+
+it('#953: never offers update_routine for a sealed routine, and still offers cancel_routine', () => {
+  const state = { team: { bots: { main: { id: 'main', name: 'Main', role: 'Owner', mainBot: true, archived: false, readyRevision: '1' } }, notes: [],
+    homeOperations: [], rounds: {}, seats: {}, rooms: {} }, delegations: {}, replies: {} } as unknown as ContextState;
+  const plain = { id: 'plain-1', owner: 'main', lifecycle: 'active' }, sealed = { id: 'sealed-1', owner: 'main', lifecycle: 'active', definition: { sealed: true as const } };
+  const actions = (routines: object[]) => outcomeSchema('main', state, undefined, ['default'], routines as never).properties as Record<string, unknown>;
+  const both = actions([plain, sealed]);
+  expect(JSON.stringify(both.update_routine)).toContain('"plain-1"');
+  expect(JSON.stringify(both.update_routine)).not.toContain('"sealed-1"');
+  expect(JSON.stringify(both.cancel_routine)).toContain('"sealed-1"');
+  const only = actions([sealed]);
+  expect(only.update_routine).toBeUndefined();
+  expect(JSON.stringify(only.cancel_routine)).toContain('"sealed-1"');
+});
