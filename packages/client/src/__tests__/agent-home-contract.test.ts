@@ -245,6 +245,109 @@ describe('SDK-owned Agent home contract', () => {
     await expect(manager.prepare(ref('one'))).rejects.toBeInstanceOf(AgentHomeLeaseCorruptError);
   });
 
+  it('still refuses an empty lease marker; restart reclaims only a parseable one', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const initial = await manager.prepare(ref('one'));
+    const marker = path.join(initial.resolution.canonicalHome, '.byok', 'agent-home.lease');
+    await initial.lease.release();
+    await fs.writeFile(marker, '', 'utf8');
+
+    await expect(manager.prepare(ref('one'))).rejects.toBeInstanceOf(AgentHomeLeaseCorruptError);
+  });
+
+  const leaseTemps = async (home: string) => (await fs.readdir(path.join(home, '.byok'))).filter((name) => /^agent-home\.lease\..+\.tmp$/u.test(name));
+
+  it('publishes the lease marker whole, and removes the temp files of a killed acquire', async () => {
+    const root = await makeRoot();
+    const ownerId = 'store-product:stable-owner';
+    const manager = new AgentHomeManager({ hostStorageRoot: root, leaseManager: new AgentHomeLeaseManager({ ownerId }) });
+    const initial = await manager.prepare(ref('one'));
+    const home = initial.resolution.canonicalHome;
+    expect(await leaseTemps(home)).toEqual([]);
+    await initial.lease.release();
+    // Killed while writing the temp file, and killed after the link but before the unlink.
+    const internal = path.join(home, '.byok');
+    await fs.writeFile(path.join(internal, 'agent-home.lease.4242-0.tmp'), '{"version":1,"own', 'utf8');
+    await fs.writeFile(path.join(internal, 'agent-home.lease.4242-1.tmp'), 'complete residue', 'utf8');
+
+    const next = await manager.prepare(ref('one'));
+    expect(await leaseTemps(home)).toEqual([]);
+    const stored = JSON.parse(await fs.readFile(path.join(internal, 'agent-home.lease'), 'utf8')) as { ownerId: string; leaseId: string };
+    expect(stored).toMatchObject({ ownerId, leaseId: next.lease.leaseId });
+    await next.lease.release();
+  });
+
+  it('refuses a marker linked by another writer during reclaim, and leaves no temp file', async () => {
+    const root = await makeRoot();
+    const ownerId = 'store-product:stable-owner';
+    const manager = new AgentHomeManager({ hostStorageRoot: root, leaseManager: new AgentHomeLeaseManager({ ownerId }) });
+    const initial = await manager.prepare(ref('one'));
+    const home = initial.resolution.canonicalHome;
+    await initial.lease.release();
+    const marker = path.join(home, '.byok', 'agent-home.lease');
+    const residue = { version: 1, ownerId, leaseId: 'crashed-lease', agentRef: ref('one'), canonicalHome: home };
+    await fs.writeFile(marker, JSON.stringify(residue), 'utf8');
+    const link = fs.link.bind(fs);
+    let calls = 0;
+    vi.spyOn(fs, 'link').mockImplementation(async (source, target) => {
+      calls += 1;
+      // After this writer removed its own residue, another one links first.
+      if (calls === 2) await fs.writeFile(marker, JSON.stringify({ ...residue, ownerId: 'store-product:another-owner', leaseId: 'raced' }), 'utf8');
+      return link(source, target);
+    });
+
+    await expect(manager.prepare(ref('one'))).rejects.toThrow(/was concurrently reclaimed/u);
+    expect(calls).toBe(2);
+    expect(await leaseTemps(home)).toEqual([]);
+    expect(JSON.parse(await fs.readFile(marker, 'utf8'))).toMatchObject({ leaseId: 'raced' });
+  });
+
+  it('fails closed on a filesystem without hard links, and leaves neither marker nor temp file', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const initial = await manager.prepare(ref('one'));
+    const home = initial.resolution.canonicalHome;
+    await initial.lease.release();
+    vi.spyOn(fs, 'link').mockRejectedValueOnce(Object.assign(new Error('operation not supported'), { code: 'ENOTSUP' }));
+
+    await expect(manager.prepare(ref('one'))).rejects.toThrow(/needs a hard link in .+ which its filesystem refused \(ENOTSUP\)/u);
+    await expect(fs.lstat(path.join(home, '.byok', 'agent-home.lease'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await leaseTemps(home)).toEqual([]);
+    // The refusal leaves no in-process writer behind.
+    const retried = await manager.prepare(ref('one'));
+    await retried.lease.release();
+  });
+
+  it('names a hard-link refusal as EPERM only off Windows, where EPERM also means access denied', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    vi.spyOn(fs, 'link').mockRejectedValueOnce(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }));
+
+    const refused = manager.prepare(ref('one'));
+    if (process.platform === 'win32') await expect(refused).rejects.toThrow(/could not acquire Agent home lease: operation not permitted/u);
+    else await expect(refused).rejects.toThrow(/needs a hard link in .+ which its filesystem refused \(EPERM\)/u);
+  });
+
+  it('keeps an acquired lease when the temp file cannot be removed, and removes it on the next acquire', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const rm = fs.rm.bind(fs);
+    const refuse = vi.spyOn(fs, 'rm').mockImplementation(async (target, options) => {
+      if (/agent-home\.lease\..+\.tmp$/u.test(String(target))) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+      return rm(target, options);
+    });
+    const first = await manager.prepare(ref('one'));
+    const home = first.resolution.canonicalHome;
+    expect(await leaseTemps(home)).toHaveLength(1);
+    await first.lease.release();
+    refuse.mockRestore();
+
+    const next = await manager.prepare(ref('one'));
+    expect(await leaseTemps(home)).toEqual([]);
+    await next.lease.release();
+  });
+
   it('persists exact AgentRef/profileRevision/session/runtime/cwd and terminal cause in Agent home', async () => {
     const root = await makeRoot();
     const manager = new AgentHomeManager({ hostStorageRoot: root });

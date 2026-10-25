@@ -486,6 +486,19 @@
   now uses it, with no change in behavior. A Host wires it into
   `CommandPorts.admit`, so both Hosts refuse the same commands while a device
   switches.
+- **Fixed (client)** — An Agent home lease marker is now published whole
+  (#605). `AgentHomeLeaseManager.acquire` created `.byok/agent-home.lease`
+  and then wrote it, so a process killed in between left an empty marker,
+  and every later acquire of that home failed with
+  `AgentHomeLeaseCorruptError`. It now writes and syncs a temp file beside
+  the marker and hard-links it onto the lease path. The exclusive create,
+  owner check and exact-owner reclaim are unchanged. The next acquire
+  removes the temp files of a killed one. An empty or unparseable marker
+  is still refused.
+- **Breaking (client)** — An Agent home root on a filesystem without hard
+  links now fails at its first acquire, with an error that names the
+  directory (#605). Examples are FAT32, exFAT, and some network or FUSE
+  filesystems. Before this change, acquire did not need hard links.
 - **Feature (examples)** — K8 gains the owner switch format (#975 slice 2):
   the `./migration` entry, also exported from the K8 root. `SwitchExport`
   version 1 holds one whole coordination domain (an L tenant or an H scope) in
