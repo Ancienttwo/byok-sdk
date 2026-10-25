@@ -1,7 +1,7 @@
 import { canonical, DEFAULT_RETRY, hash, project, taskId, validateInput,
-  type Conclusion, type Intent, type IntentInput, type Json, type LedgerState } from './model';
+  type Conclusion, type Intent, type IntentExecution, type Json, type LedgerIntentInput, type LedgerState } from './model';
 
-export function enqueue(state: LedgerState, tenant: string, input: IntentInput): Intent {
+export function enqueue(state: LedgerState, tenant: string, input: LedgerIntentInput): Intent {
   validateInput(input);
   const frozen = structuredClone({ ...input, retry: input.retry ?? DEFAULT_RETRY });
   const id = hash(input.key);
@@ -20,7 +20,7 @@ export function enqueue(state: LedgerState, tenant: string, input: IntentInput):
 }
 
 /** The FIFO key of an intent: one queue per tenant, device and Agent. */
-export function agentKey(tenant: string, execution: Pick<IntentInput['execution'], 'deviceId' | 'payload'>): string {
+export function agentKey(tenant: string, execution: Pick<IntentExecution, 'deviceId' | 'payload'>): string {
   return hash([tenant, execution.deviceId, execution.payload.agentRef.agentId]);
 }
 
