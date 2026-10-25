@@ -1,11 +1,11 @@
 /**
  * The H Host as a Worker on local workerd (#794 D3, Worker row): the authenticated command entry, a pass, a device process, a
- * pass, and the cron trigger. One substrate, one device process and one scope for the file; each test seeds its own Agent.
+ * pass, and the clock. One substrate, one device process and one scope for the file; each test seeds its own Agent.
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDeviceSimulator } from '../../../packages/testkit/src/index';
-import { openHome, RUN, until, type Home } from './worker.test-support';
+import { alarmReports, openHome, RUN, until, type Home } from './worker.test-support';
 
 describe.skipIf(!RUN)('H Host on local workerd (#794 D3)', () => {
   let h: Home;
@@ -60,8 +60,7 @@ describe.skipIf(!RUN)('H Host on local workerd (#794 D3)', () => {
     }
   });
 
-  it('runs the scheduled handler on the cron route', async () => {
-    await h.worker.cron();
-    await h.worker.waitForOutput('[h-worker] scheduled pass');
+  it('starts the clock on the first request, and its alarm runs the Host passes with no cron trigger', async () => {
+    await until(async () => alarmReports(h.worker).length >= 2 || undefined);
   });
 });

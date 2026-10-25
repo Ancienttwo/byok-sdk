@@ -4,5 +4,6 @@
   "compatibility_date": "2026-08-01",
   "compatibility_flags": ["nodejs_compat"],
   "hyperdrive": [{ "binding": "BYOK_PG", "id": "byok-hosted-collaboration-worker-local" }],
-  "triggers": { "crons": ["* * * * *"] }
+  "durable_objects": { "bindings": [{ "name": "HOST_CLOCK", "class_name": "HostClock" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HostClock"] }]
 }

@@ -148,19 +148,26 @@ export interface WorkerInstance {
   /** The instance is destroyed: SIGKILL to wrangler and workerd, with no grace and no cleanup in the Worker. */
   kill(): Promise<void>;
   passes(): Promise<PassReport>;
-  /** Fires the `scheduled` handler through wrangler's `--test-scheduled` route. */
-  cron(): Promise<void>;
   admin<T>(route: string, body: unknown): Promise<T>;
   input(token: string, botId: string, key: string, request: string): Promise<Response>;
 }
 
-export interface WorkerOptions { port?: number; fault?: string; vars?: Record<string, string> }
+export interface WorkerOptions {
+  port?: number;
+  fault?: string;
+  vars?: Record<string, string>;
+  /**
+   * The local storage dir of an earlier instance, which the caller removes. The clock's Durable Object storage, and so its
+   * next alarm, survives the restart, as it does on Cloudflare. Without it the instance gets a new dir and removes it.
+   */
+  persist?: string;
+}
 
 export async function startWorker(substrate: Substrate, options: WorkerOptions = {}): Promise<WorkerInstance> {
   const port = options.port ?? await freePort();
   const base = `http://127.0.0.1:${port}`;
   const adminToken = ADMIN_TOKEN;
-  const persist = mkdtempSync(path.join(tmpdir(), 'hw-persist-'));
+  const persist = options.persist ?? mkdtempSync(path.join(tmpdir(), 'hw-persist-'));
   const storage = s3(substrate.sdkSchema);
   const vars: Record<string, string> = { H_SCHEMA: substrate.hSchema, HOST_SCHEMA: substrate.hostSchema, BYOK_TOKEN_SECRET: TOKEN_SECRET,
     HOST_ADMIN_TOKEN: adminToken, BYOK_S3_ENDPOINT: storage.endpoint, BYOK_S3_BUCKET: storage.bucket, BYOK_S3_ACCESS_KEY_ID: storage.accessKeyId,
@@ -170,7 +177,7 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
     ...options.vars };
   let output = '';
   const child = spawn(process.execPath, [wranglerEntry(), 'dev', '--config', WRANGLER_CONFIG, '--port', String(port), '--ip', '127.0.0.1', '--persist-to', persist,
-    '--test-scheduled', '--show-interactive-dev-session=false', ...Object.entries(vars).flatMap(([name, value]) => ['--var', `${name}:${value}`])],
+    '--show-interactive-dev-session=false', ...Object.entries(vars).flatMap(([name, value]) => ['--var', `${name}:${value}`])],
   { cwd: EXAMPLE_DIR, detached: true, env: { ...process.env, CI: 'true', WRANGLER_SEND_METRICS: 'false', NO_COLOR: '1',
     CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_BYOK_PG: substrate.connectionString } });
   const waiters = new Set<() => void>();
@@ -183,7 +190,7 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
       try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group is gone */ }
       await exited;
     }
-    rmSync(persist, { recursive: true, force: true });
+    if (options.persist === undefined) rmSync(persist, { recursive: true, force: true });
     // wrangler's bundle scratch next to the config; the next instance writes it again.
     rmSync(path.join(path.dirname(WRANGLER_CONFIG), '.wrangler'), { recursive: true, force: true });
   };
@@ -206,10 +213,6 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
       return await response.json() as T;
     },
     passes: () => instance.admin<PassReport>('/host/passes', {}),
-    async cron() {
-      const response = await fetch(`${base}/__scheduled?cron=*+*+*+*+*`);
-      if (!response.ok) throw new Error(`/__scheduled: HTTP ${response.status} ${await response.text()}`);
-    },
     input: (token, botId, key, request) => fetch(`${base}/host/input`, authorized({ botId, key, request }, token)),
   };
   for (const deadline = Date.now() + 120_000; ;) {
@@ -225,6 +228,15 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
 /** Fixed for the run: a device bearer minted by one instance must verify in the next one. */
 const TOKEN_SECRET = randomBytes(32).toString('hex');
 const ADMIN_TOKEN = randomBytes(24).toString('hex');
+
+const ALARM_PASS = '[h-clock] alarm pass ';
+/** The reports of the instance's alarm passes, in the order they ended. A failed pass prints no report. */
+export function alarmReports(worker: WorkerInstance): PassReport[] {
+  return worker.lines(ALARM_PASS).flatMap(line => {
+    const start = line.indexOf('{', line.indexOf(ALARM_PASS));
+    return start < 0 ? [] : [JSON.parse(line.slice(start)) as PassReport];
+  });
+}
 
 /** One device process (`device.child.ts`), driven over IPC. */
 export interface DeviceProcess {
@@ -299,19 +311,22 @@ export async function until<T>(check: () => Promise<T | undefined>, timeoutMs = 
 
 /**
  * One substrate, one paired device process, and its scope (`home`: the SDK tenant that owns the enrollment), with a Worker
- * instance that a test may kill and restart on the same port, so the device reconnects to the new instance.
+ * instance that a test may kill and restart on the same port and storage dir, so the device reconnects to the new instance
+ * and the clock keeps its alarm.
  */
-export async function openHome(options: WorkerOptions = {}) {
+export async function openHome(options: Omit<WorkerOptions, 'persist'> = {}) {
   const substrate = await openSubstrate();
   const home = `worker-tenant-${randomUUID()}`;
+  const persist = mkdtempSync(path.join(tmpdir(), 'hw-persist-'));
   let worker: WorkerInstance | undefined, device: DeviceProcess | undefined;
   try {
     await substrate.provision(home, OWNER, { models: { default: template('pending', 'main') }, readOnlyToolsets: [] });
-    worker = await startWorker(substrate, options);
+    worker = await startWorker(substrate, { ...options, persist });
     const { code } = await worker.admin<{ code: string }>('/host/pairing-code', { scope: home });
     device = await startDevice(worker.base, code);
   } catch (error) {
     await device?.stop(); await worker?.kill(); await substrate.dispose();
+    rmSync(persist, { recursive: true, force: true });
     throw error;
   }
   const port = Number(new URL(worker.base).port);
@@ -320,9 +335,9 @@ export async function openHome(options: WorkerOptions = {}) {
     substrate, home, device,
     get worker() { return worker!; },
     /** Destroys the running instance and starts a new one on the same port, with these options (no fault by default). */
-    async restart(next: WorkerOptions = {}) {
+    async restart(next: Omit<WorkerOptions, 'persist' | 'port'> = {}) {
       await worker!.kill();
-      worker = await startWorker(substrate, { ...next, port });
+      worker = await startWorker(substrate, { ...next, port, persist });
       return worker;
     },
     /** A Main Bot on the device with its own Agent, bound to H. Returns a new owner session token. */
@@ -357,7 +372,22 @@ export async function openHome(options: WorkerOptions = {}) {
     taskStatus: async (task: string) => (await substrate.pool.query<{ status: string }>(
       `SELECT status FROM "${substrate.sdkSchema}".task WHERE tenant_id = $1 AND task_id = $2`, [home, task])).rows[0]?.status,
     turn: async (turnId: string) => (await substrate.store.read(home)).turns[turnId],
-    async close() { await device?.stop(); await worker?.kill(); await substrate.dispose(); },
+    /** The scope's routine rows: each one's next slot. */
+    routines: async () => (await substrate.pool.query<{ next_at: string | null }>(
+      `SELECT next_at::text FROM "${h}".routine WHERE scope = $1 ORDER BY ordinal`, [storedKey(home)])).rows
+      .map(row => ({ nextAt: row.next_at === null ? null : Number(row.next_at) })),
+    /** The scope's routine occurrences, each with its trigger and the slot and record times. */
+    occurrences: async () => (await substrate.pool.query<{ key: string; trigger_kind: string; planned_at: string; recorded_at: string }>(
+      `SELECT key, trigger_kind, planned_at::text, recorded_at::text FROM "${h}".occurrence WHERE scope = $1 ORDER BY ordinal`, [storedKey(home)])).rows
+      .map(row => ({ key: JSON.parse(row.key) as string, trigger: row.trigger_kind, plannedAt: Number(row.planned_at), recordedAt: Number(row.recorded_at) })),
+    /** The frozen intents of the scope's routine Turns. */
+    routineIntents: async () => (await substrate.pool.query<{ task: string; tries: number; submission: string; conclusion: string | null }>(
+      `SELECT task_id AS task, tries, submission, conclusion FROM "${h}".intent WHERE scope = $1 AND source = 'routine' ORDER BY ordinal`,
+      [storedKey(home)])).rows,
+    async close() {
+      await device?.stop(); await worker?.kill(); await substrate.dispose();
+      rmSync(persist, { recursive: true, force: true });
+    },
   };
 }
 export type Home = Awaited<ReturnType<typeof openHome>>;
