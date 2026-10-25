@@ -87,6 +87,8 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
     const occurrence = await until(() => occurrenceOf(h!, slot), SLOT_WAIT_MS);
     expect(occurrence.trigger).toBe('scheduled');
     expect(occurrence.recordedAt - slot).toBeLessThan(ROUTINE_LATE_AFTER_MS);
+    // A pass prints its report after its commits, so the occurrence can be seen first.
+    await until(async () => fired(h!) > 0 || undefined, 3 * CLOCK_MS);
     expect(fired(h)).toBe(1);
     // The same alarm pass froze and offered the routine Turn, and the device started it.
     const [intent] = await until(async () => {
