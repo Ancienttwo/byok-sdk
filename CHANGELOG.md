@@ -357,6 +357,17 @@
   `create-daemon.d.ts` are unchanged. The `@byok-sdk/client` closure grows by
   20609 B and `bin:byok-agent` by 20582 B, for the scope prologues, the bound
   function wrappers and the stage hand-offs.
+- **Feature (examples)** — a private example composes the hosted (H) Bot
+  collaboration Host as one Cloudflare Worker and runs it on local workerd
+  (#794 D3). Each invocation builds and ends its own pools over the Hyperdrive
+  binding, the SDK stores, `createByokCloud` and the H store; a device
+  response keeps its pools until its body ends, so the board SSE stream works.
+  Host passes run from cron and an operator route, and a notification only
+  schedules one more pass. Tests cover lost and duplicate notifications, an
+  instance killed mid-request, and two device processes running a delegation
+  and reply with a synthetic runtime. The CI `dataplane` job runs them. No H,
+  SDK, wire or SQL change; there is no deployment, physical-device or
+  real-runtime evidence yet.
 
 ## 0.30.1 — 2026-10-24 (published)
 
