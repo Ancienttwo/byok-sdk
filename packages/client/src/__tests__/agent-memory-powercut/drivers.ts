@@ -191,7 +191,11 @@ export class ProcessKillDriver implements PowerCutDriver {
     await once(child, 'spawn');
     if (process.platform === 'win32') {
       this.#windowsDevice = (await windowsProcesses()).find((entry) => entry.pid === child.pid);
-      if (this.#windowsDevice === undefined) throw new Error(`the device ended before it sent its snapshot (process ${child.pid} exited at start)`);
+      if (this.#windowsDevice === undefined) {
+        // Not recorded, so `close` cannot check its tree; it started nothing yet.
+        this.#child = undefined;
+        throw new Error(`the device ended before it sent its snapshot (process ${child.pid} exited at start)`);
+      }
     }
     return { link: { input: child.stdout!, output: child.stdin! }, ended: exited(child) };
   }
@@ -199,7 +203,7 @@ export class ProcessKillDriver implements PowerCutDriver {
   async cut(): Promise<void> {
     const child = this.#take();
     if (hasExited(child)) {
-      this.#windowsDevice = undefined;
+      await this.#exitedTreeGone(child);
       throw new Error(`device ${child.pid} exited before the cut (${child.exitCode ?? child.signalCode})`);
     }
     if (process.platform === 'win32') {
@@ -219,10 +223,15 @@ export class ProcessKillDriver implements PowerCutDriver {
       return;
     }
     this.#child = undefined;
+    await this.#exitedTreeGone(child);
+  }
+
+  /** The device is gone; what it started must be gone too. */
+  async #exitedTreeGone(child: ChildProcess): Promise<void> {
     const device = this.#windowsDevice;
     this.#windowsDevice = undefined;
-    // The device is gone; what it started must be gone too. A POSIX group ID
-    // is not reused while the group has a member, so probing it is safe.
+    // A POSIX group ID is not reused while the group has a member, so
+    // probing it is safe.
     if (process.platform !== 'win32') {
       await this.#posixGroupGone(child.pid!, 'outlived the device');
       return;

@@ -16,6 +16,7 @@ import { powercutTriggers } from './agent-memory-powercut/cli';
 import { ProcessKillDriver, QemuDriver, qmpExecute, taskkillNamedProcesses, windowsTree, type PowerCutDriver, type StorageProfile } from './agent-memory-powercut/drivers';
 import { runExperiment } from './agent-memory-powercut/experiment';
 import { contentRevision, HostJournal, PowercutHost, powercutContent, type IssuedIntent } from './agent-memory-powercut/host';
+import { writeMessage } from './agent-memory-powercut/protocol';
 import { EMPTY_REVISION, revisionOf, type DeviceSnapshot, type FileObservation, type HomeSnapshot } from './agent-memory-powercut/snapshot';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { resolveBunBin } from './support/test-bun-bin';
@@ -327,6 +328,18 @@ describe('W5 process-crash run', () => {
     expect(report.cuts).toEqual([]);
     await new Promise((resolve) => setTimeout(resolve, 1_200));
     expect(cuts).toBe(0);
+  }, 20_000);
+
+  it.skipIf(BUN_BIN === undefined)('refuses to cut a device that already exited', async () => {
+    const driver = new ProcessKillDriver({ command: BUN_BIN!, args: [fakeDevice(scratch(), 'notice'), scratch()] });
+    try {
+      const run = await driver.start();
+      writeMessage(run.link.output, { type: 'notice', payload: { intentId: 'gone', agentRef: { agentId: 'w5-agent-0', profileRevision: '1' } } });
+      await run.ended;
+      await expect(driver.cut()).rejects.toThrow(/exited before the cut/u);
+    } finally {
+      await driver.close();
+    }
   }, 20_000);
 
   it.skipIf(BUN_BIN === undefined)('fails at once, with its stderr, when the device dies before its snapshot', async () => {

@@ -201,32 +201,35 @@ export async function runExperiment(options: ExperimentOptions): Promise<Experim
     const timer = trigger.kind === 'delay' ? setTimeout(cut, trigger.ms) : undefined;
     let issued = 0;
     let exitedBeforeCut = false;
-    for (;;) {
-      if (cutting !== undefined) break;
-      if (issued >= maxIntents) {
-        cut();
-        stoppedEarly = `round ${round} reached ${maxIntents} intents without a cut`;
-        break;
+    // Every way out of the round disarms the delay, a throw included: a
+    // late timer would signal a device that is gone.
+    try {
+      for (;;) {
+        if (cutting !== undefined) break;
+        if (issued >= maxIntents) {
+          cut();
+          stoppedEarly = `round ${round} reached ${maxIntents} intents without a cut`;
+          break;
+        }
+        const intent = await host.issueNext();
+        issued += 1;
+        // A delay cut can fire while the intent is being issued.
+        if (cutting !== undefined) break;
+        if (trigger.kind === 'host' && trigger.intent === issued) session.arm(trigger.on, intent.intentId, cut);
+        const outcome = await session.deliver(intent);
+        if (outcome === 'failed') {
+          cut();
+          stoppedEarly = `round ${round}: a notice failed before any cut`;
+          break;
+        }
+        if (outcome === 'closed') {
+          exitedBeforeCut = cutting === undefined;
+          break;
+        }
       }
-      const intent = await host.issueNext();
-      issued += 1;
-      // A delay cut can fire while the intent is being issued.
-      if (cutting !== undefined) break;
-      if (trigger.kind === 'host' && trigger.intent === issued) session.arm(trigger.on, intent.intentId, cut);
-      const outcome = await session.deliver(intent);
-      if (outcome === 'failed') {
-        cut();
-        stoppedEarly = `round ${round}: a notice failed before any cut`;
-        break;
-      }
-      if (outcome === 'closed') {
-        exitedBeforeCut = cutting === undefined;
-        break;
-      }
+    } finally {
+      clearTimeout(timer);
     }
-    // Every way out of the round disarms the delay: a late timer would
-    // signal a device that is gone, and its PID may be another process.
-    clearTimeout(timer);
     await cutting;
     await run.ended;
     await session.closed;

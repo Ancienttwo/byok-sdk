@@ -395,7 +395,7 @@ Drivers:
 
 | Driver | Fault | Storage profile | Cut |
 |---|---|---|---|
-| `ProcessKillDriver` | process-crash | `os-cache-keeps-writes` | SIGKILL of the process group, then wait until the group is empty. On Windows: `start` records the device with its creation time; the cut runs `taskkill /T /F` at once, reads the tree at that moment from its output, and requires that none of those processes and nothing they started is alive. Creation times rule out a reused PID only in that survivor scan after the kill. Before any signal, `cut` refuses a device child that has already exited; until Node sees the exit it holds the child (unreaped on POSIX, an open process handle on Windows), so the PID still names that child. The taskkill exit code is kept as evidence, not trusted. The helper is spawned without `detached` (`agent-memory-fs-helper.ts`), so it is in the group and dies with the device; a helper left alive would see end of input and finish its write. |
+| `ProcessKillDriver` | process-crash | `os-cache-keeps-writes` | SIGKILL of the process group, then wait until the group is empty. On Windows: `start` records the device with its creation time; the cut runs `taskkill /T /F` at once, reads the tree at that moment from its output, and requires that none of those processes and nothing they started is alive. Creation times rule out a reused PID only in that survivor scan after the kill. Before any signal, `cut` refuses a device child that has already exited, after checking that nothing it started is alive. On POSIX the child stays unreaped until Node sees its exit, so its PID and group still name it for the whole kill. On Windows the check holds only at the moment `taskkill` is issued: the device can exit while taskkill walks the tree, and the survivor scan with creation times covers what follows. The taskkill exit code is kept as evidence, not trusted. The helper is spawned without `detached` (`agent-memory-fs-helper.ts`), so it is in the group and dies with the device; a helper left alive would see end of input and finish its write. |
 | `QemuDriver` | os-crash | the configured layer | QMP `inject-nmi`. Windows 8 and later bugcheck on an NMI. The guest must reboot automatically and write no crash dump to the disk under test. QEMU keeps running. |
 | `QemuDriver` | power-loss | the configured layer | `StorageLayer.cut` while QEMU is alive, SIGKILL of QEMU, `StorageLayer.prepareBoot`, a new boot. Never QMP `quit`, `stop` or a pause before the cut: each flushes the block devices. |
 
@@ -472,7 +472,8 @@ every process of the tree at that moment, including the ones it reports as
 not terminable. The cut then requires, within 10 s, that none of those
 processes and nothing they started is alive, using creation times to rule
 out a reused PID in that scan; a survivor fails the cut. Before signalling,
-the cut only checks that the device child has not exited. Each kill record lists the named
+the cut only checks that the device child has not exited, and that check
+holds at the moment taskkill is issued, not across the whole kill. Each kill record lists the named
 processes by role (device, helper, helper child) and whether a helper was
 alive. The test prints how many cuts hit a live helper and does not assert
 it, because that depends on timing. A Host-point cut never hits a helper:
