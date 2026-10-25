@@ -319,7 +319,7 @@ export declare function createByokPool(options: ByokPoolOptions): Pool;
  */
 export { createByokPool } from './pool';
 export type { ByokPoolOptions } from './pool';
-export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresAgentMessageDraftStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, PostgresTaskRedactionStore, createPostgresTaskRedactionStore, PostgresE2eeMemberStore, createPostgresCloudStores, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './stores/index';
+export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofReceiptRetentionAuthority, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresAgentMessageDraftStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, PostgresTaskRedactionStore, createPostgresTaskRedactionStore, PostgresE2eeMemberStore, createPostgresCloudStores, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './stores/index';
 export type { PostgresCloudStoreOptions, PostgresCloudStores, PostgresObjectStorageOptions, PostgresAgentMemoryProjectionStoreOptions, PostgresTaskRedactionStoreOptions, } from './stores/index';
 export { DEFAULT_MAX_ATTEMPTS, DEFAULT_PRESIGN_TTL_SECONDS, DEFAULT_RETRY_DELAY_MS, MAX_PRESIGN_TTL_SECONDS, MIN_PRESIGN_TTL_SECONDS, ObjectStoreRequestError, R2_BLOB_ERROR_CODES, R2BlobStoreError, R2CloudBlobStore, R2ObjectMaintenanceStore, } from './stores/index';
 export type { ObjectStoreFetch, R2BlobErrorCode, R2BlobStoreOptions } from './stores/index';
@@ -941,7 +941,7 @@ export { PostgresInboundDedupStore } from './dedup';
 export { PostgresNonceStore } from './nonces';
 export { PostgresPairingCodeStore } from './pairing-codes';
 export { PostgresRequestReceiptStore } from './receipts';
-export { PostgresProofRequestReceiptStore } from './proof-receipts';
+export { PostgresProofReceiptRetentionAuthority, PostgresProofRequestReceiptStore } from './proof-receipts';
 export { PostgresTaskAttemptStore } from './task-attempts';
 export { PostgresTaskCancellationStore } from './task-cancellations';
 export { PostgresActivityStore } from './activity';
@@ -1087,8 +1087,8 @@ export declare class PostgresPairingCodeStore implements PairingCodeStore {
     }): Promise<DeviceRecord | undefined>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/proof-receipts.d.ts ====
-import type { ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore } from '@byok-sdk/cloud';
-import type { Clock, TenantId } from '@byok-sdk/core';
+import type { ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore } from '@byok-sdk/cloud';
+import { type Clock, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 export declare class PostgresProofRequestReceiptStore implements ProofRequestReceiptStore {
     #private;
@@ -1098,6 +1098,17 @@ export declare class PostgresProofRequestReceiptStore implements ProofRequestRec
         readonly created: boolean;
     }>;
     get(tenant: TenantId, deviceId: string, requestId: string): Promise<ProofRequestReceipt | undefined>;
+}
+/**
+ * Prunes `proof_request_receipt`, which the truth put and the three E2EE member
+ * writes share. A Postgres host passes it as the cloud's
+ * `proofReceiptRetention.authority`. It is separate from the `proofReceipts`
+ * port, which keeps exactly the methods the cloud contract declares.
+ */
+export declare class PostgresProofReceiptRetentionAuthority implements ProofReceiptRetentionAuthority {
+    #private;
+    constructor(pool: Pool);
+    collectExpired(tenant: TenantId, input: ProofReceiptCollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/r2-blobs.d.ts ====
 /**

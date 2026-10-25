@@ -9,8 +9,11 @@ import {
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_DEVICE_PROOF_CLOCK_SKEW_MS,
+  MAX_DEVICE_PROOF_CLOCK_SKEW_MS,
+  MAX_DEVICE_PROOF_MAX_LIFETIME_MS,
   authenticateDeviceProof,
 } from '../auth/device-proof';
+import { PROOF_RECEIPT_RETENTION_FLOOR_MS } from '../maintenance';
 import { createWebCrypto } from '../crypto/web-crypto';
 import { InMemoryDeviceDirectory } from '../stores/in-memory/device-directory';
 
@@ -164,6 +167,23 @@ describe('device proof authentication (I3)', () => {
     await expect(
       verify(envelope(claims({ expiresAt: '2026-08-09T00:05:00.001Z' }))),
     ).resolves.toBeUndefined();
+  });
+
+  // A receipt recorded at NOW binds a proof issued no later than NOW + skew.
+  it('refuses, at the proof receipt retention floor, every proof a receipt recorded at NOW can bind', async () => {
+    const at = (ms: number) => new Date(Date.parse(NOW) + ms).toISOString();
+    const latest = envelope(claims({ issuedAt: at(MAX_DEVICE_PROOF_CLOCK_SKEW_MS) }));
+    const longest = envelope(claims({ issuedAt: at(MAX_DEVICE_PROOF_CLOCK_SKEW_MS), expiresAt: at(MAX_DEVICE_PROOF_CLOCK_SKEW_MS + MAX_DEVICE_PROOF_MAX_LIFETIME_MS) }));
+    const deps = { devices, crypto, clock, clockSkewMs: MAX_DEVICE_PROOF_CLOCK_SKEW_MS, maxLifetimeMs: MAX_DEVICE_PROOF_MAX_LIFETIME_MS };
+    const request = { method: 'PUT', path: PATH, operation: 'truth.write', resource: 'memory/profile', body: BODY };
+    clock.set(new Date(at(2 * MAX_DEVICE_PROOF_CLOCK_SKEW_MS)));
+    await expect(authenticateDeviceProof(latest, request, deps)).resolves.toBeDefined();
+    await expect(authenticateDeviceProof(longest, request, deps)).resolves.toBeDefined();
+    clock.set(new Date(at(2 * MAX_DEVICE_PROOF_CLOCK_SKEW_MS + 1)));
+    await expect(authenticateDeviceProof(latest, request, deps)).resolves.toBeUndefined();
+    await expect(authenticateDeviceProof(longest, request, deps)).resolves.toBeUndefined();
+    clock.set(new Date(at(Number(PROOF_RECEIPT_RETENTION_FLOOR_MS))));
+    await expect(authenticateDeviceProof(latest, request, deps)).resolves.toBeUndefined();
   });
 
   it('rejects malformed canonical values before row lookup or verification', async () => {

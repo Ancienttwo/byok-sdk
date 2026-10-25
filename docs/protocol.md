@@ -1491,7 +1491,11 @@ entries of 64 KiB); a larger body gets 413 before the proof is checked.
   recorded `requestId` with another binding gets 409 `proof_request_conflict`
   and writes nothing. A refused write (any 4xx) records nothing, so the same
   request can succeed later. A Host control-plane write has no proof and
-  records nothing.
+  records nothing. A `requestId` is single-use within the deployment's
+  proof receipt retention (24 hours by default, at least 15 minutes). The
+  verifier refuses every proof a receipt can bind before that retention ends,
+  so maintenance then deletes the receipt. The memory composition keeps
+  every receipt for the life of the process.
 - **Reads.** A device route checks the bearer against the device row, so a
   revoked or superseded device gets 401. The package read returns only the
   packages addressed to the device's registered member; a query names no

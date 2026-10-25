@@ -2743,6 +2743,15 @@ cannot erase prior committed counts. Observers receive the same report.
 An eleventh step sweeps the ephemeral Agent message draft snapshots with
 `sweepExpired(now)`. This sweep is global. Its success report has no row or
 byte counts because that port returns no counts.
+A twelfth step, `proofReceipts`, deletes the receipts of used device-proof
+request ids recorded more than `proofReceiptRetentionMs` before `now`. The
+deployment sets that value once in `ByokCloudOptions.proofReceiptRetention`
+(default 24h); it is not part of the per-tenant policy. Construction refuses a
+value below 15 minutes: a receipt recorded at R binds a proof issued no later
+than R + 5 min of clock skew, and the verifier refuses that proof after
+R + 10 min. Within the retention a `requestId` is single-use. Without an
+authority the step reports `not-configured`; the reference server wires the
+SQLite store and leaves the memory composition unpruned.
 
 The reference server always schedules one non-overlapping pass every five
 minutes with ±20% jitter, defaults to 500 rows/objects per step, and exposes

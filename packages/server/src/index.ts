@@ -373,6 +373,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     cloud: composition.cloud,
     blobContentProxy: composition.blobContentProxy,
     e2eeMemberStore: composition.e2eeMember,
+    ...(composition.proofReceiptAuthority === undefined ? {} : { proofReceiptRetention: { authority: composition.proofReceiptAuthority } }),
     crypto: composition.crypto,
     tokenSigner,
     clock: composition.clock,
