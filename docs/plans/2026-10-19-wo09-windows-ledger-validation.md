@@ -393,7 +393,7 @@ Drivers:
 
 | Driver | Fault | Storage profile | Cut |
 |---|---|---|---|
-| `ProcessKillDriver` | process-crash | `os-cache-keeps-writes` | SIGKILL of the process group, then wait until the group is empty; `taskkill /T /F` on Windows. The helper dies with the device; a helper left alive would see end of input and finish its write. |
+| `ProcessKillDriver` | process-crash | `os-cache-keeps-writes` | SIGKILL of the process group, then wait until the group is empty; `taskkill /T /F` on Windows. The helper is spawned without `detached` (`agent-memory-fs-helper.ts`), so it is in the group and dies with the device; a helper left alive would see end of input and finish its write. |
 | `QemuDriver` | os-crash | the configured layer | QMP `inject-nmi`. Windows 8 and later bugcheck on an NMI. The guest must reboot automatically and write no crash dump to the disk under test. QEMU keeps running. |
 | `QemuDriver` | power-loss | the configured layer | `StorageLayer.cut` while QEMU is alive, SIGKILL of QEMU, `StorageLayer.prepareBoot`, a new boot. Never QMP `quit`, `stop` or a pause before the cut: each flushes the block devices. |
 
@@ -444,9 +444,7 @@ Windows legs of existing CI do not run the new test file; see Sign-off.
 Question: does such a guest give credible power-loss evidence for S?
 Research date 2026-10-26. QEMU source claims refer to QEMU master
 `d7314928`. Labels: (verified) means read in the cited source; (inferred)
-means reasoning from sources; (unverified) means no source was found. The
-full notes with every source are in the lane notes,
-`lane-605-w5-qemu-research.md`, outside the repository.
+means reasoning from sources; (unverified) means no source was found.
 
 Short answer: yes for OS crash. For power loss, only with a storage layer
 under QEMU that drops unflushed writes, only for the storage profile that
@@ -644,6 +642,6 @@ Not made in this change. Each needs the maintainer's approval.
   Go standard-user step in `agent-memory-helper-non-darwin`. Not proposed
   until A6 is decided.
 
-This change's own CI evidence is Linux: build-test runs the new test file
-with the procfs backend. The macOS and Windows legs do not run it until the
-Sign-off items land.
+This change's own CI evidence can only be Linux: build-test runs the new
+test file with the procfs backend under Bun. The macOS and Windows legs do
+not run it until the Sign-off items land.
