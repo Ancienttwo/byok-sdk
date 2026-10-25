@@ -40,20 +40,14 @@ import type {
   McpToolsetReloadReceipt,
 } from '../types';
 import {
-  AgentHomeLeaseManager,
-  AgentHomeManager,
-  stableAgentHomeOwnerId,
   type AgentHomeExecutionStatus,
   type AgentHomeProjection,
 } from '../agent-home';
 import type { AgentRef } from '../agent-home';
 import {
-  resolveLocalAgentReleaseIdentity,
   type LocalAgentReleaseIdentity,
 } from '../release-identity';
-import { validatePiByokLauncherConfig } from '../adapters/pi/pi-adapter';
 import { attachOwnedProcessGroupLedger } from '../adapters/process-tree';
-import { OwnedProcessLedger } from './owned-process-ledger';
 import { assertCodexSandboxSetting, type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager, DeviceRevokedError } from './auth-manager';
@@ -66,10 +60,6 @@ import {
 } from './capabilities-client';
 import type { CapabilityDeclaration } from '@byok-sdk/core';
 import {
-  assertPresenceHeartbeatCadence,
-  DEFAULT_PRESENCE_HEARTBEAT_INTERVAL_MS,
-  DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS,
-  DEFAULT_PRESENCE_TTL_MS,
   PresencePublisher,
 } from './presence-publisher';
 import { assertServerUrlAllowed, formatServerUrl, InsecureServerUrlError, toHttpBase } from './url';
@@ -118,7 +108,6 @@ import {
   type InputPreparationResult,
 } from './control-protocol';
 import {
-  validateInputPreparationLimits,
   type InputPreparationAuthorityResolver,
   type InputPreparationCounterAdapter,
   type InputPreparationLimitsPolicyV1,
@@ -130,21 +119,16 @@ import {
 } from './input-preparation-service';
 import { InputPreparationUnsupportedRecordVersionError } from './input-preparation-store';
 import { createPiInputPreparationCompiler, resolvePinnedPiRuntimeIdentity } from '../adapters/pi/input-preparation';
-import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
-import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
+import { decodeTeamMemberContext, encodeTeamMemberContext } from './team-workspace';
+import { McpToolsetRevisionConflictError } from './toolset-registry';
 import { ConnectionManager } from './connection-manager';
 import { createFleetJitter, deterministicJitterMs } from './deterministic-jitter';
-import { OperationalHealthTracker, type OperationalHealthSnapshot } from './operational-health';
+import { type OperationalHealthSnapshot } from './operational-health';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from './daemon-owner';
-import { CursorStore } from './cursor-store';
 import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
-import { SessionWorkspaceStore } from './session-workspace-store';
-import { AgentSessionHandoffStore } from './agent-session-handoff-store';
-import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
+import { GitWorkspaceManager } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
-import { DeviceRecordRePairRequiredError, DeviceStore, enrollmentIdentityOf, type DeviceEnrollment, type DeviceRecord } from './store';
-import { createDeviceCredentialStore, createDeviceMemberCustody } from './device-credential-provider';
-import { DeviceMemberRecords } from './device-member-custody';
+import { DeviceRecordRePairRequiredError, enrollmentIdentityOf, type DeviceEnrollment, type DeviceRecord } from './store';
 import { checkVerificationSecret, enrollDeviceMember, resumeDeviceMember } from './device-member';
 import { StoredDeviceProofSigner } from './device-proof-signer';
 import { processE2eeKeyPackageNotice, type DeviceMemberStatus } from './e2ee-key-package-notice';
@@ -154,9 +138,7 @@ import { JournalRecordTooLargeError, journalHash, type JournalIdentity, type Loc
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
 import type { JournalOpenFaultSeam } from './journal/sqlite-support';
 import { promises as fs } from 'node:fs';
-import { LocalStorageConfigError, resolveStorageConfig, type StorageConfig } from './retention/config';
-import { ScratchRoot } from './retention/scratch';
-import { StoragePressure } from './retention/pressure';
+import { type StorageConfig } from './retention/config';
 import { RetentionSweeper, type RetentionTimers } from './retention/sweeper';
 import { createRetentionRegistry } from './retention/producers';
 
@@ -168,11 +150,10 @@ import {
   type TaskRunnerDeps,
 } from './task-runner';
 import {
-  validateProgressBatcherOptions,
   type ProgressBatcherOptions,
 } from './progress-batcher';
 import { AgentEgressController, type AgentEgressReliableAppendResult } from './agent-egress-controller';
-import { resolveAgentEgressPolicy, type AgentEgressStatus } from './agent-egress-policy';
+import { type AgentEgressStatus } from './agent-egress-policy';
 import type { AgentContentReceiptWithoutReliableIdentity, AgentReliableEgressRecord } from './agent-egress-spool';
 import { AgentContentAuditStore } from './agent-content-audit-store';
 import { AgentHomeProjectionCompletionClient } from './agent-home-projection-client';
@@ -184,13 +165,10 @@ import {
 import {
   createRemoteInputPreparationHandler,
 } from './input-preparation-remote';
-import { createPreparedToolSurfaceAssembler } from './prepared-tool-surface';
-import { buildRuntimeEnv } from './environment';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
 import { preflightAgentResultMcp } from './agent-result-mcp-preflight';
-import { assertJournalEnvelopeProtocol, DaemonConfigFieldRemovedError } from './daemon-errors';
-import { resolveAgentMemoryDescribeBin, resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
+import { assertJournalEnvelopeProtocol } from './daemon-errors';
 import { exportAgentMemoryHome, type AgentMemoryExport, type AgentMemoryExportOptions } from './agent-memory-export';
 import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import {
@@ -205,8 +183,6 @@ import {
   type AgentMemoryIntentBackend,
   type AgentMemoryIntentTransport,
 } from './agent-memory-intent';
-import { isAgentMemoryFilesystemHelperSupported } from './agent-memory-fs-helper';
-import { resolveAgentMemoryFilesystemHelper } from './agent-memory-helper-release';
 import { openAgentMemoryFilesystemHelper } from './agent-memory-fs-helper';
 import {
   AGENT_CONTENT_READ_CAPABILITIES,
@@ -215,7 +191,10 @@ import {
   type AgentContentSessionIdentity,
 } from './agent-content-read';
 import type { DaemonState } from './create-daemon/state';
-import { SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS, DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS, PairedWithoutMemberError, delay, terminalKindOf, toJournalEnvelopeRecord, detectRuntimes, computeCapabilities, resolveContentReadPolicies, hasExactContentReadTransfer, policyRevisionMismatchPolicies, buildDefaultAdapters, resolveDeviceAssertionAudiences, resolveDeviceAssertionTtlMs } from './create-daemon/support';
+import { SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS, DEFAULT_SHUTDOWN_OUTBOX_DRAIN_TIMEOUT_MS, PairedWithoutMemberError, delay, terminalKindOf, toJournalEnvelopeRecord, detectRuntimes, computeCapabilities, hasExactContentReadTransfer, policyRevisionMismatchPolicies, buildDefaultAdapters } from './create-daemon/support';
+import { resolveDaemonConfig } from './create-daemon/config';
+import { composeDaemonStores } from './create-daemon/stores';
+import { composeDaemonWorkspaces } from './create-daemon/workspaces';
 
 /**
  * Optional white-label product display info — purely opaque passthrough
@@ -897,246 +876,16 @@ export function buildDaemonWithAdapters(
   overrides: DaemonOverrides = {},
   assertionProbe?: AssertionIssueProbe,
 ): Daemon {
-  if (overrides.deviceCredentials !== undefined && config.deviceCredentials !== undefined) {
-    throw new TypeError('configure OS deviceCredentials or inject a credential backend, not both');
-  }
-  if (Object.hasOwn(config, 'permissionDefaults')) {
-    throw new DaemonConfigFieldRemovedError('permissionDefaults', 'DaemonConfig.permissionDefaults was removed: the local agent\'s own permission settings apply');
-  }
-  if (config.agentEgress !== undefined && Object.hasOwn(config.agentEgress, 'sanitizer')) {
-    throw new DaemonConfigFieldRemovedError('agentEgress.sanitizer', 'DaemonConfig.agentEgress.sanitizer was removed: Agent egress goes to the Host as is');
-  }
-  if (Object.hasOwn(config, 'mcpLaunchCwd')) {
-    throw new DaemonConfigFieldRemovedError('mcpLaunchCwd', 'DaemonConfig.mcpLaunchCwd was removed: MCP servers start in the session cwd, as the agent runtime does');
-  }
-  if (Object.hasOwn(config, 'toolImplementationAuthority')) {
-    throw new DaemonConfigFieldRemovedError('toolImplementationAuthority', 'DaemonConfig.toolImplementationAuthority was removed: the SDK does not attest tool or runtime executables');
-  }
-  if (Object.hasOwn(config, 'hostedJournal') || Object.hasOwn(overrides, 'hostedJournal')) {
-    throw new DaemonConfigFieldRemovedError('hostedJournal', 'DaemonConfig.hostedJournal was removed: every daemon journals; tune it under storage.journal and inject a journal as overrides.journal');
-  }
-  if (Object.hasOwn(config, 'resultDocument')) {
-    throw new DaemonConfigFieldRemovedError('resultDocument', 'DaemonConfig.resultDocument was removed: a result-document offer carries its frozen schema and the runtime submits the outcome through the SDK-reserved submit_result tool');
-  }
-  if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
-    throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
-  }
-  if (
-    config.agentMemoryIntents !== undefined &&
-    (config.agentMemoryIntents === null ||
-      typeof config.agentMemoryIntents !== 'object' ||
-      typeof config.agentMemoryIntents.fetch !== 'function' ||
-      typeof config.agentMemoryIntents.complete !== 'function')
-  ) {
-    throw new Error('DaemonConfig.agentMemoryIntents must be a transport with fetch and complete functions when present');
-  }
-  if (config.agentHome !== undefined && config.gitWorkspace !== undefined) {
-    throw new Error(
-      'DaemonConfig.agentHome and DaemonConfig.gitWorkspace are mutually exclusive; Agent home is the only workspace authority for Agent offers',
-    );
-  }
-  if (config.agentMemoryMcp !== undefined && config.agentMemoryMcp !== 'auto' && config.agentMemoryMcp !== 'off') {
-    throw new Error('DaemonConfig.agentMemoryMcp must be auto or off when present');
-  }
-  if (config.agentMemoryExport !== undefined && config.agentMemoryExport !== true) {
-    throw new Error('DaemonConfig.agentMemoryExport must be true when present');
-  }
-  if (config.agentMemoryExport === true && config.agentHome === undefined) {
-    throw new Error('DaemonConfig.agentMemoryExport requires agentHome');
-  }
-  const agentMemoryMcpEnabled = config.agentMemoryMcp !== 'off';
-  if (config.agentMemory !== undefined && config.agentHome === undefined) {
-    throw new Error('DaemonConfig.agentMemory requires DaemonConfig.agentHome for the exact Agent memory authority');
-  }
-  if (config.agentMemoryHelperAssetRoot !== undefined) {
-    if (config.agentHome === undefined) throw new Error('DaemonConfig.agentMemoryHelperAssetRoot requires agentHome');
-    // Explicit configuration must fail closed even without projection or intent transport.
-    resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
-  }
-  if (Object.hasOwn(config, 'agentMemoryFilesystem')) {
-    throw new Error('DaemonConfig.agentMemoryFilesystem is removed; an arbitrary helper is not admitted on this platform. Use the SDK release artifact.');
-  }
-  if (config.sdkHelperHost !== undefined) {
-    resolveSdkReservedHelperBin('agent-message-mcp', config.sdkHelperHost);
-  }
-  // Platform support alone cannot admit memory. Compiled products and ordinary
-  // JS builds can have Agent homes without the SDK native release assets.
-  let resolveAgentMemoryFilesystemHelperBin: (() => string) | undefined;
-  if (config.agentHome !== undefined && (agentMemoryMcpEnabled || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined || config.agentMemoryExport === true)
-    && isAgentMemoryFilesystemHelperSupported()) {
-    try {
-      resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
-      resolveAgentMemoryFilesystemHelperBin = () => resolveAgentMemoryFilesystemHelper(config.agentMemoryHelperAssetRoot);
-    } catch (error) {
-      if (config.agentMemoryHelperAssetRoot !== undefined || config.agentMemory !== undefined || config.agentMemoryIntents !== undefined || config.agentMemoryExport === true) throw error;
-    }
-  }
-  const externalAgentMemoryFilesystem = resolveAgentMemoryFilesystemHelperBin !== undefined;
-  if (config.agentMemory !== undefined && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
-    throw new Error('DaemonConfig.agentMemory requires a platform with safe descriptor-relative filesystem operations');
-  }
-  if (config.agentMemoryExport === true && !isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)) {
-    throw new Error('DaemonConfig.agentMemoryExport requires a secure Linux, macOS or Windows x64 memory backend');
-  }
-  const agentMemoryMcpBin = !agentMemoryMcpEnabled || config.agentHome === undefined
-    ? undefined
-    : resolveAgentMemoryMcpBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
-  const agentMemoryDescribeBin = !agentMemoryMcpEnabled || config.agentHome === undefined
-    ? undefined
-    : resolveAgentMemoryDescribeBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
-  // The same daemon-level facts the task runner checks before it binds the memory MCP.
-  const agentMemoryMcpAdmission: DaemonStatus['agentMemoryMcp'] = !agentMemoryMcpEnabled
-    ? 'off'
-    : agentMemoryMcpBin !== undefined && isAgentMemorySecureFilesystemAvailable(externalAgentMemoryFilesystem)
-      ? 'admitted'
-      : 'unavailable';
-  const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
-  const suppliedJournal = overrides.journal;
-  if (suppliedJournal !== undefined && (typeof suppliedJournal.listPrunableConfirmedTasks !== 'function' || typeof suppliedJournal.pruneConfirmedJournalTask !== 'function')) throw new LocalStorageConfigError('config', 'requires the journal confirmed-retention ports');
-  const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
-  validatePiByokLauncherConfig(config.piByokLauncher);
-  if (config.durablePi !== undefined && typeof config.durablePi !== 'boolean') throw new Error('durablePi must be boolean');
-  if (config.durablePi === true && (!config.agentHome || !config.piByokLauncher)) throw new Error('durablePi requires Agent home and Pi custody launcher');
-  if (config.durablePi === true && process.platform === 'win32') throw new Error('durablePi is unavailable on Windows until parent-death Job Object recovery is validated');
-  // M5 batch-3 (workstream 2): validated synchronously, up front — see
-  // `DaemonConfig.maxTaskOutputBytes`'s own doc comment for the full
-  // zero/negative-is-an-error / `Number.POSITIVE_INFINITY`-is-the-real-
-  // opt-out pin. `configured > 0` is `false` for `NaN`, `0`, and any
-  // negative number, and `true` for `Number.POSITIVE_INFINITY` — exactly the
-  // three-way split this config wants.
-  if (config.startupTimeoutMs !== undefined && (!Number.isSafeInteger(config.startupTimeoutMs) || config.startupTimeoutMs <= 0)) throw new Error('startupTimeoutMs must be a positive safe integer');
-  if (config.artifactLimits !== undefined) {
-    for (const value of [config.artifactLimits.maxFileBytes, config.artifactLimits.maxTaskBytes]) {
-      if (!Number.isSafeInteger(value) || value <= 0) throw new Error('artifactLimits must contain positive safe integer byte budgets');
-    }
-  }
-  if (config.maxTaskOutputBytes !== undefined && !(config.maxTaskOutputBytes > 0)) {
-    throw new Error(
-      `DaemonConfig.maxTaskOutputBytes must be a positive number (or omitted to use the ${DEFAULT_MAX_TASK_OUTPUT_BYTES}-byte default) — got ${config.maxTaskOutputBytes}. Pass Number.POSITIVE_INFINITY to explicitly disable the cap; 0 or a negative number is rejected rather than silently treated as "disabled".`,
-    );
-  }
-  // Same up-front discipline as `maxTaskOutputBytes` above, with one
-  // deliberate difference: there is no `Number.POSITIVE_INFINITY` opt-out.
-  // An unbounded per-event payload is the exact failure this cap exists to
-  // prevent, and a cap below `MIN_MAX_INLINE_EVENT_BYTES` cannot even hold
-  // the descriptor that documents the omission — see
-  // `DaemonConfig.maxInlineEventBytes`'s own doc comment.
-  if (
-    config.maxInlineEventBytes !== undefined
-    && !(Number.isSafeInteger(config.maxInlineEventBytes) && config.maxInlineEventBytes >= MIN_MAX_INLINE_EVENT_BYTES)
-  ) {
-    throw new Error(
-      `DaemonConfig.maxInlineEventBytes must be a safe integer of at least ${MIN_MAX_INLINE_EVENT_BYTES} (or omitted to use the ${DEFAULT_MAX_INLINE_EVENT_BYTES}-byte default) — got ${config.maxInlineEventBytes}. A smaller cap cannot hold the spill descriptor that documents the omission, and there is no "disabled" value: an unbounded tool_use.input/tool_result.output is what this cap exists to prevent.`,
-    );
-  }
-  validateProgressBatcherOptions(config.progressBatch);
-  if (config.agentEgress !== undefined && config.agentHome === undefined) {
-    throw new Error('DaemonConfig.agentEgress requires DaemonConfig.agentHome for the per-Agent local spool');
-  }
-  if (config.strictAgentOnly === true && config.agentHome === undefined) {
-    throw new Error('DaemonConfig.strictAgentOnly requires DaemonConfig.agentHome');
-  }
-  if (config.strictAgentOnly !== true && (typeof config.workspaceRoot !== 'string' || config.workspaceRoot === '')) {
-    throw new Error('DaemonConfig.workspaceRoot is required unless DaemonConfig.strictAgentOnly is true');
-  }
-  // WP0: same up-front discipline as `maxTaskOutputBytes` above. A cap that
-  // governs how many writers may share one Agent home is a correctness
-  // control, so an unusable value is a construction error rather than
-  // something the first offer discovers — and there is no
-  // `Number.POSITIVE_INFINITY` opt-out here: "no cap" is exactly the
-  // co-writing state this exists to prevent.
-  if (Object.prototype.hasOwnProperty.call(config, 'maxConcurrentMutableSessionsPerAgentHome')) {
-    throw new DaemonConfigFieldRemovedError(
-      'maxConcurrentMutableSessionsPerAgentHome',
-      'DaemonConfig.maxConcurrentMutableSessionsPerAgentHome was removed. A home has one writer Attempt; send concurrent tasks as homeAccess: \'memory-reader\' offers and set maxConcurrentReaderAttemptsPerAgentHome to limit them.',
-    );
-  }
-  if (
-    config.maxConcurrentReaderAttemptsPerAgentHome !== undefined
-    && !(Number.isSafeInteger(config.maxConcurrentReaderAttemptsPerAgentHome)
-      && config.maxConcurrentReaderAttemptsPerAgentHome > 0)
-  ) {
-    throw new Error(
-      `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome must be a positive safe integer (or omitted to use the default of ${DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME}) — got ${config.maxConcurrentReaderAttemptsPerAgentHome}. 0, a negative number, NaN, or a non-integer is rejected rather than silently treated as "uncapped".`,
-    );
-  }
-  // Resolved exactly once so the admission gate and the status readback below
-  // can never report different numbers.
-  const agentHomeReaderLimit = config.maxConcurrentReaderAttemptsPerAgentHome
-    ?? DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME;
-  const egressPolicy = resolveAgentEgressPolicy(config.agentEgress?.policy);
-  const egressBatcherOptions: ProgressBatcherOptions | undefined = config.agentEgress === undefined
-    ? config.progressBatch
-    : {
-        ...config.progressBatch,
-        flushIntervalMs: Math.min(config.progressBatch?.flushIntervalMs ?? 250, egressPolicy.activity.maxCoalesceMs),
-      };
+  const {
+    agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin,
+    agentMemoryDescribeBin, agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry,
+  } = resolveDaemonConfig({ overrides, config });
+  const {
+    agentHomeReaderLimit, egressPolicy, egressBatcherOptions, presenceCadence, deviceAssertionAudiences,
+    deviceAssertionTtlMs, storeDir, storageConfig, retentionClock, scratchRoot, storagePressure,
+    inputPreparationLimits, preparedToolSurface, teamWorkspaces, store, memberRecords, sealIdentityOf,
+  } = composeDaemonStores({ config, overrides, agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, toolsetRegistry, agentMemoryDescribeBin });
 
-  // Same up-front discipline as `maxTaskOutputBytes` above: the presence
-  // cadence is pure config, so a band violation is a construction error rather
-  // than something the heartbeat loop discovers later — see
-  // `DaemonConfig.presence`. Resolved once here so the assertion and the
-  // publisher below can never read different numbers.
-  const presenceCadence = {
-    intervalMs: config.presence?.intervalMs ?? DEFAULT_PRESENCE_HEARTBEAT_INTERVAL_MS,
-    ttlMs: config.presence?.ttlMs ?? DEFAULT_PRESENCE_TTL_MS,
-    minimumIntervalMs: config.presence?.minimumIntervalMs ?? DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS,
-  };
-  assertPresenceHeartbeatCadence(presenceCadence);
-
-  // Plan `device-assertion-broker`: same up-front discipline as the two blocks
-  // above. This one guards a local AUTHENTICATION surface, so every rejection
-  // below is a construction error rather than a runtime refusal — a daemon
-  // that starts with a malformed allowlist is a daemon whose operator believes
-  // an allowlist is in force.
-  //
-  // Resolved into a `Set` (exact membership, no ordering, no pattern) and a
-  // number here, once, so the handler below cannot read a different allowlist
-  // or a different TTL than the one that was validated.
-  const deviceAssertionAudiences = resolveDeviceAssertionAudiences(config.deviceAssertion);
-  const deviceAssertionTtlMs = resolveDeviceAssertionTtlMs(config.deviceAssertion);
-
-  const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
-  const storageConfig = resolveStorageConfig(storeDir, config.storage);
-  const retentionClock = overrides.retention?.clock ?? (() => new Date());
-  const scratchRoot = new ScratchRoot(storageConfig.scratchRoot, retentionClock);
-  const storagePressure = new StoragePressure(storageConfig.budget);
-
-  /**
-   * B-P2 local primitive. Three facts are resolved here, once, at construction:
-   *
-   * 1. The limits policy is VALIDATED now, not on the first call. A present but
-   *    malformed policy is a construction error (same rule as the presence
-   *    cadence and the assertion allowlist); an ABSENT section leaves the whole
-   *    surface off, and all three methods answer `input_preparation_unconfigured`.
-   * 2. The native compiler binds to the identity of the pinned official Pi
-   *    release. If the client pin does not name that release the feature does
-   *    not silently degrade to a caller-supplied identity — it answers
-   *    `runtime_identity_unavailable` and compiles nothing.
-   * 3. The service itself, which owns the durable record log under `storeDir`.
-   */
-  const inputPreparationLimits =
-    config.inputPreparation === undefined ? undefined : validateInputPreparationLimits(config.inputPreparation.limits);
-  /**
-   * The ONE prepared-tool-surface entry, bound to this daemon's registry
-   * (`./prepared-tool-surface.ts`).
-   *
-   * There is deliberately no second path: both
-   * the local `input_preparation.prepare` control call and the remote
-   * `agent.input.preparation` envelope reach this assembler through
-   * `InputPreparationService.prepare`, so a preparation's fingerprints and an
-   * offer's admission bind the same facts.
-   *
-   * The runtime environment is resolved PER CALL, exactly as the offer path
-   * builds it — a value captured at construction would miss a later change.
-   */
-  const preparationRuntimeEnv = () => buildRuntimeEnv({ ambient: process.env });
-  const preparedToolSurface = createPreparedToolSurfaceAssembler({
-    memoryAvailable: () => agentMemoryMcpEnabled && isAgentMemorySecureFilesystemAvailable(resolveAgentMemoryFilesystemHelperBin !== undefined),
-    toolsetRegistry,
-    runtimeEnv: preparationRuntimeEnv,
-    ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribe: agentMemoryDescribeBin }),
-  });
   function initializeInputPreparation(): Promise<void> {
     return daemonState.inputPreparationInitialization ??= (async () => {
       if (config.inputPreparation === undefined || inputPreparationLimits === undefined) return;
@@ -1175,23 +924,13 @@ export function buildDaemonWithAdapters(
       throw error;
     }
   }
-  const teamWorkspaces = new LocalTeamWorkspace(storeDir);
-  const store = new DeviceStore(storeDir, overrides.deviceCredentials === undefined ? createDeviceCredentialStore({
-    productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials,
-  }) : overrides.deviceCredentials);
-  // #654 E2d-1: the member entries live in the same OS custody as the
-  // enrollment. An injected enrollment backend has no member custody, so such
-  // a daemon refuses an E2EE pairing rather than split one device's secrets
-  // across two custodians.
-  const memberRecords = overrides.deviceCredentials === undefined
-    ? new DeviceMemberRecords(createDeviceMemberCustody({ productId: config.productId, storeDir, deviceCredentials: config.deviceCredentials }))
-    : undefined;
-  const sealIdentityOf = (record: DeviceRecord, member: DeviceMemberKeyring | undefined): string | undefined => {
-    const memberId = member?.session?.member.memberId;
-    return memberId === undefined ? undefined : JSON.stringify([record.tenantId, record.deviceId, memberId]);
-  };
   const memberStatus = (): DeviceMemberStatus => daemonState.deviceMember ?? (daemonState.memberResuming ? 'resuming' : 'none');
-  const logMember = (message: string): void => console.warn(`[byok/client] ${message}`);
+  const {
+    logMember, operationalHealth, ownedProcessLedger, cursorStore, sessionWorkspaces, agentHomeManager,
+    agentSessionHandoffs, agentContentReadPolicies, initialAgentEgress, gitWorkspaceManager,
+    gitWorkspaceStore,
+  } = composeDaemonWorkspaces({ storeDir, config, egressPolicy, overrides });
+
   function memberClient(record: DeviceRecord, signal?: AbortSignal): E2eeMemberClient {
     const identity = enrollmentIdentityOf(record);
     return new E2eeMemberClient({
@@ -1203,36 +942,6 @@ export function buildDaemonWithAdapters(
       ...(signal === undefined ? {} : { signal }),
     });
   }
-  const operationalHealth = new OperationalHealthTracker(storeDir);
-  const ownedProcessLedger = new OwnedProcessLedger(storeDir);
-  let maintenanceSequence = 0;
-  const cursorStore = new CursorStore(storeDir);
-  const sessionWorkspaces = new SessionWorkspaceStore(storeDir);
-  const agentHomeManager = config.agentHome === undefined
-    ? undefined
-    : new AgentHomeManager({
-        hostStorageRoot: config.agentHome.hostStorageRoot,
-        ...(config.agentHome.projection === undefined ? {} : { projection: config.agentHome.projection }),
-        leaseManager: new AgentHomeLeaseManager({
-          ownerId: stableAgentHomeOwnerId(storeDir, config.productId),
-        }),
-      });
-  const agentSessionHandoffs = config.agentHome === undefined ? undefined : new AgentSessionHandoffStore();
-  // Construction performs only non-mutating path/config validation. The real
-  // writable preflight runs after daemon ownership below and before transport
-  // or capability publication, so relocation can exclude it race-free.
-  if (config.strictAgentOnly === true) agentHomeManager?.preflightSync();
-  const agentContentReadPolicies = resolveContentReadPolicies(egressPolicy, config.agentEgress?.contentRead);
-  // Before authenticated enrollment is loaded, egress is deliberately unable
-  // to persist or acknowledge tenant-scoped records. startUnderLease replaces
-  // this with the exact loaded DeviceRecord binding before it accepts work.
-  const initialAgentEgress = new AgentEgressController({
-    policy: egressPolicy,
-  });
-  // Git workspace mode excludes agentHome, so it is never strict and the
-  // validation above has already required workspaceRoot.
-  const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot!, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
-  const gitWorkspaceStore = config.gitWorkspace ? overrides.gitWorkspace?.store ?? new GitWorkspaceStore(storeDir) : undefined;
 
 
   /** Construct every daemon-owned hosted writer only after ownership exists. */
