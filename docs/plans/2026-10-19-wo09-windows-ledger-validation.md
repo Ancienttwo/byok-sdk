@@ -393,7 +393,7 @@ Drivers:
 
 | Driver | Fault | Storage profile | Cut |
 |---|---|---|---|
-| `ProcessKillDriver` | process-crash | `os-cache-keeps-writes` | SIGKILL of the process group, then wait until the group is empty; `taskkill /T /F` on Windows. The helper is spawned without `detached` (`agent-memory-fs-helper.ts`), so it is in the group and dies with the device; a helper left alive would see end of input and finish its write. |
+| `ProcessKillDriver` | process-crash | `os-cache-keeps-writes` | SIGKILL of the process group, then wait until the group is empty. On Windows: record the device tree (Win32_Process, PID plus creation time), `taskkill /T /F`, then require that no recorded process and no process the tree started is alive; the taskkill exit code is kept as evidence, not trusted. The helper is spawned without `detached` (`agent-memory-fs-helper.ts`), so it is in the group and dies with the device; a helper left alive would see end of input and finish its write. |
 | `QemuDriver` | os-crash | the configured layer | QMP `inject-nmi`. Windows 8 and later bugcheck on an NMI. The guest must reboot automatically and write no crash dump to the disk under test. QEMU keeps running. |
 | `QemuDriver` | power-loss | the configured layer | `StorageLayer.cut` while QEMU is alive, SIGKILL of QEMU, `StorageLayer.prepareBoot`, a new boot. Never QMP `quit`, `stop` or a pause before the cut: each flushes the block devices. |
 
@@ -439,6 +439,28 @@ verified the darwin pin.
 This is process-crash evidence on APFS. It is not NTFS evidence. The
 windows-latest NTFS run comes from the `agent-memory-helper` job once the
 Sign-off wiring runs.
+
+### First windows-latest run (2026-10-26)
+
+At `44523a1c` the process-crash case failed on windows-latest: `taskkill
+/PID <device> /T /F` exited non-zero because the device's child and that
+child's child "could not be terminated. Reason: The operation attempted is
+not supported." The other 13 cases in the file passed.
+
+Cause, from libuv `src/win/process.c` (v1.x): every child that `uv_spawn`
+starts without `UV_PROCESS_DETACHED` is assigned to a job created with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and the spawning process holds the only
+handle. Terminating the device closes that handle, so Windows is already
+terminating the helper when taskkill reaches it (inferred; the next run
+records it). The child's child is most likely the helper's `conhost.exe`,
+since the helper starts with `windowsHide`.
+
+Change: the Windows cut no longer trusts taskkill's exit code either way. It
+records the tree (Win32_Process, PID plus creation time), runs taskkill, and
+requires within 10 s that no recorded process and no process the tree
+started is alive; a survivor fails the cut with the tree, the taskkill output
+and the survivors. The test prints each kill record on Windows and requires
+one per cut.
 
 ### Evaluation: a QEMU/KVM Windows guest on a GitHub-hosted Linux runner
 

@@ -70,6 +70,49 @@ function processGroupAlive(pid: number): boolean {
   }
 }
 
+export interface WindowsProcess {
+  readonly pid: number;
+  readonly ppid: number;
+  readonly name: string;
+  /** Creation time in Unix milliseconds; with the PID it names one process, not a reused PID. */
+  readonly created: number;
+}
+
+const LIST_WINDOWS_PROCESSES = 'Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ '
+  + 'pid = [int]$_.ProcessId; ppid = [int]$_.ParentProcessId; name = [string]$_.Name; '
+  + 'created = ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } } | ConvertTo-Json -Compress';
+
+async function windowsProcesses(): Promise<WindowsProcess[]> {
+  const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', LIST_WINDOWS_PROCESSES], {
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  const parsed = JSON.parse(stdout) as WindowsProcess | WindowsProcess[];
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+/** `roots` and every process started under them, by parent links; a child is never older than its parent. */
+export function windowsTree(all: readonly WindowsProcess[], roots: readonly WindowsProcess[], createdBy = Infinity): WindowsProcess[] {
+  const tree = new Map(roots.map((entry) => [entry.pid, entry]));
+  for (let grown = true; grown;) {
+    grown = false;
+    for (const entry of all) {
+      const parent = tree.get(entry.ppid);
+      if (tree.has(entry.pid) || parent === undefined || entry.created < parent.created || entry.created > createdBy) continue;
+      tree.set(entry.pid, entry);
+      grown = true;
+    }
+  }
+  return [...tree.values()];
+}
+
+/** What one Windows cut killed, and what taskkill said about it. */
+export interface WindowsKillRecord {
+  readonly tree: readonly Readonly<{ pid: number; ppid: number; name: string }>[];
+  readonly taskkill: Readonly<{ exitCode: number; output: string }>;
+  /** Milliseconds from taskkill's return until no process of the tree was left. */
+  readonly goneAfterMs: number;
+}
+
 export interface ProcessKillDriverOptions {
   readonly command: string;
   readonly args: readonly string[];
@@ -81,13 +124,20 @@ export interface ProcessKillDriverOptions {
  * helper included, with no chance to run any more code. Killing only the
  * device program would let the helper see end of input and finish its
  * current write, which is a clean stop and not a crash. POSIX kills the
- * process group with SIGKILL and waits until the group is empty. Windows
- * uses `taskkill /T /F`, which is TerminateProcess over the process tree.
+ * process group with SIGKILL and waits until the group is empty.
+ *
+ * Windows has no process group. The cut records the device tree, runs
+ * `taskkill /T /F` (TerminateProcess over the tree), then requires that no
+ * recorded process, and no process the tree started, is still alive. The
+ * taskkill exit code is kept as evidence, not trusted: libuv puts each
+ * non-detached child in a kill-on-close job, so terminating the device can
+ * leave its helper already terminating when taskkill reaches it.
  */
 export class ProcessKillDriver implements PowerCutDriver {
   readonly fault = 'process-crash' as const;
   readonly storageProfile = OS_CACHE_KEEPS_WRITES;
   readonly stderr: string[] = [];
+  readonly windowsKills: WindowsKillRecord[] = [];
   readonly #options: ProcessKillDriverOptions;
   #child: ChildProcess | undefined;
 
@@ -114,8 +164,7 @@ export class ProcessKillDriver implements PowerCutDriver {
   async cut(): Promise<void> {
     const child = this.#take();
     if (process.platform === 'win32') {
-      await execFileAsync('taskkill', ['/PID', String(child.pid), '/T', '/F']);
-      await exited(child);
+      await this.#cutWindows(child);
       return;
     }
     process.kill(-child.pid!, 'SIGKILL');
@@ -133,6 +182,37 @@ export class ProcessKillDriver implements PowerCutDriver {
     await exited(child);
     clearTimeout(timer);
     if (child.exitCode !== 0) throw new Error(`device program exited with ${child.exitCode ?? child.signalCode}`);
+  }
+
+  async #cutWindows(child: ChildProcess): Promise<void> {
+    const before = await windowsProcesses();
+    const root = before.find((entry) => entry.pid === child.pid);
+    if (root === undefined) throw new Error(`device process ${child.pid} was gone before the cut`);
+    const recorded = windowsTree(before, [root]);
+    let taskkill: WindowsKillRecord['taskkill'];
+    try {
+      const { stdout, stderr } = await execFileAsync('taskkill', ['/PID', String(child.pid), '/T', '/F']);
+      taskkill = { exitCode: 0, output: `${stdout}${stderr}`.trim() };
+    } catch (error) {
+      const failure = error as { code?: unknown; stdout?: string; stderr?: string };
+      taskkill = { exitCode: typeof failure.code === 'number' ? failure.code : -1, output: `${failure.stdout ?? ''}${failure.stderr ?? ''}`.trim() };
+    }
+    const killedAt = Date.now();
+    let survivors: WindowsProcess[];
+    for (;;) {
+      // A recorded process still alive, or one the tree started before the kill.
+      const alive = await windowsProcesses();
+      survivors = windowsTree(alive, recorded, killedAt)
+        .filter((entry) => alive.some((other) => other.pid === entry.pid && other.created === entry.created));
+      if (survivors.length === 0 || Date.now() - killedAt > 10_000) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const tree = recorded.map(({ pid, ppid, name }) => ({ pid, ppid, name }));
+    if (survivors.length > 0) {
+      throw new Error(`device tree survived the cut: ${JSON.stringify({ tree, taskkill, survivors })}`);
+    }
+    await exited(child);
+    this.windowsKills.push({ tree, taskkill, goneAfterMs: Date.now() - killedAt });
   }
 
   #take(): ChildProcess {

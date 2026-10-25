@@ -13,7 +13,7 @@ import {
 } from '../daemon/agent-memory-intent';
 import { checkCut, checkRecovery, type CutCheck, type InvariantId } from './agent-memory-powercut/checker';
 import { powercutTriggers } from './agent-memory-powercut/cli';
-import { ProcessKillDriver, QemuDriver, qmpExecute, type PowerCutDriver, type StorageProfile } from './agent-memory-powercut/drivers';
+import { ProcessKillDriver, QemuDriver, qmpExecute, windowsTree, type PowerCutDriver, type StorageProfile } from './agent-memory-powercut/drivers';
 import { runExperiment } from './agent-memory-powercut/experiment';
 import { contentRevision, HostJournal, PowercutHost, powercutContent, type IssuedIntent } from './agent-memory-powercut/host';
 import { EMPTY_REVISION, revisionOf, type DeviceSnapshot, type FileObservation, type HomeSnapshot } from './agent-memory-powercut/snapshot';
@@ -206,6 +206,12 @@ describe('W5 process-crash run', () => {
       expect({ failures, stoppedEarly: report.stoppedEarly, stderr: failures.length === 0 ? [] : driver.stderr }).toEqual({ failures: [], stoppedEarly: undefined, stderr: [] });
       expect(report.cuts).toHaveLength(14);
       expect(report.evidence).toBe('process-crash');
+      if (process.platform === 'win32') {
+        // Each cut recorded the tree and saw every process of it gone. The
+        // taskkill output stays in the log as evidence of what it reported.
+        console.log(`W5 Windows kills: ${JSON.stringify(driver.windowsKills)}`);
+        expect(driver.windowsKills).toHaveLength(14);
+      }
       // A Host point stops answering at one message, so its window is exact.
       expect(report.cuts.slice(0, 6).map((cut) => [cut.trigger, cut.window])).toEqual([
         ['host:fetch@1', 'no-record'],
@@ -303,6 +309,25 @@ function commands(log: string): string[] {
 }
 
 const DROPS: StorageProfile = { id: 'test-drop', dropsUnflushedWrites: true, description: 'test layer' };
+
+describe('W5 Windows device tree', () => {
+  const entry = (pid: number, ppid: number, created: number, name = `p${pid}`) => ({ pid, ppid, name, created });
+
+  it('follows parent links from the device, and rejects a reused PID and a later process', () => {
+    const device = entry(10, 1, 1_000, 'bun.exe');
+    const all = [
+      device,
+      entry(11, 10, 1_100, 'win32-x64.exe'),
+      entry(12, 11, 1_101, 'conhost.exe'),
+      entry(13, 99, 1_200),
+      // PID 14 claims parent 11 but is older than it, so 11 was reused.
+      entry(14, 11, 900),
+      entry(15, 12, 5_000),
+    ];
+    expect(windowsTree(all, [device]).map((entry) => entry.pid)).toEqual([10, 11, 12, 15]);
+    expect(windowsTree(all, [device], 2_000).map((entry) => entry.pid)).toEqual([10, 11, 12]);
+  });
+});
 
 describe.skipIf(process.platform === 'win32')('W5 QEMU driver against a fake QEMU monitor', () => {
   it('speaks QMP: greeting, capabilities, events skipped, errors raised', async () => {
