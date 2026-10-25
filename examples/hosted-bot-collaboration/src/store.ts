@@ -1,9 +1,9 @@
 import type { Pool, PoolClient } from 'pg';
 import { canonical, hash, occurrenceRun, taskId, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
-  type HostJobRun, type HostJobRoutineDefinition, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
+  type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
 import { botRoutines, endable, owned, routineTurn, updateDefinition, type BotRoutineInput } from '@byok-sdk/example-bot-collaboration/routines';
-import { applyHomeTerminal, applyManagement, failHomeFlush, homeEnqueued, homeHead, planHomeRetry, requireMain, updateBot, writeSnapshotBot,
-  type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
+import { admitBotToolsets, applyHomeTerminal, applyManagement, failHomeFlush, homeEnqueued, homeHead, planHomeRetry, requireMain, updateBot,
+  writeSnapshotBot, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy, type InputFields } from '@byok-sdk/example-bot-collaboration/coalesce';
 /** A K8 `update_routine` action. */
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
@@ -14,9 +14,9 @@ import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } 
 import { activeBinding, bindDevice, revokeDevice } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
-import { cancelIntent, deliverCancels, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
+import { cancelIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
-import { decideFinish, type TaskEvidence } from './reconcile';
+import { decideFinish, type HostedIntentHandler, type IntentOutcomeError, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
 import { dueRoutine, hostedRoutineCommands, hostJobCommands, hostJobRowKey, loadSlice, planSlice, recordDue, switchDueVersions,
   writeSlice } from './routines';
@@ -101,7 +101,14 @@ export interface HostedStoreOptions {
    * concludes its occurrence `failed` (owner Q4 A).
    */
   hostJobs?: Readonly<Record<string, HostJobHandler>>;
+  /**
+   * The handlers of the Host's own intents (#955), by name, as L's `hostIntents`. `enqueueHostIntent` stores the name on the
+   * intent row, and the terminal transaction of a `task.complete` result runs that handler.
+   */
+  hostIntents?: Readonly<Record<string, HostedIntentHandler>>;
 }
+/** A Host intent (#955): its key, its stable task id, and its conclusion once it has one. */
+export interface HostIntent { key: string; taskId: string; conclusion?: Conclusion }
 /** The delegation fields that a reply check read. A settle applies only while they are unchanged. */
 export interface ReplyFence { checks?: number; nextCheckAt: number }
 /**
@@ -200,10 +207,13 @@ export class HostedCollaborationStore {
   private readonly host: (scope: string) => HostConfig;
   /** The Host job handlers by type (#793 S14). */
   readonly hostJobs: ReadonlyMap<string, HostJobHandler>;
+  /** The Host intent handlers by name (#955). */
+  private readonly hostIntents: ReadonlyMap<string, HostedIntentHandler>;
   constructor(private readonly pool: Pool, readonly schema: string, options: HostedStoreOptions) {
     if (typeof options?.host !== 'function') throw new Error('The Host config of each scope is required');
     this.host = options.host;
     this.hostJobs = new Map(Object.entries(options.hostJobs ?? {}));
+    this.hostIntents = new Map(Object.entries(options.hostIntents ?? {}));
     this.channel = options.channel === true;
     // The ContextPack budget comes with each sync, so the construction checks every bound except that one.
     if (options.coalesce) this.coalesce = coalescePolicy(options.coalesce, Number.MAX_SAFE_INTEGER);
@@ -603,7 +613,62 @@ export class HostedCollaborationStore {
    */
   finish(scope: string, turnId: string, evidence: TaskEvidence, clock: () => number): Promise<Conclusion | undefined> {
     return this.transaction(client => this.decideIn(client, storedKey(scope), evidence.terminal.envelope.task_id,
-      (state, publish) => decideFinish(client, scope, turnId, state, evidence, this.ports(scope, state, publish, clock), this.channel)), false);
+      (state, publish) => decideFinish(client, scope, turnId, state, evidence, this.ports(scope, state, publish, clock), this.channel,
+        this.hostIntents)), false);
+  }
+
+  /**
+   * Host API (#955), as L's `enqueueHostIntent` (K8 host.ts): the Host's own work in the scope's FIFOs, with Host authority.
+   * One transaction under the scope lock saves the intent row with its handler name. Its outcome goes to that handler, never
+   * to a Bot Turn. On a Bot's agentRef, it shares that Bot's FIFO. An exact replay returns the same intent, until compaction
+   * removes the row. It refuses, with nothing written, a handler that the store does not have, connector toolsets that the
+   * scope's Host config does not declare read-only, a key that is a Bot Turn, a key whose row has another handler or none,
+   * and every refusal of `freezeIntent`: another identity, a retired key, a retry policy, and a device with no active H binding.
+   */
+  enqueueHostIntent(scope: string, input: IntentInput, handler: string, clock: () => number): Promise<HostIntent> {
+    if (!this.hostIntents.has(handler)) return Promise.reject(new Error(`Unknown Host intent handler: ${handler}`));
+    try { admitBotToolsets(input.execution, this.host(scope).readOnlyToolsets ?? []); } catch (error) { return Promise.reject(error); }
+    const scopeKey = storedKey(scope), key = storedKey(input.key);
+    return this.change(scope, undefined, async (state, _publish, client) => {
+      if (Object.hasOwn(state.turns, input.key)) throw new Error('Host intent identity conflict: the key is a Bot Turn');
+      const prior = (await client.query<{ handler: string | null }>('SELECT handler FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key])).rows[0];
+      if (prior && prior.handler !== handler) throw new Error('Host intent identity conflict');
+      const frozen = await freezeIntent(client, scope, { ...input, handler });
+      const row = (await client.query<{ conclusion: Conclusion | null }>('SELECT conclusion FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key])).rows[0]!;
+      return { value: { key: input.key, taskId: frozen.taskId, ...(row.conclusion ? { conclusion: row.conclusion } : {}) }, outbox: [], now: clock() };
+    });
+  }
+
+  /**
+   * Records a terminal of `scope` that the reconciliation refused (#955), as L's `reportIntentFailures`: the reason goes to
+   * the open intent's `last_error`, and a reason that differs from the stored one writes one audit line, so a stuck intent
+   * adds one line and not one for each pass, in any number of processes.
+   */
+  async refuseTerminal(scope: string, error: IntentOutcomeError, clock: () => number): Promise<void> {
+    await this.change(scope, undefined, async (state, _publish, client) => {
+      const changed = await client.query(`UPDATE intent SET last_error = $3 WHERE scope = $1 AND key = $2 AND conclusion IS NULL
+        AND last_error IS DISTINCT FROM $3`, [storedKey(scope), storedKey(error.key), `${error.code}: ${error.message}`]);
+      if (changed.rowCount) state.audit.push(`Intent outcome refused ${error.code}: ${error.key} ${error.message}`.slice(0, 1024));
+      return { value: undefined, outbox: [], now: clock() };
+    });
+  }
+
+  /**
+   * The settle of the owner's `failStuckIntent` (#955), after the reconciliation refused the terminal of `error.key`: in one
+   * transaction under the scope lock, the open intent concludes `failed` with no terminal, its audit line is written, and a
+   * staged routine version that is now due switches. A settled intent refuses with `Intent already settled`.
+   */
+  failIntent(scope: string, error: IntentOutcomeError, clock: () => number): Promise<void> {
+    const scopeKey = storedKey(scope);
+    return this.change(scope, undefined, async (state, _publish, client) => {
+      const now = clock();
+      const settled = await client.query(`UPDATE intent SET conclusion = 'failed', last_error = NULL WHERE scope = $1 AND key = $2
+        AND conclusion IS NULL`, [scopeKey, storedKey(error.key)]);
+      if (!settled.rowCount) throw new Error(`Intent already settled: ${error.key}`);
+      state.audit.push(`Intent failed by owner ${error.code}: ${error.key} ${error.message}`.slice(0, 1024));
+      await switchDueVersions(client, scopeKey, now);
+      return { value: undefined, outbox: [], now };
+    });
   }
 
   /**
