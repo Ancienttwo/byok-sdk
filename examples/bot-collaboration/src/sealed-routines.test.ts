@@ -49,7 +49,14 @@ describe('sealed Bot routines (#953)', () => {
   it('refuses an id that exists, another version, another Agent, other categories and the ninth open routine', async () => {
     const { commands } = ledger();
     commands.create(sealedDefinition(commands.list(), 'main', action(1, v1), execution));
-    expect(() => sealedDefinition(commands.list(), 'main', action(1, v1), execution)).toThrow('already has this id');
+    expect(() => sealedDefinition(commands.list(), 'main', { ...action(1, v1), schedule: { ...schedule, hour: 10 } }, execution)).toThrow('already has this id');
+    expect(() => sealedDefinition(commands.list(), 'main', action(1, v2), execution)).toThrow('already has this id');
+    expect(() => sealedDefinition(commands.list(), 'helper', action(1, v1), execution)).toThrow('already has this id');
+    // An exact retry after a lost response is the same definition, which K4 takes as a no-op.
+    const replay = sealedDefinition(commands.list(), 'main', action(1, v1), execution);
+    expect(replay).toEqual(commands.list()[0]!.definition);
+    commands.create(replay);
+    expect(commands.list()).toHaveLength(1);
     expect(() => sealedDefinition([], 'main', action(2, v1), execution)).toThrow(SealedRoutineVersionError);
     const otherAgent = { ...execution, payload: { ...execution.payload, agentRef: { agentId: 'main', profileRevision: '2' } } };
     expect(() => sealedDefinition([], 'main', action(1, v1), otherAgent)).toThrow('another Agent revision');
