@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import type { DeviceRefusal } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { DEVICE_SWITCHING, type SyncRefusal } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { storedKey } from './layout';
 
 /**
@@ -19,7 +19,7 @@ export class DeviceBindingError extends Error {
  * It is the typed "switching" refusal: retry after the switch. L throws its own error with the same `code`.
  */
 export class DeviceSwitchingError extends Error {
-  readonly code = 'device_switching' as const;
+  readonly code = DEVICE_SWITCHING;
   constructor(readonly deviceId: string, readonly target: 'L' | 'H', readonly revision: number) {
     super(`Device is switching to ${target}: ${deviceId}`);
     this.name = 'DeviceSwitchingError';
@@ -39,7 +39,7 @@ type BindingRow = { mode: 'L' | 'H'; mode_revision: string; revoked: boolean; sw
 /** A device's binding row as the switch steps return it, read back in the transaction that wrote it. */
 export interface DeviceBinding { mode: 'L' | 'H'; revision: number; switching?: 'L' | 'H'; revoked: boolean }
 /** Why a device's binding row refuses new execution, or nothing for an active binding in mode H with no open switch. */
-function refusalOf(row: BindingRow | undefined): DeviceRefusal | undefined {
+function refusalOf(row: BindingRow | undefined): SyncRefusal | undefined {
   if (!row) return 'unbound';
   if (row.revoked) return 'revoked';
   if (row.switching) return 'switching';
@@ -77,7 +77,7 @@ export async function switchFence(client: PoolClient, scopeKey: string, deviceId
  * The K8 `deviceRefusal` of each of these devices (#956), read in one query: the reason that `activeBinding` would throw,
  * and no entry for a device with an active binding in mode H.
  */
-export async function deviceRefusals(client: PoolClient, scopeKey: string, deviceIds: readonly string[]): Promise<Map<string, DeviceRefusal>> {
+export async function deviceRefusals(client: PoolClient, scopeKey: string, deviceIds: readonly string[]): Promise<Map<string, SyncRefusal>> {
   const rows = new Map((await client.query<BindingRow & { device: string }>(`${BINDING} AND device = ANY($2::text[])`,
     [scopeKey, deviceIds.map(storedKey)])).rows.map(row => [JSON.parse(row.device) as string, row]));
   return new Map(deviceIds.flatMap(id => {

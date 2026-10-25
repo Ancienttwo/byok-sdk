@@ -7,10 +7,11 @@ import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { routineCalendar } from '@byok-sdk/example-bot-collaboration/routines';
 import type { InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { DEVICE_NOT_BOUND } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { DEVICE_SWITCHING } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
 import { storedKey } from './layout';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
+import { HostedRoutineScheduler } from './scheduler';
 import { HostedOutboxSender } from './sender';
 import { TEST_HOST } from './memory-subject.test-support';
 import { HostedCollaborationStore, homeRowKey, inSchema, lockScope, type InboundIdentity } from './store';
@@ -28,7 +29,7 @@ const IDENTITY: InboundIdentity = { owner: 'owner', self: {} };
 const clock = () => VECTOR_NOW;
 const refused = (reason: string) => expect.objectContaining({ name: 'DeviceSwitchRefusedError', code: 'switch_refused', reason });
 const switching = (target: 'L' | 'H', revision: number) =>
-  expect.objectContaining({ name: 'DeviceSwitchingError', code: 'device_switching', deviceId: 'device', target, revision });
+  expect.objectContaining({ name: 'DeviceSwitchingError', code: DEVICE_SWITCHING, deviceId: 'device', target, revision });
 const modeRefusal = expect.objectContaining({ name: 'DeviceBindingError', code: 'device_not_bound', reason: 'mode' });
 const binding = async (scope: string) => (await opened!.pool.query<{ mode: string; mode_revision: string; switching: string | null }>(
   `SELECT mode, mode_revision::text, switching FROM ${table('device_binding')} WHERE scope = $1 AND device = $2`,
@@ -140,7 +141,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     await store().beginSwitch(scope, 'device', 'L', 1);
     await store().sync(scope, SYNC);
     const state = await store().read(scope);
-    expect([state.turns.q1!.held, state.audit]).toEqual([DEVICE_NOT_BOUND, [`Turn held ${DEVICE_NOT_BOUND} switching: q1`]]);
+    expect([state.turns.q1!.held, state.audit]).toEqual([DEVICE_SWITCHING, [`Turn held ${DEVICE_SWITCHING} switching: q1`]]);
     expect(await intents(scope)).toEqual([]);
     expect(await dueAt(scope)).toBeNull();
     await store().abortSwitch(scope, 'device', 2);
@@ -223,6 +224,9 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     await store().beginSwitch(scope, 'device', 'L', 1);
     const frozen = await store().dump(scope);
     await expect(store().fire(scope, id, first)).rejects.toEqual(switching('L', 2));
+    // The routine scheduler counts that fire as fenced, as for a device with no binding.
+    const pass = await new HostedRoutineScheduler(opened!.pool, store(), { now: () => first }).run();
+    expect([pass.fired, pass.failed, pass.fenced.map(row => row.error)]).toEqual([0, [], [switching('L', 2)]]);
     expect(await store().dump(scope)).toBe(frozen);
     expect((await opened!.pool.query(`SELECT 1 FROM ${table('occurrence')} WHERE scope = $1`, [storedKey(scope)])).rows).toEqual([]);
     await store().abortSwitch(scope, 'device', 2);

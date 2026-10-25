@@ -376,8 +376,8 @@ mode revision in one write, and keeps the row as the tombstone.
   `expired` at its `wait_until`, through the claim's queued expiry or through the reconciliation, with the revoke
   reason in `last_error`. A delivered task keeps reconciling under its own identity.
 - The sync holds a Turn whose Bot's device has no active H binding (#956, §55a). Each sync round reads, in one query,
-  the binding of each Bot's current device and answers K8's `deviceRefusal(botId)` (`unbound`, `revoked`, `switching`
-  or `mode`).
+  the binding of each Bot's current device and answers K8's `deviceRefusal(botId)` (`unbound`, `revoked`, `mode`, or
+  `switching` during an owner switch, see Topology switch).
   The K8 step then holds that Bot's Turns that have no intent: `held: 'device_not_bound'`, one `held:<turnId>`
   projection with a fixed body, and an audit line with the reason. The rest of the scope syncs, an Agent's delegation to
   such a Bot included. A Turn that already has an intent is not checked: its work lands under its own identity.
@@ -420,11 +420,12 @@ During the freeze:
   target and the frozen revision), as L's error with the same code: the command entry, the freeze of an intent (a Host
   intent too), the submit claim and the read right before the SDK call. The freeze raises the revision, so a submit
   claimed before it is not made;
-- a Bot routine fire of the device throws it too and writes nothing; the slot stays due and fires after an abort;
+- a Bot routine fire of the device throws it too and writes nothing (the scheduler counts it in `pass.fenced`); the
+  slot stays due and fires after an abort;
 - the inbound channel entry refuses input that adds work for a Bot on the device with the same error. Input for an
   unbound or revoked device is still taken and held (#956);
-- the sync holds a Turn of the device's Bots with the `switching` reason. An abort writes the due time 0, so the next
-  sync freezes it;
+- the sync holds a Turn of the device's Bots with K8's `switching` refusal: `held: 'device_switching'` and a
+  `held-switching:<turnId>` projection. An abort writes the due time 0, so the next sync freezes it;
 - Agent home flushes go on: the commit waits for them.
 
 After a commit to L, the same writes refuse with `DeviceBindingError` and `mode`, and the outbox sender backs off the
@@ -516,7 +517,8 @@ H has no SDK wake. `HostedRoutineScheduler` finds due slots in `routine_due` and
 - A fire runs no version switch: its new occurrence stays open, so K4 `versionSwitchDue` is false for that routine.
 
 `run()` is one pass. It reads due rows in slot order in keyset pages. Only fires count against `batch` (default 100),
-so fenced rows and failed rows cannot fill it. A fenced fire (`pass.fenced`) and a fire that throws (`pass.failed`) write
+so fenced rows and failed rows cannot fill it. A fenced fire (`pass.fenced`: no active binding, or a device frozen for a
+switch) and a fire that throws (`pass.failed`) write
 nothing, and the routine waits `backoffMs` (default 60 s, in memory only) before its next try: a stuck row keeps its
 old slot, which sorts ahead of every healthy row. A wait that has ended is dropped at the start of a pass. Each fire
 reads the clock, as K4 does when it consumes a wake; the pass time only selects the due rows. The pass also sets `ok` on
