@@ -338,7 +338,9 @@ async function admin(request: Request, env: Env): Promise<boolean> {
 
 /** The product side: the operator routes and the owner's command entry. */
 async function serveHost(request: Request, env: Env, ctx: ExecutionContext, route: string): Promise<Response> {
-  if (route === '/host/input' || route === '/host/sealed-routine') return serveOwner(request, env, ctx, route);
+  if (route === '/host/input' || route === '/host/sealed-routine' || route === '/host/sealed-routine/reseal') {
+    return serveOwner(request, env, ctx, route);
+  }
   if (!await admin(request, env)) return new Response('unauthorized\n', { status: 401 });
   if (route === '/host/passes') return Response.json(await runPasses(env));
   if (route === '/host/board-item') {
@@ -363,7 +365,9 @@ async function serveHost(request: Request, env: Env, ctx: ExecutionContext, rout
 
 /**
  * The owner's routes of H's authenticated command entry, with the owner's session bearer: `POST /host/input {botId, key,
- * request}`, and `POST /host/sealed-routine {botId, action}`, the member endpoint's `createSealedRoutine` (#953).
+ * request}`, and the member endpoint's sealed routine calls (#953): `POST /host/sealed-routine {botId, action}` is
+ * `createSealedRoutine`, and `POST /host/sealed-routine/reseal {botId, action}` is `resealRoutine`, which a sealed routine
+ * needs after its Bot's Agent changed.
  */
 async function serveOwner(request: Request, env: Env, ctx: ExecutionContext, route: string): Promise<Response> {
   const notify = notifier(env, ctx);
@@ -381,9 +385,10 @@ async function serveOwner(request: Request, env: Env, ctx: ExecutionContext, rou
       sync: host.syncScope,
     });
     try {
-      if (route === '/host/sealed-routine') {
+      if (route === '/host/sealed-routine' || route === '/host/sealed-routine/reseal') {
         const body = await request.json() as { botId: string; action: Parameters<typeof entry.createSealedRoutine>[2] };
-        await entry.createSealedRoutine(credential, body.botId, body.action);
+        if (route === '/host/sealed-routine') await entry.createSealedRoutine(credential, body.botId, body.action);
+        else await entry.resealRoutine(credential, body.botId, body.action);
         return Response.json({ routineId: body.action.routineId });
       }
       const body = await request.json() as { botId: string; key: string; request: string };
@@ -419,7 +424,7 @@ export default {
     } catch (error) {
       return Response.json({ error: text(error) }, { status: 500 });
     }
-    return new Response('routes: /byok/* (device surface); POST /host/input /host/sealed-routine /host/passes /host/pairing-code /host/board-item\n',
+    return new Response('routes: /byok/* (device surface); POST /host/input /host/sealed-routine /host/sealed-routine/reseal /host/passes /host/pairing-code /host/board-item\n',
       { status: 404 });
   },
   /** The cron trigger arms the clock and runs no pass. */

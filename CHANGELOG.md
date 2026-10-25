@@ -454,7 +454,8 @@
   change.
 - **Feature (examples)** — the Worker H Host has the sealed lane (#953): its
   task port's `submitSealed` is the cloud's `submitSealedAgentExecution`, and an
-  owner route creates a sealed routine through H's command entry. Each pass
+  owner route creates a sealed routine and another reseals it through H's
+  command entry. Each pass
   syncs the scopes that the submitter reports for an intent it concluded with no
   SDK call, so a queued expiry ends its Turn in the same pass. Local workerd
   tests cover both; the synthetic device has no E2EE member keyring, so the SDK

@@ -51,6 +51,7 @@ from Node before `wrangler dev` starts. The Worker never migrates.
 | `/byok/*` | device | the SDK device surface (`cloud.fetch`) |
 | `POST /host/input` | owner, with the session bearer | `HostedCommandEntry.input`: authenticate, commit, sync |
 | `POST /host/sealed-routine` | owner, with the session bearer | `HostedCommandEntry.createSealedRoutine`: the member endpoint's sealed routine (#953) |
+| `POST /host/sealed-routine/reseal` | owner, with the session bearer | `HostedCommandEntry.resealRoutine`: the next version of a sealed routine, after its Bot's Agent changed (#953) |
 | `POST /host/passes` | operator bearer | one Host pass; returns its report |
 | `POST /host/pairing-code` | operator bearer | `cloud.createPairingCode` for a provisioned scope |
 | `POST /host/board-item` | operator bearer | `cloud.createBoardItem`: the Host's own board write |
@@ -104,7 +105,9 @@ a failure (`src/ci.test.ts` pins that step). Each run has its own Postgres role 
 - `sealed.test.ts` (#953): an owner creates a sealed routine through `/host/sealed-routine`, and its occurrence goes to
   `submitSealedAgentExecution`, not `submit`. The device has no E2EE member keyring, so the SDK refuses the sealed offer
   before its mailbox append (`sealed-payload-v1`), and no mailbox row is written. Also an untried intent that reaches
-  its wait time ends `expired` in the submitter, and its Turn ends in the same pass.
+  its wait time ends `expired` in the submitter, and its Turn ends in the same pass. A reseal through
+  `/host/sealed-routine/reseal` with no open occurrence replaces version 1 with version 2 at once. A request with no
+  session or an unknown one gets 401, and another scope's owner acts only in its own scope; neither writes anything here.
 - `faults.test.ts`: a lost notification (the alarm passes find the work); a duplicate notification (one submit, one
   outcome); an instance destroyed after the SDK accepted a submit (the next instance reads the offer back and submits
   nothing new); an instance destroyed after it read a device terminal (the next one applies the outcome once); a scope

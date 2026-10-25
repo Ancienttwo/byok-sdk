@@ -29,25 +29,33 @@ function nextSlot() {
   return { at, schedule: { minute: date.getUTCMinutes(), hour: date.getUTCHours(), tz: 'UTC' } };
 }
 
-/** The member endpoint's action: version 1 of a sealed routine of the Main Bot, sealed for its current Agent. */
-async function sealedAction(deviceId: string, agentId: string, schedule: SealedRoutineAction['schedule']): Promise<SealedRoutineAction> {
-  const routineId = randomUUID(), notAfter = '2099-01-01T00:00:00.000Z';
+/** The member endpoint's action: one version of a sealed routine of the Main Bot, sealed for its current Agent. */
+async function sealedAction(deviceId: string, agentId: string, schedule: SealedRoutineAction['schedule'],
+  { routineId = randomUUID() as string, definitionVersion = 1, prompt = 'Check the watchlist.' }:
+    { routineId?: string; definitionVersion?: number; prompt?: string } = {}): Promise<SealedRoutineAction> {
+  const notAfter = '2099-01-01T00:00:00.000Z';
   const sealing = { scopeId: 'scope-1', epoch: 1, categories: ['task-input' as const] };
   const agentRef = template(deviceId, agentId).payload.agentRef;
   const sealed = await sealRoutineTemplate({ tenantId: 'tenant', scopeKey: Uint8Array.from({ length: 32 }, (_, index) => index), sealing,
-    chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` }, sender: 'A'.repeat(43), routineRef: { routineId, definitionVersion: 1, notAfter },
-    agentRef, instruction: sealedRoutineInstruction('Check the watchlist.') });
-  return { routineId, definitionVersion: 1, schedule,
+    chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` }, sender: 'A'.repeat(43), routineRef: { routineId, definitionVersion, notAfter },
+    agentRef, instruction: sealedRoutineInstruction(prompt) });
+  return { routineId, definitionVersion, schedule,
     sealed: { sealing, template: sealed, agentRef: { agentId: agentRef.agentId, profileRevision: agentRef.profileRevision }, notAfter } };
 }
+
+/** An owner route of the Worker with `token` as the session bearer, or with no bearer. */
+const ownerPost = (home: Home, route: string, token: string | undefined, body: unknown) => fetch(`${home.worker.base}${route}`, {
+  method: 'POST', body: JSON.stringify(body),
+  headers: { ...(token === undefined ? {} : { authorization: `Bearer ${token}` }), 'content-type': 'application/json' } });
+const routineRow = async (home: Home, routineId: string) => (await home.substrate.pool.query<{ definition: { version: number }; pending: unknown }>(
+  `SELECT definition, pending FROM "${home.substrate.hSchema}".routine WHERE scope = $1 AND id = $2`, [storedKey(home.home), storedKey(routineId)])).rows[0];
 
 describe.skipIf(!RUN)('the Worker submitter lanes (#953)', () => {
   it('sends a sealed routine occurrence to submitSealedAgentExecution, not submit', async () => {
     h = await openHome({ fault: 'drop-notify' });
     const { token, agentId } = await h.bot();
     const slot = nextSlot(), action = await sealedAction(h.device.deviceId, agentId, slot.schedule);
-    const response = await fetch(`${h.worker.base}/host/sealed-routine`, { method: 'POST', body: JSON.stringify({ botId: 'main', action }),
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } });
+    const response = await ownerPost(h, '/host/sealed-routine', token, { botId: 'main', action });
     expect([response.status, await response.json()]).toEqual([200, { routineId: action.routineId }]);
     expect(await h.routines()).toEqual([{ nextAt: slot.at }]);
     const tried = await until(async () => {
@@ -62,6 +70,34 @@ describe.skipIf(!RUN)('the Worker submitter lanes (#953)', () => {
     // Refused before the append, on either lane: the mailbox has no row for this task.
     expect(await h.mailbox(tried.task)).toEqual([]);
   }, SLOT_WAIT_MS + 120_000);
+
+  it('reseals a sealed routine to version 2 through the owner route, and refuses any other caller with nothing written', async () => {
+    h = await openHome({ fault: 'drop-notify' });
+    const { token, agentId } = await h.bot();
+    const schedule = nextSlot().schedule, v1 = await sealedAction(h.device.deviceId, agentId, schedule);
+    expect((await ownerPost(h, '/host/sealed-routine', token, { botId: 'main', action: v1 })).status).toBe(200);
+    const reseal = (version: number) => sealedAction(h!.device.deviceId, agentId, schedule,
+      { routineId: v1.routineId, definitionVersion: version, prompt: `Version ${version}.` });
+    // No pass ran, so no occurrence is open: version 2 replaces version 1 at once.
+    const v2 = await reseal(2);
+    const response = await ownerPost(h, '/host/sealed-routine/reseal', token, { botId: 'main', action: v2 });
+    expect([response.status, await response.json()]).toEqual([200, { routineId: v1.routineId }]);
+    expect(await routineRow(h, v1.routineId)).toMatchObject({ definition: { version: 2 }, pending: null });
+    // A Worker session is always its own scope's owner, so any other caller has no session here, or is the owner of another
+    // scope, whose call acts in that scope only.
+    const before = await h.substrate.store.dump(h.home), v3 = await reseal(3);
+    for (const bearer of [undefined, 'not-a-session']) {
+      const refused = await ownerPost(h, '/host/sealed-routine/reseal', bearer, { botId: 'main', action: v3 });
+      expect([refused.status, await refused.json()]).toEqual([401, { error: 'unauthenticated' }]);
+    }
+    const other = await h.substrate.provision(`worker-other-${randomUUID()}`, { id: 'other-owner', kind: 'human' },
+      { models: { default: template(h.device.deviceId, agentId) }, readOnlyToolsets: [] });
+    // The other owner's call runs in its own scope, which has no such Bot.
+    const elsewhere = await ownerPost(h, '/host/sealed-routine/reseal', other, { botId: 'main', action: v3 });
+    expect([elsewhere.status, await elsewhere.json()]).toEqual([500, { error: 'Bot is archived or absent' }]);
+    expect(await h.substrate.store.dump(h.home)).toBe(before);
+    expect(await routineRow(h, v1.routineId)).toMatchObject({ definition: { version: 2 }, pending: null });
+  });
 
   it('an untried intent that reaches its wait time ends in the submitter, and its Turn ends in the same pass', async () => {
     h = await openHome({ fault: 'drop-notify' });
