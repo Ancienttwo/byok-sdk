@@ -15,8 +15,6 @@ import path from 'node:path';
 import {
   createEnvelope,
   PreparedAgentMemoryModeSchema,
-  TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
-  TERMINAL_INFERENCE_USAGE_MAX_TOKENS,
   type AgentMessageContentType,
   type AgentMessageDispositionPayload,
   type AgentMessageEgressRequirement,
@@ -70,7 +68,6 @@ import {
   type AgentRef,
 } from '../agent-home';
 import {
-  compareAgentHomeMemory,
   digestAgentHomeMemory,
   type AgentHomeAccessMode,
 } from '../agent-home-readers';
@@ -109,10 +106,7 @@ import { prependGitWorkspaceGuidance } from './git-workspace';
 import type { GitWorkspaceStore, GitWorkspaceLedgerRecord, GitWorkspacePhase } from './git-workspace-store';
 import type { AgentEgressController } from './agent-egress-controller';
 import { AgentMessageOutbox, type AgentMessageOutboxRecord } from './agent-message-outbox';
-import {
-  AGENT_RESULT_TOOL_NAME,
-} from '../sdk-reserved-mcp';
-import { AgentResultStore, type AgentResultRecord } from './agent-result-store';
+import { AgentResultStore } from './agent-result-store';
 import {
   type McpToolsProbeOptions,
 } from './mcp-tools-probe';
@@ -131,7 +125,7 @@ import {
 } from './agent-memory';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
 import type { PreparedExecutionObservation, ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry } from './task-runner/support';
-import { AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS, GIT_OBSERVATION_TIMEOUT_MS, MAX_INLINE_ARTIFACT_BYTES, observePreparedCall, closingReply, executionTerminalOf, isKnownRuntimeId, terminalUsageNumber, offeredPreparation, offeredInstruction, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage, estimateEventBytes, openArtifact, NO_SEALED_SPILL, offerSettlements, trackOffer, observeTerminalUsage } from './task-runner/support';
+import { MAX_INLINE_ARTIFACT_BYTES, observePreparedCall, closingReply, executionTerminalOf, isKnownRuntimeId, offeredPreparation, offeredInstruction, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage, estimateEventBytes, openArtifact, NO_SEALED_SPILL, offerSettlements, trackOffer, observeTerminalUsage } from './task-runner/support';
 import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message';
 import { withAgentMessageMcp, withAgentResultMcp, withAgentMemoryMcp, withHostToolsetContext, resolveMcpServers } from './task-runner/mcp-contexts';
 import { activeMemoryContext, runMemoryOperation, quiesceAndSnapshotAgentMemory, bindAgentMemoryFilesystem } from './task-runner/agent-memory';
@@ -139,6 +133,7 @@ import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, inter
 import { admitOffer, reserveOfferHome, admitOfferLimits, handleSealedOffer, declineSealedOffer } from './task-runner/offer-admission';
 import { prepareOfferRuntime, pickAdapter } from './task-runner/offer-runtime';
 import { requestApproval, dispatchApproval, clearPendingApproval, handleApprove, handleReject } from './task-runner/approvals';
+import { terminalInferenceUsagePayload, preparedObservationPayload, agentTerminalPayload, resolveStagedResult, observeGit, persistAgentTerminalEvidence, measureReaderMemoryChange, retryAgentTerminalEvidence, reportAgentTerminalEvidenceFailure } from './task-runner/terminal-evidence';
 
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
@@ -3471,27 +3466,7 @@ export class TaskRunner {
    * built from it would be a usage observation with no usage in it.
    */
   private terminalInferenceUsagePayload(active: ActiveTask): { usage?: TerminalInferenceUsage } {
-    const release = this.deps.localAgentRelease;
-    const runtimeId = active.adapter.descriptor.id;
-    if (!isKnownRuntimeId(runtimeId)) return {};
-    if (release === undefined || active.lastUsage === undefined) return {};
-    if (active.lastUsage.inputTokens === undefined && active.lastUsage.outputTokens === undefined) return {};
-
-    const nowMs = Date.now();
-    const durationMs = terminalUsageNumber(nowMs - active.startedAtMs, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS);
-    const promptTokens = terminalUsageNumber(active.lastUsage?.inputTokens, TERMINAL_INFERENCE_USAGE_MAX_TOKENS);
-    const completionTokens = terminalUsageNumber(active.lastUsage?.outputTokens, TERMINAL_INFERENCE_USAGE_MAX_TOKENS);
-
-    return {
-      usage: {
-        runtime: runtimeId,
-        clientVersion: release.version,
-        reportedAt: new Date(nowMs).toISOString(),
-        ...(promptTokens === undefined ? {} : { promptTokens }),
-        ...(completionTokens === undefined ? {} : { completionTokens }),
-        ...(durationMs === undefined ? {} : { durationMs }),
-      },
-    };
+    return terminalInferenceUsagePayload.call(this, active);
   }
 
   /**
@@ -3501,15 +3476,7 @@ export class TaskRunner {
    * separate field from the telemetry-only `usage` block.
    */
   private preparedObservationPayload(active: ActiveTask): { preparedObservation?: TerminalPreparedObservation } {
-    const observed = active.prepared;
-    if (observed?.initialPromptTokens === undefined || observed.maxPromptTokens === undefined) return {};
-    return {
-      preparedObservation: {
-        requestDigest: observed.requestDigest,
-        initialPromptTokens: observed.initialPromptTokens,
-        maxPromptTokens: observed.maxPromptTokens,
-      },
-    };
+    return preparedObservationPayload.call(this, active);
   }
 
   /** Exact Agent identity projection for claim/terminal wire payloads. */
@@ -3521,11 +3488,7 @@ export class TaskRunner {
     agentHomeProjection?: TerminalAgentHomeProjection;
     agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
   } {
-    return {
-      ...terminalIdentity(active.adapter.descriptor.id, active.agentRef),
-      ...(active.appliedAgentHomeProjection === undefined ? {} : { agentHomeProjection: active.appliedAgentHomeProjection }),
-      ...(active.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: active.agentHomeMemoryChange }),
-    };
+    return agentTerminalPayload.call(this, active);
   }
 
   /**
@@ -3544,60 +3507,14 @@ export class TaskRunner {
    * message-only and legacy offers) never read the store and carry no
    * document. Failure, cancel and interrupt paths never come here.
    */
-  private async resolveStagedResult(
+  private resolveStagedResult(
     active: ActiveTask,
   ): Promise<{ deliver: true; document?: unknown; failure?: ResultReplyFailure } | { deliver: false }> {
-    const selection = active.terminalProjection;
-    if (selection?.mode !== 'result-document') return { deliver: true };
-    this.revokeAgentResultContext(active.taskId);
-    let record: AgentResultRecord | undefined;
-    try {
-      if (active.resultStore === undefined) throw new Error('the task has no Agent result store');
-      record = await active.resultStore.get(active.taskId);
-    } catch (err) {
-      if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return { deliver: false };
-      if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-unreadable' };
-      await this.fail(active.taskId, `${RESULT_UNREADABLE_REASON_PREFIX}: the staged result for contract ${selection.contract} could not be read: ${errorMessage(err)}`, false);
-      return { deliver: false };
-    }
-    if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return { deliver: false };
-    if (record === undefined) {
-      if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-missing' };
-      await this.fail(
-        active.taskId,
-        `${RESULT_NOT_SUBMITTED_REASON_PREFIX}: the offer requires result contract ${selection.contract}, but the runtime ended its turn without a staged ${AGENT_RESULT_TOOL_NAME} outcome`,
-        false,
-      );
-      return { deliver: false };
-    }
-    if (record.contract !== selection.contract || record.tenantId !== this.deps.tenantId
-      || active.agentRef === undefined || record.agentRef.agentId !== active.agentRef.agentId
-      || record.agentRef.profileRevision !== active.agentRef.profileRevision) {
-      if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-unreadable' };
-      await this.fail(active.taskId, `${RESULT_UNREADABLE_REASON_PREFIX}: the staged result does not belong to this task's contract and Agent`, false);
-      return { deliver: false };
-    }
-    return { deliver: true, document: record.outcome };
+    return resolveStagedResult.call(this, active);
   }
 
-  private async observeGit(active: ActiveTask, phase: GitWorkspacePhase): Promise<void> {
-    if (!active.gitWorkspaceId || !this.deps.gitWorkspaceManager || !this.deps.gitWorkspaceStore) return;
-    try {
-      const observation = await new Promise<GitWorkspaceObservation>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Git workspace observation timed out')), GIT_OBSERVATION_TIMEOUT_MS);
-        timer.unref?.();
-        void this.deps.gitWorkspaceManager!.observe(active.workspaceDir, active.gitBaseline).then(
-          (value) => { clearTimeout(timer); resolve(value); },
-          (error) => { clearTimeout(timer); reject(error); },
-        );
-      });
-      await this.deps.gitWorkspaceStore.updateObservation(active.gitWorkspaceId, observation, phase);
-      this.deps.onGitWorkspaceEvent?.({ taskId: active.taskId, workspaceId: active.gitWorkspaceId, phase, observation });
-    } catch (err) {
-      const category = ((err as GitWorkspaceError).category ?? 'repository-invalid') as GitErrorCategory;
-      await this.updateGitPhaseBestEffort(active.gitWorkspaceId, phase, category);
-      this.deps.onGitWorkspaceEvent?.({ taskId: active.taskId, workspaceId: active.gitWorkspaceId, phase, errorCategory: category });
-    }
+  private observeGit(active: ActiveTask, phase: GitWorkspacePhase): Promise<void> {
+    return observeGit.call(this, active, phase);
   }
 
   private async updateGitPhaseBestEffort(workspaceId: string | undefined, phase: GitWorkspacePhase, errorCategory?: GitErrorCategory): Promise<void> {
@@ -3608,48 +3525,12 @@ export class TaskRunner {
   }
 
   /** Persist Agent terminal truth before wire when local storage is available. */
-  private async persistAgentTerminalEvidence(
+  private persistAgentTerminalEvidence(
     active: ActiveTask,
     cause: AgentTerminalCause,
     reason?: string,
   ): Promise<boolean> {
-    // Cancellation revokes publication. Ordinary failure preserves a message that
-    // may already be in transport, including its existing admission recovery gate.
-    // For unsent messages, join activation and revoke before terminal truth.
-    if (cause === 'cancelled' || (cause === 'failed' && !active.messageSendAttempted)) {
-      await active.messageOutbox?.revoke(active.taskId);
-    }
-    active.terminalCause = cause;
-    active.terminalReason = reason;
-    await this.measureReaderMemoryChange(active);
-    if (active.agentBinding === undefined || active.agentRef === undefined || active.agentHandoff === undefined) {
-      return true;
-    }
-    const agentRef = active.agentRef;
-    const handoff = active.agentHandoff;
-    const result = await this.retryAgentTerminalEvidence(() =>
-      this.deps.agentSessionHandoffs!.recordTerminal(
-        {
-          agentRef,
-          sessionRef: handoff.sessionRef,
-          runtimeId: handoff.runtimeId,
-          home: handoff.home,
-          cwd: handoff.cwd,
-          ...(handoff.homeAccess === undefined ? {} : { homeAccess: handoff.homeAccess }),
-        },
-        cause,
-        reason,
-      ),
-    );
-    if (result.ok) {
-      active.agentTerminalPersisted = true;
-      return true;
-    }
-    console.warn(
-      `[byok/client] Agent terminal evidence for ${active.taskId} remained unavailable after ` +
-        `${AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS} attempts; publishing the exact terminal and retrying during cleanup: ${errorMessage(result.error)}`,
-    );
-    return false;
+    return persistAgentTerminalEvidence.call(this, active, cause, reason);
   }
 
   /**
@@ -3658,37 +3539,14 @@ export class TaskRunner {
    * The execution lease is still held, so the overlap flag covers every
    * writer that started before this point.
    */
-  private async measureReaderMemoryChange(active: ActiveTask): Promise<void> {
-    if (active.readerMemoryBaseline === undefined || active.agentHomeMemoryChange !== undefined) return;
-    const binding = active.agentBinding;
-    if (binding === undefined) return;
-    const after = await digestAgentHomeMemory(binding.resolution.canonicalHome);
-    active.agentHomeMemoryChange ??= compareAgentHomeMemory(
-      active.readerMemoryBaseline.digest,
-      after,
-      binding.lease.writerOverlapped(),
-    );
+  private measureReaderMemoryChange(active: ActiveTask): Promise<void> {
+    return measureReaderMemoryChange.call(this, active);
   }
 
-  private async retryAgentTerminalEvidence(
+  private retryAgentTerminalEvidence(
     write: () => Promise<unknown>,
   ): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: unknown }> {
-    let lastError: unknown = new Error('Agent terminal evidence write did not run');
-    for (let attempt = 1; attempt <= AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS; attempt++) {
-      try {
-        await write();
-        return { ok: true };
-      } catch (error) {
-        lastError = error;
-        if (attempt < AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS) {
-          await new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS);
-            timer.unref?.();
-          });
-        }
-      }
-    }
-    return { ok: false, error: lastError };
+    return retryAgentTerminalEvidence.call(this, write);
   }
 
   private reportAgentTerminalEvidenceFailure(input: {
@@ -3700,21 +3558,7 @@ export class TaskRunner {
     reason?: string;
     error: unknown;
   }): void {
-    const error = errorMessage(input.error);
-    console.error(
-      `[byok/client] Agent terminal evidence permanently unavailable for ${input.taskId} after ` +
-        `${AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS} attempts; terminal publication continued to avoid a stuck cloud task: ${error}`,
-    );
-    this.deps.onAgentTerminalEvidenceFailure?.({
-      taskId: input.taskId,
-      agentRef: input.agentRef,
-      runtimeId: input.runtimeId,
-      cwd: input.cwd,
-      cause: input.cause,
-      ...(input.reason === undefined ? {} : { reason: input.reason }),
-      attempts: AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS,
-      error,
-    });
+    return reportAgentTerminalEvidenceFailure.call(this, input);
   }
 
   async retryTerminalFinalization(taskId: string): Promise<void> {
