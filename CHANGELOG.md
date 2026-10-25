@@ -9,6 +9,15 @@
   now stops the rotation with `key_package_missing`, and the old key stays.
   Before, the rotation finished and dropped that epoch. The rotation still
   has no production caller.
+- **Fixed (examples)** — K8 counts a Bot Turn whose outcome commit throws as a
+  stuck intent, with the new `IntentOutcomeError` code `outcome_failed`.
+  `drain()` and every API that runs a pass reject with it, the audit gets one
+  row, and `failStuckIntent(key)` ends it: the intent settles `failed`, the
+  next sync fails the Turn and reports it, and the Bot's FIFO moves on. Before,
+  K4 kept the error only as the outbox row's `lastError`, `drain()` resolved,
+  the FIFO stayed blocked and the owner call refused the key as not stuck. A
+  Host that switches exhaustively on `IntentOutcomeError.code` must add the
+  `outcome_failed` case.
 - **Feature (examples)** — with `roomHistory`, K8 publishes each accepted seat
   post as the projection `room-message:<roomId>:<messageId>` with
   `{ roomId, id, from, text, late }`, and does not read the next seat of a room
