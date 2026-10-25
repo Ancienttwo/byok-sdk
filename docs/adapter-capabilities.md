@@ -232,8 +232,9 @@ reason names servers and plugin ids, never paths:
 
 - `codex Agent user MCP server exclusion refused: user MCP servers share a name with task servers: <names>`
 - `codex Agent thread still runs MCP servers outside the task: <names>`
-- `codex Agent user MCP server exclusion refused: …` when a reply it reads
-  has the wrong shape.
+- `codex Agent user MCP server exclusion refused: config/read returned no readable configuration`
+- `codex Agent user MCP server exclusion refused: mcpServerStatus/list returned a reply it cannot read`
+  (also for a cursor that does not end within 64 pages)
 
 A failed `config/read` or `mcpServerStatus/list` request fails the open as any
 other app-server error does.

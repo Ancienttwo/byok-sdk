@@ -107,20 +107,12 @@ describe('verifyCodexUserMcpServersExcluded', () => {
       .toBe('codex Agent thread still runs MCP servers outside the task: codex_apps, probe_plugin_srv (plugin probe-plugin@probe-market), user_notes');
   });
 
-  it('refuses a reply it cannot read', async () => {
-    const cases: [Record<string, unknown>, string][] = [
-      [{}, 'mcpServerStatus/list returned no server list'],
-      [{ data: [{ runtimeStatus: 'disabled' }] }, 'mcpServerStatus/list returned a server without a name'],
-      [{ data: [], nextCursor: 7 }, 'mcpServerStatus/list returned an invalid cursor'],
-    ];
-    for (const [reply, reason] of cases) {
-      expect(await refusal(() => verifyCodexUserMcpServersExcluded(pages(reply).request, 't', []))).toBe(`codex Agent user MCP server exclusion refused: ${reason}`);
+  it('refuses a reply it cannot read, a cursor that never ends included', async () => {
+    const replies: Record<string, unknown>[] = [{}, { data: [{ runtimeStatus: 'disabled' }] }, { data: [], nextCursor: 7 }];
+    const requests: CodexOpenStepRequest[] = [...replies.map(reply => pages(reply).request), async () => ({ data: [], nextCursor: 'again' })];
+    for (const request of requests) {
+      expect(await refusal(() => verifyCodexUserMcpServersExcluded(request, 't', [])))
+        .toBe('codex Agent user MCP server exclusion refused: mcpServerStatus/list returned a reply it cannot read');
     }
-  });
-
-  it('refuses a cursor that never ends', async () => {
-    const request: CodexOpenStepRequest = async () => ({ data: [], nextCursor: 'again' });
-    expect(await refusal(() => verifyCodexUserMcpServersExcluded(request, 't', [])))
-      .toBe('codex Agent user MCP server exclusion refused: mcpServerStatus/list did not finish paging');
   });
 });

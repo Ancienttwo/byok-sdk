@@ -4,6 +4,8 @@ import type { CodexOpenStepRequest } from '../../runtime/codex-session-runtime';
 type JsonRecord = Record<string, unknown>;
 
 const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+const PREFIX = 'codex Agent user MCP server exclusion refused';
+const UNREADABLE_STATUS = `${PREFIX}: mcpServerStatus/list returned a reply it cannot read`;
 const record = (value: unknown): JsonRecord | undefined =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? value as JsonRecord : undefined;
 /** A cursor that never ends is a broken reply, not an inventory. */
@@ -23,10 +25,10 @@ const MAX_STATUS_PAGES = 64;
 export function withCodexUserMcpServersExcluded(params: JsonRecord, effective: JsonRecord, taskServers: readonly string[]): JsonRecord {
   const configured = effective.config === undefined ? undefined : record(effective.config);
   const servers = configured?.mcp_servers === undefined || configured.mcp_servers === null ? {} : record(configured.mcp_servers);
-  if (configured === undefined || servers === undefined) throw refuse('codex Agent user MCP server exclusion refused: config/read returned no readable configuration');
+  if (configured === undefined || servers === undefined) throw refuse(`${PREFIX}: config/read returned no readable configuration`);
   const names = Object.keys(servers);
   const shared = names.filter(name => taskServers.includes(name)).sort();
-  if (shared.length > 0) throw refuse(`codex Agent user MCP server exclusion refused: user MCP servers share a name with task servers: ${shared.join(', ')}`);
+  if (shared.length > 0) throw refuse(`${PREFIX}: user MCP servers share a name with task servers: ${shared.join(', ')}`);
   const config = record(params.config) ?? {};
   return {
     ...params,
@@ -48,10 +50,10 @@ export async function verifyCodexUserMcpServersExcluded(request: CodexOpenStepRe
   let cursor: string | undefined;
   for (let page = 0; page < MAX_STATUS_PAGES; page++) {
     const reply = await request('mcpServerStatus/list', { threadId, detail: 'toolsAndAuthOnly', ...(cursor === undefined ? {} : { cursor }) });
-    if (!Array.isArray(reply.data)) throw refuse('codex Agent user MCP server exclusion refused: mcpServerStatus/list returned no server list');
+    if (!Array.isArray(reply.data)) throw refuse(UNREADABLE_STATUS);
     for (const entry of reply.data) {
       const server = record(entry);
-      if (typeof server?.name !== 'string') throw refuse('codex Agent user MCP server exclusion refused: mcpServerStatus/list returned a server without a name');
+      if (typeof server?.name !== 'string') throw refuse(UNREADABLE_STATUS);
       if (taskServers.includes(server.name) || server.runtimeStatus === 'disabled') continue;
       leaks.push(typeof server.pluginId === 'string' ? `${server.name} (plugin ${server.pluginId})` : server.name);
     }
@@ -59,8 +61,8 @@ export async function verifyCodexUserMcpServersExcluded(request: CodexOpenStepRe
       if (leaks.length > 0) throw refuse(`codex Agent thread still runs MCP servers outside the task: ${leaks.sort().join(', ')}`);
       return;
     }
-    if (typeof reply.nextCursor !== 'string') throw refuse('codex Agent user MCP server exclusion refused: mcpServerStatus/list returned an invalid cursor');
+    if (typeof reply.nextCursor !== 'string') throw refuse(UNREADABLE_STATUS);
     cursor = reply.nextCursor;
   }
-  throw refuse('codex Agent user MCP server exclusion refused: mcpServerStatus/list did not finish paging');
+  throw refuse(UNREADABLE_STATUS);
 }
