@@ -410,7 +410,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       this.options.log(`rotated scope ${JSON.stringify(scopeId)} to epoch ${epoch} for ${recipients.length} members`);
     } catch (error) {
       scopeKey.fill(0);
-      // A key the notice cached for the abandoned epoch must not outlive it.
+      // Zero a key the notice cached for the abandoned epoch. A notice may cache it again; no seal uses it without a freshness point.
       this.#drop(keyOf(scopeId, epoch));
       if (!(error instanceof E2eeMemberClientError && error.code === 'e2ee_scope_key_conflict')) throw error;
       // Another client may hold the epoch without a package for this member, so a read would show it free again.
@@ -569,7 +569,7 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       const view = this.#session;
       if (view === undefined) return 'member_lost';
       if (this.#scopeFailure(view, scopeId) !== undefined) continue;
-      const failure = await this.#readBack(view, scopeId, confirmed.get(scopeId) ?? new Map(), next, view.keys.kem);
+      const failure = await this.#readBack(view, scopeId, confirmed.get(scopeId) ?? new Map(), next, view.keys.kem, this.#heldEpochs(scopeId), [...this.#fresh.get(scopeId)?.keys() ?? []]);
       if (failure !== undefined) return failure;
     }
     return undefined;
@@ -629,19 +629,21 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       for (let at = 0; at < rewrapped.length; at += E2EE_SCOPE_KEY_PACKAGE_PUT_MAX) {
         await this.options.client.putKeyPackages(rewrapped.slice(at, at + E2EE_SCOPE_KEY_PACKAGE_PUT_MAX), this.#requestSignal());
       }
-      return await this.#readBack(this.#session ?? view, scopeId, expected, next, old) ?? expected;
+      return await this.#readBack(this.#session ?? view, scopeId, expected, next, old, held, fresh) ?? expected;
     }
     return 'chain_moved';
   }
 
   /**
    * Read the scope's epochs again: each epoch of `expected` must open with
-   * `next` under its `keyId`, and a package that landed since, such as one a
-   * client that has not walked the `rotate` yet wrapped to `old`, must not
-   * open only with `old`.
+   * `next` under its `keyId`, each `held` epoch must read back and open with
+   * `next`, each `fresh` epoch must read back, and a package that landed
+   * since, such as one a client that has not walked the `rotate` yet wrapped
+   * to `old`, must not open only with `old`.
    */
   async #readBack(
     view: DeviceMemberSession, scopeId: string, expected: ReadonlyMap<number, string>, next: MemberKemKey, old: MemberKemKey,
+    held: ReadonlySet<number>, fresh: readonly number[],
   ): Promise<KemRotationFailure | undefined> {
     const found = await this.#readEpochs(scopeId);
     if (found === undefined) return 'scope_epochs_exceeded';
@@ -650,6 +652,11 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
       return 'rewrap_unverified';
     };
     for (const epoch of expected.keys()) if (!found.has(epoch)) return unverified(epoch, 'was re-wrapped but no key package reads back');
+    const missing = [...held, ...fresh].find((epoch) => !found.has(epoch));
+    if (missing !== undefined) {
+      this.options.log(`epoch ${missing} of scope ${JSON.stringify(scopeId)} is held but its key package was not read`);
+      return 'key_package_missing';
+    }
     for (const [epoch, pkg] of found) {
       const current = await this.#openAccepted(view, scopeId, epoch, pkg, next);
       current?.scopeKey.fill(0);
@@ -657,10 +664,10 @@ export class DeviceMemberKeyring implements SealedScopeKeyring {
         if (expected.has(epoch) && expected.get(epoch) !== current.keyId) return unverified(epoch, 'reads back under another key id');
         continue;
       }
-      if (expected.has(epoch)) return unverified(epoch, 'reads back with a key package the next KEM key does not open');
-      const held = await this.#openAccepted(view, scopeId, epoch, pkg, old);
-      held?.scopeKey.fill(0);
-      if (held !== undefined) return unverified(epoch, 'holds a key package that opens only with the old KEM key');
+      if (expected.has(epoch) || held.has(epoch)) return unverified(epoch, 'reads back with a key package the next KEM key does not open');
+      const stale = await this.#openAccepted(view, scopeId, epoch, pkg, old);
+      stale?.scopeKey.fill(0);
+      if (stale !== undefined) return unverified(epoch, 'holds a key package that opens only with the old KEM key');
     }
     return undefined;
   }
