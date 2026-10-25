@@ -1,7 +1,8 @@
 /**
  * The clock of #794 D3 (H4) on local workerd: the `HostClock` alarm alone runs routine slots and due steps on time. Each
  * test reaches its subject with `drop-notify` on, and calls no `/host/passes`, so only an alarm pass can do the work. Each
- * test has its own scope, device and instance; a restart keeps the instance's storage dir, so the clock keeps its alarm.
+ * test has its own scope, device and instance, and arms the clock once through the cron trigger; a restart keeps the
+ * instance's storage dir, so the clock keeps its alarm with no new arm.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { ROUTINE_LATE_AFTER_MS } from '@byok-sdk/example-bot-collaboration/routines';
@@ -80,6 +81,7 @@ async function busyBot(home: Home) {
 describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
   it('fires a routine slot from an alarm pass, inside the K8 late bound, and offers its Turn', async () => {
     h = await openHome();
+    await h.worker.armClock();
     const slot = await routine(h);
     await h.restart({ fault: 'drop-notify' });
     const occurrence = await until(() => occurrenceOf(h!, slot), SLOT_WAIT_MS);
@@ -97,6 +99,7 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
 
   it('a duplicate alarm runs two passes at once: one occurrence, one routine Turn, one offer', async () => {
     h = await openHome();
+    await h.worker.armClock();
     const slot = await routine(h);
     await h.restart({ fault: 'drop-notify,duplicate-alarm' });
     await until(() => occurrenceOf(h!, slot), SLOT_WAIT_MS);
@@ -116,6 +119,7 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
 
   it('an instance lost mid-alarm, after the routine Turn was offered: the stored alarm of the next instance reads it back', async () => {
     h = await openHome();
+    await h.worker.armClock();
     const slot = await routine(h);
     let worker = await h.restart({ fault: 'drop-notify,hang-after-submit', vars: { H_SUBMIT_LEASE_MS: '2000' } });
     await worker.waitForOutput('[h-fault] hang-after-submit', SLOT_WAIT_MS);
@@ -139,6 +143,7 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
 
   it('seals a coalesced input batch from an alarm pass, within a minute of its seal time', async () => {
     h = await openHome(COALESCE);
+    await h.worker.armClock();
     const token = await busyBot(h);
     await h.restart({ ...COALESCE, fault: 'drop-notify' });
     await settled(h);
@@ -151,6 +156,7 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
 
   it('lost alarms leave a due batch open; the next alarm after them seals it from Postgres', async () => {
     h = await openHome(COALESCE);
+    await h.worker.armClock();
     const token = await busyBot(h);
     await settled(h);
     const worker = await h.restart({ ...COALESCE, fault: 'drop-notify,drop-alarm' });

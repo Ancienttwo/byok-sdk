@@ -15,7 +15,8 @@ const NOTIFIED = '[h-worker] notified pass';
 
 describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
   let h: Home;
-  beforeAll(async () => { h = await openHome(); });
+  // The clock runs from the start. A restart keeps the storage dir, so each instance has the alarm without a new arm.
+  beforeAll(async () => { h = await openHome(); await h.worker.armClock(); });
   afterAll(async () => { await h?.close(); });
 
   it('a lost notification delays the work to the next alarm pass, which finds it in Postgres', async () => {

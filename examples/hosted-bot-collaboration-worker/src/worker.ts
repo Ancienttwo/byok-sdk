@@ -11,7 +11,8 @@
  * Module scope holds no mutable state. Postgres is the only memory between invocations: no `LISTEN`, no timer that outlives
  * an invocation, no session map. The Host passes run from the alarm of `HostClock`, one Durable Object for the deployment,
  * every `H_CLOCK_MS`, and from `POST /host/passes`; both call the same function. The alarm holds no Host state, only its next
- * time. A notification (an SDK observer call after a device commit, or a product command) only schedules one more pass with
+ * time; a cron trigger only arms the clock, once a minute, and runs no pass. A notification (an SDK observer call after a
+ * device commit, or a product command) only schedules one more pass with
  * `ctx.waitUntil`, and that pass rereads Postgres. Losing a notification or an alarm delays work until the next pass;
  * repeating either is harmless.
  *
@@ -36,6 +37,7 @@ import { readHostScopes, sha256Hex, type HostScope } from './host-scopes';
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void }
 interface DurableObjectState { readonly storage: { getAlarm(): Promise<number | null>; setAlarm(scheduledTime: number): Promise<void> } }
 interface DurableObjectNamespace { idFromName(name: string): unknown; get(id: unknown): { fetch(input: string): Promise<Response> } }
+interface ScheduledController { readonly cron: string }
 
 export interface Env {
   readonly BYOK_PG: { readonly connectionString: string };
@@ -262,8 +264,8 @@ async function runPasses(env: Env): Promise<PassReport> {
 
 /**
  * The deployment's clock (H4 of #794 D3): one Durable Object whose alarm runs the Host passes every `H_CLOCK_MS`, so routine
- * slots and due steps run on time without a cron trigger. It keeps no Host state: each alarm pass rereads Postgres, so an
- * alarm that is lost, delivered twice, or cut off by a lost instance is made up by the next one.
+ * slots and due steps run inside the K8 late bound, which a once-a-minute cron cannot meet. It keeps no Host state: each alarm
+ * pass rereads Postgres, so an alarm that is lost, delivered twice, or cut off by a lost instance is made up by the next one.
  */
 export class HostClock {
   readonly #state: DurableObjectState;
@@ -274,7 +276,10 @@ export class HostClock {
     this.#env = env;
   }
 
-  /** Arms a clock that has no alarm, to fire at once. Every Worker invocation asks, so a new deployment starts its clock. */
+  /**
+   * Arms a clock that has no alarm, to fire at once. The cron trigger asks once a minute, so a new deployment starts its
+   * clock, and a clock whose alarm is gone starts again, within a minute and with no request.
+   */
   async fetch(): Promise<Response> {
     const storage = this.#state.storage;
     if (await storage.getAlarm() !== null) return Response.json({ armed: false });
@@ -283,8 +288,10 @@ export class HostClock {
   }
 
   /**
-   * Sets the next alarm first, so a pass that throws or an instance lost mid-pass still leaves one set. It never throws:
-   * a thrown alarm would also start the platform's own retries, next to the fixed interval.
+   * Sets the next alarm first, so a pass that throws or an instance lost mid-pass still leaves one set. A failed pass is
+   * logged, not thrown: a thrown alarm would also start the platform's own retries, next to the fixed interval. It throws
+   * only on an invalid `H_CLOCK_MS` (before the next alarm is set) or `H_FAULT`: invalid config fails closed, and the cron
+   * arms the clock again each minute.
    */
   async alarm(): Promise<void> {
     await this.#state.storage.setAlarm(Date.now() + clockMs(this.#env));
@@ -299,11 +306,11 @@ export class HostClock {
   }
 }
 
-/** Asks the clock to arm itself, after this invocation's own work. */
-function armClock(env: Env, ctx: ExecutionContext): void {
+/** Asks the clock to arm itself. Returns whether it had no alarm. */
+async function armClock(env: Env): Promise<boolean> {
   const clock = env.HOST_CLOCK.get(env.HOST_CLOCK.idFromName(CLOCK_NAME));
-  ctx.waitUntil(clock.fetch('https://host-clock/arm').then(response => response.text())
-    .catch(error => { console.error('[h-clock] arm failed', error); }));
+  const { armed } = await (await clock.fetch('https://host-clock/arm')).json() as { armed: boolean };
+  return armed;
 }
 
 async function bearer(request: Request): Promise<string | undefined> {
@@ -383,7 +390,6 @@ async function serveDevice(request: Request, env: Env, ctx: ExecutionContext): P
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    armClock(env, ctx);
     const route = new URL(request.url).pathname;
     try {
       if (route.startsWith('/byok/')) return await serveDevice(request, env, ctx);
@@ -392,5 +398,9 @@ export default {
       return Response.json({ error: text(error) }, { status: 500 });
     }
     return new Response('routes: /byok/* (device surface); POST /host/input /host/passes /host/pairing-code /host/board-item\n', { status: 404 });
+  },
+  /** The cron trigger arms the clock and runs no pass. */
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    console.log(`[h-clock] cron ${controller.cron} armed ${await armClock(env)}`);
   },
 };

@@ -24,12 +24,13 @@ board SSE stream keeps querying after `cloud.fetch` returns its headers.
 Module scope holds no mutable state. Postgres is the only memory between invocations: no `LISTEN`, no timer that
 outlives an invocation, no session map.
 
-- The Host passes run from the clock and from `POST /host/passes`. Both call the same function. There is no cron trigger.
+- The Host passes run from the clock and from `POST /host/passes`. Both call the same function. The cron trigger runs no
+  pass: it only arms the clock.
 - The clock is one Durable Object for the deployment, `HostClock` (`idFromName('deployment')`). Its `alarm()` first sets
   the next alarm `H_CLOCK_MS` later (10 s by default, 15 s at most), then runs one pass in its own composition, and never
   throws. The alarm keeps no Host state, only its next time, so a lost, repeated or cut-off alarm is made up by the next
-  one, which rereads Postgres. Every Worker invocation asks the clock, after its own work, to arm itself if it has no
-  alarm, so a new deployment starts its clock on its first request.
+  one, which rereads Postgres. The cron trigger (`* * * * *`) asks the clock to arm itself if it has no alarm, so a new
+  deployment starts its clock, and a clock whose alarm is gone starts again, within a minute and with no request.
 - A notification only schedules one more pass with `ctx.waitUntil`. A notification is an SDK observer call after a device
   commit, or a product command. That pass rereads Postgres. A lost notification delays work to the next pass, and a
   repeated one changes nothing.
@@ -49,6 +50,7 @@ from Node before `wrangler dev` starts. The Worker never migrates.
 | `POST /host/pairing-code` | operator bearer | `cloud.createPairingCode` for a provisioned scope |
 | `POST /host/board-item` | operator bearer | `cloud.createBoardItem`: the Host's own board write |
 | `HostClock` alarm | Cloudflare | the same pass as `/host/passes`, every `H_CLOCK_MS` |
+| cron `* * * * *` | Cloudflare | arms `HostClock` if it has no alarm; runs no pass |
 
 ### Configuration
 
@@ -85,9 +87,11 @@ a failure (`src/ci.test.ts` pins that step). Each run has its own Postgres role 
 
 - `worker.test.ts`: one owner Turn through the command entry, a pass, a device process and a pass, with one offer row and
   one command record; a request with no valid owner session writes nothing; a board row written after
-  `/byok/board/stream` returned its headers arrives as `event: board` (the stream keeps its pools); the first request
-  starts the clock, and its alarm runs passes. `body-lifetime.test.ts` checks the release on body end, error and cancel.
-- `clock.test.ts` (H4): with notifications dropped and no `/host/passes` call, so only an alarm pass can do the work. A
+  `/byok/board/stream` returned its headers arrives as `event: board` (the stream keeps its pools); requests do not
+  arm the clock, the cron trigger does, and then its alarm runs passes. `body-lifetime.test.ts` checks the release on
+  body end, error and cancel.
+- `clock.test.ts` (H4): each test arms the clock once through the cron route, then reaches its subject with notifications
+  dropped and no `/host/passes` call, so only an alarm pass can do the work. A
   routine slot fires as `scheduled` within the K8 late bound and its Turn is offered; a duplicate alarm (two passes at
   once) records one occurrence and makes one offer; an instance lost mid-alarm after the routine Turn's submit leaves one
   occurrence and one offer, and the next instance's stored alarm reads the offer back; a coalesced input batch seals with
@@ -145,9 +149,9 @@ Proposed text for lane K8 or the coordinator to apply. The status stays OPEN:
   syncs a pass, so about 10 of each a second at the default 10 s. A slot or due step is late by up to `H_CLOCK_MS` plus
   the time of the pass before it. At 10x scopes the pass grows (the `host_scope` read below, the due scan, one sync per
   due scope), so lateness climbs toward the K8 late bound (60 s), past which a slot fires as `catch_up` with an
-  occurrence key that differs from L's. Every Worker invocation also asks the one clock object to arm itself, so the
-  request rate of the whole deployment reaches one Durable Object. The next step is an alarm per scope: each scope's
-  object sets its alarm to its own next due time and passes only its own rows.
+  occurrence key that differs from L's. Requests never reach the clock object: only the alarm and the once-a-minute
+  arm-only cron do, so an alarm that is gone is replaced within a minute, with or without traffic. The next step is an
+  alarm per scope: each scope's object sets its alarm to its own next due time and passes only its own rows.
 - H's `host(scope)` is synchronous, so each invocation reads every `host_scope` row before it runs. At 10x scopes that
   read grows with them; a per-pass read of only the due scopes needs an H change.
 - The H bundle pulls `node:sqlite` and `node:http` through the K4 index. workerd loads them today, and H never calls

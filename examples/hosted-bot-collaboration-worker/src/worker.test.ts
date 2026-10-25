@@ -60,7 +60,15 @@ describe.skipIf(!RUN)('H Host on local workerd (#794 D3)', () => {
     }
   });
 
-  it('starts the clock on the first request, and its alarm runs the Host passes with no cron trigger', async () => {
+  it('the cron trigger only arms the clock, and the clock\'s alarm runs the Host passes', async () => {
+    // Requests do not arm it: the tests above sent many, and no alarm pass ran.
+    expect(alarmReports(h.worker)).toEqual([]);
+    await h.worker.armClock();
+    expect(h.worker.lines('[h-clock] cron')).toEqual([expect.stringContaining('armed true')]);
     await until(async () => alarmReports(h.worker).length >= 2 || undefined);
+    // The clock has its alarm, so a second cron arms nothing.
+    await h.worker.armClock();
+    await until(async () => h.worker.lines('[h-clock] cron').length === 2 || undefined);
+    expect(h.worker.lines('[h-clock] cron')[1]).toContain('armed false');
   });
 });

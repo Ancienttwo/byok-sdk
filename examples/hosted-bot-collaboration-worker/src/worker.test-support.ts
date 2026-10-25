@@ -148,6 +148,8 @@ export interface WorkerInstance {
   /** The instance is destroyed: SIGKILL to wrangler and workerd, with no grace and no cleanup in the Worker. */
   kill(): Promise<void>;
   passes(): Promise<PassReport>;
+  /** Fires the cron trigger through wrangler's `--test-scheduled` route: it arms the clock and runs no pass. */
+  armClock(): Promise<void>;
   admin<T>(route: string, body: unknown): Promise<T>;
   input(token: string, botId: string, key: string, request: string): Promise<Response>;
 }
@@ -177,7 +179,7 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
     ...options.vars };
   let output = '';
   const child = spawn(process.execPath, [wranglerEntry(), 'dev', '--config', WRANGLER_CONFIG, '--port', String(port), '--ip', '127.0.0.1', '--persist-to', persist,
-    '--show-interactive-dev-session=false', ...Object.entries(vars).flatMap(([name, value]) => ['--var', `${name}:${value}`])],
+    '--test-scheduled', '--show-interactive-dev-session=false', ...Object.entries(vars).flatMap(([name, value]) => ['--var', `${name}:${value}`])],
   { cwd: EXAMPLE_DIR, detached: true, env: { ...process.env, CI: 'true', WRANGLER_SEND_METRICS: 'false', NO_COLOR: '1',
     CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_BYOK_PG: substrate.connectionString } });
   const waiters = new Set<() => void>();
@@ -213,6 +215,11 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
       return await response.json() as T;
     },
     passes: () => instance.admin<PassReport>('/host/passes', {}),
+    async armClock() {
+      const response = await fetch(`${base}/__scheduled?cron=*+*+*+*+*`);
+      if (!response.ok) throw new Error(`/__scheduled: HTTP ${response.status} ${await response.text()}`);
+      await instance.waitForOutput('[h-clock] cron');
+    },
     input: (token, botId, key, request) => fetch(`${base}/host/input`, authorized({ botId, key, request }, token)),
   };
   for (const deadline = Date.now() + 120_000; ;) {
