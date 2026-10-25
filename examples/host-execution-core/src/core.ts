@@ -3,7 +3,7 @@ import type { ByokServer, ByokServerEvent, CreateByokServerOptions, DueWake } fr
 import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
 import { HostLedger, OutboxFullError, type ApplicationRows } from './ledger';
 import { canonical, hash, isSealed, project, taskId, time, validateJson, type HostJobHandler, type HostOccurrenceRun, type Attempt,
-  type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type Terminal } from './model';
+  type Intent, type LedgerIntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type Terminal } from './model';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 import { applyPlan, auditCalendarError, auditIgnoredWake, deferSchedule, nextWake, occurrenceRun, promote, recordOccurrence, routineCommands, scheduleNext,
   switchVersion, versionSwitchDue, WAKE_HORIZON_MS, type RoutineCommands } from './routines';
@@ -184,7 +184,7 @@ export class HostExecutionCore {
       return decision;
     });
   };
-  async enqueue(input: IntentInput): Promise<Intent> {
+  async enqueue(input: LedgerIntentInput): Promise<Intent> {
     this.assertOpen();
     this.ledger.transaction(state => enqueue(state, this.ledger.tenant, input));
     await this.drain();

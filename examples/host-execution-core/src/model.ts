@@ -33,11 +33,13 @@ export const DEFAULT_RETRY: RetryPolicy = { maxAttempts: 3, delaysMs: [300_000, 
 export interface IntentInput {
   key: string;
   source: 'user' | 'bot' | 'routine';
-  execution: IntentExecution;
+  execution: ExecutionTemplate;
   waitUntil: number;
   retry?: RetryPolicy;
 }
-export interface Intent extends IntentInput {
+/** An intent as the ledger takes it: a routine occurrence may also run a sealed template. */
+export type LedgerIntentInput = Omit<IntentInput, 'execution'> & { execution: IntentExecution };
+export interface Intent extends LedgerIntentInput {
   id: string; agent: string; sequence: number; retry: RetryPolicy;
   phase: 'queued' | 'inflight' | 'backoff' | 'memory_blocked' | 'settled';
   memoryBlocked?: { resume: 'queued' | 'backoff'; reason: string };
@@ -143,7 +145,7 @@ export function validateJson(value: unknown, ancestors = new Set<object>()): ass
   }
   ancestors.delete(value);
 }
-export function validateInput(input: IntentInput): void {
+export function validateInput(input: LedgerIntentInput): void {
   if (!input.key.trim() || !['user', 'bot', 'routine'].includes(input.source)) throw new Error('Invalid intent identity');
   time(input.waitUntil);
   const { execution } = input;
