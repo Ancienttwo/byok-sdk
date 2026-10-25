@@ -1,7 +1,7 @@
 import { hash, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { stateOf, type CollaborationState } from './model';
 import { CommitConflict } from './rules/commit';
-import { DEVICE_NOT_BOUND, DEVICE_SWITCHING, type DeviceRefusal } from './rules/commands';
+import { DEVICE_NOT_BOUND, DEVICE_SWITCHING, type SyncRefusal } from './rules/commands';
 
 // The L side of the §4.1 owner switch (#957). L is the old owner: it freezes one device, drains it, and then either hands it
 // to H or resumes it. The record is per device, as §4.1 records the mode, and one L Host can own Bots on two devices.
@@ -47,7 +47,7 @@ export function deviceTopology(state: CollaborationState, deviceId: string): Dev
   return row ? { ...row } : { mode: 'L', revision: 0 };
 }
 /** The sync refusal of the device (#956 `deviceRefusal`), or undefined when L may create work on it. */
-export function deviceRefusal(state: CollaborationState, deviceId: string): Extract<DeviceRefusal, 'mode' | 'switching'> | undefined {
+export function deviceRefusal(state: CollaborationState, deviceId: string): Extract<SyncRefusal, 'mode' | 'switching'> | undefined {
   const row = recordOf(state, deviceId);
   return row?.mode === 'H' ? 'mode' : row?.switching ? 'switching' : undefined;
 }

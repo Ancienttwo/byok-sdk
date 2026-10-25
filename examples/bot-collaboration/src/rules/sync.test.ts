@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEVICE_NOT_BOUND, DEVICE_SWITCHING, syncTurn, type DeviceRefusal, type FreezeExecution, type SyncFacts, type SyncOptions, type SyncState } from './sync';
+import { DEVICE_NOT_BOUND, DEVICE_SWITCHING, syncTurn, type DeviceRefusal, type FreezeExecution, type SyncFacts, type SyncOptions, type SyncRefusal,
+  type SyncState } from './sync';
 import type { Json, Rejection, Turn } from './turn';
 import type { IntentFact } from './delegation';
 import { outcomeOffer, SYSTEM_PROMPT, systemPrompt, type CheckedOffer } from './schema';
@@ -105,7 +106,7 @@ describe('syncTurn', () => {
 
   it('#957: holds a switching device under its own projection id, so each hold code keeps one body across holds', () => {
     const s = state(), row = turn(s, { status: 'queued' }), out = published();
-    let refusal: DeviceRefusal | undefined = 'unbound';
+    let refusal: SyncRefusal | undefined = 'unbound';
     const refused: SyncFacts = { ...facts(), deviceRefusal: () => refusal };
     syncTurn(s, row, refused, OPTIONS, out.publish);
     // Released, but its profile is not ready, so it neither freezes nor stays held.

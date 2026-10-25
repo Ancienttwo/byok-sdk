@@ -41,8 +41,10 @@ export interface SyncState<E extends FreezeExecution> extends ContextState, BotH
 export const DEVICE_NOT_BOUND = 'device_not_bound';
 /** The code of a Turn that the sync holds because its Bot's device is frozen for an owner switch (#957, §4.1). */
 export const DEVICE_SWITCHING = 'device_switching';
-/** Why a Host refuses a Bot's device: never bound, revoked, bound to another mode, or frozen for an owner switch. */
-export type DeviceRefusal = 'unbound' | 'revoked' | 'mode' | 'switching';
+/** Why a Host refuses a Bot's device binding: never bound, revoked, or bound to another mode. */
+export type DeviceRefusal = 'unbound' | 'revoked' | 'mode';
+/** A sync refusal: a binding refusal, or `switching` while the device is frozen for an owner switch (#957). */
+export type SyncRefusal = DeviceRefusal | 'switching';
 /** The hold code of each refusal, and the projection id prefix of each hold code. */
 const HOLD_CODE = { unbound: DEVICE_NOT_BOUND, revoked: DEVICE_NOT_BOUND, mode: DEVICE_NOT_BOUND, switching: DEVICE_SWITCHING } as const;
 const HOLD_PROJECTION = { [DEVICE_NOT_BOUND]: 'held', [DEVICE_SWITCHING]: 'held-switching' } as const;
@@ -61,7 +63,7 @@ export interface SyncFacts extends Pick<IntentFacts, 'intent'> {
    * The Host's binding check of the device of the Bot's current execution template, which a freeze would use (#956).
    * A refusal holds that Bot's Turns that have no intent, and the rest of the scope syncs. Absent: no check.
    */
-  deviceRefusal?(botId: string): DeviceRefusal | undefined;
+  deviceRefusal?(botId: string): SyncRefusal | undefined;
 }
 export interface SyncOptions<R extends ContextRoutine> {
   now: number;
