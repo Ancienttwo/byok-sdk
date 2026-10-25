@@ -1,5 +1,5 @@
 import { testScratchRoot } from "./fixtures/execution-scratch";
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -65,7 +65,7 @@ describe('client public surface', () => {
     // The key is imported exactly once, inside the mint function.
     expect(code.match(/importPrivateKeyPem\(/g)).toHaveLength(1);
     // And no other daemon module reaches for the private key on this path.
-    const createDaemon = readFileSync(new URL('../daemon/create-daemon.ts', import.meta.url), 'utf8');
+    const createDaemon = readCreateDaemonSources();
     expect(createDaemon).not.toContain('importPrivateKeyPem');
     expect(createDaemon).not.toContain('devicePrivateKeyPem');
   });
@@ -143,7 +143,7 @@ describe('client public surface', () => {
       expect(indexNoComments, `index.ts must not surface ${forbidden}`).not.toContain(forbidden);
     }
 
-    const createDaemon = readFileSync(new URL('../daemon/create-daemon.ts', import.meta.url), 'utf8');
+    const createDaemon = readCreateDaemonSources();
     for (const iface of ['DaemonConfig', 'DaemonOverrides']) {
       const body = extractInterfaceBody(createDaemon, iface);
       expect(body, `${iface} must expose no store-mutex override`).not.toMatch(/mutexPort|storeMutexPort|mutexEndpoint/);
@@ -156,6 +156,16 @@ describe('client public surface', () => {
     );
   });
 });
+
+/** `create-daemon.ts`, then the daemon composition's modules in `create-daemon/` (#926), sorted and joined. */
+function readCreateDaemonSources(): string {
+  const moduleDir = new URL('../daemon/create-daemon/', import.meta.url);
+  const modules = readdirSync(moduleDir).filter((name) => name.endsWith('.ts') && !name.endsWith('.d.ts') && !name.includes('.test.')).sort();
+  return [
+    readFileSync(new URL('../daemon/create-daemon.ts', import.meta.url), 'utf8'),
+    ...modules.map((name) => readFileSync(new URL(name, moduleDir), 'utf8')),
+  ].join('\n');
+}
 
 /** Extracts the brace-balanced body of `export interface <name> { ... }` from source. */
 function extractInterfaceBody(source: string, name: string): string {

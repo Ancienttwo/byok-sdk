@@ -1,36 +1,17 @@
-import { resultReplyFailureReason, type ResultReplyFailure } from './result-reply-failure';
+import { type ResultReplyFailure } from './result-reply-failure';
 import type { ActivityIngress } from '@byok-sdk/protocol';
-import { AgentMessageDraftPublisher } from './agent-message-draft';
-import type { ScratchRoot, ExecutionScratch } from './retention/scratch';
-import { observePreparedMemory, type PreparedAgentMemoryState } from './prepared-agent-memory';
-import { InputPreparationRequestError } from './input-preparation-service';
-import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
-import type { PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
-import { awaitAdmission } from './admission-wait';
-import { terminalIdentity } from './terminal-identity';
-import { abortedStartOf, startOwnedRuntime } from './runtime-start';
+import type { ScratchRoot } from './retention/scratch';
 import { StartupOwnership } from './startup-ownership';
-import { DEFAULT_ARTIFACT_LIMITS, readArtifactBytes } from './artifact-read';
-import { observeRuntimeDetection } from '../runtime-detection';
-import { randomBytes, randomUUID } from 'node:crypto';
-import { promises as fs, constants as fsConstants } from 'node:fs';
-import type { FileHandle } from 'node:fs/promises';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   createEnvelope,
-  RuntimeIdSchema,
-  PreparedAgentMemoryModeSchema,
-  TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
-  TERMINAL_INFERENCE_USAGE_MAX_TOKENS,
-  type AgentEvent,
   type AgentMessageContentType,
   type AgentMessageDispositionPayload,
   type AgentMessageEgressRequirement,
   type AgentEgressPolicy,
-  type BlobRef,
   type Envelope,
   type SealedDeclineCode,
-  type PreparedAgentMemoryMode,
   type RuntimeId,
   type TerminalInferenceUsage,
   type TerminalPreparedObservation,
@@ -45,64 +26,36 @@ import {
   type TaskOfferForAgentWithEgressFreshPayload,
   type TaskOfferPreparedPayload,
   type TaskOfferWithToolsetsPayload,
-  type InputPreparationOfferBinding,
   requiredReceiverCapabilities,
-  SEALED_SPLIT_TABLE,
-  validateResultOutcome,
 } from '@byok-sdk/protocol';
 import {
-  SteerUnsupportedError,
-  freezeRuntimeAdapterDescriptor,
-  sealRuntimeOperationManifest,
   type McpStdioServerConfig,
   type McpToolsetConfig,
   type RuntimeAdapter,
-  type RuntimeAdapterDescriptor,
-  type RuntimeOperationStartInput,
-  type RuntimePreparedLaunchV1,
-  type Session,
 } from '../types';
-import {
-  admitPreparedOffer,
-  type PreparedOfferServerProjection,
-} from './prepared-offer-admission';
 import type { InputPreparationStore } from './input-preparation-store';
 import {
-  inputPreparationDigest,
   type InputPreparationRuntimeIdentityV1,
   type InputPreparationBindingV1,
 } from '../input-preparation';
 import {
-  AgentHomeBusyError,
-  AgentHomeReaderRunMissingError,
-  AgentHomeResolutionError,
   AgentHomeManager,
-  type AgentHomeExecutionBinding,
   type AgentRef,
-  validateAgentRef,
 } from '../agent-home';
 import {
-  compareAgentHomeMemory,
-  digestAgentHomeMemory,
-  isReaderRunName,
   type AgentHomeAccessMode,
-  type AgentHomeMemoryDigest,
 } from '../agent-home-readers';
 import {
   AgentSessionHandoffStore,
   type AgentTerminalCause,
 } from './agent-session-handoff-store';
 import {
-  RuntimeDisposalFailure,
-  isRuntimeDisposalFailure,
-  isRuntimeStartupDisposalFailure,
-  projectRuntimeBoundaryFailure,
   type RuntimeDisposalStage,
 } from '../runtime-failure';
-import { ApprovalNotFoundError, type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
+import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { SealedTasks } from './sealed-task';
-import { DAEMON_TASK_FAILURE, taskFailureField } from './task-failure';
+import { taskFailureField } from './task-failure';
 import type {
   AgentResultDescribeParams,
   AgentResultDescribeResult,
@@ -110,56 +63,47 @@ import type {
   AgentResultSubmitResult,
   TaskQueueWatermark,
 } from './control-protocol';
-import { DEFAULT_MAX_INLINE_EVENT_BYTES, spillOversizedEvent } from './event-spill';
-import { ExecutionRecordAccumulator, type ExecutionRecord } from './execution-record';
-import { buildRuntimeEnv } from './environment';
-import { toRuntimeInfoCapabilities } from './runtime-capabilities';
+import { DEFAULT_MAX_INLINE_EVENT_BYTES } from './event-spill';
+import { type ExecutionRecord } from './execution-record';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import {
-  ProgressBatcher,
-  ProgressEventTooLargeError,
   type ProgressBatcherOptions,
 } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
-import type { GitWorkspaceManager, GitWorkspaceLease, GitWorkspaceObservation, GitWorkspaceError, GitErrorCategory } from './git-workspace';
-import { prependGitWorkspaceGuidance } from './git-workspace';
-import type { GitWorkspaceStore, GitWorkspaceLedgerRecord, GitWorkspacePhase } from './git-workspace-store';
+import type { GitWorkspaceManager, GitWorkspaceObservation, GitErrorCategory } from './git-workspace';
+import type { GitWorkspaceStore, GitWorkspacePhase } from './git-workspace-store';
 import type { AgentEgressController } from './agent-egress-controller';
 import { AgentMessageOutbox, type AgentMessageOutboxRecord } from './agent-message-outbox';
+import { AgentResultStore } from './agent-result-store';
 import {
-  AGENT_MEMORY_MCP_SERVER_NAME,
-  AGENT_MESSAGE_MCP_SERVER_NAME,
-  AGENT_RESULT_MCP_SERVER_NAME,
-  AGENT_RESULT_TOOL_NAME,
-  AGENT_RESULT_TOOL_DESCRIPTION,
-} from '../sdk-reserved-mcp';
-import { AgentResultStore, type AgentResultRecord } from './agent-result-store';
-import {
-  McpAuthorityError,
-  MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
-  probeMcpServer,
   type McpToolsProbeOptions,
 } from './mcp-tools-probe';
 import {
-  bindMcpToolsetServerObservation,
   type McpServerObservation,
-  type McpToolsetServerObservation,
 } from '../mcp/observation';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
-import { prependAgentMemoryModeGuidance } from './memory-guidance';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import {
   AgentMemoryService,
-  AgentMemoryError,
   isAgentMemorySecureFilesystemAvailable,
-  snapshotAndProjectAgentMemory,
   type AgentMemoryAuditWarning,
   type AgentMemoryHostedProjection,
   type AgentMemoryTaskContext,
 } from './agent-memory';
-import { openAgentMemoryFilesystemHelper } from './agent-memory-fs-helper';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
-import { MAX_TIMER_DELAY_MS } from '../util/timer-delay';
+import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry } from './task-runner/support';
+import { offerSettlements, trackOffer } from './task-runner/support';
+import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message';
+import { withAgentMessageMcp, withAgentResultMcp, withAgentMemoryMcp, withHostToolsetContext, resolveMcpServers } from './task-runner/mcp-contexts';
+import { activeMemoryContext, runMemoryOperation, quiesceAndSnapshotAgentMemory, bindAgentMemoryFilesystem } from './task-runner/agent-memory';
+import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, interruptBounded, teardownActiveTask, shutdownTask, armMaxDurationTimer, handleCancel, evictPendingCancelled, handleSteer } from './task-runner/lifecycle';
+import { admitOffer, reserveOfferHome, admitOfferLimits, handleSealedOffer, declineSealedOffer } from './task-runner/offer-admission';
+import { prepareOfferRuntime, pickAdapter } from './task-runner/offer-runtime';
+import { requestApproval, dispatchApproval, clearPendingApproval, handleApprove, handleReject } from './task-runner/approvals';
+import { terminalInferenceUsagePayload, preparedObservationPayload, agentTerminalPayload, resolveStagedResult, observeGit, persistAgentTerminalEvidence, measureReaderMemoryChange, retryAgentTerminalEvidence, reportAgentTerminalEvidenceFailure } from './task-runner/terminal-evidence';
+import { fail, failClaimedAgent, homeFinalizations, finishOnce, publishExecutionRecord, settleSemanticTerminal, releasePreparationPin } from './task-runner/finish';
+import { pump, publishSuccessfulCompletion, sendArtifact, reportArtifactError } from './task-runner/event-pump';
+import { handleOffer } from './task-runner/offer';
 
 /**
  * M4 Phase 3: default wait for `requestApproval` (see its own doc comment)
@@ -197,10 +141,7 @@ export const DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS = 5_000;
 
 /** Bounded retry before terminal publication degrades observably. */
 export const AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS = 3;
-const AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS = 20;
 
-/** Bound best-effort Git observation so terminal protocol outcomes cannot wait forever on repository I/O. */
-const GIT_OBSERVATION_TIMEOUT_MS = 5_000;
 
 /**
  * M4 Phase 4 (fold-in from the P3 gate): bound on how many `requestApproval`
@@ -236,8 +177,6 @@ export class NoPendingApprovalError extends Error {
   }
 }
 
-/** Inline artifact payloads must stay under this many UTF-8 bytes — mirrors the frozen `TaskArtifactPayloadSchema.inline` limit in `packages/protocol` (see docs/protocol.md §7). Anything bigger goes through the blob client. */
-const MAX_INLINE_ARTIFACT_BYTES = 64 * 1024;
 
 /**
  * M3-B: cap for both `finishedTaskIds` and `pendingCancelled` below (each
@@ -321,58 +260,7 @@ export const PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX = 'context_overflow';
  */
 export const PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX = 'usage_unavailable';
 
-/**
- * What one prepared Execution has observed about its provider calls so far.
- *
- * Seeded at admission from the durable record — the frozen artifact's request
- * digest and the context window of the model D was compiled for — and advanced
- * by every runtime `usage` event, each of which is ONE provider call's
- * observation on the prepared lane. `initialPromptTokens` is the first call's
- * prompt, the only call whose request is D; `maxPromptTokens` is the largest
- * prompt of any call.
- */
-interface PreparedExecutionObservation {
-  readonly requestDigest: string;
-  readonly contextWindow: number;
-  calls: number;
-  initialPromptTokens?: number;
-  maxPromptTokens?: number;
-}
 
-/**
- * Advance one prepared observation by one provider call and classify it.
- *
- * Returns the typed failure reason when the call ends the Execution —
- * {@link PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX} for a call with no positive,
- * representable prompt count, {@link PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX}
- * for a prompt at or above the context window — and `undefined` when it does
- * not. Numbers only.
- */
-function observePreparedCall(
-  observation: PreparedExecutionObservation,
-  event: Extract<AgentEvent, { type: 'usage' }>,
-): string | undefined {
-  // Context-only observations are telemetry, not an unreadable provider call.
-  // A bare usage event still represents an unreadable call and fails closed.
-  if (event.contextSource !== undefined &&
-      event.inputTokens === undefined && event.cachedInputTokens === undefined &&
-      event.outputTokens === undefined && event.reasoningTokens === undefined &&
-      event.totalTokens === undefined) return undefined;
-  observation.calls += 1;
-  const prompt = event.inputTokens;
-  if (prompt === undefined || !Number.isSafeInteger(prompt) || prompt <= 0 || prompt > TERMINAL_INFERENCE_USAGE_MAX_TOKENS) {
-    return `${PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX}: provider call ${observation.calls} of this prepared Execution`
-      + ' reported no positive, representable prompt token count';
-  }
-  if (observation.initialPromptTokens === undefined) observation.initialPromptTokens = prompt;
-  observation.maxPromptTokens = Math.max(observation.maxPromptTokens ?? 0, prompt);
-  if (prompt >= observation.contextWindow) {
-    return `${PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX}: provider call ${observation.calls} of this prepared Execution`
-      + ` reported ${prompt} prompt tokens, at or above the ${observation.contextWindow}-token context window`
-      + ' of the model its request was prepared for';
-  }
-  return undefined;
-}
 
 
 /**
@@ -715,312 +603,21 @@ export type AdmissionGuardDecision =
   | { readonly admit: true }
   | { readonly admit: false; readonly reason: string; readonly retryable: boolean };
 
-interface ActiveTask {
-  taskId: string;
-  /** Cancels every blob transfer owned by this task before its terminal path runs. */
-  blobAbort: AbortController;
-  /** True for offers carrying egressPolicy, including prepared execution. */
-  egressEnabled: boolean;
-  adapter: RuntimeAdapter;
-  session: Session;
-  scratch: ExecutionScratch;
-  /** One consumer; teardown drains its final usage within the existing interrupt deadline. */
-  eventPump?: Promise<void>;
-  workspaceDir: string;
-  agentBinding?: AgentHomeExecutionBinding;
-  agentRef?: AgentRef;
-  agentHandoff?: {
-    sessionRef: string;
-    runtimeId: string;
-    /** Canonical Agent home; the handoff ledger lives under it. */
-    home: string;
-    cwd: string;
-    homeAccess?: 'memory-reader';
-  };
-  /** The task-free projection applied when this Agent Attempt started; see `TerminalAgentHomeProjectionSchema`. */
-  appliedAgentHomeProjection?: TerminalAgentHomeProjection;
-  /**
-   * A `memory-reader` Attempt's memory digest at start; `digest` is
-   * `undefined` when it could not be measured. Absent for a writer.
-   */
-  readerMemoryBaseline?: { readonly digest: AgentHomeMemoryDigest | undefined };
-  /** Measured once, at the first terminal decision; see `TerminalAgentHomeMemoryChangeSchema`. */
-  agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
-  terminalCause?: AgentTerminalCause;
-  terminalReason?: string;
-  agentTerminalPersisted?: boolean;
-  agentTerminalEvidenceFailureReported?: boolean;
-  gitWorkspaceId?: string;
-  gitLease?: GitWorkspaceLease;
-  gitBaseline?: string;
-  batcher: ProgressBatcher;
-  summaryParts: string[];
-  /**
-   * The FINAL text run only: every `progress` text emitted after the last
-   * tool interaction (`tool_use` / `tool_result` / `needs_approval`), which
-   * reset it. `summaryParts` above stays the whole run's concatenation and
-   * remains what `task.complete.summary` carries; this narrower slice is
-   * what the DAEMON-authored required Agent message publishes, so the
-   * user-visible reply is the model's closing answer rather than its
-   * intermediate narration ("let me read X first…") glued in front of it.
-   *
-   * The same slice is `task.complete.finalMessage`, so the host reads the same closing reply
-   * the daemon would publish. An adapter whose descriptor sets
-   * `progressEventsAreMessages` (Codex, Claude) also resets it at each `progress`
-   * event that `Session.progressStartsMessage` does not mark as a
-   * continuation, so the slice is that runtime's last whole message.
-   *
-   * `turn_end` deliberately does not reset (it is what reads this), and
-   * neither does `usage`: bundled adapters emit terminal usage IMMEDIATELY
-   * BEFORE `turn_end` (see `claude/events.ts` — "Ordering is load-bearing"),
-   * so resetting on it would discard every closing reply. `artifact` does
-   * not reset either — it is a content side effect, not a tool interaction
-   * the model narrates around.
-   */
-  finalTextParts: string[];
-  /**
-   * M4 Phase 3: the `ApprovalRegistry` id of the single out-of-band approval
-   * currently DISPATCHED (registered + `task.await_approval` sent) for this
-   * task, if any — set by `requestApproval`/`dispatchApproval`, cleared once
-   * resolved (by a real decision or by the timeout). `undefined` whenever
-   * nothing is dispatched right now — including while `approvalQueue` below
-   * is non-empty but hasn't been dispatched yet. See `requestApproval` and
-   * `RuntimeOperationStartInput.approvalChannel.resolve`'s doc comments.
-   */
-  pendingApprovalId?: string;
-  /**
-   * M4 Phase 4 (fold-in from the P3 gate): FIFO queue of `requestApproval`
-   * calls for this SAME task that arrived while another one was already
-   * dispatched (`pendingApprovalId` set) — see `requestApproval`'s own doc
-   * comment for the full concurrency bug this fixes (claude's parallel tool
-   * use can call it more than once for one task before the first resolves).
-   * Bounded by {@link MAX_PENDING_APPROVALS_PER_TASK}.
-   */
-  approvalQueue: QueuedApprovalRequest[];
-  /**
-   * M5 batch-3 (workstream 2): the wall-clock timer enforcing
-   * `payload.limits.maxDurationMs` for this task, if the offer set one — see
-   * `armMaxDurationTimer`. `undefined` when no `maxDurationMs` was set.
-   * Cleared unconditionally at the top of `finish()` so every terminal
-   * outcome (success, fail, cancel, or daemon shutdown) leaves no dangling
-   * timer and can never fire a stray fail for a task that already ended a
-   * different way.
-   */
-  maxDurationTimer?: ReturnType<typeof setTimeout>;
-  /**
-   * M5 batch-3 (workstream 2): running total of accumulated agent-event
-   * output bytes counted so far for `DaemonConfig.maxTaskOutputBytes`
-   * enforcement — see `TaskRunner.pump`'s own per-event counting for exactly
-   * what's counted (a serialized-payload-length approximation, not an exact
-   * wire-byte accountant).
-   */
-  outputBytesSoFar: number;
-  artifactBytesSoFar?: number;
-  /** Device monotonic-ish wall-clock anchor taken only after a Session started. */
-  startedAtMs: number;
-  /** Fed by `pump` until the terminal decision; published once by `finishOnce`. */
-  executionRecord: ExecutionRecordAccumulator;
-  executionRecordPublished?: boolean;
-  /**
-   * Last runtime usage observation received before this task's terminal
-   * signal. This is intentionally NOT accumulated: Codex and Claude expose a
-   * terminal turn-level usage object, and adding observations would invent a
-   * cross-runtime accounting meaning this client does not own.
-   */
-  lastUsage?: Extract<AgentEvent, { type: 'usage' }>;
-  /**
-   * Present exactly on a prepared Execution. Unlike `lastUsage` it IS advanced
-   * per event, because on the prepared lane each `usage` event is one provider
-   * call and the observation it feeds is first-call and maximum, not a sum.
-   */
-  prepared?: PreparedExecutionObservation;
-  /** Distinguishes runner-initiated teardown from an unexpected event-stream end. */
-  beingTornDown?: boolean;
-  /** Set before the first disposal await so no racing path can publish a second semantic terminal. */
-  finalizationStarted?: boolean;
-  /** The first terminal decision owns all retries, including pre-publication durability. */
-  semanticTerminal?: {
-    readonly prepare: () => Promise<Envelope>;
-    envelope?: Envelope;
-    attempt?: Promise<boolean>;
-  };
-  /** Shared receipt for concurrent finish/shutdown callers; cleared after a failed attempt so shutdown can retry. */
-  disposalAttempt?: Promise<void>;
-  messageRequirement?: Readonly<AgentMessageEgressRequirement>;
-  messageDraft?: AgentMessageDraftPublisher;
-  terminalProjection?: Readonly<TerminalProjectionSelection>;
-  /** Present exactly for a result-document task: where its `submit_result` outcome is staged. */
-  resultStore?: AgentResultStore;
-  messageOutbox?: AgentMessageOutbox;
-  /** A send attempt may already have entered transport; failure must preserve its admission recovery. */
-  messageSendAttempted?: boolean;
-  messageAccepted?: boolean;
-  resultReplyFailure?: ResultReplyFailure;
-  pendingMessageCompletion?: { readonly finalOutput: string; readonly document?: unknown; readonly failureReason?: string };
-  messageRetryTimer?: ReturnType<typeof setTimeout>;
-}
 
-/**
- * One result-document task's `submit_result` binding. The schema and contract
- * are the offer's frozen selection; `store`/`agentRef` are bound once the
- * Agent home is initialized, before the runtime starts.
- */
-interface AgentResultContext {
-  readonly taskId: string;
-  readonly token: string;
-  readonly contract: string;
-  readonly schema: unknown;
-  store?: AgentResultStore;
-  agentRef?: AgentRef;
-}
 
-interface PendingMessageTask {
-  readonly taskId: string;
-  readonly agentRef: AgentRef;
-  readonly requirement: Readonly<AgentMessageEgressRequirement>;
-  readonly outbox: AgentMessageOutbox;
-}
 
-interface ClaimedAgentFailureContext {
-  readonly binding: AgentHomeExecutionBinding;
-  readonly runtimeId: string;
-  readonly sessionRef?: string;
-}
 
-/** One not-yet-dispatched `requestApproval` call waiting its turn — see `ActiveTask.approvalQueue`. */
-interface QueuedApprovalRequest {
-  summary: string;
-  resolve: (result: { approved: boolean; reason?: string }) => void;
-  /**
-   * C1 (cross-model review, P1): forwarded verbatim to `dispatchApproval`
-   * once this request is actually dispatched (`dispatchNextQueuedApproval`)
-   * — see `requestApproval`'s own doc comment for why this exists at all.
-   */
-  onOrigin?: (origin: ApprovalOrigin) => void;
-}
 
-type PickResult =
-  | { ok: true; adapter: RuntimeAdapter; descriptor: RuntimeAdapterDescriptor }
-  | { ok: false; reason: string; retryable: boolean };
 
-/** The closures that handleOffer builds once and gives to its phase methods. */
-interface OfferPhaseContext {
-  readonly taskId: string;
-  readonly decline: (reason: string, retryable: boolean, code?: TaskDeclinePayload['code']) => void;
-  readonly admissionWithdrawn: () => boolean;
-  /** Aborted exactly when `admissionWithdrawn()` would decline: cancel, shutdown, or the startup deadline. */
-  readonly admissionSignal: AbortSignal;
-  readonly releaseReservation: () => void;
-  readonly reserveHome: (reservationKey: string) => void;
-}
 
-/** The front-phase values that `prepareOfferRuntime` reads. */
-interface OfferRuntimeInput {
-  readonly acquireScratch: () => Promise<ExecutionScratch>;
-  readonly payload: AcceptedOfferPayload;
-  readonly agentRef: AgentRef | undefined;
-  readonly preparation: InputPreparationOfferBinding | undefined;
-  readonly preparedMemorySelected: boolean;
-  /** The memory mode of an ordinary Agent offer; the prepared lane does not read it. */
-  readonly ordinaryMemoryMode: PreparedAgentMemoryMode;
-  /** Whether an ordinary Agent offer binds the memory MCP, decided once at offer time. */
-  readonly ordinaryMemoryMcp: boolean;
-  readonly messageRequirement: Readonly<AgentMessageEgressRequirement> | undefined;
-  readonly terminalProjection: Readonly<TerminalProjectionSelection> | undefined;
-  readonly readerAttempt: boolean;
-  readonly requiredToolsets: readonly string[] | undefined;
-  readonly resolvedMcp: ReturnType<TaskRunner['resolveMcpServers']> | undefined;
-  readonly blobAbort: AbortController;
-}
 
-/**
- * Resolves once every attempt settled or `signal` aborted, whichever is first.
- * Never rejects and leaves no listener behind. See `reserveOfferHome` (#476).
- */
-async function settledOrWithdrawn(attempts: readonly Promise<unknown>[], signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return;
-  let onAbort!: () => void;
-  const withdrawn = new Promise<void>((resolve) => { onAbort = resolve; });
-  signal.addEventListener('abort', onAbort, { once: true });
-  try {
-    await Promise.race([Promise.allSettled(attempts), withdrawn]);
-  } finally {
-    signal.removeEventListener('abort', onAbort);
-  }
-}
 
-/** The closing reply (`ActiveTask.finalTextParts`), or `undefined` when it holds only whitespace. */
-function closingReply(active: ActiveTask): string | undefined {
-  const text = active.finalTextParts.join('');
-  return text.trim() === '' ? undefined : text;
-}
 
-/** The execution record's terminal for the semantic terminal envelope this runner sent. */
-function executionTerminalOf(envelope: Envelope | undefined): ExecutionRecord['terminal'] | undefined {
-  switch (envelope?.type) {
-    case 'task.complete': return 'complete';
-    case 'task.fail': return 'failed';
-    case 'task.cancelled': return 'cancelled';
-    default: return undefined;
-  }
-}
 
-/**
- * M5 (claimed runtime): `RuntimeAdapter.descriptor.id` is a bare `string` (`../types.ts`)
- * — deliberately wider than the frozen wire `RuntimeIdSchema`, so a custom,
- * embedder-supplied adapter for a runtime this protocol doesn't know about
- * can still be plugged in. `task.claim.runtime` (`TaskClaimPayloadSchema`)
- * is narrower (`'pi' | 'claude' | 'codex'`), so the picked adapter's id must
- * be checked before it can be sent on the wire — mirrors `create-daemon.ts`'s
- * own `isRuntimeId` gate for `conn.hello.runtimes` reporting. An adapter
- * whose id isn't one of these is simply omitted from `task.claim.runtime`
- * (never sent as an invalid enum value), the same fail-closed-by-omission
- * shape `detectRuntimes` already applies.
- */
-function isKnownRuntimeId(id: string): id is RuntimeId {
-  return RuntimeIdSchema.safeParse(id).success;
-}
 
-/** Preserve a runtime/device number only when the terminal wire contract can represent it exactly. */
-function terminalUsageNumber(value: number | undefined, maximum: number): number | undefined {
-  return value !== undefined && Number.isSafeInteger(value) && value >= 0 && value <= maximum
-    ? value
-    : undefined;
-}
 
-/**
- * M5 batch-3 (workstream 1): default auto-select priority order — claude,
- * then codex, then pi LAST. Product decision: pi is this SDK's FALLBACK
- * runtime (tried only once nothing better is available/capable), not the
- * default it silently was before this change (see `ALL_RUNTIME_IDS`'s own
- * doc comment, `create-daemon.ts`, for how the old accidental default arose).
- * Overridable per-daemon via `DaemonConfig.runtimePreference` /
- * `TaskRunnerDeps.runtimePreference`; this is only the fallback when that's
- * left unset.
- */
-const DEFAULT_RUNTIME_PREFERENCE: readonly RuntimeId[] = ['claude', 'codex', 'pi'];
 
-/**
- * Reorders `candidates` by `preference` (lower index tried first), appending
- * every candidate whose id isn't named in `preference` at all — e.g. a
- * product-supplied adapter for a runtime id outside the frozen
- * `RuntimeIdSchema` enum (`RuntimeAdapter.descriptor.id` is deliberately a plain
- * `string`, wider than `RuntimeId` — see `types.ts`'s own doc comment) —
- * after every ranked one, in their original relative order. Safe because
- * `Array.prototype.sort` has been a stable sort since ES2019: two candidates
- * that tie on rank (both unranked, or the same explicit rank) never get
- * reordered relative to each other. This guarantees a candidate already
- * present in `deps.adapters` is never silently dropped from auto-select just
- * because `preference` doesn't happen to mention its id.
- */
-function orderByPreference(candidates: readonly RuntimeAdapter[], preference: readonly string[]): RuntimeAdapter[] {
-  const rank = new Map(preference.map((id, index) => [id, index]));
-  return [...candidates].sort((a, b) => (rank.get(a.descriptor.id) ?? preference.length) - (rank.get(b.descriptor.id) ?? preference.length));
-}
 
-function adapterSupportsMcpToolsets(descriptor: RuntimeAdapterDescriptor): boolean {
-  return descriptor.capabilities.mcpToolsets === true;
-}
 
 type AcceptedOfferPayload =
   | TaskOfferPayload
@@ -1030,300 +627,21 @@ type AcceptedOfferPayload =
   | TaskOfferForAgentWithEgressFreshPayload
   | TaskOfferPreparedPayload;
 
-function withoutRequiredToolsets(payload: AcceptedOfferPayload): TaskOfferPayload {
-  const { requiredToolsets, egressPolicy, messageEgress, preparation, ...offer } = payload as TaskOfferWithToolsetsPayload
-    & Partial<TaskOfferForAgentWithEgressPayload>
-    & Partial<TaskOfferForAgentWithEgressFreshPayload>
-    & Partial<TaskOfferPreparedPayload>;
-  void requiredToolsets;
-  void egressPolicy;
-  void messageEgress;
-  // Deliberately stripped before the adapter sees the offer: `prepare()`
-  // admits a RUNTIME, and a preparation reference is not a runtime input. The
-  // prepared lane carries it to `start()` as its own start variant instead.
-  void preparation;
-  return offer as TaskOfferPayload;
-}
 
-/**
- * The preparation this offer names, or `undefined` for every ordinary offer.
- *
- * The presence of this value is what selects the prepared lane. It is read from
- * the parsed payload rather than from the envelope type so one branch reads one
- * fact: `task.offer_prepared` is the only message whose schema carries it.
- */
-function offeredPreparation(payload: AcceptedOfferPayload): InputPreparationOfferBinding | undefined {
-  return 'preparation' in payload ? payload.preparation : undefined;
-}
 
-/**
- * The instruction an ordinary offer carries.
- *
- * A prepared offer has none, and that is not an omission to default around: the
- * user request is already inside the frozen envelope its record retained, and a
- * prepared run that resolved a separate instruction would have two answers to
- * what it is about to send.
- */
-function offeredInstruction(payload: AcceptedOfferPayload): TaskOfferPayload['instruction'] | undefined {
-  return 'instruction' in payload ? payload.instruction : undefined;
-}
 
-function sameEgressPolicy(left: Readonly<AgentEgressPolicy>, right: Readonly<AgentEgressPolicy>): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
 
-function offeredAgentRef(payload: AcceptedOfferPayload): AgentRef | undefined {
-  if (!Object.prototype.hasOwnProperty.call(payload, 'agentRef')) return undefined;
-  return validateAgentRef((payload as unknown as { agentRef?: unknown }).agentRef);
-}
 
-/**
- * The fresh egress offer deliberately has no sessionRef. Preserve that absence
- * through admission and manifest sealing so only the legacy egress message
- * can take the exact-resume path.
- */
-function offeredSessionRef(payload: AcceptedOfferPayload): string | undefined {
-  if (!Object.prototype.hasOwnProperty.call(payload, 'sessionRef')) return undefined;
-  const value = (payload as unknown as { sessionRef?: unknown }).sessionRef;
-  return typeof value === 'string' ? value : undefined;
-}
 
-/** An Agent offer without `homeAccess` is a writer. */
-function offeredHomeAccess(payload: AcceptedOfferPayload): AgentHomeAccessMode {
-  return 'homeAccess' in payload && payload.homeAccess === 'memory-reader' ? 'memory-reader' : 'memory-writer';
-}
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
-/**
- * An absolute path in quotes, as Node filesystem errors name it
- * (`open '/path'`). The matching quote ends it, so every segment may hold
- * spaces, the last one too.
- */
-const QUOTED_LOCAL_PATH = /(['"`])(?:\/|[A-Za-z]:[\\/]|\\\\)(?:(?!\1)[^\r\n])*\1/g;
 
-/**
- * The absolute command of a Node spawn error (`spawn /path ENOENT`). Node
- * does not quote it, so the error code after it ends it, and every segment
- * may hold spaces, the last one too.
- */
-const SPAWN_LOCAL_PATH = /(?<=(?:^|\s)spawn(?:Sync)? )(?:\/|[A-Za-z]:[\\/]|\\\\)[^\r\n]*?(?= (?:E[A-Z0-9]+|UNKNOWN)(?!\w))/g;
 
-/**
- * An absolute POSIX, drive-letter or UNC path that starts a token. Inner
- * segments may hold spaces (`Application Support/`); the last segment ends at
- * the first space, so the words after the path stay.
- */
-const ABSOLUTE_LOCAL_PATH = /(?<=^|[\s'"`(=])(?:\/|[A-Za-z]:[\\/]|\\\\)(?:[^\s'"`,;)\\/]+(?: +[^\s'"`,;)\\/]+)*[\\/])*[^\s'"`,;)\\/]*/g;
 
-/**
- * Agent-home and session-handoff errors, and the filesystem errors under
- * them, name local paths: the canonical home, lease markers, run directories.
- * So do the filesystem errors of the preparation store, the Agent message
- * outbox, the artifact open and a runtime adapter's detect/prepare, and an
- * MCP server probe's spawn error and quoted stderr.
- * `task.decline`, `task.fail` and `task.progress` leave this device, so a
- * reason that forwards one keeps the error's wording and drops each absolute
- * path.
- */
-function outboundErrorMessage(err: unknown): string {
-  return errorMessage(err)
-    .replace(QUOTED_LOCAL_PATH, '$1<local path>$1')
-    .replace(SPAWN_LOCAL_PATH, '<local path>')
-    .replace(ABSOLUTE_LOCAL_PATH, '<local path>');
-}
 
-/**
- * M5 batch-3 (workstream 2): races `fn()` against `timeoutMs`, resolving
- * `true` once `fn()` itself settles (success OR rejection — a rejection is
- * swallowed here, the same best-effort contract every teardown call in this
- * file already applies to `session.interrupt()`/`session.close()`) and
- * `false` if `timeoutMs` elapses first with `fn()` still pending. Unlike a
- * plain `Promise.race`, the caller can tell WHICH one won —
- * `teardownActiveTask` needs that to decide whether to escalate to a hard
- * kill.
- */
-function raceSettleFirst(fn: () => Promise<void>, timeoutMs: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        resolve(false);
-      }
-    }, timeoutMs);
-    timer.unref?.();
-    void (async () => {
-      try {
-        await fn();
-      } catch {
-        // best-effort — the caller only cares whether this settled in time
-      }
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        resolve(true);
-      }
-    })();
-  });
-}
 
-/**
- * M5 batch-3 (workstream 2): approximate output size of one normalized
- * `AgentEvent`, for `DaemonConfig.maxTaskOutputBytes` enforcement (`pump`
- * below) — the UTF-8 byte length of `JSON.stringify(event)`. This is a
- * serialized-payload-length APPROXIMATION of the event's eventual wire cost,
- * not an exact accountant: `task.progress` batching/envelope framing
- * overhead is not included, and for an `artifact` event this counts only the
- * event's own `{name, contentType}` shape — the artifact's actual file bytes
- * are read/uploaded separately by `sendArtifact` and are NOT counted here
- * (capping that would need a different hook; out of scope for this cap).
- * Good enough to catch a genuinely runaway task without needing an exact
- * wire-byte accountant. Never throws: a shape `JSON.stringify` can't handle
- * (it never should for a well-formed `AgentEvent`) counts as 0 bytes rather
- * than crashing the task loop over an accounting nicety.
- */
-function estimateEventBytes(event: AgentEvent): number {
-  try {
-    return Buffer.byteLength(JSON.stringify(event), 'utf8');
-  } catch {
-    return 0;
-  }
-}
 
-type OpenArtifactResult = { ok: true; handle: FileHandle } | { ok: false; reason: string };
 
-/**
- * Finding F7/N5 (artifact path traversal + TOCTOU symlink race): resolve an
- * artifact `name` against `workspaceDir`, then **open it and verify the
- * open file descriptor** — never a path-based check followed by a separate
- * re-open by pathname.
- *
- * The prior version (`resolveArtifactPath`) realpath'd the candidate to
- * verify containment and returned a *path string*; `sendArtifact` then
- * reopened that path via `fs.readFile(path)`. That's a classic
- * check-then-use race: between the realpath check and the later open, the
- * final path component can be swapped for a symlink pointing outside the
- * workspace (a compromised/buggy runtime, or something written by the very
- * agent turn that reported this artifact name), and the reopen would
- * silently follow it. Confirmed pre-fix: swapping the artifact's final
- * component for a symlink to `/etc/hosts` after the containment check
- * passed but before the read caused the daemon to read and upload
- * `/etc/hosts` as the task artifact.
- *
- * Fix: the LEXICAL pathname containment check below (`path.resolve` +
- * string-prefix) is only a fast, well-messaged early reject (defense in
- * depth — rejects absolute `name`s and `../` traversal before touching the
- * filesystem at all). It is followed by a SECOND, filesystem-resolving
- * containment check (finding P4/Codex): `fs.realpath` the full candidate
- * path and re-check containment against the realpath'd workspace root. This
- * exists because the lexical check alone cannot catch an INTERMEDIATE path
- * component that's actually a symlink pointing outside the workspace — e.g.
- * `name = "sublink/secret.txt"` where `<workspace>/sublink` is a symlink to
- * an outside directory: `<workspace>/sublink/secret.txt` lexically starts
- * with `<workspace>/` regardless of what `sublink` points at, and
- * `O_NOFOLLOW` (below) only guards the *final* path component per POSIX
- * `open(2)` semantics — it has nothing to reject when the final component,
- * once the intermediate symlink is followed, is itself a perfectly ordinary
- * regular file. Resolving the realpath of the WHOLE candidate and checking
- * containment against it catches this: the resolved path lands outside the
- * workspace root regardless of which component in the middle was the
- * symlink. After both containment checks pass, the actual TOCTOU security
- * boundary is still `O_NOFOLLOW` on the `open()` call itself, which fails
- * atomically (`ELOOP`) if the FINAL path component is a symlink — there is
- * no window between "check" and "use" for that component specifically,
- * just an open that refuses to follow one — plus an `fstat` on the
- * resulting *file descriptor* (not the path) to confirm it's a regular
- * file. `sendArtifact` reads from that same handle and closes it when done;
- * the bytes it hashes/inlines/uploads are the exact bytes that passed every
- * check, not a re-read of whatever exists at the path afterward.
- *
- * Residual (documented, not fixed here): a *static* intermediate symlink
- * (created ahead of time, no race needed) is now closed by the realpath
- * containment check above. The only gap left is a genuine RACE: an
- * intermediate directory component swapped for a symlink AFTER the
- * candidate's realpath call above resolves but BEFORE the subsequent
- * `open()`. Closing that fully needs Linux's `openat2`/`RESOLVE_BENEATH`
- * (resolve-and-open as one atomic, symlink-constrained operation), which
- * Node's stdlib doesn't expose, and isn't implemented cross-platform here.
- *
- * Windows (M3 TODO): the `O_NOFOLLOW` guard is POSIX-only. On Windows
- * `fs.constants.O_NOFOLLOW` does not exist, so the `?? 0` below no-ops the
- * flag there and the final-component symlink guarantee does NOT hold: a
- * symlinked final component is opened and followed like any other file
- * (reparse-point/symlink handling for that platform isn't implemented yet).
- * It is deliberately NOT papered over with a pre-open `lstat` rejection —
- * `lstat`-then-`open` re-opens the exact check-then-use TOCTOU window
- * `O_NOFOLLOW` exists to close atomically, which would be racy security
- * theater, not a guard. The lexical + realpath containment checks above
- * still run on Windows and remain its floor of protection, but they are
- * defense-in-depth, not an equivalent; until a real Windows-side mechanism
- * exists, workspace confinement there stays a convention, not an enforced
- * boundary (see `docs/security.md`'s "Workspace confinement is a
- * convention, not a sandbox"). For the same reason the symlink/TOCTOU
- * rejection tests in `__tests__/daemon-blob.test.ts` are skipIf-gated to
- * win32 — on Windows they would pass vacuously (a rejected open for the
- * wrong reason, e.g. `ENOENT` on a nonexistent target) and green CI there
- * must never be mistaken for the guard having held.
- */
-async function openArtifact(workspaceDir: string, name: string): Promise<OpenArtifactResult> {
-  // Workspace root is daemon-created (see `resolveWorkspaceDir`) and
-  // trusted — realpath'd exactly once, not derived from the untrusted
-  // `name`, so this step has no TOCTOU exposure of its own.
-  const realWorkspaceDir = await fs.realpath(workspaceDir).catch(() => workspaceDir);
-  const candidate = path.resolve(realWorkspaceDir, name);
-
-  const prefix = realWorkspaceDir.endsWith(path.sep) ? realWorkspaceDir : realWorkspaceDir + path.sep;
-  if (candidate !== realWorkspaceDir && !candidate.startsWith(prefix)) {
-    return { ok: false, reason: `artifact name "${name}" resolves outside the task workspace — rejected` };
-  }
-
-  // Finding P4/Codex: the check above is LEXICAL and does not catch an
-  // intermediate path component that's actually a symlink pointing outside
-  // the workspace (`O_NOFOLLOW` below only guards the final component).
-  // Resolve the full candidate's real path and re-check containment against
-  // it — this fails closed whenever any intermediate component resolves
-  // outside the workspace root, even though the final component (once
-  // resolved) is an ordinary regular file. A realpath failure here (ENOENT,
-  // a broken intermediate link, etc.) falls through to the `open()` below
-  // unchanged, so that call produces the natural, consistent "could not be
-  // opened" error instead of a differently-worded one — it doesn't grant
-  // any additional access, since `open()` would fail for the same
-  // underlying reason (and still can't follow a symlinked final component
-  // either way).
-  let realCandidate = candidate;
-  try {
-    realCandidate = await fs.realpath(candidate);
-  } catch {
-    // handled by the open() call below
-  }
-  if (realCandidate !== realWorkspaceDir && !realCandidate.startsWith(prefix)) {
-    return { ok: false, reason: `artifact name "${name}" resolves outside the task workspace — rejected` };
-  }
-
-  const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
-  let handle: FileHandle;
-  try {
-    handle = await fs.open(candidate, fsConstants.O_RDONLY | O_NOFOLLOW);
-  } catch (err) {
-    return { ok: false, reason: `artifact "${name}" could not be opened: ${outboundErrorMessage(err)}` };
-  }
-
-  try {
-    const st = await handle.stat();
-    if (!st.isFile()) {
-      await handle.close().catch(() => {});
-      return { ok: false, reason: `artifact "${name}" is not a regular file` };
-    }
-  } catch (err) {
-    await handle.close().catch(() => {});
-    return { ok: false, reason: `artifact "${name}" could not be verified: ${errorMessage(err)}` };
-  }
-
-  return { ok: true, handle };
-}
 
 /**
  * The SDK-owned environment variable that carries one host toolset server's
@@ -1337,22 +655,7 @@ async function openArtifact(workspaceDir: string, name: string): Promise<OpenArt
  */
 export const HOST_TOOLSET_CONTEXT_ENV = 'BYOK_HOST_TOOLSET_CONTEXT';
 
-/** 32 bytes of CSPRNG, base64url unpadded — one per `(task, server)`, never reused, never derived. */
-function freshHostToolsetContextToken(): string {
-  return randomBytes(32).toString('base64url');
-}
 
-/** One `(task, host toolset server)` nonce and everything the task signer may claim about it. */
-interface HostToolsetContextEntry {
-  readonly taskId: string;
-  /** The FROZEN offer's Agent identity (§8.1) — captured at injection, never re-read from a profile later. */
-  readonly agentRef: AgentRef;
-  /** The logical toolset id from the frozen offer's `requiredToolsets` — the wire's `toolset` field (§8.2 AR-2). */
-  readonly toolsetId: string;
-  /** The MCP server the nonce was injected into; the `(task, server)` half of the binding §8.1 requires. */
-  readonly serverName: string;
-  state: 'active' | 'revoked';
-}
 
 /**
  * What the daemon's `task_assertion.issue` handler learns about one token.
@@ -1368,27 +671,8 @@ export type HostToolsetContextLookup =
   | { readonly status: 'revoked' }
   | { readonly status: 'unknown' };
 
-const NO_SEALED_SPILL: Pick<BlobResolver, 'uploadArtifact'> = {
-  uploadArtifact: async () => { throw new Error('a sealed task stores no plaintext spill blob'); },
-};
 
-// Keep internal lifecycle bookkeeping out of the exported class declaration.
-const offerSettlements = new WeakMap<TaskRunner, Set<Promise<void>>>();
-async function trackOffer(runner: TaskRunner, operation: Promise<void>): Promise<void> {
-  let offers = offerSettlements.get(runner);
-  if (!offers) { offers = new Set(); offerSettlements.set(runner, offers); }
-  offers.add(operation);
-  try { await operation; }
-  finally { offers.delete(operation); }
-}
 
-function observeTerminalUsage(active: ActiveTask, event: Extract<AgentEvent, { type: 'usage' }>): void {
-  if (event.contextSource === undefined || event.inputTokens !== undefined ||
-      event.cachedInputTokens !== undefined || event.outputTokens !== undefined ||
-      event.reasoningTokens !== undefined || event.totalTokens !== undefined) {
-    active.lastUsage = event;
-  }
-}
 
 /**
  * Per-connection task orchestration: offer -> (decline | prepare -> seal ->
@@ -1643,49 +927,12 @@ export class TaskRunner {
   }
 
   /** Authenticated control-socket entry used only by the SDK-owned task MCP helper. */
-  async publishAgentMessage(input: {
+  publishAgentMessage(input: {
     readonly contextToken: string;
     readonly contentType: AgentMessageContentType;
     readonly body: string;
   }): Promise<{ messageId: string; state: 'staged' | 'pending' }> {
-    const taskId = this.messageContextByToken.get(input.contextToken);
-    if (taskId === undefined || this.messageContextByTask.get(taskId) !== input.contextToken) {
-      throw new Error('invalid or expired Agent message task context');
-    }
-    const pending = this.pendingMessageTasks.get(taskId);
-    const active = this.tasks.get(taskId);
-    const context = pending ?? (active?.messageRequirement && active.agentRef && active.messageOutbox
-      ? { taskId, agentRef: active.agentRef, requirement: active.messageRequirement, outbox: active.messageOutbox }
-      : undefined);
-    if (context === undefined) throw new Error('task has no active required Agent message contract');
-    const isCurrent = () => {
-      if (this.messageContextByToken.get(input.contextToken) !== taskId
-        || this.messageContextByTask.get(taskId) !== input.contextToken || this.pendingCancelled.has(taskId)) return false;
-      const current = this.tasks.get(taskId);
-      return current === undefined
-        ? active === undefined && this.pendingMessageTasks.get(taskId) === pending
-        : (active === undefined || current === active) && current.messageOutbox === context.outbox && this.canPublishAgentMessage(current);
-    };
-    if (!isCurrent()) throw new Error('invalid or expired Agent message task context');
-    const record = await context.outbox.appendDraft({
-      taskId,
-      tenantId: this.deps.tenantId!,
-      agentRef: context.agentRef,
-      requirement: context.requirement,
-      contentType: input.contentType,
-      body: input.body,
-      maxPendingEvents: 64,
-      maxPendingBytes: 4 * 1024 * 1024,
-    });
-    if (!isCurrent()) throw new Error('invalid or expired Agent message task context');
-    const current = this.tasks.get(taskId);
-    if (current === undefined) return { messageId: record.messageId, state: 'staged' };
-    const activated = await this.activateAgentMessage(context.outbox, taskId, current.session.sessionRef, isCurrent,
-      () => current.messageSendAttempted === true);
-    if (!isCurrent()) throw new Error('invalid or expired Agent message task context');
-    if (activated === undefined) throw new Error('Agent message draft disappeared before activation');
-    this.sendAgentMessageRecord(context.outbox, activated);
-    return { messageId: activated.messageId, state: 'pending' };
+    return publishAgentMessage.call(this, input);
   }
 
   /**
@@ -1695,15 +942,7 @@ export class TaskRunner {
    * before the runtime starts) until `turn_end` or teardown revokes it.
    */
   describeAgentResult(input: AgentResultDescribeParams): AgentResultDescribeResult {
-    const context = this.resultContextByToken.get(input.contextToken);
-    if (context === undefined || this.resultContextByTask.get(context.taskId) !== context || this.pendingCancelled.has(context.taskId)) {
-      throw new Error('invalid or expired Agent result task context');
-    }
-    return {
-      name: AGENT_RESULT_TOOL_NAME,
-      description: AGENT_RESULT_TOOL_DESCRIPTION,
-      inputSchema: context.schema as Record<string, unknown>,
-    };
+    return describeAgentResult.call(this, input);
   }
 
   /**
@@ -1712,45 +951,8 @@ export class TaskRunner {
    * canonical snapshot durably before answering. `staged` is the only ack;
    * delivery happens at `turn_end`. A rejected outcome stores nothing.
    */
-  async submitAgentResult(input: AgentResultSubmitParams): Promise<AgentResultSubmitResult> {
-    const context = this.resultContextByToken.get(input.contextToken);
-    if (context === undefined || this.resultContextByTask.get(context.taskId) !== context) {
-      throw new Error('invalid or expired Agent result task context');
-    }
-    const { taskId } = context;
-    const active = this.tasks.get(taskId);
-    const isCurrent = (): boolean => {
-      if (this.resultContextByToken.get(input.contextToken) !== context
-        || this.resultContextByTask.get(taskId) !== context || this.pendingCancelled.has(taskId)) return false;
-      const current = this.tasks.get(taskId);
-      return current === undefined ? active === undefined : (active === undefined || current === active) && this.canPublishAgentMessage(current);
-    };
-    if (!isCurrent()) throw new Error('invalid or expired Agent result task context');
-    const { store, agentRef } = context;
-    const tenantId = this.deps.tenantId;
-    if (store === undefined || agentRef === undefined || tenantId === undefined) {
-      throw new Error('the Agent result store is not bound for this task');
-    }
-    const check = validateResultOutcome(context.schema, input.outcome);
-    if (!check.ok) {
-      return {
-        state: 'rejected',
-        reason: check.reason,
-        issues: check.issues.map((issue) => ({ pointer: issue.pointer, keyword: issue.keyword, message: issue.message })),
-        truncated: check.truncated,
-      };
-    }
-    const record = await store.stage({
-      taskId,
-      tenantId,
-      agentRef,
-      contract: context.contract,
-      schema: context.schema,
-      outcome: check.canonical,
-      byteCount: check.bytes,
-    });
-    if (!isCurrent()) throw new Error('invalid or expired Agent result task context');
-    return { state: 'staged', receiptId: record.receiptId };
+  submitAgentResult(input: AgentResultSubmitParams): Promise<AgentResultSubmitResult> {
+    return submitAgentResult.call(this, input);
   }
 
   /** Authenticated control-socket entry used only by the SDK-owned memory MCP helper. */
@@ -1764,37 +966,12 @@ export class TaskRunner {
   }
 
   /** Restore activated, unaccepted message drafts before transport admission on daemon restart. */
-  async recoverAgentMessageOutboxes(agentsRoot: string, resultFailureTasks: ReadonlyMap<string, { agentRef: AgentRef; contract: string }> = new Map(), isCancelled?: (taskId: string) => Promise<boolean>): Promise<void> {
-    if (this.deps.tenantId === undefined) throw new Error('Agent message recovery requires authenticated tenant enrollment');
-    for (const outbox of await AgentMessageOutbox.recover(agentsRoot, this.deps.tenantId)) {
-      this.messageOutboxesByHome.set(outbox.homeDir, Promise.resolve(outbox));
-      for (let record of outbox.records()) {
-        if (await isCancelled?.(record.taskId)) { await outbox.revoke(record.taskId); continue; }
-        const binding = resultFailureTasks.get(record.taskId);
-        if (binding !== undefined && (record.agentRef.agentId !== binding.agentRef.agentId
-          || record.agentRef.profileRevision !== binding.agentRef.profileRevision || record.contract !== binding.contract)) {
-          throw new Error('recovered required reply does not match its durable offer');
-        }
-        if (record.sessionRef === undefined && record.recoverySessionRef !== undefined && resultFailureTasks.has(record.taskId)) {
-          record = await outbox.activate(record.taskId, record.recoverySessionRef) ?? record;
-        }
-        if (record.sessionRef === undefined && !resultFailureTasks.has(record.taskId)) continue;
-        const existing = this.recoveredMessageOutboxes.get(record.taskId);
-        if (existing !== undefined && existing !== outbox) throw new Error(`multiple Agent message outboxes claim task ${record.taskId}`);
-        this.recoveredMessageOutboxes.set(record.taskId, outbox);
-      }
-    }
+  recoverAgentMessageOutboxes(agentsRoot: string, resultFailureTasks?: ReadonlyMap<string, { agentRef: AgentRef; contract: string }>, isCancelled?: (taskId: string) => Promise<boolean>): Promise<void> {
+    return recoverAgentMessageOutboxes.call(this, agentsRoot, resultFailureTasks, isCancelled);
   }
 
   private agentMessageOutbox(homeDir: string): Promise<AgentMessageOutbox> {
-    const existing = this.messageOutboxesByHome.get(homeDir);
-    if (existing !== undefined) return existing;
-    const opened = AgentMessageOutbox.open(homeDir);
-    this.messageOutboxesByHome.set(homeDir, opened);
-    void opened.catch(() => {
-      if (this.messageOutboxesByHome.get(homeDir) === opened) this.messageOutboxesByHome.delete(homeDir);
-    });
-    return opened;
+    return agentMessageOutbox.call(this, homeDir);
   }
 
   /** A recovery terminal must not close first-message admission before this durable draft has a disposition. */
@@ -1804,14 +981,8 @@ export class TaskRunner {
       .some((record) => record.taskId === taskId && record.sessionRef !== undefined) === true;
   }
 
-  async cancelRecoveredAgentMessage(taskId: string, persist: () => Promise<void>): Promise<void> {
-    this.cancelledRecoveredMessages.add(taskId);
-    const timer = this.recoveredMessageRetryTimers.get(taskId);
-    if (timer !== undefined) clearTimeout(timer);
-    this.recoveredMessageRetryTimers.delete(taskId);
-    await persist();
-    await this.recoveredMessageOutboxes.get(taskId)?.revoke(taskId);
-    this.recoveredMessageOutboxes.delete(taskId);
+  cancelRecoveredAgentMessage(taskId: string, persist: () => Promise<void>): Promise<void> {
+    return cancelRecoveredAgentMessage.call(this, taskId, persist);
   }
 
   recoveredAgentMessageState(taskId: string): 'pending' | 'held' | 'refused' | 'missing' {
@@ -1831,118 +1002,24 @@ export class TaskRunner {
   }
 
   /** All authors and startup use the same queue-time and post-I/O authority check. */
-  private async activateAgentMessage(
+  private activateAgentMessage(
     outbox: AgentMessageOutbox, taskId: string, sessionRef: string, isCurrent: () => boolean,
-    wasSendAttempted: () => boolean = () => false,
+    wasSendAttempted?: () => boolean,
   ): Promise<AgentMessageOutboxRecord | undefined> {
-    if (!isCurrent()) return undefined;
-    const record = await outbox.activate(taskId, sessionRef, isCurrent);
-    if (!isCurrent()) {
-      if (!wasSendAttempted()) await outbox.revoke(taskId);
-      return undefined;
-    }
-    return record;
+    return activateAgentMessage.call(this, outbox, taskId, sessionRef, isCurrent, wasSendAttempted);
   }
 
   private sendAgentMessageRecord(outbox: AgentMessageOutbox, record: AgentMessageOutboxRecord): void {
-    const active = this.tasks.get(record.taskId);
-    const authorized = active === undefined
-      ? !this.cancelledRecoveredMessages.has(record.taskId) && this.recoveredMessageOutboxes.get(record.taskId) === outbox
-      : active.messageOutbox === outbox && this.canPublishAgentMessage(active);
-    if (!authorized || record.sessionRef === undefined
-      || !outbox.retryableRecords().some(pending => pending.messageId === record.messageId)) return;
-    if (active !== undefined) {
-      active.messageDraft?.finalize(record.body);
-      active.messageDraft?.stop();
-      active.messageSendAttempted = true;
-    }
-    const envelope = this.agentMessageEnvelopes.get(record) ?? createEnvelope('agent.message.publish', outbox.publishPayload(record), {
-      taskId: record.taskId,
-      sessionRef: record.sessionRef,
-    });
-    this.agentMessageEnvelopes.set(record, envelope);
-    this.deps.send(envelope);
-    if (active?.messageOutbox === outbox) {
-      if (active.messageRetryTimer !== undefined) clearTimeout(active.messageRetryTimer);
-      active.messageRetryTimer = setTimeout(() => {
-        active.messageRetryTimer = undefined;
-        if (this.tasks.get(record.taskId) !== active) return;
-        const pending = outbox.get(record.taskId);
-        if (pending !== undefined) this.sendAgentMessageRecord(outbox, pending);
-      }, 1_000);
-      active.messageRetryTimer.unref?.();
-      return;
-    }
-    if (this.recoveredMessageOutboxes.get(record.taskId) === outbox) {
-      const prior = this.recoveredMessageRetryTimers.get(record.taskId);
-      if (prior !== undefined) clearTimeout(prior);
-      const timer = setTimeout(() => {
-        this.recoveredMessageRetryTimers.delete(record.taskId);
-        const pending = outbox.get(record.taskId);
-        if (pending !== undefined && this.recoveredMessageOutboxes.get(record.taskId) === outbox) {
-          this.sendAgentMessageRecord(outbox, pending);
-        }
-      }, 1_000);
-      timer.unref?.();
-      this.recoveredMessageRetryTimers.set(record.taskId, timer);
-    }
+    return sendAgentMessageRecord.call(this, outbox, record);
   }
 
-  private async handleAgentMessageDisposition(taskId: string, disposition: AgentMessageDispositionPayload): Promise<void> {
-    const active = this.tasks.get(taskId);
-    const outbox = active?.messageOutbox ?? this.recoveredMessageOutboxes.get(taskId);
-    if (outbox === undefined) return;
-    const outcome = await outbox.applyDisposition(taskId, disposition, () => this.deps.recordAgentMessageAccepted?.(taskId) ?? Promise.resolve());
-    if (active === undefined) {
-      if (outcome === 'accepted' || outcome === 'held' || outcome === 'refused') {
-        const timer = this.recoveredMessageRetryTimers.get(taskId);
-        if (timer !== undefined) clearTimeout(timer);
-        this.recoveredMessageRetryTimers.delete(taskId);
-      }
-      if (outcome === 'accepted') this.recoveredMessageOutboxes.delete(taskId);
-      return;
-    }
-    // Disposition persistence may race cancellation and disposal. Never create
-    // a new terminal for an execution that finished while its receipt was written.
-    if (this.tasks.get(taskId) !== active) return;
-    if (outcome === 'held') {
-      if (active.messageRetryTimer !== undefined) clearTimeout(active.messageRetryTimer);
-      active.messageRetryTimer = undefined;
-      return;
-    }
-    if (outcome === 'refused') {
-      if (active.messageRetryTimer !== undefined) clearTimeout(active.messageRetryTimer);
-      active.messageRetryTimer = undefined;
-      this.revokeAgentMessageContext(taskId);
-      active.pendingMessageCompletion = undefined;
-      await this.fail(taskId, 'required Agent message was refused', false);
-      return;
-    }
-    if (outcome !== 'accepted') return;
-    if (active.messageRetryTimer !== undefined) {
-      clearTimeout(active.messageRetryTimer);
-      active.messageRetryTimer = undefined;
-    }
-    active.messageAccepted = true;
-    this.revokeAgentMessageContext(taskId);
-    if (active.pendingMessageCompletion !== undefined) {
-      const completion = active.pendingMessageCompletion;
-      active.pendingMessageCompletion = undefined;
-      if (completion.failureReason !== undefined) await this.fail(taskId, completion.failureReason, false);
-      else await this.publishSuccessfulCompletion(active, completion.finalOutput, completion.document);
-    }
+  private handleAgentMessageDisposition(taskId: string, disposition: AgentMessageDispositionPayload): Promise<void> {
+    return handleAgentMessageDisposition.call(this, taskId, disposition);
   }
 
   /** M4 Phase 2: stop claiming any FUTURE `task.offer` — see `stoppingOffers`'s own doc comment. Idempotent. */
   stopAcceptingOffers(): void {
-    this.stoppingOffers = true;
-    // Contract §8.2(1): a daemon on its way down signs nothing more for any
-    // task. The control handler's own `shutting_down` gate answers first, so
-    // this is not the refusal a caller sees — it is the registry telling the
-    // truth regardless of which path initiated the shutdown.
-    this.revokeAllHostToolsetContexts();
-    this.startupOwnership.stopRetry();
-    for (const abort of this.inFlightBlobAborts.values()) abort.abort();
+    return stopAcceptingOffers.call(this);
   }
 
   /**
@@ -1991,40 +1068,11 @@ export class TaskRunner {
   }
 
   private closeActiveSession(active: ActiveTask): Promise<void> {
-    // Store the receipt before close runs. A synchronous throw is a rejected
-    // receipt, just like an adapter's asynchronous disposal failure.
-    const attempt = active.disposalAttempt ??= Promise.resolve().then(async () => { await active.session.close(); await active.scratch.release(); });
-    // Interrupt can start close before finalization waits for it. Observe the
-    // rejection here, but retain the receipt until finalization reports it.
-    void attempt.catch(() => undefined);
-    return attempt;
+    return closeActiveSession.call(this, active);
   }
 
-  private async awaitActiveSessionClose(active: ActiveTask): Promise<boolean> {
-    const attempt = this.closeActiveSession(active);
-    try {
-      await attempt;
-    } catch (caught) {
-      if (active.disposalAttempt === attempt) active.disposalAttempt = undefined;
-      const failure = isRuntimeDisposalFailure(caught)
-        ? caught
-        : new RuntimeDisposalFailure({
-            stage: 'quiescence',
-            reason: `${active.adapter.descriptor.id} session.close() returned an untyped disposal failure`,
-          }, { cause: caught });
-      // stderr is a service log: the stage and the reason's size, never its text (issue #395).
-      console.error(
-        `[byok/client] runtime disposal failed for task ${active.taskId}: runtime=${active.adapter.descriptor.id} stage=${failure.stage} reasonBytes=${Buffer.byteLength(failure.message, 'utf8')}`,
-      );
-      this.deps.onRuntimeDisposalFailure?.({
-        taskId: active.taskId,
-        runtimeId: active.adapter.descriptor.id,
-        stage: failure.stage,
-        reason: failure.message,
-      });
-      return false;
-    }
-    return true;
+  private awaitActiveSessionClose(active: ActiveTask): Promise<boolean> {
+    return awaitActiveSessionClose.call(this, active);
   }
 
   /**
@@ -2057,52 +1105,17 @@ export class TaskRunner {
    * a genuine protocol bug, not a benign race — mirrors `pump()`'s own
    * identity-check guard for the same class of race.
    */
-  private async interruptBounded(active: ActiveTask, drainEvents = true): Promise<void> {
-    const timeoutMs = this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
-    const deadline = Date.now() + timeoutMs;
-    await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
-    // Close drains native stdio even if an ACK arrived before final usage, or
-    // the adapter never supplies turn_end. Retain this SAME receipt for finish
-    // to await/retry; a deadline is never proof of disposal.
-    this.closeActiveSession(active);
-    if (drainEvents) {
-      // Drain events already delivered by interrupt before publishing usage.
-      // A pending close/next() is not metering authority and cannot hold the
-      // cancellation ACK hostage. One scheduler turn drains queued microtasks;
-      // a close receipt (including a hung one) is still awaited by finish().
-      if (Date.now() < deadline) {
-        await Promise.race([active.eventPump ?? Promise.resolve(),
-          new Promise<void>(resolve => setImmediate(resolve))]);
-      }
-    }
+  private interruptBounded(active: ActiveTask, drainEvents?: boolean): Promise<void> {
+    return interruptBounded.call(this, active, drainEvents);
   }
 
-  private async teardownActiveTask(active: ActiveTask, reason: string, retryable: boolean, drainEvents = true): Promise<boolean> {
-    return this.settleSemanticTerminal(active, async () => {
-      active.blobAbort.abort();
-      await this.observeGit(active, 'salvage');
-      await this.interruptBounded(active, drainEvents);
-      await this.persistAgentTerminalEvidence(active, 'failed', reason);
-      return createEnvelope('task.fail', {
-        reason,
-        retryable,
-        ...this.failurePayload(DAEMON_TASK_FAILURE),
-        ...this.terminalInferenceUsagePayload(active),
-        ...this.preparedObservationPayload(active),
-        ...this.agentTerminalPayload(active),
-      }, { taskId: active.taskId });
-    });
+  private teardownActiveTask(active: ActiveTask, reason: string, retryable: boolean, drainEvents?: boolean): Promise<boolean> {
+    return teardownActiveTask.call(this, active, reason, retryable, drainEvents);
   }
 
   /** Graceful-shutdown caller of {@link teardownActiveTask} — see `shutdownActiveTasks`'s own doc comment. `retryable: true`: nothing about the task/policy itself was ever at fault, only this device's own availability right now. */
-  private async shutdownTask(active: ActiveTask, reason: string): Promise<void> {
-    const disposed = await this.teardownActiveTask(active, `daemon shutting down: ${reason}`, true);
-    if (!disposed) {
-      throw new RuntimeDisposalFailure({
-        stage: 'quiescence',
-        reason: `${active.adapter.descriptor.id} runtime ownership remains active after shutdown disposal failed`,
-      });
-    }
+  private shutdownTask(active: ActiveTask, reason: string): Promise<void> {
+    return shutdownTask.call(this, active, reason);
   }
 
   /**
@@ -2140,27 +1153,7 @@ export class TaskRunner {
    * `finish()` had a chance to clear it.
    */
   private armMaxDurationTimer(active: ActiveTask, maxDurationMs: number): void {
-    // `maxDurationMs` is server-supplied and unbounded above; a limit beyond
-    // one timer's range (~24.8 days) is armed in capped steps so it still
-    // fires at the real limit instead of immediately. Each step replaces
-    // `active.maxDurationTimer`, so `finish()` always clears the live one.
-    const limitAt = Date.now() + maxDurationMs;
-    const arm = (remainingMs: number): void => {
-      const capped = remainingMs > MAX_TIMER_DELAY_MS;
-      const timer = setTimeout(() => {
-        if (capped) {
-          if (!active.finalizationStarted) arm(Math.max(0, limitAt - Date.now()));
-          return;
-        }
-        void this.failActiveTaskForResourceLimit(
-          active.taskId,
-          `${MAX_DURATION_EXCEEDED_REASON_PREFIX}: task exceeded its configured wall-clock limit of ${maxDurationMs}ms`,
-        );
-      }, capped ? MAX_TIMER_DELAY_MS : remainingMs);
-      timer.unref?.();
-      active.maxDurationTimer = timer;
-    };
-    arm(maxDurationMs);
+    return armMaxDurationTimer.call(this, active, maxDurationMs);
   }
 
   async handleEnvelope(envelope: Envelope): Promise<void> {
@@ -2230,1479 +1223,34 @@ export class TaskRunner {
     }
   }
 
-  private async handleOffer(
+  private handleOffer(
     taskId: string,
     payload: AcceptedOfferPayload,
     strictAgentOffer: boolean,
   ): Promise<void> {
-    // Finding P2, Fix 2c (redelivered offer for an already-active/finished
-    // task): checked first, ahead of everything below — a redelivered
-    // `task.offer` for a taskId this device already claimed/started, or
-    // already finished, can never be "the first time" for it, so there is
-    // nothing left to decide. Without this, the stalled-cursor long-poll
-    // re-pull (see `ConnectionManager.dedupWatermark`) redelivering this
-    // same offer while its first prepared operation is still in flight (or
-    // well after it already succeeded) would start a SECOND adapter session
-    // for the same task, orphaning the first.
-    if (this.tasks.has(taskId) || this.startupOwnership.has(taskId) || this.inFlightOffers.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId)) {
-      return;
-    }
-
-    let agentRef: AgentRef | undefined;
-    if (strictAgentOffer) {
-      try {
-        agentRef = offeredAgentRef(payload);
-      } catch (error) {
-        this.decline(taskId, `invalid AgentRef: ${errorMessage(error)}`, false);
-        return;
-      }
-      if (agentRef === undefined || this.deps.agentHome === undefined || this.deps.agentSessionHandoffs === undefined) {
-        this.decline(
-          taskId,
-          'Agent offer requires the SDK-owned agent-home-contract layout and handoff store',
-          false,
-          agentRef,
-        );
-        return;
-      }
-    }
-    const decline = (reason: string, retryable: boolean, code?: TaskDeclinePayload['code']): void => {
-      this.decline(taskId, reason, retryable, agentRef, code);
-    };
-    const sessionRef = offeredSessionRef(payload);
-    const homeAccess = offeredHomeAccess(payload);
-    const readerAttempt = homeAccess === 'memory-reader';
-    const homeBusyCode = readerAttempt ? 'agent_home_reader_busy' : 'agent_home_writer_busy';
-    // The prepared lane is selected by the presence of this value and nothing
-    // else. Absent for every ordinary offer, so every branch below that does
-    // not mention it behaves exactly as it did before this lane existed.
-    const preparation = offeredPreparation(payload);
-    const offeredMemory = 'agentMemory' in payload ? payload.agentMemory : undefined;
-    if (preparation !== undefined && !PreparedAgentMemoryModeSchema.safeParse(offeredMemory).success) {
-      decline('agent_memory_selection_invalid: prepared offers require an explicit memory selection', false);
-      return;
-    }
-    // The prepared lane refused both `*-if-admitted` values above, so this view is exact there.
-    const agentMemory = offeredMemory === 'read-if-admitted' || offeredMemory === 'read-write-if-admitted'
-      ? undefined
-      : offeredMemory;
-    const preparedMemorySelected = preparation !== undefined && agentMemory !== 'none';
-    // An ordinary Agent offer may select its own memory (#614). Absent keeps the
-    // daemon admission: a writer `read-write`, a reader `read`, and `off` none.
-    // An explicit selection is never changed to a smaller one, except
-    // `read-if-admitted` and `read-write-if-admitted`, which run as `read` and
-    // `read-write` when admitted and else `none` (#815, #833). Admission is read
-    // once here; the runtime binding uses this answer.
-    const ordinaryMemory = preparation === undefined ? offeredMemory : undefined;
-    if ((ordinaryMemory === 'read-write' || ordinaryMemory === 'read-write-if-admitted') && readerAttempt) {
-      decline('agent_memory_selection_invalid: a memory-reader Attempt reads memory only', false);
-      return;
-    }
-    const memoryAdmitted = this.agentMemoryMcpAdmitted();
-    if ((ordinaryMemory === 'read' || ordinaryMemory === 'read-write') && !memoryAdmitted) {
-      decline('agent_memory_unavailable: this daemon does not admit the Agent memory MCP', false);
-      return;
-    }
-    const ordinaryMemoryMode: PreparedAgentMemoryMode = ordinaryMemory === 'read-if-admitted'
-      ? (memoryAdmitted ? 'read' : 'none')
-      : ordinaryMemory === 'read-write-if-admitted'
-        ? (memoryAdmitted ? 'read-write' : 'none')
-        : ordinaryMemory ?? (this.deps.agentMemoryMcp === 'off' ? 'none' : readerAttempt ? 'read' : 'read-write');
-    const ordinaryMemoryMcp = ordinaryMemoryMode !== 'none' && memoryAdmitted;
-    const preparationLane = this.deps.inputPreparationLane;
-    if (preparation !== undefined) {
-      if (preparationLane === undefined) {
-        // By name, not by reinterpretation. A daemon with no input-preparation
-        // section holds no record this reference could mean, and running the
-        // offer some other way would be running an Execution nobody counted.
-        this.decline(taskId, 'preparation_lane_unconfigured: this daemon is not configured for input preparation', false, agentRef);
-        return;
-      }
-      // BEFORE the first read. A restarted daemon reaches this line with a
-      // store that nothing has opened yet, and an unopened store is not an
-      // empty one — `get` refuses rather than answering `undefined`, so this
-      // await is what turns a durable record back into a visible one.
-      //
-      // The redelivery guard above must hold across this await too. Without
-      // the marker here, a second delivery of this offer under a new seq
-      // passes the guard while this one waits, and then acts on a task this
-      // delivery claims, starts or declines. The marker is released on both
-      // exits and added again below, with no await in between.
-      this.inFlightOffers.add(taskId);
-      try {
-        await preparationLane.open();
-      } catch (error) {
-        this.decline(
-          taskId,
-          `preparation_store_unavailable: the preparation store could not be opened: ${outboundErrorMessage(error)}`,
-          false,
-          agentRef,
-        );
-        return;
-      } finally {
-        this.inFlightOffers.delete(taskId);
-      }
-      if (preparationLane.store.get(preparation.reference) === undefined) {
-        this.decline(taskId, 'preparation_not_found: no preparation record under this reference on this device', false, agentRef);
-        return;
-      }
-    }
-    const messageRequirement = 'messageEgress' in payload ? payload.messageEgress : undefined;
-    const terminalProjection = 'terminalProjection' in payload ? payload.terminalProjection : undefined;
-    if ('egressPolicy' in payload) {
-      if (this.deps.agentEgressPolicy === undefined || !sameEgressPolicy(this.deps.agentEgressPolicy, payload.egressPolicy)) {
-        decline('Agent egress offer policy is not exactly enabled by this daemon', false);
-        return;
-      }
-    }
-    if (messageRequirement !== undefined && (agentRef === undefined || (preparation === undefined && this.deps.agentMessageMcpBin === undefined) || this.deps.tenantId === undefined)) {
-      decline('required Agent message egress is unavailable on this daemon', false);
-      return;
-    }
-    if (terminalProjection?.mode === 'result-document') {
-      if (agentRef === undefined || this.deps.tenantId === undefined || this.deps.agentResultMcpBin === undefined) {
-        decline('offer requires a result document but this daemon cannot host the submit_result channel: it needs an Agent offer, an enrolled tenant and the SDK result helper', false);
-        return;
-      }
-    }
-
-    // Finding #5: mark this taskId as "in-flight" for the entire remainder
-    // of this call — `evictPendingCancelled` must never remove a
-    // `pendingCancelled` entry for a taskId in this set (see its own doc
-    // comment and `inFlightOffers`'s class-level doc comment for the exact
-    // counterexample this closes). The `finally` below clears it on every
-    // exit path (decline, fail, the checkpoint-2 cancel-teardown, or
-    // successful registration) — never leaked past this one call.
-    this.inFlightOffers.add(taskId);
-    const blobAbort = new AbortController();
-    const startupDeadline = Date.now() + (this.deps.startupTimeoutMs ?? 30_000);
-    const startupTimer = setTimeout(() => blobAbort.abort(new Error('runtime startup deadline exceeded during admission/start')),
-      this.deps.startupTimeoutMs ?? 30_000);
-    startupTimer.unref?.();
-    const admissionWithdrawn = (): boolean => {
-      if (!blobAbort.signal.aborted) return false;
-      const cancelled = this.pendingCancelled.has(taskId);
-      decline(cancelled ? 'cancelled before claim' : this.stoppingOffers ? 'daemon is shutting down' : 'runtime startup deadline exceeded', !cancelled);
-      return true;
-    };
-    this.inFlightBlobAborts.set(taskId, blobAbort);
-    let agentBinding: AgentHomeExecutionBinding | undefined;
-    let gitLease: GitWorkspaceLease | undefined;
-    // The one owner of the offer's leases, pin, and contexts at each moment.
-    // Each change of owner happens on the same synchronous path as the
-    // startup registration or the active handoff it names.
-    let owner: 'offer' | 'startup' | 'active' = 'offer';
-    let runtimeLaunch: PiRuntimeLaunchResources | undefined;
-    let executionScratch: ExecutionScratch | undefined;
-    let reservedHome: string | undefined;
-    const releaseReservation = (): void => {
-      if (reservedHome === undefined) return;
-      const remaining = this.homeReservations.get(reservedHome)! - 1;
-      if (remaining === 0) this.homeReservations.delete(reservedHome);
-      else this.homeReservations.set(reservedHome, remaining);
-      reservedHome = undefined;
-    };
-    const reserveHome = (reservationKey: string): void => {
-      this.homeReservations.set(reservationKey, (this.homeReservations.get(reservationKey) ?? 0) + 1);
-      reservedHome = reservationKey;
-    };
-    const phase: OfferPhaseContext = {
-      taskId, decline, admissionWithdrawn, admissionSignal: blobAbort.signal, releaseReservation, reserveHome,
-    };
-    try {
-      if (this.admitOffer(phase, strictAgentOffer) === undefined) return;
-
-      if (agentRef !== undefined) {
-        if (await this.reserveOfferHome(phase, agentRef, readerAttempt, sessionRef, homeAccess) === undefined) return;
-      }
-
-      const offerLimits = this.admitOfferLimits(phase, payload);
-      if (offerLimits === undefined) return;
-      const { requiredToolsets, resolvedMcp } = offerLimits;
-      const runtime = await this.prepareOfferRuntime(phase, {
-        acquireScratch: async () => {
-          const scratch = await this.deps.scratchRoot.create();
-          executionScratch = scratch;
-          return scratch;
-        },
-        payload, agentRef, preparation, preparedMemorySelected, ordinaryMemoryMode, ordinaryMemoryMcp, messageRequirement, terminalProjection,
-        readerAttempt, requiredToolsets, resolvedMcp, blobAbort,
-      });
-      if (runtime === undefined) return;
-      const { scratch, offered, pick, env, mcpEnv, mcpToolsetTools, prepared } = runtime;
-      let taskMcpServers = runtime.taskMcpServers;
-
-      if (agentRef !== undefined) {
-        // A resumed reader runs again in the run directory its session handoff
-        // recorded. The ledger lives in the home, so it is found by sessionRef.
-        let readerRunDirectory: string | undefined;
-        if (readerAttempt && sessionRef !== undefined) {
-          try {
-            const resolution = await this.deps.agentHome!.layout.resolve(agentRef);
-            readerRunDirectory = await this.deps.agentSessionHandoffs!.readerSessionCwd({
-              agentRef: resolution.agentRef,
-              sessionRef,
-              runtimeId: pick.descriptor.id,
-              home: resolution.canonicalHome,
-            });
-          } catch (error) {
-            decline(`Agent session handoff mismatch: ${outboundErrorMessage(error)}`, error instanceof AgentHomeBusyError,
-              error instanceof AgentHomeBusyError ? homeBusyCode : undefined);
-            return;
-          }
-        }
-        try {
-          agentBinding = await this.deps.agentHome!.acquireExecution(agentRef, {
-            taskId,
-            sessionRef,
-            homeAccess,
-            ...(readerRunDirectory === undefined ? {} : { runDirectory: readerRunDirectory }),
-          });
-          releaseReservation();
-        } catch (error) {
-          decline(
-            `Agent home admission failed: ${outboundErrorMessage(error)}`,
-            error instanceof AgentHomeBusyError || !(error instanceof AgentHomeResolutionError),
-            error instanceof AgentHomeBusyError ? homeBusyCode : undefined,
-          );
-          return;
-        }
-      }
-
-      let known: Awaited<ReturnType<SessionWorkspaceStore['get']>> = undefined;
-      let workspaceDir: string;
-      let gitWorkspaceId: string | undefined;
-      let gitBaseline: string | undefined;
-      let gitExisting = false;
-      let plainWorkspaceNeedsResolve = false;
-      let appliedAgentHomeProjection: TerminalAgentHomeProjection | undefined;
-      let readerMemoryBaseline: ActiveTask['readerMemoryBaseline'];
-      if (agentBinding !== undefined) {
-        workspaceDir = agentBinding.lease.cwd;
-        if (sessionRef !== undefined) {
-          try {
-            await this.deps.agentSessionHandoffs!.requireMatch({
-              agentRef: agentBinding.resolution.agentRef,
-              sessionRef,
-              runtimeId: pick.descriptor.id,
-              home: agentBinding.resolution.canonicalHome,
-              cwd: workspaceDir,
-              ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
-            });
-          } catch (error) {
-            await agentBinding.lease.release().catch(() => {});
-            agentBinding = undefined;
-            decline(`Agent session handoff mismatch: ${outboundErrorMessage(error)}`, false);
-            return;
-          }
-        }
-        if (readerAttempt) {
-          const fresh = sessionRef === undefined;
-          try {
-            await this.deps.agentHome!.prepareReaderRun(agentBinding, { fresh });
-          } catch (error) {
-            await agentBinding.lease.release().catch(() => {});
-            agentBinding = undefined;
-            // A busy run directory (a redelivered task found a directory it
-            // cannot reuse) may clear; every other failure is permanent.
-            decline(error instanceof AgentHomeReaderRunMissingError
-              ? `Agent session ${sessionRef} cannot resume: its reader run directory no longer exists`
-              : `Agent reader run directory preparation failed: ${outboundErrorMessage(error)}`,
-              error instanceof AgentHomeBusyError,
-              error instanceof AgentHomeBusyError ? homeBusyCode : undefined);
-            return;
-          }
-        }
-        try {
-          await this.deps.agentHome!.initializeExecution(agentBinding);
-        } catch (error) {
-          await agentBinding.lease.release().catch(() => {});
-          agentBinding = undefined;
-          decline(`Agent home initialization failed: ${outboundErrorMessage(error)}`, error instanceof AgentHomeBusyError,
-            error instanceof AgentHomeBusyError ? homeBusyCode : undefined);
-          return;
-        }
-        // Terminal evidence only (#318): an unreadable projection record must not
-        // block an Attempt that ran before this evidence existed, so omit it.
-        appliedAgentHomeProjection = await this.deps.agentHome!.readAppliedProjection(agentBinding).catch((error: unknown) => {
-          console.warn(`[byok/client] Agent-home projection record is unreadable for ${taskId}; terminal evidence omits it: ${errorMessage(error)}`);
-          return undefined;
-        });
-        // Evidence only (#317): the SDK does not make memory read-only. The
-        // reader terminal compares this digest with one taken at the terminal.
-        if (readerAttempt) {
-          readerMemoryBaseline = { digest: await digestAgentHomeMemory(agentBinding.resolution.canonicalHome) };
-        }
-        if (messageRequirement !== undefined) {
-          try {
-            const outbox = await this.agentMessageOutbox(agentBinding.resolution.canonicalHome);
-            this.pendingMessageTasks.set(taskId, {
-              taskId,
-              agentRef: agentBinding.resolution.agentRef,
-              requirement: messageRequirement,
-              outbox,
-            });
-          } catch (error) {
-            await agentBinding.lease.release().catch(() => {});
-            agentBinding = undefined;
-            decline(`Agent message outbox initialization failed: ${outboundErrorMessage(error)}`, true);
-            return;
-          }
-        }
-        if (terminalProjection?.mode === 'result-document') {
-          try {
-            const store = await this.agentResultStore(agentBinding.resolution.canonicalHome);
-            const context = this.resultContextByTask.get(taskId);
-            if (context === undefined) throw new Error('the task result context was revoked before its Agent home was bound');
-            context.store = store;
-            context.agentRef = agentBinding.resolution.agentRef;
-          } catch (error) {
-            await agentBinding.lease.release().catch(() => {});
-            agentBinding = undefined;
-            decline(`Agent result store initialization failed: ${outboundErrorMessage(error)}`, true);
-            return;
-          }
-        }
-      } else if (this.deps.gitWorkspaceManager && this.deps.gitWorkspaceStore) {
-        known = sessionRef ? await this.deps.sessionWorkspaces.get(sessionRef) : undefined;
-        const gitManager = this.deps.gitWorkspaceManager;
-        const gitStore = this.deps.gitWorkspaceStore;
-        if (sessionRef) {
-          const ledger = await gitStore.findBySessionAnyPhase(sessionRef).catch(() => undefined);
-          const sameProtocolTask = ledger?.taskId === taskId;
-          const interruptedOldTask = ledger?.phase === 'interrupted' && sameProtocolTask;
-          const activeDifferentTask = ledger !== undefined && ledger.taskId !== taskId && (ledger.phase === 'preparing' || ledger.phase === 'active');
-          if (!known || known.workspaceKind !== 'git' || !known.gitWorkspaceId || !ledger ||
-              ledger.workspaceId !== known.gitWorkspaceId || ledger.sessionRef !== sessionRef ||
-              path.resolve(ledger.workspaceDir) !== path.resolve(known.workspaceDir) ||
-              interruptedOldTask || activeDifferentTask) {
-            decline('session is incompatible with Git workspace mode', true);
-            return;
-          }
-          workspaceDir = known.workspaceDir;
-          gitWorkspaceId = known.gitWorkspaceId;
-          gitBaseline = ledger.baseline;
-          gitExisting = true;
-          try {
-            await gitManager.validateExisting(workspaceDir);
-          } catch {
-            decline('workspace is busy or unavailable', true);
-            return;
-          }
-        } else {
-          workspaceDir = this.legacyWorkspaceDir(taskId);
-          gitWorkspaceId = randomUUID();
-        }
-        try {
-          gitLease = await gitManager.acquireLease(workspaceDir, sessionRef);
-        } catch {
-          decline('workspace is busy or unavailable', true);
-          return;
-        }
-      } else if (!this.deps.gitWorkspaceManager && !this.deps.gitWorkspaceStore) {
-        known = sessionRef ? await this.deps.sessionWorkspaces.get(sessionRef) : undefined;
-        workspaceDir = known?.workspaceDir ?? this.legacyWorkspaceDir(taskId);
-        plainWorkspaceNeedsResolve = true;
-      } else {
-        decline('workspace mode is unavailable', true);
-        return;
-      }
-
-      if (prepared.operation.resolveRuntimeLaunch !== undefined) {
-        try {
-          runtimeLaunch = await prepared.operation.resolveRuntimeLaunch({
-            kind: preparation === undefined ? 'instruction' : 'prepared', cwd: workspaceDir, env,
-            scratch,
-          });
-        } catch (error) {
-          gitLease?.release();
-          if (!admissionWithdrawn()) decline(`runtime launch admission failed: ${errorMessage(error)}`, false);
-          return;
-        }
-        if (admissionWithdrawn()) { gitLease?.release(); return; }
-      }
-
-      // `env` was built before admission (see its declaration above) so the
-      // MCP probes and the runtime child are guaranteed to share one
-      // allowlist decision rather than two computations that could drift.
-      const manifest = sealRuntimeOperationManifest({
-        ...(preparation === undefined ? {} : {agentMemory}),
-        taskId,
-        runtimeId: pick.descriptor.id,
-        descriptor: pick.descriptor,
-        requiredToolsetIds: requiredToolsets ?? [],
-        ...(offered.dispatchSelection === undefined ? {} : { dispatchSelection: offered.dispatchSelection }),
-        ...(sessionRef === undefined || (known === undefined && agentBinding === undefined)
-          ? {}
-          : { sessionRef }),
-        ...(agentBinding === undefined ? {} : {
-          agentRef: agentBinding.resolution.agentRef,
-          cwd: agentBinding.lease.cwd,
-          ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
-          lease: {
-            leaseId: agentBinding.lease.leaseId,
-            canonicalHome: agentBinding.resolution.canonicalHome,
-          },
-        }),
-        cwd: workspaceDir,
-        workspace: {
-          workspaceDir,
-          ...(gitWorkspaceId === undefined ? {} : { workspaceId: gitWorkspaceId }),
-          ...(gitBaseline === undefined ? {} : { baseline: gitBaseline }),
-        },
-        forwardedEnvironmentNames: Object.freeze(Object.keys(env).sort()),
-      });
-
-      // The prepared lane's whole admission, in the one order it is allowed to
-      // happen: COMPARE the sealed Execution against the record item by item,
-      // then PIN, then claim. Pinning strictly before the claim is what makes
-      // single consumption real — two runners that both compared successfully
-      // race the store's compare-and-set, and the loser returns here having
-      // sent no claim and dispatched nothing.
-      let preparedLaunch: RuntimePreparedLaunchV1 | undefined;
-      let preparedObservation: PreparedExecutionObservation | undefined;
-      if (preparation !== undefined) {
-        const lane = preparationLane!;
-        const record = lane.store.get(preparation.reference);
-        if (record === undefined) {
-          gitLease?.release();
-          decline('preparation_not_found: no preparation record under this reference on this device', false);
-          return;
-        }
-        // Each memory admission stage declines with its own C5 `reason: detail`
-        // pair, decided by the stage (or the typed error it raised), never by
-        // reading an error message. Every one is before pin and claim, and no
-        // raw helper/transport text reaches the wire.
-        const declineMemory = (reason: string): void => {
-          gitLease?.release();
-          decline(reason, false);
-        };
-        if (agentMemory === undefined) {
-          declineMemory('agent_memory_selection_invalid: prepared offers require an explicit memory selection');
-          return;
-        }
-        if (record.binding.agentMemory !== agentMemory) {
-          declineMemory('agent_memory_mismatch: the offered Agent memory selection differs from the named preparation');
-          return;
-        }
-        try {
-          await lane.authorizeAgentMemory(record.binding);
-        } catch (error) {
-          declineMemory(error instanceof InputPreparationRequestError
-            ? `${error.code}: ${error.message}`
-            : 'authority_unavailable: the local Agent memory authority could not be consulted');
-          return;
-        }
-        let memory: PreparedAgentMemoryState | null = null;
-        if (agentMemory !== 'none') {
-          const describe = this.deps.agentMemoryDescribeBin;
-          if (describe === undefined || this.deps.agentMemoryMcpBin === undefined
-            || !isAgentMemorySecureFilesystemAvailable(this.deps.resolveAgentMemoryFilesystemHelperBin !== undefined)) {
-            declineMemory('unsupported_input: agent_memory_unavailable');
-            return;
-          }
-          try {
-            memory = await observePreparedMemory(describe, mcpEnv, blobAbort.signal);
-          } catch {
-            declineMemory('toolsets_unobservable: agent_memory_descriptor_unobservable');
-            return;
-          }
-        }
-        // Only the toolsets this offer names: the preparation bound exactly the
-        // revisions of the toolsets its record named, so binding every toolset
-        // configured on the device would make an unrelated one a digest
-        // mismatch. An unconfigured name was already declined above.
-        const registryRevisions = lane.toolsetDefinitionRevisions();
-        const revisions: Record<string, string> = {};
-        for (const toolsetId of requiredToolsets ?? []) {
-          const revision = registryRevisions.get(toolsetId);
-          if (revision !== undefined) revisions[toolsetId] = revision;
-        }
-        const servers: PreparedOfferServerProjection[] = [];
-        for (const [serverName, server] of Object.entries(resolvedMcp?.ok ? resolvedMcp.servers : {})) {
-          const toolsetId = resolvedMcp!.toolsetIdByServer.get(serverName);
-          if (toolsetId === undefined) continue;
-          servers.push({
-            serverName,
-            toolsetId,
-            command: server.command,
-            args: Object.freeze([...(server.args ?? [])]),
-          });
-        }
-        const admitted = await admitPreparedOffer({
-          offeredAgentMemory: agentMemory, memory,
-          terminalProjection,
-          record,
-          artifactPath: lane.store.artifactPathOf(record),
-          offered: preparation,
-          agentRef: agentRef!,
-          deviceId: this.deps.deviceId,
-          policyRevision: lane.policyRevision,
-          runtime: lane.runtime,
-          // No projected server (memory-only or tool-less) means an empty
-          // observation, not a missing one; a missing one with servers still
-          // present stays a fail-closed decline in admission.
-          observation: mcpToolsetTools ?? (preparedMemorySelected || servers.length === 0 ? {} : undefined),
-          servers,
-          toolsetDefinitionRevisions: Object.freeze(revisions),
-          nowMs: Date.now(),
-        });
-        if (!admitted.ok) {
-          gitLease?.release();
-          // Non-retryable, every one of them: re-offering the same reference
-          // against the same device state reaches the same answer, and a
-          // prepared failure never permits sending a DIFFERENT input under the
-          // same accounting.
-          decline(`${admitted.reason}: ${admitted.detail}`, false);
-          return;
-        }
-        let pinned: Awaited<ReturnType<InputPreparationStore['pin']>>;
-        try {
-          pinned = await lane.store.pin(record.recordId, {
-            taskId,
-            manifestDigest: inputPreparationDigest(manifest),
-            sealedAt: new Date().toISOString(),
-          });
-        } catch (error) {
-          gitLease?.release();
-          decline(`preparation_not_ready: the preparation pin could not be written: ${errorMessage(error)}`, false);
-          return;
-        }
-        if (pinned.kind === 'occupied') {
-          gitLease?.release();
-          decline(
-            `preparation_already_pinned: task ${JSON.stringify(pinned.record.pin!.taskId)} already consumed this preparation`,
-            false,
-          );
-          return;
-        }
-        this.preparationPinsByTask.set(taskId, record.recordId);
-        preparedLaunch = admitted.launch;
-        // Seeded from the durable record the admission just compared, never
-        // from the offer: the digest the Host ruled on and the window of the
-        // model D was compiled for.
-        preparedObservation = {
-          requestDigest: record.artifact!.requestDigest,
-          contextWindow: admitted.launch.expected.model.contextWindow,
-          calls: 0,
-        };
-      }
-
-      // All semantic admission is now in `prepare()` and the frozen manifest.
-      // Claim is the first externally visible commitment; instruction bytes,
-      // workspace preparation, and process creation remain after it.
-      if (admissionWithdrawn()) { gitLease?.release(); return; }
-      await this.deps.beforeClaim?.(taskId, manifest.descriptor.id);
-      if (admissionWithdrawn()) { gitLease?.release(); return; }
-      if (!isKnownRuntimeId(manifest.descriptor.id)) this.claimedHarnesses.set(taskId, manifest.descriptor.id);
-      this.deps.send(
-        createEnvelope(
-          'task.claim',
-          {
-            deviceId: this.deps.deviceId,
-            ...(manifest.agentRef === undefined ? {} : { agentRef: manifest.agentRef }),
-            // M5 (claimed runtime, docs/protocol.md §3.1): the ACTUAL adapter
-            // `pickAdapter` just selected — covers both the explicit-runtime
-            // path (`payload.runtime` named one) and the auto-select
-            // (preference-ordered, pi last by default — M5 batch-3, see
-            // `DEFAULT_RUNTIME_PREFERENCE`) path (`payload.runtime` was
-            // absent) uniformly, since `pick.adapter` already reflects
-            // whichever one won either way. Distinct from `payload.runtime`
-            // (the merely REQUESTED runtime): this is what closes the gap
-            // where an auto-selected task left the server never learning
-            // which runtime actually ran.
-            runtime: isKnownRuntimeId(manifest.descriptor.id) ? manifest.descriptor.id : undefined,
-            ...(!isKnownRuntimeId(manifest.descriptor.id) ? { harnessId: manifest.descriptor.id } : {}),
-            // S0/D-4 (`task.claim.capabilities`, docs/protocol.md §2.4): the
-            // selected adapter's own capability self-report, carried on the
-            // same message that establishes the task↔runtime binding. The
-            // server gates control messages (`task.steer`) on this and only
-            // this — connection-level `conn.hello.runtimes[].capabilities`
-            // stays device discovery on both transports and cannot replace
-            // the claim-time truth for this exact task/runtime binding.
-            //
-            // Sent UNCONDITIONALLY, deliberately NOT gated on
-            // `isKnownRuntimeId` the way `runtime` above is: `runtime` is a
-            // closed protocol enum a custom adapter has no member of, but
-            // capabilities are a self-report every adapter can make honestly.
-            // Gating them would silently strip a custom steer-capable
-            // adapter's own truth and leave the server fail-closing on it
-            // forever.
-            capabilities: toRuntimeInfoCapabilities(manifest.descriptor.capabilities),
-          },
-          { taskId },
-        ),
-      );
-
-      // Resolve the instruction blob after claim; workspace preparation follows.
-      // A prepared Execution resolves nothing here — it carries no instruction,
-      // and the empty string below is never read: the prepared start variant has
-      // no `instruction` field for it to reach.
-      const offeredInstructionValue = offeredInstruction(payload);
-      let resolvedInstruction: string;
-      try {
-        resolvedInstruction = offeredInstructionValue === undefined
-          ? ''
-          : await this.resolveInstruction(offeredInstructionValue, blobAbort.signal);
-        if (plainWorkspaceNeedsResolve) workspaceDir = await this.resolveWorkspaceDir(taskId, known?.workspaceDir);
-      } catch (err) {
-        gitLease?.release();
-        const reason = `failed to resolve instruction blob: ${errorMessage(err)}`;
-        if (agentBinding === undefined) {
-          await this.fail(taskId, reason, true);
-        } else {
-          await this.failClaimedAgent(taskId, reason, true, {
-            binding: agentBinding,
-            runtimeId: pick.descriptor.id,
-          });
-        }
-        return;
-      }
-
-      if (this.deps.gitWorkspaceManager && gitLease) {
-        try {
-          let observation: GitWorkspaceObservation;
-          if (gitExisting) {
-            observation = await this.deps.gitWorkspaceManager.validateExisting(workspaceDir);
-          } else {
-            const workspaceId = gitWorkspaceId ?? randomUUID();
-            const now = new Date().toISOString();
-            gitWorkspaceId = workspaceId;
-            await this.deps.gitWorkspaceStore?.upsert({
-              workspaceId,
-              taskId,
-              workspaceDir,
-              phase: 'preparing',
-              commitsSinceBaseline: 0,
-              staged: 0,
-              unstaged: 0,
-              untracked: 0,
-              conflicted: 0,
-              createdAt: now,
-              updatedAt: now,
-            });
-            this.deps.onGitWorkspaceEvent?.({ taskId, workspaceId, phase: 'preparing' });
-            observation = await this.deps.gitWorkspaceManager.prepareFresh(workspaceDir);
-          }
-          const workspaceId = gitWorkspaceId ?? randomUUID();
-          const phase: GitWorkspacePhase = 'active';
-          const now = new Date().toISOString();
-          const ledgerRecord: GitWorkspaceLedgerRecord = {
-            workspaceId,
-            taskId,
-            workspaceDir,
-            sessionRef,
-            phase,
-            baseline: gitBaseline ?? observation.head,
-            current: observation.head,
-            commitsSinceBaseline: observation.commitsSinceBaseline,
-            staged: observation.staged,
-            unstaged: observation.unstaged,
-            untracked: observation.untracked,
-            conflicted: observation.conflicted,
-            createdAt: now,
-            updatedAt: now,
-          };
-          await this.deps.gitWorkspaceStore?.upsert(ledgerRecord);
-          this.deps.onGitWorkspaceEvent?.({ taskId, workspaceId, phase, observation });
-          gitWorkspaceId = workspaceId;
-          gitBaseline = gitBaseline ?? observation.head;
-        } catch (err) {
-          const category = (err as GitWorkspaceError).category ?? 'repository-invalid';
-          await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed', category);
-          gitLease.release();
-          this.deps.onGitWorkspaceEvent?.({ taskId, workspaceId: gitWorkspaceId ?? '', phase: 'failed', errorCategory: category });
-          await this.fail(taskId, 'Git workspace preparation failed', true);
-          return;
-        }
-      }
-
-      if (preparedLaunch !== undefined && preparedLaunch.agentMemory !== 'none') {
-        // Post-claim: a failure here is a truthful task failure, never a raw
-        // throw that strands the claimed task. The finally below revokes any
-        // context token minted for it and releases the pin.
-        try {
-          const helper = this.deps.agentMemoryMcpBin;
-          if (preparedLaunch.memory === null || agentRef === undefined || helper === undefined) throw new Error('prepared Agent memory execution state missing');
-          taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef, preparedLaunch.agentMemory, helper, 'complete');
-        } catch {
-          const reason = 'agent_memory_unavailable: the sealed Agent memory helper could not be bound for launch';
-          await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed');
-          gitLease?.release();
-          if (agentBinding === undefined) {
-            await this.fail(taskId, reason, false);
-          } else {
-            await this.failClaimedAgent(taskId, reason, false, {
-              binding: agentBinding,
-              runtimeId: pick.descriptor.id,
-            });
-          }
-          return;
-        }
-      }
-      const durableBinding = agentBinding;
-      const startInput: RuntimeOperationStartInput = {
-        scratch,
-        ...(runtimeLaunch?.kind !== 'pi-durable' ? {} : { durableContext: {
-          tenantId: this.deps.tenantId!, replicaRoot: path.join(this.deps.storeDir, 'durable-replicas'), lifecycle: {
-            ownsLease: () => durableBinding !== undefined && !blobAbort.signal.aborted && !this.pendingCancelled.has(taskId),
-            record: async (kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number) => {
-              if (!durableBinding || !this.deps.recordDurableTransition || !this.deps.tenantId) throw new Error('durable parent authority unavailable');
-              await this.deps.agentHome!.executionLeaseManager.mutate(durableBinding, () => {
-                // Do not overwrite a persisted normal-turn failure intent.
-                if (this.tasks.get(taskId)?.resultReplyFailure !== undefined) return Promise.resolve();
-                return this.deps.recordDurableTransition!(taskId, durableBinding.lease.leaseId, kind, ordinal);
-              });
-            },
-          },
-        } }),
-        mcpEnv,
-        ...(runtimeLaunch === undefined ? {} : { runtimeLaunch }),
-        // The two lanes are mutually exclusive authority over the same bytes,
-        // so they are two variants rather than one shape with an optional
-        // field: the prepared Execution's request was compiled, counted and
-        // frozen before this offer existed, and the ordinary one's is the
-        // instruction resolved above. `preparedLaunch` is set ONLY after the
-        // item-by-item comparison passed, the manifest was sealed, the record
-        // was pinned and the claim went out.
-        ...(preparedLaunch === undefined
-          ? {
-            kind: 'instruction' as const,
-            instruction: agentBinding === undefined
-              ? (gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction)
-              : prependAgentMemoryModeGuidance(resolvedInstruction, ordinaryMemoryMode, readerAttempt),
-          }
-          : { kind: 'prepared' as const, preparation: preparedLaunch }),
-        manifest,
-        env,
-        ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
-        ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
-        approvalChannel: {
-          taskId,
-          storeDir: this.deps.storeDir,
-          productId: this.deps.productId,
-          timeoutMs: this.deps.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS,
-          resolve: async (approved, reason) => {
-            const currentActive = this.tasks.get(taskId);
-            const pendingId = currentActive?.pendingApprovalId;
-            if (!pendingId) {
-              throw new NoPendingApprovalError(taskId);
-            }
-            // 'wire': this closure is invoked ONLY by an adapter's own
-            // `session.resolveApproval()` on a custom adapter, which is called from
-            // `handleApprove`/`handleReject` below — i.e. a server-sent wire
-            // `task.approve`/`task.reject`. The server already knows this
-            // decision (it sent it); `task.approval_resolved` must never be
-            // sent back for it — see `ApprovalOrigin`'s own doc comment
-            // (`approvals.ts`) and `sendApprovalResolved`'s gate below.
-            this.deps.approvalRegistry.resolve(pendingId, approved ? 'approve' : 'reject', reason, 'wire');
-          },
-        },
-      };
-      let session: Session;
-      try {
-        session = await startOwnedRuntime(input => prepared.operation.start(input), startInput, blobAbort.signal,
-          Math.max(0, startupDeadline - Date.now()));
-      } catch (err) {
-        const disposalFailure = isRuntimeStartupDisposalFailure(err);
-        const cancelled = this.pendingCancelled.has(taskId);
-        if (disposalFailure || cancelled) {
-          if (cancelled) {
-            this.revokeAgentMessageContext(taskId);
-            this.revokeAgentResultContext(taskId);
-          }
-          const ownedBinding = agentBinding;
-          const cancellation = createEnvelope('task.cancelled', {
-            reason: this.pendingCancelled.get(taskId),
-            ...terminalIdentity(this.claimedHarnesses.get(taskId)),
-            ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
-          }, { taskId });
-          let cancellationSettled = false;
-          const abortedStart = abortedStartOf(err);
-          this.startupOwnership.register(taskId, {
-            runtimeId: pick.descriptor.id,
-            ...(abortedStart === undefined ? {} : { abortedStart }),
-            dispose: async () => { if (disposalFailure) await err.retryDisposal(); await scratch.release(); },
-            ...(cancelled ? { settle: async () => {
-              if (cancellationSettled) return;
-              // Retain startup ownership on a failed durable barrier, just as
-              // active cancellation retains its owner until terminal evidence.
-              await this.pendingMessageTasks.get(taskId)?.outbox.revoke(taskId);
-              this.deps.send(cancellation);
-              cancellationSettled = true;
-              this.pendingCancelled.delete(taskId);
-              this.addFinishedTaskId(taskId);
-            } } : {}),
-            release: async () => {
-              await ownedBinding?.lease.release();
-              gitLease?.release();
-              await this.releasePreparationPin(taskId);
-            },
-          });
-          owner = 'startup';
-          // An abort while the start still runs is not a disposal failure:
-          // nothing has been disposed yet. `StartupOwnership.dispose` reports
-          // it if a later attempt fails.
-          if (disposalFailure && abortedStart === undefined) this.deps.onRuntimeDisposalFailure?.({ taskId,
-            runtimeId: pick.descriptor.id, stage: 'quiescence', reason: err.message });
-          if (!cancelled) {
-            const reason = this.stoppingOffers ? 'daemon shutting down during runtime startup' : errorMessage(err);
-            const retryable = this.stoppingOffers;
-            if (agentBinding === undefined) await this.fail(taskId, reason, retryable);
-            else await this.failClaimedAgent(taskId, reason, retryable, {
-              binding: agentBinding, runtimeId: pick.descriptor.id,
-            });
-          }
-          return;
-        }
-        const failure = projectRuntimeBoundaryFailure(err, 'start');
-        if (failure.contractViolation) {
-          // Never the error object itself: stderr is a service log and an
-          // adapter's error can carry runtime output (issue #395).
-          console.error(`[byok/client] runtime adapter ${pick.descriptor.id} start() returned an untyped failure for task ${taskId}`);
-        }
-        await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed', 'repository-invalid');
-        gitLease?.release();
-        if (agentBinding === undefined) {
-          await this.fail(taskId, failure.reason, failure.retryable, failure.failure);
-        } else {
-          await this.failClaimedAgent(taskId, failure.reason, failure.retryable, {
-            binding: agentBinding,
-            runtimeId: pick.descriptor.id,
-          }, failure.failure);
-        }
-        return;
-      }
-
-      const ownedBinding = agentBinding;
-      this.startupOwnership.register(taskId, {
-        runtimeId: pick.descriptor.id,
-        dispose: async () => { await session.close(); await scratch.release(); },
-        release: async () => {
-          await ownedBinding?.lease.release();
-          gitLease?.release();
-          await this.releasePreparationPin(taskId);
-        },
-      });
-      owner = 'startup';
-      try {
-      if (agentBinding !== undefined) {
-        try {
-          await agentBinding.lease.bindSession(session.sessionRef);
-        } catch (error) {
-          await this.failClaimedAgent(
-            taskId,
-            `Agent session execution lease could not bind the runtime session: ${outboundErrorMessage(error)}`,
-            false,
-            {
-              binding: agentBinding,
-              runtimeId: pick.descriptor.id,
-              sessionRef: session.sessionRef,
-            },
-          );
-          return;
-        }
-      }
-
-      let active!: ActiveTask;
-      active = {
-        taskId,
-        blobAbort,
-        egressEnabled: 'egressPolicy' in payload,
-        adapter: pick.adapter,
-        session,
-        scratch,
-        workspaceDir,
-        ...(agentBinding === undefined ? {} : {
-          agentBinding,
-          agentRef: agentBinding.resolution.agentRef,
-          agentHandoff: {
-            sessionRef: session.sessionRef,
-            runtimeId: pick.descriptor.id,
-            home: agentBinding.resolution.canonicalHome,
-            cwd: workspaceDir,
-            ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
-          },
-          ...(appliedAgentHomeProjection === undefined ? {} : { appliedAgentHomeProjection }),
-          ...(readerMemoryBaseline === undefined ? {} : { readerMemoryBaseline }),
-        }),
-        gitWorkspaceId,
-        gitLease,
-        gitBaseline,
-        summaryParts: [],
-        finalTextParts: [],
-        batcher: new ProgressBatcher(
-          (seq, events) => {
-            const projected = active.egressEnabled
-              ? this.deps.agentEgress?.projectLatestValue({
-                  agentRef: active.agentRef,
-                  taskId,
-                  events,
-                }) ?? []
-              : events;
-            if (projected.length > 0) this.deps.send(createEnvelope('task.progress', { seq, events: [...projected] }, { taskId, seq }));
-          },
-          this.deps.batcherOptions,
-          () => this.ingressBudget,
-        ),
-        approvalQueue: [],
-        outputBytesSoFar: 0,
-        startedAtMs: Date.now(),
-        executionRecord: new ExecutionRecordAccumulator(taskId, pick.descriptor.trajectoryEvidence, session),
-        ...(preparedObservation === undefined ? {} : { prepared: preparedObservation }),
-        ...(messageRequirement === undefined ? {} : {
-          messageRequirement,
-          messageOutbox: this.pendingMessageTasks.get(taskId)!.outbox,
-        }),
-        ...(terminalProjection === undefined ? {} : { terminalProjection }),
-        ...(terminalProjection?.mode !== 'result-document' ? {} : { resultStore: this.resultContextByTask.get(taskId)?.store }),
-      };
-      // #654 D9: a task with sealing streams no draft (design §6.1, §10.4).
-      if (active.messageRequirement !== undefined && active.agentRef !== undefined
-        && pick.descriptor.capabilities.messageDraft === true
-        && this.deps.getServerCapabilities?.().includes('agent-message-draft')
-        && this.deps.sealedTasks?.isSealed(taskId) !== true) {
-        active.messageDraft = new AgentMessageDraftPublisher({
-          taskId,
-          agentRef: active.agentRef,
-          maxBytes: active.messageRequirement.maxBytes,
-          maxCoalesceMs: this.deps.agentEgressPolicy!.activity.maxCoalesceMs,
-          getServerCapabilities: () => this.deps.getServerCapabilities?.() ?? [],
-          send: envelope => this.deps.send(envelope),
-        });
-      }
-
-      // A strict Agent handoff is the local restart authority. It is
-      // intentionally awaited and fsynced before task.started; an Agent
-      // runtime session that has no durable exact-match receipt must never be
-      // advertised as resumable.
-      if (agentBinding !== undefined) {
-        const binding = agentBinding;
-        try {
-          await this.deps.agentHome!.mutateExecution(binding, () =>
-            this.deps.agentSessionHandoffs!.record({
-              agentRef: binding.resolution.agentRef,
-              taskId,
-              sessionRef: session.sessionRef,
-              runtimeId: pick.descriptor.id,
-              home: binding.resolution.canonicalHome,
-              cwd: workspaceDir,
-              ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
-              leaseId: binding.lease.leaseId,
-            }));
-        } catch (error) {
-          await this.failClaimedAgent(
-            taskId,
-            `Agent session handoff could not be durably written before start: ${outboundErrorMessage(error)}`,
-            false,
-            {
-              binding: agentBinding,
-              runtimeId: pick.descriptor.id,
-              sessionRef: session.sessionRef,
-            },
-          );
-          return;
-        }
-      }
-      const activatedMessageRecord = active.messageOutbox === undefined
-        ? undefined
-        : await this.activateAgentMessage(active.messageOutbox, taskId, session.sessionRef,
-          () => !this.pendingCancelled.has(taskId) && !blobAbort.signal.aborted);
-
-      // Finding F4, checkpoint 2 ("consulted when start() resolves"): a
-      // task.cancel arrived while prepared-operation start() was in flight — i.e. AFTER
-      // task.claim already went out above, so declining is no longer an
-      // option. Tear the just-started session down before it's ever
-      // registered as active (this.tasks.set below) or reported task.started,
-      // so pump() never begins and no zombie turn runs — then report the
-      // outcome exactly like a post-registration cancel would (M1 gap #6:
-      // task.cancelled, not task.fail).
-      if (this.pendingCancelled.has(taskId)) {
-        const reason = this.pendingCancelled.get(taskId);
-        this.pendingCancelled.delete(taskId);
-        this.startupOwnership.transferToActive(taskId);
-        this.tasks.set(taskId, active);
-        owner = 'active';
-        await this.settleSemanticTerminal(active, async () => {
-          active.eventPump ??= this.pump(active);
-          await this.interruptBounded(active);
-          await this.updateGitPhaseBestEffort(gitWorkspaceId, 'cancelled');
-          await this.persistAgentTerminalEvidence(active, 'cancelled', reason);
-          return createEnvelope('task.cancelled', {
-            reason, ...this.terminalInferenceUsagePayload(active), ...this.agentTerminalPayload(active),
-          }, { taskId });
-        });
-        return;
-      }
-
-      // Claimed -> Running (M1 gap #2): report `task.started` only once the
-      // adapter session has actually started — never implied by `task.claim`.
-      this.deps.send(createEnvelope('task.started', {}, { taskId }));
-
-      // This handoff (construct `active` -> register it -> kick off `pump()`)
-      // must stay synchronous, with no `await` in between: a `task.cancel`
-      // (or `task.steer`/`task.approve`/`task.reject`) for this exact taskId
-      // can arrive and be processed by `handleEnvelope` at any `await` point,
-      // and every one of those handlers starts with `this.tasks.get(taskId)`
-      // — if this task isn't registered yet, they silently no-op (see e.g.
-      // `handleCancel`). An earlier version of this method awaited the
-      // sessionWorkspaces write (below) before registering `active` and broke
-      // exactly this: a cancel racing a task.offer lost its `interrupt()`/
-      // `task.cancelled` entirely.
-      this.inFlightBlobAborts.delete(taskId);
-      this.startupOwnership.transferToActive(taskId);
-      this.tasks.set(taskId, active);
-      owner = 'active';
-      this.pendingMessageTasks.delete(taskId);
-      if (active.messageOutbox !== undefined && activatedMessageRecord !== undefined) {
-        this.sendAgentMessageRecord(active.messageOutbox, activatedMessageRecord);
-      }
-      // M5 batch-3 (workstream 2): see `armMaxDurationTimer`'s own doc
-      // comment — still inside the synchronous construct -> register -> arm
-      // -> pump handoff described just below (no `await` yet).
-      if (payload.limits?.maxDurationMs !== undefined) {
-        this.armMaxDurationTimer(active, payload.limits.maxDurationMs);
-      }
-      active.eventPump = this.pump(active);
-
-      // Record (or refresh) this session's resumable workspace for any future
-      // task.offer that carries the same sessionRef, fire-and-forget:
-      // `session.sessionRef` is always the adapter's real, resumable
-      // identifier (see PiSession / resolveFreshSessionId) whether or not
-      // *this* dispatch was itself a resume. Deliberately not awaited — see
-      // the comment above; losing this mapping only costs a future resume
-      // opportunity, never the correctness of the task in progress.
-      if (agentBinding === undefined) {
-        void this.deps.sessionWorkspaces
-          .record(session.sessionRef, {
-            workspaceDir,
-            runtimeSessionId: session.sessionRef,
-            ...(gitWorkspaceId ? { workspaceKind: 'git' as const, gitWorkspaceId } : {}),
-          })
-          .catch(() => {});
-      }
-      if (gitWorkspaceId && this.deps.gitWorkspaceStore) {
-        void this.deps.gitWorkspaceStore.attachSession(gitWorkspaceId, session.sessionRef).catch(() => {});
-      }
-      } catch (error) {
-        if (this.tasks.has(taskId)) throw error;
-        const reason = `runtime activation failed: ${outboundErrorMessage(error)}`;
-        if (agentBinding === undefined) await this.fail(taskId, reason, false);
-        else await this.failClaimedAgent(taskId, reason, false, {
-          binding: agentBinding, runtimeId: pick.descriptor.id, sessionRef: session.sessionRef,
-        });
-      }
-    } finally {
-      clearTimeout(startupTimer);
-      releaseReservation();
-      try {
-        if (owner === 'startup') {
-          // Startup release must succeed. The startup owner releases the
-          // leases and the preparation pin only after the disposal receipt
-          // and the terminal commit. A failed release keeps the owner, and
-          // StartupOwnership retries it.
-          await this.startupOwnership.dispose(taskId);
-        }
-        if (owner === 'offer') {
-          // Offer release is best effort. The offer never became an
-          // Execution: it declined, failed, threw, or was cancelled before
-          // `start()` published a session. Each early exit already released
-          // its leases before it declined or failed; these calls only cover
-          // a throw, and each release is idempotent. The nonces minted for
-          // its would-be children die with it.
-          this.pendingMessageTasks.delete(taskId);
-          this.revokeAgentMessageContext(taskId);
-          this.revokeAgentResultContext(taskId);
-          this.revokeAgentMemoryContext(taskId);
-          this.deleteHostToolsetContexts(taskId);
-          await agentBinding?.lease.release().catch(() => {});
-          gitLease?.release();
-          await this.releasePreparationPin(taskId);
-        }
-        // An active task's Session owns the runtime launch. The projection
-        // holds env or IPC references, not the key, so removing it does not
-        // revoke a credential. Its cleanup timing for a retained startup
-        // stays unchanged here.
-        if (owner === 'offer' && executionScratch !== undefined) {
-          try { await executionScratch.release(); }
-          catch (error) {
-            this.deps.scratchRoot?.abandon(executionScratch.token);
-            this.deps.onRuntimeDisposalFailure?.({ taskId, runtimeId: 'scratch', stage: 'cleanup', reason: 'offer scratch disposal did not complete' });
-            throw error;
-          }
-        }
-      } finally {
-        this.inFlightBlobAborts.delete(taskId);
-        this.inFlightOffers.delete(taskId);
-        this.claimedHarnesses.delete(taskId);
-      }
-    }
+    return handleOffer.call(this, taskId, payload, strictAgentOffer);
   }
 
   private admitOffer(phase: OfferPhaseContext, strictAgentOffer: boolean): true | undefined {
-    const { taskId, decline } = phase;
-    // Finding F4, checkpoint 1 ("before claim where possible -> decline
-    // path"): a task.cancel already arrived for this exact taskId before
-    // this offer was even looked at. Decline outright — never claim, never
-    // spawn a runtime session for a task that's already dead. Checked first
-    // (ahead of every other pre-claim check below) so a pre-cancelled offer
-    // costs nothing beyond this map lookup.
-    if (this.pendingCancelled.has(taskId)) {
-      const reason = this.pendingCancelled.get(taskId);
-      this.pendingCancelled.delete(taskId);
-      decline(reason ? `cancelled before claim: ${reason}` : 'cancelled before claim', false);
-      return undefined;
-    }
-
-    // Gate A strict local authority: journal receive precedes this runner,
-    // and dedup plus pre-cancel above retain their established precedence.
-    // This is deliberately before admission, adapter preparation, workspace
-    // materialization, claim, start, or any terminal receipt bookkeeping.
-    if (this.deps.strictAgentOnly === true && !strictAgentOffer) {
-      this.addStrictDeclinedTaskId(taskId);
-      decline('strict Agent-only daemon refuses legacy task offers', false);
-      return undefined;
-    }
-    return true;
+    return admitOffer.call(this, phase, strictAgentOffer);
   }
 
-  private async reserveOfferHome(
+  private reserveOfferHome(
     phase: OfferPhaseContext,
     agentRef: AgentRef,
     readerAttempt: boolean,
     sessionRef: string | undefined,
     homeAccess: AgentHomeAccessMode,
   ): Promise<true | undefined> {
-    const { taskId, decline, admissionWithdrawn, admissionSignal, reserveHome } = phase;
-    // WP0 (canonical Agent home single writer): execution is serialized per
-    // canonical Agent home. Placed exactly here — after the receive, dedup,
-    // pre-cancel and strict-Agent-only precedence above, before adapter
-    // preparation, the workspace, the claim, or any process side effect —
-    // so a duplicate or pre-cancelled offer returns above without ever
-    // consuming a slot, and a busy home costs the offer nothing beyond this
-    // count.
-    //
-    // Counted per HOME, not per lane: two different runtimes on two
-    // different lanes still share `MEMORY.md`, `notes/` and `.git` in that
-    // one directory, and only a per-home count stops them co-writing it.
-    // The decline reason carries counts only — never a path, never prompt
-    // text — because `task.decline` leaves this device.
-    //
-    // Canonical-home reservations bridge this check and lease acquisition.
-    // Different homes may start concurrently; check-and-reserve has no await.
-    //
-    // #476: an Attempt whose semantic terminal is already published still
-    // holds its lease until `finishOnce` releases it after `Session.close()`,
-    // the terminal commit and the memory snapshot. A Host that offers the
-    // same home right after observing that terminal would otherwise race the
-    // release. So when the count is at the limit and enough of it belongs to
-    // this runner's Attempts that are already finishing (finalization started
-    // and an in-flight finalization attempt), admission waits ONCE for those
-    // attempts to settle (or for the offer to be withdrawn), then recounts
-    // from the lease registry and reserves or declines exactly as without the
-    // wait. A finished Attempt with no in-flight finalization (failed
-    // disposal, retained ownership) is a live holder and is never waited on.
-    // Once offers are stopping, there is no wait at all.
-    // The lease registry stays the only admission authority; the wait only
-    // decides when to read it.
-    //
-    // The count key is derived with `canonicalHomePath()`, NOT `resolve()`:
-    // this gate runs before the host's own admission veto, so it must not
-    // create `agents/<agentId>` or bind an Agent identity for an offer that
-    // is about to be declined. `resolve()` still runs later, on the
-    // admission path, for an offer that actually executes.
-    //
-    // Writers and `memory-reader` Attempts are counted apart: one writer,
-    // and up to `maxConcurrentReaderAttemptsPerAgentHome` readers, each in
-    // its own run directory. A fresh reader names that directory after its
-    // taskId, so a taskId that is not one plain path segment is refused here,
-    // before any side effect.
-    if (readerAttempt && sessionRef === undefined && !isReaderRunName(taskId)) {
-      decline('a memory-reader Attempt needs a taskId that is one plain path segment ([A-Za-z0-9._-], at most 128 characters)', false);
-      return undefined;
-    }
-    const limit = readerAttempt ? this.maxConcurrentReaderAttemptsPerAgentHome : 1;
-    let canonicalHome: string;
-    try {
-      canonicalHome = await this.deps.agentHome!.layout.canonicalHomePath(agentRef);
-    } catch (error) {
-      decline(
-        `Agent home admission failed: ${outboundErrorMessage(error)}`,
-        !(error instanceof AgentHomeResolutionError),
-        error instanceof AgentHomeBusyError
-          ? readerAttempt ? 'agent_home_reader_busy' : 'agent_home_writer_busy'
-          : undefined,
-      );
-      return undefined;
-    }
-    if (admissionWithdrawn()) return undefined;
-    const reservationKey = `${homeAccess}\0${canonicalHome}`;
-    const countHome = (): number => this.deps.agentHome!.executionLeaseManager.activeAttemptCount(canonicalHome, homeAccess)
-      + (this.homeReservations.get(reservationKey) ?? 0);
-    let active = countHome();
-    // A daemon that is stopping never parks an offer: `stopAcceptingOffers`
-    // aborts only the admission signals that existed when it ran, so an offer
-    // that arrived after it would otherwise wait on a finishing Attempt.
-    if (active >= limit && !this.stoppingOffers) {
-      const finishing = this.homeFinalizations(canonicalHome, homeAccess);
-      if (finishing.length > 0 && active - finishing.length < limit) {
-        await settledOrWithdrawn(finishing, admissionSignal);
-        if (admissionWithdrawn()) return undefined;
-        active = countHome();
-      }
-    }
-    if (active >= limit) {
-      decline(`agent home busy: ${active} active ${readerAttempt ? 'reader ' : ''}attempt(s)`, true,
-        readerAttempt ? 'agent_home_reader_busy' : 'agent_home_writer_busy');
-      return undefined;
-    }
-    // Check and reserve are synchronous at the canonical-home authority.
-    reserveHome(reservationKey);
-    return true;
+    return reserveOfferHome.call(this, phase, agentRef, readerAttempt, sessionRef, homeAccess);
   }
 
   private admitOfferLimits(phase: OfferPhaseContext, payload: AcceptedOfferPayload) {
-    const { taskId, decline } = phase;
-    // S3b (L-002): the pre-claim admission veto stays after the strict
-    // receive/dedup/cancel precedence above and before every runtime or
-    // workspace side effect.
-    const guarded = this.deps.admissionGuard?.({ taskId, payload });
-    if (guarded !== undefined && !guarded.admit) {
-      decline(guarded.reason, guarded.retryable);
-      return undefined;
-    }
-
-    // M4 Phase 2: the control socket's `shutdown` RPC flips this before
-    // tearing down active tasks — any later offer is declined outright.
-    if (this.stoppingOffers) {
-      decline('daemon is shutting down', true);
-      return undefined;
-    }
-
-    // M5 batch-3 (workstream 1): `limits.maxTokens` has no hard-enforcement
-    // path on ANY bundled runtime adapter today — nothing actually counts
-    // or caps tokens against it. Silently accepting the offer would let a
-    // caller believe a token ceiling is in effect when nothing checks it;
-    // declining fail-closed, pre-claim, is honest about that gap and lets
-    // the dispatcher route the task elsewhere instead of running
-    // unbounded. `retryable: true` — a different device's adapter set (or
-    // a future SDK version) might genuinely enforce this, so re-routing
-    // can help even though nothing here can. `limits.maxDurationMs` is
-    // deliberately left OUT of this admission gate: unlike maxTokens, it
-    // IS hard-enforced — daemon-authoritative, at the TaskRunner layer
-    // itself (a wall-clock timer armed once this task is registered as
-    // active — see `armMaxDurationTimer` — not delegated to any adapter),
-    // so there is no gap here to decline fail-closed for.
-    if (payload.limits?.maxTokens !== undefined) {
-      decline(
-        `offer requests limits.maxTokens (${payload.limits.maxTokens}), which no bundled runtime adapter enforces — declining fail-closed rather than silently ignoring it`,
-        true,
-      );
-      return undefined;
-    }
-
-    if (
-      payload.dispatchSelection !== undefined &&
-      payload.runtime !== undefined &&
-      payload.runtime !== payload.dispatchSelection.runtimeId
-    ) {
-      decline(
-        `offer runtime ${payload.runtime} does not match dispatchSelection.runtimeId ${payload.dispatchSelection.runtimeId}`,
-        false,
-      );
-      return undefined;
-    }
-
-    if (payload.harnessId !== undefined && (payload.runtime !== undefined || payload.dispatchSelection !== undefined)) {
-      decline('harnessId cannot be combined with a built-in runtime selection', false);
-      return undefined;
-    }
-    if (payload.harnessId !== undefined && !(this.deps.getServerCapabilities?.() ?? []).includes('custom-harness')) {
-      decline('server does not support custom-harness identity', false);
-      return undefined;
-    }
-    const requiredToolsets = 'requiredToolsets' in payload ? payload.requiredToolsets : undefined;
-    const resolvedMcp = requiredToolsets ? this.resolveMcpServers(requiredToolsets) : undefined;
-    if (resolvedMcp && !resolvedMcp.ok) {
-      decline(resolvedMcp.reason, true);
-      return undefined;
-    }
-    return { requiredToolsets, resolvedMcp };
+    return admitOfferLimits.call(this, phase, payload);
   }
 
-  private async prepareOfferRuntime(phase: OfferPhaseContext, input: OfferRuntimeInput) {
-    const { taskId, decline, admissionWithdrawn } = phase;
-    const {
-      payload, agentRef, preparation, preparedMemorySelected, ordinaryMemoryMode, ordinaryMemoryMcp, messageRequirement, terminalProjection,
-      readerAttempt, requiredToolsets, resolvedMcp, blobAbort,
-    } = input;
-    const offered = withoutRequiredToolsets(payload);
-    const requestedRuntime = payload.harnessId ?? payload.dispatchSelection?.runtimeId ?? payload.runtime;
-    const requiresAgentMemoryMcp = preparation === undefined && agentRef !== undefined && ordinaryMemoryMcp;
-    let pick: PickResult;
-    try {
-      pick = await this.pickAdapter(
-        requestedRuntime,
-        requiredToolsets !== undefined
-          || (preparation === undefined && (messageRequirement !== undefined || terminalProjection?.mode === 'result-document'))
-          || requiresAgentMemoryMcp || preparedMemorySelected,
-        blobAbort.signal,
-      );
-    } catch (error) {
-      if (!admissionWithdrawn()) decline(`runtime detection failed: ${outboundErrorMessage(error)}`, true);
-      return undefined;
-    }
-    if (admissionWithdrawn()) return undefined;
-    if (!pick.ok) {
-      decline(pick.reason, pick.retryable);
-      return undefined;
-    }
-    if (readerAttempt && pick.descriptor.capabilities.durablePi === true) {
-      // Durable Pi binds its replica to the canonical home as its cwd.
-      decline('durable Pi runs only in the canonical Agent home; it does not run memory-reader Attempts', false);
-      return undefined;
-    }
-    if (!isKnownRuntimeId(pick.descriptor.id) && !(this.deps.getServerCapabilities?.() ?? []).includes('custom-harness')) {
-      decline('server does not support the selected custom harness identity', false);
-      return undefined;
-    }
-    // Scratch-free declines do not own an Execution resource or contend on
-    // its store gate. Acquire it at the first consumer; handleOffer retains
-    // ownership across this await and releases it on every pre-start exit.
-    const scratch = await input.acquireScratch();
-    if (admissionWithdrawn()) return undefined;
-    // The environment EVERY child process of this task receives: the
-    // daemon's own, minus the hard deny (`./environment.ts`). Computed here,
-    // before admission, so the admission-time MCP probes below see exactly
-    // what the runtime path sees. One computation, both phases.
-    const env = { ...buildRuntimeEnv({ ambient: process.env }), ...scratch.env };
-    const mcpEnv = pick.descriptor.id === 'pi' ? projectPiMcpEnvironment(env) : env;
-    if (resolvedMcp?.ok && agentRef !== undefined && this.deps.prepareHostTaskContext) {
-      await this.deps.prepareHostTaskContext(taskId, blobAbort.signal);
-      if (admissionWithdrawn()) return undefined;
-    }
-    // Contract §8.1: the host toolset servers this task will actually run
-    // get their per-`(task, server)` nonce here, on the copy handed to the
-    // adapter. The admission probe below keeps reading `resolvedMcp.servers`,
-    // which stays clean — a `tools/list` handshake is not this task's
-    // execution and has no business holding its tool authority.
-    let taskMcpServers = resolvedMcp?.ok
-      ? this.withHostToolsetContext(resolvedMcp.servers, taskId, agentRef, resolvedMcp.toolsetIdByServer)
-      : undefined;
-    if (preparation === undefined) {
-      taskMcpServers = this.withAgentMessageMcp(taskMcpServers, taskId, messageRequirement);
-    }
-    taskMcpServers = this.withAgentResultMcp(taskMcpServers, taskId, terminalProjection);
-    // Only the adapters that register projected toolset tools themselves
-    // need the daemon's `tools/list` observation (see
-    // `RuntimeAdapterDescriptor.requiresMcpToolsetToolObservation`). An
-    // adapter whose runtime lists the tools itself must not pay a probe per
-    // projected server on every offer.
-    const needsToolsetObservation = resolvedMcp?.ok === true
-      && pick.descriptor.requiresMcpToolsetToolObservation === true;
-    if (preparation === undefined && messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
-      try {
-        await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv);
-      } catch (error) {
-        decline(`required Agent message helper preflight failed: ${outboundErrorMessage(error)}`, false);
-        return undefined;
-      }
-    }
-    if (preparation === undefined && terminalProjection?.mode === 'result-document' && this.deps.agentResultMcpPreflight !== undefined) {
-      try {
-        await this.deps.agentResultMcpPreflight(taskMcpServers![AGENT_RESULT_MCP_SERVER_NAME]!, mcpEnv);
-      } catch (error) {
-        decline(`required Agent result helper preflight failed: ${outboundErrorMessage(error)}`, false);
-        return undefined;
-      }
-    }
-    if (requiresAgentMemoryMcp && agentRef !== undefined && ordinaryMemoryMode !== 'none') {
-      try {
-        // A `read` task, which includes every reader, is sealed `read` and its helper lists only `memory_recall`.
-        taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef, ordinaryMemoryMode, this.deps.agentMemoryMcpBin!, 'granted');
-      } catch (error) {
-        decline(`Agent memory MCP configuration failed: ${errorMessage(error)}`, false);
-        return undefined;
-      }
-    }
-    // Observe each projected toolset server's OWN tool list before the
-    // adapter is asked to admit the task. Both bundled runtimes refuse an
-    // MCP tool they were not told to allow, and the only honest source for
-    // those names is the server itself — device toolset configuration
-    // carries `command`/`args` and nothing more.
-    //
-    // All servers are probed CONCURRENTLY under one shared deadline
-    // (`MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS`, see its own doc comment):
-    // Downloads belong to this offer; a serial loop would
-    // multiply the timeout by the server count and let one unresponsive
-    // command delay `task.cancel`/`task.approve` for minutes. Every probe
-    // kills its own child when the deadline expires, so a decline never
-    // leaves a probed server running.
-    //
-    // Retryability follows the KIND of failure, not the phase: a spawn
-    // error, an early exit, or a timeout may well succeed later and stays
-    // retryable, exactly like the workspace-busy declines below. A server
-    // that answered and reported an ungrantable tool name has stated a
-    // permanent fact about itself — re-offering the task would probe the
-    // same command and get the same answer forever, so that declines
-    // non-retryably and names the server and the tool.
-    let mcpToolsetTools: Record<string, McpToolsetServerObservation> | undefined;
-    if (needsToolsetObservation) {
-      const probe = this.deps.mcpToolsetToolsProbe ?? probeMcpServer;
-      const entries = Object.entries(resolvedMcp!.servers);
-      const settled = await Promise.allSettled(entries.map(async ([serverName, server]) => {
-        const observation = await probe(serverName, server, {
-          label: `MCP toolset server "${serverName}"`,
-          timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
-          env: mcpEnv,
-        });
-        if (observation.tools.length === 0) throw new Error('tools/list reported no tools');
-        // The toolset id is the registry's fact about this server, joined
-        // on here so the adapter receives one self-describing record instead
-        // of an observation plus a parallel map that could disagree with it.
-        const toolsetId = resolvedMcp!.toolsetIdByServer.get(serverName);
-        if (toolsetId === undefined) {
-          throw new Error('observed a server that belongs to no projected toolset');
-        }
-        return bindMcpToolsetServerObservation(observation, toolsetId);
-      }));
-      const observed: Record<string, McpToolsetServerObservation> = {};
-      let failure: { serverName: string; error: unknown } | undefined;
-      for (let index = 0; index < entries.length; index += 1) {
-        const serverName = entries[index]![0];
-        const result = settled[index]!;
-        if (result.status === 'fulfilled') observed[serverName] = result.value;
-        else if (failure === undefined) failure = { serverName, error: result.reason };
-      }
-      if (failure !== undefined) {
-        decline(
-          `required MCP toolset server "${failure.serverName}" could not be observed: ${outboundErrorMessage(failure.error)}`,
-          !(failure.error instanceof McpAuthorityError),
-        );
-        return undefined;
-      }
-      mcpToolsetTools = Object.freeze(observed);
-    }
-    let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
-    try {
-      prepared = await awaitAdmission(() => pick.adapter.prepare({
-        signal: blobAbort.signal,
-        offer: offered,
-        descriptor: pick.descriptor,
-        requiredToolsetIds: requiredToolsets ?? [],
-        ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
-        ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
-      }), blobAbort.signal);
-    } catch (error) {
-      if (!admissionWithdrawn()) decline(`runtime preparation failed: ${outboundErrorMessage(error)}`, true);
-      return undefined;
-    }
-    if (admissionWithdrawn()) return undefined;
-    if (prepared.kind === 'reject') {
-      decline(prepared.reason, prepared.retryable);
-      return undefined;
-    }
-    return { scratch, offered, pick, env, mcpEnv, taskMcpServers, mcpToolsetTools, prepared };
+  private prepareOfferRuntime(phase: OfferPhaseContext, input: OfferRuntimeInput) {
+    return prepareOfferRuntime.call(this, phase, input);
   }
 
   private withAgentMessageMcp(
@@ -3710,24 +1258,7 @@ export class TaskRunner {
     taskId: string,
     requirement: Readonly<AgentMessageEgressRequirement> | undefined,
   ): Readonly<Record<string, McpStdioServerConfig>> | undefined {
-    if (requirement === undefined) return existing;
-    const bin = this.deps.agentMessageMcpBin!;
-    const contextToken = `${randomUUID()}.${randomUUID()}`;
-    this.revokeAgentMessageContext(taskId);
-    this.messageContextByToken.set(contextToken, taskId);
-    this.messageContextByTask.set(taskId, contextToken);
-    return Object.freeze({
-      ...(existing ?? {}),
-      [AGENT_MESSAGE_MCP_SERVER_NAME]: Object.freeze({
-        command: bin.command,
-        args: Object.freeze([...bin.args]),
-        env: Object.freeze({
-          BYOK_STORE_DIR: this.deps.storeDir,
-          BYOK_PRODUCT_ID: this.deps.productId,
-          BYOK_AGENT_MESSAGE_CONTEXT: contextToken,
-        }),
-      }),
-    });
+    return withAgentMessageMcp.call(this, existing, taskId, requirement);
   }
 
   private withAgentResultMcp(
@@ -3735,25 +1266,7 @@ export class TaskRunner {
     taskId: string,
     selection: Readonly<TerminalProjectionSelection> | undefined,
   ): Readonly<Record<string, McpStdioServerConfig>> | undefined {
-    if (selection?.mode !== 'result-document') return existing;
-    const bin = this.deps.agentResultMcpBin!;
-    const contextToken = `${randomUUID()}.${randomUUID()}`;
-    this.revokeAgentResultContext(taskId);
-    const context: AgentResultContext = { taskId, token: contextToken, contract: selection.contract, schema: selection.schema };
-    this.resultContextByToken.set(contextToken, context);
-    this.resultContextByTask.set(taskId, context);
-    return Object.freeze({
-      ...(existing ?? {}),
-      [AGENT_RESULT_MCP_SERVER_NAME]: Object.freeze({
-        command: bin.command,
-        args: Object.freeze([...bin.args]),
-        env: Object.freeze({
-          BYOK_STORE_DIR: this.deps.storeDir,
-          BYOK_PRODUCT_ID: this.deps.productId,
-          BYOK_AGENT_RESULT_CONTEXT: contextToken,
-        }),
-      }),
-    });
+    return withAgentResultMcp.call(this, existing, taskId, selection);
   }
 
   private revokeAgentResultContext(taskId: string): void {
@@ -3763,14 +1276,7 @@ export class TaskRunner {
   }
 
   private agentResultStore(homeDir: string): Promise<AgentResultStore> {
-    const existing = this.resultStoresByHome.get(homeDir);
-    if (existing !== undefined) return existing;
-    const opened = AgentResultStore.open(homeDir);
-    this.resultStoresByHome.set(homeDir, opened);
-    void opened.catch(() => {
-      if (this.resultStoresByHome.get(homeDir) === opened) this.resultStoresByHome.delete(homeDir);
-    });
-    return opened;
+    return agentResultStore.call(this, homeDir);
   }
 
   private revokeAgentMessageContext(taskId: string): void {
@@ -3798,137 +1304,24 @@ export class TaskRunner {
     bin: {command: string; args: readonly string[]},
     toolList: 'granted' | 'complete',
   ): Readonly<Record<string, McpStdioServerConfig>> {
-    if (existing !== undefined && Object.prototype.hasOwnProperty.call(existing, AGENT_MEMORY_MCP_SERVER_NAME)) {
-      throw new Error(`MCP server name "${AGENT_MEMORY_MCP_SERVER_NAME}" is reserved by the daemon`);
-    }
-    const contextToken = `${randomUUID()}.${randomUUID()}`;
-    this.revokeAgentMemoryContext(taskId);
-    this.memoryContextByToken.set(contextToken, Object.freeze({ taskId, agentRef: Object.freeze({ ...agentRef }), mode }));
-    this.memoryContextByTask.set(taskId, contextToken);
-    return Object.freeze({
-      ...(existing ?? {}),
-      [AGENT_MEMORY_MCP_SERVER_NAME]: Object.freeze({
-        command: bin.command,
-        args: Object.freeze([...bin.args]),
-        env: Object.freeze({
-          BYOK_STORE_DIR: this.deps.storeDir,
-          BYOK_PRODUCT_ID: this.deps.productId,
-          BYOK_AGENT_MEMORY_CONTEXT: contextToken,
-          BYOK_PREPARED_AGENT_MEMORY_MODE: mode,
-          ...(toolList === 'granted' ? { BYOK_AGENT_MEMORY_TOOL_LIST: 'granted' } : {}),
-        }),
-      }),
-    });
+    return withAgentMemoryMcp.call(this, existing, taskId, agentRef, mode, bin, toolList);
   }
 
   /** Reconstruct all sensitive context from the active sealed task, never from MCP/model arguments. */
   private activeMemoryContext(contextToken: string): AgentMemoryTaskContext {
-    const registered = this.memoryContextByToken.get(contextToken);
-    if (registered === undefined || this.memoryContextByTask.get(registered.taskId) !== contextToken || this.memoryClosingTasks.has(registered.taskId)) {
-      throw new Error('invalid, expired, or quiescing Agent memory task context');
-    }
-    const active = this.tasks.get(registered.taskId);
-    if (
-      active === undefined ||
-      active.finalizationStarted ||
-      active.agentBinding === undefined ||
-      active.agentRef === undefined ||
-      active.agentHandoff === undefined ||
-      this.deps.tenantId === undefined ||
-      active.agentRef.agentId !== registered.agentRef.agentId ||
-      active.agentRef.profileRevision !== registered.agentRef.profileRevision ||
-      active.agentBinding.resolution.agentRef.agentId !== registered.agentRef.agentId ||
-      active.agentBinding.resolution.agentRef.profileRevision !== registered.agentRef.profileRevision ||
-      active.agentHandoff.sessionRef !== active.session.sessionRef ||
-      active.agentHandoff.runtimeId !== active.adapter.descriptor.id ||
-      active.agentHandoff.cwd !== active.agentBinding.lease.cwd ||
-      active.agentBinding.lease.canonicalHome !== active.agentBinding.resolution.canonicalHome
-    ) {
-      throw new Error('Agent memory context no longer matches its exact active task identity');
-    }
-    return Object.freeze({
-      taskId: registered.taskId,
-      tenantId: this.deps.tenantId,
-      deviceId: this.deps.deviceId,
-      agentRef: Object.freeze({ ...active.agentRef }),
-      sessionRef: active.session.sessionRef,
-      runtimeId: active.adapter.descriptor.id,
-      canonicalHome: active.agentBinding.resolution.canonicalHome,
-      leaseId: active.agentBinding.lease.leaseId,
-      homeIdentity: active.agentBinding.lease.homeIdentity,
-    });
+    return activeMemoryContext.call(this, contextToken);
   }
 
-  private async runMemoryOperation<T>(contextToken: string, required: 'read'|'write', operation: (context: AgentMemoryTaskContext) => Promise<T>): Promise<T> {
-    let context = this.activeMemoryContext(contextToken);
-    if (required === 'write' && this.memoryContextByToken.get(contextToken)?.mode !== 'read-write') throw new AgentMemoryError('agent_memory_operation_denied: write denied by sealed capability');
-    context = await this.bindAgentMemoryFilesystem(context);
-    // The helper handshake is asynchronous. Reconstruct the authority again so
-    // a task that began closing during it cannot retain a stale context.
-    const current = this.activeMemoryContext(contextToken);
-    if (current.taskId !== context.taskId || current.leaseId !== context.leaseId) throw new Error('Agent memory context changed during secure filesystem handshake');
-    context = Object.freeze({ ...current, ...(context.filesystem === undefined ? {} : { filesystem: context.filesystem }) });
-    const pending = this.memoryInFlightByTask.get(context.taskId) ?? new Set<Promise<unknown>>();
-    this.memoryInFlightByTask.set(context.taskId, pending);
-    const result = operation(context);
-    pending.add(result);
-    try {
-      return await result;
-    } finally {
-      pending.delete(result);
-      if (pending.size === 0) this.memoryInFlightByTask.delete(context.taskId);
-    }
+  private runMemoryOperation<T>(contextToken: string, required: 'read'|'write', operation: (context: AgentMemoryTaskContext) => Promise<T>): Promise<T> {
+    return (runMemoryOperation<T>).call(this, contextToken, required, operation);
   }
 
-  private async quiesceAndSnapshotAgentMemory(active: ActiveTask): Promise<void> {
-    if (active.agentBinding === undefined || active.agentRef === undefined || active.agentHandoff === undefined) return;
-    if (!isAgentMemorySecureFilesystemAvailable(this.deps.resolveAgentMemoryFilesystemHelperBin !== undefined)) return;
-    if (this.deps.tenantId === undefined) {
-      console.error(`[byok/client] Agent memory quiescent snapshot skipped for ${active.taskId}: exact tenant context is unavailable`);
-      return;
-    }
-    this.memoryClosingTasks.add(active.taskId);
-    try {
-      await Promise.allSettled([...this.memoryInFlightByTask.get(active.taskId) ?? []]);
-      const context = await this.bindAgentMemoryFilesystem({
-        taskId: active.taskId,
-        tenantId: this.deps.tenantId,
-        deviceId: this.deps.deviceId,
-        agentRef: active.agentRef,
-        sessionRef: active.agentHandoff.sessionRef,
-        runtimeId: active.agentHandoff.runtimeId,
-        canonicalHome: active.agentBinding.resolution.canonicalHome,
-        leaseId: active.agentBinding.lease.leaseId,
-        homeIdentity: active.agentBinding.lease.homeIdentity,
-      });
-      await snapshotAndProjectAgentMemory(context, this.deps.agentMemoryHostedProjection);
-    } catch (error) {
-      // Projection never becomes a second task-terminal authority. A failed
-      // snapshot/upload is observable locally and preserves the raw home plus
-      // any already-appended redacted outbox record for later replay.
-      console.error(`[byok/client] Agent memory quiescent snapshot failed for ${active.taskId}: ${errorMessage(error)}`);
-    } finally {
-      await this.closeAgentMemoryFilesystem(active.taskId);
-    }
+  private quiesceAndSnapshotAgentMemory(active: ActiveTask): Promise<void> {
+    return quiesceAndSnapshotAgentMemory.call(this, active);
   }
 
-  private async bindAgentMemoryFilesystem(context: AgentMemoryTaskContext): Promise<AgentMemoryTaskContext> {
-    const helperBin = this.deps.resolveAgentMemoryFilesystemHelperBin?.();
-    if (helperBin === undefined) return context;
-    let filesystem = this.memoryFilesystemByTask.get(context.taskId);
-    if (filesystem === undefined) {
-      filesystem = openAgentMemoryFilesystemHelper({
-        helperBin,
-        assetRoot: this.deps.agentMemoryHelperAssetRoot,
-        canonicalHome: context.canonicalHome,
-        homeIdentity: context.homeIdentity,
-      });
-      this.memoryFilesystemByTask.set(context.taskId, filesystem);
-      void filesystem.catch(() => {
-        if (this.memoryFilesystemByTask.get(context.taskId) === filesystem) this.memoryFilesystemByTask.delete(context.taskId);
-      });
-    }
-    return Object.freeze({ ...context, filesystem: await filesystem });
+  private bindAgentMemoryFilesystem(context: AgentMemoryTaskContext): Promise<AgentMemoryTaskContext> {
+    return bindAgentMemoryFilesystem.call(this, context);
   }
 
   private async closeAgentMemoryFilesystem(taskId: string): Promise<void> {
@@ -3968,49 +1361,7 @@ export class TaskRunner {
     agentRef: AgentRef | undefined,
     toolsetIdByServer: ReadonlyMap<string, string>,
   ): Readonly<Record<string, McpStdioServerConfig>> {
-    // §8.1's capability gate, asked before anything is minted. An undeclared
-    // lane gets no nonce at all — not a weaker one, and not a device
-    // assertion's identity wearing a task's name. The MCP child then fails
-    // explicitly for want of a token (§8.2(1)), which is the visible outcome
-    // §8.3 asks for when a device or a deployment cannot serve this lane.
-    if (this.deps.hostTaskContextAvailable?.() !== true) return servers;
-    if (agentRef === undefined) return servers;
-    // A re-offer of the same taskId must not leave the previous attempt's
-    // nonces mintable: the old child is gone, so its tokens are authority
-    // nobody holds any more.
-    this.deleteHostToolsetContexts(taskId);
-    const frozenAgentRef = Object.freeze({ ...agentRef });
-    const tokens = new Set<string>();
-    const injected: Record<string, McpStdioServerConfig> = {};
-    for (const [serverName, server] of Object.entries(servers)) {
-      const toolsetId = toolsetIdByServer.get(serverName);
-      // A server with no owning toolset would mean the resolution above lost
-      // the binding; minting a nonce for it would produce a claim no frozen
-      // offer can confirm, so it simply gets no task lane.
-      if (toolsetId === undefined) {
-        injected[serverName] = server;
-        continue;
-      }
-      const contextToken = freshHostToolsetContextToken();
-      this.hostToolsetContextByToken.set(contextToken, {
-        taskId,
-        agentRef: frozenAgentRef,
-        toolsetId,
-        serverName,
-        state: 'active',
-      });
-      tokens.add(contextToken);
-      injected[serverName] = Object.freeze({
-        ...server,
-        env: Object.freeze({
-          BYOK_STORE_DIR: this.deps.storeDir,
-          BYOK_PRODUCT_ID: this.deps.productId,
-          [HOST_TOOLSET_CONTEXT_ENV]: contextToken,
-        }),
-      });
-    }
-    if (tokens.size > 0) this.hostToolsetContextTokensByTask.set(taskId, tokens);
-    return Object.freeze(injected);
+    return withHostToolsetContext.call(this, servers, taskId, agentRef, toolsetIdByServer);
   }
 
   /**
@@ -4092,391 +1443,15 @@ export class TaskRunner {
         toolsetIdByServer: ReadonlyMap<string, string>;
       }
     | { ok: false; reason: string } {
-    const registry = this.deps.getMcpToolsets?.();
-    if (!registry || registry.size === 0) {
-      return { ok: false, reason: 'offer requires MCP toolsets, but this device has no local mcpToolsets registry' };
-    }
-    const servers = Object.create(null) as Record<string, McpStdioServerConfig>;
-    const toolsetIdByServer = new Map<string, string>();
-    for (const toolsetId of requiredToolsets) {
-      const toolset = registry.get(toolsetId);
-      if (!toolset) {
-        return { ok: false, reason: `required MCP toolset "${toolsetId}" is not configured on this device` };
-      }
-      for (const [serverName, server] of Object.entries(toolset.mcpServers)) {
-        if (Object.prototype.hasOwnProperty.call(servers, serverName)) {
-          return {
-            ok: false,
-            reason: `required MCP toolsets collide on server name "${serverName}"; refusing ambiguous projection`,
-          };
-        }
-        servers[serverName] = Object.freeze({
-          command: server.command,
-          ...(server.args ? { args: Object.freeze([...server.args]) } : {}),
-        });
-        toolsetIdByServer.set(serverName, toolsetId);
-      }
-    }
-    if (Object.keys(servers).length === 0) {
-      return { ok: false, reason: 'required MCP toolsets resolved to no servers; refusing to run without tools' };
-    }
-    return { ok: true, servers: Object.freeze(servers), toolsetIdByServer };
+    return resolveMcpServers.call(this, requiredToolsets);
   }
 
-  private async pump(active: ActiveTask): Promise<void> {
-    try {
-      for await (let event of active.session.events) {
-        if (this.tasks.get(active.taskId) !== active || active.finalizationStarted) return;
-        if (active.beingTornDown) {
-          // Cancellation owns the result, but the native interrupt may still
-          // deliver metering after a tool result/diagnostic. Consume only that
-          // observation, never progress, artifacts, approvals or a new terminal.
-          if (event.type === 'usage') observeTerminalUsage(active, event);
-          if (event.type === 'turn_end') return;
-          continue;
-        }
-        // A concurrent task.cancel/task.reject may already have finished
-        // (and deleted) this task while this loop was awaiting the next
-        // event — e.g. the runtime's own interrupt handling settles with a
-        // trailing turn_end shortly after handleCancel() already reported
-        // task.cancelled and started tearing the session down. That event
-        // is stray at this point: without this check, the turn_end branch
-        // below would unconditionally resend task.complete (and any
-        // buffered task.progress) for a task the server already moved to a
-        // terminal state, which it can only log as a dropped/illegal
-        // transition (console.warn) rather than the silent-drop §9
-        // guarantees for genuinely stale terminal messages. Mirrors the
-        // same check already used below for the non-turn_end loop exits.
-        if (this.tasks.get(active.taskId) !== active) return;
-        // Display only: a delta never reaches the batcher, the record or the reply.
-        if (event.type === 'message_draft_delta') {
-          active.messageDraft?.pushDelta(event.text, event.startsMessage);
-          continue;
-        }
-
-        // DaemonConfig.maxInlineEventBytes: bound this ONE event before it is
-        // counted, batched, or sent. An oversized `tool_use.input` /
-        // `tool_result.output` is uploaded to the blob plane in full and
-        // replaced inline by a head/tail preview plus a `spill` descriptor
-        // (see `event-spill.ts`). Deliberately placed BEFORE the whole-task
-        // byte accounting below so `maxTaskOutputBytes` counts what actually
-        // goes on the wire, not the pre-spill size — a task that spills is
-        // not a task that flooded.
-        event = await spillOversizedEvent(event, {
-          maxInlineBytes: this.maxInlineEventBytes,
-          // #654: a sealed task never stores a plaintext spill blob. Its
-          // event keeps the preview, which is sealed with the rest of the batch.
-          blobClient: this.deps.sealedTasks?.sealsOutput(active.taskId) ? NO_SEALED_SPILL : this.deps.blobClient,
-          taskId: active.taskId,
-          signal: active.blobAbort.signal,
-          log: (message) => {
-            if (!active.beingTornDown) console.error(`[byok/client] ${message}`);
-          },
-        });
-        // The upload above is a real await: a concurrent cancel/reject may
-        // have finished this task while it was in flight. Same guard, same
-        // reason as the two above — see this loop's own top-of-body checks.
-        if (this.tasks.get(active.taskId) !== active || active.finalizationStarted) return;
-        if (active.beingTornDown) continue; // skip the aborted spill, then drain queued interrupt usage
-        // After the spill (it reads `spill.unstoredReason`) and the teardown
-        // guards, so the record ends exactly where the terminal decision is.
-        active.executionRecord.observe(event);
-
-        // M5 batch-3 (workstream 2): DaemonConfig.maxTaskOutputBytes
-        // enforcement — see `estimateEventBytes`'s own doc comment for
-        // exactly what's counted (a serialized-payload-length
-        // approximation) and what isn't (batching overhead; an artifact's
-        // actual file bytes, uploaded separately by `sendArtifact`). Checked
-        // here, before any per-event-type handling below, so a task that's
-        // about to be torn down for this never pays for `sendArtifact`'s own
-        // disk I/O or dispatches a pointless approval request first.
-        active.outputBytesSoFar += estimateEventBytes(event);
-        if (active.outputBytesSoFar > this.maxTaskOutputBytes) {
-          active.batcher.flush();
-          await this.failActiveTaskForResourceLimit(
-            active.taskId,
-            `${MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX}: task emitted approximately ${active.outputBytesSoFar} bytes of output (serialized-event-length approximation), exceeding the configured limit of ${this.maxTaskOutputBytes} bytes`,
-            false, // Called by this pump: it cannot await its own settlement.
-          );
-          return;
-        }
-
-        if (event.type === 'usage') {
-          // Terminal usage is last-observed, not an accumulator. The bundled
-          // Codex/Claude adapters emit their runtime terminal observation
-          // before turn_end/error; a custom adapter that emits several keeps
-          // only the latest actual observation rather than inventing a sum.
-          // Keep terminal provider cost observation when a separate context snapshot arrives.
-          observeTerminalUsage(active, event);
-          if (active.prepared !== undefined) {
-            const verdict = observePreparedCall(active.prepared, event);
-            if (verdict !== undefined) {
-              // The observation that ended the Execution still reaches the
-              // wire, ahead of the typed failure it caused.
-              active.batcher.push(event);
-              active.batcher.flush();
-              await this.teardownActiveTask(active, verdict, false, false);
-              return;
-            }
-          }
-        }
-
-        // The session hook can be stateful. Share one decision with both text lanes.
-        const startsMessage = event.type === 'progress'
-          && active.adapter.descriptor.progressEventsAreMessages === true && event.text.trim() !== ''
-          && active.session.progressStartsMessage?.(event) !== false;
-        active.messageDraft?.push(event, startsMessage);
-        if (event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'needs_approval') {
-          // A tool interaction ends the current text run: whatever the model
-          // said before it was narration about what it was ABOUT to do, not
-          // its answer. See `ActiveTask.finalTextParts` for why `usage`,
-          // `artifact` and `turn_end` deliberately do not reset here.
-          active.finalTextParts.length = 0;
-        }
-
-        if (event.type === 'needs_approval') {
-          active.batcher.flush();
-          // Acceptance finding 1 (dormant branch bypassing the approval
-          // registry): this used to mint its own approvalId and stamp it
-          // onto `active.pendingApprovalId` directly, entirely bypassing
-          // `deps.approvalRegistry` — no registry entry ever existed for it,
-          // and nothing ever cleared this field for it either (clearing
-          // lived ONLY in `dispatchApproval`'s own `onResolve` callback,
-          // which is registered only when a request actually goes through
-          // the registry). For a hypothetical adapter mixing this
-          // stream-based path with the out-of-band `approvalChannel` path
-          // on the SAME task (e.g. a custom session whose `resolveApproval()`
-          // sometimes delegates to `ctx.approvalChannel.resolve()`), that
-          // meant: this event could clobber an already-dispatched channel
-          // approval's id (a later wire decision for the REAL dispatched
-          // approval would then look stale and be dropped); a resolved
-          // dormant approval left a stale id blocking every later
-          // `requestApproval` call for this task until the task finished;
-          // and routing a wire decision through `ctx.approvalChannel.resolve()`
-          // for a dormant id that was never registered threw
-          // `ApprovalNotFoundError` — not treated as benign staleness by
-          // `handleApprove`/`handleReject` — failing the task outright.
-          //
-          // Fix: reuse `requestApproval`, the SAME entry point a real
-          // out-of-band approval (MCP-triggered) goes through. This gives
-          // the dormant path the exact same lifecycle: it queues (rather
-          // than clobbers) behind an already-dispatched approval for this
-          // task, registers in `deps.approvalRegistry` once actually
-          // dispatched, and arms the same timeout — see
-          // `task-runner-approval.test.ts`'s mixed-path regression test.
-          //
-          // C1 (cross-model review, P1): reusing `requestApproval` fixed the
-          // registry-bypass above, but its returned promise used to be
-          // discarded outright (`void`d with no continuation at all). That
-          // was harmless for the WIRE path — `handleApprove`/`handleReject`
-          // already call `active.session.resolveApproval()` themselves,
-          // directly, before ever touching the registry (see
-          // `clearPendingApproval`'s own doc comment) — but a decision that
-          // resolves THIS registry entry any OTHER way (the local
-          // control-socket CLI's `approvals.resolve`, this request's own
-          // `dispatchApproval` timeout, or a bounded-eviction fallback in
-          // `ApprovalRegistry.register`) never goes through
-          // `handleApprove`/`handleReject` at all — so nothing ever called
-          // `session.resolveApproval()` for it. The runtime session stayed
-          // paused forever even though the daemon (and, for a `'local'`
-          // origin, the server too, via `sendApprovalResolved`) already
-          // considered the approval resolved.
-          //
-          // Fix: chain a continuation onto the SAME promise that forwards
-          // the decision into `active.session.resolveApproval()` — but ONLY
-          // when the resolution's origin is NOT `'wire'`, since the wire
-          // path already did that itself, synchronously, before this
-          // registry entry was ever resolved; forwarding again here would
-          // double-resolve the session. `origin` is deliberately NOT part of
-          // the promise's own resolved value — that shape (`{approved,
-          // reason}`) is `requestApproval`'s public contract, asserted
-          // exactly by this file's own tests and relied on by
-          // `create-daemon.ts`'s shared control socket —
-          // instead it's threaded through via the optional `onOrigin`
-          // callback parameter (additive, invisible to every other caller).
-          // See `task-runner-approval.test.ts`'s "C1" describe block for the
-          // local-resolve / wire-resolve / timeout regression tests, and
-          // `clearPendingApproval`'s own doc comment for the sibling wire
-          // half of this exact design.
-          const { taskId } = active;
-          let resolutionOrigin: ApprovalOrigin = 'local';
-          void this.requestApproval(taskId, event.summary, (origin) => {
-            resolutionOrigin = origin;
-          }).then(async ({ approved, reason }) => {
-            if (resolutionOrigin === 'wire') return;
-            // The task may have finished (completed/failed/cancelled) by the
-            // time this settles — look it up fresh rather than trust the
-            // `active` closed over above, mirroring every other post-await
-            // guard in this method (e.g. this loop's own stray-event check,
-            // and the catch block below).
-            if (this.tasks.get(taskId) !== active) return;
-            try {
-              await active.session.resolveApproval(approved, reason);
-            } catch (err) {
-              await this.fail(taskId, `failed to resume session after approval decision: ${errorMessage(err)}`, false);
-            }
-          });
-          continue;
-        }
-        if (event.type === 'turn_end') {
-          if (active.prepared !== undefined && active.prepared.initialPromptTokens === undefined) {
-            // A prepared result nobody can check against its byte bound is not
-            // a success. Fail closed rather than completing without evidence.
-            active.batcher.flush();
-            await this.fail(
-              active.taskId,
-              `${PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX}: this prepared Execution settled with no provider usage observed`,
-              false,
-            );
-            return;
-          }
-          active.batcher.push(event);
-          active.batcher.flush();
-          const finalOutput = active.summaryParts.join('');
-          // Resolve the result decision before Git observation and reply handoff.
-          // Missing/unreadable results can still deliver a required reply; a task
-          // that cannot deliver its required result takes the salvage path
-          // `fail()` already applies to every other failure — rather than
-          // being observed as completed and only then failed.
-          const outcome = await this.resolveStagedResult(active);
-          if (!outcome.deliver) return; // already reported task.fail and finished
-          const failureReason = outcome.failure === undefined ? undefined
-            : resultReplyFailureReason(outcome.failure, active.terminalProjection!.mode === 'result-document' ? active.terminalProjection!.contract : '');
-          if (outcome.failure !== undefined) active.resultReplyFailure = outcome.failure;
-          else await this.observeGit(active, 'completed');
-          if (!this.canPublishAgentMessage(active)) return;
-          const recordFailure = async () => {
-            if (outcome.failure === undefined) return;
-            if (this.deps.recordResultReplyFailure === undefined) throw new Error('required reply result failure has no durable intent writer');
-            await this.deps.recordResultReplyFailure(active.taskId, outcome.failure);
-          };
-          if (active.messageRequirement !== undefined && !active.messageAccepted) {
-            // Tool-authored and daemon-authored replies share one immutable
-            // draft and one append → failure intent → activation boundary.
-            // A recovery binding stays inert until the journal intent exists.
-            const outbox = active.messageOutbox;
-            let refusalReason: string | undefined;
-            try {
-              if (outbox === undefined || active.agentRef === undefined) {
-                refusalReason = 'required Agent message lane is unavailable for this task';
-                throw new Error(refusalReason);
-              }
-              if (outbox.get(active.taskId) === undefined) {
-                const body = (closingReply(active) ?? finalOutput).trim();
-                if (body === '') {
-                  refusalReason = 'runtime produced no reply text for the required Agent message';
-                  throw new Error(refusalReason);
-                }
-                try {
-                  await outbox.appendDraft({ taskId: active.taskId, tenantId: this.deps.tenantId!,
-                    agentRef: active.agentRef, requirement: active.messageRequirement,
-                    contentType: active.messageRequirement.contentType, body,
-                    ...(outcome.failure === undefined ? {} : { recoverySessionRef: active.session.sessionRef }),
-                    maxPendingEvents: 64, maxPendingBytes: 4 * 1024 * 1024 });
-                } catch (error) {
-                  // An in-flight tool author may win the immutable draft.
-                  if (!active.messageAccepted && outbox.get(active.taskId) === undefined) throw error;
-                }
-              }
-              if (!this.canPublishAgentMessage(active)) return;
-              await recordFailure();
-              if (!this.canPublishAgentMessage(active)) return;
-              if (!active.messageAccepted) {
-                active.pendingMessageCompletion = { finalOutput, ...(failureReason === undefined ? {} : { failureReason }), ...(outcome.document === undefined ? {} : { document: outcome.document }) };
-                const activated = await this.activateAgentMessage(outbox, active.taskId, active.session.sessionRef,
-                  () => this.canPublishAgentMessage(active), () => active.messageSendAttempted === true);
-                if (!this.canPublishAgentMessage(active)) return;
-                if (activated === undefined) throw new Error('Agent message draft disappeared before activation');
-                this.sendAgentMessageRecord(outbox, activated);
-                return;
-              }
-            } catch (err) {
-              if (outcome.failure !== undefined) throw err; // preserve the runtime-boundary failure projection
-              if (!this.canPublishAgentMessage(active)) return;
-              active.pendingMessageCompletion = undefined;
-              await this.fail(active.taskId, refusalReason ?? `failed to deliver the required Agent message: ${errorMessage(err)}`, false);
-              return;
-            }
-          } else {
-            await recordFailure();
-            if (!this.canPublishAgentMessage(active)) return;
-          }
-          if (failureReason !== undefined) await this.fail(active.taskId, failureReason, false);
-          else await this.publishSuccessfulCompletion(active, finalOutput, outcome.document);
-          return;
-        }
-        if (event.type === 'progress') {
-          active.summaryParts.push(event.text);
-          // A blank whole message must not erase the reply that came before it.
-          if (startsMessage) {
-            active.finalTextParts.length = 0;
-          }
-          active.finalTextParts.push(event.text);
-        }
-        if (event.type === 'artifact') await this.sendArtifact(active, event.name, event.contentType);
-        active.batcher.push(event);
-      }
-      // The events iterable ended without either an explicit turn_end or a
-      // typed RuntimeExecutionFailure. Bundled adapters translate process
-      // disappearance into a typed infrastructure failure before their
-      // iterable ends; a clean end here is therefore an adapter-contract
-      // violation, not permission for TaskRunner to guess provider meaning.
-      // This is also exactly what happens when `handleCancel`/`handleReject`
-      // concurrently call `session.close()` while this loop is still
-      // awaiting the same iterable (ending it is how those paths stop the
-      // session). Check identity against the tasks map — if something else
-      // already finished this exact active task, its own message
-      // (task.cancelled / task.fail) already reported the outcome; this is
-      // not a second failure. M5 batch-3 (workstream 2): `beingTornDown` is
-      // the SAME guard for `teardownActiveTask`'s own controlled teardown
-      // (graceful shutdown / resource-limit enforcement) — see
-      // `ActiveTask.beingTornDown`'s own doc comment for why the identity
-      // check alone doesn't cover that path's pre-finish() hard-kill
-      // `close()` call.
-      if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
-      active.executionRecord.streamEnded();
-      const failure = projectRuntimeBoundaryFailure(undefined, 'run');
-      console.error('[byok/client] runtime adapter events iterable ended without terminal authority');
-      await this.fail(active.taskId, failure.reason, failure.retryable, failure.failure);
-    } catch (err) {
-      if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
-      active.batcher.flush();
-      if (err instanceof ProgressEventTooLargeError) {
-        await this.failActiveTaskForResourceLimit(
-          active.taskId,
-          `${ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX}: event requires ${err.actualBytes} UTF-8 bytes, exceeding the advertised activity ingress limit of ${err.maxBytes} bytes`,
-          false,
-        );
-        return;
-      }
-      // The runner fails the task as the runtime's `run` failure below, so the
-      // record counts the throw as the runtime ending its stream.
-      active.executionRecord.streamEnded();
-      const failure = projectRuntimeBoundaryFailure(err, 'run');
-      if (failure.contractViolation) {
-        // Never the error object itself (issue #395); see the start() case.
-        console.error(
-          `[byok/client] runtime adapter ${active.adapter.descriptor.id} events iterable returned an untyped failure for task ${active.taskId}`,
-        );
-      }
-      await this.fail(active.taskId, failure.reason, failure.retryable, failure.failure);
-    }
+  private pump(active: ActiveTask): Promise<void> {
+    return pump.call(this, active);
   }
 
-  private async publishSuccessfulCompletion(active: ActiveTask, finalOutput: string, document?: unknown): Promise<void> {
-    await this.settleSemanticTerminal(active, async () => {
-      await this.persistAgentTerminalEvidence(active, 'complete');
-      const finalMessage = closingReply(active);
-      return createEnvelope('task.complete', {
-        summary: finalOutput,
-        ...(finalMessage === undefined ? {} : { finalMessage }),
-        sessionRef: active.session.sessionRef,
-        ...(document !== undefined ? { document } : {}),
-        ...this.terminalInferenceUsagePayload(active),
-        ...this.preparedObservationPayload(active),
-        ...this.agentTerminalPayload(active),
-      }, { taskId: active.taskId, sessionRef: active.session.sessionRef });
-    });
+  private publishSuccessfulCompletion(active: ActiveTask, finalOutput: string, document?: unknown): Promise<void> {
+    return publishSuccessfulCompletion.call(this, active, finalOutput, document);
   }
 
   /**
@@ -4505,126 +1480,17 @@ export class TaskRunner {
    * normally, but the dropped artifact is now visible in the event stream
    * rather than swallowed.
    */
-  private async sendArtifact(active: ActiveTask, name: string, contentType: string): Promise<void> {
-    const opened = await openArtifact(active.workspaceDir, name);
-    if (!opened.ok) {
-      this.reportArtifactError(active, name, opened.reason);
-      return;
-    }
-
-    let bytes: Buffer;
-    try {
-      const limits = this.deps.artifactLimits ?? DEFAULT_ARTIFACT_LIMITS;
-      const remaining = limits.maxTaskBytes - (active.artifactBytesSoFar ?? 0);
-      bytes = await readArtifactBytes(opened.handle, Math.min(limits.maxFileBytes, remaining),
-        active.blobAbort.signal, count => { active.artifactBytesSoFar = (active.artifactBytesSoFar ?? 0) + count; });
-    } catch (err) {
-      this.reportArtifactError(active, name, `failed to read artifact "${name}": ${errorMessage(err)}`);
-      return;
-    } finally {
-      await opened.handle.close().catch(() => {});
-    }
-
-    if (this.tasks.get(active.taskId) !== active || active.blobAbort.signal.aborted || active.beingTornDown) return;
-    const sealedTasks = this.deps.sealedTasks;
-    if (sealedTasks?.sealsOutput(active.taskId)) {
-      // #654 decision 12b: a sealed task's artifact is sealed inline content.
-      // It is never uploaded as a plaintext blob.
-      const inline = bytes.toString('base64');
-      if (Buffer.byteLength(inline, 'utf8') > SEALED_SPLIT_TABLE['task.artifact_sealed'].limits.inline) {
-        this.reportArtifactError(active, name, `artifact "${name}" is over the sealed inline limit and was not sent`);
-        return;
-      }
-      try {
-        const sealed = await sealedTasks.sealArtifact(active.taskId, { name, contentType, inline });
-        if (this.tasks.get(active.taskId) !== active || active.blobAbort.signal.aborted || active.beingTornDown) return;
-        if (sealed === undefined) this.reportArtifactError(active, name, `artifact "${name}" was not sent: no sealing key`);
-        else this.deps.send(sealed);
-      } catch (err) {
-        this.reportArtifactError(active, name, `failed to seal artifact "${name}": ${errorMessage(err)}`);
-      }
-      return;
-    }
-    if (bytes.length <= MAX_INLINE_ARTIFACT_BYTES) {
-      const inline = bytes.toString('base64');
-      if (new TextEncoder().encode(inline).length <= MAX_INLINE_ARTIFACT_BYTES) {
-        this.deps.send(createEnvelope('task.artifact', { name, contentType, inline }, { taskId: active.taskId }));
-        return;
-      }
-    }
-
-    try {
-      const blobRef: BlobRef = await this.deps.blobClient.uploadArtifact(bytes, contentType, {
-        signal: active.blobAbort.signal,
-      });
-      if (this.tasks.get(active.taskId) !== active || active.blobAbort.signal.aborted || active.beingTornDown) return;
-      this.deps.send(createEnvelope('task.artifact', { name, contentType, blobRef }, { taskId: active.taskId }));
-    } catch (err) {
-      this.reportArtifactError(active, name, `failed to upload artifact "${name}": ${errorMessage(err)}`);
-    }
+  private sendArtifact(active: ActiveTask, name: string, contentType: string): Promise<void> {
+    return sendArtifact.call(this, active, name, contentType);
   }
 
   /** Loud, non-silent artifact failure (finding F7): logged, and folded into this task's own progress stream as an `error` AgentEvent rather than swallowed — the task itself can still complete normally, but the omission is now visible. */
   private reportArtifactError(active: ActiveTask, name: string, reason: string): void {
-    if (active.blobAbort.signal.aborted || active.beingTornDown) return;
-    // The name and reason go to the task's own progress stream; stderr is a
-    // service log and gets sizes only (issue #395).
-    console.error(
-      `[byok/client] artifact for task ${active.taskId} dropped: nameBytes=${Buffer.byteLength(name, 'utf8')} reasonBytes=${Buffer.byteLength(reason, 'utf8')}`,
-    );
-    active.batcher.push({ type: 'error', message: reason });
+    return reportArtifactError.call(this, active, name, reason);
   }
 
-  private async handleCancel(taskId: string, reason: string | undefined): Promise<void> {
-    // Contract §8.2(1) / AC11: the FIRST statement of this handler, before the
-    // active-task lookup and before any `await`. A cancel and a
-    // `task_assertion.issue` can arrive as two frames the daemon dispatches on
-    // the same tick; revoking anywhere below an await would leave a window in
-    // which a task this device has already agreed to cancel can still mint new
-    // tool authority. Unconditional, so it covers the not-yet-registered offer
-    // window too — a taskId with no nonces is simply a no-op here.
-    this.revokeHostToolsetContexts(taskId);
-    const active = this.tasks.get(taskId);
-    if (!active) {
-      if (this.startupOwnership.has(taskId) && !this.inFlightOffers.has(taskId)) {
-        await this.startupOwnership.dispose(taskId);
-        return;
-      }
-      // Finding F4: not registered yet — record it in case handleOffer is
-      // still in flight for this exact taskId (claimed but not yet started;
-      // see the class-level doc on `pendingCancelled` and the two
-      // checkpoints in handleOffer). A genuinely stale/unknown/already-
-      // finished taskId just leaves a harmless, never-consulted entry —
-      // identical in effect to the old silent-drop behavior for that case
-      // (M3-B: except now bounded — see `setPendingCancelled`).
-      this.setPendingCancelled(taskId, reason);
-      this.inFlightBlobAborts.get(taskId)?.abort();
-      return;
-    }
-    await this.settleSemanticTerminal(active, async () => {
-      active.blobAbort.abort();
-      await this.interruptBounded(active);
-      await this.observeGit(active, 'salvage');
-      // Deliberately NOT active.batcher.flush()-ed here (M1-4 e2e finding):
-      // §4's "server state is authoritative on its own action" rule means the
-      // server already moved this task to `Cancelled` — and already closed
-      // this task's ServerTaskEvent queue (hub.ts's onStateChange, called
-      // synchronously from cancelTask() before task.cancel is even sent) —
-      // before this notification reaches the daemon at all. Any progress
-      // still buffered in the batcher at this point can therefore never reach
-      // an embedder no matter what: sending it only draws a
-      // dropped/illegal-transition warning on the server for a `task.progress`
-      // arriving against an already-terminal task (hub.ts's onProgress has no
-      // §9 stale-terminal-message idempotency for task.progress the way it
-      // does for task.complete/fail/cancelled). `finish()` below already stops
-      // the batcher; nothing else needs to happen with its buffer contents.
-      // M1 gap #6: the canonical, explicit cancellation message — no longer
-      // `task.fail({reason:'cancelled'})`.
-      await this.persistAgentTerminalEvidence(active, 'cancelled', reason);
-      return createEnvelope('task.cancelled', {
-        reason, ...this.terminalInferenceUsagePayload(active), ...this.agentTerminalPayload(active),
-      }, { taskId });
-    });
+  private handleCancel(taskId: string, reason: string | undefined): Promise<void> {
+    return handleCancel.call(this, taskId, reason);
   }
 
   /** M3-B: bounded insert for `pendingCancelled` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest SAFE-TO-EVICT entry once over cap — see `evictPendingCancelled` (finding #5: not simply "the oldest entry", which could be an in-flight offer's own cancel marker). */
@@ -4661,15 +1527,7 @@ export class TaskRunner {
    * (deleted by `handleOffer` itself) rather than evicted.
    */
   private evictPendingCancelled(): void {
-    for (const key of this.pendingCancelled.keys()) {
-      if (!this.inFlightOffers.has(key)) {
-        this.pendingCancelled.delete(key);
-        return;
-      }
-    }
-    console.warn(
-      `[byok/client] pendingCancelled exceeded ${MAX_TRACKED_TASK_IDS} entries with every tracked taskId currently in-flight — leaving it temporarily over cap rather than evict a marker a running handleOffer() still needs`,
-    );
+    return evictPendingCancelled.call(this);
   }
 
   /**
@@ -4693,20 +1551,8 @@ export class TaskRunner {
    * Every OTHER error stays transient and is rethrown untouched, preserving
    * the existing stall/redelivery semantics exactly.
    */
-  private async handleSteer(taskId: string, text: string): Promise<void> {
-    const active = this.tasks.get(taskId);
-    if (!active) return;
-    try {
-      await active.session.steer(text);
-    } catch (err) {
-      if (err instanceof SteerUnsupportedError) {
-        console.error(
-          `[byok/client] inbound task.steer for task ${taskId} rejected: runtime "${err.runtimeId}" has no steering channel (${err.message}) — acked without retry; this envelope should have been gated server-side`,
-        );
-        return;
-      }
-      throw err;
-    }
+  private handleSteer(taskId: string, text: string): Promise<void> {
+    return handleSteer.call(this, taskId, text);
   }
 
   /**
@@ -4769,29 +1615,12 @@ export class TaskRunner {
    * see that branch's own doc comment for why origin can't simply ride
    * along on the resolved value instead.
    */
-  async requestApproval(
+  requestApproval(
     taskId: string,
     summary: string,
     onOrigin?: (origin: ApprovalOrigin) => void,
   ): Promise<{ approved: boolean; reason?: string }> {
-    const active = this.tasks.get(taskId);
-    if (!active) {
-      return { approved: false, reason: 'task is not currently active on this device' };
-    }
-
-    if (active.pendingApprovalId !== undefined) {
-      if (active.approvalQueue.length >= MAX_PENDING_APPROVALS_PER_TASK) {
-        return {
-          approved: false,
-          reason: `too many approval requests already queued for task ${taskId} (max ${MAX_PENDING_APPROVALS_PER_TASK}) — rejected fail-closed`,
-        };
-      }
-      return new Promise((resolve) => {
-        active.approvalQueue.push({ summary, resolve, onOrigin });
-      });
-    }
-
-    return this.dispatchApproval(active, summary, onOrigin);
+    return requestApproval.call(this, taskId, summary, onOrigin);
   }
 
   /**
@@ -4816,62 +1645,7 @@ export class TaskRunner {
     summary: string,
     onOrigin?: (origin: ApprovalOrigin) => void,
   ): Promise<{ approved: boolean; reason?: string }> {
-    const { taskId } = active;
-    const approvalId = randomUUID();
-    active.pendingApprovalId = approvalId;
-    // Finding F4: see `onApprovalDispatched`'s own doc comment — must fire
-    // BEFORE `deps.send` below so the observer has already stashed this
-    // approvalId by the time that same synchronous call triggers
-    // `DaemonObserver.handleOutboundEnvelope`'s `task.await_approval` case.
-    this.deps.onApprovalDispatched?.(taskId, approvalId);
-    // Mirrors the dormant needs_approval branch's own flush-before-pausing
-    // discipline (~line 611 below): whatever progress already accumulated
-    // this turn should reach the server before the task's state moves to
-    // AwaitApproval, not sit buffered behind an indefinite pause.
-    active.batcher.flush();
-    // M5 (approval targeting): approvalId is always included — see
-    // TaskAwaitApprovalPayloadSchema's own doc comment (@byok-sdk/protocol) for
-    // why no capability gating is needed to send it safely.
-    this.deps.send(createEnvelope('task.await_approval', { summary, approvalId }, { taskId }));
-
-    const timeoutMs = this.deps.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        try {
-          this.deps.approvalRegistry.resolve(approvalId, 'reject', `approval timed out after ${timeoutMs}ms with no decision`);
-        } catch {
-          // Already resolved by a real decision that raced the timer — the
-          // registered onResolve callback below already fired; nothing left
-          // to do here.
-        }
-      }, timeoutMs);
-      timer.unref?.();
-
-      this.deps.approvalRegistry.register(
-        { approvalId, taskId, summary, createdAt: new Date().toISOString() },
-        (decision: ApprovalDecision, reason: string | undefined, origin: ApprovalOrigin) => {
-          clearTimeout(timer);
-          if (active.pendingApprovalId === approvalId) active.pendingApprovalId = undefined;
-          // M4 (additive-minor): report a LOCAL resolution to the server
-          // immediately — but never a 'wire' one (the server already knows;
-          // see `ApprovalOrigin`'s own doc comment, `approvals.ts`). This is
-          // the single convergence point for every local path: the CLI's
-          // `approvals.resolve`, this same method's own timeout branch above,
-          // `finish()`'s fail-closed cleanup, and the registry's own
-          // bounded-eviction fallback all funnel through `onResolve` here.
-          if (origin === 'local') {
-            this.sendApprovalResolved(taskId, approvalId, decision);
-          }
-          // C1: fires BEFORE `resolve(...)` below — a caller chaining
-          // `.then()` onto this method's returned promise (`pump()`'s
-          // dormant `needs_approval` branch) must already be able to see
-          // this origin by the time that continuation runs.
-          onOrigin?.(origin);
-          resolve({ approved: decision === 'approve', reason });
-          this.dispatchNextQueuedApproval(active);
-        },
-      );
-    });
+    return dispatchApproval.call(this, active, summary, onOrigin);
   }
 
   /**
@@ -4970,35 +1744,7 @@ export class TaskRunner {
    * regression test for this exact interleaving reproduced end to end.
    */
   private clearPendingApproval(pendingId: string | undefined, decision: ApprovalDecision, reason: string | undefined): void {
-    if (pendingId === undefined) return;
-    try {
-      this.deps.approvalRegistry.resolve(pendingId, decision, reason, 'wire');
-    } catch (err) {
-      // C3 (cross-model review, P2): narrowed to ONLY the benign
-      // already-resolved race this catch was ever meant to cover — a bare
-      // `catch {}` here used to swallow EVERYTHING, but
-      // `ApprovalRegistry.resolve` deletes the entry BEFORE invoking its
-      // registered `onResolve` callback (`dispatchApproval` above), so a
-      // genuine bug in that callback (`sendApprovalResolved` throwing,
-      // `dispatchNextQueuedApproval` failing to dispatch the next queued
-      // approval, this same file's own `onOrigin` hook throwing) vanished
-      // here too, silently, with nothing ever finding out.
-      if (err instanceof ApprovalNotFoundError) {
-        // Already resolved via ctx.approvalChannel.resolve (the channel-based
-        // adapter path) — benign, same first-resolution-wins guarantee
-        // `ApprovalRegistry` already documents on its own `resolve()` method.
-        return;
-      }
-      // Anything else is a genuine failure, not a benign race — propagate
-      // it to the caller's existing error handling. Neither `handleApprove`
-      // nor `handleReject` wraps this call in a try/catch of their own, so
-      // this bubbles all the way up through `handleEnvelope` to
-      // `ConnectionManager.process()`'s own existing catch, which logs it
-      // and leaves the cursor unadvanced so a reconnect redelivers this
-      // exact `task.approve`/`task.reject` for a retry — the same handling
-      // every other envelope-handler failure already gets.
-      throw err;
-    }
+    return clearPendingApproval.call(this, pendingId, decision, reason);
   }
 
   /**
@@ -5021,49 +1767,8 @@ export class TaskRunner {
    * couldn't resume for some real reason) still fails the task exactly as
    * before.
    */
-  private async handleApprove(taskId: string, approvalId: string | undefined): Promise<void> {
-    const active = this.tasks.get(taskId);
-    if (!active) return;
-    // M5 (approval targeting, docs/protocol.md): checked FIRST, before ever
-    // touching active.session. Closes the race NoPendingApprovalError alone
-    // could not: approval A resolves, approval B is dispatched next for the
-    // SAME task (active.pendingApprovalId now B), and a LATE task.approve
-    // meant for A arrives after. Pre-M5, `ctx.approvalChannel.resolve`
-    // always resolved "whichever approval is currently pending" (B),
-    // silently applying A's decision to B. A mismatch here is an
-    // audit-only no-op via the same onStaleApprovalDecision hook
-    // NoPendingApprovalError already uses. An absent approvalId (legacy
-    // server, or one that never recorded an id) preserves the pre-M5
-    // behavior exactly: resolve whichever approval is currently pending.
-    if (approvalId !== undefined && approvalId !== active.pendingApprovalId) {
-      this.deps.onStaleApprovalDecision?.(
-        taskId,
-        'approve',
-        `approvalId ${approvalId} does not match the currently pending approval` +
-          (active.pendingApprovalId ? ` (${active.pendingApprovalId})` : ' (none pending)'),
-      );
-      return;
-    }
-    // CRITICAL: captured BEFORE the await below — see `clearPendingApproval`'s
-    // own doc comment for exactly why reading `active.pendingApprovalId`
-    // only AFTER `resolveApproval()` settles is wrong: for a channel-based
-    // session, that same await's own synchronous side effects (racing
-    // through `approvalRegistry.resolve` -> `dispatchNextQueuedApproval`)
-    // can already have reassigned it to a different, queued approval by the
-    // time control returns here.
-    const resolvedId = approvalId ?? active.pendingApprovalId;
-    try {
-      await active.session.resolveApproval(true);
-    } catch (err) {
-      if (err instanceof NoPendingApprovalError) {
-        this.deps.onStaleApprovalDecision?.(taskId, 'approve');
-        return;
-      }
-      await this.fail(taskId, `failed to resume session after approval: ${errorMessage(err)}`, false);
-      return;
-    }
-    // Acceptance finding 1: see `clearPendingApproval`'s own doc comment.
-    this.clearPendingApproval(resolvedId, 'approve', undefined);
+  private handleApprove(taskId: string, approvalId: string | undefined): Promise<void> {
+    return handleApprove.call(this, taskId, approvalId);
   }
 
   /**
@@ -5089,63 +1794,8 @@ export class TaskRunner {
    * daemon must still conform to that regardless of whether telling the
    * session about it succeeded.
    */
-  private async handleReject(taskId: string, reason: string | undefined, approvalId: string | undefined): Promise<void> {
-    const active = this.tasks.get(taskId);
-    if (!active) return;
-    if (active.semanticTerminal !== undefined || active.finalizationStarted) {
-      await this.settleSemanticTerminal(active);
-      return;
-    }
-    // M5 (approval targeting): same validate-first mismatch check as
-    // handleApprove above — see that method's own comment for the full
-    // race this closes. Returned early here means NONE of the
-    // interrupt+task.fail+finish sequence below runs for a stale decision:
-    // the currently-pending (different) approval stays untouched and the
-    // task is not torn down.
-    if (approvalId !== undefined && approvalId !== active.pendingApprovalId) {
-      this.deps.onStaleApprovalDecision?.(
-        taskId,
-        'reject',
-        `approvalId ${approvalId} does not match the currently pending approval` +
-          (active.pendingApprovalId ? ` (${active.pendingApprovalId})` : ' (none pending)'),
-      );
-      return;
-    }
-    // CRITICAL: captured BEFORE the await below — see handleApprove above
-    // and `clearPendingApproval`'s own doc comment for the full race this
-    // closes (identical here: a channel-based session's own resolution,
-    // still inside this await, can already have reassigned
-    // `active.pendingApprovalId` to a different, queued approval).
-    const resolvedId = approvalId ?? active.pendingApprovalId;
-    try {
-      await active.session.resolveApproval(false, reason);
-    } catch (err) {
-      if (err instanceof NoPendingApprovalError) {
-        this.deps.onStaleApprovalDecision?.(taskId, 'reject', reason);
-        return;
-      }
-      // best-effort — still report the rejection outcome below
-    }
-    // Acceptance finding 1: see `clearPendingApproval`'s own doc comment.
-    // Must run BEFORE `finish()` below — its own fail-closed cleanup
-    // defaults to origin 'local' (see `ApprovalRegistry.resolve`'s default
-    // parameter), which would incorrectly echo `task.approval_resolved`
-    // back to a server that already knows this decision (it sent this
-    // task.reject itself) if this hadn't already cleared it as 'wire' here.
-    this.clearPendingApproval(resolvedId, 'reject', reason);
-    await this.settleSemanticTerminal(active, async () => {
-      await this.interruptBounded(active);
-      await this.observeGit(active, 'salvage');
-      // As with cancel, the server has already closed its progress stream.
-      await this.persistAgentTerminalEvidence(active, 'failed', reason ?? 'rejected');
-      return createEnvelope('task.fail', {
-        reason: reason ?? 'rejected', retryable: false,
-        ...this.failurePayload(DAEMON_TASK_FAILURE),
-        ...this.terminalInferenceUsagePayload(active),
-        ...this.preparedObservationPayload(active),
-        ...this.agentTerminalPayload(active),
-      }, { taskId });
-    });
+  private handleReject(taskId: string, reason: string | undefined, approvalId: string | undefined): Promise<void> {
+    return handleReject.call(this, taskId, reason, approvalId);
   }
 
   /**
@@ -5153,26 +1803,8 @@ export class TaskRunner {
    * {@link handleOffer}. A server without `sealed-payload-v1` gets a plaintext
    * decline before the open: the task's output could not be sent to it.
    */
-  private async handleSealedOffer(envelope: Envelope): Promise<void> {
-    const taskId = envelope.task_id!;
-    if (this.tasks.has(taskId) || this.startupOwnership.has(taskId) || this.inFlightOffers.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId) || this.sealedOpening.has(taskId)) return;
-    const agentRef = (envelope.payload as { agentRef?: AgentRef }).agentRef;
-    const sealedTasks = this.deps.sealedTasks;
-    if (sealedTasks === undefined || !this.sealedCodesAllowed()) {
-      this.declineSealedOffer(taskId, agentRef, 'sealed_key_unavailable');
-      return;
-    }
-    this.sealedOpening.add(taskId);
-    try {
-      const opened = await sealedTasks.openOffer(envelope);
-      if (!opened.ok) {
-        this.declineSealedOffer(taskId, agentRef, opened.code);
-        return;
-      }
-      await this.handleOffer(taskId, opened.offer.payload as AcceptedOfferPayload, opened.offer.type.startsWith('task.offer_for_agent'));
-    } finally {
-      this.sealedOpening.delete(taskId);
-    }
+  private handleSealedOffer(envelope: Envelope): Promise<void> {
+    return handleSealedOffer.call(this, envelope);
   }
 
   private failurePayload(failure: TaskFailure): { failure?: TaskFailure } {
@@ -5192,14 +1824,7 @@ export class TaskRunner {
    * flag, so without it the decline has a plaintext reason and no code.
    */
   private declineSealedOffer(taskId: string, agentRef: AgentRef | undefined, code: SealedDeclineCode): void {
-    if (this.strictDeclinedTaskIds.has(taskId)) return;
-    this.addStrictDeclinedTaskId(taskId);
-    if (this.sealedCodesAllowed()) {
-      this.decline(taskId, code, false, agentRef, code);
-    } else {
-      const why = this.deps.sealedTasks === undefined ? 'this daemon does not open sealed task input' : 'the server does not accept sealed task output';
-      this.decline(taskId, `sealed_payload_unsupported: ${why}`, false, agentRef);
-    }
+    return declineSealedOffer.call(this, taskId, agentRef, code);
   }
 
   /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */
@@ -5211,27 +1836,8 @@ export class TaskRunner {
     ));
   }
 
-  private async fail(taskId: string, reason: string, retryable: boolean, failure = DAEMON_TASK_FAILURE): Promise<void> {
-    const active = this.tasks.get(taskId);
-    if (active !== undefined) {
-      await this.settleSemanticTerminal(active, async () => {
-        await this.observeGit(active, 'salvage');
-        await this.persistAgentTerminalEvidence(active, 'failed', reason);
-        return createEnvelope('task.fail', {
-          reason,
-          retryable,
-          ...this.failurePayload(failure),
-          ...this.terminalInferenceUsagePayload(active),
-          ...this.preparedObservationPayload(active),
-          ...this.agentTerminalPayload(active),
-        }, { taskId });
-      });
-      return;
-    }
-    this.deps.send(createEnvelope('task.fail', {
-      reason, retryable, ...this.failurePayload(failure), ...terminalIdentity(this.claimedHarnesses.get(taskId)),
-    }, { taskId }));
-    await this.finish(taskId);
+  private fail(taskId: string, reason: string, retryable: boolean, failure?: TaskFailure): Promise<void> {
+    return fail.call(this, taskId, reason, retryable, failure);
   }
 
   /**
@@ -5241,46 +1847,14 @@ export class TaskRunner {
    * the already-claimed cloud task forever; the exact terminal still goes on
    * the wire and handleOffer's finally block releases the lease.
    */
-  private async failClaimedAgent(
+  private failClaimedAgent(
     taskId: string,
     reason: string,
     retryable: boolean,
     context: ClaimedAgentFailureContext,
-    failure = DAEMON_TASK_FAILURE,
+    failure?: TaskFailure,
   ): Promise<boolean> {
-    await this.pendingMessageTasks.get(taskId)?.outbox.revoke(taskId);
-    const agentRef = context.binding.resolution.agentRef;
-    const result = await this.retryAgentTerminalEvidence(() =>
-      this.deps.agentHome!.mutateExecution(context.binding, () =>
-        this.deps.agentSessionHandoffs!.recordTaskTerminal({
-          agentRef,
-          taskId,
-          runtimeId: context.runtimeId,
-          home: context.binding.resolution.canonicalHome,
-          cwd: context.binding.lease.cwd,
-          ...(context.binding.lease.homeAccess === 'memory-reader' ? { homeAccess: 'memory-reader' as const } : {}),
-          leaseId: context.binding.lease.leaseId,
-          ...(context.sessionRef === undefined ? {} : { sessionRef: context.sessionRef }),
-          terminalReason: reason,
-        })),
-    );
-    if (!result.ok) {
-      this.reportAgentTerminalEvidenceFailure({
-        taskId,
-        agentRef,
-        runtimeId: context.runtimeId,
-        cwd: context.binding.lease.cwd,
-        cause: 'failed',
-        reason,
-        error: result.error,
-      });
-    }
-    this.deps.send(createEnvelope(
-      'task.fail',
-      { reason, retryable, ...this.failurePayload(failure), ...terminalIdentity(context.runtimeId, agentRef) },
-      { taskId },
-    ));
-    return result.ok;
+    return failClaimedAgent.call(this, taskId, reason, retryable, context, failure);
   }
 
   /**
@@ -5301,27 +1875,7 @@ export class TaskRunner {
    * built from it would be a usage observation with no usage in it.
    */
   private terminalInferenceUsagePayload(active: ActiveTask): { usage?: TerminalInferenceUsage } {
-    const release = this.deps.localAgentRelease;
-    const runtimeId = active.adapter.descriptor.id;
-    if (!isKnownRuntimeId(runtimeId)) return {};
-    if (release === undefined || active.lastUsage === undefined) return {};
-    if (active.lastUsage.inputTokens === undefined && active.lastUsage.outputTokens === undefined) return {};
-
-    const nowMs = Date.now();
-    const durationMs = terminalUsageNumber(nowMs - active.startedAtMs, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS);
-    const promptTokens = terminalUsageNumber(active.lastUsage?.inputTokens, TERMINAL_INFERENCE_USAGE_MAX_TOKENS);
-    const completionTokens = terminalUsageNumber(active.lastUsage?.outputTokens, TERMINAL_INFERENCE_USAGE_MAX_TOKENS);
-
-    return {
-      usage: {
-        runtime: runtimeId,
-        clientVersion: release.version,
-        reportedAt: new Date(nowMs).toISOString(),
-        ...(promptTokens === undefined ? {} : { promptTokens }),
-        ...(completionTokens === undefined ? {} : { completionTokens }),
-        ...(durationMs === undefined ? {} : { durationMs }),
-      },
-    };
+    return terminalInferenceUsagePayload.call(this, active);
   }
 
   /**
@@ -5331,15 +1885,7 @@ export class TaskRunner {
    * separate field from the telemetry-only `usage` block.
    */
   private preparedObservationPayload(active: ActiveTask): { preparedObservation?: TerminalPreparedObservation } {
-    const observed = active.prepared;
-    if (observed?.initialPromptTokens === undefined || observed.maxPromptTokens === undefined) return {};
-    return {
-      preparedObservation: {
-        requestDigest: observed.requestDigest,
-        initialPromptTokens: observed.initialPromptTokens,
-        maxPromptTokens: observed.maxPromptTokens,
-      },
-    };
+    return preparedObservationPayload.call(this, active);
   }
 
   /** Exact Agent identity projection for claim/terminal wire payloads. */
@@ -5351,11 +1897,7 @@ export class TaskRunner {
     agentHomeProjection?: TerminalAgentHomeProjection;
     agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
   } {
-    return {
-      ...terminalIdentity(active.adapter.descriptor.id, active.agentRef),
-      ...(active.appliedAgentHomeProjection === undefined ? {} : { agentHomeProjection: active.appliedAgentHomeProjection }),
-      ...(active.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: active.agentHomeMemoryChange }),
-    };
+    return agentTerminalPayload.call(this, active);
   }
 
   /**
@@ -5374,60 +1916,14 @@ export class TaskRunner {
    * message-only and legacy offers) never read the store and carry no
    * document. Failure, cancel and interrupt paths never come here.
    */
-  private async resolveStagedResult(
+  private resolveStagedResult(
     active: ActiveTask,
   ): Promise<{ deliver: true; document?: unknown; failure?: ResultReplyFailure } | { deliver: false }> {
-    const selection = active.terminalProjection;
-    if (selection?.mode !== 'result-document') return { deliver: true };
-    this.revokeAgentResultContext(active.taskId);
-    let record: AgentResultRecord | undefined;
-    try {
-      if (active.resultStore === undefined) throw new Error('the task has no Agent result store');
-      record = await active.resultStore.get(active.taskId);
-    } catch (err) {
-      if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return { deliver: false };
-      if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-unreadable' };
-      await this.fail(active.taskId, `${RESULT_UNREADABLE_REASON_PREFIX}: the staged result for contract ${selection.contract} could not be read: ${errorMessage(err)}`, false);
-      return { deliver: false };
-    }
-    if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return { deliver: false };
-    if (record === undefined) {
-      if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-missing' };
-      await this.fail(
-        active.taskId,
-        `${RESULT_NOT_SUBMITTED_REASON_PREFIX}: the offer requires result contract ${selection.contract}, but the runtime ended its turn without a staged ${AGENT_RESULT_TOOL_NAME} outcome`,
-        false,
-      );
-      return { deliver: false };
-    }
-    if (record.contract !== selection.contract || record.tenantId !== this.deps.tenantId
-      || active.agentRef === undefined || record.agentRef.agentId !== active.agentRef.agentId
-      || record.agentRef.profileRevision !== active.agentRef.profileRevision) {
-      if (active.messageRequirement !== undefined) return { deliver: true, failure: 'required-reply-result-unreadable' };
-      await this.fail(active.taskId, `${RESULT_UNREADABLE_REASON_PREFIX}: the staged result does not belong to this task's contract and Agent`, false);
-      return { deliver: false };
-    }
-    return { deliver: true, document: record.outcome };
+    return resolveStagedResult.call(this, active);
   }
 
-  private async observeGit(active: ActiveTask, phase: GitWorkspacePhase): Promise<void> {
-    if (!active.gitWorkspaceId || !this.deps.gitWorkspaceManager || !this.deps.gitWorkspaceStore) return;
-    try {
-      const observation = await new Promise<GitWorkspaceObservation>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Git workspace observation timed out')), GIT_OBSERVATION_TIMEOUT_MS);
-        timer.unref?.();
-        void this.deps.gitWorkspaceManager!.observe(active.workspaceDir, active.gitBaseline).then(
-          (value) => { clearTimeout(timer); resolve(value); },
-          (error) => { clearTimeout(timer); reject(error); },
-        );
-      });
-      await this.deps.gitWorkspaceStore.updateObservation(active.gitWorkspaceId, observation, phase);
-      this.deps.onGitWorkspaceEvent?.({ taskId: active.taskId, workspaceId: active.gitWorkspaceId, phase, observation });
-    } catch (err) {
-      const category = ((err as GitWorkspaceError).category ?? 'repository-invalid') as GitErrorCategory;
-      await this.updateGitPhaseBestEffort(active.gitWorkspaceId, phase, category);
-      this.deps.onGitWorkspaceEvent?.({ taskId: active.taskId, workspaceId: active.gitWorkspaceId, phase, errorCategory: category });
-    }
+  private observeGit(active: ActiveTask, phase: GitWorkspacePhase): Promise<void> {
+    return observeGit.call(this, active, phase);
   }
 
   private async updateGitPhaseBestEffort(workspaceId: string | undefined, phase: GitWorkspacePhase, errorCategory?: GitErrorCategory): Promise<void> {
@@ -5438,48 +1934,12 @@ export class TaskRunner {
   }
 
   /** Persist Agent terminal truth before wire when local storage is available. */
-  private async persistAgentTerminalEvidence(
+  private persistAgentTerminalEvidence(
     active: ActiveTask,
     cause: AgentTerminalCause,
     reason?: string,
   ): Promise<boolean> {
-    // Cancellation revokes publication. Ordinary failure preserves a message that
-    // may already be in transport, including its existing admission recovery gate.
-    // For unsent messages, join activation and revoke before terminal truth.
-    if (cause === 'cancelled' || (cause === 'failed' && !active.messageSendAttempted)) {
-      await active.messageOutbox?.revoke(active.taskId);
-    }
-    active.terminalCause = cause;
-    active.terminalReason = reason;
-    await this.measureReaderMemoryChange(active);
-    if (active.agentBinding === undefined || active.agentRef === undefined || active.agentHandoff === undefined) {
-      return true;
-    }
-    const agentRef = active.agentRef;
-    const handoff = active.agentHandoff;
-    const result = await this.retryAgentTerminalEvidence(() =>
-      this.deps.agentSessionHandoffs!.recordTerminal(
-        {
-          agentRef,
-          sessionRef: handoff.sessionRef,
-          runtimeId: handoff.runtimeId,
-          home: handoff.home,
-          cwd: handoff.cwd,
-          ...(handoff.homeAccess === undefined ? {} : { homeAccess: handoff.homeAccess }),
-        },
-        cause,
-        reason,
-      ),
-    );
-    if (result.ok) {
-      active.agentTerminalPersisted = true;
-      return true;
-    }
-    console.warn(
-      `[byok/client] Agent terminal evidence for ${active.taskId} remained unavailable after ` +
-        `${AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS} attempts; publishing the exact terminal and retrying during cleanup: ${errorMessage(result.error)}`,
-    );
-    return false;
+    return persistAgentTerminalEvidence.call(this, active, cause, reason);
   }
 
   /**
@@ -5488,37 +1948,14 @@ export class TaskRunner {
    * The execution lease is still held, so the overlap flag covers every
    * writer that started before this point.
    */
-  private async measureReaderMemoryChange(active: ActiveTask): Promise<void> {
-    if (active.readerMemoryBaseline === undefined || active.agentHomeMemoryChange !== undefined) return;
-    const binding = active.agentBinding;
-    if (binding === undefined) return;
-    const after = await digestAgentHomeMemory(binding.resolution.canonicalHome);
-    active.agentHomeMemoryChange ??= compareAgentHomeMemory(
-      active.readerMemoryBaseline.digest,
-      after,
-      binding.lease.writerOverlapped(),
-    );
+  private measureReaderMemoryChange(active: ActiveTask): Promise<void> {
+    return measureReaderMemoryChange.call(this, active);
   }
 
-  private async retryAgentTerminalEvidence(
+  private retryAgentTerminalEvidence(
     write: () => Promise<unknown>,
   ): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: unknown }> {
-    let lastError: unknown = new Error('Agent terminal evidence write did not run');
-    for (let attempt = 1; attempt <= AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS; attempt++) {
-      try {
-        await write();
-        return { ok: true };
-      } catch (error) {
-        lastError = error;
-        if (attempt < AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS) {
-          await new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS);
-            timer.unref?.();
-          });
-        }
-      }
-    }
-    return { ok: false, error: lastError };
+    return retryAgentTerminalEvidence.call(this, write);
   }
 
   private reportAgentTerminalEvidenceFailure(input: {
@@ -5530,21 +1967,7 @@ export class TaskRunner {
     reason?: string;
     error: unknown;
   }): void {
-    const error = errorMessage(input.error);
-    console.error(
-      `[byok/client] Agent terminal evidence permanently unavailable for ${input.taskId} after ` +
-        `${AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS} attempts; terminal publication continued to avoid a stuck cloud task: ${error}`,
-    );
-    this.deps.onAgentTerminalEvidenceFailure?.({
-      taskId: input.taskId,
-      agentRef: input.agentRef,
-      runtimeId: input.runtimeId,
-      cwd: input.cwd,
-      cause: input.cause,
-      ...(input.reason === undefined ? {} : { reason: input.reason }),
-      attempts: AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS,
-      error,
-    });
+    return reportAgentTerminalEvidenceFailure.call(this, input);
   }
 
   async retryTerminalFinalization(taskId: string): Promise<void> {
@@ -5561,16 +1984,7 @@ export class TaskRunner {
    * Attempt without an in-flight attempt keeps its slot as a live holder.
    */
   private homeFinalizations(canonicalHome: string, homeAccess: AgentHomeAccessMode): Promise<boolean>[] {
-    const attempts: Promise<boolean>[] = [];
-    for (const active of this.tasks.values()) {
-      if (!active.finalizationStarted) continue;
-      const binding = active.agentBinding;
-      if (binding === undefined || binding.resolution.canonicalHome !== canonicalHome
-        || binding.lease.homeAccess !== homeAccess) continue;
-      const attempt = this.finalizationAttempts.get(active.taskId);
-      if (attempt !== undefined) attempts.push(attempt);
-    }
-    return attempts;
+    return homeFinalizations.call(this, canonicalHome, homeAccess);
   }
 
   private finish(taskId: string): Promise<boolean> {
@@ -5581,133 +1995,8 @@ export class TaskRunner {
     return attempt;
   }
 
-  private async finishOnce(taskId: string): Promise<boolean> {
-    const active = this.tasks.get(taskId);
-    if (!active) return true;
-    // M5 batch-3 (workstream 2): see `armMaxDurationTimer`'s own doc
-    // comment — `finish()` is the single choke point every terminal outcome
-    // (normal completion, fail, cancel, or daemon shutdown) already funnels
-    // through, so clearing here (unconditionally, before anything else)
-    // guarantees no leaked timer and no stray fail after this task has
-    // already ended a different way.
-    if (!active.finalizationStarted) {
-      active.finalizationStarted = true;
-      active.beingTornDown = true;
-      if (active.maxDurationTimer) {
-        clearTimeout(active.maxDurationTimer);
-        active.maxDurationTimer = undefined;
-      }
-      if (active.messageRetryTimer) {
-        clearTimeout(active.messageRetryTimer);
-        active.messageRetryTimer = undefined;
-      }
-      active.batcher.stop();
-      active.messageDraft?.stop();
-      this.addFinishedTaskId(taskId); // semantic terminal is authoritative even while disposal ownership is retained
-
-    // M4 Phase 4 (gatekeeper LOW advisory): a task can finish (complete,
-    // fail, or cancel) while ONE approval is still DISPATCHED
-    // (`active.pendingApprovalId`) and/or MORE are QUEUED behind it
-    // (`active.approvalQueue` — see `requestApproval`'s own doc comment for
-    // the full concurrent-approval design). Left alone, a queued request
-    // would eventually get dispatched (a fresh, pointless `task.await_approval`
-    // + timeout window for a task that no longer exists) once whatever it
-    // was queued behind finally resolves; the dispatched one's own timer
-    // would keep running for up to `approvalTimeoutMs` regardless. Both are
-    // resolved fail-closed HERE instead: the queue is drained and rejected
-    // FIRST (each queued promise settles immediately, never dispatched at
-    // all), so that resolving the dispatched one next — which triggers
-    // `dispatchNextQueuedApproval` via its own `onResolve` callback — finds
-    // an already-empty queue and dispatches nothing. Order matters: doing
-    // it the other way around would let that callback pull the first
-    // queued entry and dispatch it for real.
-      const queued = active.approvalQueue.splice(0);
-      for (const request of queued) {
-        request.resolve({
-          approved: false,
-          reason: `task ${taskId} finished before this queued approval request could be dispatched`,
-        });
-      }
-      if (active.pendingApprovalId !== undefined) {
-        try {
-          this.deps.approvalRegistry.resolve(active.pendingApprovalId, 'reject', `task ${taskId} finished`);
-        } catch {
-          // Already resolved by a real decision/timeout that raced this.
-        }
-      }
-    }
-
-    if (!await this.awaitActiveSessionClose(active)) return false;
-    if (this.tasks.get(taskId) !== active) return true;
-    try {
-      await this.deps.awaitTerminalCommit?.(taskId);
-    } catch {
-      return false;
-    }
-    if (this.tasks.get(taskId) !== active) return true;
-    this.publishExecutionRecord(active);
-    if (active.agentBinding !== undefined && active.agentRef !== undefined && active.agentHandoff !== undefined) {
-      const agentRef = active.agentRef;
-      const handoff = active.agentHandoff;
-      // Session.close() is the adapter quiescence receipt. Capture only after
-      // it, while this exact Agent-home writer lease is still held, so direct
-      // runtime file-tool writes cannot escape the deterministic snapshot.
-      await this.quiesceAndSnapshotAgentMemory(active);
-      if (!active.agentTerminalPersisted) {
-        const cause = active.terminalCause ?? 'failed';
-        const result = await this.retryAgentTerminalEvidence(() =>
-          this.deps.agentSessionHandoffs!.recordTerminal(
-            {
-              agentRef,
-              sessionRef: handoff.sessionRef,
-              runtimeId: handoff.runtimeId,
-              home: handoff.home,
-              cwd: handoff.cwd,
-              ...(handoff.homeAccess === undefined ? {} : { homeAccess: handoff.homeAccess }),
-            },
-            cause,
-            active.terminalReason,
-          ),
-        );
-        if (result.ok) {
-          active.agentTerminalPersisted = true;
-        } else if (!active.agentTerminalEvidenceFailureReported) {
-          active.agentTerminalEvidenceFailureReported = true;
-          this.reportAgentTerminalEvidenceFailure({
-            taskId,
-            agentRef,
-            runtimeId: handoff.runtimeId,
-            cwd: handoff.cwd,
-            cause,
-            reason: active.terminalReason,
-            error: result.error,
-          });
-        }
-      }
-      let leaseReleased = true;
-      try {
-        await active.agentBinding.lease.release();
-      } catch (error) {
-        console.error(`[byok/client] Agent home lease could not be released for ${taskId}: ${errorMessage(error)}`);
-        leaseReleased = false;
-      }
-      active.gitLease?.release();
-      await this.releasePreparationPin(taskId);
-      this.tasks.delete(taskId);
-      this.revokeAgentMessageContext(taskId);
-      this.revokeAgentResultContext(taskId);
-      this.revokeAgentMemoryContext(taskId);
-      this.deleteHostToolsetContexts(taskId);
-      return leaseReleased;
-    }
-    active.gitLease?.release();
-    await this.releasePreparationPin(taskId);
-    this.tasks.delete(taskId);
-    this.revokeAgentMessageContext(taskId);
-    this.revokeAgentResultContext(taskId);
-    this.revokeAgentMemoryContext(taskId);
-    this.deleteHostToolsetContexts(taskId);
-    return true;
+  private finishOnce(taskId: string): Promise<boolean> {
+    return finishOnce.call(this, taskId);
   }
 
   /**
@@ -5716,45 +2005,11 @@ export class TaskRunner {
    * the terminal or the lease release, and a failure here is only logged.
    */
   private publishExecutionRecord(active: ActiveTask): void {
-    if (active.executionRecordPublished) return;
-    active.executionRecordPublished = true;
-    const terminal = executionTerminalOf(active.semanticTerminal?.envelope);
-    if (terminal === undefined) return;
-    try {
-      this.deps.onExecutionRecord?.(active.executionRecord.finish(terminal));
-    } catch {
-      // stderr is a service log: no adapter or listener error text (issue #395).
-      console.error(`[byok/client] execution record for task ${active.taskId} was not published`);
-    }
+    return publishExecutionRecord.call(this, active);
   }
 
   private settleSemanticTerminal(active: ActiveTask, prepare?: () => Promise<Envelope>): Promise<boolean> {
-    if (this.tasks.get(active.taskId) !== active) return Promise.resolve(true);
-    if (active.semanticTerminal?.attempt) return active.semanticTerminal.attempt;
-    if (active.finalizationStarted) return this.finish(active.taskId);
-    if (active.semanticTerminal === undefined) {
-      if (prepare === undefined) return Promise.resolve(false);
-      // First decision wins synchronously, before interrupt or durability I/O.
-      // Keep its closure after failure; competing cancel/fail/shutdown reasons
-      // may retry it, but can never select a replacement semantic terminal.
-      this.revokeHostToolsetContexts(active.taskId);
-      active.beingTornDown = true;
-      active.semanticTerminal = { prepare };
-      active.messageDraft?.stop();
-    }
-    const terminal = active.semanticTerminal;
-    const attempt = Promise.resolve().then(async () => {
-      terminal.envelope ??= await terminal.prepare();
-      if (this.tasks.get(active.taskId) !== active) return true;
-      // Retain the exact envelope even if the synchronous sender throws. The
-      // existing terminal journal remains the sole durable wire authority.
-      this.deps.send(terminal.envelope);
-      return this.finish(active.taskId);
-    }).finally(() => {
-      if (terminal.attempt === attempt) terminal.attempt = undefined;
-    });
-    terminal.attempt = attempt;
-    return attempt;
+    return settleSemanticTerminal.call(this, active, prepare);
   }
 
   /**
@@ -5766,17 +2021,8 @@ export class TaskRunner {
    * would rewrite an already-established result for a reason the task itself had
    * nothing to do with.
    */
-  private async releasePreparationPin(taskId: string): Promise<void> {
-    const recordId = this.preparationPinsByTask.get(taskId);
-    if (recordId === undefined) return;
-    this.preparationPinsByTask.delete(taskId);
-    try {
-      await this.deps.inputPreparationLane?.store.unpin(recordId, taskId);
-    } catch (error) {
-      console.error(
-        `[byok/client] preparation pin for task ${taskId} could not be released: ${errorMessage(error)}`,
-      );
-    }
+  private releasePreparationPin(taskId: string): Promise<void> {
+    return releasePreparationPin.call(this, taskId);
   }
 
   /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap. */
@@ -5823,66 +2069,11 @@ export class TaskRunner {
    * device-specific (which runtimes happen to be installed here), so a
    * different device's installed runtime set might satisfy it.
    */
-  private async pickAdapter(
+  private pickAdapter(
     requestedRuntime: string | undefined,
     requiresMcpToolsets: boolean,
     signal: AbortSignal,
   ): Promise<PickResult> {
-    const allowlist = this.deps.runtimeAllowlist;
-
-    if (requestedRuntime) {
-      if (allowlist && !allowlist.includes(requestedRuntime)) {
-        return {
-          ok: false,
-          reason: `runtime "${requestedRuntime}" is not in this device's runtime allowlist`,
-          retryable: false,
-        };
-      }
-      const adapter = this.deps.adapters.find((a) => a.descriptor.id === requestedRuntime);
-      if (!adapter) {
-        return { ok: false, reason: `unknown runtime "${requestedRuntime}"`, retryable: false };
-      }
-      const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
-      if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) {
-        return {
-          ok: false,
-          reason: `runtime "${requestedRuntime}" cannot project required MCP toolsets`,
-          retryable: false,
-        };
-      }
-      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
-      // Another device may support this platform, as it may have the runtime installed.
-      if (detected.kind === 'refused' && detected.reason === 'platform_unsupported') {
-        return { ok: false, reason: `platform_unsupported: runtime "${requestedRuntime}" does not support ${process.platform}`, retryable: true };
-      }
-      if (detected.kind !== 'available') {
-        return {
-          ok: false,
-          reason: `runtime "${requestedRuntime}" is not installed/available on this device`,
-          retryable: true,
-        };
-      }
-      return { ok: true, adapter, descriptor };
-    }
-
-    const eligible = allowlist ? this.deps.adapters.filter((a) => allowlist.includes(a.descriptor.id)) : this.deps.adapters;
-    // M5 batch-3: product decision — pi is the FALLBACK runtime, not the
-    // default. Ordered independently of `deps.adapters`'s own construction
-    // order (which stays whatever `buildDefaultAdapters`/the embedder built
-    // it as — see `ALL_RUNTIME_IDS`'s doc comment, `create-daemon.ts`).
-    const candidates = orderByPreference(eligible, this.deps.runtimePreference ?? DEFAULT_RUNTIME_PREFERENCE);
-    for (const adapter of candidates) {
-      const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
-      if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) continue;
-      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
-      if (detected.kind === 'available') return { ok: true, adapter, descriptor };
-    }
-    return {
-      ok: false,
-      reason: requiresMcpToolsets
-        ? 'no available runtime on this device can project required MCP toolsets'
-        : 'no available runtime on this device',
-      retryable: true,
-    };
+    return pickAdapter.call(this, requestedRuntime, requiresMcpToolsets, signal);
   }
 }
