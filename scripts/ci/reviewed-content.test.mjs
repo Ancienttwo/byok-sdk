@@ -734,4 +734,8 @@ test('keys model-route subpath admits the exact addition only', t => {
   }
   const defaults = selectImpact(['packages/keys/src/pi-runtime-defaults.generated.ts']);
   assert.ok(defaults.dirs.includes('packages/keys') && defaults.dirs.includes('packages/client'));
+  // The modules split from provider-profile.ts and secret-store.ts keep their Windows custody family.
+  for (const path of ['packages/keys/src/provider-profile-binding.ts', 'packages/keys/src/secret-value.ts']) {
+    assert.ok(selectImpact([path]).families.includes('adapter-lifecycle-smoke'), path);
+  }
 });

@@ -249,7 +249,9 @@ and makes no network request.
   `auth_mode` and the normalized `base_url` are unchanged
   (`providerSecretReusable`); otherwise the draft reports
   `secret_reentry_required`. The device rechecks a save with the same
-  functions. No view contains a key.
+  functions, on a context it builds itself with `modelRouteContext()` from its
+  own stored profile and policy; it never accepts a catalog, stored state or
+  policy from the page. No view contains a key.
 - JSON fixture vectors under `packages/keys/src/fixtures/model-route/` give
   draft, change, new draft, view and submission for Hosts in other languages.
 

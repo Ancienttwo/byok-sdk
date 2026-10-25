@@ -300,6 +300,10 @@ if (submission.ok) {
   key. `providerSecretReusable` keeps a stored key only while `profile_ref`,
   `provider_kind`, `adapter`, `auth_mode` and the normalized `base_url` are
   unchanged; the device rechecks a save with it.
+- The device rechecks a save with `modelRouteSubmission` on its own
+  `modelRouteContext()`: its stored profile, its policy, the pinned catalog.
+  A context sent by the page could claim a stored key or a catalog entry that
+  does not exist, so the device never uses one.
 - `src/fixtures/model-route/*.json` are vectors (draft and change to new draft,
   view and submission) for a host that reimplements the functions.
 

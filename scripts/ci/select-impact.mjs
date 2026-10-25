@@ -220,7 +220,7 @@ export const familyOwners = Object.freeze({
     /^examples\/(?:host-execution-core|bot-collaboration)\//,
     /^examples\/basic\/goal-btw\.test-support\.ts$/,
     /^scripts\/ci\/run-windows-bot-tests\.mjs$/,
-    /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|secret-store|sqlite-profile-store|command-runner)\.ts)$/,
+    /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|provider-profile-binding|secret-store|secret-value|sqlite-profile-store|command-runner)\.ts)$/,
   ],
   'windows-git-workspace': [
     /^packages\/client\/src\/daemon\/(?:git-workspace|git-workspace-store|session-workspace-store|auth-manager|daemon-lifecycle|daemon-owner|daemon-record)\.ts$/,
