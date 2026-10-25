@@ -314,6 +314,23 @@ it('blocks an over-limit current Unicode Request with a measured reason and no S
   }));
 });
 
+it('runs every seat of a round whose seat Turns all block in one pass, so no waiting seat is left without a Turn', async () => {
+  fixture = await openTeam();
+  const { profiles: first } = await createTeam();
+  // A Turn creates at most three Bots, so a second one adds a Bot and a room of all five, with the Main Bot.
+  const more = await host().input('create-more', 'Create one more Bot and a room of five');
+  await finish(more, { create_bot: [{ localId: 'new_bot_1', name: 'Bot 4', role: 'Reviewer', persona: 'Persona 4', model: 'default' }],
+    create_room: [{ localId: 'new_room_1', name: 'Five', members: ['main', ...first.map(profile => profile.id), 'new_bot_1'] }] });
+  const profiles = Object.values(host().snapshot().team.bots);
+  const room = Object.values(host().snapshot().team.rooms).find(row => row.name === 'Five')!;
+  expect(room.members).toHaveLength(5);
+  await ready(profiles);
+  // Each seat Turn blocks in its Turn step, which releases its seat. One pass of the Host syncs four times.
+  const round = await host().roomInput('over-limit-all', room.id, '😀'.repeat(18000), profiles.map(profile => profile.id));
+  expect(seats(round).map(seat => [seat.status, seat.released])).toEqual(profiles.map(() => ['blocked', true]));
+  expect(host().snapshot().team.rounds[round]).toMatchObject({ closed: true });
+});
+
 it.each([false, true])('counts a large in-limit Unicode Request in the budget and still posts through the real SDK (lost wake hints: %s)', async dropHints => {
   wakeFault.dropHints = dropHints;
   fixture = await openTeam();

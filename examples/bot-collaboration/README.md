@@ -445,8 +445,11 @@ The room step of a Host sync is `advanceRoomSeats(state, facts, now, add)` in
 fails a seat Turn whose work was not admitted, queues each new seat Turn
 through `add` (`seatTurn` gives its fields), and returns the seats whose
 admitted work the Host cancels. `src/rules/commands.ts` exports both. L builds
-the facts from its K4 intents; H builds them from its intent rows. The
-`roomVectors` run on both.
+the facts from its K4 intents; H builds them from its intent rows. A Turn
+step can release a seat (a blocked or retired seat Turn). Both Hosts then run
+the room step and the Turn steps again in the same sync, so the next seat gets
+its Turn: L in `advanceRoomsAndTurns` (`src/rooms.ts`), H in its sync loop.
+The `roomVectors` run on both.
 
 `checkReply(state, d, check, now, emit, uncertainAfterMs)` in
 `src/rules/delegation.ts` decides one reply check of a `reply_pending`
@@ -483,6 +486,10 @@ transaction freezes only a Turn that still has no offer.
   messages, so they read no history.
 - A read that throws or returns another shape leaves the Turn queued. The
   timer reads again after about one second.
+- A read still open after `historyTimeoutMs` (default 10 seconds) counts as
+  failed, so a stalled authority cannot hold the Host queue. The Host does
+  not abort the read. Reads run one after another, so a pass waits at most
+  `historyTimeoutMs` for each Turn that reads.
 
 With the `roomHistory` option, the room messages of a seat ContextPack come
 from an external authority too (#883). Before a seat Turn freezes its offer,
@@ -499,7 +506,8 @@ transaction, in the same phase as `history`.
 - K8 still writes `room.messages`. Round counts, mention seats and the seat
   request text read it.
 - A read that throws or returns another shape leaves the seat queued, and the
-  timer reads again. A read still open at the seat deadline counts as failed.
+  timer reads again. A read still open after `historyTimeoutMs` or at the
+  seat deadline counts as failed.
   The seat deadline still applies, so a seat whose read never succeeds is
   released as `busy` and its Turn expires.
 - No projection carries an accepted room post yet. The Host reads posts from
