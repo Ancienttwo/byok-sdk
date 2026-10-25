@@ -1,13 +1,13 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll } from 'vitest';
+import { afterAll, expect, it } from 'vitest';
 import { canonical, hash, HostLedger, project, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { stateOf } from './model';
 import { admitUserInput } from './coalesce';
-import { commitInLedger, syncTurnInLedger } from './commit';
+import { callCardsInLedger, commitInLedger, syncTurnInLedger } from './commit';
 import { intentRows } from './delegation';
-import { cardCallDue, expireCards, reportCardDecisions, settleCardCall, type CommandPorts } from './rules/commands';
+import { CONNECTOR_OUTCOME_UNKNOWN, expireCards, reportCardDecisions, type CommandPorts } from './rules/commands';
 import { cardCallVectors, seedCollaboration, SYNC_OPTIONS, VECTOR_NOW, type CardCallSubject, type SyncIntentRecord } from './commit-vectors.test-support';
 
 // #793 S12: the shared card call vectors on the L ledger, with L's card call step (K8 host.ts `flushCards`).
@@ -19,10 +19,9 @@ afterAll(() => {
 
 /**
  * A real SQLite HostLedger with L's card sync order (K8 host.ts `sync`: `expireCards`, the Turn steps, then
- * `reportCardDecisions`) and L's `flushCards`, written out here: each due card's connector call outside the transaction, then
- * `settleCardCall` in one ledger transaction.
+ * `reportCardDecisions`) and L's card call step, `callCardsInLedger`, which K8 host.ts `flushCards` runs.
  */
-function cardCallSubject(): CardCallSubject {
+function cardCallSubject(): CardCallSubject & { ledger: HostLedger } {
   const root = mkdtempSync(join(tmpdir(), 'k8-card-call-'));
   roots.push(root);
   const ledger = new HostLedger(join(root, 'host.sqlite'), 'product:card-call');
@@ -54,16 +53,47 @@ function cardCallSubject(): CardCallSubject {
     },
     concludeIntent: (id, conclusion) => { ledger.transaction(s => { Object.assign(s.intents[hash(id)]!, { phase: 'settled', conclusion }); }); },
     projection: id => Object.values(ledger.snapshot().outbox).flatMap(row => row.kind === 'projection' && row.id === id ? [row.value] : []),
-    callCards: async connector => {
-      for (const card of Object.values(stateOf(ledger.snapshot().application).cards)) {
-        if (!cardCallDue(card)) continue;
-        let outcome: Parameters<typeof settleCardCall>[1];
-        try { outcome = { result: await connector(card.id, card.action.action, card.action.draft, new AbortController().signal) }; }
-        catch (error) { outcome = { error }; }
-        ledger.transaction(s => settleCardCall(stateOf(s.application).cards[card.id]!, outcome));
-      }
-    },
+    callCards: connector => callCardsInLedger(ledger, card => connector(card.id, card.action.action, card.action.draft, new AbortController().signal)),
+    ledger,
   };
 }
 
 cardCallVectors('L HostLedger', cardCallSubject);
+
+/** #958: `t1` concluded and reported, and card `c1` confirmed and due for its call. */
+async function confirmed() {
+  const subject = cardCallSubject();
+  subject.change(state => {
+    Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+    state.cards.c1!.expiresAt = VECTOR_NOW + 60_000;
+  });
+  await subject.commit({ scope: subject.scope, commandId: 'decide', command: { kind: 'decide', cardId: 'c1', decision: 'confirmed' } });
+  await subject.sync(VECTOR_NOW);
+  return subject;
+}
+
+it('#958: claims the card call in the ledger before the connector runs, and drops the claim at the settle', async () => {
+  const subject = await confirmed();
+  const seen: unknown[] = [];
+  await subject.callCards(async () => { seen.push(stateOf(subject.ledger.snapshot().application).cardCalls); return { sent: true }; });
+  expect(seen).toEqual([{ c1: true }]);
+  expect(stateOf(subject.ledger.snapshot().application).cardCalls).toEqual({});
+  expect((await subject.state()).cards.c1).toMatchObject({ result: { sent: true }, conclusion: 'succeeded' });
+});
+
+it('#958: ends a card whose claim never settled with the unknown outcome, and never calls the connector again', async () => {
+  const subject = await confirmed();
+  // A crash after the call: the claim is stored and the card has no result or error.
+  subject.ledger.transaction(s => { stateOf(s.application).cardCalls = { c1: true }; });
+  const calls: string[] = [];
+  await subject.callCards(async id => { calls.push(id); return { sent: true }; });
+  expect(calls).toEqual([]);
+  expect((await subject.state()).cards.c1).toMatchObject({ error: CONNECTOR_OUTCOME_UNKNOWN, conclusion: 'failed' });
+  expect((await subject.state()).cards.c1).not.toHaveProperty('result');
+  expect(stateOf(subject.ledger.snapshot().application).cardCalls).toEqual({});
+  await subject.callCards(async id => { calls.push(id); return { sent: true }; });
+  expect(calls).toEqual([]);
+  await subject.sync(VECTOR_NOW);
+  expect((await subject.state()).turns[hash(['action_result', 'c1'])]).toMatchObject({ source: 'action_result',
+    request: JSON.stringify({ cardId: 'c1', state: 'confirmed', conclusion: 'failed', error: CONNECTOR_OUTCOME_UNKNOWN }) });
+});

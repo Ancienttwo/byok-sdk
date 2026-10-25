@@ -155,9 +155,12 @@ The connector receives an AbortSignal and must deduplicate by the card id.
 The Host enforces `connectorTimeoutMs` (default 30 seconds), even if the
 connector ignores cancellation. A timeout releases the serial chain and
 commits a failed action_result with an unknown external outcome. A late connector
-result cannot overwrite that committed result. A crash after the
-external effect but before result commit can call it again with that id.
-No exactly-once external effect is claimed.
+result cannot overwrite that committed result. The Host calls the connector at
+most once per card (#958): one transaction claims the call before it runs, and
+the transaction that commits its result or error drops the claim. A claim found
+with no result at a later pass (a crash after the call, or a failed result
+commit) ends the card the same way as a timeout, with no second call. No
+exactly-once external effect is claimed.
 
 The system rules are in `src/rules/schema.ts`. K4 carries them in the instruction.
 They require an acknowledgement and self delegation for long work. Final text

@@ -36,6 +36,11 @@ export interface CollaborationState {
    * keeps its intent. It appears at the first Host intent, so an older ledger reads an empty table.
    */
   hostIntents?: Record<string, { handler: string }>;
+  /**
+   * L card call claims (#958): a card id is here from the transaction before its connector call until the one that settles
+   * it. It appears at the first claim, so an older ledger reads an empty table. Never in ContextPack or projections.
+   */
+  cardCalls?: Record<string, true>;
 }
 export function stateOf(application: Record<string, Json>): CollaborationState {
   if (application.collaboration === undefined) application.collaboration = json({

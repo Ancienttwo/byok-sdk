@@ -965,8 +965,10 @@ export function deviceVectors(name: string, open: () => DeviceSubject | Promise<
 export type CardConnector = (id: string, action: string, draft: Json, signal: AbortSignal) => Promise<unknown>;
 /**
  * #793 S12 card calls. `callCards(connector)` is the Host's card call step, as L's `flushCards` runs it: for each card that K8
- * `cardCallDue` selects, one call of `connector` outside any transaction, then K8 `settleCardCall` with its result or its
- * error. It runs no sync: the next `sync` reports the card and adds its `action_result` Turn.
+ * `cardCallDue` selects, the Host claims the call, runs one call of `connector` outside any transaction, then K8
+ * `settleCardCall` with its result or its error, which drops the claim (#958). A claim found with no settle ends the card
+ * with `CONNECTOR_OUTCOME_UNKNOWN` and no call. It runs no sync: the next `sync` reports the card and adds its
+ * `action_result` Turn.
  */
 export interface CardCallSubject extends CardSubject {
   callCards(connector: CardConnector): void | Promise<void>;
