@@ -36,8 +36,9 @@ async function sealed(definitionVersion: number, prompt: string): Promise<Sealed
 
 const routineRow = async (scope: string) => (await query<{ definition: RoutineDefinition; pending: RoutineDefinition | null; next_at: string | null }>(
   `SELECT definition, pending, next_at::text FROM ${table('routine')} WHERE scope = $1 AND id = $2`, [storedKey(scope), storedKey(ID)]))[0];
-const intentRow = async (scope: string, key: string) => (await query<{ source: string; input: SealedAgentExecutionInput; last_error: string | null }>(
-  `SELECT source, input, last_error FROM ${table('intent')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(key)]))[0];
+const intentRow = async (scope: string, key: string) => (await query<{ source: string; input: SealedAgentExecutionInput; last_error: string | null;
+  conclusion: string | null; tries: number }>(`SELECT source, input, last_error, conclusion, tries FROM ${table('intent')} WHERE scope = $1 AND key = $2`,
+[storedKey(scope), storedKey(key)]))[0];
 
 describe.skipIf(POSTGRES_URL === undefined)('H sealed Bot routines on real Postgres (#953)', () => {
   let v1: SealedRoutineTemplate, v2: SealedRoutineTemplate, rival: SealedRoutineTemplate;
@@ -91,13 +92,15 @@ describe.skipIf(POSTGRES_URL === undefined)('H sealed Bot routines on real Postg
     expect(port.submit).not.toHaveBeenCalled();
   });
 
-  it('submits nothing on a port with no sealed lane, and keeps the error on the row', async () => {
+  it('fails an untried sealed intent before any SDK call on a port with no sealed lane, as L does, and its Turn fails', async () => {
     const scope = await scoped(), turn = await frozen(scope);
     const port: FrozenSubmitPort = { submit: vi.fn(), offer: vi.fn(async () => undefined) };
     await new HostedSubmitter(opened!.pool, store().schema, { port: () => port, now: () => FIRST }).run();
     expect(port.submit).not.toHaveBeenCalled();
     expect(port.offer).not.toHaveBeenCalled();
-    expect((await intentRow(scope, turn))!.last_error).toBe('This Host has no sealed dispatch');
+    expect(await intentRow(scope, turn)).toMatchObject({ conclusion: 'failed', tries: 0, last_error: 'This Host has no sealed dispatch' });
+    await store().sync(scope, SYNC);
+    expect((await store().read(scope)).turns[turn]).toMatchObject({ status: 'failed', conclusion: 'failed' });
   });
 
   it('reseals at the next version while an occurrence is open, replays it, and refuses a rival seal of the same version', async () => {
@@ -114,15 +117,16 @@ describe.skipIf(POSTGRES_URL === undefined)('H sealed Bot routines on real Postg
     expect(await store().dump(scope)).toBe(before);
   });
 
-  it('freezes a sealed execution only as a routine occurrence', async () => {
+  it('freezes a sealed execution only as a routine occurrence, never as a Host intent', async () => {
     const scope = await scoped(), turn = await frozen(scope);
     const { taskId: _, ...execution } = (await intentRow(scope, turn))!.input;
-    for (const source of ['user', 'bot'] as const) {
+    const forged = [{ source: 'user' }, { source: 'bot' }, { source: 'routine', handler: 'host-handler' }] as const;
+    for (const [index, fields] of forged.entries()) {
       await expect(inSchema(opened!.pool, store().schema, async client => {
         await lockScope(client, storedKey(scope));
-        return freezeIntent(client, scope, { key: `forged-${source}`, source, execution, waitUntil: FIRST + 60_000 });
+        return freezeIntent(client, scope, { key: `forged-${index}`, ...fields, execution, waitUntil: FIRST + 60_000 });
       })).rejects.toThrow('A sealed execution must be a routine template occurrence');
-      expect(await intentRow(scope, `forged-${source}`)).toBeUndefined();
+      expect(await intentRow(scope, `forged-${index}`)).toBeUndefined();
     }
   });
 

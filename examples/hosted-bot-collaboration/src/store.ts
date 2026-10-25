@@ -511,16 +511,17 @@ export class HostedCollaborationStore {
   }
   /**
    * Owner API for a sealed routine of the Main Bot `botId` (#953), from the owner's member endpoint: adds version 1 with the
-   * member's template, checked against the Bot's current execution template. An exact retry is a no-op. A refusal writes
-   * nothing.
+   * member's template, checked against the Bot's current execution template. A retry is a no-op while version 1 is the
+   * definition. A refusal writes nothing.
    */
   createSealedRoutine(scope: string, botId: string, action: SealedRoutineAction, now: number): Promise<void> {
     return this.routineCommand(scope, botId, now, (commands, execution) => commands.create(sealedDefinition(commands.list(), botId, action, execution)));
   }
   /**
    * Owner API (#953): stages version `max(current, pending) + 1` of a sealed routine of the Main Bot `botId` with a new
-   * template. A template sealed for another version throws `SealedRoutineVersionError`, and nothing is written. An exact
-   * retry is a no-op, also after the Bot's Agent changed: the freeze then reports `sealed_routine_agent_changed`.
+   * template. A template sealed for another version throws `SealedRoutineVersionError`, and nothing is written. A retry is
+   * a no-op while its version is current or staged, also after the Bot's Agent changed: the freeze then reports
+   * `sealed_routine_agent_changed`.
    */
   resealRoutine(scope: string, botId: string, action: SealedRoutineAction, now: number): Promise<void> {
     return this.routineCommand(scope, botId, now, (commands, execution) => commands.update(resealDefinition(commands.list(), botId, action, execution)));

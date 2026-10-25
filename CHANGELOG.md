@@ -434,11 +434,14 @@
 - **Added (examples)** — sealed Bot routines on the hosted (H) Host (#953,
   #654 E3d-4). The owner API `createSealedRoutine` and `resealRoutine`, also
   owner commands of the entry, add and reseal a K8 sealed Bot routine of the
-  Main Bot. An exact retry is a no-op, also for K8 `sealedDefinition`. The
-  sync freezes each sealed occurrence Turn from the routine's stored template,
-  and the submitter sends it through `FrozenSubmitPort.submitSealed`, the
-  cloud's `submitSealedAgentExecution`. `freezeIntent` refuses a sealed
-  execution outside a routine occurrence. No DDL, SDK or wire change.
+  Main Bot. A retry after a lost response is a no-op while the version it made
+  is still there, also for K8 `sealedDefinition`. The sync freezes each
+  sealed occurrence Turn from the routine's stored template, and the submitter
+  sends it through `FrozenSubmitPort.submitSealed`, the cloud's
+  `submitSealedAgentExecution`. On a port without it, an untried sealed intent
+  fails before any SDK call, as in L. `freezeIntent` takes a sealed execution
+  only from a routine occurrence with no Host handler. No DDL, SDK or wire
+  change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

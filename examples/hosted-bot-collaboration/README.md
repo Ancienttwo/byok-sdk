@@ -512,17 +512,23 @@ H runs the K8 sealed Bot routines (#953, #654 E3d-4; K8 README, Sealed Bot routi
   next version with a new template. The entry has both as owner commands, which sync after the write, as
   `updateRoutine` does. Both check the template against the Bot's current execution template, with K8
   `sealedDefinition` and `resealDefinition`.
-- An exact retry of either command, after a lost response, is a no-op. A reseal retry is a no-op even after the Bot's
-  Agent changed. The member learns of that change from the `sealed-routine-failed:<turnId>` projection
+- A retry after a lost response is a no-op while the version it made is still there: a create retry while version 1
+  is the routine's definition, and a reseal retry while its version is the current or the staged one and the routine
+  is not completed. Later, the retry is refused like any other command: `A routine already has this id` once version 1
+  was replaced, or the owner check once the routine is completed. A reseal retry is a no-op even after the Bot's Agent
+  changed. The member learns of that change from the `sealed-routine-failed:<turnId>` projection
   (`sealed_routine_agent_changed`) at the next occurrence, and reseals then.
 - A reseal for another version than `max(current, pending) + 1` throws `SealedRoutineVersionError`, and nothing is
   written. `updateRoutine` refuses a sealed routine.
 - The template lives in the `routine` row's `definition` or `pending` JSON. Once frozen, the sealed offer input lives in
   `intent.input`. There is no DDL change and no second copy.
 - The sync passes K8 the template of each routine version, from the slice. A sealed occurrence intent goes through
-  `FrozenSubmitPort.submitSealed`, the cloud's `submitSealedAgentExecution`. A port without it submits nothing, and the
-  row keeps `This Host has no sealed dispatch` as its error. `freezeIntent` refuses a sealed execution outside a
-  routine occurrence, as K4 `enqueue` does.
+  `FrozenSubmitPort.submitSealed`, the cloud's `submitSealedAgentExecution`. On a port without it, the submitter fails
+  an untried sealed row before any SDK call, as K4 `begin` does in L: the intent and its Turn end `failed`, the row
+  keeps `This Host has no sealed dispatch`, and the agent's queue moves on. A tried row may have reached the SDK, so it
+  keeps its resubmit until `wait_until`.
+- K4 `enqueue` refuses every sealed execution. H's `freezeIntent` takes one only from the sync's freeze of a promoted
+  routine occurrence: source `routine` and no handler, so a Host intent never carries one.
 
 ### Scheduler
 

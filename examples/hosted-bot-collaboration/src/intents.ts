@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
-import { agentKey, canonical, fifoHeads, hash, isSealed, promoteOccurrence, queuedExpiry, RetiredIntentIdentityError, submitFrozen, taskId,
+import { agentKey, canonical, fifoHeads, hash, isSealed, promoteOccurrence, queuedExpiry, RetiredIntentIdentityError, SealedDispatchUnavailableError,
+  submitFrozen, taskId,
   type Conclusion, type ExecutionTemplate, type FrozenExecutionInput, type FrozenSubmitPort, type IntentExecution } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
@@ -34,8 +35,11 @@ export async function freezeIntent<E extends IntentExecution>(client: PoolClient
   Promise<E & { taskId: string }> {
   // H never retries a task (#793 D2d option A), so it cannot honor a K4 retry policy. It refuses one instead of dropping it.
   if ((freeze as IntentFreeze & { retry?: unknown }).retry !== undefined) throw new Error('H intents have no retry policy');
-  // Only a promoted routine occurrence has a stored routine whose version pins the template's `routineRef` (K4 `enqueue`).
-  if (isSealed(freeze.execution) && freeze.source !== 'routine') throw new Error('A sealed execution must be a routine template occurrence');
+  // Only the sync's freeze of a promoted routine occurrence has a stored routine whose version pins the template's
+  // `routineRef`. A Host intent has a handler, whatever its source, so it never takes a sealed execution.
+  if (isSealed(freeze.execution) && (freeze.source !== 'routine' || freeze.handler !== undefined)) {
+    throw new Error('A sealed execution must be a routine template occurrence');
+  }
   const scopeKey = storedKey(scope), key = storedKey(freeze.key);
   const input = { ...structuredClone(freeze.execution), taskId: taskId(freeze.key, 0) };
   const prior = await client.query<{ source: string; handler: string | null; input: string; wait_until: string }>(
@@ -284,7 +288,7 @@ export class HostedSubmitter {
   private async try(scopeKey: string, key: string): Promise<boolean> {
     const claim = await this.claim(scopeKey, key);
     if (claim === 'skipped') return false;
-    if (claim === 'expired') return true;
+    if (claim === 'concluded') return true;
     const scope = JSON.parse(scopeKey) as string;
     let outcome: 'delivered' | 'stopped' | { error: unknown };
     try { outcome = await submitFrozen(this.options.port(scope), claim.input, () => this.mayStillSubmit(claim)); }
@@ -314,8 +318,8 @@ export class HostedSubmitter {
     return open && this.now() < claim.waitUntil;
   }
 
-  /** Step 1: under the scope lock, expire an untried row, or take the lease and raise `tries`. */
-  private claim(scopeKey: string, key: string): Promise<Claim | 'skipped' | 'expired'> {
+  /** Step 1: under the scope lock, expire an untried row, fail an untried sealed row with no sealed lane, or take the lease and raise `tries`. */
+  private claim(scopeKey: string, key: string): Promise<Claim | 'skipped' | 'concluded'> {
     return inSchema(this.pool, this.schema, async client => {
       await lockScope(client, scopeKey);
       const now = this.now();
@@ -337,7 +341,15 @@ export class HostedSubmitter {
         if (conclusion) {
           await client.query('UPDATE intent SET conclusion = $3 WHERE scope = $1 AND key = $2', [scopeKey, key, conclusion]);
           await switchDueVersions(client, scopeKey, now);
-          return 'expired';
+          return 'concluded';
+        }
+        // K4 `begin`: a sealed row that was never tried fails before any SDK call when the port has no sealed lane, so it
+        // does not hold its agent's queue until `wait_until`. A tried row may have reached the SDK, so it keeps its resubmit.
+        if (isSealed(row.input) && !this.options.port(JSON.parse(scopeKey) as string).submitSealed) {
+          await client.query('UPDATE intent SET conclusion = $3, last_error = $4 WHERE scope = $1 AND key = $2',
+            [scopeKey, key, 'failed', new SealedDispatchUnavailableError().message]);
+          await switchDueVersions(client, scopeKey, now);
+          return 'concluded';
         }
       }
       // The try can create execution, so the device must have an active H binding (#793 D2e). A throw backs the row off.

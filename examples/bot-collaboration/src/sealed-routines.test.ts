@@ -50,6 +50,8 @@ describe('sealed Bot routines (#953)', () => {
     const { commands } = ledger();
     commands.create(sealedDefinition(commands.list(), 'main', action(1, v1), execution));
     expect(() => sealedDefinition(commands.list(), 'main', { ...action(1, v1), schedule: { ...schedule, hour: 10 } }, execution)).toThrow('already has this id');
+    expect(() => sealedDefinition(commands.list(), 'main', action(1, v2), execution)).toThrow('already has this id');
+    expect(() => sealedDefinition(commands.list(), 'helper', action(1, v1), execution)).toThrow('already has this id');
     // An exact retry after a lost response is the same definition, which K4 takes as a no-op.
     const replay = sealedDefinition(commands.list(), 'main', action(1, v1), execution);
     expect(replay).toEqual(commands.list()[0]!.definition);

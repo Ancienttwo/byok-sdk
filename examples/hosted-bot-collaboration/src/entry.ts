@@ -137,7 +137,7 @@ export class HostedCommandEntry<C> {
   }
   /**
    * The owner's member endpoint adds a sealed routine of Main Bot `botId` (#953): version 1, with the template that the member
-   * sealed for it. An exact retry is a no-op.
+   * sealed for it. A retry is a no-op while version 1 is the definition.
    */
   async createSealedRoutine(credential: C, botId: string, action: SealedRoutineAction): Promise<void> {
     const { scope } = await this.owned(credential, 'createSealedRoutine', action.routineId);
