@@ -69,8 +69,8 @@ test('CI policy and runbook changes take the contract-only lane', () => {
 test('a migration PR plans the targeted cloud-dataplane suite, the dataplane job and the packed migrate job (#654)', () => {
   const plan = planCi({ event: 'pull_request', sha, paths: ['deploy/sql/0027_e2ee_member.sql', 'tests/sql/control_plane_invariants.sql'] });
   assert.equal(plan.mode, 'targeted');
-  // The hosted example depends on cloud-dataplane (#793 D2b-1), so the graph also selects it.
-  assert.deepEqual(plan.dirs, ['examples/hosted-bot-collaboration', 'packages/cloud-dataplane']);
+  // The hosted example (#793 D2b-1) and its Worker composition (#794 D3) depend on cloud-dataplane, so the graph also selects them.
+  assert.deepEqual(plan.dirs, ['examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker', 'packages/cloud-dataplane']);
   assert.deepEqual(plan.families, ['dataplane', 'release-pack-migrate']);
   assert.ok(needsBuild(plan));
   assert.ok(!plan.families.includes('build-test'));
