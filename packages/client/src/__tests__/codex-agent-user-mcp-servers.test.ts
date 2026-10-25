@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { withCodexUserContextExcluded, verifyCodexUserContextExcluded, type CodexAppServerRequest } from '../adapters/codex/agent-user-context';
+import { withCodexUserMcpServersExcluded, verifyCodexUserMcpServersExcluded, type CodexAppServerRequest } from '../adapters/codex/agent-user-mcp-servers';
 import { isRuntimeExecutionFailure } from '../runtime-failure';
 
 // Shapes as Codex 0.160.0 and 0.164.0 answered them in a synthetic CODEX_HOME:
@@ -32,9 +32,9 @@ async function refusal(work: () => unknown): Promise<string> {
   throw new Error('expected a refusal');
 }
 
-describe('withCodexUserContextExcluded', () => {
+describe('withCodexUserMcpServersExcluded', () => {
   it('disables every configured server outside the task and turns off apps and plugins', () => {
-    expect(withCodexUserContextExcluded(OPEN, EFFECTIVE, ['byokagentmemory'])).toEqual({
+    expect(withCodexUserMcpServersExcluded(OPEN, EFFECTIVE, ['byokagentmemory'])).toEqual({
       cwd: '/home/agent',
       approvalPolicy: 'never',
       config: {
@@ -51,7 +51,7 @@ describe('withCodexUserContextExcluded', () => {
   });
 
   it('adds the features to an open with no config and no configured servers', () => {
-    expect(withCodexUserContextExcluded({ threadId: 't' }, { config: {} }, [])).toEqual({
+    expect(withCodexUserMcpServersExcluded({ threadId: 't' }, { config: {} }, [])).toEqual({
       threadId: 't',
       config: { mcp_servers: {}, features: { apps: false, plugins: false } },
     });
@@ -59,19 +59,19 @@ describe('withCodexUserContextExcluded', () => {
 
   it('refuses a user server that shares a task server name', async () => {
     const effective = { config: { mcp_servers: { byokagentmemory: { command: 'x', env: { NODE_OPTIONS: '--require /x' } }, zeta: {}, alpha: {} } } };
-    expect(await refusal(() => withCodexUserContextExcluded(OPEN, effective, ['zeta', 'byokagentmemory', 'alpha'])))
-      .toBe('codex Agent user-context exclusion refused: user MCP servers share a name with task servers: alpha, byokagentmemory, zeta');
+    expect(await refusal(() => withCodexUserMcpServersExcluded(OPEN, effective, ['zeta', 'byokagentmemory', 'alpha'])))
+      .toBe('codex Agent user MCP server exclusion refused: user MCP servers share a name with task servers: alpha, byokagentmemory, zeta');
   });
 
   it('refuses a configuration it cannot read', async () => {
     for (const effective of [{}, { config: null }, { config: [] }, { config: { mcp_servers: [] } }, { config: { mcp_servers: 'x' } }]) {
-      expect(await refusal(() => withCodexUserContextExcluded(OPEN, effective, [])))
-        .toBe('codex Agent user-context exclusion refused: config/read returned no readable configuration');
+      expect(await refusal(() => withCodexUserMcpServersExcluded(OPEN, effective, [])))
+        .toBe('codex Agent user MCP server exclusion refused: config/read returned no readable configuration');
     }
   });
 });
 
-describe('verifyCodexUserContextExcluded', () => {
+describe('verifyCodexUserMcpServersExcluded', () => {
   const status = (name: string, runtimeStatus: string | null, pluginId: string | null = null) => ({
     name, runtimeStatus, pluginId, httpOrigin: null, serverInfo: null, tools: {}, toolsError: null, resources: [], resourceTemplates: [], authStatus: 'unsupported',
   });
@@ -90,7 +90,7 @@ describe('verifyCodexUserContextExcluded', () => {
       { data: [status('probe_user', 'disabled'), status('byokagentmemory', 'connected')], nextCursor: 'c1' },
       { data: [status('probe.dotted', 'disabled'), status('host_tool', 'starting')], nextCursor: null },
     );
-    await verifyCodexUserContextExcluded(request, 'thread-1', ['byokagentmemory', 'host_tool']);
+    await verifyCodexUserMcpServersExcluded(request, 'thread-1', ['byokagentmemory', 'host_tool']);
     expect(calls).toEqual([
       { threadId: 'thread-1', detail: 'toolsAndAuthOnly' },
       { threadId: 'thread-1', detail: 'toolsAndAuthOnly', cursor: 'c1' },
@@ -102,7 +102,7 @@ describe('verifyCodexUserContextExcluded', () => {
       { data: [status('probe_plugin_srv', 'connected', 'probe-plugin@probe-market'), status('user_notes', 'failed')], nextCursor: 'c1' },
       { data: [status('codex_apps', null), status('probe_user', 'disabled')] },
     );
-    expect(await refusal(() => verifyCodexUserContextExcluded(request, 'thread-1', ['byokagentmemory'])))
+    expect(await refusal(() => verifyCodexUserMcpServersExcluded(request, 'thread-1', ['byokagentmemory'])))
       .toBe('codex Agent thread still runs MCP servers outside the task: codex_apps, probe_plugin_srv (plugin probe-plugin@probe-market), user_notes');
   });
 
@@ -113,13 +113,13 @@ describe('verifyCodexUserContextExcluded', () => {
       [{ data: [], nextCursor: 7 }, 'mcpServerStatus/list returned an invalid cursor'],
     ];
     for (const [reply, reason] of cases) {
-      expect(await refusal(() => verifyCodexUserContextExcluded(pages(reply).request, 't', []))).toBe(`codex Agent user-context exclusion refused: ${reason}`);
+      expect(await refusal(() => verifyCodexUserMcpServersExcluded(pages(reply).request, 't', []))).toBe(`codex Agent user MCP server exclusion refused: ${reason}`);
     }
   });
 
   it('refuses a cursor that never ends', async () => {
     const request: CodexAppServerRequest = async () => ({ data: [], nextCursor: 'again' });
-    expect(await refusal(() => verifyCodexUserContextExcluded(request, 't', [])))
-      .toBe('codex Agent user-context exclusion refused: mcpServerStatus/list did not finish paging');
+    expect(await refusal(() => verifyCodexUserMcpServersExcluded(request, 't', [])))
+      .toBe('codex Agent user MCP server exclusion refused: mcpServerStatus/list did not finish paging');
   });
 });
