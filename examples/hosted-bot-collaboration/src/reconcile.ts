@@ -278,8 +278,9 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
   let conclusion: Conclusion, outbox: OutboxIntent[] = [];
   const { manage, ...given } = ports, now = given.now();
   // The published values of this commit, so a conflict with a stored projection row is refused below as the outcome's own.
+  // Each is a copy taken at the call, as the store stages it, so a later change to the caller's object cannot hide a conflict.
   const published = new Map<string, Json>();
-  const base = { ...given, publish: (id: string, value: Json) => { given.publish(id, value); published.set(id, value); } };
+  const base = { ...given, publish: (id: string, value: Json) => { given.publish(id, value); published.set(id, structuredClone(value)); } };
   if (attempt.cancellation || envelope.type === 'task.cancelled') conclusion = 'cancelled';
   else if (envelope.type === 'task.complete') {
     const document = envelope.payload.document;

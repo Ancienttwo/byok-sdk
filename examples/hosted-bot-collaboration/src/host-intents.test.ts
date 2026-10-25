@@ -178,6 +178,25 @@ describe.skipIf(POSTGRES_URL === undefined)('H Host intents on real Postgres (#9
       .toEqual([{ body: RESULT }]);
   });
 
+  it('checks the value as published, not the object that the handler changes afterwards', async () => {
+    const store = hostStore({ research: (document, tx) => {
+      const value = { ...(document as object) };
+      tx.publish('research', value);
+      Object.assign(value, RESULT);
+    } }), scope = await scoped(store);
+    const second = 'host-research-2', secondTask = taskId(second, 0);
+    await store.enqueueHostIntent(scope, input(), 'research', Date.now);
+    await store.enqueueHostIntent(scope, input({ key: second }), 'research', Date.now);
+    await submit();
+    documents.set(TASK, RESULT);
+    await reconciler(store).run();
+    await submit();
+    // Published as { summary: 'another result' }, then changed to the stored value: the staged copy still conflicts.
+    documents.set(secondTask, { summary: 'another result' });
+    expect(await reconciler(store).run()).toMatchObject({ failed: [{ turnId: second, error: { name: 'IntentOutcomeError', code: 'handler_failed',
+      message: 'Projection identity conflict' } }] });
+  });
+
   it('refuses an async handler, and consumes its rejection', async () => {
     const unhandled: unknown[] = [], record = (reason: unknown) => { unhandled.push(reason); };
     process.on('unhandledRejection', record);
