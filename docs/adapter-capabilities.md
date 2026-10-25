@@ -319,12 +319,30 @@ keeps `resume: true`, because ordinary tasks can still resume.
 
 Auto memory also writes under `projects/<encoded cwd>/memory/`. This option
 does not turn it off; `agentUserContext: 'excluded'` does, and the two
-options apply together. Claude also keeps other directories in the config
-directory, such as `file-history/`, `shell-snapshots/`, `session-env/` and
-`debug/`. Whether `--no-session-persistence` keeps those empty was not probed:
-it needs a paid `claude -p` run. Fixture tests prove the launch flag, the
-follow-up on the same process and the refusal; they do not prove what an
-installed Claude writes.
+options apply together.
+
+An offline probe of Claude 2.1.302 started `-p --input-format stream-json
+--output-format stream-json --verbose` with a temporary `HOME` and
+`CLAUDE_CONFIG_DIR`, an invalid `ANTHROPIC_API_KEY` and the network denied by
+`sandbox-exec`. No request left the machine; Claude retried the API until the
+probe killed it.
+
+- Without the flag, `system/init` carried a `session_id`, and
+  `projects/<encoded cwd>/<session>.jsonl` held the user message, the
+  attachments and the API request bodies.
+- With the flag, `system/init` still carried a `session_id`. Under
+  `projects/` there was only an empty `<encoded cwd>/memory/` directory.
+- With the flag and auto memory off (the `env` setting that
+  `agentUserContext: 'excluded'` writes), there was no `projects/` directory.
+- In every run, Claude also wrote `.claude.json` and its backup,
+  `sessions/<pid>.json` (the process's cwd and session id) and a failed
+  telemetry event under `telemetry/`, none with the instruction text. The
+  probe killed the process, so whether a clean exit removes
+  `sessions/<pid>.json` is not shown. No tool ran, so `file-history/` and
+  `shell-snapshots/` stayed untested.
+
+Fixture tests prove the launch flag, the follow-up on the same process and
+the refusal.
 
 As with `agentUserContext`, `createDaemon` builds the Claude adapter without
 options. A Host sets this option on its own `ClaudeAdapter` through
