@@ -19,3 +19,4 @@ export { ROOM_GRACE_MS, ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES, type RoomMess
 export { TEAM_NOTE_LIMIT } from './team';
 export { TeamModeError, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot } from './rules/team';
 export { createBotPersonaProjection } from './persona';
+export { DeviceModeError, DeviceSwitchingError, type DeviceTopology, type SwitchWork } from './topology';

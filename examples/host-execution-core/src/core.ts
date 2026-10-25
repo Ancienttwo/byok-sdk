@@ -69,6 +69,14 @@ export interface HostOptions {
   onOutbox?: (signal: AbortSignal) => void | Promise<void>;
   applyMessage?: (input: AgentMessageInput, transaction: MessageTransaction) => MessageDecision;
   applyOutcome?: (document: unknown, transaction: OutcomeTransaction) => void;
+  /**
+   * Submit admission (#957): asked in the transaction that begins a submit, and again in the readback right before the SDK
+   * call, with the intent and the ledger state. `false` holds the intent: a queued or backoff intent keeps its phase and
+   * generation, and a begun intent is not sent. A held queued or backoff intent arms the scan only for its expiry, so the
+   * Host drains after it admits again. A cancel still settles a held intent. Covers every
+   * submit of this core, the timer drain and direct `enqueue` calls included. Must be synchronous. Absent: every submit is admitted.
+   */
+  admitSubmit?: (intent: Readonly<Intent>, state: Readonly<LedgerState>) => boolean;
 }
 
 /** One instance per embedded tenant. Only horizon retries use a process-local timer. */
@@ -561,8 +569,12 @@ export class HostExecutionCore {
         state.scanWake = null; return;
       }
       const now = this.now();
+      // A held intent (#957) is not ready, so it arms the scan only for its expiry. A ready time would make every scan re-arm
+      // at `now + 1` while it stays held. An admission that throws counts as held: the begin records its error.
+      const held = (intent: Intent) => { try { return !this.admits(intent, state); } catch { return true; } };
       const due = Math.max(now + 1, notBefore, Math.min(...open.map(intent => {
         if (intent.phase === 'memory_blocked') return Math.min(intent.waitUntil, intent.retryUntil ?? Infinity);
+        if ((intent.phase === 'queued' || intent.phase === 'backoff') && held(intent)) return Math.min(intent.waitUntil, intent.retryUntil ?? Infinity);
         if (intent.phase === 'backoff') return Math.min(intent.notBefore, intent.waitUntil, intent.retryUntil ?? Infinity);
         if (intent.phase === 'queued') return open.some(other => other.agent === intent.agent && other.sequence < intent.sequence) ? intent.waitUntil : Math.min(intent.waitUntil, intent.retryUntil ?? Infinity, readyAt);
         if (this.eventsActive && this.liveTasks.has(intent.taskId)) return Infinity;
@@ -603,15 +615,23 @@ export class HostExecutionCore {
   private delivered(intent: Intent): Promise<boolean> {
     return frozenDelivered({ offer: taskId => this.server.tasks.offer(taskId) }, this.ledger.snapshot().executions[intent.taskId]!.input);
   }
+  private admits(intent: Intent, state: LedgerState): boolean {
+    if (!this.options.admitSubmit) return true;
+    const admitted: unknown = this.options.admitSubmit(intent, state);
+    if (typeof admitted !== 'boolean') throw new Error('Submit admission must return a boolean synchronously');
+    return admitted;
+  }
   private async submit(intent: Intent): Promise<void> {
     const input = this.ledger.snapshot().executions[intent.taskId]!.input;
     const outcome = await submitFrozen(this.frozenPort(), input, () => {
-      const latest = this.ledger.snapshot().intents[intent.id]!;
+      const snapshot = this.ledger.snapshot(), latest = snapshot.intents[intent.id]!;
       if (latest.conclusion || latest.cancelReason) return false;
       if (this.now() >= latest.waitUntil) {
         this.ledger.transaction(state => { state.intents[intent.id]!.cancelReason = 'expired'; });
         return false;
       }
+      // The admission can change between the begin and the SDK call, so it is read again here.
+      if (!this.admits(latest, snapshot)) return false;
       this.options.memory?.refreshExecution({ deviceId: input.deviceId, agentRef: input.payload.agentRef }, input.taskId);
       return true;
     });
@@ -665,6 +685,8 @@ export class HostExecutionCore {
       const row = state.intents[intent.id]!;
       if (row.conclusion || row.cancelReason || this.now() >= row.waitUntil
         || this.now() >= (row.retryUntil ?? Infinity) || row.phase === 'inflight' || row.phase === 'memory_blocked') return undefined;
+      // A held intent keeps its phase and generation, so a backoff intent gets no new task id.
+      if (!this.admits(row, state)) return undefined;
       if (isSealed(row.execution) && !this.server.executions.submitSealed) {
         // Fail before any submit, as a refused preparation does, so the drain never retries a submit that cannot exist.
         row.preparationError = new SealedDispatchUnavailableError().code;
