@@ -54,7 +54,7 @@ function content(edit: (state: CollaborationState) => void = () => {}): SwitchCo
       intent(`occurrence:${O2}`, 2, { source: 'routine', conclusion: 'failed', retryUntil: 4_000 })],
     routines: structuredClone(ROUTINES),
     occurrences: structuredClone(OCCURRENCES),
-    outbox: [{ kind: 'projection', id: 'p1', value: { v: 1 } }, { kind: 'host-job', occurrenceKey: O1 }],
+    outbox: [{ kind: 'host-job', occurrenceKey: O1 }],
     tombstones: [{ kind: 'row', digest: hash('r'), expiresAt: 5_000 }, { kind: 'intent', digest: hash('i0') }],
   };
 }
@@ -84,9 +84,8 @@ describe('switch export format (#975)', () => {
     expect(sealed.devices.map(device => device.deviceId)).toEqual(['d1', 'd2']);
     expect(sealed.archived.map(row => row.id)).toEqual(['c1', 't2']);
     expect(sealed.intents.map(row => row.key)).toEqual(['i1', 'i2', `occurrence:${O2}`]);
-    expect(sealed.outbox.map(row => row.kind)).toEqual(['host-job', 'projection']);
     expect(sealed.tombstones.map(row => row.kind)).toEqual(['intent', 'row']);
-    expect(sealed.manifest.counts).toEqual({ collaboration: 1, archived: 2, intents: 3, routines: 2, occurrences: 2, outbox: 2, tombstones: 2 });
+    expect(sealed.manifest.counts).toEqual({ collaboration: 1, archived: 2, intents: 3, routines: 2, occurrences: 2, outbox: 1, tombstones: 2 });
     expect(sealed.manifest.digests.archived).toBe(hash(sealed.archived));
     expect(verifySwitchExport(sealed)).toEqual(sealed.manifest);
     // A target's read-back is a JSON round trip of what it wrote: the digest does not depend on key order or row order.
@@ -104,7 +103,7 @@ describe('switch export format (#975)', () => {
     refused(() => verifySwitchExport({ ...sealed, archived: [{ ...sealed.archived[0]!, body: { n: 9 } }, sealed.archived[1]!] }), 'manifest');
     refused(() => verifySwitchExport({ ...sealed, exportedAt: 1_001 }), 'manifest');
     refused(() => verifySwitchExport({ ...sealed, devices: [{ deviceId: 'd1', frozenRevision: 4 }, sealed.devices[1]!] }), 'manifest');
-    refused(() => verifySwitchExport({ ...sealed, outbox: sealed.outbox.slice(1) }), 'manifest');
+    refused(() => verifySwitchExport({ ...sealed, outbox: [] }), 'manifest');
     refused(() => verifySwitchExport({ ...sealed, routines: [{ ...sealed.routines[0]!, ordinal: 7 }, sealed.routines[1]!] }), 'manifest');
   });
 
@@ -142,7 +141,6 @@ describe('switch export format (#975)', () => {
       value => { Object.assign(value.occurrences[0]!.trigger, { extra: 1 }); },
       value => { Object.assign(value.occurrences[0]!.job!, { executionSuperseded: true }); },
       value => { extra(value.outbox[0]!); },
-      value => { extra(value.outbox[1]!); },
       value => { extra(value.tombstones[0]!); },
       value => { Object.assign(value.collaboration, { memory: {} }); },
     ]);
@@ -152,9 +150,9 @@ describe('switch export format (#975)', () => {
     refusesEach('reference', [
       value => { value.intents[0]!.taskId = hash(['i2', 0]); },
       value => { value.intents[2]!.key = `occurrence:${hash('o9')}`; },
-      value => { value.outbox[1] = { kind: 'host-job', occurrenceKey: hash('o9') }; },
+      value => { value.outbox[0] = { kind: 'host-job', occurrenceKey: hash('o9') }; },
       // `O2` is an occurrence hook, not a Host job.
-      value => { value.outbox[1] = { kind: 'host-job', occurrenceKey: O2 }; },
+      value => { value.outbox[0] = { kind: 'host-job', occurrenceKey: O2 }; },
       value => { value.occurrences[0]!.routineId = 'r9'; },
       // An occurrence key is K4's hash of its routine slot and trigger.
       value => { value.occurrences[0]!.trigger.plannedAt = 901; },
@@ -288,6 +286,12 @@ describe('switch export format (#975)', () => {
     refused(() => sealSwitchExport(content(state => { state.team.homeOperations.push(home(1, { retryAt: 10 })); })), 'home_sent');
   });
 
+  it('refuses a pending projection, which H receivers deduplicate under the source scope', () => {
+    refusesEach('projection_pending', [
+      value => { value.outbox.push({ kind: 'projection', id: 'p1', value: { v: 1 } } as unknown as SwitchContent['outbox'][number]); },
+    ]);
+  });
+
   it('refuses malformed content', () => {
     refusesEach('invalid', [
       value => { (value as { version: number }).version = 2; },
@@ -306,12 +310,12 @@ describe('switch export format (#975)', () => {
       value => { delete (value.intents[0] as { waitUntil?: number }).waitUntil; },
       value => { value.tombstones[0]!.digest = 'short'; },
       value => { (value.tombstones[0] as { kind: string }).kind = 'other'; },
-      value => { (value.outbox[1] as { kind: string }).kind = 'intent'; },
+      value => { (value.outbox[0] as { kind: string }).kind = 'intent'; },
       value => { value.archived[0]!.expiresAt = 1.5; },
       value => { (value.intents[0] as { conclusion: string }).conclusion = 'done'; },
       value => { (value.collaboration.team as { bots: unknown }).bots = null; },
       value => { value.archived[0]!.body = { n: Number.NaN }; },
-      value => { value.outbox[0] = { kind: 'projection', id: 'p1', value: { at: new Date(0) } as unknown as Record<string, number> }; },
+      value => { value.archived[0]!.body = { at: new Date(0) } as unknown as Record<string, number>; },
       // Checked before the seal's clone, which would turn the instance into a plain object.
       value => { value.archived[0]!.body = new (class Body { n = 2; })() as unknown as Record<string, number>; },
       value => { (value.archived[1] as { expiresAt?: number }).expiresAt = undefined; },

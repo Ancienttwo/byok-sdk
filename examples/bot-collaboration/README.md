@@ -1049,9 +1049,10 @@ their frozen input (a sealed one stays sealed). H stores only part of this
 today: the K4-only fields get H columns in the H slice that imports them.
 Every object has an exact set of keys.
 
-A value that a Host derives from others is not in a record. The source
-refuses an export where its stored copy differs, and the target derives its
-own:
+A value that a Host derives from others is not in a record, and the target
+derives its own. The format never sees the source's stored copies, so each
+Host's export builder checks them against these rules and refuses to build an
+export where one differs:
 - an intent's FIFO key, K4 `agentKey(domain, execution)`, from the target's
   own tenant or scope and the device and Agent of the frozen input;
 - the execution input of each earlier generation (`input` with that
@@ -1064,10 +1065,11 @@ own:
 
 An intent carries the K4 execution of each earlier generation (submission,
 start, attempt, terminal and message receipt), because K4 compacts an intent
-only with the execution of every generation. After the switch, a replay of an
-earlier Agent message does not reach a stored receipt: the device sends it
-under the tenant it is enrolled with, and the target's SDK answers only from
-the task and offer binding in its own stores, which the switch does not move.
+only with the execution of every generation. A message for an earlier task is
+answered from its execution: by its receipt, or else `stale_generation`.
+Nothing relies on a replay after the switch getting `accepted`: the target's
+SDK passes an Agent message to the Host only when its own stores hold the
+device's task and offer binding, which this export does not carry.
 
 The format refuses, with `SwitchExportError` and a `reason`:
 - the source's owner records (L `topology`, and L `hostIntents`, whose handler
@@ -1091,6 +1093,9 @@ The format refuses, with `SwitchExportError` and a `reason`:
   card call in flight;
 - a pending Agent home write that is `sent` or has a `retryAt`, because it may
   have reached the device. An unsent one moves and is sent by the new owner;
+- a pending projection (`projection_pending`): H's receiver deduplicates by
+  `(scope, id)`, and neither Host records whether it was sent, so the source
+  flushes its projections first;
 - rows out of identity order, a repeated identity or ordinal, a key outside the
   format, malformed fields, a value that is not JSON by K4's `validateJson`
   (`NaN`, `undefined`, a class instance, checked before the seal clones the
@@ -1098,7 +1103,9 @@ The format refuses, with `SwitchExportError` and a `reason`:
 
 A channel delivery moves under its id, `hash([taskId, messageId, route])`,
 which names no Host domain, so the target's readback or resend of a `sending`
-or `unknown` delivery uses the source's idempotency key.
+or `unknown` delivery uses the source's idempotency key. Whether a platform
+honors that key is its adapter's concern (`docs/host-im-adapter.md`); the
+switch does not change it.
 
 The export, the import and the commit of the switch on each Host come in
 later #975 slices. This entry has no I/O.

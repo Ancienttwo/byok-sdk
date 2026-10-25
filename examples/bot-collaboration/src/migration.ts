@@ -14,8 +14,9 @@ import type { CollaborationState } from './model';
  * H cannot import a record that has them. Every object has an exact set of keys, so nothing an importer would drop can
  * ride along.
  *
- * A value that a Host derives from others is not in the record. The source refuses an export where its stored copy
- * differs, and the target derives its own:
+ * A value that a Host derives from others is not in the record, and the target derives its own. The format never sees
+ * the source's stored copies, so each Host's export builder checks its copies against these rules and refuses to build an
+ * export where one differs:
  * - an intent's `agent`, K4 `agentKey(domain, execution)` (`transitions.ts`, H `intents.ts` with its scope). It names the
  *   source's tenant or scope, and K4 `loadForSwitch` refuses another tenant's, so each target derives it with its domain;
  * - the K4 execution input of an earlier generation, and K4 `intent.execution`: `input` with that generation's task id, and
@@ -34,9 +35,11 @@ import type { CollaborationState } from './model';
  * from its own rows. Devices are in JS string order of `deviceId`, and each section in JS string order of
  * `canonical(identity)`, so a read-back sorts that way in JS or reseals; a database `ORDER BY` would give `unsorted`.
  *
- * A channel delivery and a projection outbox record move under their original ids. A delivery id is
- * `hash([taskId, messageId, route])` (`delivery.ts`), with no domain id in it, so the target's readback or resend of a
- * `sending` or `unknown` delivery reaches the receiver under the same idempotency key as the source's would.
+ * A channel delivery moves under its id, `hash([taskId, messageId, route])` (`delivery.ts`), which names no domain, so
+ * the target's readback or resend of a `sending` or `unknown` delivery uses the source's idempotency key. Whether a
+ * platform honors that key is its adapter's concern (`docs/host-im-adapter.md`), and the switch does not change it. A
+ * projection does not move: H's receiver deduplicates by `(scope, id)` (H `sender.ts` ProjectionPort), and neither Host
+ * records whether a pending projection was sent, so the source flushes its projections before the export.
  */
 export const SWITCH_EXPORT_VERSION = 1;
 export const SWITCH_SECTIONS = ['collaboration', 'archived', 'intents', 'routines', 'occurrences', 'outbox', 'tombstones'] as const;
@@ -59,12 +62,12 @@ export interface ExecutionRecord {
  *
  * `earlierExecutions` holds generations 0 to `generation - 1`, in order, each with the execution facts K4 stores
  * (#975 D1). Its task id is `hash([key, generation])` and its input is `input` with that task id, so neither is stored.
- * K4 compacts an intent only with the execution of every generation (`ledger.ts` compact: `Missing execution evidence`),
- * and a message for an earlier task gets `stale_generation`, not `unknown_task`, from its execution (`core.ts`
- * consumeMessage); H stores the same generations in its H slice. A replay of an earlier message after the switch does
- * not reach a stored receipt: the device sends it under the tenant it is enrolled with, its outbox refuses a record of
- * another tenant (`packages/client` `agent-message-outbox.ts`), and the target's SDK answers it only from the task and
- * offer binding in its own stores (`packages/cloud` `inbound.ts`), which the switch does not move.
+ * K4 compacts an intent only with the execution of every generation (`ledger.ts` compact: `Missing execution evidence`).
+ * A message for an earlier task is answered from its execution, by its receipt or else `stale_generation`, never
+ * `unknown_task` (`core.ts` consumeMessage); H stores the same generations in its H slice. Nothing here relies on a
+ * replay after the switch getting `accepted`: the target's SDK passes an Agent message to the Host only when its own
+ * stores hold the device's task and offer binding (`packages/cloud` `inbound.ts`), which this export does not carry and
+ * no code moves.
  *
  * Each receipt, current or earlier, is the same fact as the K8 accepted reply of its task id, so the two must agree. A
  * `reserved` intent is in generation 0 and was never submitted: K4 begins a new generation in the transaction that
@@ -101,8 +104,8 @@ export interface OccurrenceRecord {
   recordedAt: number; nextAt: number | null; job: { attempts: number; summary?: Json } | null; executionSuperseded: boolean;
   conclusion?: Conclusion; slotReplayCount?: number;
 }
-/** An unconfirmed outbox record under its original identity. The receiver deduplicates a projection by its id. */
-export type OutboxRecord = { kind: 'projection'; id: string; value: Json } | { kind: 'host-job'; occurrenceKey: string };
+/** A pending Host job of an open occurrence. The target runs it again, as K4 does after a crash. */
+export interface OutboxRecord { kind: 'host-job'; occurrenceKey: string }
 /** A permanent or expiring tombstone in the K4 scheme: the digest of the retired identity, by kind. */
 export interface TombstoneRecord { kind: 'intent' | 'row' | 'slot' | 'application'; digest: string; expiresAt?: number }
 
@@ -118,7 +121,7 @@ export interface SwitchManifest { counts: Record<SwitchSection, number>; digests
 export interface SwitchExport extends SwitchContent { manifest: SwitchManifest }
 
 export type SwitchExportRefusal = 'invalid' | 'unsorted' | 'duplicate' | 'reference' | 'receipt_mismatch' | 'owner_record' | 'device_missing' | 'open_work'
-  | 'home_sent' | 'card_call' | 'manifest';
+  | 'home_sent' | 'projection_pending' | 'card_call' | 'manifest';
 /** An export that the format refuses. Nothing may be imported or committed from it. */
 export class SwitchExportError extends Error {
   readonly code = 'switch_export_refused' as const;
@@ -132,7 +135,7 @@ const IDENTITY: { [S in ListSection]: (row: SwitchContent[S][number]) => Json } 
   intents: row => (row as IntentRecord).key,
   routines: row => (row as RoutineRecord).id,
   occurrences: row => (row as OccurrenceRecord).key,
-  outbox: row => { const out = row as OutboxRecord; return [out.kind, out.kind === 'projection' ? out.id : out.occurrenceKey]; },
+  outbox: row => [(row as OutboxRecord).kind, (row as OutboxRecord).occurrenceKey],
   tombstones: row => [(row as TombstoneRecord).kind, (row as TombstoneRecord).digest],
 };
 const LISTS = SWITCH_SECTIONS.filter((section): section is ListSection => section !== 'collaboration');
@@ -318,9 +321,11 @@ function checkContent(content: SwitchContent, top: readonly string[]): void {
   }
   for (const row of content.routines) ensure(routineRecord(row), 'routine');
   for (const row of content.occurrences) ensure(occurrenceRecord(row), 'occurrence');
-  for (const row of content.outbox) {
-    ensure(object(row) && (row.kind === 'projection' ? keys(row, ['kind', 'id', 'value']) && text(row.id) : keys(row, ['kind', 'occurrenceKey'])
-      && row.kind === 'host-job' && text(row.occurrenceKey)), 'outbox row');
+  for (const row of content.outbox as unknown[]) {
+    if (object(row) && row.kind === 'projection') {
+      throw new SwitchExportError('projection_pending', `Switch export has a pending projection; flush it first: ${String(row.id)}`);
+    }
+    ensure(keys(row, ['kind', 'occurrenceKey']) && row.kind === 'host-job' && text(row.occurrenceKey), 'outbox row');
   }
   for (const row of content.tombstones) {
     ensure(keys(row, ['kind', 'digest'], ['expiresAt']) && oneOf(['intent', 'row', 'slot', 'application'])(row.kind) && digestText(row.digest)
@@ -376,7 +381,6 @@ function checkReferences(content: SwitchContent): void {
   }
   const routineById = new Map(content.routines.map(row => [row.id, row]));
   for (const row of content.outbox) {
-    if (row.kind !== 'host-job') continue;
     const occurrence = occurrences.get(row.occurrenceKey);
     reference(occurrence?.job != null, `Host job ${row.occurrenceKey} names no Host job occurrence`);
     // K4 runs a pending Host job only for an open, unpromoted occurrence of a Host job routine (`core.ts` runHostJobs).
