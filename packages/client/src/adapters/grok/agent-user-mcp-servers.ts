@@ -1,10 +1,9 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 
-const execFileAsync = promisify(execFile);
 const INSPECT_TIMEOUT_MS = 5000;
 const INSPECT_MAX_BYTES = 16 * 1024 * 1024;
 const PREFIX = 'grok Agent user MCP server exclusion refused';
+const INSPECT_FAILED = `${PREFIX}: grok inspect failed`;
 
 /** Grok's per-process switches for the Claude and Cursor MCP compatibility cells and the managed MCP fetch. */
 export const GROK_USER_MCP_SERVERS_OFF = Object.freeze({
@@ -23,7 +22,7 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
 export function grokInspectRefusal(output: string): string | undefined {
   let parsed: Record<string, unknown> | undefined;
   try { parsed = record(JSON.parse(output)); } catch { parsed = undefined; }
-  const failed = `${PREFIX}: grok inspect failed`;
+  const failed = INSPECT_FAILED;
   if (!parsed || !Array.isArray(parsed.mcpServers) || !Array.isArray(parsed.plugins)) return failed;
   const servers: string[] = [];
   for (const entry of parsed.mcpServers) {
@@ -47,15 +46,39 @@ export function grokInspectRefusal(output: string): string | undefined {
   return found.length === 0 ? undefined : `${PREFIX}: ${found.join('; ')}`;
 }
 
-/** Runs `grok inspect --json` with the agent's cwd and environment and judges its output. */
-export async function grokUserMcpServersRefusal(command: string, cwd: string, env: Readonly<Record<string, string>>): Promise<string | undefined> {
-  let stdout: string;
-  try {
-    ({ stdout } = await execFileAsync(command, ['inspect', '--json'], {
-      cwd, env, timeout: INSPECT_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: INSPECT_MAX_BYTES,
-    }));
-  } catch {
-    return `${PREFIX}: grok inspect failed`;
-  }
-  return grokInspectRefusal(stdout);
+/**
+ * Runs `grok inspect --json` through the spawn that starts the agent, with
+ * the agent's command, cwd and environment, so it judges the configuration
+ * the agent will load. A non-zero exit, a spawn error, more than 16 MiB of
+ * output or 5 s without an exit fail it.
+ */
+export async function grokUserMcpServersRefusal(spawnFn: typeof spawn, command: string, cwd: string, env: Readonly<Record<string, string>>): Promise<string | undefined> {
+  const stdout = await new Promise<string | undefined>((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (value: string | undefined) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawnFn(command, ['inspect', '--json'], { cwd, env, stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch {
+      finish(undefined);
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    timer = setTimeout(() => { child.kill('SIGKILL'); finish(undefined); }, INSPECT_TIMEOUT_MS);
+    child.stdout?.on('data', (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes <= INSPECT_MAX_BYTES) chunks.push(chunk);
+      else { child.kill('SIGKILL'); finish(undefined); }
+    });
+    child.on('error', () => finish(undefined));
+    child.on('close', (code) => finish(code === 0 ? Buffer.concat(chunks).toString('utf8') : undefined));
+  });
+  return stdout === undefined ? INSPECT_FAILED : grokInspectRefusal(stdout);
 }

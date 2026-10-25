@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { spawn, type SpawnOptions } from 'node:child_process';
 import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -343,6 +344,20 @@ describe('GrokAdapter agentUserMcpServers (#935)', () => {
     for (const env of [inspect.env, started.env]) {
       expect(env).toMatchObject({ ...MCP_OFF, GROK_CLAUDE_RULES_ENABLED: '0', FAKE_ACP_LOG: resources.log });
     }
+  });
+
+  it('runs inspect through a custom spawnFn with the command, cwd and env of the agent', async () => {
+    const resources = await agentCtx();
+    const calls: { command: string; args: readonly string[]; cwd: unknown; env: unknown }[] = [];
+    const spawnFn: typeof spawn = ((command: string, args: readonly string[], options: SpawnOptions) => {
+      calls.push({ command, args, cwd: options.cwd, env: options.env });
+      return spawn(command, args, options);
+    }) as typeof spawn;
+    await turn(await open(adapter({ agentUserMcpServers: 'excluded', spawnFn }), { instruction: 'hello' }, resources));
+    const [inspect, agent] = [calls.find(call => call.args[0] === 'inspect')!, calls.find(call => call.args[0] === 'agent')!];
+    expect(calls.indexOf(inspect)).toBeLessThan(calls.indexOf(agent));
+    expect(inspect).toEqual({ command: agent.command, args: ['inspect', '--json'], cwd: agent.cwd, env: agent.env });
+    expect(inspect.env).toMatchObject(MCP_OFF);
   });
 
   it('fails before the agent starts when inspect lists a server outside the task, or fails', async () => {

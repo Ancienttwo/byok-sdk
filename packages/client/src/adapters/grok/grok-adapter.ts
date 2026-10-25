@@ -1,4 +1,4 @@
-import { execFile, type spawn as nodeSpawn } from 'node:child_process';
+import { execFile, spawn, type spawn as nodeSpawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -177,7 +177,7 @@ export class GrokAdapter implements RuntimeAdapter {
       ...(excludeUserMcp ? GROK_USER_MCP_SERVERS_OFF : {}),
     };
     if (excludeUserMcp) {
-      const refusal = await grokUserMcpServersRefusal(command, cwd, { ...env, ...agentEnv });
+      const refusal = await grokUserMcpServersRefusal(this.options.spawnFn ?? spawn, command, cwd, { ...env, ...agentEnv });
       if (refusal !== undefined) throw authority(refusal);
     }
     // As OAR: the servers go in the ACP mcpServers of session/new or session/resume.
