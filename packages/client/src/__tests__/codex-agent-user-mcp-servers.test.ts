@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { withCodexUserMcpServersExcluded, verifyCodexUserMcpServersExcluded, type CodexAppServerRequest } from '../adapters/codex/agent-user-mcp-servers';
+import { withCodexUserMcpServersExcluded, verifyCodexUserMcpServersExcluded } from '../adapters/codex/agent-user-mcp-servers';
+import type { CodexOpenStepRequest } from '../runtime/codex-session-runtime';
 import { isRuntimeExecutionFailure } from '../runtime-failure';
 
 // Shapes as Codex 0.160.0 and 0.164.0 answered them in a synthetic CODEX_HOME:
@@ -77,7 +78,7 @@ describe('verifyCodexUserMcpServersExcluded', () => {
   });
   const pages = (...replies: Record<string, unknown>[]) => {
     const calls: Record<string, unknown>[] = [];
-    const request: CodexAppServerRequest = async (method, params) => {
+    const request: CodexOpenStepRequest = async (method, params) => {
       expect(method).toBe('mcpServerStatus/list');
       calls.push(params);
       return replies[calls.length - 1]!;
@@ -118,7 +119,7 @@ describe('verifyCodexUserMcpServersExcluded', () => {
   });
 
   it('refuses a cursor that never ends', async () => {
-    const request: CodexAppServerRequest = async () => ({ data: [], nextCursor: 'again' });
+    const request: CodexOpenStepRequest = async () => ({ data: [], nextCursor: 'again' });
     expect(await refusal(() => verifyCodexUserMcpServersExcluded(request, 't', [])))
       .toBe('codex Agent user MCP server exclusion refused: mcpServerStatus/list did not finish paging');
   });

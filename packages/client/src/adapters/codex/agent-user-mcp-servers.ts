@@ -1,8 +1,7 @@
 import { RuntimeExecutionFailure } from '../../runtime-failure';
+import type { CodexOpenStepRequest } from '../../runtime/codex-session-runtime';
 
 type JsonRecord = Record<string, unknown>;
-/** One request on the session's own app-server client. */
-export type CodexAppServerRequest = (method: string, params: JsonRecord) => Promise<JsonRecord>;
 
 const refuse = (reason: string) => new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
 const record = (value: unknown): JsonRecord | undefined =>
@@ -44,7 +43,7 @@ export function withCodexUserMcpServersExcluded(params: JsonRecord, effective: J
  * thread id reuses its connections and starts nothing) and refuses the start
  * when a server outside the task is not disabled.
  */
-export async function verifyCodexUserMcpServersExcluded(request: CodexAppServerRequest, threadId: string, taskServers: readonly string[]): Promise<void> {
+export async function verifyCodexUserMcpServersExcluded(request: CodexOpenStepRequest, threadId: string, taskServers: readonly string[]): Promise<void> {
   const leaks: string[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < MAX_STATUS_PAGES; page++) {
