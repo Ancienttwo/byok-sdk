@@ -24,7 +24,7 @@ import { DeviceSealingKeyStore } from './device-sealing-key';
 import { FileSecretStore } from './fixtures/file-secret-store';
 import { DEVICE, NOW, PROFILE_REF, TENANT, configureRequest, placedIdentity, replaceSecretRequest } from './fixtures/provisioning-requests';
 import { readProviderCustodySnapshot } from './pi-provider-launcher-core';
-import { exactProviderProfileBinding } from './provider-profile';
+import { exactProviderProfileBinding } from './provider-profile-binding';
 import { modelProviderSecretName } from './secret-store';
 import { applySealedProviderProvisioning, type ProviderProvisioningCutPoint } from './sealed-provisioning';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';

@@ -4,6 +4,7 @@ import {
   type ProviderProfileRef,
 } from './provider-profile';
 import { assertSecretName, assertSecretNamespace } from './secret-name';
+import { isSharedSecretValue } from './secret-value';
 
 /**
  * Storage contract for a single secret entry in an operating-system credential
@@ -88,7 +89,7 @@ export function modelProviderSecretName(
  * in the backends; only the empty/control-character rule is common.
  */
 export function assertSharedSecretValue(secret: string): void {
-  if (secret.length === 0 || /[\u0000\r\n]/u.test(secret)) {
+  if (!isSharedSecretValue(secret)) {
     throw new ByokKeysError(
       'SECRET_VALUE_INVALID',
       'Secret must be a non-empty string without null or newline characters',

@@ -19,19 +19,21 @@ export {
   ProviderModelCapabilitySchema,
   ProviderProfileRefSchema,
   parseModelProviderProfile,
-  exactProviderProfileBinding,
-  assertExactProviderProfileBinding,
 } from './provider-profile';
 export type {
   ModelProviderAdapter,
   ModelProviderKind,
   ModelProviderProfile,
   ModelProviderProfileInput,
-  ExactProviderProfileBinding,
   ProviderAuthMode,
   ProviderModelCapability,
   ProviderProfileRef,
 } from './provider-profile';
+export {
+  exactProviderProfileBinding,
+  assertExactProviderProfileBinding,
+} from './provider-profile-binding';
+export type { ExactProviderProfileBinding } from './provider-profile-binding';
 
 export {
   MODEL_PROVIDER_VENDORS,
@@ -97,6 +99,7 @@ export {
   decodeStrictBase64Utf8,
   modelProviderSecretName,
 } from './secret-store';
+export { PROVIDER_PROVISIONING_SECRET_MAX_BYTES } from './secret-value';
 export type { ModelProviderSecretName, SecretStore } from './secret-store';
 
 export {
@@ -163,7 +166,6 @@ export type {
 
 export {
   PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS,
-  PROVIDER_PROVISIONING_SECRET_MAX_BYTES,
   applySealedProviderProvisioning,
   readSealedProvisioningResult,
 } from './sealed-provisioning';

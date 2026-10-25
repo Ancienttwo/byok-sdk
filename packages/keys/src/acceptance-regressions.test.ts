@@ -20,7 +20,7 @@ import {
   placedIdentity,
   replaceSecretRequest,
 } from './fixtures/provisioning-requests';
-import { exactProviderProfileBinding } from './provider-profile';
+import { exactProviderProfileBinding } from './provider-profile-binding';
 import {
   applySealedProviderProvisioning,
   readSealedProvisioningResult,

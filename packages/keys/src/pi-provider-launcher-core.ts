@@ -14,12 +14,14 @@ import type { ProviderProfileStore } from './profile-store';
 import {
   ProviderModelCapabilitySchema,
   ProviderProfileRefSchema,
-  assertExactProviderProfileBinding,
-  exactProviderProfileBinding,
-  type ExactProviderProfileBinding,
   type ModelProviderProfile,
   type ProviderProfileRef,
 } from './provider-profile';
+import {
+  assertExactProviderProfileBinding,
+  exactProviderProfileBinding,
+  type ExactProviderProfileBinding,
+} from './provider-profile-binding';
 import { type SecretStore, modelProviderSecretName } from './secret-store';
 
 export interface PiProviderLauncherOptions {

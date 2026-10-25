@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { createHash } from 'node:crypto';
 
 import { ByokKeysError } from './errors';
 import {
@@ -8,7 +7,13 @@ import {
   type ModelProviderVendorId,
 } from './provider-catalog';
 import { normalizeProviderUrl } from './url';
-import { PI_ANTHROPIC_PROFILE_COMPAT_KEYS, PI_COMPAT_KEYS_BY_API, PiModelConfigSchema, piCompatIssues } from './pi-model-config';
+import {
+  PI_ANTHROPIC_PROFILE_COMPAT_KEYS,
+  PI_COMPAT_KEYS_BY_API,
+  PiModelConfigSchema,
+  piCompatIssues,
+  type PiModelConfig,
+} from './pi-model-config';
 
 /**
  * Opaque, portable identity of one locally configured provider profile.
@@ -144,6 +149,72 @@ const providerBaseUrl = z
   })
   .transform((value) => normalizeProviderUrl(value));
 
+/** The auth modes each adapter accepts. */
+export function providerAuthModesForAdapter(
+  adapter: ModelProviderAdapter,
+): readonly ProviderAuthMode[] {
+  return adapter === 'anthropic' ? ['x_api_key'] : ['bearer', 'none'];
+}
+
+/**
+ * One broken cross-field rule. The path names the rule: `auth_mode` for the
+ * adapter's auth modes, `adapter` for the vendor's adapter, `pi_model.*` for
+ * what the adapter's Pi api admits.
+ */
+export interface ProviderProfileRouteIssue {
+  readonly path: string[];
+  readonly message: string;
+}
+
+/** The profile fields the cross-field rules read. */
+export interface ProviderProfileRoute {
+  readonly provider_kind: string;
+  readonly adapter: ModelProviderAdapter;
+  readonly auth_mode: ProviderAuthMode;
+  readonly pi_model?: Pick<PiModelConfig, 'api' | 'compat'>;
+}
+
+/**
+ * The cross-field profile rules, as data. {@link ModelProviderProfileSchema}
+ * and `@byok-sdk/keys/model-route` both report these issues, so the rules
+ * have one implementation.
+ */
+export function providerProfileRouteIssues(
+  route: ProviderProfileRoute,
+): ProviderProfileRouteIssue[] {
+  const issues: ProviderProfileRouteIssue[] = [];
+  if (!providerAuthModesForAdapter(route.adapter).includes(route.auth_mode)) {
+    issues.push({
+      path: ['auth_mode'],
+      message: route.adapter === 'anthropic'
+        ? 'Anthropic requires x_api_key authentication'
+        : 'OpenAI-compatible providers support bearer or no authentication',
+    });
+  }
+  if (route.adapter === 'anthropic' && route.pi_model?.api !== undefined) {
+    issues.push({
+      path: ['pi_model', 'api'],
+      message: 'Anthropic profiles project anthropic-messages and declare no Pi api',
+    });
+  }
+  if (route.pi_model !== undefined && route.pi_model.api === undefined) {
+    const [admitted, api] = route.adapter === 'anthropic'
+      ? [PI_ANTHROPIC_PROFILE_COMPAT_KEYS, 'anthropic-messages']
+      : [PI_COMPAT_KEYS_BY_API['openai-completions'], 'openai-completions'];
+    for (const issue of piCompatIssues(route.pi_model.compat, admitted, api)) {
+      issues.push({ path: ['pi_model', ...issue.path], message: issue.message });
+    }
+  }
+  const vendor = modelProviderVendor(route.provider_kind);
+  if (vendor !== undefined && vendor.adapter !== route.adapter) {
+    issues.push({
+      path: ['adapter'],
+      message: `Provider kind ${route.provider_kind} speaks the ${vendor.adapter} adapter`,
+    });
+  }
+  return issues;
+}
+
 /**
  * A model provider profile: everything needed to address a provider except the
  * secret itself, which lives in the OS credential store.
@@ -177,46 +248,8 @@ export const ModelProviderProfileSchema = z
         path: ['capabilities'],
       });
     }
-    if (profile.adapter === 'anthropic' && profile.auth_mode !== 'x_api_key') {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Anthropic requires x_api_key authentication',
-        path: ['auth_mode'],
-      });
-    }
-    if (
-      profile.adapter === 'openai_compatible' &&
-      profile.auth_mode === 'x_api_key'
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        message:
-          'OpenAI-compatible providers support bearer or no authentication',
-        path: ['auth_mode'],
-      });
-    }
-    if (profile.adapter === 'anthropic' && profile.pi_model?.api !== undefined) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Anthropic profiles project anthropic-messages and declare no Pi api',
-        path: ['pi_model', 'api'],
-      });
-    }
-    if (profile.pi_model !== undefined && profile.pi_model.api === undefined) {
-      const [admitted, api] = profile.adapter === 'anthropic'
-        ? [PI_ANTHROPIC_PROFILE_COMPAT_KEYS, 'anthropic-messages']
-        : [PI_COMPAT_KEYS_BY_API['openai-completions'], 'openai-completions'];
-      for (const issue of piCompatIssues(profile.pi_model.compat, admitted, api)) {
-        ctx.addIssue({ ...issue, path: ['pi_model', ...issue.path] });
-      }
-    }
-    const vendor = modelProviderVendor(profile.provider_kind);
-    if (vendor !== undefined && vendor.adapter !== profile.adapter) {
-      ctx.addIssue({
-        code: 'custom',
-        message: `Provider kind ${profile.provider_kind} speaks the ${vendor.adapter} adapter`,
-        path: ['adapter'],
-      });
+    for (const issue of providerProfileRouteIssues(profile)) {
+      ctx.addIssue({ code: 'custom', message: issue.message, path: issue.path });
     }
     if (Date.parse(profile.updated_at) < Date.parse(profile.created_at)) {
       ctx.addIssue({
@@ -232,72 +265,6 @@ export type ModelProviderProfile = z.infer<typeof ModelProviderProfileSchema>;
 
 /** Pre-normalization shape callers may hand in. */
 export type ModelProviderProfileInput = z.input<typeof ModelProviderProfileSchema>;
-
-export interface ExactProviderProfileBinding {
-  profileRef: ProviderProfileRef;
-  profileRevision: string;
-  profileHash: string;
-  modelId: string;
-  requiredCapabilities: readonly ProviderModelCapability[];
-}
-
-/**
- * Derive the credential-free wire identity from the normalized local record.
- * `updated_at` is the persisted monotonic revision authority; the hash covers
- * the complete normalized non-secret record with capability order
- * canonicalized. Secret values are not accepted by this type and therefore
- * cannot enter the digest or any mismatch message.
- */
-export function exactProviderProfileBinding(
-  profileInput: ModelProviderProfile,
-  requiredCapabilities: readonly ProviderModelCapability[] = profileInput.capabilities,
-): ExactProviderProfileBinding {
-  const profile = parseModelProviderProfile(profileInput);
-  const revision = Date.parse(profile.updated_at);
-  if (!Number.isSafeInteger(revision) || revision < 0) {
-    throw new ByokKeysError(
-      'PROVIDER_PROFILE_INVALID',
-      'Provider updated_at cannot be represented as a canonical revision',
-    );
-  }
-  const normalizedCapabilities = [...profile.capabilities].sort();
-  const canonical = JSON.stringify({
-    adapter: profile.adapter,
-    auth_mode: profile.auth_mode,
-    base_url: profile.base_url,
-    capabilities: normalizedCapabilities,
-    kind: profile.kind,
-    model: profile.model,
-    ...(profile.pi_model === undefined ? {} : { pi_model: profile.pi_model }),
-    profile_ref: profile.profile_ref,
-    provider_kind: profile.provider_kind,
-  });
-  return {
-    profileRef: profile.profile_ref,
-    profileRevision: String(revision),
-    profileHash: `sha256:${createHash('sha256').update(canonical).digest('hex')}`,
-    modelId: profile.model,
-    requiredCapabilities: [...requiredCapabilities],
-  };
-}
-
-/** Fail closed unless every offered binding field matches local authority. */
-export function assertExactProviderProfileBinding(
-  profile: ModelProviderProfile,
-  expected: ExactProviderProfileBinding,
-): void {
-  if (new Set(expected.requiredCapabilities).size !== expected.requiredCapabilities.length) {
-    throw new Error('provider profile required capabilities must be unique');
-  }
-  const actual = exactProviderProfileBinding(profile, expected.requiredCapabilities);
-  if (actual.profileRef !== expected.profileRef) throw new Error('provider profile ref mismatch');
-  if (actual.profileRevision !== expected.profileRevision) throw new Error('provider profile revision mismatch');
-  if (actual.profileHash !== expected.profileHash) throw new Error('provider profile hash mismatch');
-  if (actual.modelId !== expected.modelId) throw new Error('provider profile model mismatch');
-  const supported = new Set(profile.capabilities);
-  const unsupported = expected.requiredCapabilities.find((capability) => !supported.has(capability));
-  if (unsupported !== undefined) throw new Error(`provider profile does not support required capability ${unsupported}`);
-}
 
 /**
  * Parse and normalize a profile, or throw {@link ByokKeysError}. Replaces the

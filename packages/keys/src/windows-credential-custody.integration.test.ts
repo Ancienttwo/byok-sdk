@@ -18,7 +18,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
 import { DEVICE, NOW, PROFILE_REF, TENANT, configureRequest, deleteRequest, placedIdentity, replaceSecretRequest } from './fixtures/provisioning-requests';
 import { readProviderCustodySnapshot } from './pi-provider-launcher-core';
-import { exactProviderProfileBinding } from './provider-profile';
+import { exactProviderProfileBinding } from './provider-profile-binding';
 import { applySealedProviderProvisioning } from './sealed-provisioning';
 import { modelProviderSecretName } from './secret-store';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
