@@ -12,7 +12,10 @@ import { DeviceModeError, DeviceSwitchingError } from './topology';
 // #957 (§4.1): L as the old owner of a device switch. The freeze, the refusals, the hold, the drain, commit and abort.
 let fixture: TestHost | undefined;
 let bot: BotCollaboration | undefined;
-let clock = 0;
+// The Host clock runs with real time plus a jump. A frozen clock would put K4's scan wake in the SDK's past, and the SDK
+// would deliver it again at once, forever.
+let offset = 0;
+const now = () => Date.now() + offset;
 afterEach(async () => { await bot?.close(); await fixture?.close(); bot = undefined; fixture = undefined; });
 // The routine slot is at least 11 hours away, so no routine wake becomes due in the SDK during a test.
 const schedule = { minute: 0, hour: (new Date().getUTCHours() + 12) % 24, tz: 'UTC' };
@@ -23,10 +26,10 @@ function options(): BotOptions {
   const base = template(fixture!.deviceId);
   return { botId: 'main', execution: { ...base, agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'topology' },
     payload: { ...base.payload, messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 } } },
-  connector: async () => null, now: () => clock, hostIntents: { research: () => {} }, ...extra };
+  connector: async () => null, now, hostIntents: { research: () => {} }, ...extra };
 }
 async function setup(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> {
-  clock = Date.now(); extra = rest;
+  offset = 0; extra = rest;
   fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal),
     agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   bot = new BotCollaboration(fixture.server, fixture.ledger, options());
@@ -43,7 +46,7 @@ const device = () => fixture!.deviceId;
 const seedTurn = (id: string, botId = 'main') => fixture!.ledger.transaction(s => {
   addTurn(stateOf(s.application), { id, root: id, source: 'user', request: 'work', botId, hop: 0, authority: 'owner' });
 });
-const hostInput = (key: string, deviceId: string): IntentInput => ({ key, source: 'user', execution: template(deviceId, 'research'), waitUntil: clock + 600_000 });
+const hostInput = (key: string, deviceId: string): IntentInput => ({ key, source: 'user', execution: template(deviceId, 'research'), waitUntil: now() + 600_000 });
 const stored = () => JSON.stringify(fixture!.ledger.snapshot());
 async function running(id: string) {
   await vi.waitFor(async () => {
@@ -119,13 +122,13 @@ it('refuses a routine slot during the freeze so K4 records nothing, and runs the
   const id = await seedRoutine(bot!, 'task-1', 'report', schedule);
   await bot!.freezeForSwitch(device(), 0);
   const slot = routineOf(bot!, id).next!;
-  clock = slot.availableAt;
-  await expect(deliverRoutine(bot!, id, clock)).rejects.toBeInstanceOf(DeviceSwitchingError);
+  offset = slot.availableAt - Date.now();
+  await expect(deliverRoutine(bot!, id, now())).rejects.toBeInstanceOf(DeviceSwitchingError);
   expect(Object.values(fixture!.ledger.snapshot().occurrences)).toEqual([]);
   expect(Object.values(bot!.snapshot().turns).filter(turn => turn.source === 'routine')).toEqual([]);
   expect(routineOf(bot!, id).next).toEqual(slot);
   await bot!.abortSwitch(device(), 1);
-  await deliverRoutine(bot!, id, clock, 2);
+  await deliverRoutine(bot!, id, now(), 2);
   expect(Object.values(bot!.snapshot().turns).filter(turn => turn.source === 'routine')).toHaveLength(1);
 });
 
@@ -142,7 +145,7 @@ it('sends no Agent home write for a Bot on the frozen device, and sends it after
   expect((await bot!.drainForSwitch(device())).homeOperations).toEqual([]);
   // A ledger written before the `sent` mark has only the retry time that a send sets.
   const [op] = bot!.snapshot().team.homeOperations.filter(row => row.status === 'pending');
-  fixture!.ledger.transaction(s => { stateOf(s.application).team.homeOperations.find(row => row.sequence === op!.sequence)!.retryAt = clock; });
+  fixture!.ledger.transaction(s => { stateOf(s.application).team.homeOperations.find(row => row.sequence === op!.sequence)!.retryAt = now(); });
   expect((await bot!.drainForSwitch(device())).homeOperations).toEqual([op!.sequence]);
   fixture!.ledger.transaction(s => { delete stateOf(s.application).team.homeOperations.find(row => row.sequence === op!.sequence)!.retryAt; });
   await bot!.abortSwitch(device(), 1);
@@ -221,7 +224,7 @@ it('refuses an answer and a card decision for a Bot on the frozen device, and re
     ask_user: { question: 'Continue?', answerKind: 'text' } });
   const card = Object.values(bot!.snapshot().cards)[0]!, question = Object.values(bot!.snapshot().questions)[0]!;
   const accepted = await bot!.input('before', 'hello');
-  const host = await bot!.enqueueHostIntent(hostInput('host-0', device()), 'research');
+  const zero = hostInput('host-0', device()), host = await bot!.enqueueHostIntent(zero, 'research');
   await bot!.freezeForSwitch(device(), 0);
   const before = stored();
   const refusal = { code: 'device_switching', deviceId: device() };
@@ -231,7 +234,7 @@ it('refuses an answer and a card decision for a Bot on the frozen device, and re
   expect(stored()).toBe(before);
   // A replay adds no work, so it keeps its first answer.
   expect(await bot!.input('before', 'hello')).toBe(accepted);
-  expect(await bot!.enqueueHostIntent(hostInput('host-0', device()), 'research')).toEqual(host);
+  expect(await bot!.enqueueHostIntent(zero, 'research')).toEqual(host);
 });
 
 it('receives no room input and no bot background for a room with a Bot member on the frozen device', async () => {
@@ -292,7 +295,7 @@ it('lists an open input batch so the commit waits, and holds its Turn when it se
   await bot!.freezeForSwitch(device(), 0);
   expect(await bot!.drainForSwitch(device())).toEqual({ ...empty, intents: [first], batches: [batch] });
   await expect(bot!.commitSwitch(device(), 1)).rejects.toThrow('still has open work');
-  clock += 11_000;
+  offset += 11_000;
   await bot!.drain();
   expect(bot!.snapshot().turns[batch]).toMatchObject({ held: 'device_switching' });
   expect(bot!.core.intent(batch)).toBeUndefined();
@@ -310,8 +313,8 @@ it('cancels a running Host intent and a running routine intent of the device thr
   await bot!.enqueueHostIntent(hostInput('host-1', device()), 'research');
   await running('host-1');
   const id = await seedRoutine(bot!, 'task-1', 'report', schedule);
-  clock = routineOf(bot!, id).next!.availableAt;
-  await deliverRoutine(bot!, id, clock);
+  offset = routineOf(bot!, id).next!.availableAt - Date.now();
+  await deliverRoutine(bot!, id, now());
   const routine = Object.values(bot!.snapshot().turns).find(turn => turn.source === 'routine')!;
   const occurrence = bot!.ledger.snapshot().intents[Object.keys(bot!.ledger.snapshot().intents).find(key =>
     bot!.ledger.snapshot().intents[key]!.source === 'routine')!]!;
@@ -328,4 +331,33 @@ it('cancels a running Host intent and a running routine intent of the device thr
   }, { timeout: 5000 });
   expect(bot!.core.intent('host-1')).toMatchObject({ cancelReason: 'cancelled' });
   expect(bot!.snapshot().turns[routine.id]!.conclusion).toBeDefined();
+});
+
+it('sends no queued, backoff or raw core intent to the frozen device, and sends each after the abort', async () => {
+  await setup();
+  const first = await bot!.input('k1', 'first');
+  const session = await running(first);
+  // The Bot's FIFO holds the second intent queued behind the first.
+  const second = await bot!.input('k2', 'second');
+  expect(bot!.core.intent(second)).toMatchObject({ phase: 'queued' });
+  await bot!.freezeForSwitch(device(), 0);
+  session.finish({});
+  await vi.waitFor(async () => { await bot!.drain(); expect(bot!.core.intent(first)!.conclusion).toBe('succeeded'); }, { timeout: 5000 });
+  expect(bot!.core.intent(second)).toMatchObject({ phase: 'queued', attempts: 0 });
+  // A raw core call passes no L entry, and K4 still holds it.
+  await bot!.core.enqueue(hostInput('raw', device()));
+  expect(bot!.core.intent('raw')).toMatchObject({ phase: 'queued', attempts: 0 });
+  // A backoff intent gets no new generation while the device is frozen.
+  const backoff = bot!.core.intent(first)!;
+  fixture!.ledger.transaction(s => { Object.assign(s.intents[hash(second)]!, { phase: 'backoff', notBefore: 0 }); });
+  await bot!.drain();
+  expect(bot!.core.intent(second)).toMatchObject({ phase: 'backoff', generation: 0 });
+  expect(backoff.conclusion).toBe('succeeded');
+  expect(fixture!.adapter.starts).toHaveLength(1);
+  await bot!.abortSwitch(device(), 1);
+  await vi.waitFor(async () => {
+    await bot!.drain();
+    expect(bot!.core.intent(second)).toMatchObject({ phase: 'inflight', generation: 1 });
+    expect(bot!.core.intent('raw')).toMatchObject({ phase: 'inflight' });
+  }, { timeout: 5000 });
 });

@@ -288,7 +288,9 @@ export class BotCollaboration {
           { publish: tx.publish, occurrence: () => routineTurn(state, run) });
       } },
       applyMessage: (input, tx) => this.applyMessage(input, tx),
-      applyOutcome: (document, tx) => this.applyOutcome(document, tx) });
+      applyOutcome: (document, tx) => this.applyOutcome(document, tx),
+      // #957: K4 sends nothing to a device that is frozen or owned by H: not the timer drain, not a `bot.core` call.
+      admitSubmit: (intent, state) => !deviceRefusal(stateOf(state.application as LedgerState['application']), intent.execution.deviceId) });
     ledger.transaction(s => {
       const state = stateOf(s.application);
       promoteReplyReceipts(ledger, s, state, this.now());

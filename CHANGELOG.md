@@ -365,9 +365,11 @@
   `DeviceModeError`, `DeviceTopology` and `SwitchWork`. `./rules/commands`
   adds `DEVICE_SWITCHING`, the `SyncRefusal` type (`DeviceRefusal` or
   `switching`) that `SyncFacts.deviceRefusal` now returns, and the optional
-  `CommandPorts.admit` port. Known gap: K4 can still submit an intent queued
-  before the freeze until the drain cancels it, because K4 has no submit
-  admission hook yet.
+  `CommandPorts.admit` port. K4 gets `HostOptions.admitSubmit(intent, state)`,
+  asked when a submit begins and again right before the SDK call; `false`
+  holds the intent with its phase and generation. L wires it to its owner
+  records, so K4 sends nothing to a frozen device, the timer drain and direct
+  `bot.core` calls included.
 
 ## 0.30.1 — 2026-10-24 (published)
 

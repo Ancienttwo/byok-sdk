@@ -933,8 +933,11 @@ While the device is frozen, each entry that can create execution for it throws
 
 The check runs after the replay lookup (the new `CommandPorts.admit` port), so
 an exact replay of a command or Host intent that L accepted before the freeze
-still returns its first result. After the commit they throw `DeviceModeError` (`code: 'device_not_bound'`,
-`reason: 'mode'`, as H's refusal of a device in the other mode), for good.
+still returns its first result.
+
+After the commit these entries throw `DeviceModeError` (`code:
+'device_not_bound'`, `reason: 'mode'`, as H's refusal of a device in the other
+mode), for good.
 
 Other refusals and holds:
 
@@ -949,6 +952,12 @@ Other refusals and holds:
   home never has two writers. A sent write is still read back. A write that
   was never sent is not read back and arms no timer, so after a commit nothing
   polls it.
+- **K4 submit:** L gives K4 `admitSubmit`, which reads the same record. K4 then
+  sends nothing to the device, in the transaction that begins a submit and in
+  the readback right before the SDK call. That holds for a queued intent from
+  before the freeze, a `backoff` intent (it keeps its generation), the K4 timer
+  drain and an intent added through `bot.core` directly. A held intent is sent
+  after an abort; the drain with `cancel` settles it.
 
 Commands that add no execution still run, since the drain needs some of them:
 cancels, team and routine lifecycle changes, `consumeMessage` and retention.
@@ -956,14 +965,6 @@ cancels, team and routine lifecycle changes, `consumeMessage` and retention.
 Each check reads the record in the transaction that would write the work. The
 constructor reads every record first and refuses a malformed one, so a restart
 admits nothing before it knows the freeze.
-
-Known gap until K4 has a submit admission hook: K4 submits a queued intent
-from its own drain and timer, outside L's checks. An intent queued before the
-freeze can still be submitted to the frozen device, and a `backoff` intent can
-start a new generation, until the drain cancels it. The same holds for an
-intent added through `bot.core` directly. Run `drainForSwitch(deviceId,
-{ cancel: true })` right after the freeze; `commitSwitch` still waits for the
-terminal of anything submitted in between.
 
 L has no step for H → L: once a device is in mode H, every step refuses. Moving
 a device back to L belongs to the state export and import work (§8).
