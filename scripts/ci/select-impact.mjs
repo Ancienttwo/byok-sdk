@@ -167,6 +167,7 @@ export const knownFamilies = Object.freeze([
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
   'windows-git-workspace', 'packageability-smoke', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
+  'hermes-real-windows',
 ]);
 // A routine PR selects a platform family only when it changes a path that the
 // family owns: its tests, smoke scripts and the source they qualify. Package
@@ -220,6 +221,12 @@ export const familyOwners = Object.freeze({
     /^packages\/client\/src\/adapters\/hermes\//,
     /^packages\/client\/src\/__tests__\/(?:hermes-(?:adapter|custody|gateway-control|home)\.test\.ts|fixtures\/fake-hermes(?:\.mjs|-command\.ts))$/,
     /^packages\/keys\/src\/(?:hermes-provider-launcher\.ts|__tests__\/hermes-provider-launcher\.test\.ts)$/,
+  ],
+  // #608: the real Hermes run on Windows, its fake model endpoint and the code it qualifies.
+  'hermes-real-windows': [
+    /^packages\/client\/src\/adapters\/hermes\//,
+    /^packages\/client\/src\/__tests__\/(?:hermes-real\.test\.ts|fixtures\/hermes-fake-model\.ts)$/,
+    /^packages\/keys\/src\/hermes-provider-launcher\.ts$/,
   ],
   'packageability-smoke': [
     /^examples\/packaging\//,
