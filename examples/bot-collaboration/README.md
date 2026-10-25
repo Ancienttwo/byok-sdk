@@ -990,6 +990,12 @@ The check runs after the replay lookup (the new `CommandPorts.admit` port), so
 an exact replay of a command or Host intent that L accepted before the freeze
 still returns its first result.
 
+The Bots each command reaches are a pure rule, `commandBots(state, command)` from
+`./rules/commands` (#975). L refuses a command when one of those Bots' devices
+refuses work. H passes the same rule to its `CommandPorts.admit`, so both Hosts
+refuse the same commands during a freeze. A frozen domain then starts no new
+Turn and no new card connector call.
+
 After the commit these entries throw `DeviceModeError` (`code:
 'device_not_bound'`, `reason: 'mode'`, as H's refusal of a device in the other
 mode), for good.
