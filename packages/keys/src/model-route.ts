@@ -104,7 +104,7 @@ export interface ModelRouteHostEntry {
 export interface ModelRoutePolicy {
   /** Offered provider kinds, in order. Absent: every vendor, then `custom`. */
   readonly vendors?: readonly ModelProviderKind[];
-  /** Offered model ids per vendor. A listed vendor admits no other model. */
+  /** Offered model ids per vendor. A listed vendor admits no other model, from any source. */
   readonly models?: Readonly<Partial<Record<ModelProviderVendorId, readonly string[]>>>;
   readonly vendor_labels?: Readonly<Partial<Record<ModelProviderKind, string>>>;
   readonly model_labels?: Readonly<Partial<Record<ModelProviderVendorId, Readonly<Record<string, string>>>>>;
@@ -339,7 +339,7 @@ export function validateModelRoute(draft: ModelRouteDraft, context: ModelRouteCo
   else if (normalizedUrl(draft.base_url) === undefined) set('base_url', { code: 'invalid_url' });
   if (draft.model.trim() === '') set('model', { code: 'required' });
   else if (!shape.model.safeParse(draft.model).success) set('model', { code: 'invalid_value' });
-  else if (draft.model_source === null) set('model', { code: 'not_a_choice' });
+  else if (draft.model_source === null || !modelAllowed(draft, draft.model, context.policy)) set('model', { code: 'not_a_choice' });
   if (!shape.capabilities.safeParse(draft.capabilities).success
     || new Set(draft.capabilities).size !== draft.capabilities.length) {
     set('capabilities', { code: 'invalid_value' });
@@ -436,6 +436,7 @@ function withAuthMode(draft: ModelRouteDraft, mode: ProviderAuthMode | null, con
 
 function withModel(draft: ModelRouteDraft, model: string, api: PiModelApi | undefined, context: ModelRouteContext): ModelRouteDraft {
   if (model.trim() === '') return { ...draft, ...NO_MODEL };
+  if (!modelAllowed(draft, model, context.policy)) return { ...draft, ...NO_MODEL, model };
   const matches = modelChoices(draft, context).filter((entry) => entry.value === model && (api === undefined || entry.api === api));
   const choice = matches.length === 1 ? matches[0]! : undefined;
   if (choice?.status === 'representable') {
@@ -443,11 +444,14 @@ function withModel(draft: ModelRouteDraft, model: string, api: PiModelApi | unde
       ...draft, model, model_api: choice.api, model_source: choice.source, pi_model: null, capabilities: [],
     }, choice.thinking_levels, false);
   }
-  const restricted = draft.provider_kind !== null && allowedModels(context.policy, draft.provider_kind) !== undefined;
-  if (choice === undefined && (matches.length > 1 || restricted)) {
-    return { ...draft, ...NO_MODEL, model };
-  }
+  if (choice === undefined && matches.length > 1) return { ...draft, ...NO_MODEL, model };
   return { ...draft, ...MANUAL_MODEL, model };
+}
+
+/** A vendor the policy lists models for admits only those ids, from any source. */
+function modelAllowed(draft: ModelRouteDraft, model: string, policy: ModelRoutePolicy): boolean {
+  const allowed = draft.provider_kind === null ? undefined : allowedModels(policy, draft.provider_kind);
+  return allowed === undefined || allowed.includes(model);
 }
 
 /**

@@ -415,6 +415,32 @@ describe('acceptance review fixes', () => {
     expect(persisted(draft, context).profile.pi_model?.api).toBe('openai-responses');
   });
 
+  it('2: refuses an unlisted model from a stored profile', () => {
+    const policy: ModelRoutePolicy = { vendors: ['groq'], models: { groq: ['openai/gpt-oss-120b'] } };
+    const context = modelRouteContext({ policy, stored: stored({
+      model: 'some-other-model',
+      pi_model: { contextWindow: 1000, maxTokens: 100, reasoning: false, compat: {}, thinkingLevel: 'off' },
+    }) });
+    const draft = createModelRouteDraft(context);
+    expect(draft.model_source).toBe('manual');
+    expect(validateModelRoute(draft, context).model).toEqual({ code: 'not_a_choice' });
+    expect(modelRouteSubmission(draft, context).ok).toBe(false);
+  });
+
+  it('2: validates a listed model the same way in either edit order', () => {
+    const context = modelRouteContext({ policy: { vendors: ['groq'], models: { groq: ['openai/gpt-oss-120b'] } } });
+    const gateway: ModelRouteChange = { field: 'base_url', value: 'https://gw.example.com/v1' };
+    const listed: ModelRouteChange = { field: 'model', value: 'openai/gpt-oss-120b' };
+    const urlFirst = named(context, { field: 'provider_kind', value: 'groq' }, gateway, listed);
+    const modelFirst = named(context, { field: 'provider_kind', value: 'groq' }, listed, gateway);
+    expect(urlFirst).toEqual(modelFirst);
+    expect(urlFirst.model_source).toBe('manual');
+    expect(validateModelRoute(urlFirst, context)).toEqual(validateModelRoute(modelFirst, context));
+    expect(validateModelRoute(urlFirst, context).model).toBeUndefined();
+    const unlisted = applyModelRouteChange(urlFirst, { field: 'model', value: 'other' }, context);
+    expect(validateModelRoute(unlisted, context).model).toEqual({ code: 'not_a_choice' });
+  });
+
   it('1: refuses a declared api on a Host entry for an anthropic vendor', () => {
     const context = modelRouteContext({ policy: { overrides: [entry({
       provider_kind: 'minimax', api: 'anthropic-messages', config: { ...houseConfig, api: 'openai-completions' },
