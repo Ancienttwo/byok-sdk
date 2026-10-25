@@ -47,6 +47,7 @@ class HostSession {
   readonly closed: Promise<void>;
   #armed: { readonly on: 'fetch' | 'complete' | 'acked'; readonly intentId: string; fire(): void } | undefined;
   #waiter: { readonly intentId: string; readonly resolve: Waiter } | undefined;
+  #ended = false;
 
   constructor(private readonly run: DeviceRun, private readonly host: PowercutHost) {
     let snapshot!: (value: DeviceSnapshot) => void;
@@ -73,6 +74,7 @@ class HostSession {
             break;
         }
       }
+      this.#ended = true;
       const waiter = this.#waiter;
       this.#waiter = undefined;
       waiter?.resolve('closed');
@@ -86,6 +88,8 @@ class HostSession {
 
   /** Deliver one notice and wait until the device acknowledged it, failed it, or went away. */
   deliver(intent: IssuedIntent): Promise<'acked' | 'failed' | 'closed'> {
+    // Nothing settles a waiter once the device's input has ended.
+    if (this.#ended) return Promise.resolve('closed');
     return new Promise((resolve) => {
       this.#waiter = { intentId: intent.intentId, resolve };
       writeMessage(this.run.link.output, { type: 'notice', payload: { intentId: intent.intentId, agentRef: intent.agentRef } });
@@ -196,6 +200,8 @@ export async function runExperiment(options: ExperimentOptions): Promise<Experim
       }
       const intent = await host.issueNext();
       issued += 1;
+      // A delay cut can fire while the intent is being issued.
+      if (cutting !== undefined) break;
       if (trigger.kind === 'host' && trigger.intent === issued) session.arm(trigger.on, intent.intentId, cut);
       const outcome = await session.deliver(intent);
       if (outcome === 'failed') {

@@ -534,7 +534,17 @@ In the hang on intel at `0a9c8d52`, the VM stopped responding. The step's
 about 35 minutes, and no log or process sample survived. So the sampler in
 the W5 step cannot explain this kind of hang.
 
-The cause is unknown. Splitting W5 into its own step is not a fix; it only
+Review found one hang in the harness itself, now fixed. A delay cut
+could fire while `issueNext` was still awaiting the operation digest. The
+device's input then ended with no waiter, and the next `deliver` waited on
+a closed session forever. The run now rechecks the cut after issuing, and
+`deliver` on an ended session returns `closed`. A test with a slow
+`issueNext` and a 20 ms cut hung before the fix and passes after it.
+Inferred, not verified: this path would end as a test timeout after
+180 s, not as the wedged VM seen on CI, so it is probably not the whole
+cause.
+
+The cause of the CI hang is unknown. Splitting W5 into its own step is not a fix; it only
 avoids running W5 in the same vitest run as the other helper files. W5 now
 runs as its own step, and the job has a 30-minute limit. If the hang
 returns, it ends there instead of after 6 hours.

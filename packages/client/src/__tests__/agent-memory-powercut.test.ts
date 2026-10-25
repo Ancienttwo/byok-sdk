@@ -228,6 +228,25 @@ describe('W5 process-crash run', () => {
     }
   }, 180_000);
 
+  // A delay cut can fire while the Host is still issuing the next intent.
+  // The run must see the cut instead of delivering to the gone device.
+  it.skipIf(BUN_BIN === undefined || !BACKEND)('takes a cut that fires while the Host issues an intent', async () => {
+    const store = scratch();
+    class SlowHost extends PowercutHost {
+      override async issueNext(): Promise<IssuedIntent> {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        return super.issueNext();
+      }
+    }
+    const driver = new ProcessKillDriver({ command: BUN_BIN!, args: [CLI, 'device', '--store', store] });
+    const report = await runExperiment({
+      driver, host: new SlowHost({ seed: 11, intentsPerHome: 3, journal: new HostJournal() }), triggers: [{ kind: 'delay', ms: 20 }],
+    });
+    expect(report.stoppedEarly).toBeUndefined();
+    expect(report.cuts.map((cut) => [cut.intentsBeforeCut, cut.window, cut.recovery?.status])).toEqual([[1, 'no-record', 'held']]);
+    expect(report.violations).toBe(0);
+  }, 30_000);
+
   // Negative control: storage that tears the ledger at the cut. The same loop
   // must report the torn ledger, the lost receipt and the failed recovery.
   it.skipIf(BUN_BIN === undefined || !BACKEND)('reports a ledger the storage tore at the cut', async () => {
