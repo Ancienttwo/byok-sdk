@@ -270,6 +270,57 @@ async function assertRealDirectoryIfPresent(target: string): Promise<void> {
   }
 }
 
+const LEASE_TEMP = /^agent-home\.lease\.\d+-\d+\.tmp$/u;
+let leaseTempSeq = 0;
+
+/** A complete, synced copy of the marker beside the lease path. */
+async function writeLeaseTemp(lockPath: string, body: string): Promise<string> {
+  const temp = `${lockPath}.${process.pid}-${leaseTempSeq++}.tmp`;
+  const handle = await fs.open(temp, 'wx', 0o600);
+  try {
+    await handle.writeFile(body, 'utf8');
+    await handle.sync();
+  } catch (error) {
+    await handle.close().catch(() => {});
+    await fs.rm(temp, { force: true }).catch(() => {});
+    throw error;
+  }
+  await handle.close();
+  return temp;
+}
+
+/**
+ * Lease temp files of an acquire that was killed. Every acquire of this
+ * home holds the agent-home-root gate across processes, so under it no
+ * other write of such a file is running. Best effort: one that cannot be
+ * removed now goes on the next acquire.
+ */
+async function removeLeaseTemps(internalDir: string): Promise<void> {
+  for (const entry of await fs.readdir(internalDir)) {
+    if (!LEASE_TEMP.test(entry)) continue;
+    const file = path.join(internalDir, entry);
+    if ((await fs.lstat(file).catch(() => undefined))?.isFile()) await fs.unlink(file).catch(() => {});
+  }
+}
+
+/** Filesystems that cannot hold the lease, because they have no hard links. */
+const LINK_UNSUPPORTED = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);
+
+/** False when `target` exists. A filesystem without hard links fails closed. */
+async function linkExclusive(source: string, target: string): Promise<boolean> {
+  try {
+    await fs.link(source, target);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') return false;
+    if (code !== undefined && LINK_UNSUPPORTED.has(code)) {
+      throw new AgentHomeError(`Agent home lease needs a hard link in ${path.dirname(target)}, which its filesystem refused (${code})`);
+    }
+    throw error;
+  }
+}
+
 /** Establish each directory entry before a child or ledger can depend on it. */
 async function syncDirectoryParent(directory: string): Promise<void> {
   // Node has no Windows directory flush. Windows intents remain unavailable.
@@ -581,7 +632,6 @@ export class AgentHomeLeaseManager {
     }
     AgentHomeLeaseManager.held.set(canonicalHome, leaseId);
     let lockPath: string | undefined;
-    let handle: fs.FileHandle | undefined;
     let rootGate: PathMutationGate | undefined;
     let ownsMarker = false;
     let homeIdentity: Readonly<{ dev: bigint; ino: bigint }> | undefined;
@@ -599,8 +649,6 @@ export class AgentHomeLeaseManager {
         path.join(canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY),
       );
       lockPath = path.join(internalDir, 'agent-home.lease');
-      handle = await this.openLeaseMarker(lockPath, canonicalHome, agentRef.agentId);
-      ownsMarker = true;
       const marker: StoredLeaseMarker = {
         version: 1,
         ownerId: this.ownerId,
@@ -608,14 +656,22 @@ export class AgentHomeLeaseManager {
         agentRef,
         canonicalHome,
       };
-      await handle.writeFile(JSON.stringify(marker), 'utf8');
-      await handle.sync();
-      await handle.close();
-      handle = undefined;
+      // The marker appears whole or not at all: a complete, synced temp file
+      // is linked onto the lease path. A process killed between creating and
+      // writing the marker would otherwise leave it empty, and an empty
+      // marker is refused on every later acquire.
+      await removeLeaseTemps(internalDir);
+      const temp = await writeLeaseTemp(lockPath, JSON.stringify(marker));
+      try {
+        await this.linkLeaseMarker(temp, lockPath, canonicalHome, agentRef.agentId);
+        ownsMarker = true;
+      } finally {
+        await fs.rm(temp, { force: true });
+      }
+      await syncDirectoryParent(lockPath);
       await rootGate.release();
       rootGate = undefined;
     } catch (error) {
-      await handle?.close().catch(() => {});
       if (ownsMarker && lockPath !== undefined) await fs.rm(lockPath, { force: true }).catch(() => {});
       await rootGate?.release().catch(() => {});
       if (AgentHomeLeaseManager.held.get(canonicalHome) === leaseId) {
@@ -718,12 +774,9 @@ export class AgentHomeLeaseManager {
     } };
   }
 
-  private async openLeaseMarker(lockPath: string, canonicalHome: string, agentId: string): Promise<fs.FileHandle> {
-    try {
-      return await fs.open(lockPath, 'wx', 0o600);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
+  // Link `temp` onto `lockPath`. An existing marker refuses the link, as `wx` refused the create.
+  private async linkLeaseMarker(temp: string, lockPath: string, canonicalHome: string, agentId: string): Promise<void> {
+    if (await linkExclusive(temp, lockPath)) return;
     const prior = parseLeaseMarker(await fs.readFile(lockPath, 'utf8'), lockPath);
     if (prior.ownerId !== this.ownerId) {
       throw new AgentHomeBusyError(`Agent home ${prior.canonicalHome} already has a mutable writer lease`);
@@ -739,13 +792,8 @@ export class AgentHomeLeaseManager {
     // first (`daemon/owned-process-ledger.ts` `reconcile()`), refusing to start
     // while one survives, and leases are acquired only after it.
     await fs.rm(lockPath);
-    try {
-      return await fs.open(lockPath, 'wx', 0o600);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        throw new AgentHomeBusyError(`Agent home lease ${lockPath} was concurrently reclaimed`);
-      }
-      throw error;
+    if (!await linkExclusive(temp, lockPath)) {
+      throw new AgentHomeBusyError(`Agent home lease ${lockPath} was concurrently reclaimed`);
     }
   }
 }
@@ -942,7 +990,7 @@ export class AgentHomeExecutionLeaseManager {
    * read this count again (#476); the count itself stays the only authority
    * on whether a slot is free. Crash residue: a restarted daemon starts with
    * an empty registry and reclaims the on-disk marker only under the same
-   * stable owner identity (`openLeaseMarker`), after its start ended the
+   * stable owner identity (`linkLeaseMarker`), after its start ended the
    * crashed run's owned runtime processes (`OwnedProcessLedger.reconcile`).
    *
    * Counted regardless of which lease manager owns the group: the invariant
