@@ -332,7 +332,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres 0029 and the rotate entries stored bef
         await expect(migrate(scope.pool, DEPLOY_SQL)).rejects.toThrow(/holds rotate entries/u);
         expect(await floorTable()).toBeNull();
       } else {
-        await expect(migrate(scope.pool, DEPLOY_SQL)).resolves.toMatchObject({ applied: ['0029'] });
+        await expect(migrate(scope.pool, DEPLOY_SQL)).resolves.toMatchObject({ applied: ['0029_e2ee_member_kem_floor.sql'] });
         expect(await floorTable()).toBe('e2ee_member_kem_floor');
       }
     } finally {
