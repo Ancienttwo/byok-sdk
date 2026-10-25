@@ -444,6 +444,45 @@ describe('device member keyring rotation (E2d-4)', () => {
     expect(put.map((batch) => batch[0]!.epoch)).toEqual([2, 3, 3]);
   });
 
+  it.each([200, 503] as const)('zeroes a key a notice cached at the new epoch while the second put answers %i, but never the new key or a copy a seal holds', async (status) => {
+    const { server, web, device, keyring } = await member();
+    const clients = await Promise.all(Array.from({ length: E2EE_SCOPE_KEY_PACKAGE_PUT_MAX }, () => stranger()));
+    for (const client of clients) await web.append('add', { member: client.member });
+    await web.putScope('scope-a', [device, ...clients.map((client) => client.member)]);
+    await keyring.catchUp();
+    // While the second put is in flight, the notice of this device's package from the first put caches the epoch's key, and a seal copies it.
+    let cached!: Uint8Array;
+    let copy: Uint8Array | undefined;
+    const original = server.e2ee.handle.bind(server.e2ee);
+    let posts = 0;
+    server.e2ee.handle = async (req, res, url) => {
+      if (req.method === 'POST' && url.pathname.endsWith('/key-packages') && ++posts === 2) {
+        const fetched = await keyring.fetch('scope-a', 2);
+        if (fetched.ok) cached = fetched.key.scopeKey;
+        copy = await keyring.openingKey({ id: 'scope-a', epoch: 2 });
+        if (status === 503) {
+          res.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'unavailable' }));
+          return true;
+        }
+      }
+      return original(req, res, url);
+    };
+    const sealing = keyring.sealingKey('scope-a', 1);
+    if (status === 503) {
+      await expect(sealing).rejects.toThrow(/HTTP 503/u);
+      expect(keyring.cached('scope-a', 2)).toBeUndefined();
+    } else {
+      const key = (await sealing)!;
+      expect(key.epoch).toBe(2);
+      expect(key.scopeKey).toEqual(await openStored(server.e2ee, device, 'scope-a', 2, device.memberId, keyring.session!.keys.kem));
+      expect(keyring.cached('scope-a', 2)!.scopeKey).not.toBe(cached);
+    }
+    expect(posts).toBe(2);
+    expect(cached.every((byte) => byte === 0)).toBe(true);
+    expect(copy).toEqual(await openStored(server.e2ee, device, 'scope-a', 2, device.memberId, keyring.session!.keys.kem));
+    expect(copy!.some((byte) => byte !== 0)).toBe(true);
+  });
+
   it('rotates once for concurrent seals of one scope', async () => {
     const { server, web, device, keyring } = await member();
     await web.putScope('scope-a', [device]);
@@ -482,6 +521,28 @@ describe('device member keyring rotation (E2d-4)', () => {
     server.e2ee.failPackageReads = 1;
     await expect(keyring.sealingKey('scope-a', 1)).rejects.toThrow(/HTTP 503/u);
     expect((await keyring.sealingKey('scope-a', 1))?.epoch).toBe(3);
+  });
+
+  it('zeroes a key cached at the new epoch when the Host refuses the put as a conflict, and fetches it again on the next open', async () => {
+    const { server, web, device, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await keyring.catchUp();
+    let release!: () => void;
+    server.e2ee.holdPackagePuts = new Promise<void>((resolve) => { release = resolve; });
+    const sealing = keyring.sealingKey('scope-a', 1);
+    while (server.e2ee.devicePuts.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+    const other = new Uint8Array(32).fill(5);
+    server.e2ee.clientPutPackages(await web.sealPackage('scope-a', device, other, 2));
+    // The notice of the other client's package caches its key while the device's put is held.
+    const fetched = await keyring.fetch('scope-a', 2);
+    if (!fetched.ok) throw new Error(fetched.reason);
+    expect(fetched.key.scopeKey).toEqual(other);
+    release();
+    expect(await sealing).toBeUndefined();
+    expect(fetched.key.scopeKey.every((byte) => byte === 0)).toBe(true);
+    expect(keyring.cached('scope-a', 2)).toBeUndefined();
+    server.e2ee.holdPackagePuts = undefined;
+    expect(await keyring.openingKey({ id: 'scope-a', epoch: 2 })).toEqual(other);
   });
 
   it('does not seal at a new epoch that a remove made stale while its packages were put', async () => {
@@ -749,6 +810,12 @@ describe('device member keyring rotation (E2d-4)', () => {
     expect(await first.acceptHeader(header('scope-a', 1, web.head!, web.member.memberId))).toBe(true);
     const carried = first.retire()!;
     expect(carried.points.get('scope-a')?.get(1)).toEqual(web.head);
+
+    // Control: before the remove, the next run keeps the carried point, so it seals at epoch 1 and puts nothing.
+    const control = new DeviceMemberKeyring(session, options);
+    await control.catchUp();
+    expect(await new DeviceMemberKeyring(control.session!, { ...options, carried }).sealingKey('scope-a', 1)).toMatchObject({ epoch: 1 });
+    expect(server.e2ee.devicePuts).toHaveLength(0);
 
     await web.append('remove', { memberId: helper.member.memberId });
     const resumed = new DeviceMemberKeyring(session, options);
@@ -1149,6 +1216,64 @@ describe('device member KEM rotation (E2d-5)', () => {
     expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'key_package_missing' });
     expect(logs.join('\n')).toContain('epoch 1 of scope "scope-a" is held but its key package was not read');
     expect(server.e2ee.devicePuts).toHaveLength(0);
+    expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+  });
+
+  it('keeps the old key when a scope that was not usable at the start becomes usable during the rotation with an old-key package', async () => {
+    const { server, web, device, custody, logs, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    // scope-c held the device once; its policy dropped it, so the scope is not usable when the rotation starts.
+    await web.putScope('scope-c', [device]);
+    await web.append('scope-policy', { scopeId: 'scope-c', categories: ['task-input', 'task-output'], members: [web.member.memberId] });
+    const handle = server.e2ee.handle.bind(server.e2ee);
+    let added = false;
+    server.e2ee.handle = async (req, res, url) => {
+      if (!added && req.method === 'POST' && url.pathname.endsWith('/key-packages')) {
+        added = true;
+        // The policy adds the device back; its package of epoch 1 still opens only with the old key.
+        await web.follow();
+        await web.append('scope-policy', { scopeId: 'scope-c', categories: ['task-input', 'task-output'], members: [web.member.memberId, device.memberId].sort() });
+      }
+      return handle(req, res, url);
+    };
+    expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'rewrap_unverified' });
+    expect(added).toBe(true);
+    expect(server.e2ee.devicePuts.map((put) => put[0]!.scopeId)).toEqual(['scope-a']);
+    expect(logs.join('\n')).toContain('epoch 1 of scope "scope-c" holds a key package that opens only with the old KEM key');
+    expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
+  });
+
+  it.each(['a fetched key', 'a freshness point'] as const)('keeps the old key when the final read-back reads no package at an epoch that gained %s during the rotation', async (gained) => {
+    const { server, web, device, custody, logs, keyring } = await member();
+    await web.putScope('scope-a', [device]);
+    await web.putScope('scope-b', [device]);
+    const handle = server.e2ee.handle.bind(server.e2ee);
+    let puts = 0;
+    let withheld = false;
+    server.e2ee.handle = async (req, res, url) => {
+      if (withheld && req.method === 'GET' && url.pathname.endsWith('/key-packages')
+        && url.searchParams.get('scopeId') === 'scope-a' && url.searchParams.get('epoch') === '2') {
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ packages: [] }));
+        return true;
+      }
+      // The first put is scope-a's re-wrap, after which its read-back passed; the second is scope-b's.
+      if (req.method === 'POST' && url.pathname.endsWith('/key-packages') && ++puts === 2) {
+        await web.follow();
+        if (gained === 'a fetched key') {
+          // A client that walked the rotate wraps a new epoch of scope-a to the next key, and the device opens it.
+          const next = keyring.session!.state.members.get(device.memberId)!;
+          server.e2ee.clientPutPackages(await web.sealPackage('scope-a', next, new Uint8Array(32).fill(4), 2));
+          expect((await keyring.fetch('scope-a', 2)).ok).toBe(true);
+        } else {
+          expect(await keyring.acceptHeader(header('scope-a', 2, web.head!, web.member.memberId))).toBe(true);
+        }
+        withheld = true;
+      }
+      return handle(req, res, url);
+    };
+    expect(await keyring.rotateKem()).toEqual({ ok: false, reason: 'key_package_missing' });
+    expect(puts).toBe(2);
+    expect(logs.join('\n')).toContain('epoch 2 of scope "scope-a" is held but its key package was not read');
     expect(stored(custody)).toMatchObject({ kemEpoch: 1, nextKem: { epoch: 2 } });
   });
 
