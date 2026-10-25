@@ -979,15 +979,17 @@ owns; give each Host process its own root. Each execution gets a fresh Hermes
 profile under it, with Hermes memory and kanban dispatch off, and the adapter
 deletes the profile when the execution ends. The adapter starts the Hermes
 gateway itself and owns its process tree. It never reads or writes the user's
-`~/.hermes`. Provider
+own Hermes home (`~/.hermes`, or `%LOCALAPPDATA%\hermes` on Windows). Provider
 credentials come from the runtime environment; `model.keyEnv` names the
 variable for a `custom` endpoint. The first `detect()` on a new root waits
 while Hermes builds its Python environment there (up to `probeTimeoutMs`,
 default 180 s). A turn start takes about 20 s, so a Host may raise
 `startupTimeoutMs`. Qualified build and limits:
-[S0 note](../../docs/notes/2026-10-20-519-hermes-acp-s0.md). On Windows the
-adapter reaches the gateway over Hermes's named pipe; give `resolveBin` the
-venv `hermes.exe`. Platform notes:
+[S0 note](../../docs/notes/2026-10-20-519-hermes-acp-s0.md). The adapter
+declares macOS, Linux and Windows; a real Hermes run on `windows-latest`
+qualifies Windows (#608). There the adapter reaches the gateway over Hermes's
+named pipe; give `resolveBin` the `hermes.exe` that Hermes's installer
+publishes. Platform notes:
 [adapter capabilities](../../docs/adapter-capabilities.md#hermes-adapter-custom-harness).
 
 ### Hermes with a separate credential-custody launcher
@@ -1027,13 +1029,14 @@ Anthropic and Responses/compat overrides remain unsupported. On POSIX, use a
 Node runtime supporting `process.execve` (the SDK's Node >=24.22.1 floor); a
 Bun-only executable without `process.execve` is rejected, and no child-process
 proxy is used for launch. Use an absolute Hermes executable (on Windows, the
-venv `hermes.exe`); no PATH lookup is used for launch.
+installer's `hermes.exe`); no PATH lookup is used for launch.
 Custody mode filters inherited environment variables and injects only
 `SDK_HERMES_PROVIDER_KEY`; unlike direct mode it does not forward arbitrary
 provider or loader variables. The Host must still trust its launcher and Hermes
 executable. This adds no Hermes `dispatchSelection` wire authority: that contract
-remains Pi-only. Fake-runtime tests qualify custody/lifecycle behavior, not live
-provider compatibility or a bundled product's complete distribution.
+remains Pi-only. Fake-runtime tests, and a real Hermes run on Windows against a
+fake model endpoint, qualify custody/lifecycle behavior, not live provider
+compatibility or a bundled product's complete distribution.
 
 ### Direct adapter environments
 
