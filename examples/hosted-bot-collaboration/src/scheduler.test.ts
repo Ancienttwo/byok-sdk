@@ -31,7 +31,7 @@ const hostClock = () => NOW;
 const occurrenceKey = (id: string, kind: 'scheduled' | 'catch_up', plannedAt: number, version = 1) => hash([id, version, { kind, plannedAt }]);
 
 const routineRow = async (scope: string, id: string) => (await query<{ definition: RoutineDefinition; pending: RoutineDefinition | null; status: string;
-  next_at: string | null }>(`SELECT definition, pending, status, next_at::text FROM ${table('routine')} WHERE scope = $1 AND id = $2`,
+  next_at: string | null; retry_at: string | null }>(`SELECT definition, pending, status, next_at::text, retry_at::text FROM ${table('routine')} WHERE scope = $1 AND id = $2`,
 [storedKey(scope), storedKey(id)]))[0];
 const occurrences = (scope: string) => query<{ key: string; trigger_kind: string; planned_at: string; recorded_at: string; next_at: string | null;
   execution_superseded: boolean; conclusion: string | null }>(`SELECT key, trigger_kind, planned_at::text, recorded_at::text, next_at::text,
@@ -176,12 +176,13 @@ describe.skipIf(POSTGRES_URL === undefined)('H routine scheduler on real Postgre
     expect(await runner.run()).toEqual({ fired: 0, fenced: [], failed: [] });
     clock = FIRST + 1000;
     expect(await runner.run()).toMatchObject({ fired: 0, failed: [{ routineId: failingId }], fenced: [{ routineId: fencedId }] });
-    // Routines that stop being due leave the backoff map once their wait ends.
-    await query(`UPDATE ${table('routine')} SET lifecycle = 'paused' WHERE scope = ANY($1)`, [[storedKey(failing), storedKey(fenced)]]);
-    expect(runner['retryAt'].size).toBe(2);
+    // The backoff is on the rows (#794 H1), so a new scheduler instance waits too, and tries them again once the wait ends.
+    expect(await routineRow(failing, failingId)).toMatchObject({ next_at: String(FIRST), retry_at: String(FIRST + 2000) });
+    expect(await routineRow(fenced, fencedId)).toMatchObject({ next_at: String(FIRST), retry_at: String(FIRST + 2000) });
+    expect(await scheduler({ batch: 1, backoffMs: 1000 }).run()).toEqual({ fired: 0, fenced: [], failed: [] });
     clock = FIRST + 2000;
-    expect(await runner.run()).toEqual({ fired: 0, fenced: [], failed: [] });
-    expect(runner['retryAt'].size).toBe(0);
+    expect(await scheduler({ batch: 1, backoffMs: 1000 }).run())
+      .toMatchObject({ fired: 0, failed: [{ routineId: failingId }], fenced: [{ routineId: fencedId }] });
   });
 
   it('reads the clock for each fire, as K4 does when it consumes a wake', async () => {
@@ -216,7 +217,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H routine scheduler on real Postgre
     expect(await occurrences(scope)).toHaveLength(1);
   });
 
-  it('writes nothing when a fire throws, and backs the routine off in memory before its next try', async () => {
+  it('writes nothing but the backoff when a fire throws, holds it across scheduler instances, and clears it when the slot moves', async () => {
     const scope = await scoped(), id = await created(scope);
     // Another occurrence row holds the slot, so the occurrence insert throws after the routine Turn was committed in memory.
     await query(`INSERT INTO ${table('occurrence')} (scope, key, ordinal, routine_id, definition_version, trigger_kind, planned_at, recorded_at, next_at)
@@ -226,9 +227,29 @@ describe.skipIf(POSTGRES_URL === undefined)('H routine scheduler on real Postgre
     const pass = await runner.run();
     expect(pass).toMatchObject({ fired: 0, fenced: [], failed: [{ scope, routineId: id }] });
     expect(await store().dump(scope)).toBe(before);
+    expect(await routineRow(scope, id)).toMatchObject({ next_at: String(FIRST), retry_at: String(FIRST + 1000) });
     expect(await runner.run()).toEqual({ fired: 0, fenced: [], failed: [] });
+    expect(await scheduler({ backoffMs: 1000 }).run()).toEqual({ fired: 0, fenced: [], failed: [] });
     clock = FIRST + 1000;
     expect(await runner.run()).toMatchObject({ fired: 0, failed: [{ scope, routineId: id }] });
+    // Once the slot is free, the fire moves `next_at`, and that write clears the backoff.
+    await query(`DELETE FROM ${table('occurrence')} WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey('other')]);
+    clock = FIRST + 2000;
+    expect(await runner.run()).toMatchObject({ fired: 1 });
+    expect(await routineRow(scope, id)).toMatchObject({ next_at: String(SECOND), retry_at: null });
+  });
+
+  it('backs off only the slot it read: a fire that throws after its slot moved leaves no backoff (#794 H1)', async () => {
+    const scope = await scoped(), id = await created(scope), base = store();
+    const moving = Object.create(base) as typeof base;
+    moving.fire = async () => {
+      await query(`UPDATE ${table('routine')} SET next_at = $3 WHERE scope = $1 AND id = $2`, [storedKey(scope), storedKey(id), SECOND]);
+      throw new Error('boom');
+    };
+    clock = FIRST;
+    expect(await new HostedRoutineScheduler(opened!.pool, moving, { now: () => clock, backoffMs: 1000 }).run())
+      .toMatchObject({ fired: 0, failed: [{ scope, routineId: id }] });
+    expect(await routineRow(scope, id)).toMatchObject({ next_at: String(SECOND), retry_at: null });
   });
 
   it('reports each scope where the pass committed a fire, in fire order, and no fenced or failed routine (#793 D2f-5)', async () => {

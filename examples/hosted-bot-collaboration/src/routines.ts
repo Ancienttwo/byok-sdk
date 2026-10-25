@@ -104,7 +104,9 @@ export async function writeSlice(client: PoolClient, scopeKey: string, slice: Ro
         SELECT $1, $2, coalesce(max(ordinal) + 1, 0), $3::json, $4::json, $5, $6, $7, $8::json FROM routine WHERE scope = $1`,
       [scopeKey, storedKey(definition.id), ...routineColumns(routine)]);
     } else if (canonical(routineColumns(prior)) !== canonical(routineColumns(routine))) {
-      await client.query(`UPDATE routine SET definition = $3::json, pending = $4::json, lifecycle = $5, status = $6, next_at = $7, calendar_errors = $8::json
+      // A moved slot clears the scheduler's backoff (#794 H1). On the right of SET, `next_at` is the old value.
+      await client.query(`UPDATE routine SET definition = $3::json, pending = $4::json, lifecycle = $5, status = $6, next_at = $7, calendar_errors = $8::json,
+        retry_at = CASE WHEN next_at IS DISTINCT FROM $7 THEN NULL ELSE retry_at END
         WHERE scope = $1 AND id = $2`, [scopeKey, storedKey(definition.id), ...routineColumns(routine)]);
     }
   }

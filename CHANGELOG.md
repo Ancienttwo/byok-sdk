@@ -470,6 +470,35 @@
   scan wake key names the tenant, and there is no memory state. `discard()`
   deletes every row of a tenant and closes the ledger, for an aborted import.
   The K4 index exports `LedgerDump` and its row types.
+- **Fix (examples)** — H's due and routine schedulers keep their backoff in
+  Postgres (#794 H1): `scope.retry_at` and `routine.retry_at`. A scope whose
+  sync throws or stays due, and a routine whose fire throws or is fenced, wait
+  out `backoffMs` across scheduler instances and processes, so a Worker
+  invocation no longer retries them on every pass. A backoff holds only for the
+  due time or slot it was set on: the store write that moves `due_at` or
+  `next_at` clears it. The in-memory maps are gone. H DDL adds the two columns;
+  no SDK or wire change.
+- **Feature (examples)** — K8 exports the pure rule for which Bots a new
+  command reaches, `commandBots(state, command)` with its `CommandScopeState`
+  type, from `./rules/commands` (#975 slice 6). It names the Bot of `input` and
+  owner `receive`, every Bot member of the room for room input, and the Bot of
+  the question's or card's Turn for `answer` and `decide`. L's freeze admission
+  now uses it, with no change in behavior. A Host wires it into
+  `CommandPorts.admit`, so both Hosts refuse the same commands while a device
+  switches.
+- **Fixed (client)** — An Agent home lease marker is now published whole
+  (#605). `AgentHomeLeaseManager.acquire` created `.byok/agent-home.lease`
+  and then wrote it, so a process killed in between left an empty marker,
+  and every later acquire of that home failed with
+  `AgentHomeLeaseCorruptError`. It now writes and syncs a temp file beside
+  the marker and hard-links it onto the lease path. The exclusive create,
+  owner check and exact-owner reclaim are unchanged. The next acquire
+  removes the temp files of a killed one. An empty or unparseable marker
+  is still refused.
+- **Breaking (client)** — An Agent home root on a filesystem without hard
+  links now fails at its first acquire, with an error that names the
+  directory (#605). Examples are FAT32, exFAT, and some network or FUSE
+  filesystems. Before this change, acquire did not need hard links.
 
 ## 0.30.1 — 2026-10-24 (published)
 
