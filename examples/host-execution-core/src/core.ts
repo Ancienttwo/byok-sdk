@@ -601,7 +601,7 @@ export class HostExecutionCore {
     };
   }
   private delivered(intent: Intent): Promise<boolean> {
-    return frozenDelivered(this.frozenPort(), this.ledger.snapshot().executions[intent.taskId]!.input);
+    return frozenDelivered({ offer: taskId => this.server.tasks.offer(taskId) }, this.ledger.snapshot().executions[intent.taskId]!.input);
   }
   private async submit(intent: Intent): Promise<void> {
     const input = this.ledger.snapshot().executions[intent.taskId]!.input;
