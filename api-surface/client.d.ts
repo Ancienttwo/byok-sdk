@@ -466,6 +466,22 @@ export interface GrokAdapterOptions {
      * them. Default `inherit`: the user's Grok settings apply.
      */
     compatInstructions?: 'inherit' | 'disabled';
+    /**
+     * For an Agent task (`task.offer_for_agent`), `excluded` sets
+     * `GROK_CLAUDE_MCPS_ENABLED`, `GROK_CURSOR_MCPS_ENABLED` and
+     * `GROK_MANAGED_MCPS_ENABLED` to `0` on the Grok agent process, then runs
+     * `grok inspect --json` in the task cwd with the same environment. The
+     * start fails before the agent starts if inspect lists an MCP server that
+     * is not disabled, or an enabled plugin that provides MCP servers, or if
+     * inspect fails. Grok has no per-process switch for the servers of
+     * `~/.grok/config.toml`, project `.grok/config.toml` and `.mcp.json`, or
+     * plugins, so a user who has one enabled cannot run Agent tasks with this
+     * option. Two sources are not detected: a server turned on while the
+     * session runs (a config hot-reload, `/mcps` or `grok mcp enable`), and
+     * managed MCP that an administrator pins on. Other tasks are unchanged.
+     * Default `inherit`.
+     */
+    agentUserMcpServers?: 'inherit' | 'excluded';
     resolveBin?: () => ResolvedBin;
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
