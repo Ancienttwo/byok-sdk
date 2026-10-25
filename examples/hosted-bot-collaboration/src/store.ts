@@ -12,7 +12,7 @@ import { addTurn, stateOf, type Card, type CollaborationState, type Turn } from 
 import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions,
   seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { activeBinding, beginSwitch, switchFence, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
+import { activeBinding, beginSwitch, ownedByL, switchFence, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { cancelIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
@@ -340,9 +340,10 @@ export class HostedCollaborationStore {
   /** One commit with the store's ports and `extra`, the ports that only the store's own entries add. */
   private commitWith(scope: string, request: CommitRequest<Command>, clock: () => number,
     extra?: (state: CollaborationState, ports: StorePorts) => { remember?: CommandPorts['remember']; outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
-    fence?: 'binding' | 'switch'): Promise<CommitResult> {
+    fence?: 'binding' | 'switch', guard?: (client: PoolClient) => Promise<void>): Promise<CommitResult> {
     const key = storedKey(scope);
     return this.change(scope, request.commandId, async (state, publish, client) => {
+      await guard?.(client);
       // The store admits each input with its own policy, as L does (K8 host.ts `commitOwner`), so the admission and the sync's
       // seal use one policy.
       const { manage, ...own } = this.ports(scope, state, publish, clock), head = revisionOf(state);
@@ -847,9 +848,9 @@ export class HostedCollaborationStore {
    * lock. K8 `homeHead` decides, as L's `flushHomes`: the operation must be its Bot's oldest pending one, and the Bot must have
    * no intent row with no conclusion. A pending operation that is not a head waits `backoffMs` (never earlier). A head takes
    * a lease (`next_at = now + leaseMs`); the entity is the fence, so `tries` stays 0. A row whose operation is gone or
-   * settled settles with no call. A Bot whose device was switched to L (the `mode` refusal, #957) is L's to flush, so its
-   * operation waits `backoffMs` too. An open switch does not stop it: the switch commit waits for the device's pending
-   * operations to settle.
+   * settled settles with no call. A Bot whose device row names mode L (#957) is L's to flush, so its operation waits
+   * `backoffMs` too: after a commit to L, and during a switch from L to H until it commits. A switch away from H does not
+   * stop it: that commit waits for the device's pending operations to settle.
    */
   claimHome(scope: string, sequence: number, clock: () => number, leaseMs: number, backoffMs: number): Promise<HomeClaim> {
     const key = storedKey(scope), row = homeRowKey(sequence);
@@ -862,8 +863,8 @@ export class HostedCollaborationStore {
       const busy = (await client.query<{ busy: boolean }>(`SELECT EXISTS (SELECT 1 FROM intent WHERE scope = $1 AND conclusion IS NULL
         AND input->'payload'->'agentRef'->>'agentId' = $2) AS busy`, [key, op.botId])).rows[0]!.busy;
       const device = state.team.bots[op.botId]?.execution.deviceId;
-      const movedToL = device !== undefined && (await deviceRefusals(client, key, [device])).get(device) === 'mode';
-      if (movedToL || !homeHead(state.team, sequence, botId => botId === op.botId && busy)) {
+      const lOwned = device !== undefined && await ownedByL(client, key, device);
+      if (lOwned || !homeHead(state.team, sequence, botId => botId === op.botId && busy)) {
         await client.query('UPDATE outbox SET next_at = GREATEST(next_at, $3) WHERE scope = $1 AND key = $2 AND settled_at IS NULL', [key, row, now + backoffMs]);
         return { value: { kind: 'none' }, outbox: [] };
       }
@@ -1002,22 +1003,33 @@ export class HostedCollaborationStore {
   async drainDevice(scope: string, deviceId: string, expectedRevision: number, options: { cancel?: boolean }, clock: () => number):
     Promise<{ open: DeviceWork; failed: Array<{ id: string; error: unknown }> }> {
     const key = storedKey(scope), failed: Array<{ id: string; error: unknown }> = [];
-    const work = await this.change(scope, undefined, async (state, _publish, client) => {
+    // Every transaction of the drain checks the open switch on its revision under the scope lock, so a drain that an abort
+    // or a commit overtook stops with the switch refusal (`not_switching`) and cancels nothing more.
+    const owned = async (client: PoolClient) => {
       if ((await openSwitch(client, key, deviceId, expectedRevision)).mode !== 'H') {
         throw new DeviceSwitchRefusedError(deviceId, 'not_owner', `H is not the old owner of the switch of device ${deviceId}: L drains it`);
       }
+    };
+    const work = await this.change(scope, undefined, async (state, _publish, client) => {
+      await owned(client);
       return { value: await openWork(client, key, state, deviceId), outbox: [] };
     });
     if (!options.cancel) return { open: work, failed };
     const state = await this.read(scope);
+    const each = async (id: string, cancel: () => Promise<unknown>) => {
+      try { await cancel(); }
+      catch (error) { if (error instanceof DeviceSwitchRefusedError) throw error; failed.push({ id, error }); }
+    };
     for (const id of [...work.turns, ...work.batches]) {
       // `cancel_turn` is a keyless K8 command: it keeps no record, and a second cancel of a concluded Turn changes nothing.
-      try { await this.commitWith(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_turn', turnId: id } }, clock); }
-      catch (error) { failed.push({ id, error }); }
+      await each(id, () => this.commitWith(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_turn', turnId: id } }, clock,
+        undefined, undefined, owned));
     }
     for (const id of work.intents.filter(id => !Object.hasOwn(state.turns, id))) {
-      try { await this.change(scope, undefined, async (_state, _publish, client) => ({ value: await cancelIntent(client, scope, id, clock()), outbox: [] })); }
-      catch (error) { failed.push({ id, error }); }
+      await each(id, () => this.change(scope, undefined, async (_state, _publish, client) => {
+        await owned(client);
+        return { value: await cancelIntent(client, scope, id, clock()), outbox: [] };
+      }));
     }
     const open = await this.transaction(async client => openWork(client, key, await this.snapshot(client, key), deviceId), true);
     return { open, failed };
@@ -1026,8 +1038,9 @@ export class HostedCollaborationStore {
   /**
    * Commits the open switch of a device on its frozen revision (#957): the target becomes the owner mode, the revision rises,
    * and the freeze ends. Away from H, it refuses with `open_work` while the drain still finds open work, whatever its age:
-   * §4.1 gives no timeout path. Toward H, the caller commits after L's commit. After a commit to L, every H write that can create execution for the device, and every Agent home flush
-   * of its Bots, refuses with the `mode` reason. Cleanup of H's entries comes after and is not a safety barrier.
+   * §4.1 gives no timeout path. Toward H, the caller commits after L's commit. After a commit to L, every H write that can
+   * create execution for the device refuses with the `mode` reason, and the Agent home flushes of its Bots back off. Cleanup
+   * of H's entries comes after and is not a safety barrier.
    */
   commitSwitch(scope: string, deviceId: string, expectedRevision: number): Promise<DeviceBinding> {
     const key = storedKey(scope);
