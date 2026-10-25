@@ -204,16 +204,24 @@ describe('a sealed routine Turn (#953)', () => {
     }
   });
 
-  it('fails and ends a Turn whose outcome schema stays over budget, instead of blocking it', () => {
-    const compose = vi.spyOn(protocol, 'composeBotTurnOutcomeSchema').mockImplementation(() => {
-      throw new protocol.BotTurnOutcomeSchemaError('schema-over-budget', 'still too large');
+  it('blocks a Turn whose outcome schema stays over budget, with no sealed failure, and freezes it once the state shrinks', () => {
+    // The schema size depends on the state, not on the routine version, so a reseal cannot fix it and the Turn waits.
+    let oversized = true;
+    const compose = protocol.composeBotTurnOutcomeSchema;
+    const spy = vi.spyOn(protocol, 'composeBotTurnOutcomeSchema').mockImplementation((...args) => {
+      if (oversized) throw new protocol.BotTurnOutcomeSchemaError('schema-over-budget', 'still too large');
+      return compose(...args);
     });
     try {
       const s = sealedState(), out = published();
       const row = turn(s, { id: 'occurrence:o1', root: 'occurrence:o1', source: 'routine', request: '', status: 'queued', sealedRoutine: ref });
-      expect(syncTurn(s, row, facts(), sealedOptions(), out.publish)).toEqual({ kind: 'ended' });
-      expect([row.status, row.conclusion, row.blockedReason, s.schemas['occurrence:o1']]).toEqual(['failed', 'failed', undefined, undefined]);
-      expect(out.rows).toEqual([[`sealed-routine-failed:occurrence:o1`, expect.objectContaining({ reason: 'sealed_routine_schema_over_budget' })]]);
-    } finally { compose.mockRestore(); }
+      expect(syncTurn(s, row, facts(), sealedOptions(), out.publish)).toBeUndefined();
+      expect([row.status, row.conclusion, row.blockedReason]).toEqual(['blocked', undefined, 'Outcome schema over budget after flat fallback: still too large']);
+      expect(out.rows.map(([id]) => id)).toEqual(['blocked:occurrence:o1']);
+      oversized = false;
+      expect(syncTurn(s, row, facts(), sealedOptions(), out.publish)?.kind).toBe('routine');
+      expect([row.status, row.blockedReason]).toEqual(['processing', undefined]);
+      expect(out.rows.map(([id]) => id)).toEqual(['blocked:occurrence:o1']);
+    } finally { spy.mockRestore(); }
   });
 });

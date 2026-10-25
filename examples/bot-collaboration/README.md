@@ -257,12 +257,13 @@ which actions the Bot may take.
   `sealing`, the template byte for byte as `sealed`, and `routineRef`, with no
   `instruction`, no history and the plaintext `bot-turn-outcome.v1` contract.
   K4 then promotes it as a sealed occurrence intent.
-- A Turn whose template is missing (`sealed_routine_template_missing`), whose
-  Bot Agent revision differs from the one the template is sealed for
-  (`sealed_routine_agent_changed`), or whose outcome schema stays over budget
-  after the flat fallback (`sealed_routine_schema_over_budget`), ends `failed`
-  with the projection `sealed-routine-failed:<turnId>`. It never blocks: a blocked routine Turn
+- A Turn whose template is missing (`sealed_routine_template_missing`), or
+  whose Bot Agent revision differs from the one the template is sealed for
+  (`sealed_routine_agent_changed`), ends `failed` with the projection
+  `sealed-routine-failed:<turnId>`. It never blocks: a blocked routine Turn
   keeps its occurrence open, and that stops the version switch a reseal needs.
+  An outcome schema over budget depends on the state, not on the version, so
+  it blocks a sealed Turn as a plain one until the state shrinks.
 - The outcome and every projection stay plaintext, even when they carry
   content derived from the sealed instruction.
 

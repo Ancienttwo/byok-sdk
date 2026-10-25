@@ -38,7 +38,6 @@ export interface SealedRoutineTemplate {
 /** A sealed routine Turn that cannot freeze ends `failed` with one of these reasons (#953). */
 export const SEALED_ROUTINE_TEMPLATE_MISSING = 'sealed_routine_template_missing';
 export const SEALED_ROUTINE_AGENT_CHANGED = 'sealed_routine_agent_changed';
-export const SEALED_ROUTINE_SCHEMA_OVER_BUDGET = 'sealed_routine_schema_over_budget';
 export interface SyncBot<E extends FreezeExecution> extends ContextBot { readonly revision: string; readonly execution: E }
 /** The rows that the sync step reads and changes. */
 export interface SyncState<E extends FreezeExecution> extends ContextState, BotHistoryState {
@@ -227,9 +226,10 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
 
 /**
  * A sealed routine Turn (#953): the offer carries the member's template byte for byte in place of an instruction, with no
- * ContextPack and no history, and the plaintext `bot-turn-outcome.v1` result contract. A missing template, a Bot Agent
- * that the template is not sealed for, or an outcome schema over budget ends the Turn `failed` and never blocks it: a
- * blocked routine Turn keeps its occurrence open, and an open occurrence stops the version switch that a reseal needs.
+ * ContextPack and no history, and the plaintext `bot-turn-outcome.v1` result contract. Only a reseal fixes a missing
+ * template or a Bot Agent that the template is not sealed for, so those end the Turn `failed`: a blocked routine Turn keeps
+ * its occurrence open, and an open occurrence stops the version switch that the reseal needs. An outcome schema over
+ * budget depends on the state, not on the version, so it blocks the Turn as for a plain one until the state shrinks.
  */
 function freezeSealed<E extends FreezeExecution, R extends ContextRoutine>(state: SyncState<E>, turn: Turn, routine: SealedRoutineRef,
   bot: SyncBot<E>, options: SyncOptions<R>, publish: Publish): SyncStep<E> | undefined {
@@ -247,7 +247,8 @@ function freezeSealed<E extends FreezeExecution, R extends ContextRoutine>(state
   try { schema = outcomeSchema(turn.botId, state, turn, options.models, options.routines, options.offer); }
   catch (error) {
     if (!(error instanceof BotTurnOutcomeSchemaError) || error.code !== 'schema-over-budget') throw error;
-    return fail(SEALED_ROUTINE_SCHEMA_OVER_BUDGET);
+    blockTurn(state, turn, `Outcome schema over budget after flat fallback: ${error.message}`, publish);
+    return undefined;
   }
   state.schemas[turn.id] = schema;
   admitBotToolsets(bot.execution, options.readOnlyToolsets);
