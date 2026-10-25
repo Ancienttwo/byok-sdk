@@ -1,6 +1,6 @@
 # Headless agent 配置逻辑：SDK 给出选项、联动、校验和提交载荷，Host 自己渲染（设计草案）
 
-状态：设计草案，等待 owner 决定。本文不改变现行 SDK API、wire、spec 或部署，也不授权实现、发布、开 issue 或下游迁移。
+状态：设计草案。2026-10-26 owner 指示按本文建议实施，目标版本 0.31.0，不进 0.30.2。D3 的预算数值由实现 PR 提出、owner 批准；D6 在 S2 实现时核实。本文本身不改变现行 SDK API、wire、spec 或部署，也不授权发布或下游迁移。
 
 日期：2026-10-26（Asia/Taipei）。
 SDK 基线：`0b15e6eb0e1ef68119dcc6d396bb953f4ad7c39b`。下文 SDK 仓库内的 `file:line` 都指这个基线。
@@ -31,7 +31,7 @@ SDK 现在只给出两样东西：按 id 查询 catalog 的函数，以及保存
 | 判断 | 状态 |
 | --- | --- |
 | 方向成立 | 是。数据权威已经在 `keys`，Host 重复的是围绕这些数据的规则。 |
-| 可以开始实现 | 否。先由 owner 定 §10 的 D1–D8。每个切片单独开 issue 和 PR。 |
+| 可以开始实现 | 是。owner 2026-10-26 指示按 §10 的建议实施，S1 和 S2 并行（§13）。目标 0.31.0。 |
 | 改变 keys 的安全立场 | 否。keys README 不做设置页的三条理由都保留（§7）。 |
 | 需要 wire 变更 | 第一阶段不需要。第二阶段只有当表单定义走 SDK wire 时才需要。 |
 
@@ -350,6 +350,8 @@ RAFT 把 agent 的创建和编辑表单拆成四层：
 
 ## 10. Owner 决策
 
+2026-10-26 owner 指示按下表建议实施。D3 的数值和 D6 的结论在实现 PR 里给出。
+
 | # | 问题 | 建议 |
 | --- | --- | --- |
 | D1 | 是否接受边界调整：SDK 提供 headless 配置逻辑，Host 仍然渲染 | 接受。只改 `docs/security.md` 和 keys README 的措辞，三条理由不变 |
@@ -388,12 +390,23 @@ RAFT 把 agent 的创建和编辑表单拆成四层：
 | 切片 | 内容 | 位置 |
 | --- | --- | --- |
 | S0 | 本文 | `docs/plans/` |
-| S1 | `PiModelConfigSchema` 支持 §6 选中的 compat 字段，对 pinned Pi 核实语义并补测试 | `packages/keys` |
-| S2 | `@byok-sdk/keys/model-route`：catalog 视图、草稿函数、错误码、secret 身份规则、约束测试和 fixture 向量；同步 spec、`security.md`、keys README、api-surface、`entries.json` 和 CHANGELOG | `packages/keys`、`docs/`、`api-surface/` |
-| S3 | AiphaBee 采用，按 §11 验收 | 下游仓库，单独 PR |
+| S1 | `PiModelConfigSchema` 支持 `compat.sendSessionAffinityHeaders` 和 `compat.allowEmptySignature`，对 pinned Pi 核实语义，重新生成 catalog 并补测试 | `packages/keys` |
+| S2 | `@byok-sdk/keys/model-route`：catalog 视图、草稿函数、错误码、secret 身份规则、`PI_DEFAULT_THINKING_LEVEL`、约束测试和 fixture 向量；`provider-profile.ts` 拆出 `node:crypto`；同步 spec、`security.md`、keys README、api-surface、`entries.json`、CI scope 和 CHANGELOG | `packages/keys`、`scripts/`、`docs/`、`api-surface/` |
+| S3 | AiphaBee 采用，按 §11 验收 | 下游仓库，0.31.0 发布后单独 PR |
 | 后续 | provider 模型发现、runtime 可选状态、第二阶段 | 各自开 issue |
 
-每个切片单独开 issue 和 PR。本文所在的 PR 不开 issue。
+S1 和 S2 并行，各自一个 worktree、一个 draft PR。
+
+源文件按车道分开：
+
+- **S1**：`pi-model-config.ts`、`pi-model-catalog.generated.ts`、`pi-provider-projection.ts` 和它们的测试。
+- **S2**：`provider-profile.ts` 和 `exactProviderProfileBinding` 的引用方、新的 model-route 模块、keys 的 `package.json` 与 `tsup.config.ts`、catalog 生成脚本（只新增一个独立的生成文件，catalog 表的输出逐字节不变）、`scripts/ci/`、spec、`security.md` 和 keys README。
+
+两个 PR 都会改汇总文件：`api-surface/keys.d.ts`、`entries.json` 的 facts、README 的入口表和 CHANGELOG。后合入的 PR 先合并 main，再用 `bun run check:api-surface -- --update` 重新生成，CHANGELOG 两边条目都保留。
+
+合入时机：0.30.2 的版本准备 PR 合入之后才合，这样两个 PR 都进 0.31.0。
+
+本文所在的 PR 不开 issue。
 
 [#398]: https://github.com/Ancienttwo/byok-sdk/issues/398
 [#513]: https://github.com/Ancienttwo/byok-sdk/issues/513
