@@ -388,6 +388,16 @@
   holds the intent with its phase and generation. L wires it to its owner
   records, so K4 sends nothing to a frozen device, the timer drain and direct
   `bot.core` calls included.
+- **Fix (examples)** — K8 L refuses `execution` routines at creation, as H
+  does (#954). K8 owns only Turn and Host intents, so no K8 owner could settle
+  such a routine's occurrence intent. K4 gets `HostOptions.executionRoutines`
+  (`allow` by default, or `refuse`) and the optional
+  `RoutineValidation.executionRoutines`. Under `refuse`, `addRoutine`,
+  `updateRoutine` and `OutcomeTransaction.routines` refuse an `execution`
+  definition with no row written, and the constructor refuses a ledger with a
+  routine that is not completed and whose current or pending version is
+  `execution`. L now always sets `hostJobExecution: 'fail'` and
+  `executionRoutines: 'refuse'`.
 
 ## 0.30.1 — 2026-10-24 (published)
 

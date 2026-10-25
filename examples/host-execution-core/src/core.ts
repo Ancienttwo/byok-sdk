@@ -57,9 +57,15 @@ export interface HostOptions {
   /**
    * What a Host job result with `execution` does. `promote` (default) adds its intent to the FIFO. `fail` stores the summary,
    * concludes the occurrence `failed` with no promotion and no retry, and the drain reports `host_job_execution_unsupported`,
-   * for a Host that has no owner for such an intent (K8 L and H).
+   * for a Host that has no owner for such an intent (K8 L).
    */
   hostJobExecution?: 'promote' | 'fail';
+  /**
+   * Whether this Host runs `execution` routines. `allow` (default) runs them. `refuse`, for a Host that has no owner for an
+   * occurrence intent (K8 L), refuses an `execution` definition in `addRoutine`, `updateRoutine` and `OutcomeTransaction.routines`,
+   * and the constructor refuses a ledger that holds a routine not completed whose current or pending version is `execution`.
+   */
+  executionRoutines?: 'allow' | 'refuse';
   occurrenceHooks?: Readonly<Record<string, OccurrenceHook>>;
   memory?: HostMemoryPage;
   now?: () => number;
@@ -113,6 +119,12 @@ export class HostExecutionCore {
   constructor(readonly server: ExecutionServer, readonly ledger: HostLedger, private readonly options: HostOptions = {}) {
     this.hostJobs = new Map(Object.entries(options.hostJobs ?? {}));
     if (![undefined, 'promote', 'fail'].includes(options.hostJobExecution)) throw new Error('Invalid hostJobExecution');
+    if (![undefined, 'allow', 'refuse'].includes(options.executionRoutines)) throw new Error('Invalid executionRoutines');
+    if (options.executionRoutines === 'refuse') {
+      const held = Object.values(ledger.snapshot().routines)
+        .find(routine => routine.lifecycle !== 'completed' && (routine.definition.execution || routine.pending?.execution));
+      if (held) throw new Error(`Execution routine ${held.definition.id} is refused by this Host`);
+    }
     this.occurrenceHooks = new Map(Object.entries(options.occurrenceHooks ?? {}));
     if (options.memory && options.memory.ledger.tenant !== ledger.tenant) throw new Error('Memory tenant must match execution tenant');
     this.now = () => time((options.now ?? Date.now)());
@@ -214,7 +226,8 @@ export class HostExecutionCore {
   }
   /** The one path for routine commands. */
   private routineCommands(state: LedgerState): RoutineCommands {
-    return routineCommands(state, { now: this.now, nextTime: this.nextTime, hostJobs: this.hostJobs, occurrenceHooks: this.occurrenceHooks });
+    return routineCommands(state, { now: this.now, nextTime: this.nextTime, hostJobs: this.hostJobs, occurrenceHooks: this.occurrenceHooks,
+      executionRoutines: this.options.executionRoutines });
   }
   async lifecycle(id: string, lifecycle: Routine['lifecycle']): Promise<void> {
     this.assertOpen();
