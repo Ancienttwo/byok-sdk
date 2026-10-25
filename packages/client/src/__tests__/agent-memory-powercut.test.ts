@@ -328,7 +328,13 @@ describe.skipIf(process.platform === 'win32')('W5 QEMU driver against a fake QEM
       const layer: string[] = [];
       const driver = new QemuDriver({
         fault, command: process.execPath, args: ['-e', FAKE_QEMU, qmp, log], qmpSocket: qmp, listenPort,
-        storage: { profile: DROPS, afterPowerCut: async () => { layer.push('after-power-cut'); } }, bootTimeoutMs: 10_000,
+        storage: {
+          profile: DROPS,
+          // The layer is cut while QEMU still answers its monitor.
+          cut: async () => { layer.push(await qmpExecute(qmp, 'query-status').then(() => 'cut qemu-alive=true', () => 'cut qemu-alive=false')); },
+          prepareBoot: async () => { layer.push('prepare-boot'); },
+        },
+        bootTimeoutMs: 10_000,
       });
       expect(driver.storageProfile).toBe(DROPS);
       const first = driver.start();
@@ -337,7 +343,7 @@ describe.skipIf(process.platform === 'win32')('W5 QEMU driver against a fake QEM
       await qmpReady(qmp);
       await driver.cut();
       await run.ended;
-      expect(layer).toEqual(fault === 'power-loss' ? ['after-power-cut'] : []);
+      expect(layer).toEqual(fault === 'power-loss' ? ['cut qemu-alive=true', 'prepare-boot'] : []);
       guest.destroy();
       // The next boot: os-crash reuses the running QEMU, power-loss starts a new one.
       const second = driver.start();

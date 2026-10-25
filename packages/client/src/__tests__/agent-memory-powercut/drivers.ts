@@ -172,17 +172,21 @@ export async function qmpExecute(socketPath: string, command: string, args?: Rec
 }
 
 /**
- * Storage below the guest. `afterPowerCut` runs with QEMU gone and before the
- * next boot, for example to replay a write log only up to its last flush.
+ * Storage below the guest. On a power cut, `cut` runs while QEMU is still
+ * alive, so a disconnect cannot flush the layer first: for example SIGKILL of
+ * an nbdkit `cache=writeback` server drops every write since the last flush.
+ * `prepareBoot` runs with QEMU gone, before the next boot.
  */
 export interface StorageLayer {
   readonly profile: StorageProfile;
-  afterPowerCut(): Promise<void>;
+  cut(): Promise<void>;
+  prepareBoot(): Promise<void>;
 }
 
 export const HOST_KEEPS_ISSUED_WRITES_LAYER: StorageLayer = Object.freeze({
   profile: HOST_KEEPS_ISSUED_WRITES,
-  afterPowerCut: async () => {},
+  cut: async () => {},
+  prepareBoot: async () => {},
 });
 
 export interface QemuDriverOptions {
@@ -200,12 +204,13 @@ export interface QemuDriverOptions {
 /**
  * A Windows guest under QEMU/KVM.
  *
- * - OS crash: QMP `inject-nmi`. The guest must bugcheck on NMI
- *   (`CrashControl\NMICrashDump=1`) and reboot. QEMU keeps running, so every
- *   write the guest issued before the crash stays.
- * - Power loss: SIGKILL of QEMU, then the storage layer, then a new boot. Not
- *   QMP `quit`: QEMU then closes its block devices and flushes them, which a
- *   power cut never does.
+ * - OS crash: QMP `inject-nmi`. Windows 8 and later bugcheck on an NMI; the
+ *   guest must reboot automatically and write no crash dump to the disk under
+ *   test. QEMU keeps running, so every write the guest issued stays.
+ * - Power loss: the storage layer's `cut`, SIGKILL of QEMU, the layer's
+ *   `prepareBoot`, then a new boot. Never QMP `quit`, `stop` or a pause
+ *   before the cut: QEMU then flushes its block devices, which a power cut
+ *   never does.
  */
 export class QemuDriver implements PowerCutDriver {
   readonly fault: 'os-crash' | 'power-loss';
@@ -254,9 +259,10 @@ export class QemuDriver implements PowerCutDriver {
       const qemu = this.#qemu;
       this.#qemu = undefined;
       if (qemu === undefined) throw new Error('QEMU is not running');
+      await this.#options.storage.cut();
       qemu.kill('SIGKILL');
       await exited(qemu);
-      await this.#options.storage.afterPowerCut();
+      await this.#options.storage.prepareBoot();
     }
     // The guest cannot close this socket any more; the Host side drops it.
     socket?.destroy();

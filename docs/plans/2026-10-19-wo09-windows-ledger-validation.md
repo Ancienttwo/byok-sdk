@@ -313,3 +313,333 @@ budget follows the entry contract's measured bytes plus 10 percent rule.
 The review noted unstaged files. All four noted files were staged before
 commit. The main PRD and decision document are byte-identical to main.
 The three platform-refusal files are byte-identical to `f11fe428`.
+
+## W5: power-cut harness and VM evaluation (2026-10-26)
+
+Owner decision of 2026-10-26: build the experiment harness first and
+evaluate the environment. Add no CI. This section does not change B,
+`strictLedgerBarrier` or any admission gate. Windows admission stays
+closed. W2 and W6 still wait for W5 power-loss evidence.
+
+### P1 map
+
+- The ledger authority is the TS intent processor
+  (`packages/client/src/daemon/agent-memory-intent.ts`). On darwin and
+  win32 every ledger and memory write goes through the release helper
+  (`native/agent-memory-fs`). Linux uses the procfs descriptor backend.
+- The home write path is `AgentHomeManager.acquire` (layout resolve,
+  `mkdir`, lease marker) and `initializeTaskFree` (`notes`, empty
+  `MEMORY.md`), before the first `applying` barrier.
+- `syncDirectoryParent` in `agent-home.ts` returns at once on win32. A new
+  home chain on Windows therefore has no directory flush. This is the W2 gap.
+- Existing NTFS process-kill evidence is `crash_windows_test.go`: a
+  one-record model ledger, every barrier point of replace-new,
+  replace-existing and delete, and 150 random kills. It runs in
+  `agent-memory-helper-non-darwin` on windows-latest and windows-2022, as
+  administrator and as a standard user. It does not run the TS processor.
+
+### P2 trace
+
+Host approve -> fetch (release) -> window 2: `applying` barrier -> one CAS
+(temp write, flush, rename, directory flush) -> terminal barrier -> complete
+-> Host readback -> window 3: `ackedAt` barrier -> notice resolves. After a
+restart, window 1 turns a leftover `applying` into `uncertain` and rewrites a
+terminal before it completes it again. A fault is a claim failure when a fact
+the Host already holds is not on the device after recovery.
+
+### P3 decision
+
+The harness drives the real processor over the real helper, as the W4 smoke
+does. It does not reimplement the ledger. The Host runs outside the fault and
+journals before it answers, so its receipts stay independent of the device.
+On Windows the device claims B through a test-only seam
+(`{ ...helper, strictLedgerBarrier: true }` in `device.ts`), as the W4 smoke
+does. No production path reads that object.
+
+### Harness
+
+Directory: `packages/client/src/__tests__/agent-memory-powercut/`. It is
+typechecked and excluded from the build and the package. Bun runs it from
+source.
+
+| File | Role |
+|---|---|
+| `host.ts` | Independent Host. Seeded intents over `MEMORY.md`, `notes/a.md` and `notes/b.md`; a fresh Agent home every 3 intents; bodies of 40 to 200 KiB, so a torn write is a revision miss. It journals `issued`, `receipt` (first completion), `repeat`, `acked` and `failed` before it answers. The journal can be fsynced per entry outside a guest. |
+| `device.ts` | Device program. It sends one snapshot of the store as found, then runs the real processor with the daemon's stable lease owner identity. |
+| `snapshot.ts` | Plain reads only: raw ledger bytes, every memory file revision, helper temp leftovers, lease marker. No helper session and no lease, because a lease writes a marker. On Windows it must run in the booted guest, after NTFS replays its log. |
+| `checker.ts` | Pure function of snapshot and journal. |
+| `drivers.ts` | `PowerCutDriver`: `fault`, `storageProfile`, `start`, `cut`, `stop`. |
+| `experiment.ts` | Round loop: start, check the snapshot, redeliver every open intent, issue new intents until the trigger cuts. |
+| `cli.ts` | `device`, `process-kill` and `qemu` commands. |
+
+Checker invariants, reported per cut as `held` or `violated` with details:
+
+| Id | Invariant |
+|---|---|
+| I1 | Each ledger parses with the real strict parser, holds only intents the Host issued for that home, and has at most its last record open. No torn record is admitted. |
+| I2 | Every completion the Host received is a durable device terminal with the same outcome. This covers flushed data and the new home chain: a missing home, `.byok` or ledger is reported by name. |
+| I3 | Every intent the Host saw acknowledged has a durable `ackedAt`. |
+| I4 | Each memory file is a state the ledger order allows. A file written without a durable `applying` record fails here. |
+| I5 | Each memory file is empty or a complete body the Host issued for that path. |
+| I6 | After the restart, every open intent is acknowledged with the Host's stored completion: no failed notice, no `conflict` repeat. |
+
+A home holds at most 64 intents, far below the 511-record ledger, so no
+acknowledged record is pruned and I2 and I3 need no pruning exception.
+Observations, not invariants: the cut window of the last intent
+(`no-record`, `applying`, `terminal-without-receipt`,
+`receipt-without-ack`, `acked`), helper temp leftovers and lease markers.
+
+Drivers:
+
+| Driver | Fault | Storage profile | Cut |
+|---|---|---|---|
+| `ProcessKillDriver` | process-crash | `os-cache-keeps-writes` | SIGKILL of the process group, then wait until the group is empty; `taskkill /T /F` on Windows. The helper dies with the device; a helper left alive would see end of input and finish its write. |
+| `QemuDriver` | os-crash | the configured layer | QMP `inject-nmi`. Windows 8 and later bugcheck on an NMI. The guest must reboot automatically and write no crash dump to the disk under test. QEMU keeps running. |
+| `QemuDriver` | power-loss | the configured layer | `StorageLayer.cut` while QEMU is alive, SIGKILL of QEMU, `StorageLayer.prepareBoot`, a new boot. Never QMP `quit`, `stop` or a pause before the cut: each flushes the block devices. |
+
+`ExperimentReport.evidence` is `os-crash` for a power-loss run whose storage
+profile does not drop unflushed writes. Such a run is not power-loss
+evidence.
+
+Reach: a Host point (`fetch`, `complete`, `acked`) cuts only between
+barriers. Random delays can land inside a helper write (temp, flush,
+rename, directory flush), but not at a chosen point. The deterministic
+in-barrier points on NTFS remain those of `crash_windows_test.go`.
+
+### Process-crash run (macOS, 2026-10-26)
+
+Host: macOS arm64, Bun 1.4.3, Node v24.22.1. The release helper was built
+with `build:agent-memory-helper` (go1.26.5); its darwin and win32 bytes
+matched two independent source builds, and `helperAgentMemoryIntentBackend`
+verified the darwin pin.
+
+- `bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-powercut.test.ts`:
+  16 passed. The process-crash case runs 14 cuts (6 Host points, 8 random
+  delays up to 600 ms) and requires every invariant held and the exact
+  window of each Host point. A negative control tears the ledger after the
+  cut; the same loop reports I1, I2 and I4 violated, and I6 violated with
+  `ledger_invalid`. The checker cases cover a torn ledger, a terminal rolled
+  back to `applying` under a receipt (#522), a lost record, a missing
+  `ackedAt`, memory that disagrees with an applied terminal, torn memory, a
+  missing home, memory without `applying`, a foreign record and recovery.
+  The QEMU driver cases run against a fake QMP monitor, not QEMU.
+- `bun src/__tests__/agent-memory-powercut/cli.ts process-kill --rounds 120 --seed 21 --max-delay-ms 600`:
+  exit 0, 120 cuts, 169 intents, 57 new homes, 0 violations, 120 recoveries
+  held, 96 s. Windows: `no-record` 73, `receipt-without-ack` 35, `applying` 6,
+  `terminal-without-receipt` 4, `acked` 2. 110 cuts landed while a home lease
+  was held; every restart reclaimed its own marker.
+- Observation: helper temp files of killed writes stay in the home. The
+  count only grows (up to 8 in that run). Nothing reads them, so no
+  invariant fails, but nothing removes them either. Not fixed here.
+
+This is process-crash evidence on APFS. It is not NTFS evidence. The
+Windows legs of existing CI do not run the new test file; see Sign-off.
+
+### Evaluation: a QEMU/KVM Windows guest on a GitHub-hosted Linux runner
+
+Question: does such a guest give credible power-loss evidence for S?
+Research date 2026-10-26. QEMU source claims refer to QEMU master
+`d7314928`. Labels: (verified) means read in the cited source; (inferred)
+means reasoning from sources; (unverified) means no source was found. The
+full notes with every source are in the lane notes,
+`lane-605-w5-qemu-research.md`, outside the repository.
+
+Short answer: yes for OS crash. For power loss, only with a storage layer
+under QEMU that drops unflushed writes, only for the storage profile that
+layer models, and only after a FUA probe passes. Killing QEMU alone is not
+power-loss evidence.
+
+#### KVM on hosted runners
+
+- `/dev/kvm` works on GitHub-hosted Linux runners with 2 vCPU or more since
+  2024-04-02, after a documented udev rule step (verified:
+  [changelog](https://github.blog/changelog/2024-04-02-github-actions-hardware-accelerated-android-virtualization-now-available/)).
+  That it works on the public-repo `ubuntu-latest` x64 runner is inferred
+  from that note. arm64 runners report no `/dev/kvm`
+  ([runner-images#14062](https://github.com/actions/runner-images/issues/14062)).
+- Public-repo `ubuntu-latest` x64: 4 vCPU, 16 GB RAM, 14 GB SSD; free space
+  in practice is not documented (verified:
+  [runner docs](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)).
+  Jobs stop at 6 hours (verified:
+  [limits](https://docs.github.com/en/actions/reference/limits)).
+- The current image runs kernel `6.17.0-1022-azure`. `ubuntu-latest` moves
+  to Ubuntu 26.04 in November 2026 (verified: runner-images README).
+
+#### How a cut is simulated, and what survives
+
+- Cache modes (verified: QEMU invocation docs, `block-backend.c`):
+  `writeback` and `none` give the guest a volatile write cache, so Windows
+  sends flushes. `writethrough` and `directsync` add FUA to every write, so
+  no unflushed window exists and a power-cut test proves nothing. `unsafe`
+  ignores flushes. The disk under test must use `cache=none` or `writeback`
+  with a raw image. A qcow2 image keeps metadata in QEMU memory (inferred).
+- SIGKILL of QEMU, QMP `system_reset` and `inject-nmi` keep every write
+  QEMU completed, because the host kernel holds it in the image or the page
+  cache (inferred from the block layer source). This models an OS crash:
+  Windows loses its cache manager state, the disk keeps everything it was
+  given. QMP `quit` and `stop` flush the host side (`bdrv_close_all`,
+  `bdrv_flush_all`; verified), so they must never precede a cut.
+- QEMU has no block driver that drops unflushed writes; blkdebug injects
+  errors and blkverify compares reads (verified: QAPI `block-core.json`).
+  Two layers below QEMU can drop them:
+  - nbdkit cache filter, `cache=writeback`: writes reach the plugin only on
+    a client flush, and the cache file is unlinked at creation, so SIGKILL
+    of nbdkit drops every write since the last flush (verified:
+    nbdkit-cache-filter docs and `filters/cache/blk.c`; the SIGKILL result
+    is inferred). One crash point per cut. This fits the W5 loop as a
+    `StorageLayer`: `cut` kills nbdkit while QEMU is alive, `prepareBoot`
+    restarts it on the same backing file.
+  - dm-log-writes with xfstests `replay-log`: logs every write with flush and
+    FUA marks; replay to any mark (verified:
+    [kernel docs](https://docs.kernel.org/admin-guide/device-mapper/log-writes.html)).
+    Many crash points from one recording, one Windows boot each. The Host
+    journal would have to be cut to the matching mark, which the loop does
+    not do yet. Ubuntu's generic noble config builds it as a module; the
+    azure kernel package is unverified.
+- Both layers model one disk: it honors every flush and loses everything
+  after its last completed flush or FUA. Neither produces reordering within
+  an epoch, an arbitrary subset of unflushed writes, torn sectors or a
+  device that ignores flushes. That matches the owner decision that storage
+  must honor full flush requests.
+- FUA fidelity: QEMU honors FLUSH on virtio-blk, AHCI and NVMe, but AHCI only
+  traces the NCQ FUA bit, NVMe never reads it, and virtio-blk has no FUA
+  (verified: `hw/ide/ahci.c`, `hw/nvme/ctrl.c`, `hw/block/virtio-blk.c`). If
+  NTFS relies on FUA without a later flush, the layer drops writes that a
+  real disk would keep, and the run reports false failures. Whether NTFS
+  does this is unverified. Probe it first: count `process_ncq_command_fua`
+  trace events on AHCI during the helper's write, flush, rename and
+  directory flush.
+- The guest can switch its write cache, and Windows can turn off buffer
+  flushing by policy. Each run must record both states (inferred).
+- NTFS replays `$LogFile` when Windows mounts the volume. ntfs-3g clears the
+  log instead of replaying it. Linux ntfs3 replays with its own code and
+  writes to the device (verified: ntfs-3g man page, kernel ntfs3 docs and
+  `fs/ntfs3/fsntfs.c`). The snapshot therefore runs in the booted guest, as
+  `snapshot.ts` requires.
+
+#### What it proves for S
+
+| Fault in S | Hosted QEMU/KVM guest | Limit |
+|---|---|---|
+| Process crash | Not needed. The Go tests already run on NTFS on windows-latest and windows-2022; the TS harness can run there too (Sign-off). | Process kill keeps the OS cache. |
+| OS crash | Credible: `inject-nmi` or `system_reset` with every issued write kept. | One virtual disk model, one Windows build; not physical firmware. |
+| Power loss | Credible only for the declared profile, with nbdkit or dm-log-writes, after the FUA probe. | No reordering, subsets, torn sectors or lying firmware. A physical device is out of scope. |
+
+Results apply to the guest build (for example Server 2025 26100), local NTFS
+on the emulated disk, and a normal user token inside the guest. Windows 10
+and early Windows 11 builds need their own media; the Windows 10 Enterprise
+evaluation page now redirects to the end-of-support post (verified).
+
+The W2 gap shows up directly: a new home chain on Windows has no directory
+flush, so under a dropping layer I2 may report a missing home, `.byok` or
+ledger for an intent the Host completed. That is expected before W2 scheme B
+and is the measurement W2 needs.
+
+#### Windows media and licensing
+
+- Windows Server 2025 evaluation: 180 days, ISO or English VHD, registration
+  before download, online activation within 10 days, no Microsoft account
+  (verified: [eval center](https://www.microsoft.com/en-us/evalcenter/evaluate-windows-server-2025)).
+  Server 2022 evaluation is still offered on the same terms.
+- Windows 11 Enterprise evaluation (26H2, LTSC 2024): 90 days, ISO only, and
+  a Microsoft account sign-in is required (verified). It also needs TPM 2.0
+  and Secure Boot (swtpm and OVMF).
+- The Windows development VMs are no longer offered (verified: the page
+  redirects).
+- The governing evaluation licence text was not retrieved (unverified).
+  Earlier Microsoft evaluation terms limit use to internal evaluation on one
+  computer and forbid publishing the software for others to copy,
+  transferring it, and disclosing benchmark results without approval. That is
+  a representative text, not the governing one.
+- A public repository's Actions cache is restorable by pull-request runs
+  from forks, and artifacts are readable by anyone who can read the repo
+  (verified: [caching docs](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching)).
+  A prepared Windows image must not go into either. Each job would download
+  from Microsoft, and the registration-gated link may not be scriptable
+  (unverified).
+
+#### Cost of one run
+
+- Minutes on standard runners are free for public repositories; larger
+  runners are billed, 4-core Linux at $0.012 per minute (verified:
+  [billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions),
+  [pricing](https://docs.github.com/en/billing/reference/actions-runner-pricing)).
+- No sourced numbers exist for install, boot or image size (unverified).
+  Per job: download (an ISO is about 6 GB) plus install, or VHD import, plus
+  the workload. Each power-loss cut in the W5 loop costs one Windows boot and
+  one snapshot. A 24-cut run fits a 6-hour job only if one boot-and-check
+  cycle stays under about 10 minutes; measure it.
+- Disk is the binding limit: the image, the OS disk and the layer do not fit
+  14 GB without freeing space (inferred). Put the Agent store on a small
+  second raw disk (for example 1 GB NTFS) behind the layer, and the OS disk
+  on an overlay with `cache=unsafe`, since the OS disk is not under test. The
+  store volume still runs its own NTFS log; the system volume is not covered.
+
+#### Recommendation
+
+1. Treat a hosted QEMU/KVM guest as the W5 environment for OS crash, and for
+   power loss only with the nbdkit `cache=writeback` layer (profile: a disk
+   that honors every flush and loses all writes after its last completed
+   flush). Keep dm-log-writes for later, wider exploration.
+2. Before any W5 workflow, run two probes: the runner probe (`/dev/kvm`,
+   `nproc`, `free -g`, `df -h / /mnt`, `uname -r`, `modprobe dm-log-writes`,
+   the nbdkit and QEMU package versions) and the guest FUA probe. A non-zero
+   FUA count without a later flush blocks the power-loss claim on that disk
+   model.
+3. Use the Windows Server 2025 evaluation VHD as the first guest, with the
+   Agent store on a second disk and the device program started at boot under
+   a standard user. The guest needs Bun, the checkout and the built release
+   helper; `cli.ts device --connect 10.0.2.2:<port>` reaches the Host through
+   QEMU user networking. Add Windows 10 and early Windows 11 later, each with
+   its own media decision.
+4. Run W5 power-loss once on the current code to measure the W2 gap, then
+   again after W2 scheme B. W6 takes only the second result.
+
+If the licence review rules out per-run downloads on hosted runners, the same
+harness runs unchanged on a self-hosted runner or a local Linux box with KVM.
+Only the place where the image lives changes.
+
+#### Approvals the owner must give
+
+- A1. The storage profile for any W5 power-loss claim: a disk that honors
+  every flush and loses all writes after its last completed flush or FUA;
+  reordering, subsets, torn sectors and lying firmware stay out of scope.
+- A2. One `workflow_dispatch`-only probe workflow on `ubuntu-latest` for the
+  runner probe. It installs nothing beyond what the probe reads and
+  downloads no image.
+- A3. System packages for the experiment job: `qemu-system-x86`, `nbdkit`,
+  and `ovmf` with `swtpm` if a Windows 11 guest is used. These are runner
+  packages, not npm dependencies.
+- A4. The guest media: Windows Server 2025 evaluation VHD. The owner, as
+  licensee, accepts the evaluation terms after reading the governing text,
+  approves a download from Microsoft inside each job, and decides whether an
+  ephemeral runner VM per job fits the licence. No image or derived disk goes
+  into a cache or an artifact.
+- A5. What may be published from runs: invariant results only, no timing
+  figures, until the benchmark clause is checked.
+- A6. The CI wiring under Sign-off, so the TS process-crash run executes on
+  NTFS in the existing Windows leg.
+- A7. Whether W5 power-loss runs start before W2 scheme B (to measure the
+  gap) or only after it.
+
+### Sign-off
+
+Not made in this change. Each needs the maintainer's approval.
+
+- `.github/workflows/ci.yml`, job `agent-memory-helper`, step "Run SDK
+  helper, intent and capability contracts": add
+  `src/__tests__/agent-memory-powercut.test.ts`. It then runs on
+  macos-latest, macos-15-intel and windows-latest (NTFS, administrator
+  token). That leg already sets `BYOK_TEST_BUN_BIN` and `BYOK_REQUIRE_BUN=1`
+  on Windows and builds the helper. The test skips without the helper build,
+  so the step should also fail when its process-crash case reports a skip.
+- `scripts/ci/select-impact.mjs`, family `agent-memory-helper`: add
+  `/^packages\/client\/src\/__tests__\/agent-memory-powercut\//`. The
+  current pattern ends in `[^/]*$` and does not match the harness directory.
+- A standard-user Windows run of the TS harness would need a step like the
+  Go standard-user step in `agent-memory-helper-non-darwin`. Not proposed
+  until A6 is decided.
+
+This change's own CI evidence is Linux: build-test runs the new test file
+with the procfs backend. The macOS and Windows legs do not run it until the
+Sign-off items land.

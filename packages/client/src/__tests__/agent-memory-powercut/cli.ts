@@ -49,8 +49,11 @@ interface QemuConfig {
   readonly journal: string;
   readonly report: string;
   readonly bootTimeoutMs?: number;
-  /** A layer that drops unflushed writes, run by the operator after each power cut. */
-  readonly storage?: { readonly id: string; readonly description: string; readonly dropsUnflushedWrites: boolean; readonly afterPowerCutCommand: string };
+  /** The operator's storage layer: shell commands run at each power cut and before the next boot. */
+  readonly storage?: {
+    readonly id: string; readonly description: string; readonly dropsUnflushedWrites: boolean;
+    readonly cutCommand: string; readonly prepareBootCommand: string;
+  };
 }
 
 function storageLayer(config: QemuConfig['storage']): StorageLayer {
@@ -58,7 +61,8 @@ function storageLayer(config: QemuConfig['storage']): StorageLayer {
   const run = promisify(exec);
   return {
     profile: { id: config.id, description: config.description, dropsUnflushedWrites: config.dropsUnflushedWrites },
-    afterPowerCut: async () => { await run(config.afterPowerCutCommand); },
+    cut: async () => { await run(config.cutCommand); },
+    prepareBoot: async () => { await run(config.prepareBootCommand); },
   };
 }
 

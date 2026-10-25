@@ -53,6 +53,9 @@ class HostSession {
     let ready!: () => void;
     this.snapshot = new Promise((resolve) => { snapshot = resolve; });
     this.ready = new Promise((resolve) => { ready = resolve; });
+    // A cut can land while the Host writes. That message is lost, as at a
+    // real power cut; the Host acts on the end of the device's input instead.
+    run.link.output.on('error', () => {});
     this.closed = (async () => {
       for await (const message of readMessages<DeviceMessage>(run.link.input)) {
         switch (message.type) {
