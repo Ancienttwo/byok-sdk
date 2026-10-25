@@ -409,6 +409,18 @@
   routine that is not completed and whose current or pending version is
   `execution`. L now always sets `hostJobExecution: 'fail'` and
   `executionRoutines: 'refuse'`.
+- **Feature (examples)** — the hosted collaboration example runs the owner
+  switch of a device between L and H (#957, plan §4.1):
+  `beginSwitch`, `drainDevice`, `commitSwitch` and `abortSwitch`, each on
+  the expected mode revision, with the new `device_binding.switching`
+  column. During the freeze every H write that can create execution for
+  the device throws `DeviceSwitchingError` (`code: 'device_switching'`, as
+  L), the sync holds its Bots' Turns, and a commit away from H waits until
+  the drain finds no open work. After a commit to L the device refuses
+  with `mode`, and its Agent home operations back off. Switch steps that
+  the binding refuses throw `DeviceSwitchRefusedError`. The switch moves
+  no state; the export and import between H and an L ledger is a
+  follow-up.
 - **Feature (examples)** — the Worker H Host runs its passes from a clock
   (#794 D3, H4): one Durable Object for the deployment whose alarm re-arms
   every `H_CLOCK_MS` (10 s by default, 15 s at most) and then runs one pass, so
