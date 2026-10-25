@@ -113,13 +113,14 @@ const K8_DELIVERY_EXPORTS = Object.freeze({
   './delivery-routing': './src/delivery-routing.ts',
   './delivery-vectors': './src/delivery-vectors.test-support.ts',
 });
+/** The other workspace manifests, each with its dir. */
 function otherWorkspaceManifests(cwd, self) {
   const manifests = [];
   for (const prefix of ['packages', 'examples']) {
     if (!existsSync(resolve(cwd, prefix))) continue;
     for (const name of readdirSync(resolve(cwd, prefix))) {
-      const file = resolve(cwd, prefix, name, 'package.json');
-      if (`${prefix}/${name}` !== self && existsSync(file)) manifests.push(JSON.parse(readFileSync(file, 'utf8')));
+      const dir = `${prefix}/${name}`, file = resolve(cwd, dir, 'package.json');
+      if (dir !== self && existsSync(file)) manifests.push({ dir, manifest: JSON.parse(readFileSync(file, 'utf8')) });
     }
   }
   return manifests;
@@ -132,13 +133,15 @@ function verifyHostedManifest(manifest, cwd, example) {
     throw new Error('Reviewed CI mapping required: the hosted example manifest has an unreviewed shape');
   }
   const others = otherWorkspaceManifests(cwd, example.dir);
+  // A third-party spec must come from a workspace outside the private hosted examples, so they cannot vouch for each other.
+  const declaring = others.filter(other => !PRIVATE_HOSTED.some(hosted => hosted.dir === other.dir));
   for (const field of DEPENDENCY_FIELDS) {
     if (manifest[field] === undefined) continue;
     if (!plain(manifest[field])) throw new Error('Reviewed CI mapping required: the hosted example manifest has an unreviewed shape');
     for (const [name, spec] of Object.entries(manifest[field])) {
       const reused = name.startsWith('@byok-sdk/')
-        ? spec === 'workspace:*' && others.some(other => other.name === name)
-        : others.some(other => DEPENDENCY_FIELDS.some(declared => other[declared]?.[name] === spec));
+        ? spec === 'workspace:*' && others.some(other => other.manifest.name === name)
+        : declaring.some(other => DEPENDENCY_FIELDS.some(declared => other.manifest[declared]?.[name] === spec));
       if (!reused) throw new Error(`Reviewed CI mapping required: the hosted example may only reuse a declared dependency spec (${name})`);
     }
   }

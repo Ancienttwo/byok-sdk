@@ -488,6 +488,13 @@ test('#794 D3: the Worker example manifest and lock rows are admitted by the sam
     f.write(path, candidate);
     assert.throws(() => selectImpact([path], f), /Reviewed CI mapping required/, reason);
   }
+  // The H example cannot vouch for a spec that no other workspace declares, nor the Worker example for H.
+  f.write('examples/hosted-bot-collaboration/package.json', { name: '@byok-sdk/example-hosted-bot-collaboration', version: '0.0.1', private: true,
+    type: 'module', scripts: manifest.scripts, dependencies: { x: '9.9.9' } });
+  f.write(path, { ...manifest, dependencies: { x: '9.9.9' } });
+  assert.throws(() => selectImpact([path], f), /may only reuse a declared dependency spec \(x\)/, 'a spec that only the H example declares');
+  assert.throws(() => selectImpact(['examples/hosted-bot-collaboration/package.json'], f), /may only reuse a declared dependency spec \(x\)/,
+    'a spec that only the Worker example declares');
   f.write(path, manifest);
   f.lock.workspaces[dir].dependencies = { x: '1.0.0' }; f.write('bun.lock', f.lock);
   assert.throws(() => selectImpact(['bun.lock'], f), /lock rows differ/, 'a lock entry that differs from the manifest');
