@@ -16,6 +16,7 @@ import {
   InMemoryE2eeMemberStore,
   type BlobContentProxy,
   type E2eeMemberStore,
+  type ProofReceiptRetentionAuthority,
   type CloudCrypto,
   type CloudStores,
   type InboundDedupStore,
@@ -88,6 +89,8 @@ export interface FacadeStoreComposition {
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
   readonly e2eeMember: E2eeMemberStore;
+  /** SQLite only: the in-memory E2EE store keeps every used `requestId` for the life of the process. */
+  readonly proofReceiptAuthority?: ProofReceiptRetentionAuthority;
   readonly clock: Clock;
   readonly crypto: CloudCrypto;
   readonly counters: FacadeCounters;
@@ -172,6 +175,7 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
     },
     blobContentProxy,
     e2eeMember: sqlite?.e2eeMember ?? new InMemoryE2eeMemberStore(stores.receipts),
+    ...(sqlite === undefined ? {} : { proofReceiptAuthority: sqlite.proofReceiptAuthority }),
     clock,
     crypto,
     counters,

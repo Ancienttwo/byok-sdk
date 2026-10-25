@@ -42,6 +42,9 @@ createByokCloud({
   // core, cloud: stores, crypto, tokenSigner, clock, capabilities, ...
   truthCommitter,
   truthObjectDownloads: stores.blobs,
+  // From '@byok-sdk/cloud-dataplane/runtime'. Without it, maintenance keeps
+  // every used device-proof requestId in proof_request_receipt.
+  proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) },
 });
 ```
 

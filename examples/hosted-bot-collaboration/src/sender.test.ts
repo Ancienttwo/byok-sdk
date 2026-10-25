@@ -57,6 +57,19 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       await expect(insert('projection', null, 0, null)).rejects.toThrow('check constraint');
       await expect(insert('delivery', null, 0, null)).resolves.toBeDefined();
     });
+
+    it('lets a card or Host job row count tries, holds a home row to its entity, and refuses an unknown kind (#793 §6)', async () => {
+      const scope = await scoped();
+      let ordinal = 0;
+      const insert = (kind: string, tries: number, error: string | null) => query(`INSERT INTO ${table('outbox')}
+        (scope, key, ordinal, kind, tries, last_error) VALUES ($1, $2, $3, $4, $5, $6)`, [storedKey(scope), storedKey(randomUUID()), ordinal++, kind, tries, error]);
+      await expect(insert('card', 1, 'connector down')).resolves.toBeDefined();
+      await expect(insert('host_job', 2, 'handler threw')).resolves.toBeDefined();
+      await expect(insert('home', 0, null)).resolves.toBeDefined();
+      await expect(insert('home', 1, null)).rejects.toThrow('check constraint');
+      await expect(insert('home', 0, 'boom')).rejects.toThrow('check constraint');
+      await expect(insert('other', 0, null)).rejects.toThrow('check constraint');
+    });
   });
 
   it('refuses a backoff, readback wait or batch that is not a positive integer', () => {

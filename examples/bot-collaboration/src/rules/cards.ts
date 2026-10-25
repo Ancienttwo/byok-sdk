@@ -1,5 +1,5 @@
 import { hash } from '@byok-sdk/example-host-execution-core/canonical';
-import { addTurn, json, type Card, type TurnsState } from './turn';
+import { addTurn, json, type Card, type Json, type TurnsState } from './turn';
 import type { Publish } from './delegation';
 
 // The confirmation card steps of a Host sync (#793 S5). L runs them in its sync; H runs them in each sync round.
@@ -12,6 +12,22 @@ export function expireCard(card: Card, now: number): void {
 export function expireCards(state: { readonly cards: Readonly<Record<string, Card>> }, now: number): void {
   for (const card of Object.values(state.cards)) expireCard(card, now);
 }
+/** A confirmed card waits for its one connector call until it has a result or an error. */
+export function cardCallDue(card: Card): boolean {
+  return card.state === 'confirmed' && card.result === undefined && card.error === undefined;
+}
+/**
+ * Writes the outcome of a card's connector call: the result, or the error cut to 1024 characters, and the conclusion. A
+ * result that is not JSON is an error. The next sync's `reportCardDecisions` reports the card.
+ */
+export function settleCardCall(card: Card, outcome: { result: unknown } | { error: unknown }): void {
+  let result: Json | undefined, error: string | undefined;
+  if ('error' in outcome) error = errorText(outcome.error);
+  else try { result = json(outcome.result); } catch (cause) { error = errorText(cause); }
+  if (error !== undefined) card.error = error; else card.result = result!;
+  card.conclusion = error === undefined ? 'succeeded' : 'failed';
+}
+const errorText = (cause: unknown): string => String(cause instanceof Error ? cause.message : cause).slice(0, 1024);
 /**
  * Runs after the Turn steps. A decided card is projected once as `card:<id>:<state>`; a confirmed card waits for its
  * result or error. A confirmed or rejected card then gets its `action_result` Turn under the root of the Turn that made it.

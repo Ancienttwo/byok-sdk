@@ -46,6 +46,7 @@ const ONLINE_EXPORTS = [
   'PostgresInboundDedupStore',
   'PostgresNonceStore',
   'PostgresPairingCodeStore',
+  'PostgresProofReceiptRetentionAuthority',
   'PostgresProofRequestReceiptStore',
   'PostgresRequestReceiptStore',
   'PostgresTaskAttemptStore',

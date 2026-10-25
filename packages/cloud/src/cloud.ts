@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import { readTaskAgentMessageDraft, type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft';
-import { runMaintenanceSteps, type MaintenanceInput, type MaintenanceReport } from './maintenance';
+import { resolveProofReceiptRetention, runMaintenanceSteps, type MaintenanceInput, type MaintenanceReport, type ProofReceiptRetentionOptions } from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { readTaskAgentMessage, type TaskAgentMessage } from './task-agent-message';
 import {
@@ -305,6 +305,12 @@ function sameOfferEnvelope(expected: Envelope, actual: Envelope): boolean {
 
 export interface ByokCloudOptions {
   readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
+  /**
+   * Prunes used device-proof request ids in maintenance. Absent, the
+   * `proofReceipts` step reports `not-configured` and every used `requestId`
+   * stays single-use for as long as its receipt is kept.
+   */
+  readonly proofReceiptRetention?: ProofReceiptRetentionOptions;
   readonly mailboxWake: MailboxWake;
   readonly core: CoreStores;
   readonly cloud: CloudStores;
@@ -1028,6 +1034,7 @@ export interface ByokCloud {
 
 export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   if (options.mailboxWake === undefined) throw new TypeError('mailboxWake is required');
+  const proofReceiptRetention = options.proofReceiptRetention === undefined ? undefined : resolveProofReceiptRetention(options.proofReceiptRetention);
   const declaration = parseDeclaration(options.capabilities);
   assertNoOverDeclaration(
     declaration,
@@ -2389,7 +2396,9 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
   return {
     async runMaintenance(input) {
-      const report = await runMaintenanceSteps({ core: options.core, cloud: options.cloud, clock: options.clock, ...(options.deviceAssertionReplay === undefined ? {} : { deviceAssertionReplay: options.deviceAssertionReplay }) }, input);
+      const report = await runMaintenanceSteps({ core: options.core, cloud: options.cloud, clock: options.clock,
+        ...(options.deviceAssertionReplay === undefined ? {} : { deviceAssertionReplay: options.deviceAssertionReplay }),
+        ...(proofReceiptRetention === undefined ? {} : { proofReceiptRetention }) }, input);
       try { options.observer?.onMaintenance?.(report); } catch { /* Observers cannot change committed maintenance. */ }
       return report;
     },
