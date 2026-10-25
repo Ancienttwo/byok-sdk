@@ -279,6 +279,57 @@ directories, `HERMES_HOME/skills` and configured skill directories, which the
 SDK profile does not set. No user-level instruction source reaches the
 session, so Hermes needs no option.
 
+### Agent task session records
+
+An Agent task runs in the Agent home, but a runtime may save the session
+record elsewhere. Deleting the Agent home does not remove such a record. The
+SDK does not delete runtime records itself: their paths follow each runtime's
+own rules. Only Claude has an SDK option; Codex, Grok and ordinary Pi have
+none in this release.
+
+| Runtime | Where an Agent task's session record goes | Can the SDK turn it off? |
+| --- | --- | --- |
+| Claude | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded cwd>/<session>.jsonl`, outside the Agent home | Yes: `agentSessionPersistence: 'disabled'`, below |
+| Codex | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`. The adapter does not set `CODEX_HOME`, so normally under `~/.codex` | No. The 0.164.0 app-server schema has `ephemeral` on `thread/start` (a thread that "should not be materialized on disk"), and `codex exec --help` lists `--ephemeral`. The [launch](../packages/client/vendor/oar/c88a514/runtimes/codex/open.ts) does not send it. Inferred: 0.160.0 has the field, and an ephemeral thread leaves the other `CODEX_HOME` files alone |
+| Grok | `$GROK_HOME/sessions/<encoded cwd>/<session id>/`, and the `sessions/session_search.sqlite` index. The adapter does not set `GROK_HOME`, so normally under `~/.grok` | No. `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta` keys of its agent-mode guide have none. From the 1.0.62 guide and local folders; not probed with an SDK session or on 1.0.52 |
+| Pi, ordinary, Pi login | The settings `sessionDir`, else `<agent dir>/sessions/--<encoded cwd>--/<time>_<id>.jsonl`. The agent directory is `$PI_CODING_AGENT_DIR`, else `~/.pi/agent` | No. Pi 1.4.0 has `SessionManager.inMemory` and the CLI flag `--no-session` ("Don't save session (ephemeral)"). The SDK [host](../packages/client/src/bin/pi-session-runtime.ts) opens a saved session and accepts no such flag |
+| Pi, ordinary, Keys profile | `DaemonConfig.piByokLauncher.sessionDir/<time>_<id>.jsonl`, one folder for every execution, which the Host chooses | No, as above |
+| Pi, prepared | None: the session is in memory | Already off |
+| Pi, durable | `durable-<taskId>.sqlite` replica in the daemon store, disjoint from the Agent home, removed after its retention TTL | No: the lane recovers from the replica |
+| Hermes | `state.db` and `sessions/` in the execution's profile, `<home>/profiles/byok-<id>/`, removed when the execution closes, or by the 15-minute sweep after a crash | Not needed |
+
+#### `agentSessionPersistence`
+
+`ClaudeAdapterOptions.agentSessionPersistence: 'disabled'` starts an Agent
+task (`task.offer_for_agent`) with `--no-session-persistence`. Claude 2.1.302
+describes the flag as "sessions will not be saved to disk and cannot be
+resumed", and it works only with `--print`, which the adapter always uses.
+The adapter starts one Claude process per task, so the flag also covers every
+follow-up of the task. The default, `'enabled'`, sets nothing, and other tasks
+are unchanged.
+
+Such a session cannot be resumed. An Agent task that carries a
+`sessionRef` (a resume, an Agent handoff or a memory-reader resume) fails
+before Claude starts, writes no file and runs no fresh session in its place.
+The failure is a non-retryable `authority` failure with the reason `claude
+Agent session persistence is disabled, so the task cannot resume a session`.
+The daemon still records the session handoff of such a task, so a later offer
+with that `sessionRef` reaches the adapter and fails there. The descriptor
+keeps `resume: true`, because ordinary tasks can still resume.
+
+Auto memory also writes under `projects/<encoded cwd>/memory/`. This option
+does not turn it off; `agentUserContext: 'excluded'` does, and the two
+options apply together. Claude also keeps other directories in the config
+directory, such as `file-history/`, `shell-snapshots/`, `session-env/` and
+`debug/`. Whether `--no-session-persistence` keeps those empty was not probed:
+it needs a paid `claude -p` run. Fixture tests prove the launch flag, the
+follow-up on the same process and the refusal; they do not prove what an
+installed Claude writes.
+
+As with `agentUserContext`, `createDaemon` builds the Claude adapter without
+options. A Host sets this option on its own `ClaudeAdapter` through
+`createDaemonWithAdapters`.
+
 ### Evidence and remaining qualification
 
 Existing offline evidence includes `environment.test.ts` (environment inheritance),

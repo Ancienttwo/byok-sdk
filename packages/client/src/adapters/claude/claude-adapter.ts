@@ -266,8 +266,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
     try {
       throwIfCancelled();
       const persistSession = startInput.manifest.agentRef === undefined || this.options.agentSessionPersistence !== 'disabled';
-      // Claude saved no transcript to resume. Refused before any write, so
-      // the task never runs as a silent fresh session.
+      // With persistence off, Claude saved no transcript to resume. Refused
+      // before any write, so the task never runs as a silent fresh session.
       if (!persistSession && startInput.manifest.sessionRef !== undefined) {
         throw new RuntimeExecutionFailure({
           phase: 'start', category: 'authority', retry: 'non-retryable',

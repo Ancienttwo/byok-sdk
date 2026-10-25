@@ -9,6 +9,19 @@
   now stops the rotation with `key_package_missing`, and the old key stays.
   Before, the rotation finished and dropped that epoch. The rotation still
   has no production caller.
+- **Added (client)** — `ClaudeAdapterOptions.agentSessionPersistence`
+  (#936). With `'disabled'`, an Agent task (`task.offer_for_agent`) starts
+  Claude with `--no-session-persistence`, so Claude does not save the session
+  transcript under `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/`, outside the
+  Agent home. Such a session cannot be resumed: an Agent task that carries a
+  `sessionRef` (a resume, an Agent handoff or a memory-reader resume) fails
+  before Claude starts, as a non-retryable `authority` failure with the
+  reason `claude Agent session persistence is disabled, so the task cannot
+  resume a session`. Follow-ups in the same task still work. Other tasks and
+  the default, `'enabled'`, are unchanged. Auto memory, which also writes
+  under `projects/`, stays on unless `agentUserContext: 'excluded'` is set
+  too. `docs/adapter-capabilities.md` lists where each adapter keeps Agent
+  task session records.
 
 ## 0.30.1 — 2026-10-24 (published)
 
