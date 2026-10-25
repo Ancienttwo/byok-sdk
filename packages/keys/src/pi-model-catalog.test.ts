@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyPiCatalogModel, piModelConfigFromPinnedCatalog } from './pi-model-catalog';
+import { PI_MODEL_CATALOG } from './pi-model-catalog.generated';
 import { assertPiPreparedProviderProfile } from './pi-provider-launcher-core';
 import { buildPiProviderProjection } from './pi-provider-projection';
 import { MODEL_PROVIDER_VENDORS } from './provider-catalog';
@@ -157,6 +158,19 @@ describe('pinned entries that declare sendSessionAffinityHeaders or allowEmptySi
     expect(provider.api).toBe('anthropic-messages');
     expect(provider.models[0].compat).toEqual({ allowEmptySignature: true });
     expect(() => assertPiPreparedProviderProfile(profile)).toThrow(/anthropic adapter/);
+  });
+
+  it('keeps each OpenRouter anthropic/* completions entry unrepresentable unless it declares compat.cacheControlFormat', () => {
+    const models = PI_MODEL_CATALOG.openrouter?.['openai-completions'] ?? {};
+    const ids = Object.keys(models).filter((id) => id.startsWith('anthropic/'));
+    expect(ids.length).toBeGreaterThan(0);
+    const undeclared = ids.filter((id) => {
+      const entry = models[id]!;
+      return 'config' in entry && !Object.hasOwn(entry.config.compat, 'cacheControlFormat');
+    });
+    expect(undeclared, 'pi-ai detects compat.cacheControlFormat only for provider id "openrouter" (pi-ai 1.4.0 '
+      + 'api/openai-completions.js:1269). The byok-sdk-<ref> projected provider never matches it, so such an entry '
+      + 'must declare cacheControlFormat explicitly or stay unrepresentable').toEqual([]);
   });
 });
 
