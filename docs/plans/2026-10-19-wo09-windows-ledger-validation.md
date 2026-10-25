@@ -483,6 +483,35 @@ is not supported." (exit 128), and both were gone at the first check, about
 the device ends its helpers. The other 9 cuts, every Host point among them,
 named only `bun.exe`.
 
+### Lease marker left empty by a process kill (2026-10-26)
+
+Found while reproducing the macos-latest hang. It is a different failure,
+not that hang. Under vitest with E-cores only (`taskpolicy -b`), the
+process-crash case failed once in 19 runs:
+
+- the cut was a delay cut (235 ms);
+- I6 was violated: recovery got `local_io_failed`, and the intent stayed open.
+
+The same failure repeated in 5 of 6 longer runs (40 cuts, seeds 11–16,
+Bun 1.4.2) with a temporary probe that logged each error the processor
+swallows. That probe is not part of this change. In each failure the
+error was `AgentHomeLeaseCorruptError` from `parseLeaseMarker`, and the
+home's `.byok/agent-home.lease` was 0 bytes.
+
+Cause, from `AgentHomeLeaseManager.acquire` in `agent-home.ts`: the
+marker is created with `fs.open(lockPath, 'wx')`, then written with
+`writeFile`, then `sync`. A kill between the create and the write leaves
+an empty marker. On restart, `openLeaseMarker` parses it, and that fails.
+The exact-owner reclaim never runs, so every later acquire of that home
+fails. After one process crash in that window, the home can no longer be
+written. The 120-cut run above did not hit this window, because its CPU
+was not throttled.
+
+Not fixed here. `agent-home.ts` is product code outside this lane, and how
+a restart should treat an empty or unparseable marker is an owner decision.
+The process-crash case keeps its assertion. Until this is decided, it fails
+whenever a cut lands in that window.
+
 ### Evaluation: a QEMU/KVM Windows guest on a GitHub-hosted Linux runner
 
 Question: does such a guest give credible power-loss evidence for S?
@@ -693,21 +722,31 @@ Only the place where the image lives changes.
 
 ### Sign-off
 
-Made in this change under A6. The maintainer signs both at review.
+The first two items are made under A6. The third was asked for after the
+macos-latest leg hung. The maintainer signs all three at review.
 
-- `.github/workflows/ci.yml`, job `agent-memory-helper`, step "Run SDK
-  helper, intent and capability contracts": adds
-  `src/__tests__/agent-memory-powercut.test.ts`. It now runs on
-  macos-latest, macos-15-intel and windows-latest (NTFS, administrator
-  token). That leg sets `BYOK_TEST_BUN_BIN` and `BYOK_REQUIRE_BUN=1` on
-  Windows and builds the helper. On macOS a missing Bun or helper build
-  would make the process-crash case skip; the job log must be read for a
-  pass, as for the other listed files.
+- `.github/workflows/ci.yml`, job `agent-memory-helper`: a new step "Run
+  the W5 process-crash power-cut harness" runs
+  `src/__tests__/agent-memory-powercut.test.ts` alone, after "Run SDK
+  helper, intent and capability contracts". It runs on macos-latest,
+  macos-15-intel and windows-latest (NTFS, administrator token). That leg
+  sets `BYOK_TEST_BUN_BIN` and `BYOK_REQUIRE_BUN=1` on Windows and builds
+  the helper. On macOS a missing Bun or helper build would make the
+  process-crash case skip; the job log must be read for a pass, as for the
+  other helper test files.
 - `scripts/ci/select-impact.mjs`, family `agent-memory-helper`: adds
   `/^packages\/client\/src\/__tests__\/agent-memory-powercut\//`. The
   older pattern ends in `[^/]*$` and did not match the harness directory.
   `select-impact.test.mjs` adds a case for one path in each place; it fails
   without the new pattern.
+- `.github/workflows/ci.yml`, job `agent-memory-helper`, hang evidence:
+  the job gets `timeout-minutes: 30`, the contracts step 10 and the W5 step
+  5. The W5 step runs the verbose and hanging-process reporters. On macOS
+  it samples the vitest, bun and helper processes every 15 s into
+  `$RUNNER_TEMP/w5-processes.log`. A new `if: always()` step, "Show
+  processes during and after the W5 harness", prints that log and the
+  whole process table. Before this, the job had no limit, and a hung step
+  ran until it was cancelled or the runner was lost, with no log.
 - Not proposed: a standard-user Windows run of the TS harness, which would
   need a step like the Go standard-user step in
   `agent-memory-helper-non-darwin`.
