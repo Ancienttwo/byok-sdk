@@ -288,7 +288,7 @@ list the full upgrade steps.
    journal recovery path. A normal stop (SIGINT, SIGTERM or `daemon.stop()`)
    does not test it. It ends the task before the process exits, with
    `task.fail` reason `daemon shutting down: operator` and `retryable: true`
-   (`packages/client/src/daemon/task-runner/lifecycle.ts`), so the restart
+   (`packages/client/src/daemon/task-runner.ts`), so the restart
    has no task to recover. A hosted Host also runs the real tenant flow in
    `deploy/runbooks/hosted-operations.md`.
 7. **Know the rollback.** Rolling back means pinning all nine packages to
