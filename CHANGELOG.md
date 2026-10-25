@@ -127,6 +127,10 @@
   `kem_epoch_stale`. Upgrade the Host first, then daemons and web clients: a
   0.30.1 Host refuses v2 puts. A Host rolled back to 0.30.1 fails closed with
   `e2ee_member_state_unreadable` on any read that meets a stored v2 package.
+  Migration 0029, and the first 0.30.2 open of a SQLite store, refuse a
+  member chain that already holds a `rotate` entry. A Host that finds one
+  stays on 0.30.1 and opens an issue, because the SDK has no automatic way to
+  set those floors (`docs/security.md`).
 - **Breaking (protocol)** — `E2eeScopeKeyPackage` is version 1 or 2, and
   `E2eeScopeKeyPackageV2Schema` is the put shape. `E2eeMemberChainEntrySchema`
   refuses a `rotate` whose subject is not exactly
