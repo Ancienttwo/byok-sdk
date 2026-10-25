@@ -10,9 +10,9 @@ import { syncTurn, type Command } from '@byok-sdk/example-bot-collaboration/rule
 import { cardVectors, seedCollaboration, SYNC_OPTIONS, syncVectors, type CardSubject, type SyncIntentRecord, type SyncSubject } from '@byok-sdk/example-bot-collaboration/test-support';
 import { freezeIntent, type IntentFreeze } from './intents';
 import { storedKey } from './layout';
-import { callbackPorts, vectorPorts } from './memory-subject.test-support';
+import { VECTOR_ROUTINES, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
-import { inSchema, lockScope, type CommitPortsFactory, type PortsFactory } from './store';
+import { inSchema, lockScope, type OutcomeRoutinePorts } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -26,7 +26,7 @@ async function hosted(): Promise<SyncSubject> {
   await store().bindDevice(scope, 'device');
   return {
     scope,
-    commit: request => store().commit(scope, request, vectorPorts),
+    commit: request => store().commit(scope, request, vectorClock),
     stored: () => store().dump(scope),
     state: () => store().read(scope),
     change: edit => store().seed(scope, edit),
@@ -183,9 +183,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
   });
 
   describe('cancel_turn of a Turn with a frozen intent runs the K4 cancel in its commit, as L does (#793 D2f-4)', () => {
-    const cancel = (h: SyncSubject, turnId: string, ports?: CommitPortsFactory) => ports
-      ? store().commit(h.scope, { scope: h.scope, commandId: `cancel-${turnId}`, command: { kind: 'cancel_turn', turnId } }, ports)
-      : h.commit({ scope: h.scope, commandId: `cancel-${turnId}`, command: { kind: 'cancel_turn', turnId } });
+    const cancel = (h: SyncSubject, turnId: string) => h.commit({ scope: h.scope, commandId: `cancel-${turnId}`, command: { kind: 'cancel_turn', turnId } });
     async function frozen() {
       const h = await hosted();
       await h.change(queueTurns);
@@ -209,15 +207,6 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
         [storedKey(h.scope), storedKey('q1')]);
       await cancel(h, 'q1');
       expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: null });
-      expect((await h.state()).turns.q1).toMatchObject({ status: 'processing' });
-    });
-
-    it('reads the intent facts from the store, and ignores intent facts in the caller ports', async () => {
-      const h = await frozen();
-      const stubbed = ((state, publish) => ({ ...vectorPorts(state, publish), intents: { intent: () => undefined } })) as CommitPortsFactory;
-      await cancel(h, 'q1', stubbed);
-      // With the stub, K8 would conclude the Turn itself and leave its intent running.
-      expect(await intentRow(h.scope, 'q1')).toMatchObject({ cancel_reason: 'cancelled', conclusion: 'cancelled' });
       expect((await h.state()).turns.q1).toMatchObject({ status: 'processing' });
     });
   });
@@ -274,12 +263,9 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
         chain('running')(state);
         seedCollaboration(state);
       });
-      const stubbed = ((state, publish) => {
-        const ports = callbackPorts(state, publish);
-        return { ...ports, outcome: { ...ports.outcome!, committed: { intent: () => undefined } } };
-      }) as PortsFactory;
+      const stubbed = { ...VECTOR_ROUTINES, committed: { intent: () => undefined } } as OutcomeRoutinePorts;
       await store().commitIn(h.scope, { scope: h.scope, commandId: 'task-t1', command: { kind: 'outcome', turnId: 't1', taskId: 'task-t1',
-        document: { cancel_delegation: [{ delegationId: 'd1' }] } } }, stubbed);
+        document: { cancel_delegation: [{ delegationId: 'd1' }] } } }, vectorClock, stubbed);
       // With the stub, K8 would end the chain Turn itself and resolve the delegation while its intent kept running.
       const state = await h.state();
       expect(state.delegations.d1).toMatchObject({ status: 'running', cancel: { targetTurnId: 'q1', delivered: false, reason: 'main_bot_cancelled' } });

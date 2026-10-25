@@ -1226,11 +1226,15 @@ refreshed hello adds it, and removes it again when the member is lost.
   `daemon_interrupted` stays as it is, and a result-reply failure becomes
   `task.fail` with `reason` `sealed_key_unavailable`. The replay runs before
   the member resumes, and the freshness points live in memory, so the Host
-  never learns the real failure reason. A terminal that the same process
+  never learns the real failure reason. The replacement of a refused terminal
+  (below) waits for the member instead. A terminal that the same process
   still holds for commit after a failed stop seals with the next run's
   member, once that run's start and member resume are over, and only when
   that run has the same tenant, device and member as the run that owned the
-  task; otherwise it is in the closed form.
+  task; otherwise it is in the closed form, and a terminal that already is a
+  closed plaintext form keeps its fields. The owning run's member is the one it
+  bound when the member became ready, so a terminal made after that member
+  retired at shutdown still seals with the next run's same member.
 - A key is fetched on its first miss, so a notice that came before the
   advertisement needs no redelivery.
 
@@ -1387,13 +1391,23 @@ expire, so the cloud refuses either one with `ciphertextRef`
 (`sealed_payload_unsupported`). The device uploads a ciphertext blob first.
 If the device sends the terminal more than one day after the upload, orphan
 GC may have deleted the blob, and the Host then refuses the terminal.
-When the Host refuses a terminal sent by reference for good, because it no
-longer declares `sealed-output-ciphertext-ref` or orphan GC has deleted the
-blob (the device was offline for more than 24 hours), the daemon settles that
-terminal once and sends no other terminal, so the Host receives none for the
-task. This is a known limitation of 0.30.1. Replacing the queued terminal with
-a closed form needs a journal replace operation, which is deferred to the next
-release.
+When the Host refuses a terminal sent by `ciphertextRef` (a `rejected`
+outcome, for example because it no longer declares
+`sealed-output-ciphertext-ref`, or because orphan GC has deleted the blob after
+the device was offline for more than 24 hours), the daemon replaces that
+terminal once and sends the replacement (owner batch §77b). The Host records
+nothing for a refused terminal, so it receives exactly one terminal for the
+task. The replacement is the sealed `task.fail` with `reason`
+`terminal_result_unsealable` when the member that sealed the refused terminal
+is ready in this run. Otherwise it is the closed plaintext form, `task.fail`
+with `reason` `sealed_key_unavailable`. The journal replaces the refused
+terminal in place, keeps its hash as a transition of the task, and ignores a
+late acknowledgement of the refused bytes. A refusal journaled before a restart
+is replaced after the start and the member resume. A daemon without a journal
+sends the same replacement. The replacement is inline, so a refused
+replacement settles once, and a refused inline terminal is not replaced. No
+answer, or a non-2xx answer, of `POST /byok/messages` is not a refusal: the
+daemon sends the same bytes again.
 
 The cloud advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`,
 because it accepts all seven sealed output types. It also advertises

@@ -2250,6 +2250,8 @@ export function buildDaemonWithAdapters(
     let sealedTasks: SealedTasks | undefined;
     /** This run's verified member, bound when it is first ready; a loss leaves it bound and keyless. */
     let sealedMember: DeviceMemberKeyring | undefined;
+    /** The (tenant, device, member) of {@link sealedMember}, taken when it is bound, so retiring the member at shutdown keeps it. */
+    let ownSealIdentity: string | undefined;
     const recordRecoveryFailure = async (task: import('./journal/journal').RecoverableTask, reason: string, interrupted = false) => {
       const offer = decodeEnvelope(task.envelopeBytes);
       const { agentRef } = offer.payload as { agentRef?: AgentRef };
@@ -2467,7 +2469,11 @@ export function buildDaemonWithAdapters(
     sealedTasks = opened;
     latestSealedTasks = opened;
     sealedOutputSettled = () => opened.settled();
-    activateSealedTasks = (keyring) => { sealedMember ??= keyring; };
+    activateSealedTasks = (keyring) => {
+      if (sealedMember !== undefined) return;
+      sealedMember = keyring;
+      ownSealIdentity = sealIdentityOf(record, keyring);
+    };
     // Only the next run receives this run's points, so a run with no member leaves none.
     retireSealedMember = () => { carriedFreshness = sealedMember?.retire(); };
     latestSealIdentity = () => sealIdentityOf(record, sealedMember);
@@ -2482,8 +2488,9 @@ export function buildDaemonWithAdapters(
     deploymentDeclaration = undefined;
     helloCapabilities = capabilities;
 
-    const commitTerminal = (taskId: string, terminal: Envelope | (() => Promise<Envelope | undefined>)): void => {
-      const ownerIdentity = sealIdentityOf(record, sealedMember);
+    /** With `replaces`, the terminal replaces the refused terminal of that hash (#654 §77b). */
+    const commitTerminal = (taskId: string, terminal: Envelope | (() => Promise<Envelope | undefined>), replaces?: string): void => {
+      const ownerIdentity = ownSealIdentity;
       const plainBytes = typeof terminal === 'function' ? undefined : encodeEnvelope(terminal);
       // A sealed terminal is sealed once and its bytes are journaled; a retry
       // of the commit reuses them and never seals or uploads again (§9.2).
@@ -2505,8 +2512,9 @@ export function buildDaemonWithAdapters(
         } else envelope = terminal;
         const bytes = plainBytes ?? encodeEnvelope(envelope);
         try {
-          await activeJournal.recordTerminal({ taskId, terminalType: terminalKindOf(envelope.type)!, bytes,
-            payloadHash: journalHash(bytes), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
+          const durableRecord = { taskId, terminalType: terminalKindOf(envelope.type)!, bytes,
+            payloadHash: journalHash(bytes), truthState: 'pending' as const, attempt: 1, recordedAt: new Date().toISOString() };
+          await (replaces === undefined ? activeJournal.recordTerminal(durableRecord) : activeJournal.replaceRefusedTerminal(taskId, replaces, durableRecord));
           // Read the first immutable winner, not an attempted replacement candidate.
           const durableTerminal = (await activeJournal.listPendingTerminals(journalIdentity)).find((row) => row.taskId === taskId);
           if (!durableTerminal || durableTerminal.truthState !== 'pending') return;
@@ -2554,19 +2562,19 @@ export function buildDaemonWithAdapters(
      * queue can hold it past a failed stop. Then it seals through the run it
      * runs in, after that run's start and member resume: a throw here is a
      * retry. A run whose resume found no member, or whose member is lost,
-     * gives the closed plaintext form.
+     * gives the closed plaintext form. Without an `owner` run, it always seals
+     * through the task's journaled offer.
      */
-    const sealQueuedTerminal = async (owner: SealedTasks, ownerIdentity: string | undefined, envelope: Envelope): Promise<Envelope | undefined> => {
+    const sealQueuedTerminal = async (owner: SealedTasks | undefined, ownerIdentity: string | undefined, envelope: Envelope): Promise<Envelope | undefined> => {
       const taskId = envelope.task_id!;
       if (startInProgress) throw new Error(`${envelope.type} for sealed task ${taskId} waits for the start under way`);
       const current = latestSealedTasks!;
       if (current === owner) return owner.sealOutbound(envelope);
       if (memberResuming) throw new Error(`${envelope.type} for sealed task ${taskId} waits for this run's member`);
-      // A run under another tenant, device or member never seals this task's output.
-      if (ownerIdentity === undefined || ownerIdentity !== latestSealIdentity?.()) return current.unsealable(envelope);
       const task = await activeJournal!.readTask(taskId, journalIdentity!);
       if (!task || !('envelopeBytes' in task)) throw new Error(`missing durable offer of sealed task ${taskId}`);
-      return current.sealRecovered(decodeEnvelope(task.envelopeBytes), envelope);
+      // A run under another tenant, device or member never seals this task's output.
+      return current.sealRecovered(decodeEnvelope(task.envelopeBytes), envelope, ownerIdentity !== undefined && ownerIdentity === latestSealIdentity?.());
     };
 
     // #654: a task waits on its approval request. One that cannot be sealed
@@ -2594,7 +2602,7 @@ export function buildDaemonWithAdapters(
         observer.captureOutboundApproval(envelope);
         const sealedTaskOutput = sealedTasks;
         if (terminal) {
-          const ownerIdentity = sealIdentityOf(record, sealedMember);
+          const ownerIdentity = ownSealIdentity;
           commitTerminal(envelope.task_id!, () => sealQueuedTerminal(sealedTaskOutput, ownerIdentity, envelope));
           return;
         }
@@ -2623,6 +2631,30 @@ export function buildDaemonWithAdapters(
         return;
       }
       commitTerminal(envelope.task_id!, envelope);
+    };
+
+    /**
+     * #654 §77b: a sealed terminal that named its ciphertext blob and that the
+     * Host refused gets one replacement, the failure of a terminal that cannot
+     * be sealed. It seals with the member that sealed the refused terminal once
+     * this run's start and member resume are over, else it is the closed
+     * plaintext form. A journaled terminal is replaced in the journal, so the
+     * Host receives exactly one terminal. Never throws: the caller is the
+     * outbound settlement, which would post the refused bytes again.
+     */
+    const replaceRefusedTerminal = (refused: Envelope): void => {
+      const failure = opened.refusedReplacement(refused);
+      if (failure === undefined) return;
+      if (!activeJournal || !journalIdentity) { sendEnvelope(failure); return; }
+      const taskId = refused.task_id!;
+      const refusedHash = journalHash(encodeEnvelope(refused));
+      const ownerIdentity = JSON.stringify([record.tenantId, record.deviceId, (refused.payload as { sealed: { sender: string } }).sealed.sender]);
+      commitTerminal(taskId, async () => {
+        // A repeated trigger after the replacement committed changes nothing.
+        const durable = (await activeJournal.listPendingTerminals(journalIdentity)).find((row) => row.taskId === taskId);
+        if (durable?.payloadHash !== refusedHash || durable.truthState !== 'failed') return undefined;
+        return sealQueuedTerminal(undefined, ownerIdentity, failure);
+      }, refusedHash);
     };
 
     // #826: an inbound envelope above the journal record bound is never stored
@@ -2873,7 +2905,10 @@ export function buildDaemonWithAdapters(
         resultReplyRecoveryTasks.delete(id);
       }
       for (const terminal of await activeJournal.listPendingTerminals(journalIdentity)) {
-        if (terminal.truthState !== 'pending' || (taskId !== undefined && terminal.taskId !== taskId)) continue;
+        if (taskId !== undefined && terminal.taskId !== taskId) continue;
+        // A refusal recorded before its replacement committed (#654 §77b).
+        if (terminal.truthState === 'failed' && !terminalCommits.hasPending(terminal.taskId)) replaceRefusedTerminal(decodeEnvelope(terminal.bytes));
+        if (terminal.truthState !== 'pending') continue;
         if (runner?.hasPendingRecoveredAgentMessage(terminal.taskId)) continue;
         assertJournalEnvelopeProtocol(terminal.bytes, terminal.taskId, 'pending-terminal');
         const envelope = decodeEnvelope(terminal.bytes);
@@ -3200,10 +3235,16 @@ export function buildDaemonWithAdapters(
         // operation, without double-counting an earlier part of this batch.
         for (const settlement of settlements) {
           const { envelope } = settlement;
-          if (!activeJournal || terminalKindOf(envelope.type) === undefined || envelope.task_id === undefined) continue;
+          if (terminalKindOf(envelope.type) === undefined || envelope.task_id === undefined) continue;
+          if (!activeJournal) {
+            if (settlement.outcome === 'rejected') replaceRefusedTerminal(envelope);
+            continue;
+          }
           const hash = journalHash(encodeEnvelope(envelope));
-          if (settlement.outcome === 'rejected') await activeJournal.rejectTerminal(envelope.task_id, hash, settlement.reason);
-          else {
+          if (settlement.outcome === 'rejected') {
+            await activeJournal.rejectTerminal(envelope.task_id, hash, settlement.reason);
+            replaceRefusedTerminal(envelope);
+          } else {
             overrides.executionRecoveryFault?.('outbound:after-ack');
             await activeJournal.confirmTerminal(envelope.task_id, hash);
           }

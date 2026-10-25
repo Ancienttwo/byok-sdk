@@ -8,11 +8,10 @@ import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/example-bot-collabora
 import { DeviceBindingError } from './binding';
 import { freezeIntent } from './intents';
 import { storedKey } from './layout';
-import { vectorPorts } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import type { TaskEvidence } from './reconcile';
 import { HostedRoutineScheduler, type SchedulerOptions } from './scheduler';
-import { inSchema, lockScope, type FinishPortsFactory } from './store';
+import { inSchema, lockScope } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -27,7 +26,8 @@ const NOW = Date.UTC(2026, 0, 1);
 /** The first slot of a routine created at `NOW`, and the next two. */
 const FIRST = slotAfter(NOW - 1), SECOND = slotAfter(FIRST), THIRD = slotAfter(SECOND);
 const SYNC = { ...SYNC_OPTIONS, now: NOW, history: undefined };
-const ports: FinishPortsFactory = (state, publish) => ({ ...vectorPorts(state, publish), now: () => NOW });
+/** The Host clock of the tests. */
+const hostClock = () => NOW;
 const occurrenceKey = (id: string, kind: 'scheduled' | 'catch_up', plannedAt: number, version = 1) => hash([id, version, { kind, plannedAt }]);
 
 const routineRow = async (scope: string, id: string) => (await query<{ definition: RoutineDefinition; pending: RoutineDefinition | null; status: string;
@@ -64,7 +64,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H routine scheduler on real Postgre
     const document: Json = { create_routine: [{ localId: 'new_routine_1', schedule: DAILY, prompt: PROMPT }] };
     const evidence = { terminal: { envelope: { task_id: taskId('t1', 0), type: 'task.complete', payload: { document } } } as unknown as DeviceTerminal,
       attempt: { taskId: taskId('t1', 0) } as unknown as TaskAttempt } satisfies TaskEvidence;
-    expect(await store().finish(scope, 't1', evidence, ports)).toBe('succeeded');
+    expect(await store().finish(scope, 't1', evidence, hostClock)).toBe('succeeded');
     return hash([taskId('t1', 0), 'create_routine', 0]);
   }
 
@@ -203,7 +203,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H routine scheduler on real Postgre
     expect(await scheduler().run()).toMatchObject({ fired: 1 });
     expect(await occurrences(scope)).toMatchObject([{ key: storedKey(key), next_at: null, conclusion: null }]);
     expect(await routineRow(scope, id)).toMatchObject({ definition: { version: 1 }, pending: { version: 2 }, next_at: null });
-    await store().commit(scope, { scope, commandId: 'cancel', command: { kind: 'cancel_turn', turnId: `occurrence:${key}` } }, ports);
+    await store().commit(scope, { scope, commandId: 'cancel', command: { kind: 'cancel_turn', turnId: `occurrence:${key}` } }, hostClock);
     await store().sync(scope, { ...SYNC, now: FIRST });
     expect(await occurrences(scope)).toMatchObject([{ key: storedKey(key), conclusion: 'cancelled' }]);
     expect(await routineRow(scope, id)).toMatchObject({ definition: { version: 2 }, pending: null, next_at: String(SECOND) });

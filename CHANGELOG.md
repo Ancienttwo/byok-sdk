@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Feature (examples)** — the hosted collaboration example has its
+  authenticated product command entry (#793 S10). `HostedCommandEntry` is L's
+  owner API for requests: it takes the product's session check
+  (`authenticate`), the scope's owner principal id and the deployment's
+  composed `sync`. Each method checks the principal as L's R2 checks do
+  (with the same audit lines), commits under L's command id, syncs the scope
+  and returns L's value. It commits with the new `requireBinding` option of
+  `store.commit`: a commit that adds work for a Bot whose device has no
+  active H binding (a Turn that is not concluded, a room seat, or an input
+  batch or an input to one) throws `DeviceBindingError` and rolls back. `store.audit(scope, line, clock)` appends one audit line.
+- **Breaking (examples)** — the hosted collaboration store builds every
+  command port itself, from a per-scope Host config (#793 S9).
+  `new HostedCollaborationStore(pool, schema, { host })` requires
+  `host(scope) → { models, readOnlyToolsets }`, L's `models` and
+  `readOnlyToolsets`; a model template carries the device that a new Bot runs
+  on, so each scope has its own. The store builds `updatePersona`, `teamBot`,
+  the outcome's `manage` and, with `{ channel: true }`, the push route ports,
+  as L's owner commands and outcomes do. `commit`, `receive`, `consume` and
+  `finish` take the Host clock in place of a ports factory;
+  `hostedMessageConsumer` takes `now` and `HostedReconciler` no longer takes
+  `ports`. `HostedSyncOptions` drops `models` and `readOnlyToolsets`: the sync
+  reads them from the same config. `CommitPorts`, `CommitPortsFactory`,
+  `FinishPortsFactory` and `PortsFactory` are gone.
 - **Fixed (client)** — the last read-back of a member KEM rotation (#654
   E2d-5) now also requires each epoch whose key the run holds, and each
   epoch with a freshness point, to read back, including a key the run opened
@@ -9,6 +32,79 @@
   now stops the rotation with `key_package_missing`, and the old key stays.
   Before, the rotation finished and dropped that epoch. The rotation still
   has no production caller.
+- **Fixed (examples)** — K8 counts a Bot Turn whose outcome commit throws as a
+  stuck intent, with the new `IntentOutcomeError` code `outcome_failed`.
+  `drain()` and every API that runs a pass reject with it, the audit gets one
+  row, and `failStuckIntent(key)` ends it: the intent settles `failed`, the
+  next sync fails the Turn and reports it, and the Bot's FIFO moves on. Before,
+  K4 kept the error only as the outbox row's `lastError`, `drain()` resolved,
+  the FIFO stayed blocked and the owner call refused the key as not stuck. A
+  Host that switches exhaustively on `IntentOutcomeError.code` must add the
+  `outcome_failed` case.
+- **Feature (examples)** — with `roomHistory`, K8 publishes each accepted seat
+  post as the projection `room-message:<roomId>:<messageId>` with
+  `{ roomId, id, from, text, late }`, and does not read the next seat of a room
+  while that room has an undelivered post (#883 acceptance 2). The Host's
+  `deliver` must resolve only after the write can be read back. A projection
+  that never delivers releases each later seat of its room as `busy` at its
+  deadline. The rule's new optional `OutcomePorts.roomPosts` stays unset in H,
+  so H and every Host without the option are unchanged.
+- **Fixed (examples)** — K8 L no longer leaves a room seat waiting when a Turn
+  step releases the seat before it (a blocked or retired seat Turn). The L
+  sync runs the room step and the Turn steps again, as H's sync does since
+  #876, so the next seat gets its Turn in the same sync. Before, a round whose
+  seat Turns all blocked stopped after four seats, with no timer for the next.
+  A shared room vector holds both Hosts to this.
+- **Fixed (examples)** — K8 bounds the `history` and `roomHistory` reads with
+  the new `historyTimeoutMs` option (default 10 seconds). A read still open
+  after it counts as failed: the Turn stays queued and the timer reads again.
+  Before, a stalled `history` authority held the Host queue with no bound.
+- **Fixed (client)** — the #866 review of a sealed terminal that the commit
+  queue holds past a failed stop (#654). When the next run has another
+  tenant, device or member, a terminal that already is a closed plaintext
+  form keeps its fields, such as `recovery` on a `daemon_interrupted`
+  `task.fail` or the code of a sealed decline. Before, it was rewritten to
+  `sealed_key_unavailable`. The owning run is now the one whose member was
+  bound when it became ready, so a terminal made after that member retired
+  at shutdown seals with a next run of the same member instead of taking the
+  closed form.
+
+- **Fixed (client)** — when a Codex app-server ends on its own and the
+  adapter's record consumer then fails on a record that exit produced (the
+  exit record, or a control settled as exited), the task now fails as
+  `runtime_exited` with the consumer's reason, instead of `unknown` (#869).
+
+- **Fixed (client)** — Pi's durable lane now follows the #869 contract. A
+  start failure is a typed, non-retryable `RuntimeExecutionFailure` with a
+  fixed reason, instead of being reported as "runtime adapter contract
+  violation during start"; a worker that ends on its own before its start
+  receipt is `runtime_exited`. A run whose worker ended on its own and could
+  not be recovered, or whose respawned worker ended on its own before its
+  start receipt, fails as `runtime_exited` instead of `unknown` (#869).
+
+- **Breaking (client)** — a sealed terminal that the daemon sent by
+  `ciphertextRef` and that the Host refused now reaches the Host as one
+  replacement terminal (#654, owner batch §77b). The Host refuses one when it
+  no longer declares `sealed-output-ciphertext-ref`, or when orphan GC deleted
+  the blob. Before, the daemon recorded the refusal and sent nothing else, so
+  the Host got no terminal for the task. The replacement is the sealed
+  `task.fail` with `reason: 'terminal_result_unsealable'` when the member that
+  sealed the refused terminal is ready, and the plaintext `task.fail` with
+  `reason: 'sealed_key_unavailable'` otherwise. A refusal that an earlier run,
+  or a 0.30.1 daemon, left in the journal is replaced at the next start, after
+  the member resumes. A refused inline terminal is not replaced. The journal
+  replaces the refused row in place and keeps the refused hash as a task
+  transition; it adds no table or column. Compatibility: `LocalTaskJournal`
+  gets the required method `replaceRefusedTerminal`, and its `confirmTerminal`
+  and `rejectTerminal` must accept the hash of replaced bytes as a no-op. A
+  Host that injects its own journal must implement both.
+
+- **Breaking (client)** — `byok-agent doctor` no longer scans `os.tmpdir()`
+  for the temporary directories that releases before 0.27.0 left there (#938).
+  `doctor --json` drops its `legacyTemp` field, so a script that parses it
+  must stop reading it, and the text output drops its `legacy-temp:` line.
+  `doctor --fix` no longer deletes those directories; any left on a machine
+  have to be removed by hand.
 
 - **Feature (cloud, cloud-dataplane, server)** — maintenance prunes the
   receipts of used device-proof request ids in a new twelfth step,

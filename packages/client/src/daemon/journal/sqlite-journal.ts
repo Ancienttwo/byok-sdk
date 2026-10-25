@@ -137,6 +137,8 @@ export type JournalFaultStep =
   | 'recovery:after-commit'
   | 'confirm:before-commit'
   | 'confirm:after-commit'
+  | 'replace:before-commit'
+  | 'replace:after-commit'
   | 'recovery:before-commit'
   | 'cleanup:before-commit'
   | 'prune:before-commit';
@@ -844,11 +846,40 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     return this.#terminalDisposition(taskId, payloadHash, 'failed', reason);
   }
 
+  replaceRefusedTerminal(taskId: string, refusedPayloadHash: string, record: LocalTerminalRecord): Promise<void> {
+    return this.#enqueue('replaceRefusedTerminal', () => {
+      this.#assertTerminalBytes(record.bytes, record.payloadHash);
+      this.#transaction(() => {
+        const row = this.#db.prepare('SELECT payload_hash, truth_state, terminal_type, last_error FROM journal_terminal WHERE task_id = ?')
+          .get(taskId) as { payload_hash: string; truth_state: string; terminal_type: string; last_error: string | null } | undefined;
+        if (row?.payload_hash === record.payloadHash) return;
+        if (row?.payload_hash !== refusedPayloadHash || row.truth_state !== 'failed') {
+          throw new Error('terminal replacement does not match a refused durable terminal');
+        }
+        this.#db.prepare(`UPDATE journal_terminal SET terminal_type = ?, bytes = ?, payload_hash = ?, truth_state = 'pending',
+          attempt = ?, last_error = NULL, updated_at = ? WHERE task_id = ? AND payload_hash = ? AND truth_state = 'failed'`)
+          .run(record.terminalType, record.bytes, record.payloadHash, record.attempt, record.recordedAt, taskId, refusedPayloadHash);
+        this.#db.prepare('UPDATE journal_task SET local_state = ?, updated_at = ? WHERE task_id = ?')
+          .run(`terminal:${record.terminalType}`, record.recordedAt, taskId);
+        this.#db.prepare(`INSERT OR IGNORE INTO journal_transition (transition_id, task_id, from_state, to_state, occurred_at, detail)
+             VALUES (?, ?, ?, ?, ?, ?)`)
+          .run(`terminal-replaced:${taskId}:${refusedPayloadHash}`, taskId, `terminal:${row.terminal_type}`, `terminal:${record.terminalType}`,
+            record.recordedAt, `refused ${refusedPayloadHash}: ${row.last_error ?? ''}`);
+        this.#fault('replace:before-commit');
+      });
+      this.#fault('replace:after-commit');
+    });
+  }
+
   #terminalDisposition(taskId: string, payloadHash: string, state: 'confirmed' | 'failed', reason?: string): Promise<void> {
     return this.#enqueue('terminalDisposition', () => {
       this.#transaction(() => {
         const row = this.#db.prepare('SELECT payload_hash FROM journal_terminal WHERE task_id = ?').get(taskId) as { payload_hash: string } | undefined;
-        if (!row || row.payload_hash !== payloadHash) throw new Error('terminal acknowledgement does not match durable terminal');
+        if (!row || row.payload_hash !== payloadHash) {
+          // A late disposition of bytes that a replacement took over changes nothing.
+          if (this.#db.prepare('SELECT 1 FROM journal_transition WHERE transition_id = ?').get(`terminal-replaced:${taskId}:${payloadHash}`)) return;
+          throw new Error('terminal acknowledgement does not match durable terminal');
+        }
         this.#db.prepare(`UPDATE journal_terminal SET truth_state = ?, last_error = ?, updated_at = ?
           WHERE task_id = ? AND truth_state <> 'confirmed'`).run(state, reason ?? null, this.#clock().toISOString(), taskId);
         this.#fault('confirm:before-commit');
