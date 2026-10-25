@@ -184,7 +184,7 @@ const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
   ['api/openai-responses.js', 'else if (model.provider !== "github-copilot" && model.thinkingLevelMap?.off !== null) {', 'unreachable',
     'a byok id takes the same non-copilot branch as every catalog vendor'],
   ['api/openai-responses.js', 'if (model.provider === "xai")', 'differs',
-    'xai adds include reasoning.encrypted_content with thinking off; no effect at a level the xai rows support'],
+    'xai adds include reasoning.encrypted_content with thinking off; grok-4.3 supports off (effort none), so its request differs there; effect unverified'],
   ['api/typesafe-system-one.js', 'detectCompat: (model) => model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai")', 'url', 'not a projected api; matches by URL regardless'],
   ['compat.js', 'if (model.provider.startsWith("cloudflare-") && !hasResolvedCloudflareAuth(options)) {', 'unreachable', 'no cloudflare-* catalog vendor'],
   ['compat.js', 'if (model.provider.startsWith("cloudflare-") && !hasResolvedCloudflareAuth(options)) {', 'unreachable', 'no cloudflare-* catalog vendor'],
