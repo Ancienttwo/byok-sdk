@@ -5,6 +5,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { ROUTINE_LATE_AFTER_MS } from '@byok-sdk/example-bot-collaboration/routines';
+import { storedKey } from '@byok-sdk/example-hosted-bot-collaboration/src/layout';
 import { alarmReports, openHome, RUN, until, type Home, type WorkerOptions } from './worker.test-support';
 
 /** The default `H_CLOCK_MS`: the tests run the clock as a deployment would. */
@@ -40,17 +41,34 @@ const occurrenceOf = async (home: Home, plannedAt: number) =>
   (await home.occurrences()).find(occurrence => occurrence.plannedAt === plannedAt);
 const fired = (home: Home) => alarmReports(home.worker).reduce((sum, report) => sum + report.routines.fired, 0);
 
-/** An owner input that the coalescing policy holds in an open batch, because the Bot runs `busy`'s Turn. */
+/**
+ * An owner input that the coalescing policy holds in an open batch, because the Bot runs `busyBot`'s Turn. The scope's due
+ * time is the batch's seal time, so the due scheduler is what seals it.
+ */
 async function heldInput(home: Home, token: string) {
   const { turnId } = await home.input(token, `Held ${Date.now()}`);
   const batch = (await home.substrate.store.read(home.home)).inputBatches?.[turnId];
   expect(batch).toMatchObject({ state: 'open' });
+  const [scope] = (await home.substrate.pool.query<{ due_at: string | null }>(
+    `SELECT due_at::text FROM "${home.substrate.hSchema}".scope WHERE scope = $1`, [storedKey(home.home)])).rows;
+  expect(Number(scope?.due_at)).toBe(batch!.sealAt);
   return { turnId, sealAt: batch!.sealAt };
 }
 const sealed = (home: Home, turnId: string) => until(async () => {
   const batch = (await home.substrate.store.read(home.home)).inputBatches?.[turnId];
   return batch?.state === 'sealed' ? { reason: batch.sealReason, seenAt: Date.now() } : undefined;
 }, 90_000);
+/** The due scheduler of an alarm pass synced a due scope. A report prints after its commits, so the seal can come first. */
+const dueSyncedByAlarm = (home: Home) =>
+  until(async () => alarmReports(home.worker).some(report => report.due.synced > 0) || undefined, 3 * CLOCK_MS);
+/**
+ * Waits for an alarm pass that synced no changed scope: the reconciler has read back the running Turn. A pass also seals
+ * due batches when it syncs a scope it changed, so a seal after this comes from the due scheduler.
+ */
+async function settled(home: Home) {
+  const seen = alarmReports(home.worker).length;
+  await until(async () => alarmReports(home.worker).slice(seen).some(report => report.synced.length === 0) || undefined, 3 * CLOCK_MS);
+}
 /** A Main Bot whose first Turn runs on the device and stays running, so the Bot is busy. */
 async function busyBot(home: Home) {
   const { token } = await home.bot();
@@ -123,16 +141,18 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
     h = await openHome(COALESCE);
     const token = await busyBot(h);
     await h.restart({ ...COALESCE, fault: 'drop-notify' });
+    await settled(h);
     const { turnId, sealAt } = await heldInput(h, token);
     const seal = await sealed(h, turnId);
     expect(seal.reason).toBe('window');
     expect(seal.seenAt - sealAt).toBeLessThan(60_000);
-    expect(alarmReports(h.worker).some(report => report.due.synced > 0)).toBe(true);
+    await dueSyncedByAlarm(h);
   }, 240_000);
 
   it('lost alarms leave a due batch open; the next alarm after them seals it from Postgres', async () => {
     h = await openHome(COALESCE);
     const token = await busyBot(h);
+    await settled(h);
     const worker = await h.restart({ ...COALESCE, fault: 'drop-notify,drop-alarm' });
     const { turnId, sealAt } = await heldInput(h, token);
     // Two alarms after the seal time, both dropped.
@@ -143,6 +163,6 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
     expect((await h.substrate.store.read(h.home)).inputBatches?.[turnId]).toMatchObject({ state: 'open' });
     await h.restart({ ...COALESCE, fault: 'drop-notify' });
     expect((await sealed(h, turnId)).reason).toBe('window');
-    expect(alarmReports(h.worker).some(report => report.due.synced > 0)).toBe(true);
+    await dueSyncedByAlarm(h);
   }, 240_000);
 });
