@@ -226,6 +226,53 @@ does. Without it, the routine of an archived Bot would fire at every slot. The
 command needs the Main Bot role and gets the K4 rows through the
 `CommandPorts.routines` port.
 
+### Sealed Bot routines
+
+A sealed Bot routine (#953, #654 E3d-4) is a `bot-routine` whose Turn
+instruction only a member and the device can read. The owner's member endpoint
+seals the whole instruction once per routine version with K4
+`sealRoutineTemplate`. The instruction is `sealedRoutineInstruction(prompt)`:
+the K8 Turn frame with every action, `Request:` and the prompt, and no
+ContextPack, because v1 has no plaintext field for Host content next to a
+sealed instruction. The Turn's frozen outcome schema stays the authority on
+which actions the Bot may take.
+
+- `sealedDefinition` makes version 1. The member picks the routine id, a fresh
+  UUID, because the template binds it, and an id that any routine row already
+  has is refused. `resealDefinition` stages the next version of a sealed
+  routine only. A template sealed for another version throws
+  `SealedRoutineVersionError`, and nothing is written. Both check that
+  `sealing.categories` is exactly `['task-input']`, that the template is
+  sealed for the Bot's current Agent revision, and that the occurrence offer
+  parses. A sealed routine counts toward the limit of eight.
+- The authority is `owner`, and a routine stays sealed. `update_routine`, from
+  a Bot or the owner, is refused on a sealed routine, and the outcome schema
+  offers no sealed id for it. Cancel and `end_routine` complete it as any
+  routine.
+- The view in each ContextPack shows `sealed: true` and nothing of the
+  template.
+- The hook writes the occurrence Turn with an empty `request` and
+  `sealedRoutine: { routineId, definitionVersion }`. The sync freezes it from
+  the Host's `sealedTemplate` lookup: the Bot's execution template with
+  `sealing`, the template byte for byte as `sealed`, and `routineRef`, with no
+  `instruction`, no history and the plaintext `bot-turn-outcome.v1` contract.
+  K4 then promotes it as a sealed occurrence intent.
+- A Turn whose template is missing (`sealed_routine_template_missing`), or
+  whose Bot Agent revision differs from the one the template is sealed for
+  (`sealed_routine_agent_changed`), ends `failed` with the projection
+  `sealed-routine-failed:<turnId>`. It never blocks: a blocked routine Turn
+  keeps its occurrence open, and that stops the version switch a reseal needs.
+  An outcome schema over budget depends on the state, not on the version, so
+  it blocks a sealed Turn as a plain one until the state shrinks.
+- The outcome and every projection stay plaintext, even when they carry
+  content derived from the sealed instruction.
+
+L has no sealed dispatch. Its embedded server declares no `e2ee.member`, so
+no daemon paired to it advertises `sealed-payload-v1`, and its K4 port has no
+`submitSealed`: L has no command that creates a sealed routine, and a sealed
+intent would fail with `sealed_dispatch_unavailable` before any submit. H
+runs sealed routines on a cloud tenant.
+
 `compact` removes settled routine rows: a promoted
 occurrence through its intent key, and a concluded occurrence through its
 occurrence key. `botRoutines` reads the Bot routine views from the K4 rows.

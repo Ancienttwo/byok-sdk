@@ -409,6 +409,38 @@
   routine that is not completed and whose current or pending version is
   `execution`. L now always sets `hostJobExecution: 'fail'` and
   `executionRoutines: 'refuse'`.
+- **Feature (examples)** — the hosted collaboration example runs the owner
+  switch of a device between L and H (#957, plan §4.1):
+  `beginSwitch`, `drainDevice`, `commitSwitch` and `abortSwitch`, each on
+  the expected mode revision, with the new `device_binding.switching`
+  column. During the freeze every H write that can create execution for
+  the device throws `DeviceSwitchingError` (`code: 'device_switching'`, as
+  L), the sync holds its Bots' Turns, and a commit away from H waits until
+  the drain finds no open work. After a commit to L the device refuses
+  with `mode`, and its Agent home operations back off. Switch steps that
+  the binding refuses throw `DeviceSwitchRefusedError`. The switch moves
+  no state; the export and import between H and an L ledger is a
+  follow-up.
+- **Added (examples)** — sealed Bot routines in K8 (#953, #654 E3d-4). A
+  Bot routine may hold a member-sealed Turn instruction for each version:
+  `sealedDefinition` and `resealDefinition` check the routine id, the version,
+  the categories (exactly `task-input`) and the Agent revision, and a sealed
+  routine never turns plain. Its occurrence Turn has no request; the sync
+  freezes it from the Host's `sealedTemplate` lookup into a sealed offer with
+  the template byte for byte and `routineRef`, and no instruction or
+  ContextPack. A missing template or a changed Agent ends the Turn `failed`
+  and never blocks it. The outcome schema offers `update_routine` for no
+  sealed routine. L has no sealed dispatch. No wire, SDK or SQL change.
+- **Feature (examples)** — the Worker H Host runs its passes from a clock
+  (#794 D3, H4): one Durable Object for the deployment whose alarm re-arms
+  every `H_CLOCK_MS` (10 s by default, 15 s at most) and then runs one pass, so
+  routine slots and due steps run inside the K8 60 s late bound. The cron
+  trigger runs no pass any more: once a minute it only arms the clock if it has
+  no alarm. The alarm keeps no Host state, so a lost, repeated or cut-off
+  alarm is made up from Postgres by the next one. Local workerd tests cover a
+  routine slot and a coalesced batch seal from alarm passes alone, a duplicate
+  alarm, an instance lost mid-alarm, and dropped alarms. No H, SDK, wire or SQL
+  change.
 
 ## 0.30.1 — 2026-10-24 (published)
 
