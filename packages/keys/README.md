@@ -118,9 +118,8 @@ profile that declares `'openai-responses'` or `inputLimits`. It also refuses
 `compat.supportsLongCacheRetention`, `compat.supportsStrictMode`,
 `compat.requiresReasoningContentOnAssistantMessages` and
 `compat.sendSessionAffinityHeaders`, because the frozen prepared wire does not
-carry them. `compat.allowEmptySignature` is accepted only on an `anthropic`
-profile, and the prepared entry refuses every `anthropic` profile. A profile
-without `thinkingLevelMap` passes: the prepared wire may leave the map out.
+carry them. A profile without `thinkingLevelMap` passes: the prepared wire may
+leave the map out.
 
 The SQLite profile schema changes in this candidate. Existing stores are
 rejected and preserved: explicitly provision a separate current-schema store
