@@ -148,9 +148,10 @@ export class HostedOutboxSender {
 
   /**
    * H1-H4 of one home row: claim, the readback of each request in order (K8 `checkHomeReadback`), the fenced settle, then for
-   * a retry the enqueue of the latest request and `homeEnqueued`. A read or enqueue that throws or outlasts `sendTimeoutMs`
-   * is the operation's error (K8 `failHomeFlush`), as a throw is in L, which awaits these calls with no deadline. Returns
-   * false when the claim found nothing to flush.
+   * a retry the enqueue of the latest request and `homeEnqueued`. Each read and the enqueue get `sendTimeoutMs` or the time
+   * left on the claim's lease, whichever is shorter; once the lease has passed, the next call is not made. A read or enqueue
+   * that throws, outlasts its deadline or is not made is the operation's error (K8 `failHomeFlush`), as a throw is in L,
+   * which awaits these calls with no deadline. Returns false when the claim found nothing to flush.
    */
   private async home(scope: string, sequence: number, changed: Set<string>): Promise<boolean | { error: unknown }> {
     const homes = this.options.homes;
@@ -158,11 +159,17 @@ export class HostedOutboxSender {
     const claim = await this.store.claimHome(scope, sequence, this.now, this.times.leaseMs, this.backoffMs);
     if (claim.kind === 'none') return false;
     const port = homes(scope);
+    // Every call of the flush ends within the claim's lease, so no other sender can claim the operation while one runs.
+    const inLease = <T>(call: () => Promise<T>): Promise<T> => {
+      const left = claim.lease - this.now();
+      if (left <= 0) return Promise.reject(new Error(HOME_LEASE_PASSED));
+      return this.deadline(call, Math.min(this.sendTimeoutMs, left));
+    };
     let step: HomeStep;
     try {
       let terminal: HomeReadback | undefined;
       for (const request of homeRequests(claim.op)) {
-        terminal = checkHomeReadback(request, await this.deadline(() => port.read(request)));
+        terminal = checkHomeReadback(request, await inLease(() => port.read(request)));
         if (terminal) break;
       }
       step = terminal ? { terminal } : { retry: true };
@@ -171,7 +178,7 @@ export class HostedOutboxSender {
     if ('terminal' in step && settled) changed.add(scope);
     if ('error' in step) return { error: step.error };
     if (!settled?.enqueue) return true;
-    try { await this.deadline(() => port.enqueue(settled.enqueue!)); }
+    try { await inLease(() => port.enqueue(settled.enqueue!)); }
     catch (error) {
       await this.store.settleHome(scope, sequence, settled.retries, { error }, this.now, claim.lease);
       return { error };
@@ -249,20 +256,21 @@ export class HostedOutboxSender {
   }
 
   /**
-   * Runs a channel or receiver call with an abort signal, and rejects with `SendDeadline` after `sendTimeoutMs`, as L's
-   * delivery deadline. H bounds a readback with it too, where L awaits a readback with no deadline.
+   * Runs a channel or receiver call with an abort signal, and rejects with `SendDeadline` after `ms` (`sendTimeoutMs`), as
+   * L's delivery deadline. H bounds a readback with it too, where L awaits a readback with no deadline.
    */
-  private async deadline<T>(send: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  private async deadline<T>(send: (signal: AbortSignal) => Promise<T>, ms = this.sendTimeoutMs): Promise<T> {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => { controller.abort(); reject(new SendDeadline()); }, this.sendTimeoutMs);
+      timer = setTimeout(() => { controller.abort(); reject(new SendDeadline()); }, ms);
     });
     try { return await Promise.race([Promise.resolve().then(() => send(controller.signal)), deadline]); }
     finally { clearTimeout(timer); }
   }
 }
 
+const HOME_LEASE_PASSED = 'Home flush outlasted its lease';
 class SendDeadline extends Error {
   constructor() { super('send_timeout'); this.name = 'SendDeadline'; }
 }

@@ -140,6 +140,17 @@ describe.skipIf(POSTGRES_URL === undefined)('H Agent home flush on real Postgres
     expect(await rows(h.scope)).toMatchObject([{ next_at: String(retryAt), settled_at: null }]);
   });
 
+  it('makes no call of a flush after its lease has passed, and keeps the operation pending with the error', async () => {
+    const h = await retried();
+    let enqueues = 0;
+    // The readback ends after the lease (20 s), though within its own deadline.
+    const late: HomeCalls = { read: async () => { clock = VECTOR_NOW + 25_000; return undefined; }, enqueue: async () => { enqueues++; } };
+    expect((await sender({ homes: () => late }).run()).failed).toEqual([{ scope: h.scope, id: ['home', h.op.sequence], error: new Error('Home flush outlasted its lease') }]);
+    expect(enqueues).toBe(0);
+    expect((await store().read(h.scope)).team.homeOperations.find(row => row.sequence === h.op.sequence))
+      .toMatchObject({ status: 'pending', error: 'Home flush outlasted its lease' });
+  });
+
   it('flushes once when two senders run on one operation: the lease holds the second', async () => {
     const h = await retried();
     let release!: () => void, reads = 0;

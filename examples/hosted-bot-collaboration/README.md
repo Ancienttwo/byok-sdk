@@ -577,8 +577,10 @@ shorten the lease of a newer claim. If the wait cannot be written, `run()` rejec
     sender then enqueues the latest request (the SDK `enqueueAgentHomeProjection`) and runs `homeEnqueued`. The claim's
     lease holds the row through that enqueue: the settle that plans a retry keeps it, and `homeEnqueued` moves the row to
     the operation's `retryAt`, so no other sender enqueues the same operation meanwhile.
-  - A read or enqueue that throws, or outlasts `sendTimeoutMs`, is the operation's error (`failHomeFlush`): it stays
-    pending and is looked at again when its lease passes. L awaits these calls with no deadline.
+  - Each read and the enqueue get `sendTimeoutMs` or the time left on the claim's lease, whichever is shorter, and no call
+    is made once the lease has passed (`Home flush outlasted its lease`). So every call of a flush ends within its lease.
+    A read or enqueue that throws, outlasts its deadline or is not made is the operation's error (`failHomeFlush`): it
+    stays pending and is looked at again when its lease passes. L awaits these calls with no deadline.
   - **H enqueues at `retryAt`; L enqueues again at each pass.** The enqueue is idempotent by request id, so H skips L's
     repeats before `retryAt`. A Bot whose intent kept it waiting is looked at again `backoffMs` after the last look; L
     looks at its next pass. In one H pass a Bot's next operation can be flushed right after the one before it settles;
@@ -732,7 +734,7 @@ three and runs these suites.
   once `retryAt` has passed a retry with the next request id and a backoff; a Bot with an open intent waits without
   blocking another Bot; a Bot's later operation is not read while its oldest one is pending. H tests (`homes.test.ts`) add
   the home row of a committed operation (`retry_persona`) with its lease and settle, the row at `retryAt` after an
-  enqueue, the lease kept through a retry enqueue, two senders on one operation, the wait of a busy Bot, a read timeout, a Host with no home port, and, on the
+  enqueue, the lease kept through a retry enqueue, no call after the lease has passed, two senders on one operation, the wait of a busy Bot, a read timeout, a Host with no home port, and, on the
   hosted SDK with a paired daemon, a Bot readied through the real `enqueueAgentHomeProjection` whose Turn then freezes.
 - The due tests check the stored due time against the K8 rule after each seed, commit, sync and finish, a cancel commit
   with the store's timers, a command that throws, a step that keeps the time, and the DDL check. The due scheduler tests
