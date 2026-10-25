@@ -2,7 +2,7 @@
 
 > 状态：CURRENT，人工绘制；每个节点和边都对照过源码。
 > 核对基准：commit `142acbe2`（2026-10-24）。文中 `path:line` 均指这一版，路径相对仓库根。
-> 与 [`sdk-architecture.md`](sdk-architecture.md) 不一致时以源码为准，已知差异见 §4。
+> 与 [`sdk-architecture.md`](sdk-architecture.md) 不一致时以源码为准，已知差异由 #927 跟踪。
 > 图例：实线箭头表示运行时 import 或调用；虚线表示进程边界、网络边界或可选路径；虚线框是 SDK 不提供、需要 Host 自备的部分。图中 package 名省略 `@byok-sdk/` 前缀。
 
 ## 1. 分层架构图
@@ -462,13 +462,4 @@ flowchart TB
 
 ## 4. 与 sdk-architecture.md 的已知差异
 
-`sdk-architecture.md` 的下列描述与源码不符。上面的图按源码画：
-
-- §1.2 写 `server/keys !→ core`；两者都在运行时 import core（`packages/server/src/stores.ts:1-9`，`packages/keys/src/custody.ts:3`）。
-- §2.2 写 18 个消息类型；`MESSAGE_PAYLOAD_SCHEMAS` 现有 47 个（`packages/protocol/src/messages.ts`），新 Agent 执行用 `task.offer_for_agent_with_egress_fresh`。
-- §2.4 写 server 只接受 v2；当前 `PROTOCOL_VERSION = 3`。`packages/server/package.json` 的 description 也还写着 protocol v2。
-- §4.1、§4.4 的 adapter 列表没有 Grok；`createDaemon` 只内置 pi、claude、codex，Hermes 与 Grok 需要 Host 注入。
-- §8.1 把 challenge/token 画成配对的一部分；`/byok/pair` 已返回 accessToken，challenge/token 只用于续期。
-- §8.2 把 offer 画成推送；实际是 held GET 返回的一页 events。图中也缺 `conn.hello` 先行、cursor ack 顺序、可选 journal，以及 `Session.close()` 在终态之后。
-- §8.3 写 POST 返回 accepted/rejected 计数并做 binary isolation；v3 按 envelope 返回 `outcomes`，未知的可执行消息会冻结 cursor，不会跳过（`packages/client/src/daemon/long-poll-transport.ts:507-518`）。
-- §12.5 把任务终态画成写入 TruthStore；当前终态走 `POST /byok/messages` 和 `recordTerminal`（`packages/cloud/src/inbound.ts:987`）。
+`sdk-architecture.md` 与源码不一致的地方列在 #927 中，修正也在那里跟踪，本文不另列清单。
