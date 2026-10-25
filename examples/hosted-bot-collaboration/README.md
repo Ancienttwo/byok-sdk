@@ -85,7 +85,7 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
 | `outbox` | work for the sender: a projection's value and send state, a delivery's scan index (owner §54a, signed), a card's connector call claim, an Agent home operation's scan index, or a Host job's claim (#793 §6, signed) |
 | `intent` | Turn intent or Host intent (with its handler name, #955): the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
-| `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision and its revoke time |
+| `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision, its revoke time and the target of an open owner switch |
 | `retired_identity` | K8 identity that retention retired for good, `hash([namespace, id])`, or a compacted intent, `hash(['intent', turnId])` |
 | `archived_row` | row that retention moved out of the state, by namespace and id; a command record has an expiry |
 | `routine` | K4 routine of a Bot: its definition, staged version, lifecycle, status and next slot |
@@ -364,8 +364,10 @@ mode revision in one write, and keeps the row as the tombstone.
   returning device pairs under a new id. A revoke of a device id that was never bound is final too: it writes a
   tombstone row in the default mode L at revision 2 (creating the scope row if needed), so a later bind of the id is
   refused.
+- A bind is for a device that pairs with H first. A device whose row names mode L (after a switch to L, or an aborted
+  switch to H) refuses a bind with `mode`: it comes to H through a switch (see Topology switch).
 - Each write that can create execution checks the binding under the scope lock, and throws `DeviceBindingError`
-  unless the device has an active binding in mode H: the freeze of a new intent and the submit claim (the row backs off
+  unless the device has an active binding in mode H (`DeviceSwitchingError` while a switch of the device is open): the freeze of a new intent and the submit claim (the row backs off
   with the error). The freeze check is the last guard: the sync reads the bindings first (next bullet).
 - Right before the SDK call, the submitter reads the binding again. A revoked or changed binding throws, so the try
   backs off with the error. It does not record an expiry.
@@ -374,7 +376,8 @@ mode revision in one write, and keeps the row as the tombstone.
   `expired` at its `wait_until`, through the claim's queued expiry or through the reconciliation, with the revoke
   reason in `last_error`. A delivered task keeps reconciling under its own identity.
 - The sync holds a Turn whose Bot's device has no active H binding (#956, §55a). Each sync round reads, in one query,
-  the binding of each Bot's current device and answers K8's `deviceRefusal(botId)` (`unbound`, `revoked` or `mode`).
+  the binding of each Bot's current device and answers K8's `deviceRefusal(botId)` (`unbound`, `revoked`, `mode`, or
+  `switching` during an owner switch, see Topology switch).
   The K8 step then holds that Bot's Turns that have no intent: `held: 'device_not_bound'`, one `held:<turnId>`
   projection with a fixed body, and an audit line with the reason. The rest of the scope syncs, an Agent's delegation to
   such a Bot included. A Turn that already has an intent is not checked: its work lands under its own identity.
@@ -388,6 +391,53 @@ mode revision in one write, and keeps the row as the tombstone.
   refused device adds no due time, so a revoked device does not make the scope spin. The owner can also end the Turn
   with `cancel_turn`. The command entry still refuses a commit that adds work for a refused device (see Command entry).
 - The routine scheduler checks it before a fire (see Routines).
+
+## Topology switch
+
+The owner switch of plan §4.1 moves one device between L and H (#957). Each step runs in one transaction under the
+scope lock, on the expected mode revision, and returns the binding row read back in that transaction:
+
+- `beginSwitch(scope, deviceId, target, expectedRevision)` is the freeze. It sets `switching` to the target and raises
+  the revision. A device with no row is in the default mode L at revision 0, so a switch to H starts there with a mode L
+  row.
+- `drainDevice(scope, deviceId, expectedRevision, { cancel }, clock)` returns the device's open work while H is the old
+  owner: the open intent rows that run on the device, and for its Bots the Turns that are not concluded, the open input
+  batches and the Agent home writes to the device that were sent and have no terminal readback (a write that was never
+  sent moves with the state). With `cancel`, it first sends K8 `cancel_turn` for each Turn and batch,
+  and the K4 cancel for an intent with no Turn, and returns each cancel that threw. A tried intent concludes only from SDK
+  evidence, so it stays open until the reconciliation concludes it. The drain waits for nothing: the caller syncs the
+  scope, which concludes the cancelled Turns, and calls it again. For a switch toward H it refuses with `not_owner`: L
+  drains its own work. Each cancel runs in its own transaction, which checks the open switch on its revision first, so a
+  drain that an abort or a commit overtook stops with `not_switching` and cancels nothing more.
+- `commitSwitch(scope, deviceId, expectedRevision)` makes the target the owner mode and raises the revision. Away from H,
+  it refuses with `open_work` while the drain finds any open work, whatever its age: §4.1 has no timeout path.
+- `abortSwitch(scope, deviceId, expectedRevision)` ends the switch on the old mode and raises the revision.
+
+A step on another revision, a second freeze, a commit with no open switch, a switch to the current mode and a step on a
+revoked device refuse with `DeviceSwitchRefusedError` (`code: 'switch_refused'` and a `reason`), and write nothing. A
+revoke ends an open switch in the same write, so a revoked device is never left frozen.
+
+During the freeze:
+
+- every write that can create execution for the device throws `DeviceSwitchingError` (`code: 'device_switching'`, the
+  target and the frozen revision), as L's error with the same code: the command entry, the freeze of an intent (a Host
+  intent too), the submit claim and the read right before the SDK call. The freeze raises the revision, so a submit
+  claimed before it is not made;
+- a Bot routine fire of the device throws it too and writes nothing (the scheduler counts it in `pass.fenced`); the
+  slot stays due and fires after an abort;
+- the inbound channel entry refuses input that adds work for a Bot on the device with the same error. Input for an
+  unbound or revoked device is still taken and held (#956);
+- the sync holds a Turn of the device's Bots with K8's `switching` refusal: `held: 'device_switching'` and a
+  `held-switching:<turnId>` projection. An abort writes the due time 0, so the next sync freezes it;
+- H sends no new Agent home write to the device, as L. A write that was never sent waits; a sent one is still read back,
+  with no new enqueue, and the commit waits for its terminal readback. H marks a write `sent` (K8 `HomeOperation.sent`)
+  in the transaction that plans its first enqueue.
+
+After a commit to L, the same writes refuse with `DeviceBindingError` and `mode`. The home write rule of the freeze holds
+while the device's row names mode L too (after a commit to L, and during a switch from L to H until it commits): L writes
+them. The switch moves no data: the state export and import between H and an L
+ledger (the §8 migration set) is a follow-up. Until then, a room seat of a Bot on the device that has no Turn yet stays in
+H's state, and after a commit to L its Turn is held with `mode`.
 
 ## Retention
 
@@ -473,7 +523,8 @@ H has no SDK wake. `HostedRoutineScheduler` finds due slots in `routine_due` and
 - A fire runs no version switch: its new occurrence stays open, so K4 `versionSwitchDue` is false for that routine.
 
 `run()` is one pass. It reads due rows in slot order in keyset pages. Only fires count against `batch` (default 100),
-so fenced rows and failed rows cannot fill it. A fenced fire (`pass.fenced`) and a fire that throws (`pass.failed`) write
+so fenced rows and failed rows cannot fill it. A fenced fire (`pass.fenced`: no active binding, or a device frozen for a
+switch) and a fire that throws (`pass.failed`) write
 nothing, and the routine waits `backoffMs` (default 60 s, in memory only) before its next try: a stuck row keeps its
 old slot, which sorts ahead of every healthy row. A wait that has ended is dropped at the start of a pass. Each fire
 reads the clock, as K4 does when it consumes a wake; the pass time only selects the due rows. The pass also sets `ok` on
@@ -754,6 +805,12 @@ three and runs these suites.
 - The device binding tests use an SDK tenant in memory for the submit checks. The device hold tests (`device-hold.test.ts`,
   #956) cover a refused Bot's Turn held while another Bot's Turn freezes in the same sync, the due time at once after a bind
   that survives another transaction, and a `team_snapshot` that archives the Bot of a held Turn.
+- The topology switch tests (`switch.test.ts`, #957) cover each step's revision checks and refusals, a switch to H from a
+  device with no row, a revoke during a switch, the typed refusal of each entry during the freeze and after a commit to L,
+  a Turn held during the freeze and frozen after an abort, a submit claimed before the freeze, the drain and cancel with a
+  tried intent that holds the commit until it concludes, the cancel of a Host intent with no Turn, a routine fire during
+  the freeze and after an abort, a new store that reads the freeze, and home flushes during the switch and after a
+  commit to L.
 - The K8 retention vectors (`retentionVectors`) run on the store, with H tests for message replays after retention.
 - The compaction tests cover a settled intent and its tombstone, a repeated call, a refused freeze of a retired Turn, a
   K8 veto, an unsettled row, an unknown Turn id, a routine intent, and the sync's `result_retired`.
