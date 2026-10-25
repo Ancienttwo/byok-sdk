@@ -290,6 +290,13 @@ it('concludes a Host job result with execution as failed, with no intent and no 
   expect(digest).toHaveBeenCalledTimes(1);
 });
 
+it('refuses an execution routine on the Bot Host core and writes no routine row, as H does (#954)', async () => {
+  await setup();
+  await expect(bot!.core.addRoutine({ id: 'raw', version: 1, timeZone: 'UTC', rule: json(schedule), waitMs: 60_000, lateAfterMs: 60_000,
+    execution: template(fixture!.deviceId) })).rejects.toThrow('Execution routines are refused by this Host');
+  expect(fixture!.ledger.snapshot().routines).toEqual({});
+});
+
 it('refuses a version 1 ledger with a clear error and leaves it unchanged', async () => {
   const options = { botId: 'main', execution: template('device'), connector: async () => null };
   await setup();

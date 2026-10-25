@@ -277,8 +277,10 @@ export class BotCollaboration {
     this.timers = { cancelGraceMs: time(options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS), uncertainAfterMs: time(options.uncertainAfterMs ?? REPLY_UNCERTAIN_AFTER_MS) };
     if (this.timers.cancelGraceMs < 1 || this.timers.uncertainAfterMs < 1) throw new Error('Invalid delegation timers');
     this.core = new HostExecutionCore(server, ledger, { now: this.now, reconcileMs: options.reconcileMs ?? 100, nextOccurrence: routineCalendar,
-      // No K8 Turn could settle a promoted Host job intent, so L concludes such a result `failed`, as H does (#793 K5).
-      ...(options.hostJobs ? { hostJobs: options.hostJobs, hostJobExecution: 'fail' as const } : {}), ...(options.onOutbox ? { onOutbox: options.onOutbox } : {}),
+      // K8 owns only Turn and Host intents, so no K8 owner could settle an occurrence intent: L concludes a Host job result
+      // with `execution` `failed` (#793 K5) and refuses `execution` routines (#954), as H does.
+      hostJobExecution: 'fail', executionRoutines: 'refuse',
+      ...(options.hostJobs ? { hostJobs: options.hostJobs } : {}), ...(options.onOutbox ? { onOutbox: options.onOutbox } : {}),
       occurrenceHooks: { [BOT_ROUTINE]: (run, tx) => {
         const state = stateOf(tx.application);
         // #957: a slot of a Bot whose device is frozen or owned by H throws, so K4 records neither the slot nor a Turn and the

@@ -196,6 +196,15 @@ such an intent sets `hostJobExecution: 'fail'`: a result with `execution` then s
 its summary and concludes the occurrence `failed`, with no promotion and no retry, and
 the drain rejects with `host_job_execution_unsupported`. K8's L and H Hosts do not promote.
 
+`executionRoutines` is the same choice for `execution` routines. `allow` is the default.
+A Host with no owner for an occurrence intent sets `executionRoutines: 'refuse'`. Then
+`addRoutine`, `updateRoutine` and `OutcomeTransaction.routines` refuse an `execution`
+definition, and no routine row is written. The constructor also refuses a ledger with
+a routine that is not completed and whose current or pending version is `execution`;
+the error names the routine. To open such a ledger, complete the routine first, on a
+core without the option. An intent that an earlier slot already enqueued stays as it is.
+K8's L Host sets `refuse`.
+
 Committed results are never rerun on wake replay or `recover()`. On handler failure
 or invalid output, the pending outbox retains `lastError`, `job.attempts` increases,
 and the drain rejects after processing other work. SDK wake redelivery, `recover()`

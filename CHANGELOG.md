@@ -399,6 +399,16 @@
   and reply with a synthetic runtime. The CI `dataplane` job runs them. No H,
   SDK, wire or SQL change; there is no deployment, physical-device or
   real-runtime evidence yet.
+- **Fix (examples)** — K8 L refuses `execution` routines at creation, as H
+  does (#954). K8 owns only Turn and Host intents, so no K8 owner could settle
+  such a routine's occurrence intent. K4 gets `HostOptions.executionRoutines`
+  (`allow` by default, or `refuse`) and the optional
+  `RoutineValidation.executionRoutines`. Under `refuse`, `addRoutine`,
+  `updateRoutine` and `OutcomeTransaction.routines` refuse an `execution`
+  definition with no row written, and the constructor refuses a ledger with a
+  routine that is not completed and whose current or pending version is
+  `execution`. L now always sets `hostJobExecution: 'fail'` and
+  `executionRoutines: 'refuse'`.
 
 ## 0.30.1 — 2026-10-24 (published)
 
