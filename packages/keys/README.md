@@ -301,8 +301,10 @@ if (submission.ok) {
   In pi-ai 1.4.0 they are:
   - openrouter `anthropic/*` `cacheControlFormat`. No representable entry is
     affected.
-  - the xai `reasoning.encrypted_content` include. There is no difference at a
-    supported thinking level.
+  - the xai `reasoning.encrypted_content` include. At `off` (effort `none`),
+    pinned Pi adds it to a built-in grok-4.3 request and byok does not, so the
+    requests differ; the effect on xAI is not verified. grok-4.5 and later
+    cannot be set to `off`.
   - cerebras body-less overflow detection.
   - the Responses tool-call id, which is kept only for `openai`, `openai-codex`
     and `opencode`. Other providers flatten `callId|itemId`.
