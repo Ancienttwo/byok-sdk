@@ -24,7 +24,10 @@ CREATE TABLE IF NOT EXISTS scope (
   frame          json    NOT NULL,
   -- The earliest time that the K8 rule \`collaborationDue\` gives for this scope's state, or NULL for none. Each store
   -- transaction writes it from the state that it commits.
-  due_at         bigint  CHECK (due_at >= 0)
+  due_at         bigint  CHECK (due_at >= 0),
+  -- The due scheduler's backoff (#794 H1): no pass syncs the scope before this time. It holds only for the due time it
+  -- was set on: the write that moves \`due_at\` clears it.
+  retry_at       bigint  CHECK (retry_at >= 0)
 );
 CREATE INDEX IF NOT EXISTS scope_due ON scope (due_at, scope) WHERE due_at IS NOT NULL;
 CREATE TABLE IF NOT EXISTS entity (
@@ -163,6 +166,9 @@ CREATE TABLE IF NOT EXISTS routine (
   -- The next planned slot time. NULL: no slot within the horizon.
   next_at          bigint  CHECK (next_at >= 0),
   calendar_errors  json,
+  -- The routine scheduler's backoff after a fenced or failed fire (#794 H1): no pass fires the routine before this time.
+  -- It holds only for the slot it was set on: the write that moves \`next_at\` clears it.
+  retry_at         bigint  CHECK (retry_at >= 0),
   PRIMARY KEY (scope, id),
   UNIQUE (scope, ordinal)
 );
