@@ -763,8 +763,8 @@ export function cardVectors(name: string, open: () => CardSubject | Promise<Card
 
 /**
  * #793 S6: the room step of the Host sync. `sync(now)` is one Host sync at `now`, in L's order: the room step (K8
- * `advanceRoomSeats` on the seat facts of the K4 intents), then the Turn steps of the sync contract. A store may run more
- * rounds in one sync. `claim` is a test edit: a device claimed the first attempt of the Turn's intent (K4 `Execution.started`).
+ * `advanceRoomSeats` on the seat facts of the K4 intents), then the Turn steps of the sync contract. When a Turn step releases
+ * a seat, the sync runs the room step and the Turn steps again. A store may run more rounds in one sync. `claim` is a test edit: a device claimed the first attempt of the Turn's intent (K4 `Execution.started`).
  * `cancelReason` reads the K4 cancel reason of the Turn's intent.
  */
 export interface RoomSubject extends Omit<SyncSubject, 'sync'> {
@@ -849,6 +849,15 @@ export function roomVectors(name: string, open: () => RoomSubject | Promise<Room
       expect(await seats()).toMatchObject([{ status: 'removed', released: true }, { status: 'queued', released: false }]);
       expect(await subject.cancelReason(first)).toBe('cancelled');
       expect((await subject.state()).turns[second]).toMatchObject({ source: 'room_slot', botId: 'main' });
+    });
+
+    it('runs the room step again when a Turn step releases a seat, so the next seat gets its Turn in the same sync', async () => {
+      const { subject, round, seats } = await opened();
+      // A room request over the current-request limit blocks each seat Turn in its Turn step, which releases the seat.
+      await subject.change(state => { state.team.rooms.r!.messages[0]!.text = 'x'.repeat(70_000); });
+      await subject.sync(VECTOR_NOW);
+      expect(await seats()).toMatchObject([{ status: 'blocked', released: true }, { status: 'blocked', released: true }]);
+      expect((await subject.state()).team.rounds[round.id]).toMatchObject({ closed: true });
     });
 
     it('fails the unadmitted seat Turn of a Bot that left the room with cancelled', async () => {
