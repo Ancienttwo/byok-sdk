@@ -367,6 +367,27 @@
   pipe `WriteFile` against the real Hermes pipe server (0.29 ms at most). On
   Windows the constructor also refuses `%LOCALAPPDATA%\hermes`, Hermes's
   default home there, as `home`.
+- **Feature (examples)** — K8 L can be the old owner of a §4.1 device switch
+  (#957). It keeps one owner record per device and runs four steps, each on
+  the revision it expects: `freezeForSwitch` (read back from the ledger),
+  `drainForSwitch` (lists the device's open intents, Turns, input batches and
+  sent Agent home writes; with `cancel` it cancels the intents, Turns and
+  batches), and then `commitSwitch` or `abortSwitch`. While the device is
+  frozen, `input`, `receive`, `roomInput`, `answer`, `decide` and
+  `enqueueHostIntent` throw `DeviceSwitchingError` (`device_switching`) for it,
+  after the replay lookup, so an exact replay keeps its first result. A routine
+  slot on the device is refused, so the SDK delivers its wake again, the sync
+  holds any other new Turn on it under `held-switching:<turnId>`, and no new
+  Agent home write is sent. After the commit, every one of these refuses for
+  good with `DeviceModeError`. The L root exports `DeviceSwitchingError`,
+  `DeviceModeError`, `DeviceTopology` and `SwitchWork`. `./rules/commands`
+  adds `DEVICE_SWITCHING`, the `SyncRefusal` type (`DeviceRefusal` or
+  `switching`) that `SyncFacts.deviceRefusal` now returns, and the optional
+  `CommandPorts.admit` port. K4 gets `HostOptions.admitSubmit(intent, state)`,
+  asked when a submit begins and again right before the SDK call; `false`
+  holds the intent with its phase and generation. L wires it to its owner
+  records, so K4 sends nothing to a frozen device, the timer drain and direct
+  `bot.core` calls included.
 
 ## 0.30.1 — 2026-10-24 (published)
 

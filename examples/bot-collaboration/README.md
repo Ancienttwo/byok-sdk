@@ -418,19 +418,21 @@ write for the store:
   its open occurrence.
 
 A Host that binds devices gives the step the optional fact
-`deviceRefusal(botId)` (#956, §55a): `unbound`, `revoked` or `mode` for the
-device of the Bot's current execution template, which a freeze would use. The
-step then holds that Bot's Turns that have no intent: it returns no write,
-sets `held: 'device_not_bound'` on the Turn, publishes `held:<turnId>` with
-`{ owner, turnId, code: 'device_not_bound' }` once per hold, and adds an audit
-row with the reason. The rest of the scope syncs. The hold comes before the
-profile check, since a refused device may never apply a profile. The next sync
-with no refusal (the device is bound, or a `team_snapshot` moved the Bot)
+`deviceRefusal(botId)` (#956, §55a): `unbound`, `revoked`, `mode` or
+`switching` for the device of the Bot's current execution template, which a
+freeze would use. The step then holds that Bot's Turns that have no intent: it
+returns no write, sets `held` on the Turn, publishes the hold once, and adds an
+audit row with the reason. `unbound`, `revoked` and `mode` hold with
+`device_not_bound` and publish `held:<turnId>`; `switching` (#957) holds with
+`device_switching` and publishes `held-switching:<turnId>`. Each body is
+`{ owner, turnId, code }`. The rest of the scope syncs. The hold comes before
+the profile check, since a refused device may never apply a profile. The next
+sync with no refusal (the device is bound, or a `team_snapshot` moved the Bot)
 clears `held` and freezes the Turn with the current template. A held room
-seat Turn waits for its seat deadline, as any seat that does not start. The
-projection body never changes, so a changed reason never conflicts. L has no
-device binding and sets no fact. `DEVICE_NOT_BOUND` is H's
-`DeviceBindingError` code.
+seat Turn waits for its seat deadline, as any seat that does not start. Each
+hold code has its own projection id with one body, so a changed reason never
+conflicts. L sets the fact from its topology records (see "Topology switch").
+`DEVICE_NOT_BOUND` is H's `DeviceBindingError` code.
 
 A store runs the step for each stored Turn, in insertion order, in one
 transaction under the same scope lock as a commit. It reads the facts inside
@@ -888,6 +890,84 @@ A Main Bot with 24 Bots, 8 routines, and a room exceeds the outcome schema cap
 of 16 384 bytes. The Host blocks such a Turn with a visible reason. It does
 not cut an enum. Without the room, 24 open delegations in the
 `cancel_delegation` enum still fit (15 949 bytes).
+
+### Topology switch (§4.1)
+
+L is the old owner when a device moves from L to H (#957). L keeps one owner
+record per device in its ledger, as §4.1 records the mode per device: one L
+Host can own Bots on two devices (see "Second-device placement"). A device with
+no record is `{ mode: 'L', revision: 0 }`. `topology(deviceId)` reads it.
+The product runs the switch with these calls, each on the revision it expects.
+A stale revision throws `CommitConflict` with `stale_revision`, and each step
+raises the revision:
+
+1. `freezeForSwitch(deviceId, revision)` writes `{ mode: 'L', switching: 'H' }`
+   and returns the record read back from the ledger.
+2. `drainForSwitch(deviceId, { cancel })` returns the device's open work:
+   - open K4 intents whose execution names the device;
+   - Turns of its Bots with no conclusion and no intent;
+   - open input batches;
+   - Agent home writes that were sent and have no terminal readback. A write
+     is marked sent in the transaction before the send, so a crash or a
+     failed send still counts it.
+
+   With `cancel`, it cancels the intents, Turns and batches first, then runs a
+   pass. A tried intent concludes only from its SDK terminal, so it stays
+   listed until the reconciler reads one. The drain waits for nothing: no
+   timeout counts as stop evidence.
+3. After H commits the device, `commitSwitch(deviceId, revision)` writes
+   `{ mode: 'H' }`. It refuses while the same transaction finds open work.
+   `abortSwitch(deviceId, revision)` instead writes `{ mode: 'L' }`, so L
+   owns the device again and its held Turns run.
+
+While the device is frozen, each entry that can create execution for it throws
+`DeviceSwitchingError` (`code: 'device_switching'`) and writes nothing:
+
+- `input`, and `receive` owner input, for a Bot on the device;
+- `roomInput`, and `receive` room input or bot background, when any Bot member
+  of the room is on the device;
+- `answer`, when the question's Bot is on the device, and `decide` (either
+  decision), when the card's Bot is on the device, since each adds a Turn for
+  that Bot;
+- `enqueueHostIntent` on the device.
+
+The check runs after the replay lookup (the new `CommandPorts.admit` port), so
+an exact replay of a command or Host intent that L accepted before the freeze
+still returns its first result.
+
+After the commit these entries throw `DeviceModeError` (`code:
+'device_not_bound'`, `reason: 'mode'`, as H's refusal of a device in the other
+mode), for good.
+
+Other refusals and holds:
+
+- **Routine slot:** a slot of a routine whose Bot is on the device throws from
+  the routine hook. K4 then records neither the slot nor a Turn, and the SDK
+  delivers the wake again later, so a slot is never dropped. It runs after an
+  abort. After a commit it refuses until the product pauses the routine on L.
+- **Sync:** any other path that adds a Turn for a Bot on the device is held.
+  This covers a Bot outcome that delegates, a room round, and a batch that
+  seals.
+- **Agent home:** a home write for the device's Bots is not sent, so one Agent
+  home never has two writers. A sent write is still read back. A write that
+  was never sent is not read back and arms no timer, so after a commit nothing
+  polls it.
+- **K4 submit:** L gives K4 `admitSubmit`, which reads the same record. K4 then
+  sends nothing to the device, in the transaction that begins a submit and in
+  the readback right before the SDK call. That holds for a queued intent from
+  before the freeze, a `backoff` intent (it keeps its generation), the K4 timer
+  drain and an intent added through `bot.core` directly. A held intent is sent
+  after an abort; the drain with `cancel` settles it.
+
+Commands that add no execution still run, since the drain needs some of them:
+cancels, team and routine lifecycle changes, `consumeMessage` and retention.
+
+Each check reads the record in the transaction that would write the work. The
+constructor reads every record first and refuses a malformed one, so a restart
+admits nothing before it knows the freeze.
+
+L has no step for H → L: once a device is in mode H, every step refuses. Moving
+a device back to L belongs to the state export and import work (§8).
 
 ### Second-device placement and device wait
 

@@ -15,8 +15,8 @@ import { commit, type CommandRecord, type CommitRequest, type CommitResult, type
 // through the commit contract. Owner commands and the K4 callbacks use the same function.
 // The Host gives ports for its own helpers. A port that a command needs and that is absent is a Host error.
 // The sync step runs beside the commands, so it is part of this entry. A store runs it under the same scope lock as a commit.
-export { DEVICE_NOT_BOUND, OFFER_WAIT_MS, syncTurn, type DeviceRefusal, type FreezeExecution, type SyncBot, type SyncFacts, type SyncOptions, type SyncState,
-  type SyncStep } from './sync';
+export { DEVICE_NOT_BOUND, DEVICE_SWITCHING, OFFER_WAIT_MS, syncTurn, type DeviceRefusal, type FreezeExecution, type SyncBot, type SyncFacts, type SyncOptions, type SyncRefusal,
+  type SyncState, type SyncStep } from './sync';
 export { checkReply, delegationDue, observeDevices, replyCheckDue, settleDelegations, type DelegationTimers, type ReplyCheck,
   type ReplyReadback } from './delegation';
 export { advanceRoomSeats, seatTurn, type SeatFacts } from './rooms';
@@ -77,6 +77,11 @@ export type CommandState = OutcomeState & CommitState & TeamRows;
 export interface CommandPorts {
   /** The Host clock. A command reads it when it needs a time. */
   now(): number;
+  /**
+   * The Host's admission of a new command (#957). It runs after the replay lookup, so an exact replay still returns its
+   * first result. It throws to refuse, and the commit writes nothing. Absent: every command is admitted.
+   */
+  admit?(command: Command): void;
   publish: Publish;
   /** Input admission with the Host coalescing policy. Returns the id of the Turn that answers the input. */
   admitInput?(fields: InputFields): string;
@@ -376,6 +381,7 @@ export function commitCommand(state: CommandState, request: CommitRequest<Comman
   const command = request.command;
   let root: string | undefined;
   const decide = (out: (intent: OutboxIntent) => void): Disposition => {
+    ports.admit?.(command);
     const before = { turn: new Set(Object.keys(state.turns)), input: new Set(Object.keys(state.inputs ?? {})), round: new Set(Object.keys(state.team.rounds)) };
     const disposition = decideCommand(state, command, ports, out);
     const added = (namespace: RetiredNamespace, rows: Record<string, unknown>) => Object.keys(rows).filter(id => !before[namespace].has(id));
