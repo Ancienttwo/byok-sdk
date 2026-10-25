@@ -31,6 +31,11 @@ export interface CommandEntryOptions<C> {
   owner(scope: string): string;
   /** The deployment's composed sync of a scope, the function that `HostedDueScheduler` runs. */
   sync(scope: string, now: number): Promise<unknown>;
+  /**
+   * The deployment's owner settle of a stuck intent (#955), the reconciler's `failStuckIntent` for the scope's tenant.
+   * Without it, `failStuckIntent` refuses.
+   */
+  failStuckIntent?(scope: string, key: string): Promise<void>;
   now?: () => number;
 }
 
@@ -127,6 +132,16 @@ export class HostedCommandEntry<C> {
   async updateRoutine(credential: C, botId: string, action: UpdateRoutineAction): Promise<void> {
     const { scope } = await this.owned(credential, 'updateRoutine', action.routineId);
     await this.store.updateRoutine(scope, botId, action, this.now());
+    await this.options.sync(scope, this.now());
+  }
+  /**
+   * L's owner API `failStuckIntent` (#955): settles as `failed` an open intent whose terminal H refuses with
+   * `IntentOutcomeError`, so its FIFO moves on, then syncs, so a Bot Turn ends `failed`.
+   */
+  async failStuckIntent(credential: C, key: string): Promise<void> {
+    const { scope } = await this.owned(credential, 'failStuckIntent', key);
+    if (!this.options.failStuckIntent) throw new Error('The command entry has no failStuckIntent');
+    await this.options.failStuckIntent(scope, key);
     await this.options.sync(scope, this.now());
   }
   async setRoutineLifecycle(credential: C, botId: string, routineId: string, lifecycle: Routine['lifecycle']): Promise<void> {

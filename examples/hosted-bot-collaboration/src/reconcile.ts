@@ -9,7 +9,30 @@ import { deliverCancels } from './intents';
 import { commitStored } from './retention';
 import { storedKey } from './layout';
 import { loadSlice, outcomeRoutinePorts, switchDueVersions, writeSlice } from './routines';
-import { inSchema, lockScope, type Decision, type HostedCollaborationStore, type StorePorts } from './store';
+import { inSchema, lockScope, type Decision, type HostedCollaborationStore, type Publish, type StorePorts } from './store';
+
+/**
+ * A K4 terminal that H cannot apply, as L's `IntentOutcomeError` (K8 host.ts, #882 Q6f): its key is neither a Bot Turn
+ * nor a Host intent, its Host handler failed or is not configured here, or the outcome commit of its Bot Turn threw. The
+ * terminal transaction rolls back, so the intent stays open at the head of its FIFO, and each reconciliation refuses it
+ * again until the outcome applies or the owner calls `failStuckIntent` (#955).
+ */
+export class IntentOutcomeError extends Error {
+  constructor(readonly key: string, readonly code: 'unknown_intent' | 'handler_failed' | 'outcome_failed', message: string) {
+    super(message); this.name = 'IntentOutcomeError';
+  }
+}
+/** What a Host intent handler gets in the terminal transaction (#955). `publish` writes a projection row in the same commit. */
+export interface HostedIntentTransaction {
+  readonly intent: { readonly key: string; readonly taskId: string };
+  readonly terminal: DeviceTerminal;
+  publish: Publish;
+}
+/**
+ * Handles the `task.complete` result document of a Host intent (#955), as L's `HostIntentHandler`. Synchronous: a throw or
+ * a thenable leaves the intent open as `handler_failed`.
+ */
+export type HostedIntentHandler = (document: unknown, transaction: HostedIntentTransaction) => void;
 
 /** The SDK calls of one tenant that the reconciliation uses, as L binds them to its `ByokServer` tasks. */
 export interface HostedTaskPort extends Pick<FrozenSubmitPort, 'offer'> {
@@ -71,12 +94,45 @@ export class HostedReconciler {
         }
       }
       catch (error) {
-        pass.failed.push({ scope: JSON.parse(row.scope) as string, turnId: JSON.parse(row.key) as string, error });
+        const scope = JSON.parse(row.scope) as string;
+        pass.failed.push({ scope, turnId: JSON.parse(row.key) as string, error });
+        // A refused terminal rolled back, so its reason commits on its own: one audit line for each new reason (#955).
+        if (error instanceof IntentOutcomeError) await this.store.refuseTerminal(scope, error, this.now).catch(() => undefined);
         await this.later(row.scope, row.key).catch(() => undefined);
       }
     }
     for (const scope of changed) this.options.changed?.(scope);
     return pass;
+  }
+
+  /**
+   * Owner settle (#955), as L's `failStuckIntent` (K8 host.ts): settles as `failed` the open intent `key` of `scope` whose
+   * terminal H refuses with `IntentOutcomeError`, so its FIFO moves on. A fresh reconciliation of that row decides that it is
+   * stuck, so the call also works in a process that has not seen the refusal; a Host handler that failed runs once more in
+   * it. Then one transaction under the scope lock settles the row with no terminal and writes the audit line. Refuses an
+   * unknown key, a settled intent (also one that this reconciliation concluded), and an intent whose terminal H did not
+   * refuse, such as a row that no submit tried yet or one still waiting for its device. Another error of the
+   * reconciliation is thrown as it is. The caller syncs the scope afterwards, so a Bot Turn ends `failed`.
+   */
+  async failStuckIntent(scope: string, key: string): Promise<void> {
+    const scopeKey = storedKey(scope), stored = storedKey(key);
+    const found = await inSchema(this.pool, this.schema, client => client.query<{ concluded: boolean; tried: boolean }>(
+      `SELECT conclusion IS NOT NULL AS concluded, submission <> 'reserved' AS tried FROM intent WHERE scope = $1 AND key = $2`,
+      [scopeKey, stored]), true);
+    const row = found.rows[0];
+    if (!row) throw new Error(`Unknown intent: ${key}`);
+    if (row.concluded) throw new Error(`Intent already settled: ${key}`);
+    let refused: IntentOutcomeError | undefined;
+    if (row.tried) {
+      try {
+        if (await this.reconcile(scopeKey, stored, () => {})) throw new Error(`Intent already settled: ${key}`);
+      } catch (error) {
+        if (!(error instanceof IntentOutcomeError) || error.key !== key) throw error;
+        refused = error;
+      }
+    }
+    if (!refused) throw new Error(`Intent is not stuck: ${key} has no refused terminal`);
+    await this.store.failIntent(scope, refused, this.now);
   }
 
   /** K4 `reconcile` for one tried row. Returns true when the row concluded. */
@@ -207,10 +263,11 @@ function verified(input: FrozenInput, attempt: TaskAttempt | undefined): TaskAtt
  * conclusion, as K4 runs `applyOutcome` before `settle` (#793 D2f). Then a staged version that is due switches.
  */
 export async function decideFinish(client: PoolClient, scope: string, turnId: string, state: CollaborationState,
-  { terminal, attempt }: TaskEvidence, ports: StorePorts, channel: boolean): Promise<Decision<Conclusion | undefined>> {
+  { terminal, attempt }: TaskEvidence, ports: StorePorts, channel: boolean,
+  hostIntents: ReadonlyMap<string, HostedIntentHandler>): Promise<Decision<Conclusion | undefined>> {
   const scopeKey = storedKey(scope), key = storedKey(turnId);
-  const found = await client.query<{ task_id: string; concluded: boolean }>(
-    'SELECT task_id, conclusion IS NOT NULL AS concluded FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
+  const found = await client.query<{ task_id: string; handler: string | null; concluded: boolean }>(
+    'SELECT task_id, handler, conclusion IS NOT NULL AS concluded FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
   const row = found.rows[0];
   if (!row) throw new Error('Unknown intent');
   if (row.concluded) return { value: undefined, outbox: [] };
@@ -220,13 +277,29 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
   const { manage, ...base } = ports, now = base.now();
   if (attempt.cancellation || envelope.type === 'task.cancelled') conclusion = 'cancelled';
   else if (envelope.type === 'task.complete') {
-    // commitStored reads the committed intents before this row concludes, as L reads its ledger before the terminal transaction writes.
-    const slice = await loadSlice(client, scopeKey), head = revisionOf(state);
-    const result = await commitStored(client, scope, state, { scope, commandId: row.task_id,
-      command: { kind: 'outcome', turnId, taskId: row.task_id, document: envelope.payload.document as Json } },
-    { ...base, outcome: { manage: manage(row.task_id), ...outcomeRoutinePorts(slice, now, row.task_id) } }, channel);
-    await writeSlice(client, scopeKey, slice);
-    outbox = result.revision === head + 1 ? result.outbox : [];
+    const document = envelope.payload.document;
+    if (row.handler !== null) {
+      // As K4 `publish`: each value is a projection row of this commit.
+      const published = new Set<string>();
+      applyHostOutcome(turnId, hostIntents.get(row.handler), row.handler, document, { intent: { key: turnId, taskId: row.task_id }, terminal,
+        publish: (id, value) => { base.publish(id, value); published.add(id); } });
+      outbox = [...published].map(id => ({ kind: 'projection', id }));
+    } else {
+      // Not a key that K8 wrote. It must never settle as a success.
+      if (!Object.hasOwn(state.turns, turnId)) throw new IntentOutcomeError(turnId, 'unknown_intent', 'No Bot Turn or Host intent has this key');
+      // commitStored reads the committed intents before this row concludes, as L reads its ledger before the terminal transaction writes.
+      const slice = await loadSlice(client, scopeKey), head = revisionOf(state);
+      let result;
+      try {
+        result = await commitStored(client, scope, state, { scope, commandId: row.task_id,
+          command: { kind: 'outcome', turnId, taskId: row.task_id, document: document as Json } },
+        { ...base, outcome: { manage: manage(row.task_id), ...outcomeRoutinePorts(slice, now, row.task_id) } }, channel);
+      } catch (cause) {
+        throw new IntentOutcomeError(turnId, 'outcome_failed', cause instanceof Error ? cause.message : String(cause));
+      }
+      await writeSlice(client, scopeKey, slice);
+      outbox = result.revision === head + 1 ? result.outbox : [];
+    }
     conclusion = 'succeeded';
   } else conclusion = envelope.type === 'task.decline' ? 'declined' : 'failed';
   await client.query('UPDATE intent SET terminal = $3::json, attempt = $4::json, conclusion = $5 WHERE scope = $1 AND key = $2',
@@ -236,4 +309,21 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
   await deliverCancels(client, scope, state, now);
   await switchDueVersions(client, scopeKey, now);
   return { value: conclusion, outbox, now };
+}
+
+/** Runs the handler of a Host intent in the terminal transaction, as L's `applyHostOutcome` (K8 host.ts). */
+function applyHostOutcome(key: string, handler: HostedIntentHandler | undefined, name: string, document: unknown,
+  transaction: HostedIntentTransaction): void {
+  // L refuses to open with an open Host intent whose handler it lacks. H has no such startup check over every scope, so the
+  // terminal fails closed here.
+  if (!handler) throw new IntentOutcomeError(key, 'handler_failed', `Unknown Host intent handler: ${name}`);
+  let result: unknown;
+  try { result = handler(document, transaction); } catch (cause) {
+    throw new IntentOutcomeError(key, 'handler_failed', cause instanceof Error ? cause.message : String(cause));
+  }
+  // The handler shares the terminal transaction, so it must not resolve later. Its promise must not reject unhandled.
+  if (result && typeof (result as { then?: unknown }).then === 'function') {
+    void Promise.resolve(result).catch(() => {});
+    throw new IntentOutcomeError(key, 'handler_failed', 'Host intent handler must be synchronous');
+  }
 }
