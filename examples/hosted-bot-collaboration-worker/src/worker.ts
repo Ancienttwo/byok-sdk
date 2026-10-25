@@ -25,6 +25,7 @@ import type { FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
 import { EntryRefusedError, HostedCollaborationStore, HostedCommandEntry, HostedDeviceObserver, HostedDueScheduler, HostedReconciler,
   HostedReplyChecker, HostedRoutineScheduler, HostedSubmitter, hostedMessageConsumer, UnauthenticatedError, type HostedSyncOptions,
   type HostedTaskPort } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
+import { releaseAfterBody } from './body-lifetime';
 import { readHostScopes, sha256Hex, type HostScope } from './host-scopes';
 
 // The Workers runtime surface this Worker touches, written out because the example typechecks against Node types only.
@@ -290,10 +291,15 @@ async function serveInput(request: Request, env: Env, ctx: ExecutionContext): Pr
   } finally { await host.close(); }
 }
 
-/** The device surface. The SDK observer's notification runs after the response. */
+/**
+ * The device surface. The SDK observer's notification runs after the response. The pools stay open until the response body
+ * ends or is cancelled, because a streamed route (the board SSE stream) keeps querying after the headers return.
+ */
 async function serveDevice(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const host = await compose(env, notifier(env, ctx));
-  try { return await host.cloud.fetch(request); } finally { ctx.waitUntil(host.close()); }
+  let response: Response;
+  try { response = await host.cloud.fetch(request); } catch (error) { ctx.waitUntil(host.close()); throw error; }
+  return releaseAfterBody(response, () => { ctx.waitUntil(host.close()); });
 }
 
 export default {

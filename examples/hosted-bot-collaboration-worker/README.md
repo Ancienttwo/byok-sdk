@@ -18,6 +18,9 @@ invocation is done:
 - `HostedCollaborationStore` and its passes: the routine scheduler (`start()` and `run()`), the reconciler, the composed
   sync of each changed scope (reply checker, device observer, `store.sync`), the due scheduler and the submitter.
 
+A device response keeps its invocation's pools open until its body ends or is cancelled (`src/body-lifetime.ts`): the
+board SSE stream keeps querying after `cloud.fetch` returns its headers.
+
 Module scope holds no mutable state. Postgres is the only memory between invocations: no `LISTEN`, no timer that
 outlives an invocation, no session map.
 
