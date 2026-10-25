@@ -482,7 +482,7 @@ jobs:
             (trap 'kill "$nap" 2>/dev/null; exit' TERM
               while :; do
                 date -u +%T
-                ps -axo pid,pgid,ppid,stat,%cpu,rss,etime,command | grep -E 'vitest|bun|agent-memory|byok-|createServer' | grep -v grep | cut -c1-400
+                ps -axo pid,pgid,ppid,stat,%cpu,rss,etime,command | grep -E 'vitest|/bun |bun run|agent-memory|byok-|createServer' | grep -v grep | cut -c1-400
                 sleep 15 & nap=$!; wait "$nap"
               done) > "$RUNNER_TEMP/w5-processes.log" 2>&1 &
             sampler=$!
@@ -495,6 +495,29 @@ jobs:
         run: |
           cat "$RUNNER_TEMP/w5-processes.log" || true
           ps -axo pid,pgid,ppid,stat,%cpu,rss,etime,command
+
+      # TEMPORARY hang probe, removed once it caught the hang: the earlier
+      # single invocation with W5 last, as it hung on macos-latest.
+      - name: "Probe: the 14-file invocation that hung"
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        timeout-minutes: 6
+        run: |
+          (trap 'kill "$nap" 2>/dev/null; exit' TERM
+            while :; do
+              date -u +%T; vm_stat | head -6; sysctl -n vm.loadavg
+              ps -axo pid,pgid,ppid,stat,%cpu,rss,etime,command | grep -E 'vitest|/bun |bun run|agent-memory|byok-|createServer' | grep -v grep | cut -c1-400
+              sleep 5 & nap=$!; wait "$nap"
+            done) > "$RUNNER_TEMP/probe-processes.log" 2>&1 &
+          sampler=$!
+          trap 'kill "$sampler"' EXIT
+          bun run --filter @byok-sdk/client test -- --reporter=verbose --reporter=hanging-process src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-asset-root-daemon.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-mcp-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts src/__tests__/agent-memory-helper-identity.test.ts src/__tests__/agent-memory-windows-gate.test.ts src/__tests__/agent-memory-powercut.test.ts
+
+      - name: "Probe: processes during and after the 14-file invocation"
+        if: always() && runner.os == 'macOS'
+        run: |
+          cat "$RUNNER_TEMP/probe-processes.log" || true
+          ps -axo pid,pgid,ppid,stat,%cpu,rss,etime,command | grep -E 'vitest|/bun |bun run|agent-memory|byok-|createServer|node' | grep -v grep | cut -c1-400
 
       - name: Qualify task-free export against the release helper
         env:
