@@ -452,6 +452,14 @@
   fails before any SDK call, as in L. `freezeIntent` takes a sealed execution
   only from a routine occurrence with no Host handler. No DDL, SDK or wire
   change.
+- **Fix (examples)** — H's due and routine schedulers keep their backoff in
+  Postgres (#794 H1): `scope.retry_at` and `routine.retry_at`. A scope whose
+  sync throws or stays due, and a routine whose fire throws or is fenced, wait
+  out `backoffMs` across scheduler instances and processes, so a Worker
+  invocation no longer retries them on every pass. A backoff holds only for the
+  due time or slot it was set on: the store write that moves `due_at` or
+  `next_at` clears it. The in-memory maps are gone. H DDL adds the two columns;
+  no SDK or wire change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

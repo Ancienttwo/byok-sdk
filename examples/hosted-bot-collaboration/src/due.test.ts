@@ -25,6 +25,8 @@ const LATER = Number.MAX_SAFE_INTEGER;
 
 const dueAt = async (scope: string) => (await query<{ due_at: string | null }>(`SELECT due_at::text FROM ${table('scope')} WHERE scope = $1`,
   [storedKey(scope)]))[0]!.due_at;
+const retryAt = async (scope: string) => (await query<{ retry_at: string | null }>(`SELECT retry_at::text FROM ${table('scope')} WHERE scope = $1`,
+  [storedKey(scope)]))[0]!.retry_at;
 /** The due time that the K8 rule gives for the stored state, in the column's text form. */
 const ruleDue = async (scope: string) => {
   const due = collaborationDue(await store().read(scope), TIMERS);
@@ -179,6 +181,9 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
       const scope = await stuck('a'), pass = scheduler({ sync: unchanged });
       expect(await pass.run()).toEqual({ synced: 1, stalled: [scope], failed: [] });
       expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [] });
+      // The backoff is `scope.retry_at` (#794 H1), so a new scheduler instance waits too.
+      expect(await retryAt(scope)).toBe(String(VECTOR_NOW + 10_000));
+      expect(await scheduler({ sync: unchanged }).run()).toEqual({ synced: 0, stalled: [], failed: [] });
       clock += 10_000 - 1;
       expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [] });
       clock += 1;
@@ -192,9 +197,20 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
       const pass = scheduler({ sync: async (at, now) => { if (fail) throw error; return unchanged(at, now); } });
       expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [{ scope, error }] });
       expect(await pass.run()).toEqual({ synced: 0, stalled: [], failed: [] });
+      expect(await scheduler({ sync: unchanged }).run()).toEqual({ synced: 0, stalled: [], failed: [] });
       fail = false;
       clock += 10_000;
       expect(await pass.run()).toEqual({ synced: 1, stalled: [scope], failed: [] });
+    });
+
+    it('clears the backoff in the store write that moves the due time, so the new work is due at once (#794 H1)', async () => {
+      const scope = await stuck('a');
+      expect(await scheduler({ sync: unchanged }).run()).toEqual({ synced: 1, stalled: [scope], failed: [] });
+      expect(await retryAt(scope)).toBe(String(VECTOR_NOW + 10_000));
+      // The store's own sync expires the card, which moves the due time.
+      await store().sync(scope, { ...SYNC_OPTIONS, now: VECTOR_NOW, history: undefined });
+      expect(await dueAt(scope)).not.toBe(String(VECTOR_NOW));
+      expect(await retryAt(scope)).toBeNull();
     });
 
     it('syncs at most a batch in due order, and backed-off scopes do not fill the next batch', async () => {
@@ -236,6 +252,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H scope due time and due scheduler 
       expect(await dueAt(h.scope)).toBe(String(VECTOR_NOW));
       // The store sync alone does not read the reply, so the scope stays due.
       expect(await scheduler().run()).toEqual({ synced: 1, stalled: [h.scope], failed: [] });
+      // The stalled scope waits out its backoff, which a new scheduler instance keeps (#794 H1).
+      clock += 10_000;
       const checker = new HostedReplyChecker(store(), { port: () => ({ agentMessage: async () => ({ disposition: { outcome: 'held' } }) }), now: () => clock });
       const pass = scheduler({ sync: async (scope, now) => { await checker.check(scope, now); return sync(scope, now); } });
       expect(await pass.run()).toEqual({ synced: 1, stalled: [], failed: [] });

@@ -15,7 +15,10 @@ export interface SchedulerOptions {
   intervalMs?: number;
   /** The most fires that one pass takes. A fenced or failed row does not count: its backoff limits how often it runs. */
   batch?: number;
-  /** How long a fenced routine, or one whose fire threw, waits before the next try. The wait is kept in memory only. */
+  /**
+   * How long a fenced routine, or one whose fire threw, waits before the next try. The wait is `routine.retry_at`, so it
+   * holds across scheduler instances and processes, and only for the slot it was set on.
+   */
   backoffMs?: number;
   /**
    * Called once for each scope where this pass committed a fire, in the order of its first one, at the end of the pass
@@ -42,7 +45,6 @@ const DEFAULT_INTERVAL_MS = 5_000;
 export class HostedRoutineScheduler {
   readonly intervalMs: number;
   private readonly now: () => number;
-  private readonly retryAt = new Map<string, number>();
 
   constructor(private readonly pool: Pool, private readonly store: HostedCollaborationStore, private readonly options: SchedulerOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -69,8 +71,6 @@ export class HostedRoutineScheduler {
    */
   async run(): Promise<SchedulerPass> {
     const now = this.now(), pass: SchedulerPass = { fired: 0, fenced: [], failed: [] }, changed = new Set<string>();
-    // An expired wait has no effect, so a routine that stopped being due leaves the map within one backoff.
-    for (const [retry, at] of this.retryAt) if (at <= now) this.retryAt.delete(retry);
     const retrying = await this.scopes(`SELECT DISTINCT r.scope FROM routine r JOIN scope s ON s.scope = r.scope WHERE s.state_version = ANY($1::integer[])
       AND r.status = 'schedule_retrying' AND r.next_at <= $2 ORDER BY r.scope`, [now + WAKE_HORIZON_MS]);
     pass.failed.push(...await this.plan(retrying, 'pass'));
@@ -80,25 +80,25 @@ export class HostedRoutineScheduler {
       const due = await inSchema(this.pool, this.store.schema, client => client.query<DueRow>(
         `SELECT r.scope, r.id, r.next_at::text, r.ordinal::text FROM routine r JOIN scope s ON s.scope = r.scope
           WHERE s.state_version = ANY($3::integer[]) AND r.lifecycle = 'active' AND r.next_at <= $1
+          AND (r.retry_at IS NULL OR r.retry_at <= $1)
           AND (r.next_at, r.scope, r.ordinal) > ($4, $5, $6) ORDER BY r.next_at, r.scope, r.ordinal LIMIT $2`,
         [now, batch, [...SUPPORTED_STORE_VERSIONS], ...cursor]), true);
       for (const row of due.rows) {
         cursor = [Number(row.next_at), row.scope, Number(row.ordinal)];
         if (pass.fired >= batch) break;
-        const scope = JSON.parse(row.scope) as string, routineId = JSON.parse(row.id) as string, retry = `${row.scope}\n${row.id}`;
-        const at = this.now();
-        if ((this.retryAt.get(retry) ?? 0) > at) continue;
+        const scope = JSON.parse(row.scope) as string, routineId = JSON.parse(row.id) as string, at = this.now();
         try {
           if (await this.store.fire(scope, routineId, at) === 'fired') {
             pass.fired++;
             changed.add(scope);
           }
-          this.retryAt.delete(retry);
         } catch (error) {
           (error instanceof DeviceBindingError || error instanceof DeviceSwitchingError ? pass.fenced : pass.failed).push({ scope, routineId, error });
           // A throw wrote nothing. The routine keeps its old slot, which sorts ahead of healthy rows, so it waits before its
-          // next try and does not run a transaction on every pass.
-          this.retryAt.set(retry, at + backoffMs);
+          // next try and does not run a transaction on every pass. Keyed on that slot: a write that moved it has cleared
+          // `retry_at`, and this one then matches no row.
+          await inSchema(this.pool, this.store.schema, client => client.query(
+            'UPDATE routine SET retry_at = $4 WHERE scope = $1 AND id = $2 AND next_at = $3', [row.scope, row.id, Number(row.next_at), at + backoffMs]));
         }
       }
       if (due.rows.length < batch) break;
