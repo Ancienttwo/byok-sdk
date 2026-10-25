@@ -63,8 +63,8 @@ guarantee.
 | Adapter (version) | User-level instruction sources | User MCP servers in a task | Runtime memory | Per-process switch | SDK option |
 | --- | --- | --- | --- | --- | --- |
 | Claude (2.1.302) | `~/.claude/CLAUDE.md`, `~/.claude/rules/`, `~/.claude/settings.json`, user skills, commands and subagents; `CLAUDE.md`, `CLAUDE.local.md`, `.claude/CLAUDE.md` and `.claude/rules/` in every parent of the cwd; also managed policy and `~/.claude.json` | Yes, beside the task's `--mcp-config`: user and project servers; claude.ai connectors and plugin servers (inferred) | Auto memory, on by default | `--strict-mcp-config`; `claudeMdExcludes` and `env` through `--settings`; `--setting-sources` also drops guardrails | `agentUserContext`, Agent tasks only |
-| Codex (0.160.0) | `$CODEX_HOME/AGENTS.override.md` or `AGENTS.md`, `$CODEX_HOME/config.toml` | Yes: `config.toml` `[mcp_servers]`, merged with the task servers; plugins and apps (connectors) are on by default | `memories` feature, off by default | None | None |
-| Grok (1.0.52) | `$GROK_HOME/AGENTS.md` and `rules/`, `~/.claude/` and `~/.cursor/` instruction files and rules, `[paths] extra_rule_dirs`; also Claude and Cursor skills and hooks through compatibility cells | Yes (from the guide): `~/.grok/config.toml`, project `.grok/config.toml` and `.mcp.json`, plugins, and `~/.claude.json` and `~/.cursor/mcp.json` through compatibility cells | Experimental, off by default (`GROK_MEMORY`) | Four variables for the Claude and Cursor instruction files and rules; `GROK_CLAUDE_MCPS_ENABLED` and `GROK_CURSOR_MCPS_ENABLED` for those MCP cells only (from the guide) | `compatInstructions` |
+| Codex (0.160.0) | `$CODEX_HOME/AGENTS.override.md` or `AGENTS.md`, `$CODEX_HOME/config.toml` | Yes: `config.toml` `[mcp_servers]`, merged with the task servers; plugins and apps (connectors) are on by default | `memories` feature, off by default | None for instructions; per thread, `mcp_servers.<name>.enabled = false`, `features.apps` and `features.plugins` in the open request's `config` (probed for servers and plugins) | `agentUserMcpServers`, Agent tasks only: no user MCP source remains, connectors inferred |
+| Grok (1.0.52) | `$GROK_HOME/AGENTS.md` and `rules/`, `~/.claude/` and `~/.cursor/` instruction files and rules, `[paths] extra_rule_dirs`; also Claude and Cursor skills and hooks through compatibility cells | Yes (from the guide): `~/.grok/config.toml`, project `.grok/config.toml` and `.mcp.json`, plugins, and `~/.claude.json` and `~/.cursor/mcp.json` through compatibility cells | Experimental, off by default (`GROK_MEMORY`) | Four variables for the Claude and Cursor instruction files and rules; `GROK_CLAUDE_MCPS_ENABLED` and `GROK_CURSOR_MCPS_ENABLED` for those MCP cells only (probed), `GROK_MANAGED_MCPS_ENABLED` for managed MCP | `compatInstructions`; `agentUserMcpServers`, Agent tasks only: refuses the start while `~/.grok/config.toml`, project or plugin servers are enabled |
 | Pi (1.4.0) | Agent-directory `AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions, skills and prompts; `~/.agents/skills`; context files in every parent of the cwd | Pi's built-in MCP and `mcp.json` do not load in SDK sessions; user extensions from the agent directory load and can register tools | None found (inferred) | `--no-context-files` drops the persona too | None |
 | Hermes (0.22.2+2364.g0b10b9f) | None: each execution has a fresh `HERMES_HOME` | No: the fresh `HERMES_HOME` configuration has no `mcp_servers` | Off in the SDK profile | Not needed | None |
 
@@ -188,6 +188,59 @@ per-thread MCP override does not either. `CODEX_HOME` also holds `auth.json`
 and the sessions, so moving it moves the login. The SDK has no Codex option
 for user instructions.
 
+#### `agentUserMcpServers` (Codex)
+
+`CodexAdapterOptions.agentUserMcpServers: 'excluded'` gives an Agent task
+(`task.offer_for_agent`) only the task's and the SDK's MCP servers. It changes
+MCP servers only; the user's `AGENTS.md` still loads. Other tasks, and the
+default `'inherit'`, are unchanged. The adapter works on the session's own
+app server, through two caller-owned steps of the
+[vendored session](../packages/client/vendor/oar/c88a514/PROVENANCE.md):
+
+- Before the thread opens, `config/read` for the task cwd lists the servers of
+  the user and project `config.toml` layers. Each one that is not a task
+  server gets `enabled = false` in the `thread/start` or `thread/resume`
+  `config`, and the same `config` sets `features.apps = false` and
+  `features.plugins = false`. A user server with the name of a task or SDK
+  server refuses the start, because Codex would merge the user's `env`, `cwd`
+  and tool filters into the task server.
+- After the open, `mcpServerStatus/list` with the thread id reads the
+  thread's servers back. Any server outside the task that is not `disabled`
+  refuses the start. A plugin server is named with its plugin id.
+
+Codex keeps no MCP servers per thread, so a resume carries the same `config`:
+the option also covers resumed threads.
+
+`features.plugins = false` turns off the thread's plugins altogether, with
+their skills and commands, not only their MCP servers. Plugin servers are not
+in `config/read`'s `mcp_servers`, so the feature switch is the only per-thread
+way to remove them.
+
+Probed on Codex 0.160.0 and 0.164.0 in a synthetic `CODEX_HOME` with the
+network denied: a user stdio server, a dotted name and a trusted project
+server read back as `disabled`, a plugin server disappeared with either
+`features.plugins = false` or `plugins."<id>".enabled = false`, and the
+user's `model` and `sandbox_mode` still applied. The same overrides as launch
+`-c` arguments did not disable the servers, and a quoted dotted key stopped the
+app server, so the adapter does not use them. Connectors need a ChatGPT login
+and were not probed: that `features.apps = false` removes them is inferred. If
+Codex still starts its connector server (`codex_apps`), the read-back refuses
+the start.
+
+The start fails as a non-retryable `authority` failure, class `unknown`. The
+reason names servers and plugin ids, never paths:
+
+- `codex Agent user MCP server exclusion refused: user MCP servers share a name with task servers: <names>`
+- `codex Agent thread still runs MCP servers outside the task: <names>`
+- `codex Agent user MCP server exclusion refused: …` when a reply it reads
+  has the wrong shape.
+
+A failed `config/read` or `mcpServerStatus/list` request fails the open as any
+other app-server error does.
+
+`createDaemon` does not set the option. A Host sets it on its own
+`CodexAdapter` through `createDaemonWithAdapters`.
+
 ### Grok: user-level configuration
 
 The [vendored launch profile](../packages/client/vendor/oar/c88a514/runtimes/grok/session.ts)
@@ -231,6 +284,51 @@ not do it. With the four variables, `grok inspect --json` 1.0.52 lists the
 four Claude and Cursor files as `disabled`; without them, as `enabled`. The
 probe ran in a synthetic home with the network denied. `inspect` reports
 discovery, not prompt text. No live Grok session shows what the model sees.
+
+#### `agentUserMcpServers` (Grok)
+
+`GrokAdapterOptions.agentUserMcpServers: 'excluded'` applies to Agent tasks
+(`task.offer_for_agent`); other tasks, and the default `'inherit'`, are
+unchanged. Grok has no per-process switch for the servers of
+`~/.grok/config.toml`, a project `.grok/config.toml` or `.mcp.json`, or
+plugins, and `GROK_CONFIG` cannot set `disabled_mcp_servers`. So the adapter
+turns off what it can and refuses the start when anything else is on:
+
+- It sets `GROK_CLAUDE_MCPS_ENABLED`, `GROK_CURSOR_MCPS_ENABLED` and
+  `GROK_MANAGED_MCPS_ENABLED` to `0` on the Grok agent process.
+- Before the agent starts, it runs `grok inspect --json` in the task cwd with
+  the agent's environment. The start fails if inspect lists an MCP server that
+  is not `disabled`, or an enabled plugin that provides MCP servers, or if
+  inspect fails, times out (5 s) or prints output the adapter cannot read.
+
+A user who keeps all their servers in `~/.claude.json` or `~/.cursor/mcp.json`
+can run Agent tasks; any enabled server in a Grok-native source stops them.
+The Host reads which ones from the failure reason. Two sources are not
+detected:
+
+- A server turned on while the session runs: a project `.grok/config.toml`
+  hot-reload, `/mcps` or `grok mcp enable`.
+- Managed MCP that an administrator pins on: `managed_mcps.enabled` is a
+  `pin` key, and offline inspect does not show managed servers.
+
+`inspect` reports discovery. It over-reports in two places, which refuses
+more, never less: a server in `disabled_mcp_servers` is listed without a
+`disabled` mark, and a project `.mcp.json` in an untrusted folder is listed.
+A plugin shows only how many servers it provides, so the reason names the
+plugin. Inspect also extracts its user guide into `$GROK_HOME/docs/`, as
+every Grok start does.
+
+Probed on Grok 1.0.52 and 1.0.62 in a synthetic home with the network denied:
+with the variables, `grok inspect --json` lists the `~/.claude.json` and
+`~/.cursor/mcp.json` servers as `disabled`, and the `~/.grok/config.toml`,
+project `.grok/config.toml` and `.mcp.json` servers and the plugin as before.
+
+The start fails as a non-retryable `authority` failure, class `unknown`. The
+reason names servers with their inspect source type, and plugins, never
+paths:
+
+- `grok Agent user MCP server exclusion refused: Grok still loads MCP servers outside the task: <name (source)>; enabled plugins provide MCP servers: <plugins>`
+- `grok Agent user MCP server exclusion refused: grok inspect failed`
 
 ### Pi: user-level configuration
 

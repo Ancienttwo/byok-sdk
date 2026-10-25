@@ -9,6 +9,22 @@
   now stops the rotation with `key_package_missing`, and the old key stays.
   Before, the rotation finished and dropped that epoch. The rotation still
   has no production caller.
+- **Added (client)** — `agentUserMcpServers?: 'inherit' | 'excluded'` on
+  `CodexAdapterOptions` and `GrokAdapterOptions` (#935). It applies to Agent
+  tasks only, and the default `'inherit'` changes nothing. Under `'excluded'`
+  a Codex thread gets only the task's and the SDK's MCP servers: the adapter
+  reads Codex's effective config, disables every other configured server and
+  turns off apps (connectors) and plugins for the thread, then reads the
+  thread's servers back and fails the start if another one is not disabled
+  or a user server shares a task server's name. Grok has no per-process
+  switch for its native MCP sources, so the adapter turns off the Claude,
+  Cursor and managed MCP cells and fails the start before the agent starts
+  while `grok inspect --json` still lists an enabled server or a plugin that
+  provides one. A Grok server turned on mid-session and administrator-pinned
+  managed MCP are not detected. Both refusals are non-retryable `authority`
+  start failures. `isReservedMcpServerName` is now exported, so a Host can
+  tell the SDK's own servers in `event.mcp.server`. The vendored Codex
+  session gains optional `beforeOpen` and `afterOpen` steps.
 
 ## 0.30.1 — 2026-10-24 (published)
 
