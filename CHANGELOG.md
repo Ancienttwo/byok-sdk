@@ -335,6 +335,20 @@
   template that seals `task-input` alone, and with no memory ContextPack.
   `sealRoutineTemplate` seals a routine template on the member side. No wire,
   SDK or SQL change.
+- **Fixed (examples)** — K4 sealed executions, from the #962 security review
+  (#953). `enqueue`, on the core and as the exported transition, refuses a
+  sealed execution: one enters only as an occurrence of its routine, whose
+  stored definition pins the `routineRef`. The core's frozen port has
+  `submitSealed` only while the server does, so the reconcile resubmit of an
+  uncertain sealed intent also stops before its readback once the lane is
+  gone. `submitSealed` is called as a method of its port and of the server's
+  `executions`. `sealRoutineTemplate` seals exactly `['task-input']`.
+- **Changed (client, internal)** — `TaskRunner`'s method bodies now live in
+  `daemon/task-runner/`, one module per stage (#926). `handleOffer` and
+  `pump` are split along their existing stages, and no function is over 300
+  lines. Behavior, exports and the published `task-runner.d.ts` are unchanged.
+  The `@byok-sdk/client` closure grows by 7845 B and `bin:byok-agent` by
+  7869 B, for the delegating stubs and private-state access.
 - **Feature (examples)** — K8 L can be the old owner of a §4.1 device switch
   (#957). It keeps one owner record per device and runs four steps, each on
   the revision it expects: `freezeForSwitch` (read back from the ledger),

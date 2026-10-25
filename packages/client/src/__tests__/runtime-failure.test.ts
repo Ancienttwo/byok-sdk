@@ -97,7 +97,13 @@ describe('RuntimeExecutionFailure', () => {
   });
 
   it('statically guards TaskRunner against message parsing and catch-all retry defaults', async () => {
-    const source = await fs.readFile(fileURLToPath(new URL('../daemon/task-runner.ts', import.meta.url)), 'utf8');
+    // TaskRunner's member bodies live in daemon/task-runner/ beside the class (#926).
+    const moduleDir = fileURLToPath(new URL('../daemon/task-runner/', import.meta.url));
+    const modules = (await fs.readdir(moduleDir)).filter((name) => name.endsWith('.ts')).sort();
+    const source = [
+      await fs.readFile(fileURLToPath(new URL('../daemon/task-runner.ts', import.meta.url)), 'utf8'),
+      ...(await Promise.all(modules.map((name) => fs.readFile(`${moduleDir}${name}`, 'utf8')))),
+    ].join('\n');
     expect(source).not.toContain('runtime error: ${errorMessage(err)}');
     expect(source).not.toContain('adapter failed to start: ${errorMessage(err)}');
     expect(source).not.toMatch(/catch\s*\([^)]*\)\s*\{[^}]*runtime[^}]*retryable\s*:\s*true/s);

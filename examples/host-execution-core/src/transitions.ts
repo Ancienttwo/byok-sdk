@@ -1,7 +1,17 @@
-import { canonical, DEFAULT_RETRY, hash, project, taskId, validateInput,
-  type Conclusion, type Intent, type IntentExecution, type Json, type LedgerIntentInput, type LedgerState } from './model';
+import { canonical, DEFAULT_RETRY, hash, isSealed, project, taskId, validateInput,
+  type Conclusion, type Intent, type IntentExecution, type IntentInput, type Json, type LedgerIntentInput, type LedgerState } from './model';
 
-export function enqueue(state: LedgerState, tenant: string, input: LedgerIntentInput): Intent {
+/**
+ * Enqueues a plain intent. A sealed execution enters the ledger only as an occurrence of its routine (`admit`), whose
+ * stored definition pins the `routineRef`: here no routine is checked, so `source: 'routine'` would be only a label.
+ */
+export function enqueue(state: LedgerState, tenant: string, input: IntentInput): Intent {
+  if (isSealed(input.execution)) throw new Error('A sealed execution must be a routine template occurrence');
+  return admit(state, tenant, input);
+}
+
+/** Writes one intent. Only the routine transitions admit a sealed execution, after they check its `routineRef`. */
+export function admit(state: LedgerState, tenant: string, input: LedgerIntentInput): Intent {
   validateInput(input);
   const frozen = structuredClone({ ...input, retry: input.retry ?? DEFAULT_RETRY });
   const id = hash(input.key);

@@ -51,7 +51,9 @@ export interface SealRoutineTemplateInput {
  * ciphertext blob, so orphan GC could delete it. Seal once and keep the result: a retry must resend these bytes.
  */
 export async function sealRoutineTemplate(input: SealRoutineTemplateInput): Promise<SealedTaskInput> {
-  if (!input.sealing.categories.includes('task-input')) throw new Error('A routine template is sealed task input');
+  // K4 runs a sealed execution only with exactly `['task-input']`, and the category list is bound into the template.
+  const { categories } = input.sealing;
+  if (categories.length !== 1 || categories[0] !== 'task-input') throw new Error('A routine template is sealed task input only');
   const { header, ciphertext } = await sealContent({
     scopeKey: input.scopeKey,
     scope: { id: input.sealing.scopeId, epoch: input.sealing.epoch },
