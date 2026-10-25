@@ -477,21 +477,21 @@ export function errorMessage(err: unknown): string {
  * (`open '/path'`). The matching quote ends it, so every segment may hold
  * spaces, the last one too.
  */
-export const QUOTED_LOCAL_PATH = /(['"`])(?:\/|[A-Za-z]:[\\/]|\\\\)(?:(?!\1)[^\r\n])*\1/g;
+const QUOTED_LOCAL_PATH = /(['"`])(?:\/|[A-Za-z]:[\\/]|\\\\)(?:(?!\1)[^\r\n])*\1/g;
 
 /**
  * The absolute command of a Node spawn error (`spawn /path ENOENT`). Node
  * does not quote it, so the error code after it ends it, and every segment
  * may hold spaces, the last one too.
  */
-export const SPAWN_LOCAL_PATH = /(?<=(?:^|\s)spawn(?:Sync)? )(?:\/|[A-Za-z]:[\\/]|\\\\)[^\r\n]*?(?= (?:E[A-Z0-9]+|UNKNOWN)(?!\w))/g;
+const SPAWN_LOCAL_PATH = /(?<=(?:^|\s)spawn(?:Sync)? )(?:\/|[A-Za-z]:[\\/]|\\\\)[^\r\n]*?(?= (?:E[A-Z0-9]+|UNKNOWN)(?!\w))/g;
 
 /**
  * An absolute POSIX, drive-letter or UNC path that starts a token. Inner
  * segments may hold spaces (`Application Support/`); the last segment ends at
  * the first space, so the words after the path stay.
  */
-export const ABSOLUTE_LOCAL_PATH = /(?<=^|[\s'"`(=])(?:\/|[A-Za-z]:[\\/]|\\\\)(?:[^\s'"`,;)\\/]+(?: +[^\s'"`,;)\\/]+)*[\\/])*[^\s'"`,;)\\/]*/g;
+const ABSOLUTE_LOCAL_PATH = /(?<=^|[\s'"`(=])(?:\/|[A-Za-z]:[\\/]|\\\\)(?:[^\s'"`,;)\\/]+(?: +[^\s'"`,;)\\/]+)*[\\/])*[^\s'"`,;)\\/]*/g;
 
 /**
  * Agent-home and session-handoff errors, and the filesystem errors under
