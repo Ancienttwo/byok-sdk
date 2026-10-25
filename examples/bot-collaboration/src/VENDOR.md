@@ -172,11 +172,13 @@ src/memory.ts
 src/model.ts
 src/routines.ts
 src/schedule.ts
+src/sealed-routine.ts
 src/submit.ts
 src/transitions.ts
 @byok-sdk/client
 @byok-sdk/client/agent-memory
 @byok-sdk/core
+@byok-sdk/core/sealed-payload
 @byok-sdk/protocol
 @byok-sdk/protocol/constants
 @byok-sdk/server

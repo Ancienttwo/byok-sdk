@@ -326,6 +326,15 @@
   releases it at once; `bindDevice` and `revokeDevice` now write the due
   time in their transaction. H's card claim uses K8's
   `CONNECTOR_OUTCOME_UNKNOWN` in place of its own copy of the text.
+- **Added (examples)** — the K4 Host execution core runs sealed executions
+  (#953, #654 E3d-4). An intent or routine may carry a
+  `SealedExecutionTemplate`, sent through the optional `submitSealed` port
+  (the cloud's `submitSealedAgentExecution`); `sameFrozenOffer` checks the
+  sealed or plain offer type both ways; `routineRef` must name the routine's
+  own id and version. K4 takes a sealed execution only as an inline routine
+  template that seals `task-input` alone, and with no memory ContextPack.
+  `sealRoutineTemplate` seals a routine template on the member side. No wire,
+  SDK or SQL change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

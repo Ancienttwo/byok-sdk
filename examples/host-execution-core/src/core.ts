@@ -2,16 +2,17 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ByokServer, ByokServerEvent, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
 import { HostLedger, OutboxFullError, type ApplicationRows } from './ledger';
-import { canonical, hash, project, taskId, time, validateJson, type HostJobHandler, type HostOccurrenceRun, type Attempt,
-  type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type Terminal } from './model';
+import { canonical, hash, isSealed, project, taskId, time, validateJson, type HostJobHandler, type HostOccurrenceRun, type Attempt,
+  type Intent, type LedgerIntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type Terminal } from './model';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 import { applyPlan, auditCalendarError, auditIgnoredWake, deferSchedule, nextWake, occurrenceRun, promote, recordOccurrence, routineCommands, scheduleNext,
   switchVersion, versionSwitchDue, WAKE_HORIZON_MS, type RoutineCommands } from './routines';
 import { cancelWake, enqueue, fifoHeads, queuedExpiry, settle } from './transitions';
-import { frozenDelivered, submitFrozen, type FrozenSubmitPort } from './submit';
+import { frozenDelivered, SealedDispatchUnavailableError, submitFrozen, type FrozenSubmitPort } from './submit';
 
 export type ExecutionServer = {
-  executions: Pick<ByokServer['executions'], 'submit'>;
+  /** `submitSealed` is the sealed lane (#654). Without it, the core fails a sealed intent before any submit. */
+  executions: Pick<ByokServer['executions'], 'submit'> & Pick<FrozenSubmitPort, 'submitSealed'>;
   tasks: Pick<ByokServer['tasks'], 'offer' | 'deviceTerminal' | 'attempt' | 'cancel'>;
   wakes: ByokServer['wakes'];
   /** Embedded process-local hints; reads from tasks remain authoritative. */
@@ -183,7 +184,7 @@ export class HostExecutionCore {
       return decision;
     });
   };
-  async enqueue(input: IntentInput): Promise<Intent> {
+  async enqueue(input: LedgerIntentInput): Promise<Intent> {
     this.assertOpen();
     this.ledger.transaction(state => enqueue(state, this.ledger.tenant, input));
     await this.drain();
@@ -588,6 +589,14 @@ export class HostExecutionCore {
       if (this.eventsActive) this.liveTasks.add(input.taskId);
       return enqueued;
     },
+    submitSealed: async input => {
+      // `begin` already fails a sealed intent when the server has no sealed lane.
+      const submitSealed = this.server.executions.submitSealed;
+      if (!submitSealed) throw new SealedDispatchUnavailableError();
+      const enqueued = await submitSealed(input);
+      if (this.eventsActive) this.liveTasks.add(input.taskId);
+      return enqueued;
+    },
     offer: taskId => this.server.tasks.offer(taskId),
   };
   private delivered(intent: Intent): Promise<boolean> {
@@ -609,6 +618,8 @@ export class HostExecutionCore {
   }
   private memoryInstruction(intent: Intent): string | undefined {
     if (!this.options.memory) return undefined;
+    // A sealed instruction is member content: the Host neither reads it nor adds plaintext next to it.
+    if (isSealed(intent.execution)) throw new Error('A sealed execution takes no Host memory ContextPack');
     const instruction = intent.execution.payload.instruction;
     if (typeof instruction !== 'string') throw new Error('Memory ContextPack requires an inline instruction');
     const pack = this.options.memory.contextPack({ deviceId: intent.execution.deviceId, agentRef: intent.execution.payload.agentRef });
@@ -653,6 +664,12 @@ export class HostExecutionCore {
       const row = state.intents[intent.id]!;
       if (row.conclusion || row.cancelReason || this.now() >= row.waitUntil
         || this.now() >= (row.retryUntil ?? Infinity) || row.phase === 'inflight' || row.phase === 'memory_blocked') return undefined;
+      if (isSealed(row.execution) && !this.server.executions.submitSealed) {
+        // Fail before any submit, as a refused preparation does, so the drain never retries a submit that cannot exist.
+        row.preparationError = new SealedDispatchUnavailableError().code;
+        settle(state, row, 'failed');
+        return undefined;
+      }
       let instruction: string | undefined;
       try { instruction = this.memoryInstruction(row); }
       catch (error) {
