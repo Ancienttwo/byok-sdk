@@ -9,3 +9,4 @@ export { DeviceBindingError } from './binding';
 export { HostedDueScheduler, type DueFailure, type DuePass, type DueSchedulerOptions } from './due';
 export { HostedReplyChecker, type HostedReplyPort, type ReplyCheckerOptions } from './replies';
 export { HostedRoutineScheduler, type RoutineFailure, type SchedulerOptions, type SchedulerPass } from './scheduler';
+export { EntryRefusedError, HostedCommandEntry, UnauthenticatedError, type CommandEntryOptions, type EntryCaller } from './entry';
