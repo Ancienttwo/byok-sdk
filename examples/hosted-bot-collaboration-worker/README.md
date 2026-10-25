@@ -27,8 +27,9 @@ outlives an invocation, no session map.
 - The Host passes run from the clock and from `POST /host/passes`. Both call the same function. The cron trigger runs no
   pass: it only arms the clock.
 - The clock is one Durable Object for the deployment, `HostClock` (`idFromName('deployment')`). Its `alarm()` first sets
-  the next alarm `H_CLOCK_MS` later (10 s by default, 15 s at most), then runs one pass in its own composition, and never
-  throws. The alarm keeps no Host state, only its next time, so a lost, repeated or cut-off alarm is made up by the next
+  the next alarm `H_CLOCK_MS` later (10 s by default, 15 s at most), then runs one pass in its own composition. A failed
+  pass is logged, not thrown; `alarm()` throws only when `H_CLOCK_MS` or `H_FAULT` is invalid, before it sets the next
+  alarm. The alarm keeps no Host state, only its next time, so a lost, repeated or cut-off alarm is made up by the next
   one, which rereads Postgres. The cron trigger (`* * * * *`) asks the clock to arm itself if it has no alarm, so a new
   deployment starts its clock, and a clock whose alarm is gone starts again, within a minute and with no request.
 - A notification only schedules one more pass with `ctx.waitUntil`. A notification is an SDK observer call after a device
@@ -120,7 +121,7 @@ Each row's result is recorded in its PR, with the commit and the CI run.
 | Row | Evidence here | What it still needs |
 | --- | --- | --- |
 | Node H (D2) | `examples/hosted-bot-collaboration` on Node and Postgres (D2's suites) | none from this lane |
-| Worker H, local workerd | `worker.test.ts`, `faults.test.ts`, `clock.test.ts` on wrangler 4.123.0 (workerd 1.20260811.1), Postgres 17, the compose S3 endpoint | a deployment: real Hyperdrive (transaction pooling, the connection limit per invocation), R2 over its S3 endpoint, Durable Object alarms on Cloudflare (at-least-once delivery, retries, placement), isolate eviction by Cloudflare |
+| Worker H, local workerd | `worker.test.ts`, `faults.test.ts`, `clock.test.ts` on wrangler 4.123.0 (workerd 1.20260811.1), Postgres 17, the compose S3 endpoint | a deployment: real Hyperdrive (transaction pooling, the connection limit per invocation), R2 over its S3 endpoint, Durable Object alarms on Cloudflare (at-least-once delivery, retries, placement), cron on Cloudflare (the clock's start and recovery path), isolate eviction by Cloudflare |
 | Two device processes, one Host | `two-devices.test.ts`, synthetic runtime, one computer | two physical computers (macOS and Windows), each with its own OS user and network path |
 | Real runtime delegation and reply | none: no paid runtime call is approved | one A -> B -> A chain with real runtimes, each call approved by the maintainer, recorded apart from the synthetic results |
 

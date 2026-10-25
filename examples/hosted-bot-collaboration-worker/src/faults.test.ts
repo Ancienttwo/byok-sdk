@@ -29,6 +29,8 @@ describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
     // The device terminal committed in the SDK; its notification was lost too.
     await until(async () => (await h.turn(turnId))?.status === 'succeeded' || undefined);
     expect((await h.commands()).filter(id => id === task)).toHaveLength(1);
+    // One try: no other path tried first and failed before an alarm pass retried it.
+    expect(await h.intent(turnId)).toMatchObject({ tries: 1, conclusion: 'succeeded' });
     // No notified pass ran, and nothing called /host/passes: the alarm passes offered the Turn and applied its terminal.
     expect(worker.lines(NOTIFIED)).toEqual([]);
     const reports = alarmReports(worker);
@@ -46,9 +48,10 @@ describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
     await until(async () => (await h.turn(turnId))?.conclusion === 'succeeded' || undefined);
     await quiet();
     const stored = await h.substrate.store.dump(h.home);
-    // Two more notified-style passes at once, and the next alarm pass: the rows are settled, so nothing changes.
+    // Two more notified-style passes at once, and an alarm pass that started after the dump: alarms never overlap, so the
+    // second report from here on comes from one. The rows are settled, so nothing changes.
     const alarms = alarmReports(worker).length;
-    await Promise.all([worker.passes(), worker.passes(), until(async () => alarmReports(worker).length > alarms || undefined)]);
+    await Promise.all([worker.passes(), worker.passes(), until(async () => alarmReports(worker).length >= alarms + 2 || undefined)]);
     expect(await h.substrate.store.dump(h.home)).toBe(stored);
     expect(await h.intent(turnId)).toMatchObject({ tries: 1, conclusion: 'succeeded' });
     expect((await h.commands()).filter(id => id === task)).toHaveLength(1);

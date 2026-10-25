@@ -290,12 +290,12 @@ export class HostClock {
   /**
    * Sets the next alarm first, so a pass that throws or an instance lost mid-pass still leaves one set. A failed pass is
    * logged, not thrown: a thrown alarm would also start the platform's own retries, next to the fixed interval. It throws
-   * only on an invalid `H_CLOCK_MS` (before the next alarm is set) or `H_FAULT`: invalid config fails closed, and the cron
-   * arms the clock again each minute.
+   * only on an invalid `H_CLOCK_MS` or `H_FAULT`, both read before the next alarm is set: invalid config fails closed, and
+   * the cron arms the clock again each minute.
    */
   async alarm(): Promise<void> {
-    await this.#state.storage.setAlarm(Date.now() + clockMs(this.#env));
-    const mode = faults(this.#env);
+    const intervalMs = clockMs(this.#env), mode = faults(this.#env);
+    await this.#state.storage.setAlarm(Date.now() + intervalMs);
     if (mode.has('drop-alarm')) { console.log('[h-clock] alarm dropped'); return; }
     const id = globalThis.crypto.randomUUID(), copies = mode.has('duplicate-alarm') ? 2 : 1;
     await Promise.all(Array.from({ length: copies }, async (_, index) => {
