@@ -49,6 +49,15 @@
   the new `historyTimeoutMs` option (default 10 seconds). A read still open
   after it counts as failed: the Turn stays queued and the timer reads again.
   Before, a stalled `history` authority held the Host queue with no bound.
+- **Fixed (client)** — the #866 review of a sealed terminal that the commit
+  queue holds past a failed stop (#654). When the next run has another
+  tenant, device or member, a terminal that already is a closed plaintext
+  form keeps its fields, such as `recovery` on a `daemon_interrupted`
+  `task.fail` or the code of a sealed decline. Before, it was rewritten to
+  `sealed_key_unavailable`. The owning run is now the one whose member was
+  bound when it became ready, so a terminal made after that member retired
+  at shutdown seals with a next run of the same member instead of taking the
+  closed form.
 
 - **Fixed (client)** — when a Codex app-server ends on its own and the
   adapter's record consumer then fails on a record that exit produced (the
