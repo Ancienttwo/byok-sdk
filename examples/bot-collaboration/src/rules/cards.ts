@@ -12,6 +12,11 @@ export function expireCard(card: Card, now: number): void {
 export function expireCards(state: { readonly cards: Readonly<Record<string, Card>> }, now: number): void {
   for (const card of Object.values(state.cards)) expireCard(card, now);
 }
+/**
+ * The error of a connector call whose outcome is unknown: the call timed out, or a Host found its claim with no settle after
+ * a crash. The call may have run, so the card fails and the connector is never called again.
+ */
+export const CONNECTOR_OUTCOME_UNKNOWN = 'Connector timed out; external outcome is unknown';
 /** A confirmed card waits for its one connector call until it has a result or an error. */
 export function cardCallDue(card: Card): boolean {
   return card.state === 'confirmed' && card.result === undefined && card.error === undefined;

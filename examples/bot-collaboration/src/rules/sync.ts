@@ -34,6 +34,13 @@ export interface SyncState<E extends FreezeExecution> extends ContextState, BotH
   schemas: Record<string, ResultSchema>; audit: string[];
 }
 /** Store facts by Turn id. */
+/**
+ * The code of a Turn that the sync holds because its Bot's device has no active binding (#956, §55a). It is the code of H's
+ * `DeviceBindingError`, so a reader matches one string.
+ */
+export const DEVICE_NOT_BOUND = 'device_not_bound';
+/** Why a Host refuses a Bot's device: never bound, revoked, or bound to another mode. */
+export type DeviceRefusal = 'unbound' | 'revoked' | 'mode';
 export interface SyncFacts extends Pick<IntentFacts, 'intent'> {
   /**
    * The current execution of the Turn's intent started. This is not `IntentFacts.started`, which counts every generation.
@@ -45,6 +52,11 @@ export interface SyncFacts extends Pick<IntentFacts, 'intent'> {
    * or the occurrence of a routine Turn. `turn_retired`: retention retired the Turn id.
    */
   retired(turnId: string): 'result_retired' | 'turn_retired' | undefined;
+  /**
+   * The Host's binding check of the device of the Bot's current execution template, which a freeze would use (#956).
+   * A refusal holds that Bot's Turns that have no intent, and the rest of the scope syncs. Absent: no check.
+   */
+  deviceRefusal?(botId: string): DeviceRefusal | undefined;
 }
 export interface SyncOptions<R extends ContextRoutine> {
   now: number;
@@ -121,6 +133,18 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   if (!turn.conclusion && bot?.archived) { turn.status = 'failed'; turn.conclusion = 'cancelled'; }
   if (turn.conclusion) return { kind: 'ended' };
   if (turn.source === 'room_slot' && state.team.seats[turn.id]?.status === 'blocked') return undefined;
+  // #956: a Turn whose Bot's device is refused waits, before the profile check, since a refused device may never apply a
+  // profile. It is published once per hold with a fixed body, so a projection id never changes value. The reason is audited.
+  const refusal = bot && facts.deviceRefusal?.(turn.botId);
+  if (refusal) {
+    if (!turn.held) {
+      turn.held = DEVICE_NOT_BOUND;
+      state.audit.push(`Turn held ${DEVICE_NOT_BOUND} ${refusal}: ${turn.id}`);
+      publish(`held:${turn.id}`, { owner: turn.botId, turnId: turn.id, code: DEVICE_NOT_BOUND });
+    }
+    return undefined;
+  }
+  delete turn.held;
   if (!bot || bot.readyRevision !== bot.revision) {
     const failed = state.team.homeOperations.find(op => op.botId === turn.botId
       && op.request.payload.agentRef.profileRevision === bot?.revision && op.status === 'failed');

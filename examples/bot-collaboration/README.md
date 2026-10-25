@@ -155,9 +155,12 @@ The connector receives an AbortSignal and must deduplicate by the card id.
 The Host enforces `connectorTimeoutMs` (default 30 seconds), even if the
 connector ignores cancellation. A timeout releases the serial chain and
 commits a failed action_result with an unknown external outcome. A late connector
-result cannot overwrite that committed result. A crash after the
-external effect but before result commit can call it again with that id.
-No exactly-once external effect is claimed.
+result cannot overwrite that committed result. The Host calls the connector at
+most once per card (#958): one transaction claims the call before it runs, and
+the transaction that commits its result or error drops the claim. A claim found
+with no result at a later pass (a crash after the call, or a failed result
+commit) ends the card the same way as a timeout, with no second call. No
+exactly-once external effect is claimed.
 
 The system rules are in `src/rules/schema.ts`. K4 carries them in the instruction.
 They require an acknowledgement and self delegation for long work. Final text
@@ -413,6 +416,21 @@ write for the store:
 - `cancel`: the Bot is archived. Cancel the intent, which has not started.
 - `ended`: the Turn has no intent and is concluded. A routine Turn concludes
   its open occurrence.
+
+A Host that binds devices gives the step the optional fact
+`deviceRefusal(botId)` (#956, §55a): `unbound`, `revoked` or `mode` for the
+device of the Bot's current execution template, which a freeze would use. The
+step then holds that Bot's Turns that have no intent: it returns no write,
+sets `held: 'device_not_bound'` on the Turn, publishes `held:<turnId>` with
+`{ owner, turnId, code: 'device_not_bound' }` once per hold, and adds an audit
+row with the reason. The rest of the scope syncs. The hold comes before the
+profile check, since a refused device may never apply a profile. The next sync
+with no refusal (the device is bound, or a `team_snapshot` moved the Bot)
+clears `held` and freezes the Turn with the current template. A held room
+seat Turn waits for its seat deadline, as any seat that does not start. The
+projection body never changes, so a changed reason never conflicts. L has no
+device binding and sets no fact. `DEVICE_NOT_BOUND` is H's
+`DeviceBindingError` code.
 
 A store runs the step for each stored Turn, in insertion order, in one
 transaction under the same scope lock as a commit. It reads the facts inside

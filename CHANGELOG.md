@@ -287,6 +287,20 @@
   `check:architecture-sync` and `sync:brain-docs`. They called repo-harness
   helpers that no longer exist, and `repo-harness run` exits 0 on an unknown
   helper, so they passed without checking anything (#927).
+- **Fixed (examples)** — K8 L calls a connector at most once per card, as H
+  does (#958). It claims the call in the ledger before it runs and drops the
+  claim when it commits the result or error. A claim found with no result at
+  a later pass (a crash after the call, or a failed result commit) ends the
+  card `failed` with `Connector timed out; external outcome is unknown`, and
+  the connector is not called again. Before, L called the connector again with
+  the same card id.
+- **Feature (examples)** — the K8 sync step takes an optional
+  `deviceRefusal(botId)` fact (#956, §55a). A Host that binds devices answers
+  it for the Bot's device, and the step holds that Bot's Turns that have no
+  intent instead of freezing them: `held: 'device_not_bound'`, one
+  `held:<turnId>` projection with a fixed body, and an audit row with the
+  reason. The rest of the scope syncs, and the next sync with no refusal
+  freezes the Turn. L sets no fact; H adopts it in a follow-up.
 - **Added (examples)** — the K4 Host execution core runs sealed executions
   (#953, #654 E3d-4). An intent or routine may carry a
   `SealedExecutionTemplate`, sent through the optional `submitSealed` port

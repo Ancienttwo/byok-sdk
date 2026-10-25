@@ -1,10 +1,11 @@
 import { enqueue, hash, project, promoteOccurrence, type ApplicationRows, type HostLedger, type LedgerState } from '@byok-sdk/example-host-execution-core';
-import { stateOf, type Turn } from './model';
+import { stateOf, type Card, type Turn } from './model';
 import { intentFacts } from './delegation';
 import { turnIntentRetired } from './compaction';
 import { concludeRoutineTurn, routineOccurrence, type BotRoutine } from './routines';
 import { syncTurn, type SyncFacts, type SyncOptions } from './rules/sync';
-import { commitCommand, refuseRetired, retiredIdentity, type AdmittedIds, type Command, type CommandPorts } from './rules/commands';
+import { cardCallDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, refuseRetired, retiredIdentity, settleCardCall, type AdmittedIds, type Command,
+  type CommandPorts } from './rules/commands';
 import type { CommandRecord, CommitRequest, CommitResult } from './rules/commit';
 import { retainRoots, type RetentionInput, type RetentionLimits, type RetentionResult } from './retention';
 
@@ -54,5 +55,32 @@ export function syncTurnInLedger(ledger: HostLedger, s: LedgerState, rows: Appli
     // A concluded occurrence can make a staged version due, so the next pass drains K4 again.
     case 'ended': return turn.source === 'routine' && concludeRoutineTurn(s, turn);
     default: return false;
+  }
+}
+/**
+ * L's card call step (#958): at most one connector call per card, as H. For each due card, one transaction claims the call
+ * before it runs, and one transaction settles it and drops the claim. A claim that a later pass finds with no settle (a crash
+ * or a failed settle after the call) ends the card with `CONNECTOR_OUTCOME_UNKNOWN`, with no second call.
+ */
+export async function callCardsInLedger(ledger: HostLedger, call: (card: Card) => Promise<unknown>): Promise<void> {
+  for (const old of Object.values(stateOf(ledger.snapshot().application).cards)) {
+    if (!cardCallDue(old)) continue;
+    const claimed = ledger.transaction(s => {
+      const state = stateOf(s.application), card = state.cards[old.id];
+      if (!card || !cardCallDue(card)) return false;
+      const calls = state.cardCalls ??= {};
+      if (!calls[card.id]) return calls[card.id] = true;
+      delete calls[card.id];
+      settleCardCall(card, { error: new Error(CONNECTOR_OUTCOME_UNKNOWN) });
+      return false;
+    });
+    if (!claimed) continue;
+    let outcome: Parameters<typeof settleCardCall>[1];
+    try { outcome = { result: await call(old) }; } catch (error) { outcome = { error }; }
+    ledger.transaction(s => {
+      const state = stateOf(s.application);
+      delete state.cardCalls![old.id];
+      settleCardCall(state.cards[old.id]!, outcome);
+    });
   }
 }
