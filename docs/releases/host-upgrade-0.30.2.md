@@ -281,10 +281,16 @@ list the full upgrade steps.
 6. **Smoke one Topology L flow** (`docs/host-execution-core.md`): an embedded
    `createByokServer` on SQLite and one daemon on the device. Pair the
    device, dispatch one task, see it claimed, started and completed, and
-   read the result back. Then dispatch a second task, stop the daemon after
-   the claim, start it again, and see the task end with `task.fail`
-   (`daemon_interrupted`, `retryable: false`). A hosted Host also runs the
-   real tenant flow in `deploy/runbooks/hosted-operations.md`.
+   read the result back. Then dispatch a second task and, after the claim
+   and before the task ends, kill the daemon process (`kill -9` on POSIX,
+   `taskkill /F` on Windows). Start it again and see the task end with
+   `task.fail` (`daemon_interrupted`, `retryable: false`): that is the
+   journal recovery path. A normal stop (SIGINT, SIGTERM or `daemon.stop()`)
+   does not test it. It ends the task before the process exits, with
+   `task.fail` reason `daemon shutting down: operator` and `retryable: true`
+   (`packages/client/src/daemon/task-runner/lifecycle.ts`), so the restart
+   has no task to recover. A hosted Host also runs the real tenant flow in
+   `deploy/runbooks/hosted-operations.md`.
 7. **Know the rollback.** Rolling back means pinning all nine packages to
    the previous version and restoring the kept config.
    - Postgres has no down migration. Migrations 0027 to 0029 stay; roll back
