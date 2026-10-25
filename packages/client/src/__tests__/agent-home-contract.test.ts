@@ -319,6 +319,35 @@ describe('SDK-owned Agent home contract', () => {
     await retried.lease.release();
   });
 
+  it('names a hard-link refusal as EPERM only off Windows, where EPERM also means access denied', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    vi.spyOn(fs, 'link').mockRejectedValueOnce(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }));
+
+    const refused = manager.prepare(ref('one'));
+    if (process.platform === 'win32') await expect(refused).rejects.toThrow(/could not acquire Agent home lease: operation not permitted/u);
+    else await expect(refused).rejects.toThrow(/needs a hard link in .+ which its filesystem refused \(EPERM\)/u);
+  });
+
+  it('keeps an acquired lease when the temp file cannot be removed, and removes it on the next acquire', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const rm = fs.rm.bind(fs);
+    const refuse = vi.spyOn(fs, 'rm').mockImplementation(async (target, options) => {
+      if (/agent-home\.lease\..+\.tmp$/u.test(String(target))) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+      return rm(target, options);
+    });
+    const first = await manager.prepare(ref('one'));
+    const home = first.resolution.canonicalHome;
+    expect(await leaseTemps(home)).toHaveLength(1);
+    await first.lease.release();
+    refuse.mockRestore();
+
+    const next = await manager.prepare(ref('one'));
+    expect(await leaseTemps(home)).toEqual([]);
+    await next.lease.release();
+  });
+
   it('persists exact AgentRef/profileRevision/session/runtime/cwd and terminal cause in Agent home', async () => {
     const root = await makeRoot();
     const manager = new AgentHomeManager({ hostStorageRoot: root });

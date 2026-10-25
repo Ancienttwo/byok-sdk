@@ -303,8 +303,15 @@ async function removeLeaseTemps(internalDir: string): Promise<void> {
   }
 }
 
-/** Filesystems that cannot hold the lease, because they have no hard links. */
-const LINK_UNSUPPORTED = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);
+/**
+ * A filesystem that cannot hold the lease, because it has no hard links.
+ * On Windows, libuv maps ERROR_ACCESS_DENIED to EPERM, which also covers a
+ * delete-pending marker and an ACL refusal, so there EPERM is thrown as is.
+ */
+function linkUnsupported(code: string | undefined): boolean {
+  if (code === 'EPERM') return process.platform !== 'win32';
+  return code === 'ENOTSUP' || code === 'EOPNOTSUPP' || code === 'ENOSYS';
+}
 
 /** False when `target` exists. A filesystem without hard links fails closed. */
 async function linkExclusive(source: string, target: string): Promise<boolean> {
@@ -314,7 +321,7 @@ async function linkExclusive(source: string, target: string): Promise<boolean> {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'EEXIST') return false;
-    if (code !== undefined && LINK_UNSUPPORTED.has(code)) {
+    if (linkUnsupported(code)) {
       throw new AgentHomeError(`Agent home lease needs a hard link in ${path.dirname(target)}, which its filesystem refused (${code})`);
     }
     throw error;
@@ -666,7 +673,9 @@ export class AgentHomeLeaseManager {
         await this.linkLeaseMarker(temp, lockPath, canonicalHome, agentRef.agentId);
         ownsMarker = true;
       } finally {
-        await fs.rm(temp, { force: true });
+        // A temp file left here goes on the next acquire; its removal must
+        // not replace the outcome of the link.
+        await fs.rm(temp, { force: true }).catch(() => {});
       }
       // No directory sync: the marker excludes live writers only. A process
       // crash keeps the link visible, and after a power loss no writer is
