@@ -219,6 +219,25 @@
   of the process. `MAINTENANCE_STEPS` and the `not-configured` report variant
   gain `proofReceipts`, so a pass returns twelve step results.
 
+- **Breaking (client)** — every daemon journals its tasks (#924).
+  `DaemonConfig.hostedJournal` and `HostedJournalConfig` are removed, and a
+  config or overrides object that still has `hostedJournal` is refused with
+  `DaemonConfigFieldRemovedError`. Before, a daemon without `hostedJournal`
+  forgot the tasks it had claimed when it restarted, so they stayed `claimed`
+  or `running` in the cloud, and a `cancelTask` stayed `cancel_requested`.
+  Now a restarted daemon ends each claimed task it had not finished with
+  `task.fail` (`reason: 'daemon_interrupted'`, `retryable: false`) and never
+  runs it again. `busyTimeoutMs` and `maxRecordBytes` move to
+  `DaemonConfig.storage.journal` with the same defaults, an injected journal
+  moves to `DaemonOverrides.journal`, and the diagnostics and support bundle
+  drop their `config.hostedJournal` field. Migration: delete `hostedJournal`
+  from the config. `<storeDir>/daemon.db` is created at the first start after
+  the upgrade; tasks in flight before the upgrade have no record, so the Host
+  still ends those itself. A daemon that had no journal now also declines an
+  inbound offer above the journal record bound
+  (`inbound_envelope_too_large`) and drops any other envelope above it (#826),
+  and it admits result-document offers.
+
 ## 0.30.1 — 2026-10-24 (published)
 
 0.30.1 is a PATCH release under a one-release exception to the pre-1.0

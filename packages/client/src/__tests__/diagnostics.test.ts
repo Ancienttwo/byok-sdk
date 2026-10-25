@@ -26,7 +26,6 @@ import {
   OPERATIONAL_HEALTH_FILENAME,
   OperationalHealthTracker,
 } from '../daemon/operational-health';
-import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { loadSqliteModule } from '../daemon/journal/sqlite-support';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
 import { DAEMON_OWNER_FILENAME } from '../daemon/daemon-owner';
@@ -297,7 +296,7 @@ describe('diagnostics collector', () => {
     expect(snapshot.control).toMatchObject({ status: 'offline' });
   });
 
-  it.skipIf(!isSqliteAvailable())('detects a corrupt journal through a read-only quick_check without moving it', async () => {
+  it('detects a corrupt journal through a read-only quick_check without moving it', async () => {
     const dir = await tempDir();
     const journalPath = path.join(dir, 'daemon.db');
     await fs.writeFile(journalPath, 'not a sqlite database');
@@ -308,7 +307,7 @@ describe('diagnostics collector', () => {
     expect(await fs.readdir(dir)).toEqual(['daemon.db', 'tmp']);
   });
 
-  it.skipIf(!isSqliteAvailable())('checks a WAL snapshot without creating or changing store sidecars', async () => {
+  it('checks a WAL snapshot without creating or changing store sidecars', async () => {
     const dir = await tempDir();
     const { DatabaseSync } = loadSqliteModule();
     const db = new DatabaseSync(path.join(dir, 'daemon.db'));

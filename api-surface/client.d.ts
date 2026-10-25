@@ -4241,7 +4241,7 @@ import { GitWorkspaceManager } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
 import { type DeviceEnrollment } from './store';
 import { type LocalTaskJournal } from './journal/journal';
-import { type JournalOpenFaultSeam } from './journal/sqlite-support';
+import type { JournalOpenFaultSeam } from './journal/sqlite-support';
 import { type StorageConfig } from './retention/config';
 import { type RetentionTimers } from './retention/sweeper';
 import { type ProgressBatcherOptions } from './progress-batcher';
@@ -4269,43 +4269,6 @@ export interface DaemonBranding {
     supportUrl?: string;
     /** Brand accent color (any CSS-color-like string — hex, name, etc.); not parsed or validated here. */
     accent?: string;
-}
-/**
- * S3b (L-002): opt-in durable local journal for hosted deployments
- * (architecture §12.7.2).
- *
- * Explicit and off by default, because it changes what an ack MEANS. With no
- * journal configured (the self-hosted default this SDK has always shipped),
- * the daemon's redelivery cursor advances on handler success exactly as
- * before. With one configured, every inbound envelope is committed and fsynced
- * to `<storeDir>/daemon.db` BEFORE the handler resolves — and since
- * `ConnectionManager` only advances the cursor once the handler resolves
- * (`connection-manager.ts`), acking before committing stops being something
- * this daemon can express, rather than something it is careful not to do.
- *
- * Turning this on when the runtime has no working `node:sqlite` is a typed
- * construction failure, not a downgrade to a file journal — see
- * `JournalUnavailableError`. That refusal is the point (§12.7.2): a journal
- * that does not fsync loses tasks only under power-cut timings, so it passes
- * every test anyone will ever run against it.
- */
-export interface HostedJournalConfig {
-    /**
-     * The backend. Only `sqlite` today, and spelled out rather than implied by
-     * the section's presence so adding a second one later is an additive change
-     * to a closed set instead of a re-interpretation of an existing config.
-     */
-    mode: 'sqlite';
-    /** Bound on waiting for the journal's write lock, ms. Defaults to the journal's own bound. */
-    busyTimeoutMs?: number;
-    /**
-     * Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated.
-     * An inbound envelope record may still reach a floor derived from the inline sealed maximum (415083 bytes),
-     * so a sealed envelope is journaled and declined, not stalled (#654). An inbound envelope above the bound is
-     * not stored and does not stall the cursor: an offer is declined (`inbound_envelope_too_large`), any other
-     * envelope is dropped (#826).
-     */
-    maxRecordBytes?: number;
 }
 export interface DaemonConfig {
     /** Absolute native asset root for SDK-created runtime adapters. Custom adapters own their option. */
@@ -4400,8 +4363,6 @@ export interface DaemonConfig {
      * execution has one canonical workspace authority.
      */
     gitWorkspace?: GitWorkspaceConfig;
-    /** Disabled by default. Enables the durable local task journal — see {@link HostedJournalConfig}. */
-    hostedJournal?: HostedJournalConfig;
     /**
      * Restricts which runtimes this daemon will ever use — enforced in two
      * places that must stay consistent: `createDaemon` (this file) builds its
@@ -4908,22 +4869,14 @@ export interface DaemonOverrides {
         store?: GitWorkspaceStore;
     };
     /**
-     * S3b: injection seam for the durable local journal, mirroring
-     * `gitWorkspace` above — used only when `config.hostedJournal` is set, so an
-     * absent journal config cannot accidentally activate a supplied object. Also
-     * the host-injected-implementation path §12.7.2 allows: a backend other than
-     * `SqliteLocalTaskJournal` is acceptable if it meets the same durability
-     * contract (a resolved `appendEnvelope` means fsynced), and unacceptable
-     * otherwise — this seam does not verify that, the host asserting it does.
-     *
-     * A journal supplied here is NOT closed by `stop()`; whoever injected it
-     * owns its lifetime.
+     * A durable local journal the host supplies instead of `SqliteLocalTaskJournal`
+     * (§12.7.2). It must meet the same contract (a resolved `appendEnvelope` is
+     * fsynced); the daemon does not check that. `stop()` does not close it:
+     * whoever injected it owns its lifetime.
      */
-    hostedJournal?: {
-        journal?: LocalTaskJournal;
-        /** Test-only post-open SQLite initialization fault seam. */
-        openFaults?: JournalOpenFaultSeam;
-    };
+    journal?: LocalTaskJournal;
+    /** Test-only post-open SQLite initialization fault seam. */
+    journalOpenFaults?: JournalOpenFaultSeam;
 }
 /**
  * Plan `device-assertion-broker` (codex round-2 F3): the internal, NON-public
@@ -8037,6 +7990,19 @@ export interface StorageConfig {
         maxPassDurationMs?: number;
         ttlMs?: Partial<Record<ExpiringClassId, number>>;
     };
+    /** Every daemon journals tasks durably in `<storeDir>/daemon.db` before it acks them. */
+    journal?: {
+        /** Bound on waiting for the journal's write lock, ms. Defaults to the journal's own bound. */
+        busyTimeoutMs?: number;
+        /**
+         * Per-record byte bound. Defaults to the journal's own bound (256 KiB); oversized records are refused, never truncated.
+         * An inbound envelope record may still reach a floor derived from the inline sealed maximum (415083 bytes),
+         * so a sealed envelope is journaled and declined, not stalled (#654). An inbound envelope above the bound is
+         * not stored and does not stall the cursor: an offer is declined (`inbound_envelope_too_large`), any other
+         * envelope is dropped (#826).
+         */
+        maxRecordBytes?: number;
+    };
 }
 export interface StorageBudget {
     readonly maxStoreBytes: number;
@@ -9192,13 +9158,6 @@ export interface TaskRunnerDeps {
         readonly taskId: string;
         readonly payload: AcceptedOfferPayload;
     }) => AdmissionGuardDecision;
-    /**
-     * True only when every terminal envelope this runner sends is recorded in
-     * the durable local journal before it reaches the transport. A
-     * result-document offer needs that persist-before-send boundary, so a
-     * runner without it declines such offers.
-     */
-    terminalJournal?: boolean;
     /** Durable normal-turn result failure intent, before handing off a required reply. */
     recordResultReplyFailure?(taskId: string, failure: ResultReplyFailure): Promise<void>;
     recordAgentMessageAccepted?(taskId: string): Promise<void>;
@@ -10652,7 +10611,6 @@ export interface DiagnosticsSnapshot {
     config: {
         serverProtocol: 'http' | 'https' | 'ws' | 'wss' | 'invalid' | 'unsupported';
         customStoreDir: boolean;
-        hostedJournal: boolean;
         runtimeAllowlistCount?: number;
     };
     device: {
@@ -10762,7 +10720,7 @@ export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, t
 export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner';
 export { LocalTeamWorkspace, LocalTeamWorkspaceService, TeamWorkspaceError, TeamWorkspaceValidationError, TeamWorkspaceNotFoundError, TeamWorkspaceConflictError, TeamWorkspaceQuotaError, TeamWorkspaceLeaseError, TeamWorkspaceReceiptError, TeamWorkspaceCorruptError, encodeTeamMemberContext, decodeTeamMemberContext, type TeamWorkspaceDefinition, type TeamWorkspaceLimits, type TeamMessage, type TeamMemberLease, type TeamWorkspaceMemberReceipt, } from './daemon/team-workspace';
 export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from './bin/team-tmux-view';
-export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig, DeviceAssertionConfig, InputPreparationDaemonConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon';
+export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, DeviceAssertionConfig, InputPreparationDaemonConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon';
 export { ProviderProvisioningNoticeError, PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS, } from './daemon/provider-provisioning';
 export type { ProviderProvisioningHandler, ProviderProvisioningNotice, ProviderProvisioningNoticeFailureReason, } from './daemon/provider-provisioning';
 export { AgentMemoryIntentNoticeError, AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS, } from './daemon/agent-memory-intent';

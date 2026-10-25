@@ -9,7 +9,6 @@ import { acquireDaemonOwner } from '../daemon/daemon-owner';
 import { GitWorkspaceManager, type GitCommandResult, type GitRunner } from '../daemon/git-workspace';
 import { GitWorkspaceStore } from '../daemon/git-workspace-store';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
-import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import type { DaemonEvent } from '../daemon/observer';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -89,7 +88,7 @@ describe('daemon Git workspace startup/local-event boundary', () => {
     expect(gitRunner).not.toHaveBeenCalled();
   });
 
-  it.skipIf(!isSqliteAvailable())('rejects enabled startup on Git preflight failure before transport hello or offers', async () => {
+  it('rejects enabled startup on Git preflight failure before transport hello or offers', async () => {
     server = await TestServer.start();
     const workspaceRoot = await tempDir('byok-git-startup-failure-workspace-');
     const storeDir = await tempDir('byok-git-startup-failure-store-');
@@ -109,9 +108,6 @@ describe('daemon Git workspace startup/local-event boundary', () => {
       { storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } },
         ...baseConfig(server.url, workspaceRoot, storeDir),
         gitWorkspace: { mode: 'local-checkpoints' },
-        hostedJournal: {
-          mode: 'sqlite',
-        },
       },
       [new StubRuntimeAdapter()],
       daemonOverrides(manager, store),

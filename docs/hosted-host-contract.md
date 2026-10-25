@@ -142,6 +142,10 @@ The mailbox rows of the device also stay. Under retention, its pending rows beco
 Today the product concludes the intent itself, for example as `abandoned`, and records the cause.
 Use a product rule: the waiting deadline, `device_offline` or the revoke action.
 
+A device that restarts is not lost. On start it ends each task it claimed and had not finished
+with `task.fail` (`reason: daemon_interrupted`, `retryable: false`), and it never runs that task again (#924).
+So a `cancelTask` sent while the device was down settles once the device is back.
+
 ## 2. Rescan contract
 
 The SDK sends the Host no reliable notice of a state change:

@@ -370,7 +370,7 @@ async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelo
     approvalRegistry: new ApprovalRegistry(),
     storeDir,
     productId: 'prepared-offer-lane',
-    tenantId: 'tenant-prepared', terminalJournal: true,
+    tenantId: 'tenant-prepared',
     agentResultMcpBin: { command: process.execPath, args: ['result-helper'] },
     agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     agentHome: new AgentHomeManager({ hostStorageRoot: await tempDir('byok-prepared-home-') }),
@@ -1982,15 +1982,6 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       agentMemory: 'none', requiredToolsets: [], terminalProjection: selector, taskId: 'schema-check',
     });
     expect(parsed.success).toBe(false);
-  });
-
-  it('declines an offer that selects a result document when the daemon has no durable terminal journal', async () => {
-    const record = await toollessRecord();
-    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
-    const { sent, pin } = await run(record, (id) => toollessOffer(id, 'task-toolless-no-extractor'), { adapter, extra: { terminalJournal: false } });
-    expect(declineReason(sent)).toContain('no durable terminal journal');
-    expectNothingCommitted(sent, adapter, record);
-    expect(pin).not.toHaveBeenCalled();
   });
 
   it('fails without a submitted outcome even on a v3 server with no result-document capability flag', async () => {

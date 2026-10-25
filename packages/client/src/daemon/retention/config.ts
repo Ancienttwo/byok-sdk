@@ -25,6 +25,19 @@ export interface StorageConfig {
     maxPassDurationMs?: number;
     ttlMs?: Partial<Record<ExpiringClassId, number>>;
   };
+  /** Every daemon journals tasks durably in `<storeDir>/daemon.db` before it acks them. */
+  journal?: {
+    /** Bound on waiting for the journal's write lock, ms. Defaults to the journal's own bound. */
+    busyTimeoutMs?: number;
+    /**
+     * Per-record byte bound. Defaults to the journal's own bound (256 KiB); oversized records are refused, never truncated.
+     * An inbound envelope record may still reach a floor derived from the inline sealed maximum (415083 bytes),
+     * so a sealed envelope is journaled and declined, not stalled (#654). An inbound envelope above the bound is
+     * not stored and does not stall the cursor: an offer is declined (`inbound_envelope_too_large`), any other
+     * envelope is dropped (#826).
+     */
+    maxRecordBytes?: number;
+  };
 }
 export interface StorageBudget {
   readonly maxStoreBytes: number; readonly minFreeBytes: number; readonly softMinFreeBytes: number;

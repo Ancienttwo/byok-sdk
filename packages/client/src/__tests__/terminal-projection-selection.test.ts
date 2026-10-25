@@ -65,7 +65,6 @@ async function harness(overrides: Partial<TaskRunnerDeps> = {}) {
     storeDir,
     productId: 'result-test',
     tenantId: 'tenant-result',
-    terminalJournal: true,
     agentResultMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-result-mcp.js'] },
     agentResultMcpPreflight: preflight,
     ...overrides,
@@ -147,7 +146,6 @@ describe('submit_result: injection and describe', () => {
 
 describe('submit_result: admission (R6, R8)', () => {
   it.each([
-    ['no durable terminal journal', { terminalJournal: false }, /no durable terminal journal/],
     ['no result helper', { agentResultMcpBin: undefined }, /cannot host the submit_result channel/],
     ['no enrolled tenant', { tenantId: undefined }, /cannot host the submit_result channel/],
   ] as const)('declines non-retryably with %s', async (_label, overrides, reason) => {
