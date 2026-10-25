@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
-import { canonical, FrozenOfferMismatchError, sameFrozenOffer, type Conclusion, type FrozenInput, type FrozenSubmitPort,
+import { canonical, FrozenOfferMismatchError, sameFrozenOffer, type Conclusion, type FrozenExecutionInput, type FrozenSubmitPort,
   type Json } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { revisionOf, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
@@ -64,7 +64,7 @@ export interface ReconcilerOptions {
 /** A row whose reconciliation threw. The pass went on with the next row. */
 export interface ReconcileFailure { scope: string; turnId: string; error: unknown }
 export interface ReconcilePass { concluded: number; failed: ReconcileFailure[] }
-type Row = { input: FrozenInput; waitUntil: number; cancelReason: 'expired' | 'cancelled' | null; concluded: boolean; started: boolean };
+type Row = { input: FrozenExecutionInput; waitUntil: number; cancelReason: 'expired' | 'cancelled' | null; concluded: boolean; started: boolean };
 
 /**
  * Reads the SDK result of each tried intent and concludes it (#793 D2d), with the K4 rules of `reconcile` and `finish`.
@@ -181,7 +181,7 @@ export class HostedReconciler {
   }
 
   private async read(scopeKey: string, key: string): Promise<Row | undefined> {
-    const found = await inSchema(this.pool, this.schema, client => client.query<{ input: FrozenInput; wait_until: string;
+    const found = await inSchema(this.pool, this.schema, client => client.query<{ input: FrozenExecutionInput; wait_until: string;
       cancel_reason: Row['cancelReason']; concluded: boolean; started: boolean }>(
       `SELECT input, wait_until::text, cancel_reason, conclusion IS NOT NULL AS concluded, started FROM intent WHERE scope = $1 AND key = $2`,
       [scopeKey, key]), true);
@@ -251,7 +251,7 @@ export class HostedReconciler {
   }
 }
 
-function verified(input: FrozenInput, attempt: TaskAttempt | undefined): TaskAttempt | undefined {
+function verified(input: FrozenExecutionInput, attempt: TaskAttempt | undefined): TaskAttempt | undefined {
   if (attempt && (attempt.taskId !== input.taskId || attempt.deviceId !== input.deviceId
     || canonical(attempt.agentRef) !== canonical(input.payload.agentRef))) throw new Error('Attempt identity conflict');
   return attempt;

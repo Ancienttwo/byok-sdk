@@ -133,16 +133,23 @@ function checkSealed(id: string, version: number, sealed: SealedRoutineTemplate,
 }
 /**
  * The definition of a new sealed routine. The member picks `routineId` (a fresh UUID), because the template binds it, and
- * seals version 1. An id that any routine row already has is refused, whatever its lifecycle. It counts toward the limit
- * of 8 open routines of the owner.
+ * seals version 1. An id that any routine row already has is refused, whatever its lifecycle, except an exact retry: the
+ * version 1 that the same command made, which K4 `create` takes as a no-op. It counts toward the limit of 8 open routines
+ * of the owner.
  */
 export function sealedDefinition(routines: readonly Routine[], owner: string, action: SealedRoutineAction,
   execution: ExecutionTemplate): HostOccurrenceRoutineDefinition {
-  if (routines.some(routine => routine.definition.id === action.routineId)) throw new Error('A routine already has this id');
-  if (routines.filter(routine => fields(routine)?.owner === owner && routine.lifecycle !== 'completed').length >= 8) throw new Error('Routine limit is 8');
   if (action.definitionVersion !== 1) throw new SealedRoutineVersionError(1);
+  const next = definition(action.routineId, 1, action.schedule, { owner, authority: 'owner', sealed: action.sealed });
+  const existing = routines.find(routine => routine.definition.id === action.routineId);
+  // A member retry after a lost response resends the same bytes.
+  if (existing) {
+    if (canonical(existing.definition) === canonical(next)) return next;
+    throw new Error('A routine already has this id');
+  }
+  if (routines.filter(routine => fields(routine)?.owner === owner && routine.lifecycle !== 'completed').length >= 8) throw new Error('Routine limit is 8');
   checkSealed(action.routineId, 1, action.sealed, execution);
-  return definition(action.routineId, 1, action.schedule, { owner, authority: 'owner', sealed: action.sealed });
+  return next;
 }
 /**
  * The next version of a sealed routine, with a new template. Only a routine that is already sealed takes one, and it keeps

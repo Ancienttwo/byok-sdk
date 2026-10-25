@@ -503,6 +503,34 @@ occurrences (D2f-3).
   no drain.
 - Retention refuses a routine root while its occurrence is open, as L does.
 
+### Sealed routines
+
+H runs the K8 sealed Bot routines (#953, #654 E3d-4; K8 README, Sealed Bot routines) on its cloud tenant.
+
+- `createSealedRoutine(scope, botId, action, now)` adds version 1 of a sealed routine of the Main Bot `botId`, with
+  the template that the owner's member endpoint sealed for it. `resealRoutine(scope, botId, action, now)` stages the
+  next version with a new template. The entry has both as owner commands, which sync after the write, as
+  `updateRoutine` does. Both check the template against the Bot's current execution template, with K8
+  `sealedDefinition` and `resealDefinition`.
+- A retry after a lost response is a no-op while the version it made is still there: a create retry while version 1
+  is the routine's definition, and a reseal retry while its version is the current or the staged one and the routine
+  is not completed. Later, the retry is refused like any other command: `A routine already has this id` once version 1
+  was replaced, or the owner check once the routine is completed. A reseal retry is a no-op even after the Bot's Agent
+  changed. The member learns of that change from the `sealed-routine-failed:<turnId>` projection
+  (`sealed_routine_agent_changed`) at the next occurrence, and reseals then.
+- A reseal for another version than `max(current, pending) + 1` throws `SealedRoutineVersionError`, and nothing is
+  written. `updateRoutine` refuses a sealed routine.
+- The template lives in the `routine` row's `definition` or `pending` JSON. Once frozen, the sealed offer input lives in
+  `intent.input`. There is no DDL change and no second copy.
+- The sync passes K8 the template of each routine version, from the slice. A sealed occurrence intent goes through
+  `FrozenSubmitPort.submitSealed`, the cloud's `submitSealedAgentExecution`. On a port without it, the submitter fails
+  an untried sealed row before any SDK call, as K4 `begin` does in L: the intent ends `failed`, the row keeps `This Host
+  has no sealed dispatch`, and the agent's queue moves on. The submitter reports the scope through its `changed` option,
+  and the deployment's sync then ends the Turn `failed`. A tried row may have reached the SDK, so it
+  keeps its resubmit until `wait_until`.
+- K4 `enqueue` refuses every sealed execution. H's `freezeIntent` takes one only from the sync's freeze of a promoted
+  routine occurrence: source `routine` and no handler, so a Host intent never carries one.
+
 ### Scheduler
 
 H has no SDK wake. `HostedRoutineScheduler` finds due slots in `routine_due` and fires each one through
@@ -742,7 +770,8 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   intents stay (see Intent compaction).
 - **Workers.** The Host runs, each on its own interval: `HostedSubmitter.run()`, `HostedReconciler.run()`,
   `store.sync(scope, …)` for each scope that changed (the `changed` option of `HostedReconciler`, for a conclusion or
-  a first claim, and of `HostedRoutineScheduler`, for a fire, and the scope of each commit and consume),
+  a first claim, of `HostedSubmitter`, for an intent that it concluded with no SDK call, and of `HostedRoutineScheduler`,
+  for a fire, and the scope of each commit and consume),
   `HostedDueScheduler.run()` for the due scopes, `HostedOutboxSender.run()` with the projection receiver, the channel, the
   connector and the home port (and `store.sync(scope, …)` for each scope of its `changed` option),
   and `HostedRoutineScheduler.run()` every `intervalMs` after one `start()`. A Host with a channel opens its store with

@@ -15,6 +15,8 @@ import { inSchema, lockScope } from './store';
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 let host: HostedCloud | undefined;
 let clock = 0;
+/** The scopes that the submitters' `changed` option reported, in this test. */
+let reported: string[] = [];
 
 /** The tenant port, with a count of the SDK submits that really ran. */
 function sdkPort() {
@@ -26,7 +28,8 @@ function sdkPort() {
   return { port, submitted };
 }
 function submitter(port: FrozenSubmitPort, options: Partial<SubmitterOptions> = {}) {
-  return new HostedSubmitter(opened!.pool, opened!.store.schema, { port: () => port, now: () => clock, leaseMs: 1000, backoffMs: 500, ...options });
+  return new HostedSubmitter(opened!.pool, opened!.store.schema, { port: () => port, now: () => clock, leaseMs: 1000, backoffMs: 500,
+    changed: scope => { reported.push(scope); }, ...options });
 }
 async function freeze(scope: string, turnId = randomUUID(), waitUntil = clock + 60_000) {
   await opened!.store.seed(scope, () => {});
@@ -54,7 +57,7 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
   // One SDK server for the suite. One schema for each test, because the submit scan covers the whole schema.
   beforeAll(async () => { host = await openHostedCloud(); clock = Date.now(); });
   afterAll(async () => { await host?.close(); });
-  beforeEach(async () => { opened = await openStore(); });
+  beforeEach(async () => { opened = await openStore(); reported = []; });
   afterEach(async () => { await opened?.close(); });
 
   it('freezes one intent per Turn under the stable K4 task id, and refuses another input', async () => {
@@ -123,6 +126,8 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H submitter on real Postgres and a real SDK 
     expect(await row(scope, input.taskId)).toMatchObject({ submission: 'reserved', tries: 0, conclusion: 'expired' });
     expect(submitted).toEqual([]);
     expect(await host!.cloud.readTaskAttempt(host!.tenant, input.taskId)).toBeUndefined();
+    // No SDK call settles the Turn, so the scope goes to the deployment's sync.
+    expect(reported).toEqual([scope]);
   });
 
   it('never submits a tried row past wait_until: it gets a cancel reason, no conclusion, and leaves the scan', async () => {
