@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Feature (keys)** — add `@byok-sdk/keys/model-route`, the headless logic
+  of a Pi model route page (#986 S2). It loads in a browser: no Node builtins,
+  no custody module, no network. `listPiCatalogModels` lists the pinned
+  catalog entries of a vendor; `createModelRouteDraft`,
+  `applyModelRouteChange`, `modelRouteView`, `validateModelRoute` and
+  `modelRouteSubmission` give a Host the choices, field linkage, field error
+  codes and the submission, and the Host renders the page. Catalog and Host
+  policy entries apply only at the vendor's own base URL, because the pinned
+  Pi fills undeclared `compat` keys from the endpoint URL.
+  `PI_DEFAULT_THINKING_LEVEL` (`medium`) is generated from the pinned
+  pi-coding-agent. A model whose only level is `off` gets `off`; another
+  model without the default level needs an explicit level.
+  `providerSecretReusable` reuses a stored key only while the profile ref,
+  kind, adapter, auth mode and normalized base URL are unchanged. JSON fixture
+  vectors cover the functions for Hosts in other languages.
+  `exactProviderProfileBinding` moves to its own module so the profile schema
+  has no `node:crypto` dependency; the root exports are unchanged.
+
 - **Fixed (client)** — the prepared lane now accepts a tool schema whose
   object root defines its fields only in `oneOf` branches, such as a result
   document schema that `checkResultSchema` admits (#1003). Each branch must

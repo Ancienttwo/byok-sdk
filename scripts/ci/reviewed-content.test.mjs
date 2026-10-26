@@ -764,3 +764,38 @@ test('#927: the cloud-do client test edge is admitted only as a workspace spec, 
   f.lock.workspaces['packages/cloud-do'].devDependencies = edge; f.write('bun.lock', f.lock);
   assert.throws(() => selectImpact(['bun.lock'], f), /more than/, 'a lock edge the manifest does not declare');
 });
+
+test('keys model-route subpath admits the exact addition only', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-keys-model-route-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  mkdirSync(join(cwd, 'packages/keys'), { recursive: true });
+  const file = join(cwd, 'packages/keys/package.json');
+  const baseline = { name: '@byok-sdk/keys', version: '0.30.1', exports: {
+    '.': { types: './dist/index.d.ts', import: './dist/index.js' },
+    './pi-catalog': { types: './dist/pi-catalog.d.ts', import: './dist/pi-catalog.js' },
+  } };
+  writeFileSync(file, JSON.stringify(baseline));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
+  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
+  const candidate = structuredClone(baseline);
+  candidate.exports['./model-route'] = { types: './dist/model-route.d.ts', import: './dist/model-route.js' };
+  const write = value => writeFileSync(file, JSON.stringify(value));
+  write(candidate);
+  assert.ok(selectImpact(['packages/keys/package.json'], context).families.includes('npm-release-pack'));
+  for (const mutate of [
+    m => { m.exports['./model-route'].import = './dist/other.js'; },
+    m => { m.exports['./model-route'].require = './dist/model-route.cjs'; },
+    m => { m.exports['./pi-catalog'].import = './dist/replaced.js'; },
+    m => { m.dependencies = { '@byok-sdk/protocol': 'workspace:*' }; },
+  ]) {
+    const invalid = structuredClone(candidate); mutate(invalid); write(invalid);
+    assert.throws(() => selectImpact(['packages/keys/package.json'], context), /more than/);
+  }
+  const defaults = selectImpact(['packages/keys/src/pi-runtime-defaults.generated.ts']);
+  assert.ok(defaults.dirs.includes('packages/keys') && defaults.dirs.includes('packages/client'));
+  // The modules split from provider-profile.ts and secret-store.ts keep their Windows custody family.
+  for (const path of ['packages/keys/src/provider-profile-binding.ts', 'packages/keys/src/secret-value.ts']) {
+    assert.ok(selectImpact([path]).families.includes('adapter-lifecycle-smoke'), path);
+  }
+});

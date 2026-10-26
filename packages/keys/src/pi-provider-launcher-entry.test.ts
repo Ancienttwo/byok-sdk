@@ -4,7 +4,8 @@ import { promises as fs } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CommandResult } from './command-runner';
-import { exactProviderProfileBinding, parseModelProviderProfile, type ModelProviderProfileInput } from './provider-profile';
+import { parseModelProviderProfile, type ModelProviderProfileInput } from './provider-profile';
+import { exactProviderProfileBinding } from './provider-profile-binding';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import { MacOsKeychainSecretStore } from './macos-keychain';
 import {

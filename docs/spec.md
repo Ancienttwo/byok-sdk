@@ -218,6 +218,66 @@ is a value the Host stores in the local profile, and the same schema validates
 it. A catalog entry that the schema cannot express exactly is refused with its
 blocking fields, never narrowed.
 
+`@byok-sdk/keys/model-route` is the headless configuration logic for a Pi model
+route: vendor, model, thinking level and key. It is pure functions; the Host
+renders the page, writes the copy and owns the transport. The entry loads in a
+browser: its closure has no Node builtins, and it imports no `SecretStore`,
+OS credential store, SQLite store or `ProviderRegistry`, reads no environment
+and makes no network request.
+
+- `listPiCatalogModels` lists the pinned catalog entries of a vendor and api,
+  each `representable` (with input, reasoning and thinking levels) or
+  `unrepresentable` (with its blocking paths).
+- `PI_DEFAULT_THINKING_LEVEL` is generated from the pinned
+  `@earendil-works/pi-coding-agent`; a client test fails on drift. When `off`
+  is a selected model's only level, as for a non-reasoning model, the level is
+  `off`, which the schema requires. Otherwise selecting a model sets the
+  default level only when the model supports it, and leaves the level unset
+  and required when it does not. A stored profile keeps its stored level.
+- `createModelRouteDraft`, `applyModelRouteChange`, `modelRouteView`,
+  `validateModelRoute` and `modelRouteSubmission` take a draft and a context
+  (catalog, stored public profile state, Host policy). Errors are field codes
+  from `MODEL_ROUTE_ERROR_CODES`; the profile cross-field rules are the ones
+  `ModelProviderProfileSchema` applies, from one implementation. A submission
+  is profile input for that schema plus a separate secret action (`keep`,
+  `none` or `replace`).
+- A catalog or Host entry applies only when the draft's base URL normalizes to
+  the vendor's own base URL, because the pinned Pi fills each undeclared
+  `compat` key from the endpoint URL. At any other URL the model is manual.
+  At that URL a representable entry equals the pinned pi-ai built-in model's
+  configuration field by field. Run-time branches that pi-ai takes on its own
+  provider id are outside that promise, because the projected provider id is
+  `byok-sdk-<profile_ref>`. In pi-ai 1.4.0 these are `cacheControlFormat` for
+  openrouter `anthropic/*` models (`api/openai-completions.js:1269`), the
+  xai `reasoning.encrypted_content` include, which differs only for grok-4.3
+  at `off` (`api/openai-responses.js:308`), cerebras body-less overflow
+  detection, which differs only for a 400 with an empty body
+  (`utils/overflow.js:146`), the Responses tool-call id kept only for `OPENAI_TOOL_CALL_PROVIDERS`
+  (`api/openai-responses.js:15`, `api/openai-responses-shared.js:104`), which
+  applies only when replaying history from another model or provider id
+  (`api/transform-messages.js:87`, `:120`), and
+  the error message prefix (`api/openai-responses.js:182`). The pinned catalog
+  drift test in `@byok-sdk/client` keeps a review list of these branches, so a
+  pi-ai upgrade reviews them again.
+- The `custom` kind has no adapter, auth mode or base URL of its own; a Host
+  passes defaults in its policy. A Host entry is marked `host`. It must pass
+  `PiModelConfigSchema`, and its config must project the api it is listed
+  under; otherwise it is offered as unrepresentable. A policy that lists one
+  vendor, api and model twice throws. A vendor whose models the policy lists
+  admits only those model ids, whatever the source, so validation does not
+  depend on the order of edits.
+- Every function maps a change value of the wrong type to a field code; a
+  change naming no field throws.
+- A stored key is reused only while `profile_ref`, `provider_kind`, `adapter`,
+  `auth_mode` and the normalized `base_url` are unchanged
+  (`providerSecretReusable`); otherwise the draft reports
+  `secret_reentry_required`. The device rechecks a save with the same
+  functions, on a context it builds itself with `modelRouteContext()` from its
+  own stored profile and policy; it never accepts a catalog, stored state or
+  policy from the page. No view contains a key.
+- JSON fixture vectors under `packages/keys/src/fixtures/model-route/` give
+  draft, change, new draft, view and submission for Hosts in other languages.
+
 The launcher accepts the adapter's bounded absolute extension paths and an
 absolute `--config` path. Provider/model/thinking selection remains local
 profile authority; delegated flags cannot override it. The Pi child gets a

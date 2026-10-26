@@ -782,9 +782,12 @@ flowchart LR
 
 | 模块 | 已实现功能 |
 | --- | --- |
-| `provider-profile.ts` | provider kind、adapter、auth mode 组合验证；custom URL normalization；从 runtime-relevant non-secret record 派生 exact revision/hash binding |
+| `provider-profile.ts` | provider kind、adapter、auth mode 组合验证（跨字段规则是纯函数 `providerProfileRouteIssues`）；custom URL normalization；不依赖 Node |
+| `provider-profile-binding.ts` | 从 runtime-relevant non-secret record 派生 exact revision/hash binding（`node:crypto`） |
+| `model-route.ts` | `@byok-sdk/keys/model-route`：浏览器可加载的 Pi model route 选项、联动、字段错误码、secret 复用判断和提交载荷 |
 | `registry.ts` | configure/remove/status/resolve；profile 与 secret 的唯一汇合点 |
 | `secret-store.ts` | generic async port、memory store、secret name/value validation |
+| `secret-value.ts` | 两个 OS backend 共用的 secret 形状规则和 2560 字节上限，不依赖 Node |
 | `macos-keychain.ts` / `windows-credential-manager.ts` | OS-native secret persistence |
 | `secret-scope.ts` | `SecretScope = { account_id, workspace_id }`（`packages/keys/src/secret-scope.ts:12-15`）；`secretScopeId()` 把两者 sha256 成不泄露租户标识的 namespace，`EnvelopeScopedSecretStore` 按该 id 分区。scope 里没有 tenant/product 维度 |
 | `profile-store.ts` / `sqlite-profile-store.ts` | non-secret profile memory/SQLite persistence |

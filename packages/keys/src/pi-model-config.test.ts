@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { InMemoryTruthStore, tenantId } from '@byok-sdk/core';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
-import { parseModelProviderProfile, exactProviderProfileBinding, assertExactProviderProfileBinding } from './provider-profile';
+import { parseModelProviderProfile } from './provider-profile';
+import { exactProviderProfileBinding, assertExactProviderProfileBinding } from './provider-profile-binding';
 import { assertPiLaunchArgs, buildPiProviderArgs, buildPiProviderProjection } from './pi-provider-projection';
 import { assertPiPreparedProviderProfile } from './pi-provider-launcher-core';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';

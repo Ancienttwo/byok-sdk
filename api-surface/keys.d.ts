@@ -450,7 +450,8 @@ export declare function requiredProviderSecret(profile: ProviderAuthProfile, sec
 export declare function providerHeaders(profile: ProviderAuthProfile, secret: string | undefined): Record<string, string>;
 // ==== @byok-sdk/keys dist/hermes-provider-launcher.d.ts ====
 import { z } from 'zod';
-import { type ModelProviderProfile, type ExactProviderProfileBinding } from './provider-profile';
+import { type ModelProviderProfile } from './provider-profile';
+import { type ExactProviderProfileBinding } from './provider-profile-binding';
 import { type SecretStore } from './secret-store';
 declare const RequestSchema: z.ZodObject<{
     profileDbPath: z.ZodString;
@@ -563,8 +564,10 @@ export { ByokKeysError, BYOK_KEYS_ERROR_CODES } from './errors';
 export type { ByokKeysErrorCode } from './errors';
 export { PiModelConfigSchema, PI_THINKING_LEVELS, PI_OPENAI_COMPATIBLE_APIS, PI_MODEL_APIS, PI_COMPAT_KEYS_BY_API, } from './pi-model-config';
 export type { PiCompatKey, PiModelApi, PiModelConfig, PiOpenAICompatibleApi, PiThinkingLevel } from './pi-model-config';
-export { MODEL_PROVIDER_ADAPTERS, MODEL_PROVIDER_KINDS, PROVIDER_AUTH_MODES, PROVIDER_MODEL_CAPABILITIES, ModelProviderProfileSchema, ProviderModelCapabilitySchema, ProviderProfileRefSchema, parseModelProviderProfile, exactProviderProfileBinding, assertExactProviderProfileBinding, } from './provider-profile';
-export type { ModelProviderAdapter, ModelProviderKind, ModelProviderProfile, ModelProviderProfileInput, ExactProviderProfileBinding, ProviderAuthMode, ProviderModelCapability, ProviderProfileRef, } from './provider-profile';
+export { MODEL_PROVIDER_ADAPTERS, MODEL_PROVIDER_KINDS, PROVIDER_AUTH_MODES, PROVIDER_MODEL_CAPABILITIES, ModelProviderProfileSchema, ProviderModelCapabilitySchema, ProviderProfileRefSchema, parseModelProviderProfile, } from './provider-profile';
+export type { ModelProviderAdapter, ModelProviderKind, ModelProviderProfile, ModelProviderProfileInput, ProviderAuthMode, ProviderModelCapability, ProviderProfileRef, } from './provider-profile';
+export { exactProviderProfileBinding, assertExactProviderProfileBinding, } from './provider-profile-binding';
+export type { ExactProviderProfileBinding } from './provider-profile-binding';
 export { MODEL_PROVIDER_VENDORS, MODEL_PROVIDER_VENDOR_IDS, modelProviderVendor, } from './provider-catalog';
 export type { ModelProviderVendor, ModelProviderVendorId, } from './provider-catalog';
 export { providerHeaders, requiredProviderSecret } from './headers';
@@ -580,6 +583,7 @@ export { runCommand } from './command-runner';
 export type { CommandResult, CommandRunner } from './command-runner';
 export { SECRET_NAME_PATTERN, SECRET_NAMESPACE_PATTERN, assertSecretName, assertSecretNamespace, } from './secret-name';
 export { DEFAULT_SECRET_SERVICE_PREFIX, InMemorySecretStore, assertSharedSecretValue, decodeStrictBase64Utf8, modelProviderSecretName, } from './secret-store';
+export { PROVIDER_PROVISIONING_SECRET_MAX_BYTES } from './secret-value';
 export type { ModelProviderSecretName, SecretStore } from './secret-store';
 export { DEFAULT_KEYCHAIN_SECRET_STORAGE_PREFIX, MacOsKeychainSecretStore, } from './macos-keychain';
 export type { MacOsKeychainSecretStoreOptions } from './macos-keychain';
@@ -598,7 +602,7 @@ export { PROVIDER_CONFIGURATION_LOCK_WAIT_MS, PROVIDER_CUSTODY_RECEIPT_LIMIT, PR
 export type { ProviderConfigurationLock, ProviderCustodyCommit, ProviderCustodyOperation, ProviderCustodyPending, ProviderCustodyReceipt, ProviderKeyCheckOutcome, ProviderProvisioningBinding, ProviderProvisioningRejection, ProviderProvisioningResult, } from './custody';
 export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
 export type { DeviceSealingEnrollment, DeviceSealingKey, DeviceSealingSecretName, } from './device-sealing-key';
-export { PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS, PROVIDER_PROVISIONING_SECRET_MAX_BYTES, applySealedProviderProvisioning, readSealedProvisioningResult, } from './sealed-provisioning';
+export { PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS, applySealedProviderProvisioning, readSealedProvisioningResult, } from './sealed-provisioning';
 export type { ApplySealedProviderProvisioningOptions, ProviderProvisioningIdentitySnapshot, SealedProvisioningReadback, ProviderProvisioningCutPoint, ProviderProvisioningFaultSeam, } from './sealed-provisioning';
 export { PROVIDER_KEY_CHECK_TIMEOUT_MS, checkProviderKey } from './provider-key-check';
 export type { ProviderKeyCheckOptions } from './provider-key-check';
@@ -659,6 +663,226 @@ export declare class MacOsKeychainSecretStore<TName extends string = string> imp
     scope(namespace: string): SecretStore<TName>;
     set(name: TName, secret: string): Promise<void>;
 }
+// ==== @byok-sdk/keys dist/model-route.d.ts ====
+import type { PiCatalogModelInput, PiModelCatalogTable } from './pi-model-catalog';
+import { type PiModelApi, type PiThinkingLevel } from './pi-model-config';
+import { PI_DEFAULT_THINKING_LEVEL } from './pi-runtime-defaults.generated';
+import { type ModelProviderVendorId } from './provider-catalog';
+import { type ModelProviderAdapter, type ModelProviderKind, type ModelProviderProfile, type ModelProviderProfileInput, type ProviderAuthMode, type ProviderModelCapability } from './provider-profile';
+/** The draft fields, in the order a Host renders them. */
+export declare const MODEL_ROUTE_FIELDS: readonly ['profile_ref', 'display_name', 'provider_kind', 'adapter', 'auth_mode', 'base_url', 'model', 'pi_model', 'thinking_level', 'capabilities', 'secret'];
+export type ModelRouteField = (typeof MODEL_ROUTE_FIELDS)[number];
+/** Field error codes. The Host maps each code to its own copy. */
+export declare const MODEL_ROUTE_ERROR_CODES: readonly ['required', 'invalid_value', 'invalid_url', 'not_a_choice', 'adapter_auth_mismatch', 'vendor_adapter_mismatch', 'pi_model_required', 'pi_model_invalid', 'thinking_level_unsupported', 'secret_required', 'secret_reentry_required', 'secret_invalid'];
+export type ModelRouteErrorCode = (typeof MODEL_ROUTE_ERROR_CODES)[number];
+export interface ModelRouteFieldError {
+    readonly code: ModelRouteErrorCode;
+    /** For `pi_model_invalid`: the refused paths, relative to `pi_model`. */
+    readonly paths?: readonly string[];
+}
+export type ModelRouteErrors = Readonly<Partial<Record<ModelRouteField, ModelRouteFieldError>>>;
+/**
+ * `keep` reuses the stored key, `none` sends no key, `replace` carries a new
+ * key. The new key is write-only: no view returns it.
+ */
+export type ModelRouteSecret = 'keep' | 'none' | {
+    readonly replace: string;
+};
+/** Where `pi_model` comes from: the pinned catalog, the Host policy, or the user. */
+export type ModelRouteModelSource = 'catalog' | 'host' | 'manual';
+export interface ModelRouteDraft {
+    readonly profile_ref: string;
+    readonly display_name: string;
+    readonly provider_kind: ModelProviderKind | null;
+    readonly adapter: ModelProviderAdapter | null;
+    readonly auth_mode: ProviderAuthMode | null;
+    readonly base_url: string;
+    readonly model: string;
+    /** The Pi api of the selected catalog or Host entry; `null` otherwise. */
+    readonly model_api: PiModelApi | null;
+    /** `null` while no model is chosen, or when the model is not a choice. */
+    readonly model_source: ModelRouteModelSource | null;
+    /** The user's `pi_model` without `thinkingLevel`; set only for `manual`. */
+    readonly pi_model: unknown;
+    /** The only place the thinking level is set; submission writes it into `pi_model`. */
+    readonly thinking_level: PiThinkingLevel | null;
+    /** Edited for `manual` only; catalog and Host entries derive it from their input. */
+    readonly capabilities: readonly ProviderModelCapability[];
+    readonly secret: ModelRouteSecret;
+}
+/** The public state of a stored profile, as the device reports it. It never carries the secret. */
+export interface ModelRouteStoredProfile {
+    readonly profile: Pick<ModelProviderProfile, 'profile_ref' | 'display_name' | 'provider_kind' | 'adapter' | 'auth_mode' | 'base_url' | 'model' | 'capabilities' | 'pi_model'>;
+    readonly secret_configured: boolean;
+}
+/** A Host's own `pi_model` for one vendor model. It must still pass `PiModelConfigSchema`. */
+export interface ModelRouteHostEntry {
+    readonly provider_kind: ModelProviderVendorId;
+    readonly api: PiModelApi;
+    readonly model: string;
+    /** `pi_model` without `thinkingLevel`. */
+    readonly config: unknown;
+    readonly input: readonly PiCatalogModelInput[];
+}
+/** Product choices a Host passes in, instead of forking SDK data. */
+export interface ModelRoutePolicy {
+    /** Offered provider kinds, in order. Absent: every vendor, then `custom`. */
+    readonly vendors?: readonly ModelProviderKind[];
+    /** Offered model ids per vendor. A listed vendor admits no other model, from any source. */
+    readonly models?: Readonly<Partial<Record<ModelProviderVendorId, readonly string[]>>>;
+    readonly vendor_labels?: Readonly<Partial<Record<ModelProviderKind, string>>>;
+    readonly model_labels?: Readonly<Partial<Record<ModelProviderVendorId, Readonly<Record<string, string>>>>>;
+    /** The vendor a new draft starts with. */
+    readonly default_vendor?: ModelProviderKind;
+    /** The model selected when a vendor is chosen. */
+    readonly default_models?: Readonly<Partial<Record<ModelProviderVendorId, string>>>;
+    /** Values for a `custom` endpoint. The SDK has none of its own. */
+    readonly custom_defaults?: {
+        readonly adapter?: ModelProviderAdapter;
+        readonly auth_mode?: ProviderAuthMode;
+        readonly base_url?: string;
+    };
+    /** Host entries, which replace the catalog entry with the same vendor, api and model. */
+    readonly overrides?: readonly ModelRouteHostEntry[];
+}
+export interface ModelRouteContext {
+    readonly catalog: PiModelCatalogTable;
+    readonly stored: ModelRouteStoredProfile | null;
+    readonly policy: ModelRoutePolicy;
+}
+/**
+ * A context over the pinned Pi catalog. A policy that lists one vendor, api
+ * and model in two Host entries, or a Host entry whose model id a profile
+ * cannot hold, is a Host programming error and throws.
+ */
+export declare function modelRouteContext(input?: {
+    readonly stored?: ModelRouteStoredProfile | null;
+    readonly policy?: ModelRoutePolicy;
+}): ModelRouteContext;
+/** One entry of the pinned catalog for a vendor and api. */
+export type PiCatalogModelListing = {
+    readonly model: string;
+    readonly api: PiModelApi;
+    readonly status: 'representable';
+    readonly input: readonly PiCatalogModelInput[];
+    readonly reasoning: boolean;
+    readonly thinking_levels: readonly PiThinkingLevel[];
+} | {
+    readonly model: string;
+    readonly api: PiModelApi;
+    readonly status: 'unrepresentable';
+    /** The `pi_model` paths `PiModelConfig` cannot carry. */
+    readonly unrepresentable: readonly string[];
+};
+/**
+ * The pinned catalog entries of a vendor, for one api or for all of them.
+ * The catalog has no display names; the model id is the default label.
+ */
+export declare function listPiCatalogModels(selection: {
+    readonly provider: string;
+    readonly api?: PiModelApi;
+}): PiCatalogModelListing[];
+export type ModelRouteChoice = {
+    readonly value: string;
+    readonly label: string | null;
+};
+/** A model choice; `source` says whether the catalog or the Host policy supplied it. */
+export type ModelRouteModelChoice = PiCatalogModelListing & {
+    readonly value: string;
+    readonly label: string | null;
+    readonly source: 'catalog' | 'host';
+};
+export interface ModelRouteFieldView {
+    readonly field: ModelRouteField;
+    readonly visible: boolean;
+    readonly required: boolean;
+    /** The draft value. For `secret` it is `keep`, `none` or `replace`, never the key. */
+    readonly value: unknown;
+    readonly choices: readonly (ModelRouteChoice | ModelRouteModelChoice)[] | null;
+    readonly error: ModelRouteFieldError | null;
+}
+export interface ModelRouteView {
+    readonly fields: readonly ModelRouteFieldView[];
+    readonly model_source: ModelRouteModelSource | null;
+    /** Whether catalog and Host entries apply: a catalog vendor at its own base URL. */
+    readonly catalog_applies: boolean;
+    readonly secret_configured: boolean;
+    readonly valid: boolean;
+}
+export type ModelRouteChange = {
+    readonly field: 'profile_ref' | 'display_name' | 'base_url';
+    readonly value: string;
+} | {
+    readonly field: 'provider_kind';
+    readonly value: ModelProviderKind | null;
+} | {
+    readonly field: 'adapter';
+    readonly value: ModelProviderAdapter | null;
+} | {
+    readonly field: 'auth_mode';
+    readonly value: ProviderAuthMode | null;
+} | {
+    readonly field: 'model';
+    readonly value: string;
+    readonly api?: PiModelApi;
+} | {
+    readonly field: 'pi_model';
+    readonly value: unknown;
+} | {
+    readonly field: 'thinking_level';
+    readonly value: PiThinkingLevel | null;
+} | {
+    readonly field: 'capabilities';
+    readonly value: readonly ProviderModelCapability[];
+} | {
+    readonly field: 'secret';
+    readonly value: ModelRouteSecret;
+};
+/** The profile input a submission produces; the device adds `enabled` and the timestamps. */
+export type ModelRouteProfileInput = Omit<ModelProviderProfileInput, 'created_at' | 'updated_at' | 'enabled'>;
+export type ModelRouteSubmission = {
+    readonly ok: true;
+    readonly profile: ModelRouteProfileInput;
+    readonly secret: ModelRouteSecret;
+} | {
+    readonly ok: false;
+    readonly errors: ModelRouteErrors;
+};
+/** The fields that bind a stored key to a profile. */
+export interface ProviderSecretIdentity {
+    readonly profile_ref: string;
+    readonly provider_kind: string;
+    readonly adapter: string;
+    readonly auth_mode: string;
+    readonly base_url: string;
+}
+/**
+ * Whether a stored key may serve the next profile: every identity field is
+ * unchanged, and both base URLs normalize to the same URL. A URL that does not
+ * normalize never matches. The device rechecks a save with this function.
+ */
+export declare function providerSecretReusable(previous: ProviderSecretIdentity, next: ProviderSecretIdentity): boolean;
+/** A new draft, or the draft of the stored profile. A stored key starts as `keep`. */
+export declare function createModelRouteDraft(context: ModelRouteContext): ModelRouteDraft;
+/** Change one field and reset the fields that depend on it. */
+export declare function applyModelRouteChange(draft: ModelRouteDraft, change: ModelRouteChange, context: ModelRouteContext): ModelRouteDraft;
+/** Everything a Host renders, in field order. */
+export declare function modelRouteView(draft: ModelRouteDraft, context: ModelRouteContext): ModelRouteView;
+/** One error code per visible field that is not valid. */
+export declare function validateModelRoute(draft: ModelRouteDraft, context: ModelRouteContext): ModelRouteErrors;
+/**
+ * The profile input and the secret action for a valid draft, or the field
+ * errors. The device parses `profile` with `ModelProviderProfileSchema` and
+ * passes a `replace` key to `ProviderRegistry.configure`.
+ */
+export declare function modelRouteSubmission(draft: ModelRouteDraft, context: ModelRouteContext): ModelRouteSubmission;
+export { MODEL_PROVIDER_VENDORS, MODEL_PROVIDER_VENDOR_IDS } from './provider-catalog';
+export type { ModelProviderVendor, ModelProviderVendorId } from './provider-catalog';
+export { PI_THINKING_LEVELS, piSupportedThinkingLevels } from './pi-model-config';
+export type { PiModelApi, PiModelConfig, PiThinkingLevel } from './pi-model-config';
+export { PI_DEFAULT_THINKING_LEVEL };
+export type { PiCatalogModelInput, PiModelCatalogTable } from './pi-model-catalog';
+export type { ModelProviderAdapter, ModelProviderKind, ProviderAuthMode, ProviderModelCapability, } from './provider-profile';
 // ==== @byok-sdk/keys dist/openai-client.d.ts ====
 import { type ProviderFetch } from './http';
 /** One chat message. `content` is `unknown` so multimodal block arrays pass through. */
@@ -963,7 +1187,8 @@ import { type ChildProcess } from 'node:child_process';
 import { type CommandRunner } from './command-runner';
 import { type PiLauncherRuntimeEntry } from './pi-provider-projection';
 import type { ProviderProfileStore } from './profile-store';
-import { type ExactProviderProfileBinding, type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';
+import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';
+import { type ExactProviderProfileBinding } from './provider-profile-binding';
 import { type SecretStore } from './secret-store';
 export interface PiProviderLauncherOptions {
     piBin: string;
@@ -1194,6 +1419,9 @@ export declare function buildPiProviderArgs(profile: ModelProviderProfile, deleg
  * argument parser refuses anything but `--config` regardless.
  */
 export declare function buildPiPreparedArgs(delegatedArgs: readonly string[]): string[];
+// ==== @byok-sdk/keys dist/pi-runtime-defaults.generated.d.ts ====
+/** Pi's `DEFAULT_THINKING_LEVEL`: the level Pi starts a session at when nothing else names one. */
+export declare const PI_DEFAULT_THINKING_LEVEL = "medium";
 // ==== @byok-sdk/keys dist/profile-store.d.ts ====
 import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody';
 import { ByokKeysError } from './errors';
@@ -1424,9 +1652,29 @@ export interface ProviderKeyCheckOptions {
  */
 export declare function checkProviderKey(profile: ModelProviderProfile, secret: string, options?: ProviderKeyCheckOptions): Promise<Exclude<ProviderKeyCheckOutcome, 'not_run'>>;
 export declare function classifyProviderKeyCheckFailure(error: unknown, timedOut: boolean): Exclude<ProviderKeyCheckOutcome, 'not_run' | 'ok'>;
+// ==== @byok-sdk/keys dist/provider-profile-binding.d.ts ====
+import { type ModelProviderProfile, type ProviderModelCapability, type ProviderProfileRef } from './provider-profile';
+export interface ExactProviderProfileBinding {
+    profileRef: ProviderProfileRef;
+    profileRevision: string;
+    profileHash: string;
+    modelId: string;
+    requiredCapabilities: readonly ProviderModelCapability[];
+}
+/**
+ * Derive the credential-free wire identity from the normalized local record.
+ * `updated_at` is the persisted monotonic revision authority; the hash covers
+ * the complete normalized non-secret record with capability order
+ * canonicalized. Secret values are not accepted by this type and therefore
+ * cannot enter the digest or any mismatch message.
+ */
+export declare function exactProviderProfileBinding(profileInput: ModelProviderProfile, requiredCapabilities?: readonly ProviderModelCapability[]): ExactProviderProfileBinding;
+/** Fail closed unless every offered binding field matches local authority. */
+export declare function assertExactProviderProfileBinding(profile: ModelProviderProfile, expected: ExactProviderProfileBinding): void;
 // ==== @byok-sdk/keys dist/provider-profile.d.ts ====
 import { z } from 'zod';
 import { type ModelProviderVendorId } from './provider-catalog';
+import { type PiModelConfig } from './pi-model-config';
 /**
  * Opaque, portable identity of one locally configured provider profile.
  *
@@ -1478,6 +1726,30 @@ export type ProviderAuthMode = (typeof PROVIDER_AUTH_MODES)[number];
  */
 export declare const MODEL_PROVIDER_ADAPTERS: readonly ['openai_compatible', 'anthropic'];
 export type ModelProviderAdapter = (typeof MODEL_PROVIDER_ADAPTERS)[number];
+/** The auth modes each adapter accepts. */
+export declare function providerAuthModesForAdapter(adapter: ModelProviderAdapter): readonly ProviderAuthMode[];
+/**
+ * One broken cross-field rule. The path names the rule: `auth_mode` for the
+ * adapter's auth modes, `adapter` for the vendor's adapter, `pi_model.*` for
+ * what the adapter's Pi api admits.
+ */
+export interface ProviderProfileRouteIssue {
+    readonly path: string[];
+    readonly message: string;
+}
+/** The profile fields the cross-field rules read. */
+export interface ProviderProfileRoute {
+    readonly provider_kind: string;
+    readonly adapter: ModelProviderAdapter;
+    readonly auth_mode: ProviderAuthMode;
+    readonly pi_model?: Pick<PiModelConfig, 'api' | 'compat'>;
+}
+/**
+ * The cross-field profile rules, as data. {@link ModelProviderProfileSchema}
+ * and `@byok-sdk/keys/model-route` both report these issues, so the rules
+ * have one implementation.
+ */
+export declare function providerProfileRouteIssues(route: ProviderProfileRoute): ProviderProfileRouteIssue[];
 /**
  * A model provider profile: everything needed to address a provider except the
  * secret itself, which lives in the OS credential store.
@@ -1612,23 +1884,6 @@ export declare const ModelProviderProfileSchema: z.ZodObject<{
 export type ModelProviderProfile = z.infer<typeof ModelProviderProfileSchema>;
 /** Pre-normalization shape callers may hand in. */
 export type ModelProviderProfileInput = z.input<typeof ModelProviderProfileSchema>;
-export interface ExactProviderProfileBinding {
-    profileRef: ProviderProfileRef;
-    profileRevision: string;
-    profileHash: string;
-    modelId: string;
-    requiredCapabilities: readonly ProviderModelCapability[];
-}
-/**
- * Derive the credential-free wire identity from the normalized local record.
- * `updated_at` is the persisted monotonic revision authority; the hash covers
- * the complete normalized non-secret record with capability order
- * canonicalized. Secret values are not accepted by this type and therefore
- * cannot enter the digest or any mismatch message.
- */
-export declare function exactProviderProfileBinding(profileInput: ModelProviderProfile, requiredCapabilities?: readonly ProviderModelCapability[]): ExactProviderProfileBinding;
-/** Fail closed unless every offered binding field matches local authority. */
-export declare function assertExactProviderProfileBinding(profile: ModelProviderProfile, expected: ExactProviderProfileBinding): void;
 /**
  * Parse and normalize a profile, or throw {@link ByokKeysError}. Replaces the
  * source's `normalizeProviderProfile` (`providers.ts:1489-1556`) for the model
@@ -1800,12 +2055,6 @@ import type { ProviderProfileStore } from './profile-store';
 import { type ModelProviderSecretName, type SecretStore } from './secret-store';
 /** Largest issuedAt-in-the-future a device tolerates (bounded clock skew, A9). */
 export declare const PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS: number;
-/**
- * The smaller of the two OS backends' secret ceilings (Windows Credential
- * Manager: 2560 UTF-8 bytes), so a too-large key is a deterministic rejection
- * on every platform instead of a store failure that leaves a pending marker.
- */
-export declare const PROVIDER_PROVISIONING_SECRET_MAX_BYTES = 2560;
 /** Persistence cut points of one applied operation, in order. */
 export type ProviderProvisioningCutPoint = 'after-pending' | 'after-secret-write' | 'after-commit';
 /** Test-only seam: invoked at each cut point so crash tests can kill the process there. */
@@ -2089,6 +2338,19 @@ export declare class InMemorySecretStore<TName extends string = string> implemen
     scope(namespace: string): SecretStore<TName>;
     set(name: TName, secret: string): Promise<void>;
 }
+// ==== @byok-sdk/keys dist/secret-value.d.ts ====
+/**
+ * The secret-shape rule both OS backends share: non-empty, without null or
+ * newline characters. It has no Node dependency, so the browser-safe
+ * `@byok-sdk/keys/model-route` entry checks a new key with the same rule.
+ */
+export declare function isSharedSecretValue(secret: string): boolean;
+/**
+ * The smaller of the two OS backends' secret ceilings (Windows Credential
+ * Manager: 2560 UTF-8 bytes), so a too-large key is a deterministic rejection
+ * on every platform instead of a store failure that leaves a pending marker.
+ */
+export declare const PROVIDER_PROVISIONING_SECRET_MAX_BYTES = 2560;
 // ==== @byok-sdk/keys dist/sqlite-profile-store.d.ts ====
 import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody';
 import { type ProviderProfileStore } from './profile-store';

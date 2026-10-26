@@ -222,7 +222,7 @@ export const familyOwners = Object.freeze({
     /^examples\/(?:host-execution-core|bot-collaboration)\//,
     /^examples\/basic\/goal-btw\.test-support\.ts$/,
     /^scripts\/ci\/run-windows-bot-tests\.mjs$/,
-    /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|secret-store|sqlite-profile-store|command-runner)\.ts)$/,
+    /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|provider-profile-binding|secret-store|secret-value|sqlite-profile-store|command-runner)\.ts)$/,
   ],
   'windows-git-workspace': [
     /^packages\/client\/src\/daemon\/(?:git-workspace|git-workspace-store|session-workspace-store|auth-manager|daemon-lifecycle|daemon-owner|daemon-record)\.ts$/,
@@ -424,6 +424,8 @@ export function selectImpact(paths, context = {}) {
     // #654: the core sealed-payload subpath entry.
     if (path === 'packages/core/tsup.config.ts') { dirs.add('packages/core'); families.add('npm-release-pack'); continue; }
     if (path === 'scripts/keys/generate-pi-model-catalog.ts') { dirs.add('packages/keys'); dirs.add('packages/client'); continue; }
+    // The generated Pi defaults: keys source, and the client drift test re-renders them.
+    if (path === 'packages/keys/src/pi-runtime-defaults.generated.ts') { dirs.add('packages/keys'); dirs.add('packages/client'); continue; }
     // pack-and-smoke.mjs runs it against the packed client.
     if (path === 'packages/client/scripts/packed-cli-mcp-smoke.mjs') { dirs.add('packages/client'); families.add('npm-release-pack'); continue; }
     if (path === 'packages/client/scripts/packed-agent-memory-helper-smoke.mjs'

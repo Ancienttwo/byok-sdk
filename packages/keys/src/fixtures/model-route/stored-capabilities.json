@@ -1,0 +1,670 @@
+{
+  "description": "A stored profile whose pi_model equals the catalog entry but whose capabilities do not. It stays manual, and a resubmission keeps its pi_model and capabilities.",
+  "catalog": {
+    "groq": {
+      "openai-completions": {
+        "qwen/qwen3.6-27b": {
+          "config": {
+            "contextWindow": 131072,
+            "maxTokens": 16384,
+            "reasoning": true,
+            "thinkingLevelMap": {
+              "off": "none",
+              "minimal": null,
+              "low": null,
+              "medium": null,
+              "high": "default",
+              "xhigh": null,
+              "max": null
+            },
+            "compat": {
+              "supportsStrictMode": true
+            },
+            "inputLimits": {
+              "images": {
+                "resize": {
+                  "maxWidth": 2000,
+                  "maxHeight": 2000,
+                  "maxBytes": 4718592,
+                  "jpegQuality": 80
+                }
+              }
+            }
+          },
+          "input": [
+            "text",
+            "image"
+          ]
+        }
+      }
+    }
+  },
+  "stored": {
+    "profile": {
+      "profile_ref": "main",
+      "display_name": "Main",
+      "provider_kind": "groq",
+      "adapter": "openai_compatible",
+      "auth_mode": "bearer",
+      "base_url": "https://api.groq.com/openai/v1",
+      "model": "qwen/qwen3.6-27b",
+      "capabilities": [],
+      "pi_model": {
+        "contextWindow": 131072,
+        "maxTokens": 16384,
+        "reasoning": true,
+        "thinkingLevelMap": {
+          "off": "none",
+          "minimal": null,
+          "low": null,
+          "medium": null,
+          "high": "default",
+          "xhigh": null,
+          "max": null
+        },
+        "compat": {
+          "supportsStrictMode": true
+        },
+        "inputLimits": {
+          "images": {
+            "resize": {
+              "maxWidth": 2000,
+              "maxHeight": 2000,
+              "maxBytes": 4718592,
+              "jpegQuality": 80
+            }
+          }
+        },
+        "thinkingLevel": "high"
+      }
+    },
+    "secret_configured": true
+  },
+  "policy": {
+    "vendors": [
+      "groq",
+      "custom"
+    ]
+  },
+  "vectors": [
+    {
+      "name": "stored capabilities differ from the entry, so the draft stays manual",
+      "draft": null,
+      "change": null,
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "Main",
+          "provider_kind": "groq",
+          "adapter": "openai_compatible",
+          "auth_mode": "bearer",
+          "base_url": "https://api.groq.com/openai/v1",
+          "model": "qwen/qwen3.6-27b",
+          "capabilities": [],
+          "model_api": null,
+          "model_source": "manual",
+          "pi_model": {
+            "contextWindow": 131072,
+            "maxTokens": 16384,
+            "reasoning": true,
+            "thinkingLevelMap": {
+              "off": "none",
+              "minimal": null,
+              "low": null,
+              "medium": null,
+              "high": "default",
+              "xhigh": null,
+              "max": null
+            },
+            "compat": {
+              "supportsStrictMode": true
+            },
+            "inputLimits": {
+              "images": {
+                "resize": {
+                  "maxWidth": 2000,
+                  "maxHeight": 2000,
+                  "maxBytes": 4718592,
+                  "jpegQuality": 80
+                }
+              }
+            }
+          },
+          "thinking_level": "high",
+          "secret": "keep"
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "Main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": "groq",
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "adapter",
+              "visible": true,
+              "required": true,
+              "value": "openai_compatible",
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": true,
+              "required": true,
+              "value": "bearer",
+              "choices": [
+                {
+                  "value": "bearer",
+                  "label": null
+                },
+                {
+                  "value": "none",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": true,
+              "required": true,
+              "value": "https://api.groq.com/openai/v1",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": true,
+              "required": true,
+              "value": "qwen/qwen3.6-27b",
+              "choices": [
+                {
+                  "model": "qwen/qwen3.6-27b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text",
+                    "image"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "off",
+                    "high"
+                  ],
+                  "value": "qwen/qwen3.6-27b",
+                  "label": null,
+                  "source": "catalog"
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "pi_model",
+              "visible": true,
+              "required": true,
+              "value": {
+                "contextWindow": 131072,
+                "maxTokens": 16384,
+                "reasoning": true,
+                "thinkingLevelMap": {
+                  "off": "none",
+                  "minimal": null,
+                  "low": null,
+                  "medium": null,
+                  "high": "default",
+                  "xhigh": null,
+                  "max": null
+                },
+                "compat": {
+                  "supportsStrictMode": true
+                },
+                "inputLimits": {
+                  "images": {
+                    "resize": {
+                      "maxWidth": 2000,
+                      "maxHeight": 2000,
+                      "maxBytes": 4718592,
+                      "jpegQuality": 80
+                    }
+                  }
+                }
+              },
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "thinking_level",
+              "visible": true,
+              "required": true,
+              "value": "high",
+              "choices": [
+                {
+                  "value": "off",
+                  "label": null
+                },
+                {
+                  "value": "high",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": true,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": true,
+              "required": true,
+              "value": "keep",
+              "choices": null,
+              "error": null
+            }
+          ],
+          "model_source": "manual",
+          "catalog_applies": true,
+          "secret_configured": true,
+          "valid": true
+        },
+        "submission": {
+          "ok": true,
+          "profile": {
+            "kind": "model",
+            "profile_ref": "main",
+            "display_name": "Main",
+            "provider_kind": "groq",
+            "adapter": "openai_compatible",
+            "auth_mode": "bearer",
+            "base_url": "https://api.groq.com/openai/v1",
+            "model": "qwen/qwen3.6-27b",
+            "capabilities": [],
+            "pi_model": {
+              "contextWindow": 131072,
+              "maxTokens": 16384,
+              "reasoning": true,
+              "thinkingLevelMap": {
+                "off": "none",
+                "minimal": null,
+                "low": null,
+                "medium": null,
+                "high": "default",
+                "xhigh": null,
+                "max": null
+              },
+              "compat": {
+                "supportsStrictMode": true
+              },
+              "inputLimits": {
+                "images": {
+                  "resize": {
+                    "maxWidth": 2000,
+                    "maxHeight": 2000,
+                    "maxBytes": 4718592,
+                    "jpegQuality": 80
+                  }
+                }
+              },
+              "thinkingLevel": "high"
+            }
+          },
+          "secret": "keep"
+        }
+      }
+    },
+    {
+      "name": "display name change keeps pi_model and capabilities",
+      "draft": {
+        "profile_ref": "main",
+        "display_name": "Main",
+        "provider_kind": "groq",
+        "adapter": "openai_compatible",
+        "auth_mode": "bearer",
+        "base_url": "https://api.groq.com/openai/v1",
+        "model": "qwen/qwen3.6-27b",
+        "capabilities": [],
+        "model_api": null,
+        "model_source": "manual",
+        "pi_model": {
+          "contextWindow": 131072,
+          "maxTokens": 16384,
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": "none",
+            "minimal": null,
+            "low": null,
+            "medium": null,
+            "high": "default",
+            "xhigh": null,
+            "max": null
+          },
+          "compat": {
+            "supportsStrictMode": true
+          },
+          "inputLimits": {
+            "images": {
+              "resize": {
+                "maxWidth": 2000,
+                "maxHeight": 2000,
+                "maxBytes": 4718592,
+                "jpegQuality": 80
+              }
+            }
+          }
+        },
+        "thinking_level": "high",
+        "secret": "keep"
+      },
+      "change": {
+        "field": "display_name",
+        "value": "Renamed"
+      },
+      "expect": {
+        "draft": {
+          "profile_ref": "main",
+          "display_name": "Renamed",
+          "provider_kind": "groq",
+          "adapter": "openai_compatible",
+          "auth_mode": "bearer",
+          "base_url": "https://api.groq.com/openai/v1",
+          "model": "qwen/qwen3.6-27b",
+          "capabilities": [],
+          "model_api": null,
+          "model_source": "manual",
+          "pi_model": {
+            "contextWindow": 131072,
+            "maxTokens": 16384,
+            "reasoning": true,
+            "thinkingLevelMap": {
+              "off": "none",
+              "minimal": null,
+              "low": null,
+              "medium": null,
+              "high": "default",
+              "xhigh": null,
+              "max": null
+            },
+            "compat": {
+              "supportsStrictMode": true
+            },
+            "inputLimits": {
+              "images": {
+                "resize": {
+                  "maxWidth": 2000,
+                  "maxHeight": 2000,
+                  "maxBytes": 4718592,
+                  "jpegQuality": 80
+                }
+              }
+            }
+          },
+          "thinking_level": "high",
+          "secret": "keep"
+        },
+        "view": {
+          "fields": [
+            {
+              "field": "profile_ref",
+              "visible": true,
+              "required": true,
+              "value": "main",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "display_name",
+              "visible": true,
+              "required": true,
+              "value": "Renamed",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "provider_kind",
+              "visible": true,
+              "required": true,
+              "value": "groq",
+              "choices": [
+                {
+                  "value": "groq",
+                  "label": "Groq"
+                },
+                {
+                  "value": "custom",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "adapter",
+              "visible": true,
+              "required": true,
+              "value": "openai_compatible",
+              "choices": [
+                {
+                  "value": "openai_compatible",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "auth_mode",
+              "visible": true,
+              "required": true,
+              "value": "bearer",
+              "choices": [
+                {
+                  "value": "bearer",
+                  "label": null
+                },
+                {
+                  "value": "none",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "base_url",
+              "visible": true,
+              "required": true,
+              "value": "https://api.groq.com/openai/v1",
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "model",
+              "visible": true,
+              "required": true,
+              "value": "qwen/qwen3.6-27b",
+              "choices": [
+                {
+                  "model": "qwen/qwen3.6-27b",
+                  "api": "openai-completions",
+                  "status": "representable",
+                  "input": [
+                    "text",
+                    "image"
+                  ],
+                  "reasoning": true,
+                  "thinking_levels": [
+                    "off",
+                    "high"
+                  ],
+                  "value": "qwen/qwen3.6-27b",
+                  "label": null,
+                  "source": "catalog"
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "pi_model",
+              "visible": true,
+              "required": true,
+              "value": {
+                "contextWindow": 131072,
+                "maxTokens": 16384,
+                "reasoning": true,
+                "thinkingLevelMap": {
+                  "off": "none",
+                  "minimal": null,
+                  "low": null,
+                  "medium": null,
+                  "high": "default",
+                  "xhigh": null,
+                  "max": null
+                },
+                "compat": {
+                  "supportsStrictMode": true
+                },
+                "inputLimits": {
+                  "images": {
+                    "resize": {
+                      "maxWidth": 2000,
+                      "maxHeight": 2000,
+                      "maxBytes": 4718592,
+                      "jpegQuality": 80
+                    }
+                  }
+                }
+              },
+              "choices": null,
+              "error": null
+            },
+            {
+              "field": "thinking_level",
+              "visible": true,
+              "required": true,
+              "value": "high",
+              "choices": [
+                {
+                  "value": "off",
+                  "label": null
+                },
+                {
+                  "value": "high",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "capabilities",
+              "visible": true,
+              "required": false,
+              "value": [],
+              "choices": [
+                {
+                  "value": "image-input",
+                  "label": null
+                }
+              ],
+              "error": null
+            },
+            {
+              "field": "secret",
+              "visible": true,
+              "required": true,
+              "value": "keep",
+              "choices": null,
+              "error": null
+            }
+          ],
+          "model_source": "manual",
+          "catalog_applies": true,
+          "secret_configured": true,
+          "valid": true
+        },
+        "submission": {
+          "ok": true,
+          "profile": {
+            "kind": "model",
+            "profile_ref": "main",
+            "display_name": "Renamed",
+            "provider_kind": "groq",
+            "adapter": "openai_compatible",
+            "auth_mode": "bearer",
+            "base_url": "https://api.groq.com/openai/v1",
+            "model": "qwen/qwen3.6-27b",
+            "capabilities": [],
+            "pi_model": {
+              "contextWindow": 131072,
+              "maxTokens": 16384,
+              "reasoning": true,
+              "thinkingLevelMap": {
+                "off": "none",
+                "minimal": null,
+                "low": null,
+                "medium": null,
+                "high": "default",
+                "xhigh": null,
+                "max": null
+              },
+              "compat": {
+                "supportsStrictMode": true
+              },
+              "inputLimits": {
+                "images": {
+                  "resize": {
+                    "maxWidth": 2000,
+                    "maxHeight": 2000,
+                    "maxBytes": 4718592,
+                    "jpegQuality": 80
+                  }
+                }
+              },
+              "thinkingLevel": "high"
+            }
+          },
+          "secret": "keep"
+        }
+      }
+    }
+  ]
+}
