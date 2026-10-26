@@ -1502,7 +1502,8 @@ describe('device member KEM rotation after a shred (E5b-2)', () => {
     await rotated(custody, 3);
     expect(rotate).toHaveBeenCalledTimes(3);
     expect(logs).toContain('rotated the member KEM key to epoch 2');
-    expect(logs).toContain('rotated the member KEM key to epoch 3');
+    // Custody holds epoch 3 one await before the rotation logs it.
+    await vi.waitFor(() => expect(logs).toContain('rotated the member KEM key to epoch 3'));
     const appends = server.e2ee.deviceAppends as { readonly seq: number; readonly op: string; readonly subject: { readonly kemEpoch: number } }[][];
     expect(appends.map(([entry]) => [entry!.op, entry!.subject.kemEpoch])).toEqual([['rotate', 2], ['rotate', 3]]);
     expect(appends[1]![0]!.seq).toBeGreaterThan(shredSeq);
