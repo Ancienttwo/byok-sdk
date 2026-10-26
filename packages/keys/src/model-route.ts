@@ -12,6 +12,7 @@ import { PI_DEFAULT_THINKING_LEVEL } from './pi-runtime-defaults.generated';
 import {
   MODEL_PROVIDER_VENDOR_IDS,
   modelProviderVendor,
+  type ModelProviderVendor,
   type ModelProviderVendorId,
 } from './provider-catalog';
 import {
@@ -130,14 +131,15 @@ export interface ModelRouteContext {
 
 /**
  * A context over the pinned Pi catalog. A policy that lists one vendor, api
- * and model in two Host entries is a Host programming error and throws.
+ * and model in two Host entries, or a Host entry whose model id a profile
+ * cannot hold, is a Host programming error and throws.
  */
 export function modelRouteContext(input: {
   readonly stored?: ModelRouteStoredProfile | null;
   readonly policy?: ModelRoutePolicy;
 } = {}): ModelRouteContext {
   const policy = input.policy ?? {};
-  assertUniqueHostEntries(policy);
+  assertHostEntries(policy);
   return { catalog: PI_MODEL_CATALOG, stored: input.stored ?? null, policy };
 }
 
@@ -550,11 +552,11 @@ function catalogApplies(draft: ModelRouteDraft): boolean {
 function modelChoices(draft: ModelRouteDraft, context: ModelRouteContext): ModelRouteModelChoice[] {
   if (draft.provider_kind === null || !catalogApplies(draft)) return [];
   const vendor = draft.provider_kind as ModelProviderVendorId;
-  assertUniqueHostEntries(context.policy);
+  assertHostEntries(context.policy);
   const overrides = (context.policy.overrides ?? []).filter((entry) => entry.provider_kind === vendor);
   const key = (api: string, model: string): string => `${api}\u0000${model}`;
-  const adapter = modelProviderVendor(vendor)!.adapter;
-  const host = new Map(overrides.map((entry) => [key(entry.api, entry.model), hostListing(entry, adapter)]));
+  const route = modelProviderVendor(vendor)!;
+  const host = new Map(overrides.map((entry) => [key(entry.api, entry.model), hostListing(entry, route)]));
   const listed: { listing: PiCatalogModelListing; source: 'catalog' | 'host' }[] = [];
   for (const listing of catalogListing(context.catalog, vendor)) {
     const replaced = host.get(key(listing.api, listing.model));
@@ -574,14 +576,12 @@ function modelChoices(draft: ModelRouteDraft, context: ModelRouteContext): Model
     }));
 }
 
-/**
- * A Host entry is representable only when `PiModelConfigSchema` accepts its
- * config and the api the vendor's adapter projects for that config is the api
- * the entry is listed under, as for a catalog entry.
- */
-function assertUniqueHostEntries(policy: ModelRoutePolicy): void {
+function assertHostEntries(policy: ModelRoutePolicy): void {
   const seen = new Set<string>();
   for (const entry of policy.overrides ?? []) {
+    if (!ModelProviderProfileSchema.shape.model.safeParse(entry.model).success) {
+      throw new Error(`model-route policy has a Host entry ${entry.provider_kind} ${entry.api} with the invalid model id ${JSON.stringify(entry.model)}`);
+    }
     const key = JSON.stringify([entry.provider_kind, entry.api, entry.model]);
     if (seen.has(key)) {
       throw new Error(`model-route policy lists the Host entry ${entry.provider_kind} ${entry.api} ${entry.model} twice`);
@@ -590,11 +590,25 @@ function assertUniqueHostEntries(policy: ModelRoutePolicy): void {
   }
 }
 
-function hostListing(entry: ModelRouteHostEntry, adapter: ModelProviderAdapter): PiCatalogModelListing {
+/**
+ * A Host entry is representable only when `PiModelConfigSchema` accepts its
+ * config, the api the vendor's adapter projects for that config is the api
+ * the entry is listed under, and the profile rules of the vendor's adapter
+ * accept the config. The last check is `providerProfileRouteIssues`, the rule
+ * a submission meets, so an entry that is offered can also be submitted.
+ */
+function hostListing(entry: ModelRouteHostEntry, vendor: ModelProviderVendor): PiCatalogModelListing {
+  const { adapter, auth_mode } = vendor;
   const config = isRecord(entry.config) ? entry.config : undefined;
   const levels = config === undefined ? [] : manualThinkingLevels(config);
   const parsed = PiModelConfigSchema.safeParse({ ...config, thinkingLevel: levels[0] ?? 'off' });
   const paths = new Set(parsed.success ? [] : issuePaths(parsed.error.issues));
+  if (parsed.success) {
+    const issues = providerProfileRouteIssues({ provider_kind: entry.provider_kind, adapter, auth_mode, pi_model: parsed.data });
+    for (const issue of issues) {
+      if (issue.path[0] === 'pi_model') paths.add(issue.path.slice(1).join('.'));
+    }
+  }
   if (config !== undefined && Object.hasOwn(config, 'thinkingLevel')) paths.add('thinkingLevel');
   const projected = adapter === 'anthropic'
     ? (config?.api === undefined ? 'anthropic-messages' : undefined)

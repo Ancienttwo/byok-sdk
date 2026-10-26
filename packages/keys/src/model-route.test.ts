@@ -18,6 +18,7 @@ import {
   type ModelRoutePolicy,
   type ModelRouteStoredProfile,
   type PiModelCatalogTable,
+  type PiThinkingLevel,
 } from './model-route';
 import { ModelProviderProfileSchema } from './provider-profile';
 
@@ -567,6 +568,83 @@ describe('acceptance review fixes', () => {
     const draft = named(context, { field: 'provider_kind', value: 'minimax' });
     expect(field(draft, context, 'model').choices!.find((option) => option.value === 'house'))
       .toMatchObject({ status: 'unrepresentable', unrepresentable: ['api'] });
+  });
+});
+
+describe('Host entries are offered only when a profile can hold them', () => {
+  const base = { contextWindow: 131072, maxTokens: 8192, reasoning: false, compat: {} };
+  function hostEntry(entry: Partial<ModelRouteHostEntry>): ModelRouteHostEntry {
+    return { provider_kind: 'groq', api: 'openai-completions', model: 'house', config: base, input: ['text'], ...entry };
+  }
+
+  /** Select a Host entry on a fresh draft, as a page would. */
+  function select(context: ModelRouteContext, entry: ModelRouteHostEntry): ModelRouteDraft {
+    const draft = named(context,
+      { field: 'provider_kind', value: entry.provider_kind },
+      { field: 'model', value: entry.model, api: entry.api },
+      { field: 'secret', value: { replace: 'k' } });
+    const levels = field(draft, context, 'thinking_level').choices ?? [];
+    return draft.thinking_level === null && levels.length > 0
+      ? applyModelRouteChange(draft, { field: 'thinking_level', value: levels[0]!.value as PiThinkingLevel }, context)
+      : draft;
+  }
+
+  it('selects, submits and parses every representable Host entry', () => {
+    const entries = [
+      hostEntry({ model: 'plain' }),
+      hostEntry({ model: 'strict', config: { ...base, compat: { supportsStrictMode: true } } }),
+      hostEntry({ model: 'affinity', config: { ...base, compat: { sendSessionAffinityHeaders: true } } }),
+      hostEntry({ model: 'responses', api: 'openai-responses', config: { ...base, api: 'openai-responses' } }),
+      hostEntry({ model: 'vision', input: ['text', 'image'] }),
+      hostEntry({ provider_kind: 'anthropic', api: 'anthropic-messages', model: 'house-claude' }),
+      hostEntry({
+        provider_kind: 'anthropic', api: 'anthropic-messages', model: 'house-claude-thinking',
+        config: { ...base, reasoning: true, compat: { forceAdaptiveThinking: true } },
+      }),
+    ];
+    const context = modelRouteContext({ policy: { overrides: entries } });
+    for (const entry of entries) {
+      const offered = field(named(context, { field: 'provider_kind', value: entry.provider_kind }), context, 'model').choices!
+        .find((option) => option.value === entry.model && (option as { api: string }).api === entry.api);
+      expect(offered, entry.model).toMatchObject({ source: 'host', status: 'representable' });
+      const draft = select(context, entry);
+      expect(draft.model_source, entry.model).toBe('host');
+      const { profile } = persisted(draft, context);
+      expect(profile.model, entry.model).toBe(entry.model);
+    }
+  });
+
+  it('lists an openai_compatible Host entry with an Anthropic-only compat key as unrepresentable', () => {
+    for (const key of ['forceAdaptiveThinking', 'allowEmptySignature']) {
+      const entry = hostEntry({ config: { ...base, compat: { [key]: true } } });
+      const context = modelRouteContext({ policy: { overrides: [entry] } });
+      const offered = field(named(context, { field: 'provider_kind', value: 'groq' }), context, 'model').choices!
+        .find((option) => option.value === 'house');
+      expect(offered, key).toMatchObject({ source: 'host', status: 'unrepresentable', unrepresentable: [`compat.${key}`] });
+      const draft = applyModelRouteChange(named(context, { field: 'provider_kind', value: 'groq' }),
+        { field: 'model', value: 'house' }, context);
+      expect(draft.model_source, key).toBe('manual');
+      expect(field(draft, context, 'pi_model').visible, key).toBe(true);
+    }
+  });
+
+  it('keeps an anthropic Host entry with supportsStore representable and submittable', () => {
+    const entry = hostEntry({
+      provider_kind: 'anthropic', api: 'anthropic-messages', model: 'house-claude',
+      config: { ...base, compat: { supportsStore: true } },
+    });
+    const context = modelRouteContext({ policy: { overrides: [entry] } });
+    const offered = field(named(context, { field: 'provider_kind', value: 'anthropic' }), context, 'model').choices!
+      .find((option) => option.value === 'house-claude');
+    expect(offered).toMatchObject({ source: 'host', status: 'representable' });
+    expect(persisted(select(context, entry), context).profile.pi_model).toMatchObject({ compat: { supportsStore: true } });
+  });
+
+  it('refuses a policy with a Host entry whose model id a profile cannot hold', () => {
+    for (const model of ['', '   ', 'm'.repeat(161), 'house\nmodel']) {
+      expect(() => modelRouteContext({ policy: { overrides: [hostEntry({ model })] } }), JSON.stringify(model))
+        .toThrow(/Host entry groq openai-completions with the invalid model id/);
+    }
   });
 });
 
