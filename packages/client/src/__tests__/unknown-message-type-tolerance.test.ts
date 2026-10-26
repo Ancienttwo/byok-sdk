@@ -10,6 +10,8 @@ import { CursorStore } from '../daemon/cursor-store';
 import { TestServer } from './fixtures/test-server';
 import { waitForOpen } from './fixtures/lifecycle-barrier';
 
+const TOLERANCE_AGENT = { agentId: 'tolerance-agent', profileRevision: 'rev-1' } as const;
+
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
@@ -89,7 +91,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
   it('long-poll (a): a batch [known, unknown-type, known] processes both known entries in order, never fails the whole batch, and keeps the cursor before unknown executable work', async () => {
     const { record, cursorStore, received } = await startLongPollOnly('byok-unknown-type-lp-mixed-store-');
 
-    const before = createEnvelope('task.offer', { instruction: 'before' }, { taskId: 'known-before', seq: 1 });
+    const before = createEnvelope('task.offer_for_agent', { agentRef: TOLERANCE_AGENT, instruction: 'before' }, { taskId: 'known-before', seq: 1 });
     const unknown = {
       v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff01',
@@ -99,14 +101,14 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       seq: 2,
       payload: {},
     };
-    const after = createEnvelope('task.offer', { instruction: 'after' }, { taskId: 'known-after', seq: 3 });
+    const after = createEnvelope('task.offer_for_agent', { agentRef: TOLERANCE_AGENT, instruction: 'after' }, { taskId: 'known-after', seq: 3 });
 
     server.pushLongPollEvent(before);
     server.pushRawLongPollEvent(unknown);
     server.pushLongPollEvent(after);
 
     await vi.waitFor(() => {
-      expect(received.filter((e) => e.type === 'task.offer').map((e) => e.task_id)).toEqual(['known-before', 'known-after']);
+      expect(received.filter((e) => e.type === 'task.offer_for_agent').map((e) => e.task_id)).toEqual(['known-before', 'known-after']);
     });
     // The unrecognized-type entry never became a THIRD onEnvelope call.
     expect(received).toHaveLength(2);
@@ -153,8 +155,8 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // and the cursor moves past it so the mailbox does not stall.
     const { received } = await startLongPollOnly('byok-unknown-type-prepared-store-');
 
-    const before = createEnvelope('task.offer', { instruction: 'before' }, { taskId: 'prepared-before', seq: 1 });
-    const after = createEnvelope('task.offer', { instruction: 'after' }, { taskId: 'prepared-after', seq: 3 });
+    const before = createEnvelope('task.offer_for_agent', { agentRef: TOLERANCE_AGENT, instruction: 'before' }, { taskId: 'prepared-before', seq: 1 });
+    const after = createEnvelope('task.offer_for_agent', { agentRef: TOLERANCE_AGENT, instruction: 'after' }, { taskId: 'prepared-after', seq: 3 });
 
     server.pushLongPollEvent(before);
     server.pushRawLongPollEvent({
@@ -187,7 +189,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
   it('long-poll (b, finding F1 fix): a genuinely malformed KNOWN-type entry (recognized type, invalid/missing payload fields) is skipped for its batch but must NOT advance the cursor — unlike an unrecognized type, this is not forward-compat tolerance, so the server must keep redelivering it until a corrected version is processed', async () => {
     // F1: the ORIGINAL bug forwarded EVERY parseMessage failure (regardless
     // of class) to `onSkippedSeq`, which permanently advanced the cursor
-    // past a malformed KNOWN-type entry too — e.g. a real `task.offer`
+    // past a malformed KNOWN-type entry too — e.g. a real `task.offer_for_agent`
     // whose `PermissionPolicy` rejected an unknown constraint. That
     // silently, permanently acked a control message the daemon never
     // actually understood: the server would stop redelivering it and
@@ -195,11 +197,11 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // malformed (not just unrecognized) entry is never silently acknowledged.
     const { record, cursorStore, received } = await startLongPollOnly('byok-unknown-type-lp-malformed-store-');
 
-    const before = createEnvelope('task.offer', { instruction: 'before' }, { taskId: 'known-before-2', seq: 1 });
+    const before = createEnvelope('task.offer_for_agent', { agentRef: TOLERANCE_AGENT, instruction: 'before' }, { taskId: 'known-before-2', seq: 1 });
     server.pushLongPollEvent(before);
 
     await vi.waitFor(() => {
-      expect(received.some((e) => e.type === 'task.offer' && e.task_id === 'known-before-2')).toBe(true);
+      expect(received.some((e) => e.type === 'task.offer_for_agent' && e.task_id === 'known-before-2')).toBe(true);
     });
     await vi.waitFor(async () => {
       expect(await cursorStore.load(server.url, record.deviceId)).toBe(1);
@@ -213,10 +215,10 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff03',
       ts: new Date().toISOString(),
-      type: 'task.offer', // a RECOGNIZED type ...
+      type: 'task.offer_for_agent', // a RECOGNIZED type ...
       task_id: 'malformed-task',
       seq: 2,
-      payload: {}, // ... but missing task.offer's required `instruction`/`policy` fields
+      payload: {}, // ... but missing the offer's required `agentRef` and `instruction`
     };
     server.pushRawLongPollEvent(malformed);
 
@@ -234,14 +236,14 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // fixed-up payload) — well-formed this time, so it's processed
     // normally and the cursor finally advances past it.
     const corrected = createEnvelope(
-      'task.offer',
-      { instruction: 'corrected' },
+      'task.offer_for_agent',
+      { agentRef: TOLERANCE_AGENT, instruction: 'corrected' },
       { taskId: 'malformed-task', seq: 2 },
     );
     server.pushLongPollEvent(corrected);
 
     await vi.waitFor(() => {
-      expect(received.some((e) => e.type === 'task.offer' && e.task_id === 'malformed-task')).toBe(true);
+      expect(received.some((e) => e.type === 'task.offer_for_agent' && e.task_id === 'malformed-task')).toBe(true);
     });
     await vi.waitFor(async () => {
       expect(await cursorStore.load(server.url, record.deviceId)).toBe(2);
@@ -260,7 +262,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // successfully-processed LATER envelope in the very same batch.
     const { record, cursorStore, received } = await startLongPollOnly('byok-r1-stall-store-');
 
-    const before = createEnvelope('task.offer', { instruction: 'before' }, { taskId: 'r1-before', seq: 1 });
+    const before = createEnvelope('task.offer_for_agent', { agentRef: TOLERANCE_AGENT, instruction: 'before' }, { taskId: 'r1-before', seq: 1 });
     server.pushLongPollEvent(before);
     await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(1));
 
@@ -268,14 +270,14 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff50',
       ts: new Date().toISOString(),
-      type: 'task.offer', // recognized type ...
+      type: 'task.offer_for_agent', // recognized type ...
       task_id: 'r1-bad',
       seq: 2,
       payload: {}, // ... missing required fields -> EnvelopeValidationError
     };
     const validAfter = createEnvelope(
-      'task.offer',
-      { instruction: 'after' },
+      'task.offer_for_agent',
+      { agentRef: TOLERANCE_AGENT, instruction: 'after' },
       { taskId: 'r1-valid-3', seq: 3 },
     );
     // Pushed together, synchronously, so both land in the SAME poll
@@ -326,7 +328,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // as-is rather than inventing a second, divergent recovery path.
     const { record, cursorStore, received } = await startLongPollOnly('byok-r1-unstall-store-');
 
-    const before = createEnvelope('task.offer', { instruction: 'before' }, { taskId: 'r1b-before', seq: 1 });
+    const before = createEnvelope('task.offer_for_agent', { agentRef: TOLERANCE_AGENT, instruction: 'before' }, { taskId: 'r1b-before', seq: 1 });
     server.pushLongPollEvent(before);
     await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(1));
 
@@ -334,14 +336,14 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff51',
       ts: new Date().toISOString(),
-      type: 'task.offer',
+      type: 'task.offer_for_agent',
       task_id: 'r1b-bad',
       seq: 2,
       payload: {},
     };
     const validAfter = createEnvelope(
-      'task.offer',
-      { instruction: 'after' },
+      'task.offer_for_agent',
+      { agentRef: TOLERANCE_AGENT, instruction: 'after' },
       { taskId: 'r1b-valid-3', seq: 3 },
     );
     server.pushRawLongPollEvent(bad);
@@ -353,8 +355,8 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // Corrected redelivery of seq2 ALONE — the stall clears, the cursor
     // advances through the already-successful tail at 3.
     const corrected = createEnvelope(
-      'task.offer',
-      { instruction: 'corrected' },
+      'task.offer_for_agent',
+      { agentRef: TOLERANCE_AGENT, instruction: 'corrected' },
       { taskId: 'r1b-bad', seq: 2 },
     );
     server.pushLongPollEvent(corrected);
@@ -367,7 +369,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     expect(await cursorStore.load(server.url, record.deviceId)).toBe(3);
     expect(received).toHaveLength(3);
 
-    const fresh = createEnvelope('task.offer', { instruction: 'fresh' }, { taskId: 'r1b-fresh-4', seq: 4 });
+    const fresh = createEnvelope('task.offer_for_agent', { agentRef: TOLERANCE_AGENT, instruction: 'fresh' }, { taskId: 'r1b-fresh-4', seq: 4 });
     server.pushLongPollEvent(fresh);
     await vi.waitFor(() => expect(received.some((e) => e.task_id === 'r1b-fresh-4')).toBe(true));
     await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(4));
@@ -381,7 +383,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff52',
       ts: new Date().toISOString(),
-      type: 'task.offer',
+      type: 'task.offer_for_agent',
       task_id: 'r1-poison',
       seq: 1,
       payload: {}, // never becomes valid in this test — stays stalled the whole time
@@ -441,7 +443,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(received).toEqual([]);
     expect(await cursorStore.load(server.url, record.deviceId)).toBeUndefined();
-    server.pushLongPollEvent(createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'known', seq: 2 }));
+    server.pushLongPollEvent(createEnvelope('task.offer_for_agent', { agentRef: TOLERANCE_AGENT, instruction: 'x' }, { taskId: 'known', seq: 2 }));
     await vi.waitFor(() => expect(received.some((e) => e.task_id === 'known')).toBe(true));
     expect(await cursorStore.load(server.url, record.deviceId)).toBe(0);
     server.pushRawLongPollEvent(poison);
@@ -480,7 +482,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       auth,
       cursorStore,
       onEnvelope: async (envelope) => {
-        if (envelope.type !== 'task.offer') return; // ignore conn.ack etc.
+        if (envelope.type !== 'task.offer_for_agent') return; // ignore every other envelope
         attempts += 1;
         if (attempts === 1) {
           throw new Error('simulated first-attempt failure — retried on redelivery');
@@ -495,8 +497,8 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     await waitForOpen(connection);
 
     const realSeq1 = createEnvelope(
-      'task.offer',
-      { instruction: 'x' },
+      'task.offer_for_agent',
+      { agentRef: TOLERANCE_AGENT, instruction: 'x' },
       { taskId: 'critical-seq1', seq: 1 },
     );
     const unknownSeq2 = {
