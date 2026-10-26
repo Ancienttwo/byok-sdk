@@ -59,7 +59,7 @@ try {
     const audit = path.join(root, `${entry}-mcp.jsonl`);
     const config = { productId: `packed-${entry}-${randomUUID()}`, productName: 'Packed MCP', serverUrl, storeDir,
       ...(keychain === undefined ? {} : { deviceCredentials: { macosKeychainPath: keychain.path } }),
-      ...(entry === 'cli' ? { agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy } } : {}),
+      agentHome: { hostStorageRoot: path.join(storeDir, 'homes') }, agentEgress: { policy },
       workspaceRoot: path.join(storeDir, 'work'), runtimeAllowlist: ['codex'], serviceEnrollment: { enabled: true },
       mcpToolsets: { probe: { mcpServers: { echo: { command: process.execPath,
         args: [fileURLToPath(new URL('../src/__tests__/fixtures/toolset-echo-mcp.mjs', import.meta.url)), audit] } } } } };
@@ -79,12 +79,11 @@ try {
         await daemon.pair(pairing.code); await daemon.start();
       }
       const device = await wait(async () => (await cloud.listDevices(tenant)).find(device => device.productId === config.productId && device.capabilities?.includes('toolset-selection')), `${entry} discovery`);
-      const offer = entry === 'cli'
-        ? await cloud.submitAgentExecution(tenant, { taskId: 'packed-cli-result', deviceId: device.deviceId, payload: {
-          instruction: 'call echo', runtime: 'codex', requiredToolsets: ['probe'],
-          agentRef: { agentId: 'packed-agent', profileRevision: '1' }, egressPolicy: policy, terminalProjection: resultSelection,
-        } })
-        : await cloud.enqueueToolsetOffer(tenant, device.deviceId, { payload: { instruction: 'call echo', runtime: 'codex', requiredToolsets: ['probe'] } });
+      const offer = await cloud.submitAgentExecution(tenant, { taskId: `packed-${entry}-result`, deviceId: device.deviceId, payload: {
+        instruction: 'call echo', runtime: 'codex', requiredToolsets: ['probe'],
+        agentRef: { agentId: `packed-${entry}-agent`, profileRevision: '1' }, egressPolicy: policy,
+        terminalProjection: entry === 'cli' ? resultSelection : { mode: 'none' },
+      } });
       await wait(async () => {
         const attempt = await cloud.readTaskAttempt(tenant, offer.taskId);
         if (attempt?.status === 'failed') throw new Error(`${entry}: ${JSON.stringify(await cloud.readTerminalReceipt(tenant, offer.taskId))}\n${output}`);

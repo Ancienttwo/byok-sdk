@@ -4,12 +4,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type Envelope } from '@byok-sdk/protocol';
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { startRealCloud } from './fixtures/real-cloud';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { freshTestAgentRef } from './fixtures/test-agent';
 
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const clean of cleanup.reverse()) await clean(); cleanup.length = 0; });
@@ -20,15 +21,23 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   const root = await mkdtemp(path.join(os.tmpdir(), 'byok-read-ahead-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
   const auth = new AuthManager({ serverUrl: cloud.url, store: createTestDeviceStore(root) });
   const device = await auth.pair((await cloud.createPairingCode()).code);
-  const a = await cloud.enqueueOffer(device.deviceId, 'slow A');
-  const b = await cloud.enqueueOffer(device.deviceId, 'fast B');
+  const post = async (envelope: Envelope) => {
+    const response = await fetch(`${cloud.url}/byok/messages`, { method: 'POST', headers: { authorization: `Bearer ${device.accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ messages: [envelope] }) });
+    expect(await response.json()).toMatchObject({ accepted: 1 });
+  };
+  // Agent offer admission reads the durable capability snapshot a hello records.
+  await post(createEnvelope('conn.hello', { deviceId: device.deviceId, productId: 'read-ahead', protocolVersions: [PROTOCOL_VERSION], capabilities: ['agent-home-contract'] }));
+  const resume = (instruction: string, sessionRef: string) =>
+    cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: { instruction, agentRef: freshTestAgentRef(), sessionRef } });
+  const a = await resume('slow A', 'session-a');
+  const b = await resume('fast B', 'session-b');
   const cursorStore = new CursorStore(root);
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const controls: string[] = [];
   let aCalls = 0, bCalls = 0;
   const connection = new ConnectionManager({ serverUrl: cloud.url, deviceId: device.deviceId, productId: 'read-ahead',
-    capabilities: [], runtimes: [], auth, cursorStore, longPollIdleDelayMs: 5, longPollRetryDelayMs: 5,
+    capabilities: ['agent-home-contract'], runtimes: [], auth, cursorStore, longPollIdleDelayMs: 5, longPollRetryDelayMs: 5,
     onEnvelope: async envelope => {
       if (envelope.type === 'task.offer_for_agent' && envelope.task_id === a.taskId) { aCalls++; await gate; }
       if (envelope.type === 'task.offer_for_agent' && envelope.task_id === b.taskId) bCalls++;
@@ -37,10 +46,6 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   cleanup.push(async () => { release(); await connection.stop(); await auth.stop(); });
   await connection.start();
   await vi.waitFor(() => expect([aCalls, bCalls]).toEqual([1, 1]));
-  const post = async (envelope: Envelope) => {
-    const response = await fetch(`${cloud.url}/byok/messages`, { method: 'POST', headers: { authorization: `Bearer ${device.accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ messages: [envelope] }) });
-    expect(await response.json()).toMatchObject({ accepted: 1 });
-  };
   await post(createEnvelope('task.claim', { deviceId: device.deviceId, runtime: 'pi' }, { taskId: b.taskId }));
   await post(createEnvelope('task.started', {}, { taskId: b.taskId }));
   await post(createEnvelope('task.await_approval', { summary: 'approve B', approvalId: 'approval-b' }, { taskId: b.taskId }));

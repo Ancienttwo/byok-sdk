@@ -44,6 +44,7 @@ import {
 import { openJournalDatabase } from '../daemon/journal/sqlite-support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startRealCloud, type RealCloudHandle } from './fixtures/real-cloud';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
 const IDENTITY: JournalIdentity = { tenantId: 'tenant-a', productId: 'test-product', deviceId: 'dev_1' };
 
@@ -291,6 +292,7 @@ describe('S3.4 crash matrix, points 1-6', () => {
           serverUrl: cloud.url,
           workspaceRoot,
           agentHome: testAgentHomeConfig(),
+          agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
           storeDir,
         },
         [adapter],
@@ -304,7 +306,7 @@ describe('S3.4 crash matrix, points 1-6', () => {
       const record = await daemon.pair(pairing.code);
       await daemon.start();
 
-      const offer = await cloud.enqueueOffer(record.deviceId, 'do it, then crash around it');
+      const offer = await cloud.submitFreshAgent(record.deviceId, { instruction: 'do it, then crash around it' });
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 10_000 });
       adapter.sessions[0]?.emit({ type: 'progress', text: 'working' });
       adapter.sessions[0]?.emit({ type: 'turn_end' });
