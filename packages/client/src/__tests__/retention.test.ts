@@ -14,7 +14,7 @@ import { defaultScratchRoot, ScratchRoot, ScratchRootPathError, validateScratchR
 import { createRetentionRegistry } from '../daemon/retention/producers';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { StoragePressure } from '../daemon/retention/pressure';
-import { resolveStorageConfig } from '../daemon/retention/config';
+import { resolveStorageConfig, type StorageBudgetInput } from '../daemon/retention/config';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, RetentionRegistry, type RetentionClassId, type ClassUsage, type ClassAuthority } from '../daemon/retention/registry';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { createSupportBundle } from '../diagnostics/support-bundle';
@@ -25,14 +25,23 @@ const cleanups: (()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const cleanup of cleanups.splice(0).reverse())await cleanup();vi.restoreAllMocks();});
 const DAY=86_400_000;
 const identity:JournalIdentity={productId:'retention',tenantId:'tenant',deviceId:'device'};
-async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:AgentHomeManager;store?:string}={}) {
+async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:AgentHomeManager;store?:string;budget?:StorageBudgetInput;freeBytes?:number;usageScanLimit?:number}={}) {
  const store=input.store??testScratchRoot();let time=Date.parse('2026-10-14T00:00:00.000Z');const clock=()=>new Date(time);
- const config=resolveStorageConfig(store,{scratchRoot:testScratchRoot(),retention:{maxDeletionsPerPass:input.max??256}});
+ const config=resolveStorageConfig(store,{scratchRoot:testScratchRoot(),retention:{maxDeletionsPerPass:input.max??256},...(input.budget?{budget:input.budget}:{})});
  const scratch=new ScratchRoot(config.scratchRoot,clock);await scratch.open(store);
  const registry=createRetentionRegistry({storeDir:store,scratch,config,clock,journal:()=>input.journal,identity:()=>identity,preparation:()=>undefined,
-  ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{})});
- const sweeper=new RetentionSweeper({registry,config,clock,pressure:new StoragePressure(),freeBytes:async()=>1_000_000_000,jitter:(_s,ms)=>ms});
- cleanups.push(()=>sweeper.stop());return {store,scratch,sweeper,advance:(ms:number)=>{time+=ms;}};
+  ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit})});
+ const pressure=new StoragePressure(config.budget),failures:string[]=[];
+ const sweeper=new RetentionSweeper({registry,config,clock,pressure,freeBytes:async()=>input.freeBytes??1_000_000_000,jitter:(_s,ms)=>ms,onFailure:(_t,id,code)=>{failures.push(`${id}:${code}`);}});
+ cleanups.push(()=>sweeper.stop());return {store,scratch,sweeper,registry,pressure,failures,advance:(ms:number)=>{time+=ms;}};
+}
+const usage=(f:{sweeper:RetentionSweeper},id:RetentionClassId)=>f.sweeper.snapshot().classes.find(entry=>entry.classId===id)!;
+const resultName=(n:number)=>`result-${n.toString(16).padStart(64,'0')}.json`;
+async function stamp(file:string,iso:string){const when=new Date(iso);await fs.utimes(file,when,when);}
+async function idleHome(files=0){
+ const home=new AgentHomeManager({hostStorageRoot:testScratchRoot()}),binding=await home.prepare({agentId:'agent',profileRevision:'1'}),directory=binding.resolution.canonicalHome;
+ for(let index=0;index<files;index++)await fs.writeFile(path.join(directory,`file-${index}`),'x');
+ return {home,binding,directory,results:path.join(directory,'.byok','results')};
 }
 const exists=(file:string)=>fs.lstat(file).then(()=>true,(error:NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return false;throw error;});
 async function old(file:string){const when=new Date('2026-10-01T00:00:00Z');await fs.utimes(file,when,when);}
@@ -122,17 +131,92 @@ it('home maintenance shares the Attempt base lease, preserves tombstones and rel
  await fs.writeFile(temp,'pending');await old(temp);const marker=path.join(directory,'.byok','agent-home.lease');await fs.writeFile(marker,'invalid');
  expect((await f.sweeper.runPass('periodic')).failures).toBeGreaterThan(0);expect(await exists(temp)).toBe(true);await fs.rm(marker);expect(await home.withIdleHomeLease('agent',async()=>{})).toBe(true);await f.sweeper.runPass('periodic');await f.sweeper.runPass('periodic');expect(await exists(temp)).toBe(false);
 });
+it('idle homes lose result records past the TTL or the 256-record bound; a leased home and other names keep theirs',async()=>{
+ const {home,binding,results}=await idleHome();await fs.mkdir(results,{recursive:true});
+ const expired=path.join(results,resultName(0)),expiredTemp=path.join(results,`${resultName(1)}.123-4.tmp`),freshTemp=path.join(results,`${resultName(2)}.123-5.tmp`);
+ const other=path.join(results,'notes.json'),nested=path.join(results,resultName(3)),link=path.join(results,resultName(4)),outside=path.join(testScratchRoot(),'outside.json');
+ await fs.writeFile(expired,'{malformed');await fs.writeFile(expiredTemp,'partial');await fs.writeFile(freshTemp,'partial');await fs.writeFile(other,'{}');
+ await fs.mkdir(nested);await fs.writeFile(path.join(nested,'inner'),'x');await fs.writeFile(outside,'{}');await fs.symlink(outside,link);
+ for(const file of [expired,expiredTemp,other,nested,outside])await old(file);
+ const fresh=Array.from({length:258},(_,index)=>path.join(results,resultName(16+index)));
+ for(const [index,file] of fresh.entries()){await fs.writeFile(file,'{}');await stamp(file,new Date(Date.parse('2026-10-13T00:00:00Z')+index*1000).toISOString());}
+ await stamp(freshTemp,'2026-10-13T00:00:00Z');
+ const f=await fixture({home});
+ expect(f.registry.classes.find(entry=>entry.id==='agent-result')!.authority).toMatchObject({owner:'sdk',scope:'agent-home',ttlMs:7*DAY,maxEntries:256});
+ await f.sweeper.runPass('periodic');expect(usage(f,'agent-result')).toMatchObject({measured:true,truncated:false,entries:261});
+ for(const file of [expired,expiredTemp,fresh[0]!])expect(await exists(file)).toBe(true);
+ await binding.lease.release();for(let pass=0;pass<3;pass++)await f.sweeper.runPass('periodic');
+ for(const file of [expired,expiredTemp,fresh[0]!,fresh[1]!])expect(await exists(file)).toBe(false);
+ for(const file of [freshTemp,other,nested,link,outside,...fresh.slice(2)])expect(await exists(file)).toBe(true);
+ expect(usage(f,'agent-result')).toMatchObject({entries:257});expect(f.failures).toEqual([]);
+});
+it('result retention keeps sweeping under pressure while old home temps wait',async()=>{
+ const {binding,directory,results,home}=await idleHome();await binding.lease.release();await fs.mkdir(results,{recursive:true});
+ const record=path.join(results,resultName(0)),temp=path.join(directory,'.byok-memory-12345678-1234-1234-1234-123456789012.tmp');
+ await fs.writeFile(record,'{}');await fs.writeFile(temp,'pending');await old(record);await old(temp);
+ const f=await fixture({home,budget:{maxStoreBytes:1_000_000_000,minFreeBytes:100_000,ackCriticalReserveBytes:10_000},freeBytes:150_000});
+ await f.sweeper.runPass('periodic');expect(f.pressure.state).toBe('pressure');expect(await exists(record)).toBe(false);expect(await exists(temp)).toBe(true);
+});
+it.skipIf(process.platform==='win32')('a result directory replaced by a symbolic link fails the sweep and removes nothing behind it',async()=>{
+ const {binding,results,home}=await idleHome();await binding.lease.release();
+ const target=testScratchRoot(),record=path.join(target,resultName(0));await fs.writeFile(record,'{}');await old(record);
+ await fs.rm(results,{recursive:true,force:true});await fs.symlink(target,results);
+ const f=await fixture({home});await f.sweeper.runPass('periodic');expect(f.failures).toContain('agent-result:sweep_failed');expect(await exists(record)).toBe(true);
+});
+it('a usage walk past its entry limit reports lower bounds per root without failing startup or latching emergency',async()=>{
+ const budget={maxStoreBytes:1_000_000,minFreeBytes:100_000,ackCriticalReserveBytes:10_000};
+ const store=testScratchRoot();await fs.writeFile(path.join(store,'daemon.db'),'x'.repeat(2000));
+ const {binding,home}=await idleHome(40);await binding.lease.release();
+ const f=await fixture({store,home,budget,usageScanLimit:20});
+ expect((await f.sweeper.runPass('startup')).failures).toBe(0);expect(f.failures).toEqual([]);expect(f.pressure.state).toBe('normal');
+ expect(usage(f,'journal')).toMatchObject({measured:true,truncated:false,bytes:2000});expect(usage(f,'exec-sdk')).toMatchObject({measured:true,truncated:false});
+ expect(usage(f,'agent-content')).toMatchObject({truncated:true});expect(usage(f,'agent-content').entries).toBeLessThan(20);
+ expect(usage(f,'agent-result')).toMatchObject({measured:true,truncated:true});
+ const early=testScratchRoot();await fs.writeFile(path.join(early,'daemon.db'),'x');
+ const other=await idleHome(1);await other.binding.lease.release();
+ const g=await fixture({store:early,home:other.home,budget,usageScanLimit:1});expect((await g.sweeper.runPass('startup')).failures).toBe(0);
+ expect(usage(g,'journal')).toMatchObject({measured:true,truncated:true,bytes:0});expect(usage(g,'store-authority')).toMatchObject({measured:true,truncated:true});
+ for(const id of ['exec-sdk','agent-result','agent-content','reader-run'] as const)expect(usage(g,id)).toMatchObject({measured:false,truncated:true});
+ expect(usage(g,'confirmed-journal')).toMatchObject({truncated:false});
+});
+it('a skill-pack listing past the entry limit leaves every walked class unreached while old revisions still expire',async()=>{
+ const f=await fixture({usageScanLimit:1}),root=path.join(f.store,'skill-packs','known'),current=path.join(root,'a'.repeat(64)),prior=path.join(root,'b'.repeat(64));
+ await fs.mkdir(current,{recursive:true});await fs.mkdir(prior);await fs.writeFile(path.join(current,'current'),'keep');await fs.writeFile(path.join(prior,'old'),'remove');await old(prior);
+ await fs.writeFile(path.join(root,'lock.json'),JSON.stringify({schema:'byok-skill-pack-lock-v1',name:'known',content_hash:'sha256:'+'a'.repeat(64),files:[]}));
+ await fs.mkdir(path.join(f.store,'skill-packs','unknown'));
+ expect((await f.sweeper.runPass('startup')).failures).toBe(0);expect(f.failures).toEqual([]);
+ for(const id of ['skill-pack-current','skill-pack-old','journal','exec-sdk'] as const)expect(usage(f,id)).toMatchObject({measured:false,truncated:true,bytes:0});
+ expect(await exists(prior)).toBe(false);expect(await exists(current)).toBe(true);
+});
+it('a truncated lower bound above the hard watermark still refuses admission',async()=>{
+ const store=testScratchRoot();await fs.writeFile(path.join(store,'big'),'x'.repeat(2000));
+ const {binding,home}=await idleHome(40);await binding.lease.release();
+ const f=await fixture({store,home,budget:{maxStoreBytes:1000,minFreeBytes:100_000,ackCriticalReserveBytes:10_000},usageScanLimit:20});
+ await f.sweeper.runPass('startup');expect(usage(f,'agent-content').truncated).toBe(true);expect(f.pressure.state).toBe('hard-pressure');expect(f.pressure.admissionGuard().admit).toBe(false);
+});
+it.skipIf(process.platform==='win32'||process.getuid?.()===0)('a real walk error still latches emergency and fails startup; a later truncated measurement clears the latch',async()=>{
+ const store=testScratchRoot(),locked=path.join(store,'locked');await fs.mkdir(locked);await fs.chmod(locked,0o000);cleanups.push(()=>fs.chmod(locked,0o700));
+ const {binding,home}=await idleHome(40);await binding.lease.release();
+ const f=await fixture({store,home,budget:{maxStoreBytes:1_000_000,minFreeBytes:100_000,ackCriticalReserveBytes:10_000},usageScanLimit:20});
+ await expect(f.sweeper.runPass('startup')).rejects.toMatchObject({code:'EACCES'});expect(f.pressure.state).toBe('emergency');expect(f.failures).toContain('store-authority:measurement_failed');
+ await fs.chmod(locked,0o700);await f.sweeper.runPass('periodic');expect(usage(f,'agent-content').truncated).toBe(true);expect(f.pressure.state).toBe('normal');
+});
+it('agent-result TTL defaults to seven days and accepts any non-negative integer',()=>{
+ const store=testScratchRoot();expect(resolveStorageConfig(store).ttlMs['agent-result']).toBe(7*DAY);
+ expect(resolveStorageConfig(store,{retention:{ttlMs:{'agent-result':0}}}).ttlMs['agent-result']).toBe(0);
+ for(const value of [-1,1.5])expect(()=>resolveStorageConfig(store,{retention:{ttlMs:{'agent-result':value}}})).toThrow('DaemonConfig.storage.retention.ttlMs.agent-result is invalid');
+});
 it('a daemon runs a jittered retention timer and reports path-free classes in status and support bundle',async()=>{
  const server=await TestServer.start();cleanups.push(()=>server.close());let handler:(()=>void)|undefined;const delays:number[]=[];
  const config={localAgentRelease:{version:'0.0.0-test'},productName:'Retention',productId:'retention',serverUrl:server.url,storeDir:testScratchRoot(),storage:{scratchRoot:testScratchRoot()}};
  const daemon=createDaemonWithAdapters(config,[new StubRuntimeAdapter()],{retention:{timers:{setTimeout:(h,ms)=>{handler=h;delays.push(ms);return 'timer';},clearTimeout:()=>{}}}});
  cleanups.push(()=>daemon.stop());await daemon.pair('pairing-code');await daemon.start();expect(delays[0]).toBeGreaterThanOrEqual(675_000);expect(delays[0]).toBeLessThanOrEqual(1_125_000);
- expect(daemon.status().storage.classes).toHaveLength(22);handler!();await vi.waitFor(()=>expect(daemon.status().storage.lastSweep?.trigger).toBe('periodic'));
- const bundle=await createSupportBundle(config,config.storeDir);expect(bundle.storage.classes).toHaveLength(22);expect(bundle.storage.lastSweep?.trigger).toBe('periodic');
+ expect(daemon.status().storage.classes).toHaveLength(23);handler!();await vi.waitFor(()=>expect(daemon.status().storage.lastSweep?.trigger).toBe('periodic'));
+ const bundle=await createSupportBundle(config,config.storeDir);expect(bundle.storage.classes).toHaveLength(23);expect(bundle.storage.lastSweep?.trigger).toBe('periodic');
  expect(JSON.stringify(bundle.storage)).not.toContain(config.storeDir);expect(JSON.stringify(bundle.storage)).not.toContain(config.storage.scratchRoot);
 });
 it('uses newly measured pressure for maintenance even when the timer fired as periodic',async()=>{
- const prepare=vi.fn(async()=>{}),measure=async(id:RetentionClassId):Promise<ClassUsage>=>({classId:id,protected:PROTECTED_CLASS_IDS.includes(id as never),measured:true,bytes:0,entries:0,oldestAgeMs:null});
+ const prepare=vi.fn(async()=>{}),measure=async(id:RetentionClassId):Promise<ClassUsage>=>({classId:id,protected:PROTECTED_CLASS_IDS.includes(id as never),measured:true,truncated:false,bytes:0,entries:0,oldestAgeMs:null});
  const authority:ClassAuthority={roots:[],owner:'sdk',scope:'store'};
  const registry=new RetentionRegistry([...EXPIRING_CLASS_IDS.map(id=>({id,authority,measure:()=>measure(id),sweep:async()=>{}})),...PROTECTED_CLASS_IDS.map(id=>({id,authority,measure:()=>measure(id)}))],async()=>{},()=>{},prepare);
  const config=resolveStorageConfig(testScratchRoot(),{budget:{maxStoreBytes:1_000_000,minFreeBytes:100_000,ackCriticalReserveBytes:10_000}});
@@ -141,7 +225,7 @@ it('uses newly measured pressure for maintenance even when the timer fired as pe
 });
 it('passes serialize and stop waits for an in-flight pass before releasing maintenance resources',async()=>{
  let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});const order:string[]=[];
- const measure=async(id:RetentionClassId):Promise<ClassUsage>=>{await gate;return {classId:id,protected:PROTECTED_CLASS_IDS.includes(id as never),measured:true,bytes:0,entries:0,oldestAgeMs:null};};
+ const measure=async(id:RetentionClassId):Promise<ClassUsage>=>{await gate;return {classId:id,protected:PROTECTED_CLASS_IDS.includes(id as never),measured:true,truncated:false,bytes:0,entries:0,oldestAgeMs:null};};
  const authority: ClassAuthority={roots:[],owner:'sdk',scope:'store'};
  const registry=new RetentionRegistry([...EXPIRING_CLASS_IDS.map(id=>({id,authority,measure:()=>measure(id),sweep:async()=>{}})),...PROTECTED_CLASS_IDS.map(id=>({id,authority,measure:()=>measure(id)}))],async()=>{order.push('closed');});
  const sweeper=new RetentionSweeper({registry,config:resolveStorageConfig(testScratchRoot()),pressure:new StoragePressure(),freeBytes:async()=>1_000_000,jitter:(_s,ms)=>ms});
