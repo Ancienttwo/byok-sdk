@@ -95,7 +95,8 @@ export interface WireV3LegacyTask {
   readonly tenantId: string;
   readonly taskId: string;
   readonly deviceId: string;
-  readonly type: string;
+  /** The removed offer type, or `null` when the offer receipt was never recorded. */
+  readonly type: string | null;
 }
 
 /** A stored row the migration cannot carry into v4. Any one fails the run. */
