@@ -637,7 +637,9 @@ async function applyInboundGate(
     if (await stores.receipts.get(terminalReceiptKey(envelope.task_id)) !== undefined
       || await stores.tasks.readTaskAgentMessage({ taskId: envelope.task_id, deviceId }) !== undefined) {
       await stores.agentMessageDraft.delete(envelope.task_id);
-    } else if (applied === 'applied' && parsed.data.text.length > 0) {
+    } else if (applied === 'applied' && parsed.data.text.length > 0 && binding.attempt.ownerDeviceId !== undefined) {
+      // Ownership read before the apply: a claim that commits after this draft
+      // landed must not make the draft count as post-claim output.
       await stores.tasks.recordFirstOutput({ taskId: envelope.task_id, deviceId });
     }
     return completeInboundEnvelope(stores, deviceId, envelope.id, parsed.data.agentRef);
