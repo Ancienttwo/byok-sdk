@@ -9,6 +9,7 @@ import { cardCallDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, refuseRetired, r
 import type { CommandRecord, CommitRequest, CommitResult } from './rules/commit';
 import { botDeviceRefusal } from './topology';
 import { retainRoots, type RetentionInput, type RetentionLimits, type RetentionResult } from './retention';
+import { refuseExported } from './switch';
 
 // The L store of the commit contract (#739 D1): one K4 ledger transaction holds the state change,
 // the command record and the outbox rows. K4 deduplicates terminals and messages, so L records no callback.
@@ -18,11 +19,22 @@ export { CommitConflict, revisionOf, type CommitRequest, type CommitResult, type
 export type { Command, CommandPorts } from './rules/commands';
 
 /**
+ * One K8 write to an L ledger in one ledger transaction. It refuses while the domain is exported for a switch (#975), after
+ * the work's own refusals, so a command on a frozen or H-owned device still gets its device refusal.
+ */
+export function writeLedger<T>(ledger: Pick<HostLedger, 'transaction'>, apply: (state: LedgerState, rows: ApplicationRows) => T): T {
+  return ledger.transaction((s, rows) => {
+    const result = apply(s, rows);
+    refuseExported(stateOf(s.application));
+    return result;
+  });
+}
+/**
  * The scope of an L ledger is its tenant. `ports` gets the transaction state, so outbox writes join the commit.
  * Moved command records and tombstones come from K4 application rows of the same transaction (#798).
  */
 export function commitInLedger(ledger: HostLedger, request: CommitRequest<Command>, ports: (s: LedgerState) => CommandPorts): CommitResult {
-  return ledger.transaction((s, rows) => {
+  return writeLedger(ledger, (s, rows) => {
     let admitted: AdmittedIds | undefined;
     const result = commitCommand(stateOf(s.application), request, { scope: ledger.tenant, recordCallbacks: false,
       archived: id => rows.get('commands', id) as CommandRecord | undefined, admitted: ids => { admitted = ids; } }, ports(s));
@@ -32,9 +44,9 @@ export function commitInLedger(ledger: HostLedger, request: CommitRequest<Comman
 }
 /** One retention call in one ledger transaction. K4 facts come from the same state. */
 export function retainInLedger(ledger: HostLedger, input: RetentionInput, limits: RetentionLimits): RetentionResult {
-  return ledger.transaction((s, rows) => retainRoots(stateOf(s.application), input, limits, {
+  return writeLedger(ledger, (s, rows) => retainRoots(stateOf(s.application), input, limits, {
     hasIntent: turnId => !!s.intents[hash(turnId)],
-    occurrenceOpen: turnId => { const occurrence = s.occurrences[turnId.slice('occurrence:'.length)]; return !!occurrence && !occurrence.conclusion; },
+    occurrenceOpen: turnId => { const occurrence = s.occurrences[routineOccurrence({ id: turnId })]; return !!occurrence && !occurrence.conclusion; },
   }, rows));
 }
 /**
@@ -51,13 +63,19 @@ export function syncTurnInLedger(ledger: HostLedger, s: LedgerState, rows: Appli
     deviceRefusal: botId => botDeviceRefusal(stateOf(s.application), botId),
   };
   const step = syncTurn(stateOf(s.application), turn, facts, options, (key, value) => project(s, key, value));
-  switch (step?.kind) {
-    case 'freeze': enqueue(s, ledger.tenant, step.input); return true;
-    case 'routine': promoteOccurrence(s, ledger.tenant, routineOccurrence(turn), step.execution); return true;
-    case 'cancel': s.intents[hash(turn.id)]!.cancelReason = 'cancelled'; return false;
-    // A concluded occurrence can make a staged version due, so the next pass drains K4 again.
-    case 'ended': return turn.source === 'routine' && concludeRoutineTurn(s, turn);
-    default: return false;
+  const more = applyStep();
+  // The caller's transaction rolls the step back on an exported domain (#975).
+  refuseExported(stateOf(s.application));
+  return more;
+  function applyStep(): boolean {
+    switch (step?.kind) {
+      case 'freeze': enqueue(s, ledger.tenant, step.input); return true;
+      case 'routine': promoteOccurrence(s, ledger.tenant, routineOccurrence(turn), step.execution); return true;
+      case 'cancel': s.intents[hash(turn.id)]!.cancelReason = 'cancelled'; return false;
+      // A concluded occurrence can make a staged version due, so the next pass drains K4 again.
+      case 'ended': return turn.source === 'routine' && concludeRoutineTurn(s, turn);
+      default: return false;
+    }
   }
 }
 /**
@@ -68,7 +86,7 @@ export function syncTurnInLedger(ledger: HostLedger, s: LedgerState, rows: Appli
 export async function callCardsInLedger(ledger: HostLedger, call: (card: Card) => Promise<unknown>): Promise<void> {
   for (const old of Object.values(stateOf(ledger.snapshot().application).cards)) {
     if (!cardCallDue(old)) continue;
-    const claimed = ledger.transaction(s => {
+    const claimed = writeLedger(ledger, s => {
       const state = stateOf(s.application), card = state.cards[old.id];
       if (!card || !cardCallDue(card)) return false;
       const calls = state.cardCalls ??= {};
@@ -80,7 +98,7 @@ export async function callCardsInLedger(ledger: HostLedger, call: (card: Card) =
     if (!claimed) continue;
     let outcome: Parameters<typeof settleCardCall>[1];
     try { outcome = { result: await call(old) }; } catch (error) { outcome = { error }; }
-    ledger.transaction(s => {
+    writeLedger(ledger, s => {
       const state = stateOf(s.application);
       delete state.cardCalls![old.id];
       settleCardCall(state.cards[old.id]!, outcome);

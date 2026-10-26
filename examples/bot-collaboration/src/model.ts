@@ -7,6 +7,7 @@ import { json, type Budget, type Card, type Question, type Rejection, type Turn 
 import type { AcceptedReply, Batch, Delegation, Unit } from './rules/delegation';
 import type { CommandRecord } from './rules/commit';
 import type { DeviceTopology } from './topology';
+import type { SwitchExportMark, SwitchImport } from './switch';
 
 export type { Authority, InputBatch, SealReason, UserInput } from './rules/coalesce';
 export { addBatchTurns, addTurn, json } from './rules/turn';
@@ -47,6 +48,12 @@ export interface CollaborationState {
    * ledger reads every device as L at revision 0. Never in ContextPack or projections.
    */
   topology?: Record<string, DeviceTopology>;
+  /**
+   * L switch records (#975), from `switch.ts`. `switchExport` appears at the export of an old owner and stays; while it is
+   * here the Host writes nothing. `switchImport` is here from the load of a new owner until its commit toward L. Neither
+   * moves in an export, and neither is in ContextPack or projections.
+   */
+  switchExport?: SwitchExportMark; switchImport?: SwitchImport;
 }
 export function stateOf(application: Record<string, Json>): CollaborationState {
   if (application.collaboration === undefined) application.collaboration = json({

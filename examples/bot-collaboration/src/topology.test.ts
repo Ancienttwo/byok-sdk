@@ -60,6 +60,24 @@ async function finish(id: string, document: unknown = {}) {
   await vi.waitFor(async () => { await bot!.drain(); expect(bot!.snapshot().turns[id]?.status).toBe('succeeded'); }, { timeout: 5000 });
 }
 const empty = { intents: [], turns: [], batches: [], homeOperations: [] };
+/** A commit that the device checks refuse first, so it names no export (#975). */
+const NO_EXPORT = 'no-export';
+/**
+ * #975: the commit away needs the receipt of an export of the whole domain, so the other Bot's device is frozen and drained
+ * too. Returns the export's digest, which the new owner's receipt carries.
+ */
+async function exportDomain(): Promise<string> {
+  if (!bot!.topology(OTHER).switching) await bot!.freezeForSwitch(OTHER, 0);
+  await vi.waitFor(async () => {
+    await bot!.drainForSwitch(OTHER, { cancel: true });
+    expect(await bot!.drainForSwitch(OTHER)).toEqual(empty);
+  }, { timeout: 5000 });
+  await bot!.drain();
+  // The format moves no projection, so the old owner uploads them first.
+  await bot!.core.flushProjections(async () => {});
+  const document = await bot!.exportForSwitch([{ deviceId: device(), expectedRevision: 1 }, { deviceId: OTHER, expectedRevision: 1 }]);
+  return document.manifest.digest;
+}
 
 it('freezes one device on the expected revision, reads the record back, and refuses a stale or second freeze', async () => {
   await setup();
@@ -162,7 +180,7 @@ it('counts a home write whose send failed as sent, so the switch waits for its r
   const [op] = bot!.snapshot().team.homeOperations.filter(row => row.status === 'pending');
   await bot!.freezeForSwitch(device(), 0);
   expect((await bot!.drainForSwitch(device(), { cancel: true })).homeOperations).toEqual([op!.sequence]);
-  await expect(bot!.commitSwitch(device(), 1)).rejects.toThrow('still has open work');
+  await expect(bot!.commitSwitch(device(), 1, NO_EXPORT)).rejects.toThrow('still has open work');
   expect(enqueue).toHaveBeenCalledTimes(1);
 });
 
@@ -176,24 +194,24 @@ it('drains the device: lists and cancels its open work, keeps a tried intent unt
   await expect(bot!.drainForSwitch(OTHER)).rejects.toThrow('not switching');
   // The other device's work is not listed.
   expect(await bot!.drainForSwitch(device())).toEqual({ intents: [live], turns: ['queued'], batches: [], homeOperations: [] });
-  await expect(bot!.commitSwitch(device(), 1)).rejects.toThrow('still has open work');
+  await expect(bot!.commitSwitch(device(), 1, NO_EXPORT)).rejects.toThrow('still has open work');
   // The tried intent stays open after the cancel: only its terminal concludes it.
   expect(await bot!.drainForSwitch(device(), { cancel: true })).toEqual({ intents: [live], turns: [], batches: [], homeOperations: [] });
   expect(bot!.snapshot().turns.queued).toMatchObject({ status: 'failed', conclusion: 'cancelled' });
-  await expect(bot!.commitSwitch(device(), 1)).rejects.toThrow('still has open work');
+  await expect(bot!.commitSwitch(device(), 1, NO_EXPORT)).rejects.toThrow('still has open work');
   session.finish({});
   await vi.waitFor(async () => {
     await bot!.drain();
     expect(await bot!.drainForSwitch(device())).toEqual({ intents: [], turns: [], batches: [], homeOperations: [] });
   }, { timeout: 5000 });
-  await expect(bot!.commitSwitch(device(), 0)).rejects.toMatchObject({ code: 'stale_revision' });
-  expect(await bot!.commitSwitch(device(), 1)).toEqual({ mode: 'H', revision: 2 });
+  await expect(bot!.commitSwitch(device(), 0, NO_EXPORT)).rejects.toMatchObject({ code: 'stale_revision' });
+  expect(await bot!.commitSwitch(device(), 1, await exportDomain())).toEqual({ mode: 'H', revision: 2 });
 });
 
 it('refuses the device for good after the commit, also in a new Host over the same ledger', async () => {
   await setup();
   await bot!.freezeForSwitch(device(), 0);
-  await bot!.commitSwitch(device(), 1);
+  await bot!.commitSwitch(device(), 1, await exportDomain());
   const owned = { code: 'device_not_bound', reason: 'mode', deviceId: device(), revision: 2 };
   await expect(bot!.input('k1', 'hello')).rejects.toMatchObject(owned);
   await expect(bot!.input('k1', 'hello')).rejects.toBeInstanceOf(DeviceModeError);
@@ -204,8 +222,10 @@ it('refuses the device for good after the commit, also in a new Host over the sa
   expect(bot.topology(device())).toEqual({ mode: 'H', revision: 2 });
   await expect(bot.input('k1', 'hello')).rejects.toMatchObject(owned);
   seedTurn('t1');
+  // #975: the domain was exported, so the old owner runs no pass over it at all; it neither holds nor runs the Turn.
+  const before = stored();
   await bot.drain();
-  expect(bot.snapshot().turns.t1).toMatchObject({ held: 'device_not_bound' });
+  expect(stored()).toBe(before);
   expect(bot.core.intent('t1')).toBeUndefined();
 });
 
@@ -294,7 +314,7 @@ it('lists an open input batch so the commit waits, and holds its Turn when it se
   const batch = await bot!.input('k2', 'second');
   await bot!.freezeForSwitch(device(), 0);
   expect(await bot!.drainForSwitch(device())).toEqual({ ...empty, intents: [first], batches: [batch] });
-  await expect(bot!.commitSwitch(device(), 1)).rejects.toThrow('still has open work');
+  await expect(bot!.commitSwitch(device(), 1, NO_EXPORT)).rejects.toThrow('still has open work');
   offset += 11_000;
   await bot!.drain();
   expect(bot!.snapshot().turns[batch]).toMatchObject({ held: 'device_switching' });
@@ -305,7 +325,7 @@ it('lists an open input batch so the commit waits, and holds its Turn when it se
     expect(await bot!.drainForSwitch(device(), { cancel: true })).toEqual(empty);
   }, { timeout: 5000 });
   expect(bot!.snapshot().turns[batch]).toMatchObject({ conclusion: 'cancelled' });
-  expect(await bot!.commitSwitch(device(), 1)).toEqual({ mode: 'H', revision: 2 });
+  expect(await bot!.commitSwitch(device(), 1, await exportDomain())).toEqual({ mode: 'H', revision: 2 });
 });
 
 it('cancels a running Host intent and a running routine intent of the device through the drain', async () => {

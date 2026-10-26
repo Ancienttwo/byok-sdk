@@ -1,5 +1,5 @@
 import { WAKE_MAX_FUTURE_MS, type DueWake, type WakeScheduleInput } from '@byok-sdk/server';
-import { canonical, hash, isSealed, time, validateInput, validateJson, validateRetry, type Conclusion, type HostOccurrenceRun, type IntentExecution,
+import { canonical, hash, isSealed, occurrenceIntentKey, time, validateInput, validateJson, validateRetry, type Conclusion, type HostOccurrenceRun, type IntentExecution,
   type IgnoredWakeAudit, type Intent, type LedgerState, type Occurrence, type Routine, type RoutineDefinition } from './model';
 import { admit, cancelWake, settle } from './transitions';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
@@ -15,6 +15,8 @@ export function auditIgnoredWake(state: LedgerState, wake: DueWake, now: number,
 }
 interface WakePlan { next: WakeScheduleInput | null; status: Routine['status']; completed: boolean }
 
+/** The SDK wake dedup key of a routine slot. `parseRoutineWakeKey` reads it back. */
+export function routineWakeKey(id: string, version: number, at: number): string { return `${id}:${version}:${at}`; }
 export function parseRoutineWakeKey(key: string): { id: string; version: number; at: number } | undefined {
   const last = key.lastIndexOf(':'), previous = key.lastIndexOf(':', last - 1);
   if (previous < 1 || [...key].length > 256) return undefined;
@@ -32,7 +34,7 @@ export function nextWake(definition: RoutineDefinition, after: number, nextTime:
   time(slot);
   if (slot <= after) throw new Error('Calendar must advance beyond its input time');
   if (definition.endAt !== undefined && slot > definition.endAt) return { next: null, status: 'ok', completed: true };
-  const dedupKey = `${definition.id}:${definition.version}:${slot}`;
+  const dedupKey = routineWakeKey(definition.id, definition.version, slot);
   if (!parseRoutineWakeKey(dedupKey)) throw new Error('Invalid routine wake key');
   return { next: { dedupKey, availableAt: slot }, status: slot - now > WAKE_HORIZON_MS ? 'schedule_retrying' : 'ok', completed: false };
 }
@@ -237,7 +239,7 @@ export function recordOccurrence(state: LedgerState, tenant: string, wake: DueWa
   } else if (definition.hostOccurrence) {
     occurrence.hook = {}; // The core runs the hook in this transaction.
   } else {
-    const intent = admit(state, tenant, { key: `occurrence:${key}`, source: 'routine', execution: definition.execution,
+    const intent = admit(state, tenant, { key: occurrenceIntentKey(key), source: 'routine', execution: definition.execution,
       waitUntil: time(now + definition.waitMs), retry: definition.retry });
     intent.occurrence = key;
     if (next) intent.retryUntil = next.availableAt;
@@ -260,7 +262,7 @@ function routineRefOf(execution: IntentExecution, routineId: string, definitionV
 export function promote(state: LedgerState, tenant: string, occurrence: Occurrence, execution: IntentExecution): Intent {
   routineRefOf(execution, occurrence.routineId, occurrence.definitionVersion);
   const routine = state.routines[hash(occurrence.routineId)]!;
-  const intent = admit(state, tenant, { key: `occurrence:${occurrence.key}`, source: 'routine', execution,
+  const intent = admit(state, tenant, { key: occurrenceIntentKey(occurrence.key), source: 'routine', execution,
     waitUntil: time(occurrence.recordedAt + routine.definition.waitMs), retry: routine.definition.retry });
   intent.occurrence = occurrence.key;
   occurrence.intentId = intent.id;
