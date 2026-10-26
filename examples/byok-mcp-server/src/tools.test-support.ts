@@ -47,8 +47,9 @@ export class FakeSession implements Session {
   async resolveApproval(): Promise<void> { /* no approval */ }
 }
 export class FakeRuntime implements RuntimeAdapter {
+  // Pi projects MCP toolsets. An Agent offer carries the Agent memory MCP whenever the daemon admits it.
   readonly descriptor = freezeRuntimeAdapterDescriptor({ id: 'pi', supportsDispatchSelection: true,
-    capabilities: { steer: false, resume: false, mcpToolsets: false, approvalInteractive: false } });
+    capabilities: { steer: false, resume: false, mcpToolsets: true, approvalInteractive: false } });
   readonly sessions = new Map<string, FakeSession>();
   readonly offers: RuntimeAdapterPrepareInput['offer'][] = [];
   /** What the daemon reported, quoted when a session does not start. */
