@@ -428,6 +428,7 @@ export {
   WireV4LegacyTaskListMismatchError,
   assertWireV4MigrationConfirmed,
   hasUnnamedApproval,
+  isWireV4MailboxBody,
   migrateWireV3Receipt,
   wireV3LegacyOfferReceiptKeys,
   wireV3LegacyOfferType,

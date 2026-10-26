@@ -6,12 +6,14 @@
  * confirmed legacy task list back and changes the file in one transaction, or
  * not at all. Both take the file's exclusive ownership, so they fail while a
  * server owns it. The approval timeline is in memory on SQLite, so no
- * approval row is stored. It ships in 0.31.x only; 0.32.0 removes it (#1017).
+ * approval row is stored, and no SQLite operation replays an expired mailbox
+ * row, so only pending rows can still reach a device. It ships in 0.31.x only; 0.32.0 removes it (#1017).
  */
 import { existsSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import {
   assertWireV4MigrationConfirmed,
+  isWireV4MailboxBody,
   migrateWireV3Receipt,
   wireV3LegacyOfferReceiptKeys,
   wireV3LegacyOfferType,
@@ -119,6 +121,7 @@ function publicPreflight(found: Scan): WireV4MigrationPreflight {
 async function scan(db: DatabaseSync): Promise<Scan> {
   const legacyTasks = await findLegacyTasks(db);
   const legacyKeys = new Set(legacyTasks.flatMap((task) => task.receiptKeys.map((key) => `${task.tenantId}\u0000${key}`)));
+  const legacyTaskIds = new Set(legacyTasks.map((task) => `${task.tenantId}\u0000${task.taskId}`));
   const unmappable: WireV4UnmappableRow[] = [];
   eachReceipt(db, (row) => {
     const kind = wireV4ReceiptKind(row.key);
@@ -134,7 +137,42 @@ async function scan(db: DatabaseSync): Promise<Scan> {
       ...(result.type === undefined ? {} : { type: result.type }),
     });
   });
+  eachPendingV3Row(db, (row) => {
+    if (legacyTaskIds.has(`${row.tenant_id}\u0000${String(envelopeTaskId(row.body))}`)) return;
+    unmappable.push({
+      kind: 'mailbox',
+      tenantId: row.tenant_id,
+      deviceId: row.device_id,
+      seq: row.seq,
+      state: 'pending',
+      refusal: 'wire_version_unsupported',
+    });
+  });
   return { legacyTasks, unmappable };
+}
+
+interface MailboxRow {
+  readonly tenant_id: string;
+  readonly device_id: string;
+  readonly seq: number;
+  readonly body: string;
+}
+
+/** Pending rows a device has yet to receive whose bytes are not wire v4. */
+function eachPendingV3Row(db: DatabaseSync, visit: (row: MailboxRow) => void): void {
+  const page = db.prepare(
+    `SELECT tenant_id, device_id, seq, body FROM mailbox_message
+      WHERE state = 'pending' AND (tenant_id, device_id, seq) > (?, ?, ?)
+      ORDER BY tenant_id, device_id, seq LIMIT ?`,
+  );
+  let after = { tenantId: '', deviceId: '', seq: 0 };
+  for (;;) {
+    const rows = page.all(after.tenantId, after.deviceId, after.seq, PAGE_SIZE) as unknown as MailboxRow[];
+    for (const row of rows) if (!isWireV4MailboxBody(row.body)) visit(row);
+    const last = rows.at(-1);
+    if (rows.length < PAGE_SIZE || last === undefined) return;
+    after = { tenantId: last.tenant_id, deviceId: last.device_id, seq: last.seq };
+  }
 }
 
 /**

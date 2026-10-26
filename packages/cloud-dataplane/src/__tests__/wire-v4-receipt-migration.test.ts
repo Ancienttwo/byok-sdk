@@ -45,12 +45,12 @@ async function task(pool: Pool, tenant: string, taskId: string, agent?: typeof A
   );
 }
 
-async function outbox(pool: Pool, tenant: string, seq: number, taskId: string): Promise<void> {
-  const body = JSON.stringify({ v: 3, id: `m-${taskId}-${seq}`, ts: AT, type: 'task.cancel', task_id: taskId, seq, payload: {} });
+async function outbox(pool: Pool, tenant: string, seq: number, taskId: string, state = 'acked', v = 3): Promise<void> {
+  const body = JSON.stringify({ v, id: `m-${taskId}-${seq}`, ts: AT, type: 'task.cancel', task_id: taskId, seq, payload: {} });
   await pool.query(
     `INSERT INTO outbox (tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at)
-     VALUES ($1, 'device-1', $2, $3, $4, $5, $6, 'acked', $7)`,
-    [tenant, seq, `m-${taskId}-${seq}`, body, `sha256:${'0'.repeat(64)}`, body.length, AT],
+     VALUES ($1, 'device-1', $2, $3, $4, $5, $6, $7, $8)`,
+    [tenant, seq, `m-${taskId}-${seq}`, body, `sha256:${'0'.repeat(64)}`, body.length, state, AT],
   );
 }
 
@@ -152,7 +152,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres wire v3 -> v4 migration (#925)', () =>
     });
   });
 
-  it('changes nothing and lists every unmappable row, including an approval without an id', async () => {
+  it('changes nothing and lists every unmappable row: receipts, approvals without an id, undelivered v3 mailbox rows', async () => {
     await withStore(async (pool) => {
       await seedLegacyTask(pool);
       await task(pool, 'tenant-a', 'agent-1', AGENT);
@@ -162,12 +162,21 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres wire v3 -> v4 migration (#925)', () =>
          VALUES ('tenant-a', 'agent-1', $1, 2, 0, 50, '2999-01-01T00:00:00.000Z')`,
         [JSON.stringify([{ taskId: 'agent-1', sourceEnvelopeId: 'e1', revision: 1, receivedAt: AT, event: { type: 'approval_requested', summary: 's' } }])],
       );
+      await outbox(pool, 'tenant-a', 2, 'agent-1');
+      await outbox(pool, 'tenant-a', 3, 'agent-1', 'pending');
+      // A legacy task's pending row is deleted with the task, not refused.
+      await outbox(pool, 'tenant-a', 4, LEGACY.taskId, 'pending');
+      // replayDeadLetter can still send an expired row.
+      await outbox(pool, 'tenant-a', 5, 'agent-1', 'expired');
+      await outbox(pool, 'tenant-a', 6, 'agent-1', 'pending', 4);
       const before = await snapshot(pool);
 
       const preflight = await preflightPostgresWireV4Migration(pool);
       const unmappable = [
         { kind: 'receipt', tenantId: 'tenant-a', key: 'task-offer:bad', receiptKind: 'offer', refusal: 'invalid_under_v4', type: 'task.offer_for_agent' },
         { kind: 'approval', tenantId: 'tenant-a', taskId: 'agent-1', refusal: 'approval_id_missing' },
+        { kind: 'mailbox', tenantId: 'tenant-a', deviceId: 'device-1', seq: 3, state: 'pending', refusal: 'wire_version_unsupported' },
+        { kind: 'mailbox', tenantId: 'tenant-a', deviceId: 'device-1', seq: 5, state: 'expired', refusal: 'wire_version_unsupported' },
       ];
       expect(preflight).toEqual({ legacyTasks: [LEGACY], unmappable });
       const failure = await migratePostgresToWireV4(pool, preflight.legacyTasks).catch((error: unknown) => error);

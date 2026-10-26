@@ -8,6 +8,7 @@
  */
 import {
   MESSAGE_PAYLOAD_SCHEMAS,
+  PROTOCOL_VERSION,
   WIRE_V3_TO_V4_TYPES,
   decodeEnvelope,
   migrateWireV3Envelope,
@@ -110,7 +111,19 @@ export type WireV4UnmappableRow =
       readonly type?: string;
     }
   /** An approval request or resolution recorded without the approvalId v4 requires. */
-  | { readonly kind: 'approval'; readonly tenantId: string; readonly taskId: string; readonly refusal: 'approval_id_missing' };
+  | { readonly kind: 'approval'; readonly tenantId: string; readonly taskId: string; readonly refusal: 'approval_id_missing' }
+  /**
+   * A mailbox row of a non-legacy task that a v4 device would still receive
+   * as older wire bytes: pending, or an expired dead letter a store can replay.
+   */
+  | {
+      readonly kind: 'mailbox';
+      readonly tenantId: string;
+      readonly deviceId: string;
+      readonly seq: number;
+      readonly state: 'pending' | 'expired';
+      readonly refusal: 'wire_version_unsupported';
+    };
 
 /** The read-only result an operator reviews before the migration changes anything. */
 export interface WireV4MigrationPreflight {
@@ -152,6 +165,16 @@ export async function wireV3LegacyOfferReceiptKeys(
   return { offer: `task-offer:${messageId}`, delivered: `task-offer-delivered:${messageId}` };
 }
 
+/** True when a stored mailbox envelope is wire v4 bytes. */
+export function isWireV4MailboxBody(body: string): boolean {
+  try {
+    const value = JSON.parse(body) as unknown;
+    return value !== null && typeof value === 'object' && (value as { readonly v?: unknown }).v === PROTOCOL_VERSION;
+  } catch {
+    return false;
+  }
+}
+
 /** True when a stored approval timeline entry list names an approval without an id. */
 export function hasUnnamedApproval(entries: unknown): boolean {
   return parseApprovalObservations(entries).some((entry) => entry.event.approvalId === undefined);
@@ -171,9 +194,14 @@ export class ReceiptMigrationUnmappableError extends Error {
 }
 
 function describe(row: WireV4UnmappableRow): string {
-  return row.kind === 'receipt'
-    ? `${row.tenantId}/${row.key} (${row.type ?? 'unknown type'}: ${row.refusal})`
-    : `${row.tenantId}/approvals/${row.taskId} (${row.refusal})`;
+  switch (row.kind) {
+    case 'receipt':
+      return `${row.tenantId}/${row.key} (${row.type ?? 'unknown type'}: ${row.refusal})`;
+    case 'approval':
+      return `${row.tenantId}/approvals/${row.taskId} (${row.refusal})`;
+    case 'mailbox':
+      return `${row.tenantId}/mailbox/${row.deviceId}/${row.seq} (${row.state}: ${row.refusal})`;
+  }
 }
 
 /** The confirmed legacy task list differs from the one this store holds; nothing was changed. */

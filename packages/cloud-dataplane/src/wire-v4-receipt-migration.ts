@@ -10,6 +10,7 @@
 import {
   assertWireV4MigrationConfirmed,
   hasUnnamedApproval,
+  isWireV4MailboxBody,
   migrateWireV3Receipt,
   wireV3LegacyOfferReceiptKeys,
   wireV3LegacyOfferType,
@@ -108,7 +109,47 @@ async function scan(client: PoolClient): Promise<Scan> {
     if (legacyTaskIds.has(`${row.tenant_id}\u0000${row.task_id}`) || !hasUnnamedApproval(row.entries)) continue;
     unmappable.push({ kind: 'approval', tenantId: row.tenant_id, taskId: row.task_id, refusal: 'approval_id_missing' });
   }
+  await eachUndeliveredV3Row(client, (row) => {
+    if (legacyTaskIds.has(`${row.tenant_id}\u0000${String(envelopeTaskId(row.body))}`)) return;
+    unmappable.push({
+      kind: 'mailbox',
+      tenantId: row.tenant_id,
+      deviceId: row.device_id,
+      seq: Number(row.seq),
+      state: row.state,
+      refusal: 'wire_version_unsupported',
+    });
+  });
   return { legacyTasks, unmappable };
+}
+
+interface OutboxRow {
+  readonly tenant_id: string;
+  readonly device_id: string;
+  readonly seq: string;
+  readonly state: 'pending' | 'expired';
+  readonly body: string;
+}
+
+/**
+ * Pending rows a device has yet to receive, and expired dead letters that
+ * `replayDeadLetter` can still send, whose bytes are not wire v4. Acked rows
+ * are never sent again.
+ */
+async function eachUndeliveredV3Row(client: PoolClient, visit: (row: OutboxRow) => void): Promise<void> {
+  let after = { tenantId: '', deviceId: '', seq: '0' };
+  for (;;) {
+    const page = await client.query<OutboxRow>(
+      `SELECT tenant_id, device_id, seq::text AS seq, state, body FROM outbox
+        WHERE state IN ('pending', 'expired') AND (tenant_id, device_id, seq) > ($1, $2, $3::bigint)
+        ORDER BY tenant_id, device_id, seq LIMIT $4`,
+      [after.tenantId, after.deviceId, after.seq, PAGE_SIZE],
+    );
+    for (const row of page.rows) if (!isWireV4MailboxBody(row.body)) visit(row);
+    const last = page.rows.at(-1);
+    if (page.rows.length < PAGE_SIZE || last === undefined) return;
+    after = { tenantId: last.tenant_id, deviceId: last.device_id, seq: last.seq };
+  }
 }
 
 /**

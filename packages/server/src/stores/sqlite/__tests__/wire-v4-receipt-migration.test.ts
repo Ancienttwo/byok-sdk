@@ -51,10 +51,10 @@ const receipt = (db: DatabaseSync, tenant: string, key: string, body: string) =>
 const attempt = (db: DatabaseSync, tenant: string, taskId: string, agent?: typeof AGENT) =>
   db.prepare("INSERT INTO task_attempt (tenant_id, task_id, device_id, agent_ref_json, status, updated_at) VALUES (?, ?, 'device-1', ?, 'complete', ?)")
     .run(tenant, taskId, agent === undefined ? null : JSON.stringify(agent), AT);
-const mailbox = (db: DatabaseSync, tenant: string, seq: number, taskId: string) => {
-  const body = JSON.stringify({ v: 3, id: `m-${taskId}-${seq}`, ts: AT, type: 'task.cancel', task_id: taskId, seq, payload: {} });
-  db.prepare("INSERT INTO mailbox_message VALUES (?, 'device-1', ?, ?, ?, ?, ?, 'acked', ?)")
-    .run(tenant, seq, `m-${taskId}-${seq}`, body, `sha256:${'0'.repeat(64)}`, String(body.length), AT);
+const mailbox = (db: DatabaseSync, tenant: string, seq: number, taskId: string, state = 'acked', v = 3) => {
+  const body = JSON.stringify({ v, id: `m-${taskId}-${seq}`, ts: AT, type: 'task.cancel', task_id: taskId, seq, payload: {} });
+  db.prepare("INSERT INTO mailbox_message VALUES (?, 'device-1', ?, ?, ?, ?, ?, ?, ?)")
+    .run(tenant, seq, `m-${taskId}-${seq}`, body, `sha256:${'0'.repeat(64)}`, String(body.length), state, AT);
 };
 
 /** A legacy task with a row in every table a task can own on SQLite. */
@@ -116,13 +116,23 @@ describe.skipIf(!isSqliteAvailable())('SQLite wire v3 -> v4 migration (#925)', (
     expect(snapshot(path)).toEqual(before);
   });
 
-  it('changes nothing and lists every unmappable receipt', async () => {
+  it('changes nothing and lists every unmappable receipt and pending v3 mailbox row', async () => {
     const path = await emptyStore();
     await seedLegacyTask(path);
-    write(path, (db) => receipt(db, 'tenant-a', 'task-offer:bad', JSON.stringify({ deviceId: 'device-1', type: 'task.offer_for_agent', payload: { instruction: 'x' } })));
+    write(path, (db) => {
+      receipt(db, 'tenant-a', 'task-offer:bad', JSON.stringify({ deviceId: 'device-1', type: 'task.offer_for_agent', payload: { instruction: 'x' } }));
+      mailbox(db, 'tenant-a', 2, 'agent-1');
+      mailbox(db, 'tenant-a', 3, 'agent-1', 'pending');
+      // A legacy task's pending row is deleted with the task, not refused.
+      mailbox(db, 'tenant-a', 4, LEGACY.taskId, 'pending');
+      // SQLite never replays a dead letter.
+      mailbox(db, 'tenant-a', 5, 'agent-1', 'expired');
+      mailbox(db, 'tenant-a', 6, 'agent-1', 'pending', 4);
+    });
     const before = snapshot(path);
     const unmappable = [
       { kind: 'receipt', tenantId: 'tenant-a', key: 'task-offer:bad', receiptKind: 'offer', refusal: 'invalid_under_v4', type: 'task.offer_for_agent' },
+      { kind: 'mailbox', tenantId: 'tenant-a', deviceId: 'device-1', seq: 3, state: 'pending', refusal: 'wire_version_unsupported' },
     ];
 
     expect(await preflightSqliteWireV4Migration(path)).toEqual({ legacyTasks: [LEGACY], unmappable });
