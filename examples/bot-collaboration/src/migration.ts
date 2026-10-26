@@ -467,6 +467,7 @@ function checkCollaboration(content: SwitchContent): void {
   }
   for (const op of state.team.homeOperations) {
     // A write that may have reached a device is the old owner's to settle before the export (#957); only an unsent one moves.
+    // The `retryAt` branch reads a ledger written before the `sent` mark and goes with the one in `homeSent` (topology.ts).
     if (op.status === 'pending' && (op.sent || op.retryAt !== undefined)) {
       throw new SwitchExportError('home_sent', `Switch export has a pending Agent home write that may have been sent: ${op.sequence}`);
     }
