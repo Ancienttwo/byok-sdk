@@ -1119,6 +1119,8 @@ export class HostedCollaborationStore {
       // H checks its own open work only as the old owner. Toward H, the old owner is L: L's drain and L's commit come first,
       // and H's held Turns of the device are the work that runs after this commit.
       if ((await openSwitch(client, key, deviceId, expectedRevision)).mode !== 'H') {
+        // An exported scope takes no new owner device: the domain moved with its export.
+        if (mark) throw new SwitchExportedError(mark.digest);
         return { value: await endSwitch(client, key, deviceId, expectedRevision, 'commit'), outbox: [] };
       }
       // The device checks first, so a device that is not ready refuses the same way with or without an export.

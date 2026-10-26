@@ -228,6 +228,13 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
     await expect(store().abortSwitch(scope, 'device', 3)).rejects.toMatchObject({ reason: 'not_switching' });
   });
 
+  it('takes no new owner device on an exported scope: a switch toward H that opened before the export does not commit', async () => {
+    const scope = await plain();
+    expect(await store().beginSwitch(scope, 'device-2', 'H', 0)).toMatchObject({ mode: 'L', switching: 'H', revision: 1 });
+    const document = await exported(scope);
+    await expect(store().commitSwitch(scope, 'device-2', 1, document.manifest.digest)).rejects.toEqual(exportedError(document.manifest.digest));
+  });
+
   it('ends the export with an abort of its device: the fence lifts and the scope takes work again', async () => {
     const scope = await plain(), document = await exported(scope);
     const input = { kind: 'input' as const, botId: 'main', key: 'k', request: 'Work', sender: 'owner' as const };
