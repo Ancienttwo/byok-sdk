@@ -57,7 +57,7 @@ it cannot select a task id or product destination.
 
 It also installs the SDK-reserved `byok-agent-result-mcp` helper, the
 structured outcome channel of a `terminalProjection.mode: 'result-document'`
-offer (wire v3). Its one tool, `submit_result`, advertises the offer's frozen
+offer. Its one tool, `submit_result`, advertises the offer's frozen
 schema, which the helper fetches from the daemon over the authenticated
 control socket under its single-task context token; it forwards the model's
 arguments unvalidated. The daemon validates them against that schema, stages
@@ -399,9 +399,13 @@ Startup materializes and write-probes the canonical root before publishing
 strict Agent execution has one workspace authority and never falls back to a
 task-scoped Git workspace.
 
-Successful startup with this configuration advertises `agent-home-contract`. Agent offers are distinct
-from legacy task offers and fail closed when identity, profile revision, or
-session/runtime/cwd evidence does not match. Within one daemon process,
+Successful startup with this configuration advertises `agent-home-contract`.
+Since wire v4 every offer is an Agent offer, and the daemon runs Agent offers
+only: a daemon without `agentHome` advertises no `agent-home-contract` and
+declines every offer. `DaemonConfig.strictAgentOnly` is removed and raises
+`DaemonConfigFieldRemovedError`; `workspaceRoot` is optional and only
+`gitWorkspace` needs it. Agent offers fail closed when identity, profile
+revision, or session/runtime/cwd evidence does not match. Within one daemon process,
 execution leases are scoped to `(agentId, sessionRef)`: different sessions of
 one Agent may run concurrently in the same canonical home, while the same
 session remains serialized. Fresh

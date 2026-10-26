@@ -2,7 +2,7 @@
 
 Embed the `@byok-sdk/cloud` coordination kernel in a Node.js process serving
 one product and one tenant. The server handles pairing, device authentication,
-dispatch, approvals, cancellation and device discovery over protocol v3.
+dispatch, approvals, cancellation and device discovery over protocol v4.
 Use `@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane` for a multi-instance
 hosted deployment.
 
@@ -298,6 +298,12 @@ derived `request` class is currently empty, so its configured 24-hour policy
 does not expire SDK identity receipts. Monitor disk usage; exhaustion does not
 authorize deleting those fences.
 
+Offer and terminal receipts hold wire bytes, and a wire v4 server reads only
+v4 bytes. A SQLite file written by a v3 build needs the one-shot receipt
+migration (`migrateWireV3Receipt` from `@byok-sdk/cloud`, 0.31.x only) before a
+v4 server opens it; this package does not ship a SQLite runner for it yet. See
+[the wire v4 upgrade note](../../docs/releases/925-wire-v4.md).
+
 ## Stats and liveness
 
 `await server.stats()` returns a plain `HubStats` snapshot. It is in-process
@@ -339,20 +345,27 @@ aggregate.
 
 ## Toolset-aware dispatch
 
-Toolset-aware dispatch names logical device-local MCP toolsets; it never sends
-their commands or credentials:
+An Agent offer can name logical device-local MCP toolsets in
+`requiredToolsets`; it never sends their commands or credentials:
 
 ```ts
-const task = await server.dispatch({
+await server.executions.submit({
+  taskId,
   deviceId,
-  instruction: 'Find five qualified prospects and draft follow-ups.',
-  runtime: 'claude',
-  requiredToolsets: ['salesko.prospecting'],
+  payload: {
+    instruction: 'Find five qualified prospects and draft follow-ups.',
+    runtime: 'claude',
+    agentRef,
+    egressPolicy,
+    terminalProjection: { mode: 'none' },
+    requiredToolsets: ['salesko.prospecting'],
+  },
 });
 ```
 
-The coordinator requires the durable `toolset-selection` capability before
-creating the task. The daemon validates its actual configured inventory when
+`dispatch` takes the same field when it resumes a session. The coordinator
+requires the durable `toolset-selection` capability before creating the
+task. The daemon validates its actual configured inventory when
 it accepts the offer; presence discovery does not gate admission.
 
 ## Device-side one-shot wakes
@@ -445,8 +458,8 @@ Schema refusals at open are a `SqliteSchemaError` with `foundVersion` and
   preserve the file.
 - `SQLITE_SCHEMA_INVALID`: the file contradicts its declared schema or is not a
   BYOK database.
-- `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: a pending mailbox row is not a wire v3
-  envelope (for example a v2 offer left undrained). Nothing is rewritten or
+- `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: a pending mailbox row is not a wire v4
+  envelope (for example a v3 offer left undrained). Nothing is rewritten or
   deleted; drain it with the previous compatible SDK before upgrading, or use a
   new state directory and enrollment.
 
@@ -479,7 +492,7 @@ Before enqueue, durably bind the authenticated scope and external execution key
 immutable execution input. Fresh Agent work uses `executions.submit(input)` and
 requires the Host-owned taskId. Its strict nested payload names runtime,
 AgentRef, egressPolicy and terminalProjection. A `result-document`
-terminalProjection carries its frozen outcome `schema` (the wire v3 JSON Schema
+terminalProjection carries its frozen outcome `schema` (the wire's JSON Schema
 subset, at most 16 KiB); a schema outside the subset is refused before any row
 is written. messageEgress is optional;
 selecting it requires agentMessageContext and a registered Agent message consumer.
@@ -487,10 +500,11 @@ The return is EnqueuedOffer, with durable recovery through tasks.offer; no fresh
 egress TaskHandle is returned. Resubmitting a delivered taskId throws
 `agent_task_already_exists`; recover through exact `tasks.offer(taskId)` readback.
 A registered device that is offline is enqueued normally. Exact resume and
-prepared submission retain their existing contracts: `dispatch({ agentRef })`,
-with or without `egressPolicy`, resumes an exact session and requires
-`sessionRef` (it is refused before any write otherwise; fresh execution is
-`executions.submit`). Other `dispatch` calls may still omit taskId.
+prepared submission retain their existing contracts. `dispatch` takes only
+`AgentResumeDispatchInput`: `dispatch({ agentRef, sessionRef })`, with or
+without `egressPolicy`, resumes an exact session (it is refused before any
+write without `sessionRef`; fresh execution is `executions.submit`). `dispatch`
+may omit taskId.
 `executions.submit` and `dispatch({ agentRef })` take an optional `agentMemory`
 (`'none'`, `'read'`, `'read-write'`, `'read-if-admitted'` or `'read-write-if-admitted'`) for
 that one task. The device must advertise `agent-memory-selection`, and also

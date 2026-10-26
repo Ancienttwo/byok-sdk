@@ -812,7 +812,7 @@ export type TaskSteerPayload = z.infer<typeof TaskSteerPayloadSchema>;
  * `task.started`.
  *
  * `runtime` (M5, additive-minor — docs/protocol.md §3.1): the ACTUAL
- * adapter this device selected for the task, distinct from `task.offer`'s
+ * adapter this device selected for the task, distinct from the offer's
  * own `runtime` (the merely REQUESTED one, `TaskOfferForAgentPayloadSchema.runtime`
  * above). When an offer names no runtime the daemon auto-selects (pi-first —
  * `TaskRunner.pickAdapter`, `packages/client`'s `task-runner.ts`), and before
@@ -820,10 +820,9 @@ export type TaskSteerPayload = z.infer<typeof TaskSteerPayloadSchema>;
  * ran — `TaskSnapshot.runtime` (`packages/server`'s `types.ts`) only ever
  * recorded what was requested. Plain optional property on this already-
  * tolerant `z.object()`: an old server simply never reads it, so this needed
- * no version bump and no emission gating (same shape as `approvalId` on
- * `task.await_approval`/`task.approve`/`task.reject`, §5.3) — a new daemon
- * sends it unconditionally, regardless of whether the connected server is
- * new enough to store it.
+ * no version bump and no emission gating — a new daemon sends it
+ * unconditionally, regardless of whether the connected server is new enough
+ * to store it.
  *
  * `capabilities` (S0/D-4, additive-minor — docs/protocol.md §2.4): the
  * TASK-level capability authority — what the claiming adapter reported about

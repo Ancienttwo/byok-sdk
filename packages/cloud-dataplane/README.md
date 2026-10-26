@@ -64,7 +64,7 @@ pending mailbox (`outbox`) row and rejects with
 `PostgresMailboxProtocolUnsupportedError` (`code`
 `POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`, plus `requiredVersion`, `tenantId`,
 `deviceId` and `seq` of the first offending row) if any body is not a wire
-envelope of the build's `PROTOCOL_VERSION` (3). Acked and expired rows are
+envelope of the build's `PROTOCOL_VERSION` (4). Acked and expired rows are
 history and are not inspected. The check is read-only: no row is rewritten,
 reclassified or deleted, and there is no synchronous variant that skips it.
 
@@ -79,6 +79,20 @@ The scan walks the pending rows of every tenant in primary-key pages, so it
 costs one read of the pending mailbox per composition. On Workers the
 composition is built per invocation (see below), so that read happens on every
 invocation.
+
+### Wire v4 receipt migration (0.31.x only)
+
+The fence covers pending mailbox rows only. Offer receipts
+(`task-offer:<messageId>`) and terminal receipts (`task:<taskId>:terminal`) in
+`device_request_receipts` hold wire bytes that never expire, and a wire v4
+cloud reads only v4 bytes. After draining and stopping every writer, run the
+one-shot `migratePostgresReceiptsToWireV4(pool)` once before starting the v4
+cloud. It migrates every offer and terminal receipt in one transaction and
+returns `{ migrated, unchanged }`. If any receipt is refused (for example an
+offer receipt of a removed runtime-only offer type) it rolls back, so nothing
+changes, and throws `WireV4ReceiptMigrationError` listing each refused
+receipt. The runner ships in 0.31.x only and is removed in the next minor. See
+[the wire v4 upgrade note](../../docs/releases/925-wire-v4.md).
 
 ## Deployment compositions
 

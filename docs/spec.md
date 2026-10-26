@@ -577,6 +577,12 @@ retention cannot remove the delivered/immutable/terminal facts. Receipt columns
 and composite primary key are validated on open. Capacity exhaustion is an
 error; deleting identity fences is not a quota strategy.
 
+Offer and terminal receipts hold wire bytes, and a wire v4 build reads only v4
+bytes. A store written by a v3 build needs the one-shot receipt migration
+(`migrateWireV3Receipt`, 0.31.x only) after draining and before a v4 server
+starts; the embedded SQLite store has no runner for it yet. See
+[the wire v4 upgrade note](releases/925-wire-v4.md).
+
 ### Bot turn outcome fragments and routine time points
 
 `@byok-sdk/protocol` publishes the `bot-turn-outcome.v1` action fragments. Each
@@ -1529,8 +1535,8 @@ atomically records a cancellation tombstone and appends the existing frozen-v1
 task id fails closed. Retrying cannot change the first reason, timestamp, or
 mailbox delivery identity.
 
-An unleased offer becomes `cancelled` immediately and the original
-`task.offer` is suppressed from later long-poll delivery. A leased attempt
+An unleased offer becomes `cancelled` immediately and the original offer
+envelope is suppressed from later long-poll delivery. A leased attempt
 becomes `cancel_requested` until its device processes the durable command,
 interrupts the active Session, and returns `task.cancelled`; that acknowledgement
 moves the attempt to `cancelled`. The tombstone remains authoritative while a
@@ -1684,17 +1690,16 @@ Approval observations do not enter `ActivityTail` and do not reinterpret
 `task.progress`, `task.await_approval`, and `task.approval_resolved`, so cloud
 must not fabricate a cross-stream total order. Instead, the approval store
 assigns a monotonic per-task `revision` in arrival order and preserves the
-source envelope ID, host receive time, request summary and optional native
+source envelope ID, host receive time, request summary and native
 `approvalId`, or the exact resolution decision, resolver and resolution time.
 
 `readApprovalTimeline()` is a host control-plane read returning a bounded,
 lossy tail with `dropped`, `capacity`, `expiresAt`, and its revision cursor. It
 is observation authority, not a durable audit log and not an approval action
 surface. `CloudStores` therefore gains one required `approvals` port in the
-coordinated SDK release; there is no optional no-op store or dual authority. A
-request from an older peer with no `approvalId` remains explicit
-unpaired source data. Frozen wire v1 still parses its existing string field,
-but the cloud persistence authority rejects empty or whitespace-only IDs.
+coordinated SDK release; there is no optional no-op store or dual authority.
+Wire v4 requires a non-empty `approvalId` on `task.await_approval`, and the
+cloud persistence authority also rejects empty or whitespace-only IDs.
 Cloud does not infer `pending`, `approved`, or `rejected`, pair by adjacency, or
 associate an approval with a tool call. The separate pure UI fold projects
 `approval-requested | approval-responded`, `pending | approved | rejected`, and
@@ -1924,11 +1929,12 @@ relay adds no authentication to them. The Pi RPC binding is specified below; Cla
 ## Task-scoped host MCP toolsets
 
 A SaaS task may require one or more host-integrated tools without making the
-SaaS an execution or credential authority. It uses the distinct additive
-`task.offer_with_toolsets` message and carries 1–16 bounded logical ids. It does
-not widen `task.offer`: an older daemon must skip an unknown offer type rather
-than strip an optional field and execute the instruction without its required
-tools.
+SaaS an execution or credential authority. The Agent offer names them in its
+optional `requiredToolsets` field, 1–16 bounded logical ids. The field is a
+gated wire addition: the server and hosted cloud send it only to a device that
+advertises `toolset-selection` and refuse the task before it exists otherwise,
+so a daemon that would strip the field never executes the instruction without
+its required tools.
 
 The device operator configures each id in `DaemonConfig.mcpToolsets` as one or
 more stdio MCP servers. This first slice accepts only `command` and `args`;
@@ -2572,9 +2578,9 @@ path. The hook alone decides whether and how to write a product file such as
 `profile.json`; the SDK neither interprets its fields nor defines deletion/UI
 sync semantics. Credentials
 remain in an OS credential store; only non-secret references/configured state
-may be projected. Legacy task offers retain their existing
-`workspaceRoot/<taskId>` behavior as a separate API, never as a fallback for an
-Agent offer. Migration is an explicitly enabled one-shot cutover with no dual
+may be projected. Since wire v4 every offer is an Agent offer, and the Agent
+home is the only workspace authority for one; `workspaceRoot/<taskId>` is never
+a fallback. Migration is an explicitly enabled one-shot cutover with no dual
 read, dual write, or implicit adoption of task workspaces.
 
 See [host local storage](host-local-storage-layout.md) for the responsibility
@@ -2637,6 +2643,13 @@ secret change, or Agent-home deletion is part of this contract.
 
 ## Local Git task workspaces
 
+Status under wire v4: the configuration below is still accepted, but no task
+runs in a Git workspace. `gitWorkspace` and `agentHome` are mutually exclusive,
+and a daemon without an Agent home declines every offer, so a Git-workspace
+daemon declines all work. Whether Git checkpoints get an Agent-home authority or
+are removed is an open decision (ADR-034). The rest of this section describes
+the workspace contract as built.
+
 The client optionally provides local Git checkpoint workspaces for operators who want a consistent, recoverable code-state convention around connected coding agents. The feature is disabled by default and is enabled only by the local daemon configuration:
 
 ```ts
@@ -2645,7 +2658,7 @@ The client optionally provides local Git checkpoint workspaces for operators who
 }
 ```
 
-With the option absent, the daemon preserves the existing plain `workspaceRoot/<taskId>` behavior and performs no Git subprocesses. With the option enabled, the daemon preflights Git before accepting offers, initializes each fresh daemon-owned task directory as a local repository, and records coarse recovery state in a private local ledger. The server protocol still owns task lifecycle: offer, claim, approval, cancellation, completion, and failure. Git records code state and human-reviewable checkpoints only; a commit or dirty status never transitions a protocol task.
+With the option absent, the daemon performs no Git subprocesses. With the option enabled, the daemon preflights Git before accepting offers, initializes each fresh daemon-owned task directory as a local repository, and records coarse recovery state in a private local ledger. The server protocol still owns task lifecycle: offer, claim, approval, cancellation, completion, and failure. Git records code state and human-reviewable checkpoints only; a commit or dirty status never transitions a protocol task.
 
 ### Operator configuration and workspace contract
 
@@ -2746,19 +2759,15 @@ Copy the complete command from the Host's pairing page. A string used once
 without `--e2ee` is burned: start a new registration at the Host and do not
 retry it (protocol §2.6, device enrollment).
 
-`DaemonConfig.strictAgentOnly` is an additive local-security gate. It requires
-successful construction-time Agent-home preflight and only then advertises
-`strict-agent-only` in addition to `agent-home-contract`. The local runner is
-the final authority: after durable receive, dedup, and pre-cancel precedence,
-legacy `task.offer` and `task.offer_with_toolsets` receive only `task.decline`;
-they perform no admission/prepare/workspace/claim/start/process/terminal
-receipt work and do not enter `finishedTaskIds`. Agent offer variants remain
-normal. Server/cloud explicit dispatch rejects legacy work to a strict device
-before task/mailbox mutation, and implicit legacy selection skips strict
-devices. Those producer gates are scheduling defenses only; stale connections
-remain covered by the local gate. A strict daemon never reads
-`DaemonConfig.workspaceRoot`, so the field is optional there; every other
-daemon must still supply it at construction.
+Agent-only admission is the wire itself since v4: every offer type is
+Agent-bound (`task.offer_for_agent`, its egress and fresh-egress variants,
+their `_sealed` twins, and `task.offer_prepared`), and the runtime-only offers
+are gone from the protocol. The local runner is the final authority: a daemon
+without `DaemonConfig.agentHome` advertises no `agent-home-contract` and
+declines every offer before admission, workspace, claim or start. The
+`strict-agent-only` flag is removed, and `DaemonConfig.strictAgentOnly` raises
+`DaemonConfigFieldRemovedError`. `DaemonConfig.workspaceRoot` is optional; only
+`gitWorkspace` requires it.
 
 
 ### Owned Pi RPC team member and GUI interaction
@@ -2890,7 +2899,7 @@ Closed DeviceOperatorError codes carry no raw OS errors or secrets. Hosts own
 supervisor stop/restore and independent readiness verification. The SDK does not
 create a remote maintenance channel or automatically replay tasks.
 
-The journal owns one immutable terminal byte record, including pre-claim declines. ConnectionManager uses its existing authenticated POST queue and retries the exact original envelope. Accepted transport disposition is durably recorded as confirmed before local delivery state is retired; an acknowledgement write failure retains the original batch. Every rejected envelope emits a payload-free `outbound-rejected` event and increments `status().outbound` (also control status). A rejected terminal is durably failed with its coarse wire reason in `last_error` before retirement; support bundles report `journal.failedTerminalCount` and live outbound counts. `byok-agent tasks` marks refused terminal rows `delivery=rejected`, preserving the local terminal state even after restart; its rejection record carries a closed `taskState` and no payload. A refused progress batch is counted and reported without marking terminal delivery. Progress and terminal observer events follow successful settlement. Rejection is a delivery fact, separate from operational liveness health. On wire v3 every answer correlates each envelope with its own outcome, and a rejected outcome carries its reason. Confirmation records delivery acceptance; the cloud's immutable first terminal and cancellation authority remain product truth.
+The journal owns one immutable terminal byte record, including pre-claim declines. ConnectionManager uses its existing authenticated POST queue and retries the exact original envelope. Accepted transport disposition is durably recorded as confirmed before local delivery state is retired; an acknowledgement write failure retains the original batch. Every rejected envelope emits a payload-free `outbound-rejected` event and increments `status().outbound` (also control status). A rejected terminal is durably failed with its coarse wire reason in `last_error` before retirement; support bundles report `journal.failedTerminalCount` and live outbound counts. `byok-agent tasks` marks refused terminal rows `delivery=rejected`, preserving the local terminal state even after restart; its rejection record carries a closed `taskState` and no payload. A refused progress batch is counted and reported without marking terminal delivery. Progress and terminal observer events follow successful settlement. Rejection is a delivery fact, separate from operational liveness health. Since wire v3 every answer correlates each envelope with its own outcome, and a rejected outcome carries its reason. Confirmation records delivery acceptance; the cloud's immutable first terminal and cancellation authority remain product truth.
 
 Unknown or invalid executable messages cannot silently advance the mailbox cursor. The observer consumes the protocol offer classifier. The new journal format requires complete terminal bytes: a valid hash-only predecessor is preserved and rejected with an explicit format error, never silently upgraded, quarantined as corruption, or synthesized into replayable evidence.
 
@@ -3033,7 +3042,7 @@ Hosts never parse `reason` for classification. A failed task's runtime
 failure class is copied the same way, as `TerminalResult.failure` and
 `TaskResult.failure` (#869). The `task.decline.code` field
 landed as an additive optional field on wire v2 and is carried unchanged on
-wire v3 (K7 moved `PROTOCOL_VERSION` to 3).
+wires v3 and v4.
 Host cancellation alone returns no device terminal.
 A terminal stored under a different task key or with a non-terminal type is an
 error. This observation does not prove native Session.close or home release.
@@ -3241,8 +3250,8 @@ these optional fields.
 
 The draft lane is display-only. The accepted Agent message is the only product
 truth. Draft frames do not enter the reliable spool, mailbox or activity tail.
-The wire major remains 3. A daemon sends `agent.message.draft` only when the
-server advertises `agent-message-draft`. `RuntimeCapabilities.messageDraft` is
+The lane is a gated wire addition, not a wire major. A daemon sends
+`agent.message.draft` only when the server advertises `agent-message-draft`. `RuntimeCapabilities.messageDraft` is
 optional discovery and claim data. A runtime without this capability sends no
 draft frames.
 

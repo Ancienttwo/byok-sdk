@@ -39,7 +39,7 @@ flowchart TB
 
   subgraph L1["L1 · 契约"]
     direction LR
-    Protocol["protocol<br/>wire v3 · codec<br/>http-api"]:::contract
+    Protocol["protocol<br/>wire v4 · codec<br/>http-api"]:::contract
     Core["core<br/>tenant · store ports<br/>device proof"]:::contract
   end
 
@@ -77,7 +77,7 @@ flowchart TB
 
 | 层 | package | workspace 运行时依赖 | 主要入口 |
 | --- | --- | --- | --- |
-| L1 | `@byok-sdk/protocol` | 无 | `PROTOCOL_VERSION = 3`（`packages/protocol/src/version.ts:35`）；`encodeEnvelope` / `decodeEnvelope` / `parseMessage`（`packages/protocol/src/codec.ts`）；`BYOK_*_PATH`（`packages/protocol/src/http-api.ts:464-550`） |
+| L1 | `@byok-sdk/protocol` | 无 | `PROTOCOL_VERSION = 4`（`packages/protocol/src/version.ts:46`）；`encodeEnvelope` / `decodeEnvelope` / `parseMessage`（`packages/protocol/src/codec.ts`）；`BYOK_*_PATH`（`packages/protocol/src/http-api.ts:464-550`） |
 | L1 | `@byok-sdk/core` | 无，只依赖 `zod` | store ports `CoreStores`（`packages/core/src/stores.ts`）；`createInMemoryCoreStores`（`packages/core/src/in-memory/index.ts:45`） |
 | L2 | `@byok-sdk/cloud` | core、protocol | `createByokCloud`（`packages/cloud/src/cloud.ts:1023`）；`createInMemoryByokCloud`（`packages/cloud/src/composition/in-memory.ts:106`） |
 | L3 | `@byok-sdk/server` | cloud、core、protocol | `createByokServer`（`packages/server/src/index.ts:327`）；`listenLoopback`（`packages/server/src/loopback.ts:84`） |
@@ -126,16 +126,14 @@ sequenceDiagram
 
 ### 2.2 派工到终态
 
-主线是新的 Agent 执行 `executions.submit`。`dispatch()` 的几种 offer 走同一条下游链路，只是入队的 wire 类型不同：
+主线是新的 Agent 执行 `executions.submit`。wire v4 的每个 offer 都绑定 Agent；`dispatch()` 只做 resume。两个入口走同一条下游链路，只是入队的 wire 类型不同：
 
 | Host 入口 | wire 类型 |
 | --- | --- |
 | `executions.submit(input)` | `task.offer_for_agent_with_egress_fresh` |
-| `dispatch(input)` | `task.offer` |
-| `dispatch(input)`，带 `requiredToolsets` | `task.offer_with_toolsets` |
-| `dispatch(input)`，带 `agentRef` 与 `sessionRef`，只用于 resume | `task.offer_for_agent`；再带 `egressPolicy` 时是 `task.offer_for_agent_with_egress` |
+| `dispatch(input)`，必带 `agentRef` 与 `sessionRef`，只用于 resume | `task.offer_for_agent`；再带 `egressPolicy` 时是 `task.offer_for_agent_with_egress` |
 
-入口见 `packages/server/src/index.ts:537-701`、`:807-826`，入队见 `packages/cloud/src/cloud.ts:1354-1482`、`:2339-2447`。
+两个入口都可以带 `requiredToolsets`；设备没有声明 `toolset-selection` 时，task 建立之前就被拒绝。入口见 `packages/server/src/index.ts` 的 `dispatchInternal` 与 `executions.submit`，入队见 `packages/cloud/src/cloud.ts` 的 `enqueueAgentOffer`、`enqueueAgentEgressOffer` 与 `submitAgentExecution`。
 
 ```mermaid
 sequenceDiagram
@@ -323,7 +321,7 @@ flowchart TB
   Home["Agent home<br/>hostStorageRoot/agents/<br/>&lt;agentId&gt;/"]:::fs
   Runs[".byok/runs/&lt;taskId&gt;/<br/>memory-reader 的 cwd"]:::fs
   Exec["tmp/exec/&lt;token&gt;/<br/>每次执行一个 token"]:::fs
-  WS["workspaceRoot/&lt;taskId&gt;/<br/>legacy task workspace"]:::fs
+  WS["workspaceRoot/&lt;taskId&gt;/<br/>Git workspace 模式<br/>wire v4 下无 task 运行"]:::fs
 
   Product -->|"路径键"| Store
   Product -->|"service 名"| Cred
@@ -369,7 +367,7 @@ flowchart LR
 
   subgraph SRC["daemon 准备的来源"]
     direction TB
-    Cwd["工作目录<br/>Agent home（writer）<br/>.byok/runs/&lt;taskId&gt;（reader）<br/>workspaceRoot/&lt;taskId&gt;（legacy）"]:::src
+    Cwd["工作目录<br/>Agent home（writer）<br/>.byok/runs/&lt;taskId&gt;（reader）<br/>workspaceRoot/&lt;taskId&gt;（Git workspace 模式，wire v4 下无 task 运行）"]:::src
     Tmp["tmp/exec/&lt;token&gt;/runtime"]:::src
     Mcp["本任务的 MCP server 列表<br/>Host toolsets 与保留 helper"]:::src
     Sdk["tmp/exec/&lt;token&gt;/sdk<br/>0600 配置文件<br/>mcp-config.json<br/>rpc-launch.json"]:::src

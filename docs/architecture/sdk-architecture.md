@@ -244,7 +244,7 @@ flowchart TB
 
 | 文件 | 主要 exports / 功能 |
 | --- | --- |
-| `version.ts` | `PROTOCOL_VERSION = 3`、`CAPABILITY_FLAGS` |
+| `version.ts` | `PROTOCOL_VERSION = 4`、`CAPABILITY_FLAGS` |
 | `messages.ts` | runtime info、每个消息类型的 payload schema、direction type lists、`MESSAGE_PAYLOAD_SCHEMAS` 单一来源 |
 | `envelope.ts` | discriminated union；所有 `task.*` 必须有 `task_id`，server→daemon 必须有 envelope `seq` |
 | `codec.ts` | `parseMessage`、`decodeEnvelope`、`encodeEnvelope`、`createEnvelope` |
@@ -260,21 +260,22 @@ flowchart TB
 
 | 分组 | 方向 | 内容 |
 | --- | --- | --- |
-| connection | daemon → server | `conn.hello`：每次连接先发的设备快照（runtimes、capabilities、cursor）。schema 中还有 server → daemon 的 `conn.ack`，没有发送方，删除要等下一次 wire major（#925） |
-| offer | server → daemon | Agent 执行用 `task.offer_for_agent_with_egress_fresh`；另有 `task.offer_for_agent`、`task.offer_for_agent_with_egress`、`task.offer_prepared`，以及 legacy 的 `task.offer`、`task.offer_with_toolsets`（ADR-034 的删除尚未执行，见附录 A） |
-| task control | server → daemon | `task.approve`、`task.reject`、`task.cancel`、`task.steer` |
+| connection | daemon → server | `conn.hello`：每次连接先发的设备快照（runtimes、capabilities、cursor）。server 的 capabilities 随每次 long-poll 响应返回；`conn.ack` 已在 wire v4（#925）删除 |
+| offer | server → daemon | 每个 offer 都绑定 Agent：fresh 执行用 `task.offer_for_agent_with_egress_fresh`；resume 用 `task.offer_for_agent` 或 `task.offer_for_agent_with_egress`；prepared lane 用 `task.offer_prepared`。runtime-only 的 `task.offer`、`task.offer_with_toolsets` 及其 sealed 类型已在 wire v4（#925）删除 |
+| task control | server → daemon | `task.approve`、`task.reject`（必带 `approvalId`，只解决它指名的审批）、`task.cancel`、`task.steer` |
 | Agent / device control | server → daemon | `agent.*` 的 egress ack、message disposition、content read、home projection、input preparation，`provider.provisioning.available`，`agent.memory.intent.available`，`e2ee.key_package.available` |
 | task lifecycle | daemon → server | `task.claim`、`task.started`、`task.decline`、`task.await_approval`、`task.complete`、`task.fail`、`task.cancelled` |
-| task data | daemon → server | `task.progress`、`task.artifact`、`task.approval_resolved` |
+| task data | daemon → server | `task.progress`、`task.artifact`、`task.approval_resolved`（baseline：daemon 本地解决的每个审批都上报；server 不从后续活动推断解决） |
 | Agent data | daemon → server | `agent.egress.reliable`、`agent.message.draft`、`agent.message.publish`、`agent.content.receipt` |
 | sealed（#654） | 两个方向 | 有内容的类型各有一个 `*_sealed` 孪生类型（offer、`task.steer`、终态、进度、artifact 与审批）；`task.offer_prepared` 没有 sealed 类型 |
 
 server → daemon 的类型都带 envelope `seq`，所有 `task.*` 都带 `task_id`（`envelope.ts`）。
 
-`task.offer.workspaceHint` 是**已实现、保留字段**：protocol schema 已有，但 public `DispatchInput`、TaskRunner 与 adapters 都没有消费它，不能把它描述成工作区选择能力。S0 已就此做出决策——维持 reserved，wire 上保留（删除是 breaking 的 v1 变更，留着的成本只是一个被忽略的 optional key），并禁止任何文档、SDK surface 或 UI 声称它能选工作区。接线需要另立 ADR 先定 resolver 设计：与 `sessionRef` 派生映射的优先级、路径校验与 confinement、设备无法满足 hint 时的行为（附录 A 的 ADR-023）。
+`workspaceHint` 原是 `task.offer` 上无人消费的 reserved 字段（ADR-023），随 `task.offer` 在 wire v4 删除；Agent offer 没有这个字段，工作目录由 Agent home 决定。
 
-`task.offer_with_toolsets` 是单独的 additive 消息，其
-`requiredToolsets` 只携带逻辑 id。daemon 在 claim 前用本机
+Agent offer 的可选字段 `requiredToolsets` 只携带逻辑 id，是 gated wire
+addition：server 与 hosted cloud 只把它发给声明 `toolset-selection` 的设备，
+否则在建 task 之前拒绝。daemon 在 claim 前用本机
 `mcpToolsets` 解析全部 id；缺失、server name 冲突或 runtime 不支持
 都 fail-closed decline。三个 bundled runtime 都声明 `mcpToolsets`。Claude 以
 task-scoped `--mcp-config` 加入这些 stdio server，用户自己的 MCP 配置也会加载
@@ -319,10 +320,10 @@ stateDiagram-v2
 
 ### 2.4 Freeze 与兼容边界
 
-- 当前 wire 是 `v3`：K7（#468）把 `PROTOCOL_VERSION` 由 2 升到 3，v3 端点拒绝 v2 对端，设备与 Host 须先排空再一起升级。v2 由 ADR-037 从 1 升到 2（删除 offer 的 `PermissionPolicy`、runtime capability `permissionModes` 与 input-preparation `permissionMode`），没有 v1 reader；v2 corpus 与 registry 只读，只作负向 oracle。
-- 规则只写在 [protocol.md "Freeze rule"](../protocol.md#freeze-rule)：每个 v3 变更走 version bump、gated addition、strip-safe addition 三条路之一。后两条在 `packages/protocol/src/wire-additions.ts` 的 `WIRE_ADDITIONS` 里声明，cloud admission 读同一张表；`compat.test.ts` 用 npm 上已发布的 floor 与 previous decoder 证明这些声明。
+- 当前 wire 是 `v4`：#925 把 `PROTOCOL_VERSION` 由 3 升到 4，删除 `conn.ack`、runtime-only offer 及其 sealed 类型、`strict-agent-only` 与三个审批 capability flag，`approvalId` 在 `task.await_approval`、`task.approve`、`task.reject` 上成为必填。v4 端点拒绝 v3 对端；排空、跑一次性 receipt migration 后，设备与 Host 一起升级（[升级说明](../releases/925-wire-v4.md)）。历史：K7（#468）把 2 升到 3（result-document 的 `schema` 成为必填）；ADR-037 把 1 升到 2（删除 offer 的 `PermissionPolicy`、runtime capability `permissionModes` 与 input-preparation `permissionMode`）。v2、v3 corpus 与 registry 只读。
+- 规则只写在 [protocol.md "Freeze rule"](../protocol.md#freeze-rule)：每个 v4 变更走 version bump、gated addition、strip-safe addition 三条路之一。后两条在 `packages/protocol/src/wire-additions.ts` 的 `WIRE_ADDITIONS` 里声明，cloud admission 读同一张表。v4 尚无已发布版本：`compat.test.ts` 用最后一个 v3 版本 0.30.2（`byok-protocol-previous`）作 rejection oracle，它拒绝每个 v4 envelope；v4 registry 为空，跨版本的 addition 声明在首个 v4 release 发布并 pin 之前没有证明。
 - observability unknown 可忽略；control/security unknown 必须 fail-closed。
-- server 只接受当前 major（v3，`PROTOCOL_VERSION = 3`，`packages/protocol/src/version.ts`）。v2 envelope 被拒绝；没有 N-1 reader，所以 server 与 client 必须一起升级。
+- server 只接受当前 major（v4，`PROTOCOL_VERSION = 4`，`packages/protocol/src/version.ts`）。v3 envelope 被拒绝；没有 N-1 reader，所以 server 与 client 必须一起升级。
 
 ## 3. `@byok-sdk/server`：`@byok-sdk/cloud` domain kernel 的 self-hosted façade
 
@@ -454,9 +455,10 @@ than a 250 ms read loop per idle hold.
   dedup and reliable egress keys include exact `(tenant, device, AgentRef)`;
   device-level facts such as `conn.hello` use a separate non-Agent keyspace and
   commit their capability snapshot before the completed-envelope marker.
-- Legacy offers reserve their exact attempt before mailbox publication. Offer,
-  host-decision, and implicit-approval identities bind tenant, task, device and
-  exact AgentRef. Tenant and device identity never imply one Profile: a tenant
+- Offer and host-decision identities bind tenant, task, device and exact
+  AgentRef. A host decision names one `approvalId`; the server never infers a
+  resolution from later task activity, and a local resolution reaches it only
+  as `task.approval_resolved`. Tenant and device identity never imply one Profile: a tenant
   has many devices and agents, one device may host many active AgentPlacements,
   and the current separate placement contract limits each agent to at most one
   active placement.
@@ -638,7 +640,7 @@ adapter-only build/import surface。
 
 SDK 不再向 adapter 下发 permission policy（ADR-037）。各 runtime 的 guardrail 由用户自己的 agent 配置决定。adapter 仍然拒绝它无法执行的 offer 字段（例如 `limits.maxTokens`），不丢弃，也不近似。
 
-原先已确认的 capability honesty gap（`approvalInteractive` 对所有 adapter 硬编码 `false`）**已收口**：client `RuntimeCapabilities` 的 `approvalInteractive` 是 required 字段，由各 adapter frozen descriptor 自己声明（当前三家均为 `false`，Claude confirm 已删除），wire `RuntimeInfo.capabilities` 从 descriptor 纯 passthrough，`create-daemon.ts` 里那张硬编码表已删除。`approvalInteractive` 来自同一 descriptor snapshot；connection flag `interactive-approval` 仍是 reserved，无人 advertise、无人消费，不作为路由信号。
+原先已确认的 capability honesty gap（`approvalInteractive` 对所有 adapter 硬编码 `false`）**已收口**：client `RuntimeCapabilities` 的 `approvalInteractive` 是 required 字段，由各 adapter frozen descriptor 自己声明（当前三家均为 `false`，Claude confirm 已删除），wire `RuntimeInfo.capabilities` 从 descriptor 纯 passthrough，`create-daemon.ts` 里那张硬编码表已删除。`approvalInteractive` 来自同一 descriptor snapshot。原先 reserved、无人 advertise 的 connection flag `interactive-approval` 已在 wire v4 删除。
 
 #### 三层 capability 模型
 
@@ -703,6 +705,8 @@ request_id 匹配 ACK，不依赖事件消费者。成功 ACK 保留会话，1 �
 
 ## 6. Local Git checkpoint workspace
 
+wire v4 下的状态：配置仍被接受，但没有 task 会在 Git workspace 里运行。`gitWorkspace` 与 `agentHome` 互斥，没有 Agent home 的 daemon decline 每个 offer，所以启用 Git workspace 的 daemon decline 全部工作。Git checkpoint 是接入 Agent home 还是删除，仍待裁定（ADR-034）。下文按已实现的代码描述该 workspace 契约。
+
 该功能默认关闭；唯一启用形状是：
 
 ```ts
@@ -716,7 +720,7 @@ flowchart TB
   classDef gate fill:#b91c1c,stroke:#fecaca,stroke-width:2px,color:#fff
   classDef done fill:#047857,stroke:#a7f3d0,stroke-width:2px,color:#fff
 
-  Offer(["task.offer"]):::stage
+  Offer(["offer（v3 runtime-only offer）"]):::stage
   Preflight{{"Git mode enabled and preflight healthy?"}}:::gate
   Plain(["plain workspaceRoot/taskId"]):::stage
   Lease(["canonical workspace + session lease"]):::gate
@@ -1075,9 +1079,9 @@ CI 验证层次：
 
 | ID | 缺口 | 架构影响 | 证据 | 当前正确表述 / 修复原则 | 优先级 | 落点 |
 | --- | --- | --- | --- | --- | --- | --- |
-| GAP-001 | `approvalInteractive=false` 硬编码 | wire capability 与 Claude confirm 实际能力不一致 | §4.4 | **已修复（S0）**：修复形状是 adapter-generated `RuntimeInfo`——`approvalInteractive` 成为 client `RuntimeCapabilities` 的 required 字段并由各 adapter 声明（当前三家均 `false`），`create-daemon.ts` 的硬编码表删除；connection flag `interactive-approval` 仍 reserved | 已收口 | S0（已交付） |
+| GAP-001 | `approvalInteractive=false` 硬编码 | wire capability 与 Claude confirm 实际能力不一致 | §4.4 | **已修复（S0）**：修复形状是 adapter-generated `RuntimeInfo`——`approvalInteractive` 成为 client `RuntimeCapabilities` 的 required 字段并由各 adapter 声明（当前三家均 `false`），`create-daemon.ts` 的硬编码表删除；reserved connection flag `interactive-approval` 已在 wire v4（#925）删除 | 已收口 | S0（已交付） |
 | GAP-002 | task-level steer 未按 claimed runtime gate | Claude/Codex 收到 steer 会 throw，并可能 stall cursor | §3.3 | **已修复（S0）**：修复形状是 claimed-runtime snapshot gate——claim 时把所选 runtime 的 capabilities 快照写入 task record，`steerTask()` 在构造 envelope 前按快照拒绝并抛 typed `SteerRejectedError` / `steer_unsupported_runtime`（快照缺失 fail-closed）；client 侧把 unsupported inbound steer 记为非重试性错误并 ack，cursor 不冻结 | 已收口 | S0（已交付） |
-| GAP-003 | `workspaceHint` 无消费者 | schema 与 public functionality 不一致 | §2.2 | **已决策（S0）**：维持 reserved 并已文档化（§2.2、`docs/protocol.md` §2、ADR-023）；wire 保留、禁止声称工作区选择能力，接线需另立 ADR 先定 resolver 设计 | 已收口 | S0（已交付） |
+| GAP-003 | `workspaceHint` 无消费者 | schema 与 public functionality 不一致 | §2.2 | **已决策（S0）**：维持 reserved（ADR-023），禁止声称工作区选择能力。wire v4（#925）随 `task.offer` 删除该字段 | 已收口 | S0（已交付）；字段删除于 #925 |
 | GAP-004 | nonce 签名无 domain separation | 同一把 device 私钥未来要签第二种消息时，缺域分隔就打开跨协议签名重用的口子 | 原证据：`auth.ts` 发裸 `randomBytes(24)`，`http.ts` 直接 `verifyEd25519Signature(pubkey, nonce, sig)`，无前缀 | **已修复（S1）**：修复形状是单一域常数 `NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n'`（`auth.ts`），server 侧只有 `verifyNonceSignature` 一个 nonce 签名检查点、前缀在函数内部施加，client `device-keys.ts` 的 `signNonce` 签同一字面量；裸签名 401，无双模、无 flag、无过渡窗口，两端同批交付 | 已收口 | S1（已交付） |
 | GAP-005 | `DeviceRecord` 无 structural tenant 绑定 | 设备身份不带租户维度，隔离只能靠 handler 自觉补条件 | 原证据：`auth.ts` 的 `DeviceRecord` 只有 `deviceId/deviceName/devicePublicKey/revoked` | **已修复（S1）**：修复形状是 required tenant——`DeviceRecord` 增加 required `tenantId`/`productId`（无 optional、无默认值），值只来自 server 铸造的 pairing claims；tenant-owned 公开面按 `(tenantId, deviceId)` 复合键且 tenant-first（`get`/`revoke` 均带 tenantId）。cloud 的 `DeviceDirectory.resolveByDeviceId(deviceId)` 是 challenge/token 两条 pre-tenant auth route 的窄端口，不进入 tenant facade；server package 入口不导出 naked lookup | 已收口 | S1（已交付） |
 | GAP-007 | **已收口（S4A/S4B）**：`deploy/sql` forward-only migrations、Postgres+R2 composition、compose substrate 与 hosted env/runbook 已落地 | 平台设计已有 real Postgres+MinIO 实证 | §12.7 | 保留 SQL order/checksum、hard env 与 deploy runbook gate | 已收口 | S4 |
@@ -1108,7 +1112,7 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4
 
 ## 12. 平台架构（S0–S7 与 release/registry closeout 已落地）
 
-本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md`（#390 后不再跟踪）的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-dataplane` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 已交付 public identity、umbrella、跨平台 packageability 与 `v0.1.0` registry release，随后 adapter-only security closeout 已发布同一七包 dispatch graph 的 `v0.1.1` tag/Release。`@byok-sdk/keys` 当时独立为 `0.1.0`，wire 当时是冻结的 v1。wire v2 由 ADR-037 落地，当前 wire 是 v3（K7，`PROTOCOL_VERSION = 3`）；`byok-sdk` umbrella 已于 0.21.0 按 ADR-035 退役。
+本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md`（#390 后不再跟踪）的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-dataplane` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 已交付 public identity、umbrella、跨平台 packageability 与 `v0.1.0` registry release，随后 adapter-only security closeout 已发布同一七包 dispatch graph 的 `v0.1.1` tag/Release。`@byok-sdk/keys` 当时独立为 `0.1.0`，wire 当时是冻结的 v1。wire v2 由 ADR-037 落地，v3 由 K7 落地，当前 wire 是 v4（#925，`PROTOCOL_VERSION = 4`）；`byok-sdk` umbrella 已于 0.21.0 按 ADR-035 退役。
 
 ### 12.1 目标 package graph
 
@@ -1119,7 +1123,7 @@ flowchart TB
   classDef isolated fill:#9a3412,stroke:#fed7aa,stroke-width:2px,color:#fff
   classDef deploy fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
 
-  Protocol(["@byok-sdk/protocol<br/>existing, wire v3"]):::existing
+  Protocol(["@byok-sdk/protocol<br/>existing, wire v4"]):::existing
   Core(["@byok-sdk/core<br/>implemented, consumed by cloud<br/>zod-only, protocol-free, Node-free"]):::existing
   Cloud(["@byok-sdk/cloud<br/>stateless device + board + truth surface<br/>InMemory composition"]):::existing
   CloudPg(["@byok-sdk/cloud-dataplane<br/>Postgres + R2 production composition"]):::existing
@@ -1667,7 +1671,7 @@ sequenceDiagram
 
 “领走即弃”是**游标推过即删**，不是**读到即删**。读到即删会直接打断已冻结的 at-least-once 语义：client 的整套 stall 机制建立在“未 ack 的 seq 会被反复重投”之上（§8.3）。删除的触发器是 client 下次带上来的 cursor，那才是它的持久化 ack。
 
-对 `task.offer` 而言，“成功处理到可 ack”= wire bytes（当前 v3）与本机 task record 已在同一个**本机** transaction durable append，且工作已交给本机 scheduler；**不是**等 agent 跑到终态。cursor 不承担 running-state recovery。
+对 offer 而言，“成功处理到可 ack”= wire bytes（当前 v4）与本机 task record 已在同一个**本机** transaction durable append，且工作已交给本机 scheduler；**不是**等 agent 跑到终态。cursor 不承担 running-state recovery。
 
 | Crash 位置 | 结果 |
 | --- | --- |
@@ -2194,7 +2198,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-020 | 主生产云端 storage composition 为 Postgres + R2；D1 降为可选 adapter | Accepted；部署目标见 ADR-038 决策 3（VPS 为优化与主测试目标，Workers 的 Hyperdrive + R2 继续支持）；D1 adapter 当前未实现 |
 | ADR-021 | 套餐与计费归宿主所有；SDK 只执行版本化数值 entitlement、reservation 与 usage | Accepted；ADR-038 决策 1、2 补充：不计量执行，超出 entitlement 的存储是收费单位 |
 | ADR-022 | quota 满不自动删除 durable user truth；先拒绝新写，并保留删除/导出/扩容路径 | Accepted |
-| ADR-023 | `workspaceHint` 维持 reserved，接线需另立 ADR 与明确 resolver 设计 | Accepted |
+| ADR-023 | `workspaceHint` 维持 reserved，接线需另立 ADR 与明确 resolver 设计 | Accepted；字段随 `task.offer` 在 wire v4（#925）删除 |
 | ADR-024 | R2 object 的 canonical SHA-256 以通过认证的 daemon 声明为权威；cloud `HEAD` 只观测存在性与 size/type | Accepted |
 | ADR-025 | Device、Agent、placement 与 runtime session 分权；fleet 不得复用 runtime/task identity | Accepted；仅由明确 multi-Agent 产品 slice 触发实现 |
 | ADR-026 | 领域词汇冻结为 Tenant / Computer / Installation / Agent / Session / Run / Attempt / Workspace / ResultContext；`deviceId` 语义即 Installation，Computer 留宿主侧 | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
@@ -2205,7 +2209,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-031 | AgentHome / SessionState / Workspace 三分；mutable Workspace 单写者、同 Session Run 串行；backend 只有 plain-directory 与 git-worktree | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`）；ADR-037 保留 Agent-home 单写者 lease，cwd = 用户指定 workspace 或 Agent home；v2 `workspaceRef` 未实现（protocol 无此字段） |
 | ADR-032 | `@byok-sdk/server` 折叠为 cloud domain kernel 的 embedded façade，删除独立协调状态机与旧 transport | Accepted，Supersedes ADR-004（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-033 | `local-first-v1` 为默认数据 policy profile，contentful 进 `shared-observability-v1`；结果事务权威是 `SessionResultCommitter` | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
-| ADR-034 | legacy `task.offer*` / `strictAgentOnly` / 旧 gitWorkspace authority / ambient 选设备在一次 v2 cutover 中删除，无双读双写 | Accepted，Supersedes ADR-002（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+| ADR-034 | legacy `task.offer*` / `strictAgentOnly` / 旧 gitWorkspace authority / ambient 选设备在一次 v2 cutover 中删除，无双读双写 | Accepted，Supersedes ADR-002（详见 `adr-2026-09-03-domain-model-and-authority.md`）；legacy offer 与 `strictAgentOnly` 的删除由 wire v4（#925）执行，gitWorkspace authority 一项仍待裁定 |
 | ADR-035 | 保留 `@byok-sdk/server` 的 self-hosted Node/Hono deployment boundary；无独立能力的 `byok-sdk` umbrella 在另行批准的 breaking cutover 中退出，public artifacts 由 10 降为 9 | Accepted；implemented in 0.21.0（umbrella 删除，同 release `@byok-sdk/testkit` 转 private，public artifacts 实际由 11 降为 9；详见 `adr-2026-09-05-public-package-topology.md`） |
 | ADR-036 | 云端 Generic Agent：Bot 模式每次唤醒 = 新执行（方案 A）；云端模型 key 只由平台持有、BYOK 永远只在本地（每请求 key / 信封加密托管作废）；云端不支持官方 CLI / Keychain / 本地文件 / stdio MCP；云端工具 / 作业调用基于 Durable Objects；byok-sdk 拥有云端 backend，Aiphabee 为首个消费方；Aiphabee chat Workflow 直接替换（无并行 / flag / shadow）；DO 同时承载工具与长作业且保持最简；云端只读数据工具与 skill 加载器 `replay:'safe'`（冻结清单），本地全 unsafe | Accepted（2026-10-03，decided by Aimpact）；`@byok-sdk/cloud-do` 自 0.24.0 起发布，其余切片的落地情况本表未核实；D7 对真相层的约束由 ADR-038 修订（详见 `adr-2026-10-03-cloud-generic-agent.md`） |
 | ADR-037 | 最小 guardrail：删除 `PermissionPolicy`（protocol v2）、MCP readonly/grants、strict MCP、env allowlist 与 key 剥离、egress sanitizer、trusted launch cwd、attestation 与 custody；session 在用户指定 workspace 中以 YOLO 运行，继承用户 agent 配置；SDK 只保留自有不变量 | Accepted（owner 2026-10-07）；implemented in slices 1–5（详见 `adr-2026-10-07-minimal-guardrails.md`） |
@@ -2214,7 +2218,8 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 帐本状态注记（2026-10-13 核对，基线 `b597b93e`）：
 
 - wire v2 随 ADR-037 落地（`PROTOCOL_VERSION = 2`，`packages/protocol/src/version.ts`）；ADR-034 设想的那次 cutover 没有发生。2026-10-16 注：K7（#468）随后把 wire 升到 v3（`PROTOCOL_VERSION = 3`）。
-- ADR-034 列出的删除项尚未执行：legacy `task.offer` / `task.offer_with_toolsets` 仍在 `packages/protocol/src/envelope.ts`，`strictAgentOnly` 仍在 `packages/client/src/daemon/create-daemon.ts`。
+- 2026-10-27 注：wire v4（#925，`PROTOCOL_VERSION = 4`）执行了 ADR-034 的 offer 删除项：`task.offer`、`task.offer_with_toolsets` 及其 sealed 类型从 protocol 删除，每个 offer 都绑定 Agent；`strict-agent-only` flag 删除，`DaemonConfig.strictAgentOnly` 抛 `DaemonConfigFieldRemovedError`；`ByokServer.dispatch` 只接受 `AgentResumeDispatchInput`。同一 cut 删除了 pre-M5 审批路径（`approvalId` 必填、`task.approval_resolved` 成为 baseline、server 不再推断隐式解决）。
+- ADR-034 的 Git workspace authority 一项仍未裁定：`gitWorkspace` 代码与配置仍在 `packages/client/src/daemon/`，只是与 `agentHome` 互斥，而没有 Agent home 的 daemon decline 每个 offer。
 - ADR-028/029/030/033 看不到对应实现：`FeatureRegistry`、`SessionResultCommitter`、`local-first-v1`、`leaseEpoch` 在 `packages/` 源码中没有命中；ADR-028 的 `session.mode` 也没有出现在 protocol 中。
 - `Accepted` 不等于已实现。是否继续执行这些删除与实现，由 owner 决定。
 

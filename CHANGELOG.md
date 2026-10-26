@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+- **Breaking (protocol, client, server, cloud; #925)** — wire major 4. A v3
+  envelope is rejected; there is no v3 reader and no negotiation. Drain,
+  migrate stored receipts, then upgrade server and client together; see
+  [the wire v4 upgrade note](docs/releases/925-wire-v4.md).
+  - Every offer is Agent-bound. `conn.ack`, `task.offer`,
+    `task.offer_with_toolsets`, `task.offer_sealed` and
+    `task.offer_with_toolsets_sealed` are removed, with
+    `ConnAckPayloadSchema`, `TaskOfferPayloadSchema`,
+    `TaskOfferWithToolsetsPayloadSchema` and their payload types and the
+    `strict-agent-only` flag (`STRICT_AGENT_ONLY_CAPABILITY`, also removed
+    from `@byok-sdk/server`). The daemon declines every offer when it has no
+    Agent home. `DaemonConfig.strictAgentOnly` is removed and raises
+    `DaemonConfigFieldRemovedError`; `workspaceRoot` is no longer required.
+    Runtime adapters take the client-owned `RuntimeTaskInput` (exported from
+    `@byok-sdk/client`) instead of the removed wire `TaskOfferPayload`.
+  - `approvalId` is required on `task.await_approval`, `task.approve` and
+    `task.reject`; a decision resolves only the approval it names.
+    `Daemon.approve(taskId, { approvalId })` and
+    `Daemon.reject(taskId, { approvalId, reason? })` require it.
+    `task.approval_resolved` is baseline: the daemon reports every approval it
+    resolves locally, and the `approval_resolved` server flag is gone. The
+    server no longer infers a resolution from later task activity: the
+    `task.approval_resolved_implicit` server event and the `targeted` field of
+    `task.approval_resolved` events are removed, and activity while a task
+    awaits approval leaves it awaiting approval.
+  - `ByokServer.dispatch` takes only `AgentResumeDispatchInput` (`agentRef`
+    and `sessionRef`); `LegacyDispatchInput` is removed. Fresh work uses
+    `executions.submit`.
+  - `@byok-sdk/protocol` adds the one-shot `WIRE_V3_TO_V4_TYPES`,
+    `wireV4TypeOf` and `migrateWireV3Envelope`; `@byok-sdk/cloud` adds
+    `wireV4ReceiptKind`, `migrateWireV3Receipt` and
+    `WireV4ReceiptMigrationError`; `@byok-sdk/cloud-dataplane` adds
+    `migratePostgresReceiptsToWireV4`. They ship in 0.31.x only and are
+    removed in the next minor.
+  - The protocol test alias `byok-protocol-previous` pins 0.30.2, the last v3
+    release, as the rejection oracle. `byok-protocol-floor` (0.27.0) and
+    `published-compat.test.ts` are removed until a v4 release is published.
+
 - **Feature (keys)** — add `@byok-sdk/keys/model-route`, the headless logic
   of a Pi model route page (#986 S2). It loads in a browser: no Node builtins,
   no custody module, no network. `listPiCatalogModels` lists the pinned
