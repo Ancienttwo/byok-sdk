@@ -3,6 +3,7 @@ import { validateJson, type Json } from '@byok-sdk/example-host-execution-core';
 import type { ChannelPort } from '@byok-sdk/example-bot-collaboration/channel';
 import { CONNECTOR_OUTCOME_UNKNOWN } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
+import { SwitchExportedError } from './switch';
 import { checkHomeReadback, homeRequests, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
 import { errorText, HOST_JOB_EXECUTION_UNSUPPORTED, inSchema, lockScope, type DeliveryTimes, type HomeClaim, type HomeStep,
   type HostedCollaborationStore, type HostJobOutcome } from './store';
@@ -139,8 +140,12 @@ export class HostedOutboxSender {
       } catch (error) {
         pass.failed.push({ scope, id, error });
         // A failure to write the wait is a store failure, not a row failure, so it ends the pass. It keeps the step error.
+        // A scope exported since the scan takes no wait either (#975): its row stays as it is, and the pass goes on.
         try { await this.store.deferOutbox(scope, id, this.now, this.backoffMs); }
-        catch (deferError) { throw new AggregateError([deferError, error], errorText(deferError)); }
+        catch (deferError) {
+          if (deferError instanceof SwitchExportedError) continue;
+          throw new AggregateError([deferError, error], errorText(deferError));
+        }
       }
     }
     for (const scope of changed) this.options.changed?.(scope);

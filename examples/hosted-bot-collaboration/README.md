@@ -475,7 +475,8 @@ and the reply checker. `lockScope` refuses to run outside such a transaction, so
 switch steps pass: `exportScope`, `commitSwitch` and `abortSwitch`. The due, routine, submit, reconciliation and outbox
 scans leave an exported scope out. The due and routine backoff writes take no scope lock and do not write to an exported
 scope: the due backoff updates the scope row itself, and the routine backoff first takes a share lock on the scope row,
-so it waits for an export in flight and reads its mark.
+so it waits for an export in flight and reads its mark. An outbox row of a scope exported after the sender's scan is
+reported failed and gets no wait, and the pass goes on with the other scopes.
 
 H reads no tombstone expiry and deletes no tombstone. K4's admission readers do not read the expiry either; K4
 `compact` does, and deletes expired tombstones. Only K4's routine kinds expire (an occurrence intent, a slot, an applied

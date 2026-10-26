@@ -419,6 +419,34 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
       expect(await query(`SELECT retry_at FROM ${table('routine')} WHERE scope = $1`, [storedKey(scope)])).toEqual([{ retry_at: null }]);
     });
 
+    it('goes on with the outbox pass when a scope is exported after the scan, and writes no wait to that scope', async () => {
+      const scope = await plain();
+      await store().beginSwitch(scope, 'device', 'L', 1);
+      await flushProjections();
+      await query(`INSERT INTO ${table('outbox')} (scope, key, ordinal, kind, next_at) SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'home', 0
+        FROM ${table('outbox')} WHERE scope = $1`, [storedKey(scope), homeRowKey(1)]);
+      // A healthy scope whose projection sorts after the exported scope's row.
+      const healthy = await plain();
+      await query(`UPDATE ${table('outbox')} SET next_at = 1 WHERE scope = $1 AND settled_at IS NULL`, [storedKey(healthy)]);
+      await query(`INSERT INTO ${table('outbox')} (scope, key, ordinal, kind, body, next_at) SELECT $1, '"p1"', coalesce(max(ordinal) + 1, 0), 'projection', '{}', 1
+        FROM ${table('outbox')} WHERE scope = $1`, [storedKey(healthy)]);
+      const claimHome = store().claimHome.bind(store());
+      vi.spyOn(store(), 'claimHome').mockImplementationOnce(async (target, ...rest) => {
+        await store().exportScope(target, [{ deviceId: 'device', expectedRevision: 2 }], clock);
+        return claimHome(target, ...rest);
+      });
+      const deliver = vi.fn(async () => {});
+      const homes = { read: vi.fn(), enqueue: vi.fn() };
+      const pass = await new HostedOutboxSender(opened!.pool, store(), { projections: { deliver }, homes: () => homes, now: () => NOW + 86_400_000 }).run();
+      expect(pass.failed).toEqual([{ scope, id: ['home', 1], error: expect.objectContaining({ code: 'switch_exported' }) }]);
+      expect([homes.read, homes.enqueue].map(call => call.mock.calls.length)).toEqual([0, 0]);
+      expect(deliver).toHaveBeenCalled();
+      expect(await query(`SELECT next_at::text FROM ${table('outbox')} WHERE scope = $1 AND key = $2`, [storedKey(scope), homeRowKey(1)]))
+        .toEqual([{ next_at: '0' }]);
+      expect(await query(`SELECT count(*)::int AS n FROM ${table('outbox')} WHERE scope = $1 AND settled_at IS NULL`, [storedKey(healthy)]))
+        .toEqual([{ n: 0 }]);
+    });
+
     it('writes no routine backoff while an export holds the scope row, once that export commits', async () => {
       const { scope } = await populated();
       await store().beginSwitch(scope, 'device', 'L', 1);
