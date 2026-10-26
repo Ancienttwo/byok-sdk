@@ -1,9 +1,10 @@
-import type { TerminalProjectionSelection } from '@byok-sdk/protocol';
+import { checkResultSchema, validateResultOutcome, type TerminalProjectionSelection } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { createPiInputPreparationCompiler, resolvePinnedPiRuntimeIdentity } from '../adapters/pi/input-preparation';
 import { createPreparedToolSurfaceAssembler, fingerprintPreparedToolSurface } from '../daemon/prepared-tool-surface';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { inputPreparationRuntimeIdentityString } from '../input-preparation';
+import { buildPreparedTranscriptMessages } from '../adapters/pi/prepared-request';
 import { AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp';
 
 function selection(required: readonly string[]): TerminalProjectionSelection {
@@ -48,6 +49,39 @@ describe('a prepared SummaryJob is a one-tool submit_result record', () => {
     });
     if (!fingerprinted.ok) throw new Error(fingerprinted.message);
     expect(fingerprinted.fingerprint.toolNames).toEqual([AGENT_RESULT_TOOL_NAME]);
+  });
+
+  it('preserves an admitted root union in the compiled submit_result schema', async () => {
+    const branch = (kind: string, field: string) => ({
+      type: 'object', properties: { kind: { const: kind }, [field]: { type: 'string', maxLength: 64 } },
+      required: ['kind', field], additionalProperties: false,
+    });
+    const schema = { type: 'object', oneOf: [branch('question', 'question'), branch('done', 'summary')] };
+    expect(checkResultSchema(schema).ok).toBe(true);
+    expect(validateResultOutcome(schema, { kind: 'question', question: 'Continue?' }).ok).toBe(true);
+    expect(validateResultOutcome(schema, { kind: 'done', summary: 'Done.' }).ok).toBe(true);
+    expect(validateResultOutcome(schema, { kind: 'question', summary: 'wrong branch' }).ok).toBe(false);
+    const selected = { mode: 'result-document', contract: 'test.union.v1', schema } as TerminalProjectionSelection;
+    const { surface, compiled } = await surfaceFor(selected);
+    expect(surface.tools[0]!.parameters).toEqual(schema);
+    const body = JSON.parse(compiled.requestBody);
+    expect(body.tools).toHaveLength(1);
+    expect(body.tools[0].function.parameters).toEqual(schema);
+    expect(schema).not.toHaveProperty('properties');
+  });
+
+  it.each([null, [], 'invalid', undefined])('rejects explicitly malformed properties: %j', properties => {
+    expect(() => buildPreparedTranscriptMessages({ systemPrompt: '',
+      tools: [{ name: 'tool', description: '', parameters: { type: 'object', properties } }],
+      messages: [{ role: 'user', content: 'test', timestamp: 1 }],
+    } as never)).toThrow('needs a full object parameter schema');
+  });
+
+  it.each([null, [], { type: 'string' }, { oneOf: [{ type: 'object' }] }])('rejects a non-object tool root: %j', parameters => {
+    expect(() => buildPreparedTranscriptMessages({ systemPrompt: '',
+      tools: [{ name: 'tool', description: '', parameters }],
+      messages: [{ role: 'user', content: 'test', timestamp: 1 }],
+    } as never)).toThrow('needs a full object parameter schema');
   });
 
   it('has no tool at all when no result selection is frozen (no extractor path, no implicit tool)', async () => {

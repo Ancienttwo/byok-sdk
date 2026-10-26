@@ -216,9 +216,12 @@ function projectTool(tool: InputPreparationToolV1): Tool {
   if (typeof tool.name !== 'string' || tool.name.trim().length === 0 || typeof tool.description !== 'string') {
     refuse('prepared_transcript_invalid', 'a prepared tool needs a non-empty name and a string description');
   }
+  // Object schemas may define their properties entirely inside union branches.
+  // Preserve that schema verbatim; only validate properties when supplied.
   const parameters = tool.parameters as Record<string, unknown> | null;
   if (parameters === null || typeof parameters !== 'object' || Array.isArray(parameters) || parameters.type !== 'object'
-    || parameters.properties === null || typeof parameters.properties !== 'object' || Array.isArray(parameters.properties)) {
+    || (Object.hasOwn(parameters, 'properties')
+      && (parameters.properties === null || typeof parameters.properties !== 'object' || Array.isArray(parameters.properties)))) {
     refuse('prepared_transcript_invalid', `tool ${JSON.stringify(tool.name)} needs a full object parameter schema`);
   }
   const sampling = (tool as { constrainedSampling?: unknown }).constrainedSampling;
