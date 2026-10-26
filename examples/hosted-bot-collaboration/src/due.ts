@@ -47,8 +47,9 @@ export class HostedDueScheduler {
     let cursor: [number, string] = [-1, ''];
     while (pass.synced < batch) {
       const due = await inSchema(this.pool, this.store.schema, client => client.query<DueRow>(
-        // The text form has its own name: an output column named `due_at` would make ORDER BY sort the text.
-        `SELECT scope, due_at::text AS due FROM scope WHERE due_at <= $1 AND state_version = ANY($3::integer[])
+        // The text form has its own name: an output column named `due_at` would make ORDER BY sort the text. An exported
+        // scope commits no sync (#975), so it is left out.
+        `SELECT scope, due_at::text AS due FROM scope WHERE due_at <= $1 AND state_version = ANY($3::integer[]) AND switch_export IS NULL
           AND (retry_at IS NULL OR retry_at <= $1) AND (due_at, scope) > ($4, $5) ORDER BY due_at, scope LIMIT $2`,
         [now, batch, [...SUPPORTED_STORE_VERSIONS], ...cursor]), true);
       for (const row of due.rows) {
@@ -79,10 +80,11 @@ export class HostedDueScheduler {
 
   /**
    * Keyed on the due time that the scope still has: a store transaction that moved it has cleared `retry_at` and made the
-   * new work due at once, and this write then matches no row.
+   * new work due at once, and this write then matches no row. It takes no scope lock, so the switch fence does not see it:
+   * a scope exported after the scan read it gets no backoff (#975).
    */
   private async backOff(scopeKey: string, dueAt: number, retryAt: number): Promise<void> {
     await inSchema(this.pool, this.store.schema, client =>
-      client.query('UPDATE scope SET retry_at = $3 WHERE scope = $1 AND due_at = $2', [scopeKey, dueAt, retryAt]));
+      client.query('UPDATE scope SET retry_at = $3 WHERE scope = $1 AND due_at = $2 AND switch_export IS NULL', [scopeKey, dueAt, retryAt]));
   }
 }

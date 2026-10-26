@@ -1,6 +1,6 @@
 import type { PoolClient } from 'pg';
-import { applyPlan, auditCalendarError, canonical, DEFAULT_RETRY, hash, nextWake, recordOccurrence, routineCommands, scheduleNext, switchVersion,
-  versionSwitchDue, type FrozenExecutionInput, type HostJobHandler, type Intent, type Json, type LedgerState, type Occurrence, type Routine,
+import { applyPlan, auditCalendarError, canonical, hash, nextWake, recordOccurrence, routineCommands, routineWakeKey, scheduleNext, switchVersion,
+  versionSwitchDue, type FrozenExecutionInput, type RetryPolicy, type HostJobHandler, type Intent, type Json, type LedgerState, type Occurrence, type Routine,
   type RoutineCommands, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import { BOT_ROUTINE, createDefinition, owned, routineCalendar, routineTurn, updateDefinition } from '@byok-sdk/example-bot-collaboration/routines';
 import type { CommandPorts } from '@byok-sdk/example-bot-collaboration/rules/commands';
@@ -16,11 +16,12 @@ export interface RoutineSlice {
   readonly before: Pick<LedgerState, 'routines' | 'occurrences' | 'intents'>;
 }
 type RoutineRow = { id: string; definition: RoutineDefinition; pending: RoutineDefinition | null; lifecycle: Routine['lifecycle'];
-  status: Routine['status']; next_at: string | null; calendar_errors: Routine['calendarErrors'] | null };
+  status: Routine['status']; next_at: string | null; calendar_errors: Routine['calendarErrors'] | null; schedule_retry_at: string | null;
+  schedule_retry_count: number | null; last_error: Routine['lastError'] | null };
 type OccurrenceRow = { key: string; routine_id: string; definition_version: number; trigger_kind: Occurrence['trigger']['kind']; planned_at: string;
   recorded_at: string; next_at: string | null; execution_superseded: boolean; job: { summary?: Json } | null };
 type IntentRow = OccurrenceRow & { intent_key: string; ordinal: string; agent: string; input: FrozenExecutionInput; wait_until: string; tries: number;
-  retry_until: string | null; cancel_reason: Intent['cancelReason'] | null };
+  retry: RetryPolicy; retry_until: string | null; cancel_reason: Intent['cancelReason'] | null };
 
 const OCCURRENCE_COLUMNS = `o.key, o.routine_id, o.definition_version, o.trigger_kind, o.planned_at::text, o.recorded_at::text, o.next_at::text,
   o.execution_superseded, o.job`;
@@ -28,7 +29,6 @@ const OCCURRENCE_COLUMNS = `o.key, o.routine_id, o.definition_version, o.trigger
 const INTENT_OF = `'"occurrence:' || (o.key::json #>> '{}') || '"'`;
 // The occurrence key of a routine intent, so the join uses the occurrence primary key: 'occurrence:' is 11 characters.
 const OCCURRENCE_OF = `'"' || substr(i.key::json #>> '{}', 12) || '"'`;
-const slot = (id: string, version: number, at: number) => `${id}:${version}:${at}`;
 /** The outbox key of the Host job row of occurrence `occurrenceKey` (#793 S14). */
 export const hostJobRowKey = (occurrenceKey: string) => JSON.stringify(['host_job', occurrenceKey]);
 
@@ -38,7 +38,7 @@ function occurrence(row: OccurrenceRow, intentKey?: string): Occurrence {
   // A Host job keeps its tries in its outbox row, so `attempts` here is 0: no K4 routine rule reads it.
   const pending = row.job ? { job: { attempts: 0, ...row.job, ...superseded } } : { hook: superseded };
   return { key: JSON.parse(row.key) as string, routineId, definitionVersion: row.definition_version, trigger: { kind: row.trigger_kind, plannedAt },
-    wakeKey: slot(routineId, row.definition_version, plannedAt), recordedAt: Number(row.recorded_at), nextAt: row.next_at === null ? null : Number(row.next_at),
+    wakeKey: routineWakeKey(routineId, row.definition_version, plannedAt), recordedAt: Number(row.recorded_at), nextAt: row.next_at === null ? null : Number(row.next_at),
     attempts: 0, ...pending, ...(intentKey === undefined ? {} : { intentId: hash(intentKey) }) };
 }
 
@@ -50,26 +50,28 @@ function occurrence(row: OccurrenceRow, intentKey?: string): Occurrence {
 export async function loadSlice(client: PoolClient, scopeKey: string): Promise<RoutineSlice> {
   const state: LedgerState = { version: 1, sequence: 0, scanSequence: 0, intents: {}, executions: {}, routines: {}, occurrences: {}, slots: {},
     outbox: {}, applied: {}, application: {}, scanWake: null };
-  const routines = await client.query<RoutineRow>(`SELECT id, definition, pending, lifecycle, status, next_at::text, calendar_errors FROM routine
-    WHERE scope = $1 ORDER BY ordinal`, [scopeKey]);
+  const routines = await client.query<RoutineRow>(`SELECT id, definition, pending, lifecycle, status, next_at::text, calendar_errors,
+    schedule_retry_at::text, schedule_retry_count, last_error FROM routine WHERE scope = $1 ORDER BY ordinal`, [scopeKey]);
   for (const row of routines.rows) {
     const nextAt = row.next_at === null ? null : Number(row.next_at);
     state.routines[hash(row.definition.id)] = { definition: row.definition, ...(row.pending ? { pending: row.pending } : {}), lifecycle: row.lifecycle,
-      status: row.status, next: nextAt === null ? null : { dedupKey: slot(row.definition.id, row.definition.version, nextAt), availableAt: nextAt },
-      ...(row.calendar_errors ? { calendarErrors: row.calendar_errors } : {}) };
+      status: row.status, next: nextAt === null ? null : { dedupKey: routineWakeKey(row.definition.id, row.definition.version, nextAt), availableAt: nextAt },
+      ...(row.calendar_errors ? { calendarErrors: row.calendar_errors } : {}),
+      ...(row.schedule_retry_at === null ? {} : { scheduleRetryAt: Number(row.schedule_retry_at) }),
+      ...(row.schedule_retry_count === null ? {} : { scheduleRetryCount: row.schedule_retry_count }),
+      ...(row.last_error ? { lastError: row.last_error } : {}) };
   }
   const unpromoted = await client.query<OccurrenceRow>(`SELECT ${OCCURRENCE_COLUMNS} FROM occurrence o WHERE o.scope = $1 AND o.conclusion IS NULL
     AND NOT EXISTS (SELECT 1 FROM intent i WHERE i.scope = o.scope AND i.key = ${INTENT_OF}) ORDER BY o.ordinal`, [scopeKey]);
   for (const row of unpromoted.rows) state.occurrences[JSON.parse(row.key) as string] = occurrence(row);
   const promoted = await client.query<IntentRow>(`SELECT ${OCCURRENCE_COLUMNS}, i.key AS intent_key, i.ordinal::text, i.agent, i.input, i.wait_until::text,
-    i.tries, i.retry_until::text, i.cancel_reason FROM intent i JOIN occurrence o ON o.scope = i.scope AND o.key = ${OCCURRENCE_OF}
+    i.tries, i.retry, i.retry_until::text, i.cancel_reason FROM intent i JOIN occurrence o ON o.scope = i.scope AND o.key = ${OCCURRENCE_OF}
     WHERE i.scope = $1 AND i.source = 'routine' AND i.conclusion IS NULL ORDER BY i.ordinal`, [scopeKey]);
   for (const row of promoted.rows) {
     const key = JSON.parse(row.intent_key) as string, { taskId, ...execution } = row.input;
     state.occurrences[JSON.parse(row.key) as string] = occurrence(row, key);
-    // Only the fields that K4 routine rules read. H has no generations, so a tried row is inflight. `retry` is the K4
-    // default in memory only: H stores no retry policy and never retries.
-    state.intents[hash(key)] = { id: hash(key), key, source: 'routine', execution, waitUntil: Number(row.wait_until), retry: DEFAULT_RETRY, agent: row.agent,
+    // Only the fields that K4 routine rules read. H has no generations, so a tried row is inflight.
+    state.intents[hash(key)] = { id: hash(key), key, source: 'routine', execution, waitUntil: Number(row.wait_until), retry: row.retry, agent: row.agent,
       sequence: Number(row.ordinal), phase: row.tries === 0 ? 'queued' : 'inflight', generation: 0, taskId, notBefore: 0, attempts: row.tries,
       occurrence: JSON.parse(row.key) as string, ...(row.retry_until === null ? {} : { retryUntil: Number(row.retry_until) }),
       ...(row.cancel_reason === null ? {} : { cancelReason: row.cancel_reason }) };
@@ -78,12 +80,15 @@ export async function loadSlice(client: PoolClient, scopeKey: string): Promise<R
 }
 
 const routineColumns = (routine: Routine) => [JSON.stringify(routine.definition), routine.pending ? JSON.stringify(routine.pending) : null,
-  routine.lifecycle, routine.status, routine.next?.availableAt ?? null, routine.calendarErrors?.length ? JSON.stringify(routine.calendarErrors) : null];
+  routine.lifecycle, routine.status, routine.next?.availableAt ?? null, routine.calendarErrors?.length ? JSON.stringify(routine.calendarErrors) : null,
+  routine.scheduleRetryAt ?? null, routine.scheduleRetryCount ?? null, routine.lastError ? JSON.stringify(routine.lastError) : null];
 
 /**
  * Writes the slice diff: routine rows, the superseded flag and the conclusion of an occurrence with no intent, and the
- * `retry_until` and conclusion of loaded intents. The K4 fields with no H reader stay behind: the slice outbox,
- * `attempts`, `slotReplayCount`, `ignoredWakes`, `sequence`, and the conclusion that K4 copies onto a promoted occurrence.
+ * `retry_until` and conclusion of loaded intents. A routine keeps K4's schedule retry fields and `lastError` (#975 D2). The
+ * K4 fields with no H reader stay behind: the slice outbox, `attempts`, `slotReplayCount` (H records each slot once, under
+ * the scope lock, so it has no replays), `ignoredWakes`, `sequence`, and the conclusion that K4 copies onto a promoted
+ * occurrence.
  * A promotion writes its own intent row. Only the scheduler's fire adds an occurrence: `recorded` is its key. A Host job
  * occurrence gets its `host_job` outbox row with it, in place of the K4 `host-job:<key>` row (#793 S14); only the Host job
  * settle writes its summary. The caller holds the scope lock.
@@ -94,18 +99,20 @@ export async function writeSlice(client: PoolClient, scopeKey: string, slice: Ro
   for (const [id, routine] of Object.entries(state.routines)) {
     const { definition, next } = routine;
     // H stores only `next_at`, so the K4 reservation must be the one that `next_at` rebuilds.
-    if (next && (next.payload !== undefined || next.dedupKey !== slot(definition.id, definition.version, next.availableAt))) {
+    if (next && (next.payload !== undefined || next.dedupKey !== routineWakeKey(definition.id, definition.version, next.availableAt))) {
       throw new Error('A routine reservation differs from its stored slot');
     }
     if (definition.hostOccurrence?.type !== BOT_ROUTINE && !definition.hostJob) throw new Error('H runs only bot-routine and Host job routines');
     const prior = before.routines[id];
     if (!prior) {
-      await client.query(`INSERT INTO routine (scope, id, ordinal, definition, pending, lifecycle, status, next_at, calendar_errors)
-        SELECT $1, $2, coalesce(max(ordinal) + 1, 0), $3::json, $4::json, $5, $6, $7, $8::json FROM routine WHERE scope = $1`,
+      await client.query(`INSERT INTO routine (scope, id, ordinal, definition, pending, lifecycle, status, next_at, calendar_errors,
+          schedule_retry_at, schedule_retry_count, last_error)
+        SELECT $1, $2, coalesce(max(ordinal) + 1, 0), $3::json, $4::json, $5, $6, $7, $8::json, $9, $10, $11::json FROM routine WHERE scope = $1`,
       [scopeKey, storedKey(definition.id), ...routineColumns(routine)]);
     } else if (canonical(routineColumns(prior)) !== canonical(routineColumns(routine))) {
       // A moved slot clears the scheduler's backoff (#794 H1). On the right of SET, `next_at` is the old value.
       await client.query(`UPDATE routine SET definition = $3::json, pending = $4::json, lifecycle = $5, status = $6, next_at = $7, calendar_errors = $8::json,
+        schedule_retry_at = $9, schedule_retry_count = $10, last_error = $11::json,
         retry_at = CASE WHEN next_at IS DISTINCT FROM $7 THEN NULL ELSE retry_at END
         WHERE scope = $1 AND id = $2`, [scopeKey, storedKey(definition.id), ...routineColumns(routine)]);
     }

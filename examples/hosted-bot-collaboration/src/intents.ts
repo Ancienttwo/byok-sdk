@@ -1,7 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
-import { agentKey, canonical, fifoHeads, hash, isSealed, promoteOccurrence, queuedExpiry, RetiredIntentIdentityError, SealedDispatchUnavailableError,
+import { agentKey, canonical, fifoHeads, frozenInput, hash, isSealed, promoteOccurrence, queuedExpiry, RetiredIntentIdentityError, SealedDispatchUnavailableError,
   submitFrozen, taskId,
-  type Conclusion, type ExecutionTemplate, type FrozenExecutionInput, type FrozenSubmitPort, type IntentExecution } from '@byok-sdk/example-host-execution-core';
+  type Conclusion, type RetryPolicy, type ExecutionTemplate, type FrozenExecutionInput, type FrozenSubmitPort, type IntentExecution } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';
@@ -26,6 +26,12 @@ export interface IntentFreeze<E extends IntentExecution = IntentExecution> {
 export interface RoutineTimes { retryUntil?: number; conclusion?: Conclusion }
 
 /**
+ * The retry policy of H's own intents: one attempt. K4 opens a new generation only while `attempts < maxAttempts` (K4
+ * `core.ts` reconcile), and `validateRetry` accepts `maxAttempts: 1` with no delays, so K4 reads it as "never retry".
+ */
+const ONE_ATTEMPT: RetryPolicy = { maxAttempts: 1, delaysMs: [], retryFailures: false };
+
+/**
  * Saves one intent with its frozen input and its stable task id, `taskId(key, 0)`. The caller holds the scope lock.
  * A second freeze of the same Turn with the same identity changes nothing; another identity throws, as in K4 `enqueue`.
  * The handler is part of the identity, so a Turn never takes over a Host intent row, and a Host intent never a Turn's.
@@ -41,7 +47,7 @@ export async function freezeIntent<E extends IntentExecution>(client: PoolClient
     throw new Error('A sealed execution must be a routine template occurrence');
   }
   const scopeKey = storedKey(scope), key = storedKey(freeze.key);
-  const input = { ...structuredClone(freeze.execution), taskId: taskId(freeze.key, 0) };
+  const input = frozenInput(freeze.execution, taskId(freeze.key, 0)) as unknown as E & { taskId: string };
   const prior = await client.query<{ source: string; handler: string | null; input: string; wait_until: string }>(
     'SELECT source, handler, input::text AS input, wait_until::text FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
   if (prior.rows[0]) {
@@ -55,10 +61,10 @@ export async function freezeIntent<E extends IntentExecution>(client: PoolClient
   if ((await retiredIntents(client, scopeKey, [freeze.key])).size) throw new RetiredIntentIdentityError();
   // A new intent can create execution, so its device must have an active H binding (#793 D2e).
   await activeBinding(client, scopeKey, freeze.execution.deviceId);
-  await client.query(`INSERT INTO intent (scope, key, task_id, ordinal, agent, source, handler, input, wait_until, submission, retry_until, conclusion)
-    SELECT $1, $2, $3, coalesce(max(ordinal) + 1, 0), $4, $5, $10, $6::json, $7, 'reserved', $8, $9 FROM intent WHERE scope = $1`,
+  await client.query(`INSERT INTO intent (scope, key, task_id, ordinal, agent, source, handler, input, retry, wait_until, submission, retry_until, conclusion)
+    SELECT $1, $2, $3, coalesce(max(ordinal) + 1, 0), $4, $5, $10, $6::json, $11::json, $7, 'reserved', $8, $9 FROM intent WHERE scope = $1`,
   [scopeKey, key, input.taskId, agentKey(scope, freeze.execution), freeze.source, JSON.stringify(input), freeze.waitUntil,
-    routine.retryUntil ?? null, routine.conclusion ?? null, freeze.handler ?? null]);
+    routine.retryUntil ?? null, routine.conclusion ?? null, freeze.handler ?? null, JSON.stringify(ONE_ATTEMPT)]);
   return input;
 }
 
@@ -261,10 +267,10 @@ export class HostedSubmitter {
   async run(): Promise<SubmitPass> {
     // The NOT EXISTS head filter must match K4 fifoHeads, which the claim checks again under the scope lock.
     // A scope of a store version this code does not support is left out before the limit: its rows cannot be
-    // claimed or written, so they must not fill a pass ahead of the healthy scopes.
+    // claimed or written, so they must not fill a pass ahead of the healthy scopes. So is an exported scope (#975).
     const due = await inSchema(this.pool, this.schema, client => client.query<{ scope: string; key: string }>(
       `SELECT i.scope, i.key FROM intent i JOIN scope s ON s.scope = i.scope
-        WHERE s.state_version = ANY($3::integer[]) AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
+        WHERE s.state_version = ANY($3::integer[]) AND s.switch_export IS NULL AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
         AND i.next_at <= $1 AND NOT EXISTS (SELECT 1 FROM intent o WHERE o.scope = i.scope AND o.agent = i.agent
           AND o.conclusion IS NULL AND o.ordinal < i.ordinal)
         ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [this.now(), this.options.batch ?? 100, [...SUPPORTED_STORE_VERSIONS]]), true);
@@ -355,8 +361,9 @@ export class HostedSubmitter {
         // K4 `begin`: a sealed row that was never tried fails before any SDK call when the port has no sealed lane, so it
         // does not hold its agent's queue until `wait_until`. A tried row may have reached the SDK, so it keeps its resubmit.
         if (isSealed(row.input) && !this.options.port(JSON.parse(scopeKey) as string).submitSealed) {
-          await client.query('UPDATE intent SET conclusion = $3, last_error = $4 WHERE scope = $1 AND key = $2',
-            [scopeKey, key, 'failed', new SealedDispatchUnavailableError().message]);
+          // K4 `begin` records the error's code as `preparationError` (#975 D6-2); `last_error` is the submit diagnostic.
+          await client.query('UPDATE intent SET conclusion = $3, preparation_error = $4 WHERE scope = $1 AND key = $2',
+            [scopeKey, key, 'failed', new SealedDispatchUnavailableError().code]);
           await switchDueVersions(client, scopeKey, now);
           return 'concluded';
         }

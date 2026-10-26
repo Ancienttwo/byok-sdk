@@ -27,7 +27,11 @@ CREATE TABLE IF NOT EXISTS scope (
   due_at         bigint  CHECK (due_at >= 0),
   -- The due scheduler's backoff (#794 H1): no pass syncs the scope before this time. It holds only for the due time it
   -- was set on: the write that moves \`due_at\` clears it.
-  retry_at       bigint  CHECK (retry_at >= 0)
+  retry_at       bigint  CHECK (retry_at >= 0),
+  -- The owner switch export of the scope (#975): { digest, exportedAt, devices }, from the export on, also after the
+  -- commit away, so the scope keeps the exported state. While it is set, no transaction that locks the scope commits,
+  -- except the switch steps. NULL: not exported.
+  switch_export  json
 );
 CREATE INDEX IF NOT EXISTS scope_due ON scope (due_at, scope) WHERE due_at IS NOT NULL;
 CREATE TABLE IF NOT EXISTS entity (
@@ -103,6 +107,10 @@ CREATE TABLE IF NOT EXISTS intent (
   retry_until    bigint  CHECK (retry_until >= 0),
   -- The frozen AgentExecutionInput.
   input          json    NOT NULL,
+  -- K4 Intent.retry. H never retries (#793 D2d), so its own rows store K4's one-attempt policy: K4 opens a new
+  -- generation only while attempts < maxAttempts (K4 core.ts reconcile), and validateRetry accepts maxAttempts 1 with
+  -- no delays. An imported row keeps its source policy (#975 D5).
+  retry          json    NOT NULL,
   wait_until     bigint  NOT NULL CHECK (wait_until >= 0),
   submission     text    NOT NULL CHECK (submission IN ('reserved', 'uncertain', 'delivered')),
   -- Submit tries. A row with tries = 0 never reached the SDK. Each try raises it, and every write
@@ -110,8 +118,11 @@ CREATE TABLE IF NOT EXISTS intent (
   tries          integer NOT NULL DEFAULT 0 CHECK (tries >= 0),
   -- The earliest time of the next submit try: a lease while a submitter is in flight, then a backoff.
   next_at        bigint  NOT NULL DEFAULT 0 CHECK (next_at >= 0),
-  -- The last failed submit try, then the last refused terminal of a delivered row: '<code>: <message>' (#955).
+  -- The last failed submit try, then the last refused terminal of a delivered row: '<code>: <message>' (#955). A
+  -- diagnostic only: an owner switch does not move it (#975 D6).
   last_error     text,
+  -- K4 Intent.preparationError: the code of the failure before any SDK call, as a sealed row with no sealed lane.
+  preparation_error text,
   cancel_reason  text    CHECK (cancel_reason IN ('expired', 'cancelled')),
   conclusion     text    CHECK (conclusion IN ('succeeded', 'failed', 'declined', 'cancelled', 'expired', 'superseded')),
   -- K4 Execution.started: the SDK attempt has claimedRuntime or ownerDeviceId.
@@ -169,6 +180,11 @@ CREATE TABLE IF NOT EXISTS routine (
   -- The routine scheduler's backoff after a fenced or failed fire (#794 H1): no pass fires the routine before this time.
   -- It holds only for the slot it was set on: the write that moves \`next_at\` clears it.
   retry_at         bigint  CHECK (retry_at >= 0),
+  -- K4 Routine.scheduleRetryAt, scheduleRetryCount and lastError: K4's pacing of a slot past the SDK's furthest wake.
+  -- The K4 rules that H runs on the routine slice keep them, and lastError is never cleared (#975 D2).
+  schedule_retry_at    bigint  CHECK (schedule_retry_at >= 0),
+  schedule_retry_count integer CHECK (schedule_retry_count >= 1),
+  last_error       json,
   PRIMARY KEY (scope, id),
   UNIQUE (scope, ordinal)
 );

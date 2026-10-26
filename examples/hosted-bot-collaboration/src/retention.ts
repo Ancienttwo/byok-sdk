@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import { hash, time, type Json, type LedgerDumpTombstone } from '@byok-sdk/example-host-execution-core';
+import { hash, occurrenceOfIntentKey, time, type Json, type LedgerDumpTombstone } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { retainRoots, RetentionRefused, type RetentionInput, type RetentionLimits, type RetentionResult,
   type RetentionStore } from '@byok-sdk/example-bot-collaboration/retention';
@@ -34,8 +34,10 @@ export async function acceptedReply(client: PoolClient, scopeKey: string, state:
 /** A kind of K4 `host_retired_identity`, `row` included. */
 type TombstoneKind = LedgerDumpTombstone['kind'];
 /**
- * The tombstones of `kind` among `hashes`. As K4's readers of `row` and `intent` tombstones (`ledger.ts` isRetired and the
- * transaction guard), the expiry is not read here.
+ * The tombstones of `kind` among `hashes`. The expiry is not read, as K4's admission readers do not read it (`ledger.ts`
+ * isRetired and the transaction guard). K4 `compact` does read it, and deletes expired tombstones; only K4's routine
+ * kinds expire (an occurrence intent, a slot, an applied outcome), and H compacts no routine intent and no occurrence.
+ * So H deletes no tombstone, and one it imported with an expiry stays as it is and moves on with that expiry (#975).
  */
 async function retiredHashes(client: PoolClient, scopeKey: string, kind: TombstoneKind, hashes: string[]): Promise<Set<string>> {
   if (!hashes.length) return new Set();
@@ -146,7 +148,7 @@ export async function decideRetention(client: PoolClient, scopeKey: string, stat
   const rootOf = new Map(Object.values(state.turns).map(turn => [turn.id, turn.root]));
   const result = retainRoots(state, input, limits, {
     hasIntent: turnId => intents.has(storedKey(turnId)),
-    occurrenceOpen: turnId => openOccurrences.has(turnId.slice('occurrence:'.length)),
+    occurrenceOpen: turnId => { const key = occurrenceOfIntentKey(turnId); return key !== undefined && openOccurrences.has(key); },
   }, store);
   for (const row of puts.values()) {
     const body = JSON.stringify(row.value);
