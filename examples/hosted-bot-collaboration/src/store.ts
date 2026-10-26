@@ -13,7 +13,7 @@ import { addTurn, stateOf, type Card, type CollaborationState, type Turn } from 
 import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions,
   commandBots, seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { activeBinding, beginSwitch, refusesHomeWrites, switchRefusal, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
+import { activeBinding, beginSwitch, refusesHomeWrites, requireBound, switchRefusal, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { cancelIntent, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
@@ -281,7 +281,8 @@ export class HostedCollaborationStore {
    *
    * With `requireBinding` (the command entry's commits, #793 S10), a new commit also checks, under the scope lock, that each
    * Bot of the work that the commit added (see `addedDevices`) runs on a device with an active H binding, and throws
-   * `DeviceBindingError` otherwise, so the commit rolls back. It reads what the K8 rule produced, so H keeps no copy of the
+   * `DeviceBindingError` otherwise, so the commit rolls back. A frozen device passes that check: only the admission refuses
+   * the freeze, so H and L refuse the same commands. It reads what the K8 rule produced, so H keeps no copy of the
    * mention and seat selection.
    */
   commit(scope: string, request: CommitRequest<Command>, clock: () => number, options: { requireBinding?: boolean } = {}): Promise<CommitResult> {
@@ -379,7 +380,7 @@ export class HostedCollaborationStore {
       const result = await commitStored(client, scope, state, request, base, this.channel);
       // A new commit moves the head by 1. A replay returns its first result and writes nothing.
       if (result.revision !== head + 1) return { value: result, outbox: [] };
-      if (before) for (const deviceId of before()) await activeBinding(client, key, deviceId);
+      if (before) await requireBound(client, key, before());
       const value = result.disposition.outcome === 'accepted'
         ? result.disposition.value as { target?: string; admitted?: boolean; deliver?: boolean } | undefined : undefined;
       if (request.command.kind === 'cancel_turn' && value?.admitted && value.target !== undefined) {

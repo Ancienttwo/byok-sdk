@@ -596,8 +596,10 @@
   or owned by L (`DeviceBindingError` with `mode`). This covers the command
   entry, the store's `commit` and the inbound channel. A decision and a room
   input that mentions no Bot of the frozen device are now refused too; the
-  inbound fence that checked only the work a commit added is gone. H's
-  delegation settlement now counts a start of any generation of an imported
+  inbound fence that checked only the work a commit added is gone, and the
+  command entry's binding check of added work no longer refuses a frozen
+  device, so an abandoned delegation commits during a freeze, as on L, and
+  the sync holds its reply Turn. H's delegation settlement now counts a start of any generation of an imported
   intent, as K8 `intentFacts`. No SDK or wire change.
 
 ## 0.30.1 — 2026-10-24 (published)

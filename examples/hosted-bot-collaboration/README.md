@@ -287,9 +287,10 @@ The entry commits with `requireBinding`: under the scope lock, after the K8 rule
 added (a Turn that is not concluded, a room seat, a new input batch or an input added to an open one) must run on a
 device with an active H binding, or the commit throws `DeviceBindingError` and rolls back. A cancel commits on a revoked
 device: the Turn that it seals from an open batch is concluded. It reads what the rule produced, so H keeps no copy of the mention and seat selection.
-This check comes after the admission that every owner command gets, as L's (see Topology switch). It refuses a frozen
-device for work that K8 `commandBots` does not name too, such as the reply Turn of a delegation cancel, which L takes
-during a freeze. An error of the sync
+This check comes after the admission that every owner command gets, as L's (see Topology switch), and a device frozen
+for an owner switch passes it: only the admission refuses the freeze, so H and L refuse the same commands. Work that a
+command the admission does not name adds on a frozen device, such as the reply Turn of an abandoned delegation, is held
+by the sync. An error of the sync
 after a commit reaches the caller, as an error of L's pass does: the commit stays.
 
 ## Message consumer
@@ -429,8 +430,8 @@ revoke ends an open switch in the same write, so a revoked device is never left 
 During the freeze:
 
 - every write that can create execution for the device throws `DeviceSwitchingError` (`code: 'device_switching'`, the
-  target and the frozen revision), as L's error with the same code: the command entry, the freeze of an intent (a Host
-  intent too), the submit claim and the read right before the SDK call. The freeze raises the revision, so a submit
+  target and the frozen revision), as L's error with the same code: the freeze of an intent (a Host intent too), the
+  submit claim and the read right before the SDK call. The freeze raises the revision, so a submit
   claimed before it is not made;
 - a Bot routine fire of the device throws it too and writes nothing (the scheduler counts it in `pass.fenced`); the
   slot stays due and fires after an abort;
@@ -438,8 +439,9 @@ During the freeze:
   error while a Bot that K8 `commandBots` names runs on the device, as L's `admitCommand` (#975): the Bot of `input` and of
   owner input, every Bot member of the room for room input, and the Bot of the question's or card's Turn for `answer` and
   `decide`. A decision and a room input that mentions no Bot of the device refuse too, though their work starts later in
-  the sync. The check runs after the replay lookup, so an exact replay returns its first result. Input for an unbound or
-  revoked device is still taken and held (#956);
+  the sync. The check runs after the replay lookup, so an exact replay returns its first result. Through the store's
+  `commit` and the inbound channel entry, input for an unbound or revoked device is still taken and held (#956); the
+  command entry refuses it (`requireBinding`);
 - the sync holds a Turn of the device's Bots with K8's `switching` refusal: `held: 'device_switching'` and a
   `held-switching:<turnId>` projection. An abort writes the due time 0, so the next sync freezes it;
 - H sends no new Agent home write to the device, as L. A write that was never sent waits; a sent one is still read back,
@@ -960,8 +962,8 @@ three and runs these suites.
 - The topology switch tests (`switch.test.ts`, #957) cover each step's revision checks and refusals, a revoke during a
   switch, the typed refusal of each entry during the freeze and after a commit to L, the refusal of each command that
   K8 `commandBots` says reaches the frozen device (an answer, a decision and room input that mentions only another
-  device's Bot), the replay of an answer accepted before the freeze, a Turn held during the freeze and frozen after an abort, a submit claimed before the freeze, the drain and cancel with a
-  tried intent that holds the commit until it concludes, the cancel of a Host intent with no Turn, a routine fire during
+  device's Bot), the replay of an answer accepted before the freeze, a Turn held during the freeze and frozen after an
+  abort, a submit claimed before the freeze, the drain and cancel with a tried intent that holds the commit until it concludes, the cancel of a Host intent with no Turn, a routine fire during
   the freeze and after an abort, a new store that reads the freeze, and home flushes during the switch. Each commit away
   exports the scope first and passes the export's digest.
 - The switch export tests (`switch-export.test.ts`, #975) move a scope that holds a retained and compacted Turn, a Bot
@@ -1010,7 +1012,8 @@ three and runs these suites.
 - The settlement tests build each delegation through the product path (an outcome `delegate`, then a sync), and cover
   each verdict, the units, `target_archived`, the timers, the late terminal audit, the Main Bot cancel in the terminal
   transaction, a rollback, the settlement facts (with the earlier generation of an imported intent), a verdict at the
-  sync of a reported scope, and the store's refusal of invalid delegation timers.
+  sync of a reported scope, the store's refusal of invalid delegation timers, and an abandon during a freeze, which
+  commits through the command entry while the sync holds its reply Turn.
 - The K8 reply vectors (`replyVectors`) run on the store, as on L: a reply body that the Host holds answers, after a
   pending read and after a read that throws; no message and a refused message fail with `no_reply`; a held message
   holds; a pending read checks again with backoff, not before its time, and becomes `uncertain` after

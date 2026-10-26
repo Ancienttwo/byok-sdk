@@ -67,6 +67,20 @@ export async function activeBinding(client: PoolClient, scopeKey: string, device
 }
 
 /**
+ * The command entry's check of the work that a commit added (#793 S10): throws `DeviceBindingError` for the first of these
+ * devices whose binding is not active in mode H. A device frozen for an owner switch passes: the freeze refuses through the
+ * admission (`switchRefusal`), as on L, and the sync holds the work that a command the admission does not name added.
+ */
+export async function requireBound(client: PoolClient, scopeKey: string, deviceIds: readonly string[]): Promise<void> {
+  if (!deviceIds.length) return;
+  const rows = await readRows(client, scopeKey, deviceIds);
+  for (const deviceId of deviceIds) {
+    const refusal = refusalOf(rows.get(deviceId));
+    if (refusal && refusal !== 'switching') throw new DeviceBindingError(deviceId, refusal);
+  }
+}
+
+/**
  * L's admission of a new command on H (K8 host.ts `admitCommand`, #957, #975): the refusal of the first of these devices
  * that is frozen for an owner switch (`DeviceSwitchingError`) or whose row names mode L, the other Host's
  * (`DeviceBindingError` with `mode`), read in one query. A device with no row, a revoked one and one bound to H pass: the
