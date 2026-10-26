@@ -443,6 +443,32 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
       });
     });
 
+    it('records the first draft output once, only for the claiming device after the claim', async () => {
+      await withCloudComposition(factory, async (handle) => {
+        const { stores } = handle;
+        const taskId = 'task-draft-output';
+        const output = { taskId, deviceId: 'device-1' };
+        expect(await stores.tasks.recordFirstOutput(TENANT_A, output)).toBeUndefined();
+        expect(await stores.tasks.get(TENANT_A, taskId)).toBeUndefined();
+
+        await stores.tasks.open(TENANT_A, output);
+        expect(await stores.tasks.recordFirstOutput(TENANT_A, output)).not.toHaveProperty('firstOutputAt');
+        await stores.tasks.claim(TENANT_A, output);
+        expect(await stores.tasks.recordFirstOutput(TENANT_A, { taskId, deviceId: 'device-2' })).not.toHaveProperty('firstOutputAt');
+        expect(await stores.tasks.recordFirstOutput(TENANT_B, output)).toBeUndefined();
+
+        await handle.advanceTime(1_000);
+        const firstOutputAt = handle.now();
+        expect(await stores.tasks.recordFirstOutput(TENANT_A, output)).toMatchObject({ firstOutputAt });
+        await handle.advanceTime(1_000);
+        expect(await stores.tasks.recordFirstOutput(TENANT_A, output)).toMatchObject({ firstOutputAt });
+        await expect(stores.tasks.reserveAgentMessage(TENANT_A, {
+          ...output, messageId: '10000000-0000-4000-8000-000000000982', payloadBody: '{"m":1}',
+        })).resolves.toBe('reserved');
+        expect(await stores.tasks.get(TENANT_A, taskId)).toMatchObject({ firstOutputAt });
+      });
+    });
+
     it('stamps terminalAt when cancellation ends an unclaimed attempt, and at the terminal of a claimed one', async () => {
       await withCloudComposition(factory, async (handle) => {
         const { stores } = handle;

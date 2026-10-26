@@ -255,6 +255,20 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     }
   }
 
+  async recordFirstOutput(
+    tenant: TenantId, input: { readonly taskId: string; readonly deviceId: string },
+  ): Promise<TaskAttempt | undefined> {
+    const stamped = await this.#pool.query<TaskRow>(
+      `UPDATE task SET first_output_at = $4
+        WHERE tenant_id = $1 AND task_id = $2 AND device_id = $3
+          AND owner_device_id IS NOT NULL AND first_output_at IS NULL
+      RETURNING ${TASK_SELECT_COLUMNS}`,
+      [tenant, input.taskId, input.deviceId, this.#now()],
+    );
+    const row = stamped.rows[0];
+    return row === undefined ? this.get(tenant, input.taskId) : taskRowToAttempt(row);
+  }
+
   async readTaskAgentMessage(
     tenant: TenantId, input: { readonly taskId: string; readonly deviceId: string },
   ): Promise<AgentMessageAdmission | undefined> {

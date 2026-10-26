@@ -580,6 +580,16 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
     });
   }
 
+  recordFirstOutput(tenant: TenantId, input: { taskId: string; deviceId: string }): Promise<TaskAttempt | undefined> {
+    return this.coordinator.run((db) => {
+      db.prepare(
+        `UPDATE task_attempt SET first_output_at = ?
+         WHERE tenant_id = ? AND task_id = ? AND device_id = ? AND owner_device_id IS NOT NULL AND first_output_at IS NULL`,
+      ).run(this.#now(), tenant, input.taskId, input.deviceId);
+      return readTask(db, tenant, input.taskId);
+    });
+  }
+
   readTaskAgentMessage(
     tenant: TenantId, input: { taskId: string; deviceId: string },
   ): Promise<AgentMessageAdmission | undefined> {

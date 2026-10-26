@@ -125,6 +125,24 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
     });
   }
 
+  async recordFirstOutput(
+    tenant: TenantId, input: { readonly taskId: string; readonly deviceId: string },
+  ): Promise<TaskAttempt | undefined> {
+    const key = tenantKey(tenant, input.taskId);
+    return this.#state.mutate(key, () => {
+      const attempt = this.#state.attempts.get(key);
+      if (
+        attempt === undefined ||
+        attempt.deviceId !== input.deviceId ||
+        attempt.ownerDeviceId === undefined ||
+        attempt.firstOutputAt !== undefined
+      ) return attempt;
+      const stamped: TaskAttempt = { ...attempt, firstOutputAt: this.#now() };
+      this.#state.attempts.set(key, stamped);
+      return stamped;
+    });
+  }
+
   async readTaskAgentMessage(
     tenant: TenantId, input: { readonly taskId: string; readonly deviceId: string },
   ): Promise<AgentMessageAdmission | undefined> {

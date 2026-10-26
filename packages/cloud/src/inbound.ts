@@ -630,13 +630,15 @@ async function applyInboundGate(
       || await frozenOfferSealing(stores, deviceId, envelope.task_id, binding.attempt.agentRef) !== undefined) {
       return refuse('agent_message_draft_invalid');
     }
-    await stores.agentMessageDraft.apply({ ...parsed.data, taskId: envelope.task_id, deviceId,
+    const applied = await stores.agentMessageDraft.apply({ ...parsed.data, taskId: envelope.task_id, deviceId,
       maxBytes: binding.frozen.requirement.maxBytes, now });
     // A terminal or publish may commit while this ephemeral write is in flight.
     // Recheck after apply so that lifecycle deletion cannot leave a late row.
     if (await stores.receipts.get(terminalReceiptKey(envelope.task_id)) !== undefined
       || await stores.tasks.readTaskAgentMessage({ taskId: envelope.task_id, deviceId }) !== undefined) {
       await stores.agentMessageDraft.delete(envelope.task_id);
+    } else if (applied === 'applied' && parsed.data.text.length > 0) {
+      await stores.tasks.recordFirstOutput({ taskId: envelope.task_id, deviceId });
     }
     return completeInboundEnvelope(stores, deviceId, envelope.id, parsed.data.agentRef);
   }

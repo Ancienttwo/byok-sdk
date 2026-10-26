@@ -25,6 +25,38 @@ describe('task attempt phase instants (#980)', () => {
     expect(claimed).not.toHaveProperty('offeredAt');
   });
 
+  it('stamps firstOutputAt at the first non-empty draft after the claim, never before it', async () => {
+    const clock = createMutableClock(new Date('2026-10-27T00:00:00.000Z'));
+    const harness = createHarness({ clock, agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+    const device = await harness.pairDevice(TENANT_A);
+    const taskId = 'draft-is-output';
+    const agentRef = { agentId: 'draft-agent', profileRevision: '1' };
+    await harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId, deviceId: device.deviceId, agentRef });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['agent-message-egress'] });
+    await harness.stores.receipts.record(TENANT_A, { key: `agent-message-offer:${device.deviceId}:${taskId}`,
+      body: JSON.stringify({ agentRef, requirement: { mode: 'required', contract: 'draft.v1', contentType: 'text/plain', maxBytes: 64 },
+        context: { destinationBinding: 'chat' } }) });
+    const stores = tenantStoresFor({ kind: 'control-plane', tenantId: TENANT_A, operatorId: 'test' },
+      { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake });
+    const draft = (text: string, revision: number) => handleInboundEnvelope(stores, device.deviceId,
+      createEnvelope('agent.message.draft', { agentRef, revision, offset: 0, text }, { taskId }), undefined,
+      async () => ({ outcome: 'accepted' }), undefined, clock.now().toISOString());
+    const attempt = () => harness.cloud.readTaskAttempt(TENANT_A, taskId);
+
+    expect(await draft('before claim', 1)).toEqual({ outcome: 'accepted' });
+    expect(await attempt()).not.toHaveProperty('firstOutputAt');
+    await harness.stores.tasks.claim(TENANT_A, { taskId, deviceId: device.deviceId });
+    clock.advance(1_000);
+    expect(await draft('', 2)).toEqual({ outcome: 'accepted' });
+    expect(await attempt()).not.toHaveProperty('firstOutputAt');
+    clock.advance(1_000);
+    expect(await draft('hello', 3)).toEqual({ outcome: 'accepted' });
+    expect(await attempt()).toMatchObject({ firstOutputAt: '2026-10-27T00:00:02.000Z' });
+    clock.advance(1_000);
+    expect(await draft('hello again', 4)).toEqual({ outcome: 'accepted' });
+    expect(await attempt()).toMatchObject({ firstOutputAt: '2026-10-27T00:00:02.000Z' });
+  });
+
   it('does not count task.progress as output', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
