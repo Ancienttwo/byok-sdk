@@ -438,7 +438,7 @@ During the freeze:
   with no new enqueue, and the commit waits for its terminal readback. H marks a write `sent` (K8 `HomeOperation.sent`)
   in the transaction that plans its first enqueue.
 
-After a commit to L, the same writes refuse with `DeviceBindingError` and `mode`. A row names mode L only on a scope
+After a commit to L, the same writes refuse with `DeviceBindingError` and `mode`. A row that is not revoked names mode L only on a scope
 that the switch fence refuses (exported, or an uncommitted import), so no home flush to it commits. A switch away from H
 moves the whole scope to L with the state export below, and its commit needs the new owner's receipt.
 

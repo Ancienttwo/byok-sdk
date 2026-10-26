@@ -887,8 +887,8 @@ export class HostedCollaborationStore {
    * lock. K8 `homeHead` decides, as L's `flushHomes`: the operation must be its Bot's oldest pending one, and the Bot must have
    * no intent row with no conclusion. A pending operation that is not a head waits `backoffMs` (never earlier). A head takes
    * a lease (`next_at = now + leaseMs`); the entity is the fence, so `tries` stays 0. A row whose operation is gone or
-   * settled settles with no call. While the operation's device refuses new home writes (#957: a switch is open, or its row
-   * names mode L), an operation that was never sent waits `backoffMs` too, and a sent one is read back with no new enqueue
+   * settled settles with no call. While the operation's device refuses new home writes (#957: its switch away from H is
+   * open), an operation that was never sent waits `backoffMs` too, and a sent one is read back with no new enqueue
    * (`settleHome`), as L's `flushHomes` does.
    */
   claimHome(scope: string, sequence: number, clock: () => number, leaseMs: number, backoffMs: number): Promise<HomeClaim> {

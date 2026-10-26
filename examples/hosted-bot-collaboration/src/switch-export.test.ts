@@ -185,6 +185,7 @@ const entries: Array<[string, (scope: string, digest: string) => Promise<unknown
   ['an outbox deferral', scope => store().deferOutbox(scope, ['card', 'c1'], clock, 1000), 'exported'],
   ['a device revoke', scope => store().revokeDevice(scope, 'device', NOW), 'exported'],
   ['a bind of a new device', scope => store().bindDevice(scope, 'device-3'), 'exported'],
+  ['a switch of another H device', scope => store().beginSwitch(scope, 'device-2', 'L', 1), 'exported'],
   ['a Host intent on a device that hosts no Bot', scope => store().enqueueHostIntent(scope, { key: 'h3', source: 'user', execution: template('device-2'),
     waitUntil: NOW + 60_000 }, 'job', clock), 'exported'],
   ['the command entry', scope => entry().cancelTurn({ scope, principal: { kind: 'human', id: 'owner' } }, 't1'), 'exported'],
@@ -602,6 +603,10 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch import on real Postgres (#
         { key: JSON.stringify(routineTurn), generation: 0, task_id: taskId(routineTurn, 0) }]);
     await store().commitImport(target, document.manifest.digest);
     const kept = await store().dump(target);
+    // A replay of the Host intent's freeze finds the imported row of generation 2 and changes nothing, as K4 enqueue does.
+    expect(await store().enqueueHostIntent(target, { key: 'h1', source: 'user', execution: template('device'), waitUntil: NOW + 60_000 }, 'job', clock))
+      .toEqual({ key: 'h1', taskId: taskId('h1', 2), conclusion: 'failed' });
+    expect(await store().dump(target)).toBe(kept);
     // K4's order for an earlier task: the binding, its receipt (the accepted reply of that task), else stale_generation.
     expect(await consumer().consume(await generationMessage(target, routineTurn, 0, 'm2'))).toEqual({ outcome: 'accepted' });
     expect(await consumer().consume(await generationMessage(target, routineTurn, 0, 'm3'))).toEqual({ outcome: 'refused', reasonCode: 'message_conflict' });
@@ -714,6 +719,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch import on real Postgres (#
       // The import binds only the export's devices.
       'a Host intent on a device that hosts no Bot': expect.objectContaining({ name: 'DeviceBindingError', reason: 'unbound', deviceId: 'device-2' }),
       'a drain': expect.objectContaining({ name: 'DeviceSwitchRefusedError', reason: 'not_switching' }),
+      'a switch of another H device': expect.objectContaining({ name: 'DeviceSwitchRefusedError', reason: 'same_mode', deviceId: 'device-2' }),
     };
     it.each(entries)('%s', async (name, run) => {
       const scope = await plain();
