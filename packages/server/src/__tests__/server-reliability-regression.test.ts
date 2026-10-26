@@ -52,6 +52,7 @@ async function cloudWithFirstMailboxAppendFailure() {
     productId: PRODUCT_ID, deviceId: 'device-a', deviceName: 'mailbox-retry-fixture',
     devicePublicKey: 'fixture-key', proofKeyId: 'fixture-proof', proofKeyEpoch: 1,
   });
+  await composition.stores.devices.recordCapabilities(TENANT, { deviceId: 'device-a', capabilities: ['agent-home-contract'] });
   let fail = true;
   const mailbox: MailboxStore = {
     append: async (tenant, input) => {
@@ -103,12 +104,12 @@ describe('issues #141-#144 server reliability regressions', () => {
     return { byok: instance, daemon };
   }
 
-  it('#141 reserves a legacy attempt before mailbox visibility and retries one stable offer only', async () => {
+  it('#141 reserves an Agent attempt before mailbox visibility and retries one stable offer only', async () => {
     const { cloud, base } = await cloudWithFirstMailboxAppendFailure();
     const taskId = 'task-legacy-retry';
-    const input = { taskId, payload: { instruction: 'first body' } };
+    const input = { taskId, payload: { ...TEST_AGENT_DISPATCH, instruction: 'first body' } };
 
-    await expect(cloud.enqueueOffer(TENANT, 'device-a', input)).rejects.toMatchObject({
+    await expect(cloud.enqueueAgentOffer(TENANT, 'device-a', input)).rejects.toMatchObject({
       code: 'task_offer_append_refused',
       taskId,
       cause: new Error('injected mailbox append failure'),
@@ -116,19 +117,19 @@ describe('issues #141-#144 server reliability regressions', () => {
     expect(await cloud.readTaskAttempt(TENANT, taskId)).toMatchObject({ taskId, deviceId: 'device-a' });
 
     await expect(
-      cloud.enqueueOffer(TENANT, 'device-a', {
+      cloud.enqueueAgentOffer(TENANT, 'device-a', {
         taskId,
-        payload: { instruction: 'changed before retry' },
+        payload: { ...input.payload, instruction: 'changed before retry' },
       }),
     ).rejects.toMatchObject({ code: 'coordination_input_invalid' });
 
-    await cloud.enqueueOffer(TENANT, 'device-a', input);
+    await cloud.enqueueAgentOffer(TENANT, 'device-a', input);
     await expect(
-      cloud.enqueueOffer(TENANT, 'device-a', {
+      cloud.enqueueAgentOffer(TENANT, 'device-a', {
         taskId,
-        payload: { instruction: 'changed body' },
+        payload: { ...input.payload, instruction: 'changed body' },
       }),
-    ).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    ).rejects.toMatchObject({ code: 'agent_task_already_exists' });
 
     expect((await base.mailbox.readAfter(TENANT, { deviceId: 'device-a', afterSeq: 0 })).messages).toHaveLength(1);
   });
