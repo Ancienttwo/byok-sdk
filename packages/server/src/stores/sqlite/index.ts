@@ -78,6 +78,7 @@ const DEFAULT_OBJECT_LIST_LIMIT = 100;
 const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
 const SQLITE_SCHEMA_VERSION = '5';
+const TASK_PHASE_COLUMNS = ['offered_at', 'claimed_at', 'first_output_at', 'terminal_at'] as const;
 
 import { SqliteWakeStore, WAKE_SCHEMA } from './wakes';
 import type { WakeStore } from '../../wakes/store';
@@ -138,6 +139,10 @@ CREATE TABLE IF NOT EXISTS task_attempt (
   cancellation_reason TEXT,
   cancellation_message_id TEXT,
   updated_at TEXT NOT NULL,
+  offered_at TEXT,
+  claimed_at TEXT,
+  first_output_at TEXT,
+  terminal_at TEXT,
   PRIMARY KEY (tenant_id, task_id)
 );
 CREATE TABLE IF NOT EXISTS agent_message_admission (
@@ -299,6 +304,14 @@ class SqliteCoordinator {
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
         }
         assertProjection('claimed_harness_id FROM task_attempt');
+        // #980 phase instants: added on open to a file from before them, with
+        // no backfill — a NULL instant was never recorded.
+        const taskColumns = new Set((this.db.prepare('PRAGMA table_info(task_attempt)').all() as unknown as { name: string }[])
+          .map((column) => column.name));
+        for (const column of TASK_PHASE_COLUMNS) {
+          if (!taskColumns.has(column)) this.db.exec(`ALTER TABLE task_attempt ADD COLUMN ${column} TEXT`);
+        }
+        assertProjection(`${TASK_PHASE_COLUMNS.join(', ')} FROM task_attempt`);
         assertProjection('tenant_id, wake_id, dedup_key, available_at, payload, state, due_at, retry_at, deliveries, last_error, done_at FROM wake');
         if (wake === undefined && this.db.prepare("SELECT 1 FROM wake WHERE state = 'queued' LIMIT 1").get() !== undefined) {
           throw new WakeHookMissingError();
@@ -411,6 +424,10 @@ interface TaskRow extends Record<string, unknown> {
   cancellation_requested_at: string | null;
   cancellation_reason: string | null;
   cancellation_message_id: string | null;
+  offered_at: string | null;
+  claimed_at: string | null;
+  first_output_at: string | null;
+  terminal_at: string | null;
   updated_at: string;
 }
 
@@ -436,6 +453,10 @@ function taskRow(row: TaskRow): TaskAttempt {
             ...(row.cancellation_reason === null ? {} : { reason: row.cancellation_reason }),
           },
         }),
+    ...(row.offered_at === null ? {} : { offeredAt: row.offered_at }),
+    ...(row.claimed_at === null ? {} : { claimedAt: row.claimed_at }),
+    ...(row.first_output_at === null ? {} : { firstOutputAt: row.first_output_at }),
+    ...(row.terminal_at === null ? {} : { terminalAt: row.terminal_at }),
     updatedAt: row.updated_at,
   };
 }
@@ -499,11 +520,12 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
 
   open(tenant: TenantId, input: { taskId: string; deviceId: string; agentRef?: AgentRef }): Promise<TaskAttempt> {
     return this.coordinator.run((db) => {
+      const now = this.#now();
       db.prepare(
         `INSERT OR IGNORE INTO task_attempt
-         (tenant_id, task_id, device_id, agent_ref_json, status, updated_at)
-         VALUES (?, ?, ?, ?, 'offered', ?)`,
-      ).run(tenant, input.taskId, input.deviceId, input.agentRef === undefined ? null : JSON.stringify(input.agentRef), this.#now());
+         (tenant_id, task_id, device_id, agent_ref_json, status, offered_at, updated_at)
+         VALUES (?, ?, ?, ?, 'offered', ?, ?)`,
+      ).run(tenant, input.taskId, input.deviceId, input.agentRef === undefined ? null : JSON.stringify(input.agentRef), now, now);
       return readTask(db, tenant, input.taskId)!;
     });
   }
@@ -513,11 +535,12 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
     input: { taskId: string; deviceId: string; agentRef: AgentRef },
   ): Promise<{ attempt: TaskAttempt; created: boolean }> {
     return this.coordinator.run((db) => {
+      const now = this.#now();
       const result = db.prepare(
         `INSERT OR IGNORE INTO task_attempt
-         (tenant_id, task_id, device_id, agent_ref_json, status, updated_at)
-         VALUES (?, ?, ?, ?, 'offered', ?)`,
-      ).run(tenant, input.taskId, input.deviceId, JSON.stringify(input.agentRef), this.#now());
+         (tenant_id, task_id, device_id, agent_ref_json, status, offered_at, updated_at)
+         VALUES (?, ?, ?, ?, 'offered', ?, ?)`,
+      ).run(tenant, input.taskId, input.deviceId, JSON.stringify(input.agentRef), now, now);
       return { attempt: readTask(db, tenant, input.taskId)!, created: Number(result.changes) === 1 };
     });
   }
@@ -526,7 +549,7 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
     tenant: TenantId,
     input: { taskId: string; deviceId: string; messageId: string; payloadBody: string },
   ): Promise<'reserved' | 'pending' | 'rejected'> {
-    return this.coordinator.run((db) => {
+    return this.coordinator.transaction((db) => {
       const attempt = readTask(db, tenant, input.taskId);
       if (attempt === undefined || attempt.deviceId !== input.deviceId) return 'rejected';
       const existing = db.prepare(
@@ -548,6 +571,11 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
         `INSERT INTO agent_message_admission (tenant_id, task_id, message_id, payload_body)
          VALUES (?, ?, ?, ?)`,
       ).run(tenant, input.taskId, input.messageId, input.payloadBody);
+      // The first output after the claim lands in the reservation's transaction.
+      db.prepare(
+        `UPDATE task_attempt SET first_output_at = ?
+         WHERE tenant_id = ? AND task_id = ? AND owner_device_id IS NOT NULL AND first_output_at IS NULL`,
+      ).run(this.#now(), tenant, input.taskId);
       return 'reserved';
     });
   }
@@ -665,9 +693,10 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
     input: { taskId: string; deviceId: string; runtime?: RuntimeId; harnessId?: string; capabilities?: RuntimeCapabilities },
   ): Promise<TaskAttempt | undefined> {
     return this.coordinator.run((db) => {
+      const now = this.#now();
       db.prepare(
         `UPDATE task_attempt SET owner_device_id = ?, claimed_runtime = ?, claimed_harness_id = ?, claimed_runtime_capabilities_json = ?,
-          status = 'claimed', updated_at = ?
+          status = 'claimed', claimed_at = ?, updated_at = ?
          WHERE tenant_id = ? AND task_id = ? AND device_id = ? AND owner_device_id IS NULL
            AND cancellation_requested_at IS NULL AND status = 'offered'`,
       ).run(
@@ -675,7 +704,8 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
         input.runtime ?? null,
         input.harnessId ?? null,
         input.capabilities === undefined ? null : JSON.stringify(input.capabilities),
-        this.#now(),
+        now,
+        now,
         tenant,
         input.taskId,
         input.deviceId,
@@ -697,10 +727,12 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
       } else if (['complete', 'failed', 'cancelled'].includes(existing.status)) {
         return existing;
       }
+      const now = this.#now();
       db.prepare(
-        `UPDATE task_attempt SET status = ?, terminal_cause = ?, updated_at = ?
+        `UPDATE task_attempt SET status = ?, terminal_cause = ?, terminal_at = COALESCE(terminal_at, ?), updated_at = ?
          WHERE tenant_id = ? AND task_id = ?`,
-      ).run(input.status, input.terminalCause ?? null, this.#now(), tenant, input.taskId);
+      ).run(input.status, input.terminalCause ?? null, ['complete', 'failed', 'cancelled'].includes(input.status) ? now : null, now,
+        tenant, input.taskId);
       return readTask(db, tenant, input.taskId);
     });
   }
@@ -988,9 +1020,10 @@ export class SqliteTaskCancellationStore implements TaskCancellationStore {
       db.prepare(
         `UPDATE task_attempt SET
            status = CASE WHEN owner_device_id IS NULL THEN 'cancelled' ELSE 'cancel_requested' END,
+           terminal_at = CASE WHEN owner_device_id IS NULL THEN COALESCE(terminal_at, ?) ELSE terminal_at END,
            cancellation_requested_at = ?, cancellation_reason = ?, cancellation_message_id = ?, updated_at = ?
          WHERE tenant_id = ? AND task_id = ?`,
-      ).run(requestedAt, input.reason ?? null, input.proposedMessageId, requestedAt, tenant, input.taskId);
+      ).run(requestedAt, requestedAt, input.reason ?? null, input.proposedMessageId, requestedAt, tenant, input.taskId);
       return { attempt: readTask(db, tenant, input.taskId)!, message };
     });
   }

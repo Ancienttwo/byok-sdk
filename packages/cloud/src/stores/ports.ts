@@ -332,6 +332,23 @@ export interface TaskAttempt {
     readonly requestedAt: string;
     readonly reason?: string;
   };
+  /**
+   * When the offer created this attempt. This and the three phase instants
+   * below are written once, by the store operation that makes the transition,
+   * from the same clock and in the same format as `updatedAt`, and never again.
+   *
+   * Like {@link TaskAttempt.claimedRuntime}, they are attribution facts, not
+   * the EXECUTION state ADR-028 keeps out of cloud: each stops changing at the
+   * transition that sets it. Each is absent until its transition happens, and
+   * on attempts stored before the field existed, which are never backfilled.
+   */
+  readonly offeredAt?: string;
+  /** The winning `task.claim` (`offered -> claimed`); a redelivered or losing claim leaves it as the winner left it. */
+  readonly claimedAt?: string;
+  /** The first visible output after the claim: an Agent message draft or body. `task.progress` is not output. */
+  readonly firstOutputAt?: string;
+  /** The first entry into `complete`, `failed` or `cancelled`. */
+  readonly terminalAt?: string;
   readonly updatedAt: string;
 }
 
