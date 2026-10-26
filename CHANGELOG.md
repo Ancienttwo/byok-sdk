@@ -2,16 +2,21 @@
 
 ## Unreleased
 
-- **Feature (cloud)** — `TaskAttempt` (`ByokCloud.readTaskAttempt`) records
-  four write-once phase instants: `offeredAt`, `claimedAt`, `firstOutputAt`
-  and `terminalAt` (#980). Each is written by the store operation that makes
+- **Feature (cloud, cloud-dataplane, server)** — `TaskAttempt`
+  (`ByokCloud.readTaskAttempt`) records four write-once phase instants:
+  `offeredAt`, `claimedAt`, `firstOutputAt` and `terminalAt` (#980). Each is written by the store operation that makes
   its transition and never again: a redelivered or losing claim and a
   terminal retry leave them as they are. `firstOutputAt` is the first Agent
   message draft with text or message body after the claim; `task.progress`
   does not count. Postgres adds migration 0030 (four nullable `timestamptz`
   columns on `task`); a SQLite store adds the columns when it opens, with no
-  schema version change. Attempts stored before this are not backfilled, so
-  their instants are absent. No duration fields are derived.
+  schema version change. Apply `0030_task_attempt_phase_times.sql` before
+  deploying the new Postgres stores: their `TASK_SELECT_COLUMNS` reads the
+  four columns, so every task query fails on an unmigrated database. The
+  exported `TaskRow` and `TASK_SELECT_COLUMNS` gain the four columns; a Host
+  that writes its own select list for `taskRowToAttempt` must add them.
+  Attempts stored before this are not backfilled, so their instants are
+  absent. No duration fields are derived.
 - **Breaking (cloud)** — `TaskAttemptStore` gains the required
   `recordFirstOutput(tenant, { taskId, deviceId })`, the write-once
   `firstOutputAt` for an Agent message draft (#980). A Host that implements

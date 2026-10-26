@@ -584,7 +584,8 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
     return this.coordinator.run((db) => {
       db.prepare(
         `UPDATE task_attempt SET first_output_at = ?
-         WHERE tenant_id = ? AND task_id = ? AND device_id = ? AND owner_device_id IS NOT NULL AND first_output_at IS NULL`,
+         WHERE tenant_id = ? AND task_id = ? AND device_id = ? AND owner_device_id IS NOT NULL AND first_output_at IS NULL
+           AND status NOT IN ('complete', 'failed', 'cancelled')`,
       ).run(this.#now(), tenant, input.taskId, input.deviceId);
       return readTask(db, tenant, input.taskId);
     });

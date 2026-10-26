@@ -469,6 +469,17 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
       });
     });
 
+    it.each(['complete', 'failed', 'cancelled'] as const)('records no draft output once a claimed attempt is %s', async (status) => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        const output = { taskId: `task-late-draft-${status}`, deviceId: 'device-1' };
+        await stores.tasks.open(TENANT_A, output);
+        await stores.tasks.claim(TENANT_A, output);
+        await stores.tasks.recordStatus(TENANT_A, { taskId: output.taskId, status });
+        expect(await stores.tasks.recordFirstOutput(TENANT_A, output)).toMatchObject({ status });
+        expect(await stores.tasks.get(TENANT_A, output.taskId)).not.toHaveProperty('firstOutputAt');
+      });
+    });
+
     it('stamps terminalAt when cancellation ends an unclaimed attempt, and at the terminal of a claimed one', async () => {
       await withCloudComposition(factory, async (handle) => {
         const { stores } = handle;

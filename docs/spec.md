@@ -2998,8 +2998,9 @@ have refused because those claims were invalid, and readback must preserve that
 refusal. The Host validates integrity, frozen context and first-acceptance rules
 before any product body write. Neither discovery nor held/refused rewrites a
 previously accepted body, clears retained local evidence or proves home release.
-`TaskAttemptStore.readTaskAgentMessage` is required for memory/Postgres/SQLite
-and custom compositions on this breaking train; absent adapters fail validation
+`TaskAttemptStore.readTaskAgentMessage` and `TaskAttemptStore.recordFirstOutput`
+(#980) are required for memory/Postgres/SQLite and custom compositions on this
+breaking train; absent adapters fail validation
 instead of silently losing observations.
 
 The Cloud `readAgentMessageDisposition(tenant, deviceId, taskId, payload)` reads

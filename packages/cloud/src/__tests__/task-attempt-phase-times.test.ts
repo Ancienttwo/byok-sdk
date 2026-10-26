@@ -43,11 +43,17 @@ describe('task attempt phase instants (#980)', () => {
       async () => ({ outcome: 'accepted' }), undefined, clock.now().toISOString());
     const attempt = () => harness.cloud.readTaskAttempt(TENANT_A, taskId);
 
+    const stored = () => harness.stores.agentMessageDraft.read(TENANT_A, taskId);
+
+    // Both drafts land; what keeps them from stamping is the store's claim
+    // guard for the first and the inbound text check for the second.
     expect(await draft('before claim', 1)).toEqual({ outcome: 'accepted' });
+    expect(await stored()).toMatchObject({ revision: 1, text: 'before claim' });
     expect(await attempt()).not.toHaveProperty('firstOutputAt');
     await harness.stores.tasks.claim(TENANT_A, { taskId, deviceId: device.deviceId });
     clock.advance(1_000);
     expect(await draft('', 2)).toEqual({ outcome: 'accepted' });
+    expect(await stored()).toMatchObject({ revision: 2, text: '' });
     expect(await attempt()).not.toHaveProperty('firstOutputAt');
     clock.advance(1_000);
     expect(await draft('hello', 3)).toEqual({ outcome: 'accepted' });

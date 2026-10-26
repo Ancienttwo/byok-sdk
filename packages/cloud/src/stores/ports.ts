@@ -440,8 +440,8 @@ export interface TaskAttemptStore {
   /**
    * Write-once {@link TaskAttempt.firstOutputAt} for an Agent message draft,
    * written separately after the draft has landed in its own store. Sets it
-   * only on an attempt of this device that is already claimed and has none;
-   * any other call is a no-op. Returns the attempt as stored, or `undefined`
+   * only on an attempt of this device that is already claimed, is not yet
+   * terminal and has none; any other call is a no-op. Returns the attempt as stored, or `undefined`
    * for an unknown task.
    *
    * A process that crashes between the draft write and this one leaves the

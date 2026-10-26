@@ -135,7 +135,8 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
         attempt === undefined ||
         attempt.deviceId !== input.deviceId ||
         attempt.ownerDeviceId === undefined ||
-        attempt.firstOutputAt !== undefined
+        attempt.firstOutputAt !== undefined ||
+        ['complete', 'failed', 'cancelled'].includes(attempt.status)
       ) return attempt;
       const stamped: TaskAttempt = { ...attempt, firstOutputAt: this.#now() };
       this.#state.attempts.set(key, stamped);
