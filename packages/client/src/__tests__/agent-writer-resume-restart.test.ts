@@ -14,8 +14,11 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 // session's handoff lives in its Agent home, so a resume finds it after the
 // daemon process is replaced.
 
+const dirs: string[] = [];
 async function temp(prefix: string): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  dirs.push(dir);
+  return dir;
 }
 
 describe('Agent writer session resume across a daemon restart', () => {
@@ -26,6 +29,7 @@ describe('Agent writer session resume across a daemon restart', () => {
     await daemon?.stop();
     daemon = undefined;
     await server.close();
+    await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
   });
 
   it('resumes a writer session in the same Agent home after the daemon restarts on the same store and home root', async () => {

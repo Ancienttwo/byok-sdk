@@ -497,8 +497,10 @@ describe('daemon local observability (DaemonObserver)', () => {
 
       expect(session?.resolveApprovalCalls).toEqual([{ approved: true }]);
       // Wire v4: the server learns of a local decision only from this report.
-      const resolved = await server.waitFor((e) => e.type === 'task.approval_resolved' && e.task_id === 'task-approve-local-1');
-      expect(resolved.payload).toMatchObject({ approvalId, decision: 'approve', resolvedBy: 'local' });
+      await server.waitFor((e) => e.type === 'task.approval_resolved' && e.task_id === 'task-approve-local-1');
+      expect(server.received.filter((e) => e.type === 'task.approval_resolved').map((e) => e.payload)).toEqual([
+        expect.objectContaining({ approvalId, decision: 'approve', resolvedBy: 'local' }),
+      ]);
     });
 
     it('approve() with a stale approvalId resolves and reports nothing', async () => {
