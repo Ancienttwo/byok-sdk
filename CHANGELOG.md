@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Fixed (client)** — the prepared lane now accepts a tool schema whose
+  object root defines its fields only in `oneOf` branches, such as a result
+  document schema that `checkResultSchema` admits (#1003). Each branch must
+  be an object with its own `properties`, and the schema reaches the
+  provider unchanged: nothing is flattened or added. A tool schema with no
+  root `properties` and no such branches, or with malformed `properties`,
+  is still refused with `prepared_transcript_invalid`. Before, every tool
+  schema without root `properties` was refused.
+
 ## 0.30.2 — 2026-10-26 (published)
 
 0.30.2 is a PATCH release under a one-release exception to the pre-1.0
