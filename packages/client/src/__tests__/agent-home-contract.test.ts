@@ -254,6 +254,9 @@ describe('SDK-owned Agent home contract', () => {
     await fs.writeFile(marker, '', 'utf8');
 
     await expect(manager.prepare(ref('one'))).rejects.toBeInstanceOf(AgentHomeLeaseCorruptError);
+    await expect(manager.prepare(ref('one'))).rejects.toThrow(
+      `Agent home lease marker ${marker} is corrupt. Confirm that no process uses this Agent home, then delete this lease marker file and retry.`,
+    );
   });
 
   const leaseTemps = async (home: string) => (await fs.readdir(path.join(home, '.byok'))).filter((name) => /^agent-home\.lease\..+\.tmp$/u.test(name));
