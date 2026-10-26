@@ -954,7 +954,7 @@ Host can own Bots on two devices (see "Second-device placement"). A device with
 no record is `{ mode: 'L', revision: 0 }`. `topology(deviceId)` reads it.
 The product runs the switch with these calls, each on the revision it expects.
 A stale revision throws `CommitConflict` with `stale_revision`, and each step
-raises the revision:
+except the export raises the revision:
 
 1. `freezeForSwitch(deviceId, revision)` writes `{ mode: 'L', switching: 'H' }`
    and returns the record read back from the ledger.
@@ -970,10 +970,14 @@ raises the revision:
    pass. A tried intent concludes only from its SDK terminal, so it stays
    listed until the reconciler reads one. The drain waits for nothing: no
    timeout counts as stop evidence.
-3. After H commits the device, `commitSwitch(deviceId, revision)` writes
-   `{ mode: 'H' }`. It refuses while the same transaction finds open work.
-   `abortSwitch(deviceId, revision)` instead writes `{ mode: 'L' }`, so L
-   owns the device again and its held Turns run.
+3. `exportForSwitch(devices, exportedAt?)` seals the whole domain into a
+   switch export once every device in `devices` is frozen at its revision and
+   drained (see "Owner switch on L" below).
+4. After the new owner imported and verified the export,
+   `commitSwitch(deviceId, revision, receipt)` writes `{ mode: 'H' }` when
+   `receipt` is the export's digest. It refuses while the same transaction
+   finds open work. `abortSwitch(deviceId, revision)` instead writes
+   `{ mode: 'L' }`, so L owns the device again and its held Turns run.
 
 While the device is frozen, each entry that can create execution for it throws
 `DeviceSwitchingError` (`code: 'device_switching'`) and writes nothing:
@@ -1027,8 +1031,81 @@ Each check reads the record in the transaction that would write the work. The
 constructor reads every record first and refuses a malformed one, so a restart
 admits nothing before it knows the freeze.
 
-L has no step for H → L: once a device is in mode H, every step refuses. Moving
-a device back to L belongs to the state export and import work (§8).
+Once a device is in mode H, every step on this ledger refuses. A domain moves
+back to L by an import into a new L tenant (below).
+
+### Owner switch on L (#975)
+
+`src/switch.ts` reads an L ledger into the switch format and writes the format
+into an L tenant. One function, `switchContent`, serves both the old owner's
+export and the new owner's read-back, so one function states what an L ledger
+holds. The whole coordination domain moves together.
+
+**Old owner (L → H).** `exportForSwitch(devices, exportedAt?)` runs in one
+synchronous step: it dumps the ledger (K4 `dumpForSwitch`), checks it, seals it
+(`sealSwitchExport`) and records the export mark. It refuses:
+
+- a device that is not switching at its revision, or still has open work;
+- a live Bot on a device it does not name, and every other state the format
+  refuses (`SwitchExportError`);
+- Agent memory state, which binds the tenant inside its digests;
+- a pending projection: upload them with `core.flushProjections` first;
+- a pending submit or Host job, which K4 would run while the export waits;
+- a stored copy that differs from the value it is derived from, with
+  `reference`: an intent's `agent` (K4 `agentKey`), task id (K4 `taskId`) and
+  frozen input of each generation, K4 `applied` (the current task of each
+  succeeded intent), each occurrence's wake key (K4 `parseRoutineWakeKey`), its
+  slot, intent id and conclusion, a routine's next wake key, and the
+  `attempts` of intents and occurrences;
+- a K4 or K8 record with a field the format does not name, which would be
+  dropped.
+
+From the mark on, also after a restart, this Host writes nothing to the
+ledger. Each K8 write refuses with `SwitchExportedError` (`code:
+'switch_exported'`) after the write's own refusals, so a command on a frozen
+or H-owned device still gets its device refusal. The passes and the timer run
+nothing, and the K4 hooks refuse. The mark stays after the commit, so the old
+ledger keeps the exported state.
+
+`commitSwitch` checks the receipt against the mark, then seals the ledger
+again under the export's header and refuses a different digest. That check
+covers the K4 core, which writes on its own timers: a routine that is pacing a
+schedule retry, or that switches to a pending version, can change between the
+export and the commit. The commit then refuses, and the switch is aborted and
+exported again. An abort of a device of the export ends the export, and the new
+owner discards its import. Once one device of the export committed, no device
+of it aborts.
+
+**New owner (H → L).** On a new, empty ledger tenant (a switch back to L opens
+a new tenant), and with no `BotCollaboration` on it:
+
+1. `importForSwitch(ledger, document)` verifies the H export, writes it (K4
+   `loadForSwitch`) with each device owned by H and an import record, and
+   reads the ledger back under the document's header. A different digest
+   throws `SwitchExportError` with `manifest`, and the caller runs
+   `discardImport`. It returns the receipt `{ digest, devices }` that the old
+   owner commits away on.
+2. After the old owner committed, `commitImport(ledger, digest)` gives L each
+   device of the import and deletes the import record.
+3. `discardImport(ledger)` deletes an import that was not committed (K4
+   `discard`). It first marks the import as being discarded, so a commit
+   refuses it from then on.
+
+A `BotCollaboration` refuses to open a ledger with an import record, so no work
+runs on an import before its commit, and a committed tenant has no record to
+discard. The import writes each derived value from the format: `agent` for the
+new tenant, the task ids and inputs of every generation, `applied`, slots, wake
+keys, intent ids, `attempts` and the Host intent handlers. A concluded intent
+gets K4's cursors of a new row (`phase: 'settled'`, `notBefore: 0`). Routine
+and occurrence ordinals must be their positions 0 to n - 1, since K4 keeps only
+their order.
+
+Not moved: the source SDK's wakes, that is the `schedule` and `cancel-wake`
+rows and the scan wake. The new owner's `recover()` schedules each routine's
+next wake on its own SDK. K4 `ignoredWakes` does not move either. It is an
+optional audit of wake deliveries that the source SDK made and K4 ignored, at
+most `IGNORED_WAKE_AUDIT_LIMIT` rows, and no rule reads it. A target starts
+without it, as a new ledger does, and an export is not refused for it.
 
 ### Owner switch export format (#975)
 

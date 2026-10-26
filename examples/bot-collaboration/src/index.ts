@@ -23,3 +23,4 @@ export { DeviceModeError, DeviceSwitchingError, type DeviceTopology, type Switch
 export { SWITCH_EXPORT_VERSION, SWITCH_SECTIONS, SwitchExportError, sealSwitchExport, verifySwitchExport, type ArchivedRecord, type ExecutionRecord, type IntentRecord, type MessageReceipt,
   type OccurrenceRecord, type OutboxRecord, type RoutineRecord, type SwitchContent, type SwitchDevice, type SwitchExport, type SwitchExportRefusal,
   type SwitchManifest, type SwitchSection, type TombstoneRecord } from './migration';
+export { commitImport, discardImport, importForSwitch, SwitchExportedError, type SwitchReceipt } from './switch';

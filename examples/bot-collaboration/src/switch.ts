@@ -283,7 +283,7 @@ export function sealLedger(ledger: HostLedger, header: SwitchHeader): SwitchExpo
 }
 
 const importOf = (state: CollaborationState): SwitchImport => {
-  if (!state.switchImport) throw new Error('This ledger holds no switch import');
+  if (!state.switchImport) throw new Error('This ledger holds no switch import record');
   return state.switchImport;
 };
 
@@ -302,7 +302,7 @@ export function importForSwitch(ledger: HostLedger, document: SwitchExport): Swi
   for (const id of devices) Object.defineProperty(topology, id, { value: { mode: 'H', revision: 1 }, enumerable: true, writable: true, configurable: true });
   ledger.loadForSwitch(switchDump(document, ledger.tenant, { topology, switchImport: { digest: manifest.digest, devices, verified: false } }));
   const back = sealLedger(ledger, headerOf(document)).manifest.digest;
-  if (back !== manifest.digest) throw new SwitchExportError('manifest', `The imported ledger reads back as ${back}, not ${manifest.digest}; discard the import`);
+  if (back !== manifest.digest) throw new SwitchExportError('manifest', `The imported ledger reads back as ${back}, not ${manifest.digest}; discard the import first`);
   ledger.transaction(s => {
     const record = importOf(stateOf(s.application));
     if (record.digest !== manifest.digest || record.discarding) throw new Error('The switch import changed during its verification');

@@ -515,6 +515,17 @@
   names a missing record, a message receipt that is not its K8 reply, an
   execution routine, state K4 cannot produce, or a manifest that does not
   match. No Host uses it yet. No SDK, wire or SQL change.
+- **Feature (examples)** — K8 L runs both sides of the owner switch (#975
+  slice 3). `exportForSwitch(devices)` seals a frozen, drained domain into a
+  switch export after it checks every stored copy against the value it is
+  derived from, and from then on the Host writes nothing to its ledger
+  (`SwitchExportedError`). `commitSwitch(deviceId, revision, receipt)` now
+  needs the new owner's receipt, and seals the ledger again to check that it
+  did not change. `importForSwitch(ledger, document)` writes an H export into
+  an empty L tenant and reads it back to the same digest, `commitImport`
+  hands its devices to L, and `discardImport` deletes an import that was not
+  committed. A `BotCollaboration` refuses a ledger with an uncommitted import.
+  No SDK, wire or SQL change.
 
 ## 0.30.1 — 2026-10-24 (published)
 
