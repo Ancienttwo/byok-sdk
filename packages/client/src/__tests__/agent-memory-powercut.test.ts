@@ -11,11 +11,11 @@ import {
   serializeAgentMemoryIntentLedger,
   type AgentMemoryIntentLedgerRecord,
 } from '../daemon/agent-memory-intent';
-import { checkCut, checkRecovery, type CutCheck, type InvariantId } from './agent-memory-powercut/checker';
+import { checkCut, checkRecovery, type CutCheck, type InvariantId, type InvariantResult } from './agent-memory-powercut/checker';
 import { powercutTriggers } from './agent-memory-powercut/cli';
 import { ProcessKillDriver, QemuDriver, qmpExecute, taskkillNamedProcesses, windowsTree, type PowerCutDriver, type StorageProfile } from './agent-memory-powercut/drivers';
 import { runExperiment } from './agent-memory-powercut/experiment';
-import { contentRevision, HostJournal, PowercutHost, powercutContent, type IssuedIntent } from './agent-memory-powercut/host';
+import { contentRevision, HostJournal, PowercutHost, powercutContent, type IssuedIntent, type JournalEntry } from './agent-memory-powercut/host';
 import { writeMessage } from './agent-memory-powercut/protocol';
 import { EMPTY_REVISION, revisionOf, type DeviceSnapshot, type FileObservation, type HomeSnapshot } from './agent-memory-powercut/snapshot';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
@@ -84,6 +84,32 @@ function violated(check: CutCheck): InvariantId[] {
   return check.invariants.filter((entry) => entry.status === 'violated').map((entry) => entry.id);
 }
 
+type MemoryStep = Pick<AgentMemoryIntentLedgerRecord, 'operation' | 'baseRevision' | 'targetRevision' | 'state' | 'detail'>;
+
+/**
+ * I4 for notes/a.md after hand-built ledger records, against a journal of the
+ * issued intents only. Ids and digests come from real issued intents so the
+ * strict parser accepts the ledger; each step sets its own operation and
+ * revisions, in both the issued intent and its record.
+ */
+async function memoryState(steps: readonly MemoryStep[], file: FileObservation): Promise<InvariantResult['status']> {
+  const host = new PowercutHost({ seed: 5, intentsPerHome: Math.max(steps.length, 1), journal: new HostJournal() });
+  const journal: JournalEntry[] = [];
+  const records: AgentMemoryIntentLedgerRecord[] = [];
+  for (const step of steps) {
+    const issued = await host.issueNext();
+    const intent: IssuedIntent = { ...issued, path: 'notes/a.md', operation: step.operation, baseRevision: step.baseRevision, targetRevision: step.targetRevision };
+    journal.push({ kind: 'issued', intent });
+    records.push({
+      intentId: intent.intentId, profileRevision: '1', path: intent.path, operation: intent.operation,
+      operationDigest: intent.operationDigest, baseRevision: intent.baseRevision, targetRevision: intent.targetRevision,
+      approvalRef: `approval:w5-${intent.seq}`, state: step.state, detail: step.detail, createdAt: STAMP, updatedAt: STAMP, ackedAt: null,
+    });
+  }
+  const check = checkCut(snapshot([home(records, { 'notes/a.md': file })]), journal);
+  return check.invariants.find((entry) => entry.id === 'I4')!.status;
+}
+
 describe('W5 checker', () => {
   it('holds every invariant for a consistent device', async () => {
     const run = await consistentRun(6);
@@ -131,6 +157,38 @@ describe('W5 checker', () => {
     const files = { ...run.files, [replace.path]: { exists: true, size: 1, revision: EMPTY_REVISION } };
     const check = checkCut(snapshot([home(run.records, files)]), run.journal.entries);
     expect(violated(check)).toEqual(['I4']);
+  });
+
+  // A delete leaves no file and an empty replace leaves an empty one; both
+  // read as EMPTY_REVISION, so I4 must compare existence too (#996).
+  it('tells a deleted memory file from an empty one, as the processor does (#996)', async () => {
+    const body = revisionOf(Buffer.from('w5 body'));
+    const missing: FileObservation = { exists: false, size: 0, revision: EMPTY_REVISION };
+    const empty: FileObservation = { exists: true, size: 0, revision: EMPTY_REVISION };
+    const written: FileObservation = { exists: true, size: 7, revision: body };
+    const write: MemoryStep = { operation: 'replace', baseRevision: EMPTY_REVISION, targetRevision: body, state: 'applied', detail: { exists: true, revision: body } };
+    const writing: MemoryStep = { ...write, state: 'applying', detail: null };
+    const remove: MemoryStep = { operation: 'delete', baseRevision: body, targetRevision: null, state: 'applied', detail: { exists: false, revision: EMPTY_REVISION } };
+    const removing: MemoryStep = { ...remove, state: 'applying', detail: null };
+    const removeUncertain: MemoryStep = { ...remove, state: 'uncertain' };
+    const clear: MemoryStep = { operation: 'replace', baseRevision: body, targetRevision: EMPTY_REVISION, state: 'applied', detail: { exists: true, revision: EMPTY_REVISION } };
+    const cases: [string, MemoryStep[], FileObservation, 'held' | 'violated'][] = [
+      ['applied delete, then an empty file', [write, remove], empty, 'violated'],
+      ['applied delete, then no file', [write, remove], missing, 'held'],
+      ['applied empty replace, then no file', [write, clear], missing, 'violated'],
+      ['applied empty replace, then an empty file', [write, clear], empty, 'held'],
+      ['delete in flight, then the base', [write, removing], written, 'held'],
+      ['delete in flight, then no file', [write, removing], missing, 'held'],
+      ['delete in flight, then an empty file', [write, removing], empty, 'violated'],
+      ['uncertain delete that observed no file, then an empty file', [write, removeUncertain], empty, 'violated'],
+      ['no record, then the skeleton\'s empty file', [], empty, 'held'],
+      ['no record, then no file', [], missing, 'held'],
+      ['first write in flight, then an empty file', [writing], empty, 'held'],
+      ['first write in flight, then the body', [writing], written, 'held'],
+    ];
+    const observed: [string, string][] = [];
+    for (const [name, steps, file] of cases) observed.push([name, await memoryState(steps, file)]);
+    expect(observed).toEqual(cases.map(([name, , , expected]) => [name, expected]));
   });
 
   it('flags torn memory content as no issued body', async () => {
