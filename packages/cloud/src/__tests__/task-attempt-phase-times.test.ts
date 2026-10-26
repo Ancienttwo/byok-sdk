@@ -45,8 +45,9 @@ describe('task attempt phase instants (#980)', () => {
 
     const stored = () => harness.stores.agentMessageDraft.read(TENANT_A, taskId);
 
-    // Both drafts land; what keeps them from stamping is the store's claim
-    // guard for the first and the inbound text check for the second.
+    // Both drafts land. Inbound skips the first because the attempt it read
+    // before the apply had no owner yet, and the second because it has no
+    // text. The store's own claim guard is covered by conformance.
     expect(await draft('before claim', 1)).toEqual({ outcome: 'accepted' });
     expect(await stored()).toMatchObject({ revision: 1, text: 'before claim' });
     expect(await attempt()).not.toHaveProperty('firstOutputAt');
