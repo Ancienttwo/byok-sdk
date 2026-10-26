@@ -392,8 +392,8 @@ function checkReferences(content: SwitchContent): void {
     // By the routine's run kind, which a version cannot change (K4 `routines.ts` updateRoutine). A Host job's outbox row
     // goes in the step that concludes or promotes its occurrence (K4 `core.ts` runHostJobs, `routines.ts`; H `store.ts`).
     if (routine!.definition.hostJob) {
-      // K8 never promotes one: L runs K4 with `hostJobExecution: 'fail'` and H does the same (#954), so a job result
-      // with an execution concludes the occurrence `failed`.
+      // K8 never promotes one (#954): L runs K4 with `hostJobExecution: 'fail'`, and H concludes such a result `failed`
+      // (`store.ts` settleHostJob), so a job result with an execution concludes the occurrence `failed` on both Hosts.
       ensure(row.job !== null && !promoted.has(row.key) && pendingJobs.has(row.key) === (row.conclusion === undefined),
         `Host job occurrence ${row.key} is not promoted, and has a pending job exactly when it is open`);
     } else ensure(row.job === null, `occurrence ${row.key} has a Host job, but its routine runs a hook`);

@@ -9,7 +9,7 @@ import { sealSwitchExport, SwitchExportError, verifySwitchExport, type SwitchExp
 import { checkSwitchRecords, commitImport, discardImport, importForSwitch, sealLedger, SwitchExportedError, switchContent, switchDump,
   type SwitchHeader } from './switch';
 import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support';
-import { DeviceSwitchingError } from './topology';
+import { DeviceModeError, DeviceSwitchingError } from './topology';
 
 // #975 slice 3: L as the old owner exports a drained domain and commits away on the new owner's receipt, and L as the new
 // owner imports an H export into an empty tenant, reads it back, and commits toward L or discards it.
@@ -304,7 +304,7 @@ it('refuses an export of a device that is not frozen, not drained or not every d
   expect(stateOf(fixture!.ledger.snapshot().application).switchExport).toBeUndefined();
 });
 
-it('ends the export at an abort before any commit, and refuses an abort after a device of the export committed', async () => {
+it('ends the export at an abort before the commit, and commits every device of the export together', async () => {
   await setup();
   fixture!.ledger.transaction(s => {
     const team = stateOf(s.application).team;
@@ -323,9 +323,12 @@ it('ends the export at an abort before any commit, and refuses an abort after a 
   await bot.drain();
   await bot.core.flushProjections(async () => {});
   const second = await bot.exportForSwitch([devices[0]!, { deviceId: 'device-2', expectedRevision: 3 }]);
-  await bot.commitSwitch(device(), 1, second.manifest.digest);
-  await expect(bot.abortSwitch('device-2', 3)).rejects.toThrow('of the export is committed');
-  expect(await bot.commitSwitch('device-2', 3, second.manifest.digest)).toEqual({ mode: 'H', revision: 4 });
+  // The receipt of an export that ended does not commit; the receipt of the current one commits both devices.
+  await expect(bot.commitSwitch(device(), 1, first.manifest.digest)).rejects.toThrow("is not this Host's export");
+  expect(await bot.commitSwitch(device(), 1, second.manifest.digest)).toEqual({ mode: 'H', revision: 2 });
+  expect(bot.topology('device-2')).toEqual({ mode: 'H', revision: 4 });
+  await expect(bot.abortSwitch('device-2', 4)).rejects.toBeInstanceOf(DeviceModeError);
+  await expect(bot.commitSwitch('device-2', 3, second.manifest.digest)).rejects.toMatchObject({ code: 'stale_revision' });
 });
 
 it('discards an uncommitted import, and refuses to commit one that is not verified or is being discarded', async () => {

@@ -974,10 +974,12 @@ except the export raises the revision:
    switch export once every device in `devices` is frozen at its revision and
    drained (see "Owner switch on L" below).
 4. After the new owner imported and verified the export,
-   `commitSwitch(deviceId, revision, receipt)` writes `{ mode: 'H' }` when
-   `receipt` is the export's digest. It refuses while the same transaction
-   finds open work. `abortSwitch(deviceId, revision)` instead writes
-   `{ mode: 'L' }`, so L owns the device again and its held Turns run.
+   `commitSwitch(deviceId, revision, receipt)` writes `{ mode: 'H' }` for every
+   device of the export in one transaction, when `receipt` is the export's
+   digest and `deviceId` at `revision` is one of its devices. It refuses while
+   the same transaction finds open work. `abortSwitch(deviceId, revision)`
+   instead writes `{ mode: 'L' }`, so L owns the device again and its held
+   Turns run.
 
 While the device is frozen, each entry that can create execution for it throws
 `DeviceSwitchingError` (`code: 'device_switching'`) and writes nothing:
@@ -1072,9 +1074,10 @@ again under the export's header and refuses a different digest. That check
 covers the K4 core, which writes on its own timers: a routine that is pacing a
 schedule retry, or that switches to a pending version, can change between the
 export and the commit. The commit then refuses, and the switch is aborted and
-exported again. An abort of a device of the export ends the export, and the new
-owner discards its import. Once one device of the export committed, no device
-of it aborts.
+exported again. The commit moves every device of the export at once, so a
+domain is never split between the owners. An abort of a device of the export
+ends the export, and the new owner discards its import; after the commit no
+device of it aborts.
 
 **New owner (H → L).** On a new, empty ledger tenant (a switch back to L opens
 a new tenant), and with no `BotCollaboration` on it:
@@ -1177,8 +1180,9 @@ The format refuses, with `SwitchExportError` and a `reason`:
   anything from a submission; an earlier generation without its terminal and
   attempt, or that was not begun; an occurrence that does not match its
   routine's run kind (a Host job routine's occurrence has a job, is never
-  promoted, since both Hosts run K4 with `hostJobExecution: 'fail'`, and has a
-  pending job exactly while it is open; a hook routine's has no job); a routine
+  promoted, since L runs K4 with `hostJobExecution: 'fail'` and H concludes a
+  job result with an execution `failed`, and has a pending job exactly while it
+  is open; a hook routine's has no job); a routine
   or occurrence ordinal that is not its position; and two occurrences of one
   slot (`duplicate`);
 - an execution routine (`execution_routine`): a K8 domain holds only Turn and

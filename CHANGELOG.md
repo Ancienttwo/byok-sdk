@@ -520,8 +520,8 @@
   switch export after it checks every stored copy against the value it is
   derived from, and from then on the Host writes nothing to its ledger
   (`SwitchExportedError`). `commitSwitch(deviceId, revision, receipt)` now
-  needs the new owner's receipt, and seals the ledger again to check that it
-  did not change. `importForSwitch(ledger, document)` writes an H export into
+  needs the new owner's receipt, seals the ledger again to check that it did
+  not change, and moves every device of the export to H in one transaction. `importForSwitch(ledger, document)` writes an H export into
   an empty L tenant and reads it back to the same digest, `commitImport`
   hands its devices to L, and `discardImport` deletes an import that was not
   committed. A `BotCollaboration` refuses a ledger with an uncommitted import.

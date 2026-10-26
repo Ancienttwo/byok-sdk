@@ -176,7 +176,7 @@ describe('switch export format (#975)', () => {
       value => { Object.assign(value.occurrences[0]!, { job: { attempts: 1, summary: { ok: true } }, conclusion: 'succeeded' }); },
       // ... and only for one with no intent.
       value => { value.intents.push(intent(`occurrence:${O1}`, 3, { source: 'routine' })); },
-      // K8 never promotes a Host job occurrence: L and H run K4 with `hostJobExecution: 'fail'` (#954).
+      // K8 never promotes a Host job occurrence (#954): L runs K4 with `hostJobExecution: 'fail'`, and H concludes it `failed`.
       value => { value.intents.push(intent(`occurrence:${O1}`, 3, { source: 'routine' })); value.outbox = []; },
       // A routine's or occurrence's ordinal is its position: a gap, or a first ordinal other than 0.
       value => { value.routines[1]!.ordinal = 2; },

@@ -795,10 +795,11 @@ export class BotCollaboration {
     });
   }
   /**
-   * Step 5, after the new owner imported and verified the export: L records that the new owner owns the device, on the
-   * frozen revision, only when the device has no open work and `receipt` is the digest of this Host's export. The ledger is
-   * sealed again under the export's header and must give the same digest. Every entry then refuses the device with
-   * `DeviceModeError`, also after a restart. The export stays, so this Host keeps writing nothing.
+   * Step 5, after the new owner imported and verified the export: L records that the new owner owns the whole domain. Every
+   * device of the export moves to H in one transaction, on its frozen revision, only when none has open work and `receipt`
+   * is the digest of this Host's export. The ledger is sealed again under the export's header and must give the same
+   * digest. `deviceId` and `expectedRevision` name one device of the export, whose record is returned. Every entry then
+   * refuses those devices with `DeviceModeError`, also after a restart. The export stays, so this Host keeps writing nothing.
    */
   commitSwitch(deviceId: string, expectedRevision: number, receipt: string): Promise<DeviceTopology> {
     return this.exclusive(async () => {
@@ -813,25 +814,20 @@ export class BotCollaboration {
       // The fence covers this Host's writes; the K4 core also writes on its own timers. A change to what moves refuses.
       const now = sealLedger(this.ledger, { source: 'L', domain: this.ledger.tenant, devices: mark.devices, exportedAt: mark.exportedAt });
       if (now.manifest.digest !== mark.digest) throw new Error(`The ledger changed after its export: ${now.manifest.digest}, not ${mark.digest}`);
-      this.ledger.transaction(s => switchStep(s, deviceId, expectedRevision, 'commit'));
+      this.ledger.transaction(s => { for (const device of mark.devices) switchStep(s, device.deviceId, device.frozenRevision, 'commit'); });
       return this.topology(deviceId);
     });
   }
   /**
    * A failed export or check: clears the freeze on the frozen revision, so L owns the device again and held Turns run. An
-   * abort of a device of the export ends the export; the new owner discards its import. After a device of the export
-   * committed, its state belongs to the new owner, so no device of it aborts.
+   * abort of a device of the export ends the export, and the new owner discards its import. After the commit every device
+   * of the export is owned by H, so none aborts.
    */
   abortSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology> {
     return this.exclusive(async () => {
       this.ledger.transaction(s => {
-        const state = stateOf(s.application), mark = state.switchExport;
-        const step = switchStep(s, deviceId, expectedRevision, 'abort');
-        if (mark?.devices.some(device => device.deviceId === deviceId)) {
-          const committed = mark.devices.find(device => deviceTopology(state, device.deviceId).mode === 'H');
-          if (committed) throw new Error(`Device ${committed.deviceId} of the export is committed; the switch cannot abort`);
-          delete state.switchExport;
-        }
+        const state = stateOf(s.application), step = switchStep(s, deviceId, expectedRevision, 'abort');
+        if (state.switchExport?.devices.some(device => device.deviceId === deviceId)) delete state.switchExport;
         return step;
       });
       await this.process();
