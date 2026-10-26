@@ -64,7 +64,7 @@ describe('protocol-version admission at real long-poll receive', () => {
       serverUrl: real.url,
       deviceId: record.deviceId,
       productId: 'version-admission-client',
-      capabilities: [],
+      capabilities: ['agent-home-contract'],
       runtimes: [],
       auth,
       cursorStore,
@@ -76,7 +76,10 @@ describe('protocol-version admission at real long-poll receive', () => {
     });
     await connection.start();
     await waitForOpen(connection);
-    await real.byok.dispatch({ deviceId: record.deviceId, instruction: 'known v1 offer must not run' });
+    await real.byok.dispatch({
+      deviceId: record.deviceId, instruction: 'known v1 offer must not run',
+      agentRef: { agentId: 'version-admission-agent', profileRevision: 'rev-1' }, sessionRef: 'version-admission-session',
+    });
 
     await vi.waitFor(() => expect(rewroteKnownOffer).toBe(true));
     // The next poll starts only after LongPollClient has completed the prior

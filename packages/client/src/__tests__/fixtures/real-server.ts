@@ -13,6 +13,7 @@ import {
   type PairingCodeInfo,
   type ServerTaskEvent,
   type TaskHandle,
+  type TaskResult,
 } from '@byok-sdk/server';
 
 /**
@@ -105,6 +106,42 @@ export async function waitForTaskEvent(
     if (predicate(event)) return event;
   }
   throw new Error('task event stream ended before a matching event was seen');
+}
+
+/**
+ * Submits one fresh Agent execution (wire v4: the only fresh-task entry) and
+ * returns its taskId. The daemon must run with an Agent home and Agent egress.
+ */
+export async function submitAgentTask(
+  real: Pick<RealServerHandle, 'byok'>,
+  input: { taskId: string; deviceId: string; instruction: string; runtime?: RuntimeId; agentRef?: AgentRef },
+): Promise<string> {
+  await real.byok.executions.submit({
+    taskId: input.taskId,
+    deviceId: input.deviceId,
+    payload: {
+      instruction: input.instruction,
+      runtime: input.runtime ?? 'pi',
+      agentRef: input.agentRef ?? { agentId: `e2e-agent-${randomUUID()}`, profileRevision: 'rev-1' },
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      terminalProjection: { mode: 'none' },
+    },
+  });
+  return input.taskId;
+}
+
+/** The result of a task once it has one. */
+export async function waitForTaskResult(real: Pick<RealServerHandle, 'byok'>, taskId: string): Promise<TaskResult> {
+  return vi.waitFor(async () => {
+    const result = (await real.byok.tasks.get(taskId))?.result;
+    if (result === undefined) throw new Error(`task ${taskId} has no result yet`);
+    return result;
+  }, { timeout: 5_000, interval: 20 });
+}
+
+/** Waits for a task — one with or without a `TaskHandle` — to reach `state`. */
+export async function waitForTaskState(real: Pick<RealServerHandle, 'byok'>, taskId: string, state: string): Promise<void> {
+  await vi.waitFor(async () => expect((await real.byok.tasks.get(taskId))?.state).toBe(state), { timeout: 5_000, interval: 20 });
 }
 
 /**
