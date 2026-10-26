@@ -20,7 +20,7 @@ export class DeviceBindingError extends Error {
  */
 export class DeviceSwitchingError extends Error {
   readonly code = DEVICE_SWITCHING;
-  constructor(readonly deviceId: string, readonly target: 'L' | 'H', readonly revision: number) {
+  constructor(readonly deviceId: string, readonly target: 'L', readonly revision: number) {
     super(`Device is switching to ${target}: ${deviceId}`);
     this.name = 'DeviceSwitchingError';
   }
@@ -28,16 +28,16 @@ export class DeviceSwitchingError extends Error {
 /** A switch step that the device's binding refuses (#957). Nothing was written. */
 export class DeviceSwitchRefusedError extends Error {
   readonly code = 'switch_refused' as const;
-  constructor(readonly deviceId: string, readonly reason: 'stale_revision' | 'switching' | 'not_switching' | 'same_mode' | 'revoked' | 'not_owner' | 'open_work',
+  constructor(readonly deviceId: string, readonly reason: 'stale_revision' | 'switching' | 'not_switching' | 'same_mode' | 'revoked' | 'open_work',
     message: string) {
     super(message);
     this.name = 'DeviceSwitchRefusedError';
   }
 }
 
-type BindingRow = { mode: 'L' | 'H'; mode_revision: string; revoked: boolean; switching: 'L' | 'H' | null };
+type BindingRow = { mode: 'L' | 'H'; mode_revision: string; revoked: boolean; switching: 'L' | null };
 /** A device's binding row as the switch steps return it, read back in the transaction that wrote it. */
-export interface DeviceBinding { mode: 'L' | 'H'; revision: number; switching?: 'L' | 'H'; revoked: boolean }
+export interface DeviceBinding { mode: 'L' | 'H'; revision: number; switching?: 'L'; revoked: boolean }
 /** Why a device's binding row refuses new execution, or nothing for an active binding in mode H with no open switch. */
 function refusalOf(row: BindingRow | undefined): SyncRefusal | undefined {
   if (!row) return 'unbound';
@@ -48,6 +48,10 @@ function refusalOf(row: BindingRow | undefined): SyncRefusal | undefined {
 const BINDING = `SELECT device, mode, mode_revision::text, revoked_at IS NOT NULL AS revoked, switching FROM device_binding WHERE scope = $1`;
 const readRow = async (client: PoolClient, scopeKey: string, deviceId: string) =>
   (await client.query<BindingRow>(`${BINDING} AND device = $2`, [scopeKey, storedKey(deviceId)])).rows[0];
+/** The binding rows of these devices in one query, by device id. */
+const readRows = async (client: PoolClient, scopeKey: string, deviceIds: readonly string[]) =>
+  new Map((await client.query<BindingRow & { device: string }>(`${BINDING} AND device = ANY($2::text[])`,
+    [scopeKey, deviceIds.map(storedKey)])).rows.map(row => [JSON.parse(row.device) as string, row]));
 const viewOf = (row: BindingRow): DeviceBinding =>
   ({ mode: row.mode, revision: Number(row.mode_revision), ...(row.switching ? { switching: row.switching } : {}), revoked: row.revoked });
 
@@ -63,24 +67,45 @@ export async function activeBinding(client: PoolClient, scopeKey: string, device
 }
 
 /**
- * The owner-switch fence of a write that #956 lets through for an unbound device (#957): it throws `DeviceSwitchingError`
- * while a switch of the device is open, and `DeviceBindingError` with `mode` once the device's row names mode L. A device
- * with no row, a revoked one and one bound to H pass: the sync holds or runs their work as before.
+ * The command entry's check of the work that a commit added (#793 S10): throws `DeviceBindingError` for the first of these
+ * devices whose binding is not active in mode H. A device frozen for an owner switch passes: the freeze refuses through the
+ * admission (`switchRefusal`), as on L, and the sync holds the work that a command the admission does not name added.
  */
-export async function switchFence(client: PoolClient, scopeKey: string, deviceId: string): Promise<void> {
-  const row = await readRow(client, scopeKey, deviceId), refusal = row && refusalOf(row);
-  if (refusal === 'switching') throw new DeviceSwitchingError(deviceId, row!.switching!, Number(row!.mode_revision));
-  if (refusal === 'mode') throw new DeviceBindingError(deviceId, 'mode');
+export async function requireBound(client: PoolClient, scopeKey: string, deviceIds: readonly string[]): Promise<void> {
+  if (!deviceIds.length) return;
+  const rows = await readRows(client, scopeKey, deviceIds);
+  for (const deviceId of deviceIds) {
+    const refusal = refusalOf(rows.get(deviceId));
+    if (refusal && refusal !== 'switching') throw new DeviceBindingError(deviceId, refusal);
+  }
 }
 
 /**
- * H sends no new Agent home write to this device (#957), as L's `flushHomes` for a refused device: its row is not revoked,
- * and a switch is open or the row names mode L. A write that was sent is still read back. A device with no row, or a
- * revoked one, keeps the flush it had before.
+ * L's admission of a new command on H (K8 host.ts `admitCommand`, #957, #975): the refusal of the first of these devices
+ * that is frozen for an owner switch (`DeviceSwitchingError`) or whose row names mode L, the other Host's
+ * (`DeviceBindingError` with `mode`), read in one query. A device with no row, a revoked one and one bound to H pass: the
+ * sync holds or runs their work as before (#956). It only reads, so the caller throws it after the replay lookup.
+ */
+export async function switchRefusal(client: PoolClient, scopeKey: string, deviceIds: readonly string[]): Promise<Error | undefined> {
+  if (!deviceIds.length) return undefined;
+  const rows = await readRows(client, scopeKey, deviceIds);
+  for (const deviceId of deviceIds) {
+    const row = rows.get(deviceId), refusal = row && refusalOf(row);
+    if (refusal === 'switching') return new DeviceSwitchingError(deviceId, row!.switching!, Number(row!.mode_revision));
+    if (refusal === 'mode') return new DeviceBindingError(deviceId, 'mode');
+  }
+  return undefined;
+}
+
+/**
+ * H sends no new Agent home write to this device (#957), as L's `flushHomes` for a refused device: its row is not revoked
+ * and its switch away from H is open. A write that was sent is still read back. A device with no row, or a revoked one,
+ * keeps the flush it had before. A row in mode L is on a scope that the switch fence refuses (#975: exported, or an
+ * uncommitted import), so no flush of it commits.
  */
 export async function refusesHomeWrites(client: PoolClient, scopeKey: string, deviceId: string): Promise<boolean> {
   const row = await readRow(client, scopeKey, deviceId);
-  return row !== undefined && !row.revoked && (row.switching !== null || row.mode === 'L');
+  return row !== undefined && !row.revoked && row.switching !== null;
 }
 
 /**
@@ -88,8 +113,7 @@ export async function refusesHomeWrites(client: PoolClient, scopeKey: string, de
  * and no entry for a device with an active binding in mode H.
  */
 export async function deviceRefusals(client: PoolClient, scopeKey: string, deviceIds: readonly string[]): Promise<Map<string, SyncRefusal>> {
-  const rows = new Map((await client.query<BindingRow & { device: string }>(`${BINDING} AND device = ANY($2::text[])`,
-    [scopeKey, deviceIds.map(storedKey)])).rows.map(row => [JSON.parse(row.device) as string, row]));
+  const rows = await readRows(client, scopeKey, deviceIds);
   return new Map(deviceIds.flatMap(id => {
     const refusal = refusalOf(rows.get(id));
     return refusal ? [[id, refusal] as const] : [];
@@ -127,24 +151,18 @@ export async function revokeDevice(client: PoolClient, scopeKey: string, deviceI
 }
 
 /**
- * Opens an owner switch of a device toward `target` on the expected mode revision (§4.1, #957): the freeze. It raises the
- * revision, so a submit claimed before the freeze fails its re-read, and every later step names the frozen revision. A
- * device with no row is in the default mode L at revision 0, so an existing L device starts its switch to H here, with a
- * mode L row. Returns the row read back. The caller holds the scope lock.
+ * Opens an owner switch of a device away from H to `target` L on the expected mode revision (§4.1, #957): the freeze. It
+ * raises the revision, so a submit claimed before the freeze fails its re-read, and every later step names the frozen
+ * revision. A device with no row is in the default mode L, as is one whose row names L, so neither switches to L. H
+ * becomes the owner only through an import (#975). Returns the row read back. The caller holds the scope lock.
  */
-export async function beginSwitch(client: PoolClient, scopeKey: string, deviceId: string, target: 'L' | 'H', expectedRevision: number): Promise<DeviceBinding> {
+export async function beginSwitch(client: PoolClient, scopeKey: string, deviceId: string, target: 'L', expectedRevision: number): Promise<DeviceBinding> {
   const row = await readRow(client, scopeKey, deviceId);
-  if (!row) {
-    if (target !== 'H') throw new DeviceSwitchRefusedError(deviceId, 'same_mode', `Device is already in mode L: ${deviceId}`);
-    if (expectedRevision !== 0) throw stale(deviceId, expectedRevision, 0);
-    await client.query(`INSERT INTO device_binding (scope, device, ordinal, mode, mode_revision, switching)
-      SELECT $1, $2, coalesce(max(ordinal) + 1, 0), 'L', 1, 'H' FROM device_binding WHERE scope = $1`, [scopeKey, storedKey(deviceId)]);
-  } else {
-    refuseUnless(deviceId, row, expectedRevision, false);
-    if (row.mode === target) throw new DeviceSwitchRefusedError(deviceId, 'same_mode', `Device is already in mode ${target}: ${deviceId}`);
-    await client.query('UPDATE device_binding SET switching = $3, mode_revision = mode_revision + 1 WHERE scope = $1 AND device = $2',
-      [scopeKey, storedKey(deviceId), target]);
-  }
+  if (!row) throw new DeviceSwitchRefusedError(deviceId, 'same_mode', `Device is already in mode L: ${deviceId}`);
+  refuseUnless(deviceId, row, expectedRevision, false);
+  if (row.mode === target) throw new DeviceSwitchRefusedError(deviceId, 'same_mode', `Device is already in mode ${target}: ${deviceId}`);
+  await client.query('UPDATE device_binding SET switching = $3, mode_revision = mode_revision + 1 WHERE scope = $1 AND device = $2',
+    [scopeKey, storedKey(deviceId), target]);
   return viewOf((await readRow(client, scopeKey, deviceId))!);
 }
 

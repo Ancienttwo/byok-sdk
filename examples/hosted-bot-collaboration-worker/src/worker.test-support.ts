@@ -73,7 +73,7 @@ export async function openSubstrate(): Promise<Substrate> {
   const sdkPool = createByokPool({ connectionString, max: 2 });
   const pool = new pg.Pool({ connectionString, max: 4 });
   const configs = new Map<string, HostConfig>(), entitled = new Set<string>();
-  const store = new HostedCollaborationStore(pool, hSchema, { host: scope => configs.get(scope)! });
+  const store = new HostedCollaborationStore(pool, hSchema, { host: async scope => configs.get(scope)! });
   try {
     await migrate(sdkPool, migrationsDir());
     await store.migrate();
@@ -217,7 +217,7 @@ export async function startWorker(substrate: Substrate, options: WorkerOptions =
     passes: () => instance.admin<PassReport>('/host/passes', {}),
     async armClock() {
       const response = await fetch(`${base}/__scheduled?cron=*+*+*+*+*`);
-      if (!response.ok) throw new Error(`/__scheduled: HTTP ${response.status} ${await response.text()}`);
+      if (!response.ok) throw new Error(`/__scheduled: HTTP ${response.status} ${await response.text()}\n${output}`);
       await instance.waitForOutput('[h-clock] cron');
     },
     input: (token, botId, key, request) => fetch(`${base}/host/input`, authorized({ botId, key, request }, token)),

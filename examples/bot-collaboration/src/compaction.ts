@@ -21,6 +21,8 @@ export const botCompactVeto: CompactVeto = (ledger, key) => {
   const state = ledger.application.collaboration as unknown as CollaborationState | undefined;
   if (state === undefined) return undefined;
   if (state.version !== 3) return 'Unsupported Bot collaboration state version';
+  // #975: an exported domain keeps what it exported, so nothing of it is compacted.
+  if (state.switchExport) return 'switch_exported';
   return compactVeto(state, key, { hasIntent: turnId => !!ledger.intents[hash(turnId)],
     receipt: taskId => ledger.executions[taskId]?.messageReceipt });
 };

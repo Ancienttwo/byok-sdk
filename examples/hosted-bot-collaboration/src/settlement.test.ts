@@ -248,6 +248,19 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
     await settled(h, VECTOR_NOW + TIMERS.uncertainAfterMs, TIMERS);
   });
 
+  it('takes a delegation abandon during a freeze of the device, as L does, and the sync holds its reply Turn (#975)', async () => {
+    const h = await uncertainClaim();
+    await store().beginSwitch(h.scope, 'device', 'L', 1);
+    // K8 commandBots names no Bot for an abandon, so neither Host refuses it; its reply Turn on the frozen device is held.
+    await store().commit(h.scope, { scope: h.scope, commandId: randomUUID(), command: { kind: 'abandon_delegation', delegationId: h.id } },
+      vectorClock, { requireBinding: true });
+    const reply = (await h.delegation()).replyTurnId!;
+    expect(await h.delegation()).toMatchObject({ verdict: 'abandoned', replyTurnId: expect.any(String) });
+    await h.sync(VECTOR_NOW + TIMERS.uncertainAfterMs, TIMERS);
+    expect((await h.state()).turns[reply]).toMatchObject({ botId: 'main', held: 'device_switching' });
+    expect(await h.row(reply)).toBeUndefined();
+  });
+
   it('writes a terminal that comes after the verdict of an ended delegation to the audit list only, once', async () => {
     const h = await uncertainClaim();
     await h.commit({ kind: 'abandon_delegation', delegationId: h.id });
@@ -378,6 +391,24 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
     expect(await facts()).toMatchObject({ started: [true, true, false], decline: undefined });
     await h.set(h.id, `terminal = NULL, started = true`);
     expect(await facts()).toMatchObject({ started: [true, true, false], decline: undefined });
+    // An imported intent (#975) started when any generation did, as K8 intentFacts reads every generation: B is at generation
+    // 1 with no start, and its generation 0 is an execution row that the import moved.
+    await h.set(h.id, `started = false, generation = 1, task_id = '${taskId(h.id, 1)}', input = jsonb_set(input::jsonb, '{taskId}', '"${taskId(h.id, 1)}"')::json`);
+    expect(await facts()).toMatchObject({ started: [false, true, false], intent: { taskId: taskId(h.id, 1) } });
+    const earlier = async (started: boolean, terminal: Json) => {
+      await opened!.pool.query(`DELETE FROM ${table('intent_execution')} WHERE scope = $1`, [storedKey(h.scope)]);
+      await opened!.pool.query(`INSERT INTO ${table('intent_execution')} (scope, key, generation, task_id, submission, started, attempt, terminal)
+        VALUES ($1, $2, 0, $3, 'delivered', $4, '{}'::json, $5::json)`, [storedKey(h.scope), storedKey(h.id), taskId(h.id, 0), started, JSON.stringify(terminal)]);
+    };
+    await earlier(false, null);
+    expect(await facts()).toMatchObject({ started: [false, true, false] });
+    await earlier(true, null);
+    expect(await facts()).toMatchObject({ started: [true, true, false] });
+    const envelope = (type: string) => ({ envelope: { task_id: taskId(h.id, 0), type, payload: {} } });
+    await earlier(false, envelope('task.decline'));
+    expect(await facts()).toMatchObject({ started: [false, true, false] });
+    await earlier(false, envelope('task.fail'));
+    expect(await facts()).toMatchObject({ started: [true, true, false] });
   });
 
   describe('reply checks (#793 S7)', () => {

@@ -28,8 +28,11 @@ export interface CommandEntryOptions<C> {
    * refuses the request with `UnauthenticatedError`. H never reads a token itself.
    */
   authenticate(credential: C): Promise<EntryCaller | undefined>;
-  /** The owner principal id of a scope, the value that `InboundIdentity.owner` gives the inbound entry. */
-  owner(scope: string): string;
+  /**
+   * The owner principal id of a scope, the value that `InboundIdentity.owner` gives the inbound entry. Async, so a product
+   * reads the one scope's record when it is asked.
+   */
+  owner(scope: string): Promise<string>;
   /** The deployment's composed sync of a scope, the function that `HostedDueScheduler` runs. */
   sync(scope: string, now: number): Promise<unknown>;
   /**
@@ -182,7 +185,7 @@ export class HostedCommandEntry<C> {
   /** R2: only the scope's owner principal acts (K8 host.ts `ownerOnly`). */
   private async owned(credential: C, action: string, target: string): Promise<EntryCaller> {
     const caller = await this.verifiedCaller(credential, action, target);
-    if (isOwner(caller.principal, this.options.owner(caller.scope))) return caller;
+    if (isOwner(caller.principal, await this.options.owner(caller.scope))) return caller;
     await this.store.audit(caller.scope, `Action refused not_owner: ${action} ${target} ${caller.principal.kind}:${caller.principal.id}`, this.now);
     throw new EntryRefusedError('not_owner', `not_owner: ${action} needs the owner principal`);
   }

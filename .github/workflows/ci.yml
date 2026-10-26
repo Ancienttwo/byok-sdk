@@ -378,6 +378,7 @@ jobs:
     if: ${{ contains(fromJSON(needs.select.outputs.families), 'agent-memory-helper') }}
     name: agent memory filesystem helper (${{ matrix.os }}, fixed Node/Bun/Go)
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -467,8 +468,33 @@ jobs:
           "temp volume $($volume.DriveLetter): $($volume.FileSystemType)"
 
       - name: Run SDK helper, intent and capability contracts
+        timeout-minutes: 10
         run: |
           bun run --filter @byok-sdk/client test -- src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-asset-root-daemon.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-mcp-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts src/__tests__/agent-memory-helper-identity.test.ts src/__tests__/agent-memory-windows-gate.test.ts
+
+      # The W5 power-cut harness (#605) kills and restarts device processes.
+      # Its own time limit ends a hang with the log so far; the sampler and
+      # the next step show the processes it left and what they used.
+      - name: Run the W5 process-crash power-cut harness
+        timeout-minutes: 5
+        run: |
+          if [ "$RUNNER_OS" != Windows ]; then
+            (trap 'kill "$nap" 2>/dev/null; exit' TERM
+              while :; do
+                date -u +%T
+                ps -axo pid,pgid,ppid,stat,%cpu,rss,etime,command | grep -E 'vitest|/bun |bun run|agent-memory|byok-|createServer' | grep -v grep | cut -c1-400 || true
+                sleep 15 & nap=$!; wait "$nap"
+              done) > "$RUNNER_TEMP/w5-processes.log" 2>&1 &
+            sampler=$!
+            trap 'kill "$sampler" 2>/dev/null || true' EXIT
+          fi
+          bun run --filter @byok-sdk/client test -- --reporter=verbose --reporter=hanging-process src/__tests__/agent-memory-powercut.test.ts
+
+      - name: Show processes during and after the W5 harness
+        if: always() && runner.os != 'Windows'
+        run: |
+          cat "$RUNNER_TEMP/w5-processes.log" || true
+          ps -axo pid,pgid,ppid,stat,%cpu,rss,etime,command
 
       - name: Qualify task-free export against the release helper
         env:

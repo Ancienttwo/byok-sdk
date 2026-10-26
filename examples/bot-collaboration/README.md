@@ -954,7 +954,7 @@ Host can own Bots on two devices (see "Second-device placement"). A device with
 no record is `{ mode: 'L', revision: 0 }`. `topology(deviceId)` reads it.
 The product runs the switch with these calls, each on the revision it expects.
 A stale revision throws `CommitConflict` with `stale_revision`, and each step
-raises the revision:
+except the export raises the revision:
 
 1. `freezeForSwitch(deviceId, revision)` writes `{ mode: 'L', switching: 'H' }`
    and returns the record read back from the ledger.
@@ -970,10 +970,16 @@ raises the revision:
    pass. A tried intent concludes only from its SDK terminal, so it stays
    listed until the reconciler reads one. The drain waits for nothing: no
    timeout counts as stop evidence.
-3. After H commits the device, `commitSwitch(deviceId, revision)` writes
-   `{ mode: 'H' }`. It refuses while the same transaction finds open work.
-   `abortSwitch(deviceId, revision)` instead writes `{ mode: 'L' }`, so L
-   owns the device again and its held Turns run.
+3. `exportForSwitch(devices, exportedAt?)` seals the whole domain into a
+   switch export once every device in `devices` is frozen at its revision and
+   drained (see "Owner switch on L" below).
+4. After the new owner imported and verified the export,
+   `commitSwitch(deviceId, revision, receipt)` writes `{ mode: 'H' }` for every
+   device of the export in one transaction, when `receipt` is the export's
+   digest and `deviceId` at `revision` is one of its devices. It refuses while
+   the same transaction finds open work. `abortSwitch(deviceId, revision)`
+   instead writes `{ mode: 'L' }`, so L owns the device again and its held
+   Turns run.
 
 While the device is frozen, each entry that can create execution for it throws
 `DeviceSwitchingError` (`code: 'device_switching'`) and writes nothing:
@@ -990,6 +996,12 @@ The check runs after the replay lookup (the new `CommandPorts.admit` port), so
 an exact replay of a command or Host intent that L accepted before the freeze
 still returns its first result.
 
+The Bots each command reaches are a pure rule, `commandBots(state, command)` from
+`./rules/commands` (#975). L refuses a command when one of those Bots' devices
+refuses work. H passes the same rule to its `CommandPorts.admit`, so both Hosts
+refuse the same commands during a freeze. A frozen domain then starts no new
+Turn and no new card connector call.
+
 After the commit these entries throw `DeviceModeError` (`code:
 'device_not_bound'`, `reason: 'mode'`, as H's refusal of a device in the other
 mode), for good.
@@ -999,7 +1011,8 @@ Other refusals and holds:
 - **Routine slot:** a slot of a routine whose Bot is on the device throws from
   the routine hook. K4 then records neither the slot nor a Turn, and the SDK
   delivers the wake again later, so a slot is never dropped. It runs after an
-  abort. After a commit it refuses until the product pauses the routine on L.
+  abort. From the export on every slot refuses, also after the commit, and the
+  new owner schedules the routine's wakes on its own SDK.
 - **Sync:** any other path that adds a Turn for a Bot on the device is held.
   This covers a Bot outcome that delegates, a room round, and a batch that
   seals.
@@ -1021,8 +1034,209 @@ Each check reads the record in the transaction that would write the work. The
 constructor reads every record first and refuses a malformed one, so a restart
 admits nothing before it knows the freeze.
 
-L has no step for H → L: once a device is in mode H, every step refuses. Moving
-a device back to L belongs to the state export and import work (§8).
+Once a device is in mode H, every step on this ledger refuses. A domain moves
+back to L by an import into a new L tenant (below).
+
+### Owner switch on L (#975)
+
+`src/switch.ts` reads an L ledger into the switch format and writes the format
+into an L tenant. One function, `switchContent`, serves both the old owner's
+export and the new owner's read-back, so one function states what an L ledger
+holds. The whole coordination domain moves together.
+
+**Old owner (L → H).** `exportForSwitch(devices, exportedAt?)` runs in one
+synchronous step: it dumps the ledger (K4 `dumpForSwitch`), checks it, seals it
+(`sealSwitchExport`) and records the export mark. It refuses:
+
+- a device that is not switching at its revision, or still has open work;
+- a live Bot on a device it does not name, and every other state the format
+  refuses (`SwitchExportError`);
+- Agent memory state, which binds the tenant inside its digests;
+- a pending projection: upload them with `core.flushProjections` first;
+- a pending submit or Host job, which K4 would run while the export waits;
+- a stored copy that differs from the value it is derived from, with
+  `reference`: an intent's `agent` (K4 `agentKey`), task id (K4 `taskId`) and
+  frozen input of each generation, K4 `applied` (the current task of each
+  succeeded intent), each occurrence's wake key (K4 `parseRoutineWakeKey`), its
+  slot, intent id and conclusion, a routine's next wake key, and the
+  `attempts` of intents and occurrences;
+- a K4 or K8 record with a field the format does not name, which would be
+  dropped.
+
+From the mark on, also after a restart, this Host writes nothing to the
+ledger. Each K8 write refuses with `SwitchExportedError` (`code:
+'switch_exported'`) after the write runs, so a new command on a frozen or
+H-owned device still gets its device refusal. A refusal the write raises first
+also comes before the export's: a replayed command id (also on a frozen
+device), an id conflict, `stale_revision` and `RetentionRefused`. Each refusal
+writes nothing. That holds for the root entries a product calls directly too: `commitInLedger`, `retainInLedger`,
+`callCardsInLedger` (before the connector runs) and `syncTurnInLedger`. The
+passes and the timer run nothing, the K4 hooks and the routine lifecycle and
+update entries refuse, and the compact veto (`botCompactVeto`) refuses every
+intent with `switch_exported`. The mark stays after the commit, so the old
+ledger keeps the exported state.
+
+Do not compact an exported ledger. `ledger.compact` with no acknowledged
+intent still deletes expired tombstones, which the veto does not see. Before
+the commit that makes the commit refuse, so the switch is aborted and exported
+again; after the commit it does no harm.
+
+`commitSwitch` checks the receipt against the mark, then seals the ledger
+again under the export's header and refuses a different digest. That check
+covers the K4 core, which writes on its own timers: a routine that is pacing a
+schedule retry, or that switches to a pending version, can change between the
+export and the commit. The commit then refuses, and the switch is aborted and
+exported again. The commit moves every device of the export at once, so a
+domain is never split between the owners. An abort of a device of the export
+ends the export, and the new owner discards its import; after the commit no
+device of it aborts.
+
+**New owner (H → L).** On a new, empty ledger tenant (a switch back to L opens
+a new tenant), and with no `BotCollaboration` on it:
+
+1. `importForSwitch(ledger, document)` verifies the H export and writes it
+   with each device owned by H and an import record, in one transaction (K4
+   `loadForSwitch`). Before that transaction commits, K4 reads the tenant's
+   rows back, and they must seal to the document's digest under its header;
+   otherwise it throws `SwitchExportError` with `manifest` and writes nothing.
+   So an import is either verified or not there. It returns the receipt
+   `{ digest, devices }` that the old owner commits away on.
+2. After the old owner committed, `commitImport(ledger, digest)` gives L each
+   device of the import and deletes the import record.
+3. `discardImport(ledger)` deletes an import that is not to be committed (K4
+   `discard`). It first marks the import as being discarded, so a commit
+   refuses it from then on.
+
+A `BotCollaboration` refuses to open a ledger with an import record, and the
+root entries (`commitInLedger`, `retainInLedger`, `callCardsInLedger`,
+`syncTurnInLedger`) refuse it the same way before they run. So no work runs on
+an import before its commit, and a committed tenant has no record to discard. The import writes each derived value from the format: `agent` for the
+new tenant, the task ids and inputs of every generation, `applied`, slots, wake
+keys, intent ids, `attempts` and the Host intent handlers. A concluded intent
+gets K4's cursors of a new row (`phase: 'settled'`, `notBefore: 0`). Routines
+and occurrences go in the order of their ordinals, which the format makes their
+positions.
+
+**Ordering.** The receipt is the export's digest, and nothing between the two
+Hosts proves that the target imported it: there is no authentication between
+them. The product runs the steps in order and keeps the document:
+
+- The old owner commits away only after the target reported its import
+  verified.
+- The export document is kept until the target committed toward its owner.
+- If an import is lost after the old owner committed away, the kept document
+  is imported into a new tenant.
+- Only one import of a digest is committed; every other one is discarded. The
+  receipt names no tenant, so one document can be imported into two tenants.
+- From the export on the old owner refuses all work, so two owners never run
+  the domain at the same time.
+
+Not moved: the source SDK's wakes, that is the `schedule` and `cancel-wake`
+rows and the scan wake. The new owner's `recover()` schedules each routine's
+next wake on its own SDK. K4 `ignoredWakes` does not move either. It is an
+optional audit of wake deliveries that the source SDK made and K4 ignored, at
+most `IGNORED_WAKE_AUDIT_LIMIT` rows, and no rule reads it. A target starts
+without it, as a new ledger does, and an export is not refused for it.
+
+### Owner switch export format (#975)
+
+The `./migration` entry (`src/migration.ts`) is the one form in which a whole
+coordination domain moves between owners: an L ledger tenant or an H scope.
+Neither Host's storage is the format. The old owner builds a `SwitchContent`
+once every device of the domain is frozen and drained, and
+`sealSwitchExport` checks it, orders each section by its identity and adds a
+manifest. The manifest has the count and the `hash(canonical(section))` of
+each list section, and one digest over them and the header (source, domain,
+frozen device revisions, export time). The collaboration digest is the hash
+of its JSON text, because the insertion order of its maps is state: K8 reads
+Turns in that order for context and retention, so a target must keep it. The new owner runs `verifySwitchExport` on
+the document before it writes anything, and again on its own rows read back
+into this form, so the digest it records in its receipt is the source's. The
+digest covers the header, and `domain` is the source's tenant or scope id (a
+switch back to L opens a new tenant). So the read-back copies the document's
+header as it is and rebuilds only the sections from the target's rows. Devices
+are in JS string order of their id, and each section in JS string order of
+`canonical(identity)`, so a read-back sorts that way in JS or reseals; a
+database `ORDER BY` may give `unsorted`.
+
+A record holds what a target needs to rebuild the row, with values the source
+stores, never a default. Routines and occurrences carry their ordinal, which is
+their position in their section, exactly 0 to n - 1: what moves is their order,
+which is all K4 stores, and H stores the position in its column. An intent
+carries K4 `sequence` or H `ordinal` as it is, gaps included, and its frozen
+input (a sealed one stays sealed). H stores only part of this
+today: the K4-only fields get H columns in the H slice that imports them.
+Every object has an exact set of keys.
+
+A value that a Host derives from others is not in a record, and the target
+derives its own. The format never sees the source's stored copies, so each
+Host's export builder checks them against these rules and refuses to build an
+export where one differs:
+- an intent's FIFO key, K4 `agentKey(domain, execution)`, from the target's
+  own tenant or scope and the device and Agent of the frozen input;
+- the execution input of each earlier generation (`input` with that
+  generation's task id), and K4 `intent.execution` (`input` without
+  `taskId`), which hold while K4 runs without its memory option, as K8 does;
+- K4 `applied`: the current task id exactly when the intent `succeeded`;
+- a K4 occurrence's wake key and slot (K4 `routineWakeKey`). Each occurrence
+  has exactly one slot on both Hosts, so the format has no slot section;
+- an occurrence's intent id (K4 `occurrenceIntentKey`), and K4 `attempts`,
+  which `switchAttempts` derives for both Hosts.
+
+An intent carries the K4 execution of each earlier generation (submission,
+start, attempt, terminal and message receipt), because K4 compacts an intent
+only with the execution of every generation. A message for an earlier task is
+answered from its execution: by its receipt, or else `stale_generation`.
+Nothing relies on a replay after the switch getting `accepted`: the target's
+SDK passes an Agent message to the Host only when its own stores hold the
+device's task and offer binding, which this export does not carry.
+
+The format refuses, with `SwitchExportError` and a `reason`:
+- the source's owner records (L `topology`, and L `hostIntents`, whose handler
+  each intent carries);
+- a K4 message receipt, of the current generation or an earlier one, that is
+  not the K8 accepted reply of the same task id, or a reply with no receipt
+  (`receipt_mismatch`);
+- a record that names one the export does not hold (`reference`): an
+  occurrence intent (K4's `occurrence:<sha-256>` key) or Host job outbox row
+  without its occurrence, an occurrence without its routine, an occurrence key
+  that is not K4's hash of its routine slot and trigger, or a task id that is
+  not `hash([key, generation])`;
+- state that K4 cannot produce (`invalid`): a retry policy outside K4's
+  `validateRetry` bounds, on an intent or a routine definition; a generation at
+  or past `maxAttempts`; a `reserved` intent past generation 0 or with
+  anything from a submission; an earlier generation without its terminal and
+  attempt, or that was not begun; an occurrence that does not match its
+  routine's run kind (a Host job routine's occurrence has a job, is never
+  promoted, since L runs K4 with `hostJobExecution: 'fail'` and H concludes a
+  job result with an execution `failed`, and has a pending job exactly while it
+  is open; a hook routine's has no job); a routine
+  or occurrence ordinal that is not its position; and two occurrences of one
+  slot (`duplicate`);
+- an execution routine (`execution_routine`): a K8 domain holds only Turn and
+  Host intents (#954), L refuses execution routines and H refuses them at
+  create, and K8 Bot routines are occurrence hooks;
+- a live Bot on a device the export does not move;
+- open work: an open Turn or input batch, an intent with no conclusion, or a
+  card call in flight;
+- a pending Agent home write that is `sent` or has a `retryAt`, because it may
+  have reached the device. An unsent one moves and is sent by the new owner;
+- a pending projection (`projection_pending`): H's receiver deduplicates by
+  `(scope, id)`, and L does not record whether it was sent (H raises `tries`
+  before the send), so the source flushes its projections first;
+- rows out of identity order, a repeated identity or ordinal, a key outside the
+  format, malformed fields, a value that is not JSON by K4's `validateJson`
+  (`NaN`, `undefined`, a class instance, checked before the seal clones the
+  content), and a manifest that does not match the content.
+
+A channel delivery moves under its id,
+`hash([taskId, messageId, routeKey, nonce?])`, which names no Host domain, so
+the target's readback or resend of a `sending` or `unknown` delivery uses the
+source's idempotency key. Whether a platform honors that key is its adapter's
+concern (`docs/host-im-adapter.md`); the switch does not change it.
+
+This entry has no I/O. L's export, import and commit are in "Owner switch on L";
+H's come in a later #975 slice.
 
 ### Second-device placement and device wait
 

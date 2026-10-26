@@ -11,7 +11,10 @@ export interface DueSchedulerOptions {
   now?: () => number;
   /** The most syncs that one pass runs. A scope that waits out its backoff does not count. */
   batch?: number;
-  /** How long a scope that is still due after its sync, or whose sync threw, waits before the next try. In memory only. */
+  /**
+   * How long a scope that is still due after its sync, or whose sync threw, waits before the next try. The wait is
+   * `scope.retry_at`, so it holds across scheduler instances and processes, and only for the due time it was set on.
+   */
   backoffMs?: number;
 }
 /** A scope whose sync threw. The failed step wrote nothing; with a composed `sync`, earlier steps of that pass may have committed. */
@@ -29,7 +32,6 @@ type DueRow = { scope: string; due: string };
  */
 export class HostedDueScheduler {
   private readonly now: () => number;
-  private readonly retryAt = new Map<string, number>();
 
   constructor(private readonly pool: Pool, private readonly store: HostedCollaborationStore, private readonly options: DueSchedulerOptions) {
     this.now = options.now ?? Date.now;
@@ -41,36 +43,49 @@ export class HostedDueScheduler {
    */
   async run(): Promise<DuePass> {
     const now = this.now(), pass: DuePass = { synced: 0, stalled: [], failed: [] };
-    // An expired wait has no effect, so a scope that stopped being due leaves the map within one backoff.
-    for (const [retry, at] of this.retryAt) if (at <= now) this.retryAt.delete(retry);
     const batch = this.options.batch ?? 100, backoffMs = this.options.backoffMs ?? 60_000;
     let cursor: [number, string] = [-1, ''];
     while (pass.synced < batch) {
       const due = await inSchema(this.pool, this.store.schema, client => client.query<DueRow>(
-        // The text form has its own name: an output column named `due_at` would make ORDER BY sort the text.
-        `SELECT scope, due_at::text AS due FROM scope WHERE due_at <= $1 AND state_version = ANY($3::integer[])
-          AND (due_at, scope) > ($4, $5) ORDER BY due_at, scope LIMIT $2`,
+        // The text form has its own name: an output column named `due_at` would make ORDER BY sort the text. An exported
+        // scope, or one with an uncommitted import, commits no sync (#975), so it is left out.
+        `SELECT scope, due_at::text AS due FROM scope WHERE due_at <= $1 AND state_version = ANY($3::integer[]) AND switch_export IS NULL AND switch_import IS NULL
+          AND (retry_at IS NULL OR retry_at <= $1) AND (due_at, scope) > ($4, $5) ORDER BY due_at, scope LIMIT $2`,
         [now, batch, [...SUPPORTED_STORE_VERSIONS], ...cursor]), true);
       for (const row of due.rows) {
         cursor = [Number(row.due), row.scope];
         if (pass.synced >= batch) break;
         const scope = JSON.parse(row.scope) as string, at = this.now();
-        if ((this.retryAt.get(row.scope) ?? 0) > at) continue;
+        // The due time that a backoff is keyed on, or none. The write comes after the try, so a failed backoff write
+        // propagates and never reports one scope both synced and failed.
+        let retryOn: number | undefined;
         try {
           const { dueAt } = await this.options.sync(scope, at);
           pass.synced++;
           if (dueAt !== null && dueAt <= at) {
             // The sync left the scope due, so every pass would sync it again and write nothing.
             pass.stalled.push(scope);
-            this.retryAt.set(row.scope, at + backoffMs);
-          } else this.retryAt.delete(row.scope);
+            retryOn = dueAt;
+          }
         } catch (error) {
           pass.failed.push({ scope, error });
-          this.retryAt.set(row.scope, at + backoffMs);
+          retryOn = Number(row.due);
         }
+        if (retryOn !== undefined) await this.backOff(row.scope, retryOn, at + backoffMs);
       }
       if (due.rows.length < batch) break;
     }
     return pass;
+  }
+
+  /**
+   * Keyed on the due time that the scope still has: a store transaction that moved it has cleared `retry_at` and made the
+   * new work due at once, and this write then matches no row. It takes no scope lock, so the switch fence does not see it:
+   * a scope exported after the scan read it gets no backoff (#975). An import record is written only with a new scope
+   * row, so a scope that the scan read never gets one.
+   */
+  private async backOff(scopeKey: string, dueAt: number, retryAt: number): Promise<void> {
+    await inSchema(this.pool, this.store.schema, client =>
+      client.query('UPDATE scope SET retry_at = $3 WHERE scope = $1 AND due_at = $2 AND switch_export IS NULL', [scopeKey, dueAt, retryAt]));
   }
 }

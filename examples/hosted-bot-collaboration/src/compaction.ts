@@ -24,8 +24,8 @@ export function acknowledgedTurnIds(input: IntentCompactionInput): string[] {
  * holds the scope lock and passes the state of its transaction. Each removed row leaves a permanent intent tombstone in the
  * same transaction, so the Turn can never freeze again. A refusal or a throw writes nothing.
  *
- * Routine intents are refused: K4 gives a routine occurrence's intent tombstone the expiry of its slot, and
- * `retired_identity` has no expiry.
+ * Routine intents are refused: K4 compacts a routine intent with its occurrence, retiring the slot and giving the intent
+ * tombstone the slot's expiry (`ledger.ts` compact), and H does not compact occurrences.
  */
 export async function decideCompaction(client: PoolClient, scopeKey: string, state: CollaborationState,
   input: IntentCompactionInput): Promise<IntentCompaction> {
@@ -50,7 +50,11 @@ export async function decideCompaction(client: PoolClient, scopeKey: string, sta
     if (row.source === 'routine') throw new Error('H does not compact routine intents');
     if (row.conclusion === null) throw new Error('Only settled intents can be compacted');
   }
-  for (const turnId of present) await client.query('DELETE FROM intent WHERE scope = $1 AND key = $2', [scopeKey, storedKey(turnId)]);
-  await retire(client, scopeKey, present.map(intentIdentity));
+  // K4 compacts an intent with the execution of every generation (`ledger.ts` compact), so its earlier ones go with it (#975 D1).
+  for (const turnId of present) {
+    await client.query('DELETE FROM intent_execution WHERE scope = $1 AND key = $2', [scopeKey, storedKey(turnId)]);
+    await client.query('DELETE FROM intent WHERE scope = $1 AND key = $2', [scopeKey, storedKey(turnId)]);
+  }
+  await retire(client, scopeKey, 'intent', present.map(intentIdentity));
   return { compactedIntents: present.length, alreadyCompactedIntents: turnIds.length - present.length };
 }

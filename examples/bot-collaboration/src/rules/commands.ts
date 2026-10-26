@@ -74,6 +74,29 @@ interface TeamRows {
   };
 }
 export type CommandState = OutcomeState & CommitState & TeamRows;
+/** The state `commandBots` reads. */
+export type CommandScopeState = Pick<CommandState, 'turns' | 'questions' | 'cards' | 'team'>;
+/**
+ * The Bots on whose devices a new command would create work (#957, #975). A Host refuses the command in `CommandPorts.admit`
+ * while one of their devices is frozen for an owner switch or owned by the other Host, so both Hosts refuse the same commands.
+ * `input` and an owner `receive` name their Bot. A room input can seat any Bot member of the room. An answer adds a Turn for
+ * the question's Bot, and a decided card adds an `action_result` Turn for the card's Bot and can start its connector call.
+ * Any other command, and an unknown Bot, room, question or card, names none: the command refuses an unknown id itself.
+ */
+export function commandBots(state: CommandScopeState, command: Command): string[] {
+  const own = <T>(rows: Readonly<Record<string, T>>, id: string): T | undefined => Object.hasOwn(rows, id) ? rows[id] : undefined;
+  const bots = (ids: readonly (string | undefined)[]) => ids.filter((id): id is string => id !== undefined && Object.hasOwn(state.team.bots, id));
+  const turnBot = (turnId: string | undefined) => bots([turnId === undefined ? undefined : own(state.turns, turnId)?.botId]);
+  const members = (roomId: string) => bots(own(state.team.rooms, roomId)?.members ?? []);
+  switch (command.kind) {
+    case 'input': return bots([command.botId]);
+    case 'receive': return command.inbound === 'owner_input' ? bots([command.botId]) : members(command.roomId);
+    case 'room_input': return members(command.roomId);
+    case 'answer': return turnBot(own(state.questions, command.questionId)?.turnId);
+    case 'decide': return turnBot(own(state.cards, command.cardId)?.turnId);
+    default: return [];
+  }
+}
 export interface CommandPorts {
   /** The Host clock. A command reads it when it needs a time. */
   now(): number;

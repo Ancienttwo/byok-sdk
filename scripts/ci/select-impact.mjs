@@ -207,6 +207,8 @@ export const familyOwners = Object.freeze({
     /^scripts\/release\/agent-memory-helper-source\.test\.mjs$/,
     /^packages\/client\/src\/(?:agent-memory\/|agent-home|daemon\/(?:agent-memory|prepared-agent-memory|resolve-agent-memory))/,
     /^packages\/client\/src\/__tests__\/(?:agent-memory|agent-home-directory-barrier|daemon-conn-hello-capabilities)[^/]*$/,
+    // #605 W5: the power-cut harness modules live in their own directory.
+    /^packages\/client\/src\/__tests__\/agent-memory-powercut\//,
   ],
   'execution-recovery-native': [
     /^packages\/client\/src\/daemon\/journal\//,
@@ -314,7 +316,9 @@ function oarSnapshotListed(path, { base, cwd = process.cwd() } = {}) {
     && Array.isArray(manifest.files) && manifest.files.some(row => row.path === match[2]);
 }
 const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'packages/AGENTS.md', 'packages/CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
-const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml']);
+// #605 W5: w5-runner-probe.yml is workflow_dispatch only and reads no repo
+// file, so like release.yml it selects only the CI script checks.
+const rootCi = new Set(['.github/workflows/ci.yml', '.github/workflows/release.yml', '.github/workflows/w5-runner-probe.yml']);
 const sorted = values => [...values].sort();
 // An unmapped path is a selector gap. Fix it with a reviewed mapping; a
 // feature PR never falls back to the complete release matrix.

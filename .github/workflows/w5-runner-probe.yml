@@ -1,0 +1,49 @@
+name: W5 runner probe
+
+# #605 W5, owner approvals A2 and A3: reads what a GitHub-hosted ubuntu-latest
+# runner offers a QEMU/KVM power-cut run, before any W5 workflow exists. The
+# reads are listed under "Owner decisions (2026-10-26)" in
+# docs/plans/2026-10-19-wo09-windows-ledger-validation.md.
+#
+# Manual trigger only. It installs qemu-system-x86 and nbdkit from the Ubuntu
+# archive and nothing else, checks out no code, downloads no guest image and
+# boots nothing. Each read prints its exit code; a failed read is a result, not
+# a failed run. Only the package install can fail the job.
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  probe:
+    name: runner probe (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install qemu-system-x86 and nbdkit
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends qemu-system-x86 nbdkit
+
+      - name: Read the runner
+        shell: bash
+        run: |
+          probe() {
+            local out code
+            out="$("$@" 2>&1)" && code=0 || code=$?
+            printf '== %s (exit %d)\n%s\n\n' "$*" "$code" "$out"
+            printf '#### `%s` (exit %d)\n\n```\n%s\n```\n\n' "$*" "$code" "$out" >> "$GITHUB_STEP_SUMMARY"
+          }
+          printf '### Runner image %s %s\n\n' "$ImageOS" "$ImageVersion" | tee -a "$GITHUB_STEP_SUMMARY"
+          probe ls -l /dev/kvm
+          probe bash -c '[ -r /dev/kvm ] && [ -w /dev/kvm ]'
+          probe nproc
+          probe free -g
+          probe df -h / /mnt
+          probe uname -r
+          probe sudo modprobe dm-log-writes
+          probe bash -c 'lsmod | grep -w dm_log_writes'
+          probe dpkg-query -W -f='${Package} ${Version}\n' qemu-system-x86 nbdkit
+          probe qemu-system-x86_64 --version
+          probe nbdkit --version
