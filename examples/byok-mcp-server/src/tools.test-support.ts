@@ -8,7 +8,8 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { createByokServer } from '@byok-sdk/server';
 import { createDaemonWithAdapters, freezeRuntimeAdapterDescriptor, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type Session } from '@byok-sdk/client';
-import { createEnvelope, PROTOCOL_VERSION, type BlobRef, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type AgentRef, type BlobRef, type Envelope } from '@byok-sdk/protocol';
+import { policy } from '@byok-sdk/example-host-execution-core/test-support';
 import { createDeviceSimulator } from '@byok-sdk/testkit';
 import { expect, vi } from 'vitest';
 import { InMemoryDeviceCredentialStore } from '../../../scripts/testing/device-credentials.mjs';
@@ -16,6 +17,11 @@ import { BetaLedger, createBetaMcpServer, createTaskTools } from './index';
 
 type Event = Session['events'] extends AsyncIterable<infer E> ? E : never;
 export const PRODUCT_ID = 'beta-b3-test';
+/** The Agent that `tasks.dispatch` test keys run their tasks as. */
+export const AGENT: Readonly<AgentRef> = { agentId: 'main', profileRevision: '1' };
+/** The durable device capabilities the SDK requires before it submits a fresh Agent execution with a terminal projection. */
+export const AGENT_EXECUTION_CAPABILITIES = ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session',
+  'terminal-projection-selection'];
 export const cleanup: Array<() => void | Promise<void>> = [];
 
 /** A scripted coding agent behind the public RuntimeAdapter contract. Tests emit its events. */
@@ -69,7 +75,7 @@ export async function openHost(options: { now?: () => number } = {}) {
   const origin = `http://127.0.0.1:${address.port}`;
   const ledger = new BetaLedger(join(root, 'beta.sqlite'), 'tenant-b3', { tasks: server.tasks, ...(options.now ? { now: options.now } : {}) });
   const endpoint = createBetaMcpServer({ ledger, origin, serverInfo: { name: 'B3 test host', version: '1' },
-    tools: createTaskTools({ sdk: server, ledger, blobBaseUrl: origin, statusPollMs: 20 }) });
+    tools: createTaskTools({ sdk: server, ledger, egressPolicy: policy, blobBaseUrl: origin, statusPollMs: 20 }) });
   mcp = endpoint;
   cleanup.push(async () => {
     endpoint.close(); if ('closeAllConnections' in http) http.closeAllConnections();
@@ -84,7 +90,8 @@ export async function openDaemonHost() {
   const host = await openHost();
   const runtime = new FakeRuntime();
   const daemon = createDaemonWithAdapters({ productId: PRODUCT_ID, productName: 'B3 test', localAgentRelease: { version: '0.0.0-test' },
-    serverUrl: host.origin, storeDir: join(host.root, 'sdk') },
+    serverUrl: host.origin, storeDir: join(host.root, 'sdk'),
+    agentHome: { hostStorageRoot: join(host.root, 'homes') }, agentEgress: { policy } },
   [runtime], { deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });
   const { deviceId } = await daemon.pair((await host.server.pairing.createPairingCode({ productId: PRODUCT_ID })).code);
   await daemon.start(); cleanup.push(() => daemon.stop());
@@ -101,7 +108,7 @@ export async function openSimulatorHost(options: { now?: () => number; capabilit
     const response = await device.request({ method: 'POST', path: '/byok/messages', body: { messages: [envelope] } });
     expect(response).toMatchObject({ status: 200, body: { accepted: 1 } });
   };
-  await send(createEnvelope('conn.hello', { protocolVersions: [PROTOCOL_VERSION], capabilities: options.capabilities ?? [], productId: PRODUCT_ID,
+  await send(createEnvelope('conn.hello', { protocolVersions: [PROTOCOL_VERSION], capabilities: [...AGENT_EXECUTION_CAPABILITIES, ...options.capabilities ?? []], productId: PRODUCT_ID,
     deviceId: session.deviceId, runtimes: [{ id: 'pi', capabilities: { steer: false, resume: false, approvalInteractive: false } }] }));
   /** Declare, upload and finalize one blob as the device, through the SDK's blob routes. */
   const uploadBlob = async (content: Buffer, contentType: string): Promise<BlobRef> => {

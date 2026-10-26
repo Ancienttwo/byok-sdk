@@ -14,7 +14,7 @@ There is no listener, admin HTTP route, default key or model invocation here.
 ## Host composition
 
 ```ts
-import type { ByokServer } from '@byok-sdk/server';
+import type { AgentExecutionInput, ByokServer } from '@byok-sdk/server';
 import { BetaLedger, createBetaMcpServer, createTaskTools } from './src/index';
 
 export function composeBeta(
@@ -23,20 +23,23 @@ export function composeBeta(
   tenant: string,
   origin: string,
   sdkOrigin: string,
+  egressPolicy: AgentExecutionInput['payload']['egressPolicy'],
 ) {
   const ledger = new BetaLedger(filename, tenant, { tasks: sdk.tasks });
   try {
     const endpoint = createBetaMcpServer({ ledger, origin,
       serverInfo: { name: 'byok-host', version: '1' },
-      tools: createTaskTools({ sdk, ledger, blobBaseUrl: sdkOrigin }) });
+      tools: createTaskTools({ sdk, ledger, egressPolicy, blobBaseUrl: sdkOrigin }) });
     return { ledger, fetch: endpoint.fetch,
       close() { endpoint.close(); ledger.close(); } };
   } catch (error) { ledger.close(); throw error; }
 }
 ```
 
-The Host supplies its SDK instance, trusted tenant, private file, public MCP origin
-and the origin where it serves the SDK routes (`sdk.hono`), for artifact URLs.
+The Host supplies its SDK instance, trusted tenant, private file, public MCP origin,
+the origin where it serves the SDK routes (`sdk.hono`), for artifact URLs, and the
+Agent egress policy of task executions. Each task is a fresh Agent execution, so the
+receiving daemon needs `agentHome` and `agentEgress: { policy }` configured to accept it.
 It mounts `fetch` at the MCP endpoint behind its TLS termination. Use HTTPS for
 remote clients and loopback HTTP locally. B1 owns framing, body limits, session
 limits and the MCP protocol. The wrapper checks Origin before authentication.
@@ -68,11 +71,11 @@ contain no secret, salt or digest. Key grants are immutable. Revoke and issue a
 new key to change them. Rotation does not transfer old tasks to the new key.
 
 Scopes are `tasks.dispatch`, `tasks.read`, `tasks.cancel`, `artifacts.read`,
-`routines.read`, `routines.write`, `memory.read` and `memory.write`. Memory and
-routine grants require one AgentRef. Beta v1 has no memory-write tool
-(`byok_memory_propose` waits for beta plan §9 Q9 and PRD P5). Task-only
-keys need no AgentRef. A saved AgentRef records the key's context; it does not
-force the Host to turn an ordinary coding task into an Agent execution.
+`routines.read`, `routines.write`, `memory.read` and `memory.write`. Dispatch,
+memory and routine grants require one AgentRef: `issueKey` refuses a
+`tasks.dispatch` key without one, and every submitted task runs as that Agent.
+Beta v1 has no memory-write tool (`byok_memory_propose` waits for beta plan §9 Q9
+and PRD P5). `tasks.read`, `tasks.cancel` and `artifacts.read` need no AgentRef.
 
 Caller objects are immutable, in-process authenticated handles. Rebuilding one
 from JSON does not create authority. Ledger operations check the current key
@@ -131,8 +134,8 @@ ledger, wake calls and occurrence dispatch.
 Task slots include unresolved reservations and offered work. They prevent a
 crash before dispatch from bypassing the running cap. `reconcileTask` releases
 one only after the owning SDK supplies an exact device terminal and matching
-task/device/runtime/instruction binding. An offered AgentRef must match the key
-context. A missing task, Host cancellation or MCP cancellation does not free it.
+task/device/runtime/instruction binding. The offered AgentRef must equal the
+binding's; an offer without one never releases a slot. A missing task, Host cancellation or MCP cancellation does not free it.
 This is a quota release check, not a substitute for B3's complete conflict readback.
 Release never refunds the hourly admission. Status-rate events are pruned inside
 their transaction. Running/routine retry hints are advisory, not a promised delay.
@@ -166,20 +169,22 @@ device whose fresh presence reports the runtime. It then prefers an offline
 device (the SDK queues the work) over an online device without the runtime. A
 key with no registered granted device gets `unavailable` before admission.
 
-Dispatch uses `sdk.dispatch` with the saved task ID, device, runtime, instruction
-and toolsets. If an offer already exists, or dispatch fails, submit reads the
-offer back and accepts it only when type, device, runtime, instruction and
-toolsets match the binding exactly. Otherwise the call fails, and a retry of the
+Dispatch uses `sdk.executions.submit`: a fresh Agent execution with the saved task
+ID, device, runtime, instruction and toolsets, the binding's AgentRef, the Host's
+egress policy and terminal projection `none`. If an offer already exists, or the
+submit fails, submit reads the offer back and accepts it only when it is a
+`task.offer_for_agent_with_egress_fresh` whose device, AgentRef, runtime,
+instruction and toolsets match the binding exactly. Otherwise the call fails, and a retry of the
 same call dispatches again. A reservation whose slot is released only reads back.
 
 Submit refuses these inputs before admission, so they use no quota:
 
 - `toolsets` that the SDK would refuse: it takes 1–16 distinct lowercase IDs.
 
-- `resultSchema`: the SDK carries a terminal projection only on Agent-bound
-  offers. Plain `dispatch` and the `task.offer` wire message have no field for it.
-- `workspace`: `DispatchInput` has no workspace selection, and the daemon ignores
-  the wire `workspaceHint`. A Host workspace registry needs an SDK field first.
+- `resultSchema`: task executions use terminal projection `none` and define no
+  result contract. Routines do (B4).
+- `workspace`: an Agent execution has no workspace selection. A Host workspace
+  registry needs an SDK field first.
 
 `state` is the SDK task state. Two ledger states exist when the SDK has no task:
 `Reserved` (admitted, not dispatched; a retry of the same submit dispatches it)
@@ -203,7 +208,7 @@ That origin must be HTTPS, or HTTP on loopback, as for the MCP origin.
 The URL expires with the SDK blob grant (15 minutes by default).
 
 A dispatch that the SDK refuses before the task exists (for example, a device
-without `toolset-selection`) keeps its slot, as B2 requires for any missing SDK
+without `toolset-selection`, or a daemon without `agentHome` and `agentEgress`) keeps its slot, as B2 requires for any missing SDK
 task. Device selection does not read device capabilities, which `machines.list`
 does not expose. To clear such slots, revoke the key and issue a new one.
 

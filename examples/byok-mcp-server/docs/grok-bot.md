@@ -20,7 +20,8 @@ run.
 
 Grant the key only the scopes this Bot needs. A task-only Bot needs
 `tasks.dispatch`, `tasks.read`, and optionally `tasks.cancel` and
-`artifacts.read`. Routine and memory scopes also need an AgentRef on the key.
+`artifacts.read`. Dispatch, routine and memory scopes need an AgentRef on the key;
+each task runs as that Agent.
 `tools/list` shows only the tools whose scope the key holds
 ([`src/http.ts:55-57`](../src/http.ts)).
 

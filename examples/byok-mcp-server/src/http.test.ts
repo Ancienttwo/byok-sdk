@@ -8,7 +8,8 @@ import { BetaLedger, createBetaMcpServer, type KeySpec, type TaskArguments, type
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
-const grant: KeySpec = { label: 'Bot A', scopes: ['tasks.dispatch', 'tasks.read'], deviceIds: ['dev-a'], runtimes: ['pi'] };
+const grant: KeySpec = { label: 'Bot A', scopes: ['tasks.dispatch', 'tasks.read'], deviceIds: ['dev-a'], runtimes: ['pi'],
+  agentRef: { agentId: 'main', profileRevision: '1' } };
 function json(value: unknown): Record<string, unknown> { return { content: [{ type: 'text', text: JSON.stringify(value) }] }; }
 
 async function host(extra: ScopedTool[] = []) {
