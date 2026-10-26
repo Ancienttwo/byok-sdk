@@ -42,7 +42,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
       type,
       createEnvelope(type, {
         protocolVersions: [1],
-        capabilities: ['steer', 'blob-upload', 'interactive-approval'],
+        capabilities: ['steer', 'blob-upload', 'agent-home-contract'],
         deviceId: 'device-1',
         productId: 'acme-agent',
         runtimes: [
