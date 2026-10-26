@@ -113,7 +113,10 @@ export interface TombstoneRecord { kind: 'intent' | 'row' | 'slot' | 'applicatio
 
 export interface SwitchContent {
   version: typeof SWITCH_EXPORT_VERSION; source: 'L' | 'H'; domain: string; devices: SwitchDevice[]; exportedAt: number;
-  /** The live state. The source Host's owner records (L `topology`, L `hostIntents`, now on each intent) are not part of it. */
+  /**
+   * The live state. The source Host's owner records (L `topology`, L `hostIntents`, now on each intent) and L's switch
+   * records (`switchExport`, `switchImport`) are not part of it.
+   */
   collaboration: CollaborationState;
   archived: ArchivedRecord[]; intents: IntentRecord[]; routines: RoutineRecord[]; occurrences: OccurrenceRecord[];
   outbox: OutboxRecord[]; tombstones: TombstoneRecord[];
@@ -418,7 +421,10 @@ function checkReferences(content: SwitchContent): void {
   }
 }
 
-/** The K8 state keys (`model.ts`). The source's owner records (`topology`, `hostIntents`) are refused as `owner_record`. */
+/**
+ * The K8 state keys (`model.ts`). The source's owner records (`topology`, `hostIntents`) and L's switch records
+ * (`switchExport`, `switchImport`) are refused as `owner_record`.
+ */
 const COLLABORATION_KEYS = ['version', 'team', 'turns', 'budgets', 'delegations', 'batches', 'units', 'replies', 'schemas', 'questions', 'cards',
   'rejected', 'audit', 'sequence'];
 const COLLABORATION_OPTIONAL = ['inputs', 'inputBatches', 'channel', 'revision', 'commands', 'cardCalls'];
@@ -432,6 +438,9 @@ function checkCollaboration(content: SwitchContent): void {
   ensure(object(state), 'collaboration state');
   if (state.topology !== undefined) throw new SwitchExportError('owner_record', 'Switch export carries the source owner records (topology)');
   if (state.hostIntents !== undefined) throw new SwitchExportError('owner_record', 'Switch export carries L hostIntents; each intent carries its handler');
+  if (state.switchExport !== undefined || state.switchImport !== undefined) {
+    throw new SwitchExportError('owner_record', 'Switch export carries an L switch record (switchExport or switchImport)');
+  }
   ensure(keys(state, COLLABORATION_KEYS, COLLABORATION_OPTIONAL) && state.version === 3 && object(state.team) && object(state.team.bots)
     && Array.isArray(state.team.homeOperations) && object(state.turns) && optional(state.inputBatches, object) && optional(state.cardCalls, object),
   'collaboration state');

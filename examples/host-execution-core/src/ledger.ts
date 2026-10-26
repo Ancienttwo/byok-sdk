@@ -411,31 +411,38 @@ export class HostLedger {
   dumpForSwitch(): LedgerDump {
     this.db.exec('BEGIN');
     try {
-      const dump: LedgerDump = {
-        version: 1,
-        body: this.snapshot(),
-        tombstones: this.db.prepare('SELECT kind, identity, expires_at FROM host_retired_identity WHERE tenant=? ORDER BY kind, identity')
-          .all(this.tenant).map(row => ({ kind: row.kind as LedgerDumpTombstone['kind'], identity: String(row.identity),
-            expiresAt: row.expires_at === null ? null : Number(row.expires_at) })),
-        rows: this.db.prepare('SELECT namespace, id, body, expires_at FROM host_application_row WHERE tenant=? ORDER BY namespace, id')
-          .all(this.tenant).map(row => ({ namespace: String(row.namespace), id: String(row.id), value: JSON.parse(String(row.body)) as Json,
-            expiresAt: row.expires_at === null ? null : Number(row.expires_at) })),
-        memoryTombstones: this.db.prepare('SELECT intent_id, approval, body, expires_at FROM host_retired_memory_intent WHERE tenant=? ORDER BY intent_id')
-          .all(this.tenant).map(row => ({ intentId: String(row.intent_id), approval: String(row.approval),
-            row: JSON.parse(String(row.body)) as MemoryIntentRow, expiresAt: Number(row.expires_at) })),
-      };
+      const dump = this.readDump();
       this.db.exec('COMMIT');
       return dump;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  /** The rows of this tenant, inside the caller's transaction: the dump, and the load's read-back. */
+  private readDump(): LedgerDump {
+    return {
+      version: 1,
+      body: this.snapshot(),
+      tombstones: this.db.prepare('SELECT kind, identity, expires_at FROM host_retired_identity WHERE tenant=? ORDER BY kind, identity')
+        .all(this.tenant).map(row => ({ kind: row.kind as LedgerDumpTombstone['kind'], identity: String(row.identity),
+          expiresAt: row.expires_at === null ? null : Number(row.expires_at) })),
+      rows: this.db.prepare('SELECT namespace, id, body, expires_at FROM host_application_row WHERE tenant=? ORDER BY namespace, id')
+        .all(this.tenant).map(row => ({ namespace: String(row.namespace), id: String(row.id), value: JSON.parse(String(row.body)) as Json,
+          expiresAt: row.expires_at === null ? null : Number(row.expires_at) })),
+      memoryTombstones: this.db.prepare('SELECT intent_id, approval, body, expires_at FROM host_retired_memory_intent WHERE tenant=? ORDER BY intent_id')
+        .all(this.tenant).map(row => ({ intentId: String(row.intent_id), approval: String(row.approval),
+          row: JSON.parse(String(row.body)) as MemoryIntentRow, expiresAt: Number(row.expires_at) })),
+    };
   }
   /**
    * Writes a `dumpForSwitch` result into this tenant in one transaction (#975). The tenant must be empty: the body of a new
    * ledger and no other row. Expiry is kept, never reset. The loaded body passes the intent identity checks of `transaction()`
    * against the dump's own tombstones. The dump must be bound to this tenant: each intent's `agent` is `agentKey(tenant, …)`,
-   * a scan wake key names this tenant, and it holds no memory state or retired memory intent. Any refusal or write failure rolls the whole load back. It runs before any core is
-   * bound to this ledger, so loaded work stays inert until the caller starts one; it sends no outbox hint.
+   * a scan wake key names this tenant, and it holds no memory state or retired memory intent. After the writes, in the same
+   * transaction, `verify` gets this tenant's rows read back as `dumpForSwitch` reads them; when it throws, nothing is
+   * written. Any refusal or write failure rolls the whole load back. It runs before any core is bound to this ledger, so
+   * loaded work stays inert until the caller starts one; it sends no outbox hint.
    */
-  loadForSwitch(dump: LedgerDump): void {
+  loadForSwitch(dump: LedgerDump, verify: (readBack: LedgerDump) => void): void {
+    if (typeof verify !== 'function') throw new Error('A switch load needs a read-back check');
     if (this.outboxListeners.size) throw new Error('Load a switch dump before any core is bound to this ledger');
     const input = record(dump, 'document');
     if (input.version !== 1) throw new Error('Unsupported switch dump version');
@@ -477,6 +484,7 @@ export class HostLedger {
       for (const row of tombstones) tombstone.run(this.tenant, ...row);
       const put = this.db.prepare('INSERT INTO host_application_row (tenant,namespace,id,body,expires_at) VALUES (?,?,?,?,?)');
       for (const row of rows) put.run(this.tenant, ...row);
+      verify(this.readDump());
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }

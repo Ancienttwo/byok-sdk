@@ -1011,7 +1011,8 @@ Other refusals and holds:
 - **Routine slot:** a slot of a routine whose Bot is on the device throws from
   the routine hook. K4 then records neither the slot nor a Turn, and the SDK
   delivers the wake again later, so a slot is never dropped. It runs after an
-  abort. After a commit it refuses until the product pauses the routine on L.
+  abort. From the export on every slot refuses, also after the commit, and the
+  new owner schedules the routine's wakes on its own SDK.
 - **Sync:** any other path that adds a Turn for a Bot on the device is held.
   This covers a Bot outcome that delegates, a room round, and a batch that
   seals.
@@ -1065,9 +1066,18 @@ synchronous step: it dumps the ledger (K4 `dumpForSwitch`), checks it, seals it
 From the mark on, also after a restart, this Host writes nothing to the
 ledger. Each K8 write refuses with `SwitchExportedError` (`code:
 'switch_exported'`) after the write's own refusals, so a command on a frozen
-or H-owned device still gets its device refusal. The passes and the timer run
-nothing, and the K4 hooks refuse. The mark stays after the commit, so the old
+or H-owned device still gets its device refusal. That holds for the root
+entries a product calls directly too: `commitInLedger`, `retainInLedger`,
+`callCardsInLedger` (before the connector runs) and `syncTurnInLedger`. The
+passes and the timer run nothing, the K4 hooks and the routine lifecycle and
+update entries refuse, and the compact veto (`botCompactVeto`) refuses every
+intent with `switch_exported`. The mark stays after the commit, so the old
 ledger keeps the exported state.
+
+Do not compact an exported ledger. `ledger.compact` with no acknowledged
+intent still deletes expired tombstones, which the veto does not see. Before
+the commit that makes the commit refuse, so the switch is aborted and exported
+again; after the commit it does no harm.
 
 `commitSwitch` checks the receipt against the mark, then seals the ledger
 again under the export's header and refuses a different digest. That check
@@ -1082,15 +1092,16 @@ device of it aborts.
 **New owner (H → L).** On a new, empty ledger tenant (a switch back to L opens
 a new tenant), and with no `BotCollaboration` on it:
 
-1. `importForSwitch(ledger, document)` verifies the H export, writes it (K4
-   `loadForSwitch`) with each device owned by H and an import record, and
-   reads the ledger back under the document's header. A different digest
-   throws `SwitchExportError` with `manifest`, and the caller runs
-   `discardImport`. It returns the receipt `{ digest, devices }` that the old
-   owner commits away on.
+1. `importForSwitch(ledger, document)` verifies the H export and writes it
+   with each device owned by H and an import record, in one transaction (K4
+   `loadForSwitch`). Before that transaction commits, K4 reads the tenant's
+   rows back, and they must seal to the document's digest under its header;
+   otherwise it throws `SwitchExportError` with `manifest` and writes nothing.
+   So an import is either verified or not there. It returns the receipt
+   `{ digest, devices }` that the old owner commits away on.
 2. After the old owner committed, `commitImport(ledger, digest)` gives L each
    device of the import and deletes the import record.
-3. `discardImport(ledger)` deletes an import that was not committed (K4
+3. `discardImport(ledger)` deletes an import that is not to be committed (K4
    `discard`). It first marks the import as being discarded, so a commit
    refuses it from then on.
 
@@ -1102,6 +1113,18 @@ keys, intent ids, `attempts` and the Host intent handlers. A concluded intent
 gets K4's cursors of a new row (`phase: 'settled'`, `notBefore: 0`). Routines
 and occurrences go in the order of their ordinals, which the format makes their
 positions.
+
+**Ordering.** The receipt is the export's digest, and nothing between the two
+Hosts proves that the target imported it: there is no authentication between
+them. The product runs the steps in order and keeps the document:
+
+- The old owner commits away only after the target reported its import
+  verified.
+- The export document is kept until the target committed toward its owner.
+- If an import is lost after the old owner committed away, the kept document
+  is imported into a new tenant.
+- From the export on the old owner refuses all work, so two owners never run
+  the domain at the same time.
 
 Not moved: the source SDK's wakes, that is the `schedule` and `cancel-wake`
 rows and the scan wake. The new owner's `recover()` schedules each routine's

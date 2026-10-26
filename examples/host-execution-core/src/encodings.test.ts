@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { frozenInput, hash, isOccurrenceIntentKey, occurrenceIntentKey, parseRoutineWakeKey, routineWakeKey, taskId } from './index';
+import { frozenInput, hash, isOccurrenceIntentKey, occurrenceIntentKey, occurrenceOfIntentKey, parseRoutineWakeKey, routineWakeKey, taskId } from './index';
 import { template } from './test-support';
 
 // #975: the K4 encodings that a switch export derives again, exported so no other module spells them.
@@ -12,7 +12,11 @@ it('names a routine occurrence intent by its occurrence key, and tells it from a
   const key = hash(['routine', 1, 'slot']);
   expect(occurrenceIntentKey(key)).toBe(`occurrence:${key}`);
   expect(isOccurrenceIntentKey(occurrenceIntentKey(key))).toBe(true);
-  for (const other of ['occurrence:', `occurrence:${key.toUpperCase()}`, `occurrence:${key}0`, key, 'k1']) expect(isOccurrenceIntentKey(other), other).toBe(false);
+  expect(occurrenceOfIntentKey(occurrenceIntentKey(key))).toBe(key);
+  for (const other of ['occurrence:', `occurrence:${key.toUpperCase()}`, `occurrence:${key}0`, key, 'k1']) {
+    expect(isOccurrenceIntentKey(other), other).toBe(false);
+    expect(occurrenceOfIntentKey(other), other).toBeUndefined();
+  }
 });
 
 it('freezes one generation as a copy of the execution with its task id', () => {

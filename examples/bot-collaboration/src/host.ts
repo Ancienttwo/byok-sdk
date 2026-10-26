@@ -16,7 +16,7 @@ import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
 import { checkReply, collaborationDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, expireCards, replyCheckDue, reportCardDecisions,
   commandBots, type Command, type CommandPorts, type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
-import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
+import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, writeLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
   updateDefinition, type BotRoutineInput } from './routines';
@@ -276,7 +276,8 @@ export class BotCollaboration {
       occurrenceHooks: { [BOT_ROUTINE]: (run, tx) => {
         const state = stateOf(tx.application);
         // #957: a slot of a Bot whose device is frozen or owned by H throws, so K4 records neither the slot nor a Turn and the
-        // SDK delivers the wake again later. After an abort the slot runs; after a commit it refuses until the routine pauses.
+        // SDK delivers the wake again later. After an abort the slot runs. From the export on (#975) every slot refuses, and
+        // the new owner schedules the routine's wakes on its own SDK.
         admitBot(state, (run.input as BotRoutineInput).owner);
         refuseExported(state);
         this.commitCallback(state, run.occurrenceKey, { kind: 'occurrence', key: run.occurrenceKey },
@@ -306,13 +307,7 @@ export class BotCollaboration {
    * Every K8 write of this Host, except the switch steps (#975). It refuses while the domain is exported, after the work's
    * own refusals, so a command on a frozen or H-owned device still gets its device refusal.
    */
-  private write<T>(apply: (state: LedgerState, rows: ApplicationRows) => T): T {
-    return this.ledger.transaction((s, rows) => {
-      const result = apply(s, rows);
-      refuseExported(stateOf(s.application));
-      return result;
-    });
-  }
+  private write<T>(apply: (state: LedgerState, rows: ApplicationRows) => T): T { return writeLedger(this.ledger, apply); }
   private exclusive<T>(work: () => Promise<T>): Promise<T> {
     if (this.closed) return Promise.reject(new Error('Bot Host is closed'));
     const next = this.chain.then(work);
@@ -523,8 +518,6 @@ export class BotCollaboration {
   private commitOwner(commandId: string, command: Command, extra?: (s: LedgerState, state: CollaborationState) => Partial<CommandPorts>): CommitResult {
     return commitInLedger(this.ledger, { scope: this.ledger.tenant, commandId, command }, s => {
       const state = stateOf(s.application);
-      // #975: an exported domain writes nothing, and a command on one of its devices gets the device refusal first.
-      if (state.switchExport) { admitCommand(state, command); refuseExported(state); }
       return { now: this.now, admit: next => admitCommand(state, next), publish: (key, value) => project(s, key, value), intents: intentRows(s),
         admitInput: fields => admitUserInput(state, fields, this.coalesce, this.now()),
         updatePersona: (botId, persona) => updateBot(state, { botId, persona }, this.models(), this.options.readOnlyToolsets),
@@ -842,10 +835,7 @@ export class BotCollaboration {
    * A root that is still in use throws `RetentionRefused`, and nothing changes. Never runs on its own.
    */
   retain(input: RetentionInput): Promise<RetentionResult> {
-    return this.exclusive(async () => {
-      refuseExported(this.snapshot());
-      return retainInLedger(this.ledger, input, { contextTurnLimit: this.contextTurnLimit });
-    });
+    return this.exclusive(async () => retainInLedger(this.ledger, input, { contextTurnLimit: this.contextTurnLimit }));
   }
   recover(): Promise<void> {
     return this.exclusive(async () => {

@@ -6,7 +6,7 @@ export type { ApplicationRows, CompactionOptions, CompactionResult, CompactVeto,
   LedgerDump, LedgerDumpMemoryTombstone, LedgerDumpRow, LedgerDumpTombstone } from './ledger';
 export { nextIntervalOccurrence } from './schedule';
 export type { NextOccurrence } from './schedule';
-export { DEFAULT_RETRY, frozenInput, isOccurrenceIntentKey, occurrenceIntentKey, taskId, validateRetry } from './model';
+export { DEFAULT_RETRY, frozenInput, isOccurrenceIntentKey, occurrenceIntentKey, occurrenceOfIntentKey, taskId, validateRetry } from './model';
 export type { IntentInput, LedgerIntentInput, Intent, ExecutionTemplate, SealedExecutionTemplate, IntentExecution, SealedAgentExecutionInput, FrozenExecutionInput, RetryPolicy, AgentRoutineDefinition, HostJobRoutineDefinition, HostJobSpec, HostJobRun, HostJobResult, HostJobHandler,
   HostOccurrenceRoutineDefinition, HostOccurrenceRun, RoutineDefinition, Routine, Occurrence, Conclusion, Json } from './model';
 

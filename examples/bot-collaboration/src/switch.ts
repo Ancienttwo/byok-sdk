@@ -12,7 +12,7 @@ import { sealSwitchExport, switchAttempts, SwitchExportError, verifySwitchExport
 /** The header fields of a document: the source's, also on the target's read-back. */
 export type SwitchHeader = Pick<SwitchContent, 'source' | 'domain' | 'devices' | 'exportedAt'>;
 /** The import record of a new L owner: from the load until the commit toward L. */
-export interface SwitchImport { digest: string; devices: string[]; verified: boolean; discarding?: true }
+export interface SwitchImport { digest: string; devices: string[]; discarding?: true }
 /** What a new owner returns after its read-back: the digest the old owner commits away on. */
 export interface SwitchReceipt { digest: string; devices: string[] }
 /**
@@ -276,11 +276,11 @@ const importOf = (state: CollaborationState): SwitchImport => {
 };
 
 /**
- * Step 2 of a switch to L (#975): writes an H export into an empty L ledger tenant and verifies it. The document must verify,
- * and each of its devices is recorded as owned by H until `commitImport`. The ledger then reads its own rows back into the
- * neutral form under the document's header, and the digest must be the document's: a mismatch throws, and the caller runs
- * `discardImport`. Returns the receipt the old owner commits away on. No `BotCollaboration` may open the ledger before the
- * commit; a `BotCollaboration` refuses a ledger with an import.
+ * Step 2 of a switch to L (#975): writes an H export into an empty L ledger tenant and verifies it in the same transaction.
+ * The document must verify. Each of its devices is recorded as owned by H, with the import record, until `commitImport`.
+ * Before the load commits, K4 reads the tenant's rows back, and they must give the document's digest under its header;
+ * otherwise nothing is written. Returns the receipt the old owner commits away on. A `BotCollaboration` refuses a ledger
+ * with an import, so no work runs on it before the commit.
  */
 export function importForSwitch(ledger: HostLedger, document: SwitchExport): SwitchReceipt {
   const manifest = verifySwitchExport(document);
@@ -288,25 +288,21 @@ export function importForSwitch(ledger: HostLedger, document: SwitchExport): Swi
   const devices = document.devices.map((device: SwitchDevice) => device.deviceId);
   const topology = {};
   for (const id of devices) Object.defineProperty(topology, id, { value: { mode: 'H', revision: 1 }, enumerable: true, writable: true, configurable: true });
-  ledger.loadForSwitch(switchDump(document, ledger.tenant, { topology, switchImport: { digest: manifest.digest, devices, verified: false } }));
-  const back = sealLedger(ledger, headerOf(document)).manifest.digest;
-  if (back !== manifest.digest) throw new SwitchExportError('manifest', `The imported ledger reads back as ${back}, not ${manifest.digest}; discard the import first`);
-  ledger.transaction(s => {
-    const record = importOf(stateOf(s.application));
-    if (record.digest !== manifest.digest || record.discarding) throw new Error('The switch import changed during its verification');
-    record.verified = true;
+  ledger.loadForSwitch(switchDump(document, ledger.tenant, { topology, switchImport: { digest: manifest.digest, devices } }), readBack => {
+    const back = sealSwitchExport(switchContent(readBack, ledger.tenant, headerOf(document))).manifest.digest;
+    if (back !== manifest.digest) throw new SwitchExportError('manifest', `The imported ledger reads back as ${back}, not ${manifest.digest}`);
   });
   return { digest: manifest.digest, devices };
 }
 
 /**
- * Step 4 of a switch to L, after the old owner committed away on the receipt: L owns each device of the import. Only
- * a verified import of this digest that is not being discarded commits. Then a `BotCollaboration` can open the ledger.
+ * Step 4 of a switch to L, after the old owner committed away on the receipt: L owns each device of the import. Only the
+ * import of this digest that is not being discarded commits. Then a `BotCollaboration` can open the ledger.
  */
 export function commitImport(ledger: HostLedger, digest: string): void {
   ledger.transaction(s => {
     const state = stateOf(s.application), record = importOf(state);
-    if (!record.verified || record.discarding) throw new Error('The switch import is not verified');
+    if (record.discarding) throw new Error('The switch import is being discarded');
     if (record.digest !== digest) throw new Error(`The switch import is ${record.digest}, not ${digest}`);
     for (const id of record.devices) {
       const row = state.topology && Object.hasOwn(state.topology, id) ? state.topology[id] : undefined;
@@ -318,7 +314,8 @@ export function commitImport(ledger: HostLedger, digest: string): void {
 }
 
 /**
- * Deletes an import that was not committed: after a failed read-back, or when the old owner aborts. It first records
+ * Deletes an import that was not committed, when the switch does not go ahead: the old owner aborts, or the product
+ * decides against it. It first records
  * that the import is being discarded, so `commitImport` refuses it from then on, then deletes the tenant (K4 `discard`).
  * A committed tenant has no import record, so it is refused; no `BotCollaboration` ran work on an uncommitted one.
  */

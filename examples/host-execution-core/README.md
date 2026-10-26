@@ -579,7 +579,7 @@ state) and the neutral switch format belong to the caller (K8).
 
   Each list is ordered by its key. Expired rows that no `compact` or `expire` has removed
   yet are included. The dump has no tenant id.
-- `ledger.loadForSwitch(dump)` writes a dump into this tenant in one transaction:
+- `ledger.loadForSwitch(dump, verify)` writes a dump into this tenant in one transaction:
   - It refuses unless the tenant is empty: the body of a new ledger, and no row in the
     other tables.
   - It refuses while a core is bound to this ledger. Load first, then start the core. The
@@ -599,6 +599,9 @@ state) and the neutral switch format belong to the caller (K8).
     builds the dump with that tenant's keys.
   - Every expiry is kept, never reset, so replay evidence ends when it would have ended on
     the source.
+  - After the writes, before the commit, it reads this tenant back with the queries of
+    `dumpForSwitch` and calls `verify(readBack)`. A throw rolls the whole load back, so a
+    caller that checks the read-back leaves either a verified tenant or an empty one.
   - Any failure, a duplicate key included, rolls the whole load back.
 
   A dump loaded into an empty tenant whose tenant-derived identities it names dumps back equal.
@@ -612,9 +615,10 @@ state) and the neutral switch format belong to the caller (K8).
     tenant.
 
 A switch format derives some stored values again from the values that move. The core exports
-each of its encodings as one function and calls it itself, so a caller never spells one:
+each of its encodings as one function and calls it itself, and K8 calls them too:
 `routineWakeKey(id, version, at)` (the inverse of `parseRoutineWakeKey`),
-`occurrenceIntentKey(occurrenceKey)` and `isOccurrenceIntentKey(key)`,
+`occurrenceIntentKey(occurrenceKey)`, `isOccurrenceIntentKey(key)` and its inverse
+`occurrenceOfIntentKey(key)`,
 `frozenInput(execution, taskId)` (the input of one generation), `taskId(key, generation)`,
 `agentKey(tenant, execution)` and `validateRetry(retry)`.
 

@@ -132,6 +132,10 @@ const OCCURRENCE_INTENT_KEY = /^occurrence:[0-9a-f]{64}$/;
 export function occurrenceIntentKey(occurrenceKey: string): string { return `occurrence:${occurrenceKey}`; }
 /** Whether an intent key is a routine occurrence's. Any other key is the Host's own. */
 export function isOccurrenceIntentKey(key: string): boolean { return OCCURRENCE_INTENT_KEY.test(key); }
+/** The occurrence key that a routine occurrence's intent key names, or undefined for any other key. */
+export function occurrenceOfIntentKey(key: string): string | undefined {
+  return isOccurrenceIntentKey(key) ? key.slice('occurrence:'.length) : undefined;
+}
 export function time(value: number): number {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error('Time must be a nonnegative safe integer');
   return value;

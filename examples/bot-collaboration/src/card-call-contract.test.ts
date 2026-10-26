@@ -2,12 +2,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
-import { canonical, hash, HostLedger, project, type LedgerState } from '@byok-sdk/example-host-execution-core';
+import { canonical, hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, project, type LedgerState } from '@byok-sdk/example-host-execution-core';
 import { stateOf } from './model';
 import { admitUserInput } from './coalesce';
-import { callCardsInLedger, commitInLedger, syncTurnInLedger } from './commit';
+import { callCardsInLedger, commitInLedger, retainInLedger, syncTurnInLedger } from './commit';
 import { intentRows } from './delegation';
 import { CONNECTOR_OUTCOME_UNKNOWN, expireCards, reportCardDecisions, type CommandPorts } from './rules/commands';
+import { SwitchExportedError } from './switch';
 import { cardCallVectors, seedCollaboration, SYNC_OPTIONS, VECTOR_NOW, type CardCallSubject, type SyncIntentRecord } from './commit-vectors.test-support';
 
 // #793 S12: the shared card call vectors on the L ledger, with L's card call step (K8 host.ts `flushCards`).
@@ -97,3 +98,19 @@ it('#958: ends a card whose claim never settled with the unknown outcome, and ne
   expect((await subject.state()).turns[hash(['action_result', 'c1'])]).toMatchObject({ source: 'action_result',
     request: JSON.stringify({ cardId: 'c1', state: 'confirmed', conclusion: 'failed', error: CONNECTOR_OUTCOME_UNKNOWN }) });
 });
+
+it('#975: an exported ledger refuses the card call before the connector runs, a command, a sync step and retention', async () => {
+  const subject = await confirmed();
+  subject.change(state => { state.switchExport = { digest: 'd', exportedAt: VECTOR_NOW, devices: [{ deviceId: 'd1', frozenRevision: 1 }] }; });
+  const before = subject.stored();
+  let calls = 0;
+  await expect(subject.callCards(async () => { calls++; return { sent: true }; })).rejects.toBeInstanceOf(SwitchExportedError);
+  expect(calls).toBe(0);
+  expect(() => subject.commit({ scope: subject.scope, commandId: 'cancel', command: { kind: 'cancel_turn', turnId: 't1' } }))
+    .toThrow(SwitchExportedError);
+  expect(() => subject.sync(VECTOR_NOW)).toThrow(SwitchExportedError);
+  expect(() => retainInLedger(subject.ledger, { acknowledgedRoots: [], now: VECTOR_NOW, retentionMs: MIN_TOMBSTONE_RETENTION_MS },
+    { contextTurnLimit: 1 })).toThrow(SwitchExportedError);
+  expect(subject.stored()).toBe(before);
+});
+

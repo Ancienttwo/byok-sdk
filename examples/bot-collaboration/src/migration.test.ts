@@ -298,6 +298,8 @@ describe('switch export format (#975)', () => {
   it('refuses the source owner records and a live Bot whose device the export does not move', () => {
     refused(() => sealSwitchExport(content(state => { state.topology = {}; })), 'owner_record');
     refused(() => sealSwitchExport(content(state => { state.hostIntents = { i1: { handler: 'h' } }; })), 'owner_record');
+    refused(() => sealSwitchExport(content(state => { state.switchExport = { digest: 'd', exportedAt: 1, devices: [{ deviceId: 'd1', frozenRevision: 3 }] }; })), 'owner_record');
+    refused(() => sealSwitchExport(content(state => { state.switchImport = { digest: 'd', devices: ['d1'] }; })), 'owner_record');
     refused(() => sealSwitchExport(content(state => { state.team.bots.b2 = bot('b2', 'd3'); })), 'device_missing');
     expect(() => sealSwitchExport(content(state => { state.team.bots.b2 = bot('b2', 'd3', true); }))).not.toThrow();
   });

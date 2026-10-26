@@ -526,20 +526,25 @@
 - **Feature (examples)** — K8 L runs both sides of the owner switch (#975
   slice 3). `exportForSwitch(devices)` seals a frozen, drained domain into a
   switch export after it checks every stored copy against the value it is
-  derived from, and from then on the Host writes nothing to its ledger
-  (`SwitchExportedError`). `commitSwitch(deviceId, revision, receipt)` now
+  derived from, and from then on nothing of K8 writes to its ledger
+  (`SwitchExportedError`): not the Host, not the root ledger functions, and
+  not a compaction (the veto refuses with `switch_exported`). `commitSwitch(deviceId, revision, receipt)` now
   needs the new owner's receipt, seals the ledger again to check that it did
   not change, and moves every device of the export to H in one transaction.
   `importForSwitch(ledger, document)` writes an H export into an empty L
-  tenant and reads it back to the same digest, `commitImport`
+  tenant and reads it back to the same digest in the same transaction, or
+  writes nothing, `commitImport`
   hands its devices to L, and `discardImport` deletes an import that was not
   committed. A `BotCollaboration` refuses a ledger with an uncommitted import.
   The `./migration` format now requires each routine and occurrence `ordinal`
-  to be its position (0 to n - 1), refuses a promoted Host job occurrence, and
+  to be its position (0 to n - 1), refuses a promoted Host job occurrence and
+  L's switch records (`owner_record`), and
   exports `switchAttempts`, the K4 `attempts` that it does not carry. K4
   exports the encodings a switch derives again and calls them itself:
   `routineWakeKey`, `occurrenceIntentKey`, `isOccurrenceIntentKey`,
-  `frozenInput`, and also `validateRetry`. No SDK, wire or SQL change.
+  `occurrenceOfIntentKey`, `frozenInput`, and also `validateRetry`. K4
+  `loadForSwitch(dump, verify)` checks the read-back before it commits. No SDK,
+  wire or SQL change.
 
 ## 0.30.1 — 2026-10-24 (published)
 
