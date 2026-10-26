@@ -473,7 +473,9 @@ before its commit, so the work's own refusals come first, as on L: a command on 
 submitter, the reconciler, the outbox sender, retention and compaction, the routine fire and upkeep, the device observer
 and the reply checker. `lockScope` refuses to run outside such a transaction, so no writer skips the check. Only the
 switch steps pass: `exportScope`, `commitSwitch` and `abortSwitch`. The due, routine, submit, reconciliation and outbox
-scans leave an exported scope out, and the due and routine backoff writes, which take no scope lock, do not write to one.
+scans leave an exported scope out. The due and routine backoff writes take no scope lock and do not write to an exported
+scope: the due backoff updates the scope row itself, and the routine backoff first takes a share lock on the scope row,
+so it waits for an export in flight and reads its mark.
 
 H reads no tombstone expiry and deletes no tombstone. K4's admission readers do not read the expiry either; K4
 `compact` does, and deletes expired tombstones. Only K4's routine kinds expire (an occurrence intent, a slot, an applied

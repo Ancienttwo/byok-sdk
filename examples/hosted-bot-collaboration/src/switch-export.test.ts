@@ -199,6 +199,24 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
     expect(await store().dump(scope)).toBe(kept);
   });
 
+  it('keeps a Host job summary of null in the export, and L reads it back to the same digest', async () => {
+    // K4 accepts a handler's { summary: null } and stores the null.
+    hosted = new HostedCollaborationStore(opened!.pool, opened!.store.schema, { host: TEST_HOST, hostJobs: { job: async () => ({ summary: null }) } });
+    const scope = await plain(), slot = routineCalendar({ rule: schedule, timeZone: 'UTC' } as unknown as RoutineDefinition, NOW - 1)!;
+    await store().addHostJobRoutine(scope, { id: 'watch', version: 1, timeZone: 'UTC', rule: schedule as never, waitMs: 60_000, lateAfterMs: 60_000,
+      hostJob: { type: 'job', input: null } }, NOW);
+    expect(await new HostedRoutineScheduler(opened!.pool, store(), { now: () => slot }).run()).toEqual({ fired: 1, fenced: [], failed: [] });
+    expect(await new HostedOutboxSender(opened!.pool, store(), { projections: { deliver: async () => {} }, now: () => slot }).run())
+      .toMatchObject({ failed: [] });
+    expect(await query(`SELECT job FROM ${table('occurrence')} WHERE scope = $1`, [storedKey(scope)])).toEqual([{ job: { summary: null } }]);
+    const document = await exported(scope);
+    expect(document.occurrences).toEqual([expect.objectContaining({ job: { attempts: 1, summary: null } })]);
+    const ledger = new HostLedger(':memory:', `l:${randomUUID()}`);
+    try {
+      expect(importForSwitch(ledger, document)).toEqual({ digest: document.manifest.digest, devices: ['device'] });
+    } finally { ledger.close(); }
+  });
+
   it('refuses an export that a device or the scope is not ready for, and writes nothing', async () => {
     const scope = await plain();
     await freeze(scope, 'x1');
@@ -398,6 +416,41 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
       expect([pass.failed, pass.fenced.map(row => [row.routineId, row.error])]).toEqual([[], [[routineId, switching]]]);
       expect((await query<{ mark: unknown }>(`SELECT switch_export AS mark FROM ${table('scope')} WHERE scope = $1`, [storedKey(scope)]))[0]!.mark)
         .not.toBeNull();
+      expect(await query(`SELECT retry_at FROM ${table('routine')} WHERE scope = $1`, [storedKey(scope)])).toEqual([{ retry_at: null }]);
+    });
+
+    it('writes no routine backoff while an export holds the scope row, once that export commits', async () => {
+      const { scope } = await populated();
+      await store().beginSwitch(scope, 'device', 'L', 1);
+      await flushProjections();
+      await query(`UPDATE ${table('routine')} SET next_at = 1 WHERE scope = $1`, [storedKey(scope)]);
+      const exporter = await opened!.pool.connect();
+      let committed: Promise<unknown> | undefined;
+      try {
+        const fire = store().fire.bind(store());
+        // After the fire throws and before its backoff, an export locks the scope row and writes its mark, uncommitted.
+        vi.spyOn(store(), 'fire').mockImplementationOnce(async (target, id, at) => {
+          try { return await fire(target, id, at); } finally {
+            await exporter.query('BEGIN');
+            await exporter.query(`SELECT 1 FROM ${table('scope')} WHERE scope = $1 FOR UPDATE`, [storedKey(scope)]);
+            await exporter.query(`UPDATE ${table('scope')} SET switch_export = $2::json WHERE scope = $1`,
+              [storedKey(scope), JSON.stringify({ digest: 'd', exportedAt: NOW, devices: [{ deviceId: 'device', frozenRevision: 2 }] })]);
+            // The export commits once the backoff waits on its lock, or after a second when nothing does.
+            committed = (async () => {
+              for (let waited = 0; waited < 1_000; waited += 20) {
+                const waiting = await query<{ n: number }>(`SELECT count(*)::int AS n FROM pg_stat_activity
+                  WHERE wait_event_type = 'Lock' AND query LIKE 'SELECT switch_export IS NULL AS open%'`);
+                if (waiting[0]!.n > 0) break;
+                await new Promise(resolve => setTimeout(resolve, 20));
+              }
+              await exporter.query('COMMIT');
+            })();
+          }
+        });
+        const pass = await new HostedRoutineScheduler(opened!.pool, store(), { now: clock }).run();
+        expect(pass.fenced).toHaveLength(1);
+        await committed;
+      } finally { exporter.release(); }
       expect(await query(`SELECT retry_at FROM ${table('routine')} WHERE scope = $1`, [storedKey(scope)])).toEqual([{ retry_at: null }]);
     });
   });

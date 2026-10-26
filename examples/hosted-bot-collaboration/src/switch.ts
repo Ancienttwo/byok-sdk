@@ -125,7 +125,8 @@ export async function hostedSwitchContent(client: PoolClient, scope: string, sta
     if (row.job !== null) {
       const tries = jobTries.get(hostJobRowKey(key));
       derived(tries !== undefined, `Host job occurrence ${key} has no outbox row`);
-      job = defined({ attempts: tries!, summary: row.job.summary }) as NonNullable<OccurrenceRecord['job']>;
+      // A stored summary moves as it is, null included: K4 stores a handler's { summary: null } (#975).
+      job = { attempts: tries!, ...(Object.hasOwn(row.job, 'summary') ? { summary: row.job.summary } : {}) } as NonNullable<OccurrenceRecord['job']>;
     }
     return { ...defined({ conclusion: row.conclusion }), key, ordinal, routineId: parse<string>(row.routine_id), definitionVersion: row.definition_version,
       trigger: { kind: row.trigger_kind, plannedAt: Number(row.planned_at) }, recordedAt: Number(row.recorded_at),

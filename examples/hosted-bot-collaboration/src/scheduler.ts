@@ -99,12 +99,16 @@ export class HostedRoutineScheduler {
         }
         // A throw wrote nothing. The routine keeps its old slot, which sorts ahead of healthy rows, so it waits before its
         // next try and does not run a transaction on every pass. Keyed on that slot: a write that moved it has cleared
-        // `retry_at`, and this one then matches no row. It takes no scope lock, so the switch fence does not see it: a scope
-        // exported after the scan read the row gets no backoff (#975).
+        // `retry_at`, and this one then matches no row. It takes no scope lock, so the switch fence does not see it. It
+        // takes a share lock on the scope row instead, scope before routine as every writer does: it waits for an export in
+        // flight and reads the committed mark, so an exported scope gets no backoff (#975).
         if (threw) {
-          await inSchema(this.pool, this.store.schema, client => client.query(
-            `UPDATE routine SET retry_at = $4 WHERE scope = $1 AND id = $2 AND next_at = $3
-              AND NOT EXISTS (SELECT 1 FROM scope s WHERE s.scope = $1 AND s.switch_export IS NOT NULL)`, [row.scope, row.id, Number(row.next_at), at + backoffMs]));
+          await inSchema(this.pool, this.store.schema, async client => {
+            const scope = await client.query<{ open: boolean }>('SELECT switch_export IS NULL AS open FROM scope WHERE scope = $1 FOR SHARE', [row.scope]);
+            if (scope.rows[0]?.open) {
+              await client.query('UPDATE routine SET retry_at = $4 WHERE scope = $1 AND id = $2 AND next_at = $3', [row.scope, row.id, Number(row.next_at), at + backoffMs]);
+            }
+          });
         }
       }
       if (due.rows.length < batch) break;
