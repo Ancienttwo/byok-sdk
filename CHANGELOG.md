@@ -39,7 +39,27 @@
   - The protocol test alias `byok-protocol-previous` pins 0.30.2, the last v3
     release, as the rejection oracle. `byok-protocol-floor` (0.27.0) and
     `published-compat.test.ts` are removed until a v4 release is published.
-
+- **Feature (cloud, cloud-dataplane, server)** — `TaskAttempt`
+  (`ByokCloud.readTaskAttempt`) records four write-once phase instants:
+  `offeredAt`, `claimedAt`, `firstOutputAt` and `terminalAt` (#980). Each is written by the store operation that makes
+  its transition and never again: a redelivered or losing claim and a
+  terminal retry leave them as they are. `firstOutputAt` is the first Agent
+  message draft with text or message body after the claim; `task.progress`
+  does not count. Postgres adds migration 0030 (four nullable `timestamptz`
+  columns on `task`); a SQLite store adds the columns when it opens, with no
+  schema version change. Apply `0030_task_attempt_phase_times.sql` before
+  deploying the new Postgres stores: their `TASK_SELECT_COLUMNS` reads the
+  four columns, so every task query fails on an unmigrated database. The
+  exported `TaskRow` and `TASK_SELECT_COLUMNS` gain the four columns; a Host
+  that writes its own select list for `taskRowToAttempt` must add them.
+  Attempts stored before this are not backfilled, so their instants are
+  absent. No duration fields are derived.
+- **Breaking (cloud)** — `TaskAttemptStore` gains the required
+  `recordFirstOutput(tenant, { taskId, deviceId })`, the write-once
+  `firstOutputAt` for an Agent message draft (#980). A Host that implements
+  its own `TenantStores` or `TaskAttemptStore` must add it. Its other methods
+  report the instants only if they write them as the bundled stores do; a
+  cancellation of an unclaimed attempt also sets `terminalAt`.
 - **Feature (keys)** — add `@byok-sdk/keys/model-route`, the headless logic
   of a Pi model route page (#986 S2). It loads in a browser: no Node builtins,
   no custody module, no network. `listPiCatalogModels` lists the pinned
@@ -49,6 +69,10 @@
   codes and the submission, and the Host renders the page. Catalog and Host
   policy entries apply only at the vendor's own base URL, because the pinned
   Pi fills undeclared `compat` keys from the endpoint URL.
+  A Host entry is offered only when its config passes `PiModelConfigSchema`,
+  projects the api it is listed under and meets the vendor adapter's profile
+  rules; `modelRouteContext` throws on a repeated Host entry or one whose
+  model id a profile cannot hold.
   `PI_DEFAULT_THINKING_LEVEL` (`medium`) is generated from the pinned
   pi-coding-agent. A model whose only level is `off` gets `off`; another
   model without the default level needs an explicit level.

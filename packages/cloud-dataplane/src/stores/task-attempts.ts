@@ -46,11 +46,15 @@ export interface TaskRow {
   readonly claimed_harness_id: string | null;
   readonly claimed_runtime: string | null;
   readonly claimed_runtime_capabilities: RuntimeCapabilities | null;
+  readonly offered_at: Date | null;
+  readonly claimed_at: Date | null;
+  readonly first_output_at: Date | null;
+  readonly terminal_at: Date | null;
   readonly updated_at: Date;
 }
 
 export const TASK_SELECT_COLUMNS =
-  'tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_runtime, claimed_harness_id, claimed_runtime_capabilities, updated_at';
+  'tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_runtime, claimed_harness_id, claimed_runtime_capabilities, offered_at, claimed_at, first_output_at, terminal_at, updated_at';
 
 interface AgentMessageAdmissionRow {
   readonly message_id: string;
@@ -103,6 +107,10 @@ export function taskRowToAttempt(row: TaskRow): TaskAttempt {
             ...(row.cancel_reason === null ? {} : { reason: row.cancel_reason }),
           },
         }),
+    ...(row.offered_at === null ? {} : { offeredAt: row.offered_at.toISOString() }),
+    ...(row.claimed_at === null ? {} : { claimedAt: row.claimed_at.toISOString() }),
+    ...(row.first_output_at === null ? {} : { firstOutputAt: row.first_output_at.toISOString() }),
+    ...(row.terminal_at === null ? {} : { terminalAt: row.terminal_at.toISOString() }),
     updatedAt: row.updated_at.toISOString(),
   };
 }
@@ -125,9 +133,9 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     const inserted = await this.#pool.query<TaskRow>(
       `INSERT INTO task (
          tenant_id, task_id, device_id, agent_id, agent_profile_revision,
-         owner_device_id, status, updated_at
+         owner_device_id, status, offered_at, updated_at
        )
-       VALUES ($1, $2, $3, $4, $5, NULL, 'offered', $6)
+       VALUES ($1, $2, $3, $4, $5, NULL, 'offered', $6, $6)
        ON CONFLICT (tenant_id, task_id) DO NOTHING
        RETURNING ${TASK_SELECT_COLUMNS}`,
       [
@@ -155,9 +163,9 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     const inserted = await this.#pool.query<TaskRow>(
       `INSERT INTO task (
          tenant_id, task_id, device_id, agent_id, agent_profile_revision,
-         owner_device_id, status, updated_at
+         owner_device_id, status, offered_at, updated_at
        )
-       VALUES ($1, $2, $3, $4, $5, NULL, 'offered', $6)
+       VALUES ($1, $2, $3, $4, $5, NULL, 'offered', $6, $6)
        ON CONFLICT (tenant_id, task_id) DO NOTHING
        RETURNING ${TASK_SELECT_COLUMNS}`,
       [tenant, input.taskId, input.deviceId, input.agentRef.agentId, input.agentRef.profileRevision, this.#now()],
@@ -219,6 +227,13 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
         [tenant, input.deviceId, input.taskId, input.messageId, input.payloadBody],
       );
       if (inserted.rows[0] !== undefined) {
+        // The first output after the claim is stamped in the reservation's own
+        // transaction, under the task lock taken above.
+        await client.query(
+          `UPDATE task SET first_output_at = $3
+            WHERE tenant_id = $1 AND task_id = $2 AND owner_device_id IS NOT NULL AND first_output_at IS NULL`,
+          [tenant, input.taskId, this.#now()],
+        );
         await client.query('COMMIT');
         return 'reserved';
       }
@@ -238,6 +253,21 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
     } finally {
       client.release();
     }
+  }
+
+  async recordFirstOutput(
+    tenant: TenantId, input: { readonly taskId: string; readonly deviceId: string },
+  ): Promise<TaskAttempt | undefined> {
+    const stamped = await this.#pool.query<TaskRow>(
+      `UPDATE task SET first_output_at = $4
+        WHERE tenant_id = $1 AND task_id = $2 AND device_id = $3
+          AND owner_device_id IS NOT NULL AND first_output_at IS NULL
+          AND status NOT IN ('complete', 'failed', 'cancelled')
+      RETURNING ${TASK_SELECT_COLUMNS}`,
+      [tenant, input.taskId, input.deviceId, this.#now()],
+    );
+    const row = stamped.rows[0];
+    return row === undefined ? this.get(tenant, input.taskId) : taskRowToAttempt(row);
   }
 
   async readTaskAgentMessage(
@@ -373,6 +403,7 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
               claimed_runtime = $5,
               claimed_harness_id = $7,
               claimed_runtime_capabilities = $6::jsonb,
+              claimed_at = $4,
               updated_at = $4
         WHERE tenant_id = $1 AND task_id = $2 AND device_id = $3 AND owner_device_id IS NULL
           AND cancel_requested_at IS NULL AND status = 'offered'
@@ -409,6 +440,7 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
       `UPDATE task
           SET status = $3,
               terminal_cause = COALESCE($7, terminal_cause),
+              terminal_at = CASE WHEN $3 IN ('complete', 'failed', 'cancelled') THEN COALESCE(terminal_at, $4) ELSE terminal_at END,
               updated_at = $4
         WHERE tenant_id = $1 AND task_id = $2
           AND (
