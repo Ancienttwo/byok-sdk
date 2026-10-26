@@ -611,6 +611,13 @@ state) and the neutral switch format belong to the caller (K8).
   - Reopening the tenant id creates an empty tenant, as the constructor does for any new
     tenant.
 
+A switch format derives some stored values again from the values that move. The core exports
+each of its encodings as one function and calls it itself, so a caller never spells one:
+`routineWakeKey(id, version, at)` (the inverse of `parseRoutineWakeKey`),
+`occurrenceIntentKey(occurrenceKey)` and `isOccurrenceIntentKey(key)`,
+`frozenInput(execution, taskId)` (the input of one generation), `taskId(key, generation)`,
+`agentKey(tenant, execution)` and `validateRetry(retry)`.
+
 ## P5a memory page
 
 `src/memory.ts` adds the Host half of memory intents. It uses the existing SDK wire.

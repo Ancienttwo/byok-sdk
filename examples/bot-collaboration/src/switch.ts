@@ -1,5 +1,5 @@
-import { agentKey, canonical, hash, parseRoutineWakeKey, taskId, type Conclusion, type HostLedger, type Intent, type Json, type LedgerDump,
-  type LedgerState, type Occurrence, type Routine } from '@byok-sdk/example-host-execution-core';
+import { agentKey, canonical, frozenInput, hash, isOccurrenceIntentKey, occurrenceIntentKey, parseRoutineWakeKey, routineWakeKey, taskId,
+  type HostLedger, type Intent, type Json, type LedgerDump, type LedgerState, type Occurrence, type Routine } from '@byok-sdk/example-host-execution-core';
 import { stateOf, type CollaborationState } from './model';
 import { sealSwitchExport, SwitchExportError, verifySwitchExport, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type OutboxRecord,
   type RoutineRecord, type SwitchContent, type SwitchDevice, type SwitchExport, type SwitchExportRefusal } from './migration';
@@ -48,16 +48,8 @@ export function checkSwitchRecords(state: CollaborationState): void {
   if (!valid) throw new Error('Invalid switch export record');
 }
 
-// Derivations with no K4 function. Each is the one place that states it, so a K4 export replaces one line.
 /** K4 `attempts`: 0 while `reserved` (never begun), else one per generation begun (`core.ts` begin). */
 const attemptsOf = (submission: string, generation: number) => submission === 'reserved' ? 0 : generation + 1;
-/** K4 `nextWake` dedup key; K4 parses it with `parseRoutineWakeKey`. */
-const routineWakeKey = (id: string, version: number, at: number) => `${id}:${version}:${at}`;
-/** The frozen input of one generation: the intent's execution with that task id (K4 `admit`, `core.ts` begin). */
-const frozenInput = (execution: Intent['execution'], task: string) => ({ ...structuredClone(execution), taskId: task }) as unknown as Json;
-/** The intent key of a routine occurrence (K4 `ledger.ts` OCCURRENCE_INTENT_KEY). */
-const occurrenceIntentKey = (occurrence: string) => `occurrence:${occurrence}`;
-const OCCURRENCE_INTENT_KEY = /^occurrence:[0-9a-f]{64}$/;
 
 const INTENT_KEYS = ['id', 'key', 'source', 'execution', 'waitUntil', 'retry', 'agent', 'sequence', 'phase', 'generation', 'taskId', 'notBefore', 'attempts'];
 const INTENT_OPTIONAL = ['memoryBlocked', 'preparationError', 'occurrence', 'retryUntil', 'cancelReason', 'conclusion'];
@@ -115,7 +107,8 @@ export function switchContent(dump: LedgerDump, tenant: string, header: SwitchHe
     derived(id === hash(intent.key), `intent ${intent.key} is stored under ${id}`);
     derived(intent.agent === agentKey(tenant, intent.execution), `intent ${intent.key} queues under another tenant`);
     derived(intent.taskId === taskId(intent.key, intent.generation), `intent ${intent.key} task id is not that of its generation`);
-    derived(OCCURRENCE_INTENT_KEY.test(intent.key) ? intent.occurrence === intent.key.slice('occurrence:'.length) : intent.occurrence === undefined,
+    derived(isOccurrenceIntentKey(intent.key) ? intent.occurrence !== undefined && intent.key === occurrenceIntentKey(intent.occurrence)
+      : intent.occurrence === undefined,
       `intent ${intent.key} names occurrence ${String(intent.occurrence)}`);
     const current = s.executions[intent.taskId];
     if (!current) refuse('reference', `intent ${intent.key} has no execution`);
@@ -224,7 +217,6 @@ export function switchDump(content: SwitchContent, tenant: string, owner: Pick<C
   }
   const s: LedgerState = { version: 1, sequence: Math.max(0, ...content.intents.map(row => row.ordinal)), scanSequence: 0, intents: {}, executions: {},
     routines: {}, occurrences: {}, slots: {}, outbox: {}, applied: {}, application: {}, scanWake: null };
-  const conclusions = new Map<string, Conclusion>();
   const hostIntents: Record<string, { handler: string }> = {};
   for (const row of byOrdinal(content.intents)) {
     const { taskId: _task, ...execution } = row.input as unknown as Intent['execution'] & { taskId: string };
@@ -232,7 +224,7 @@ export function switchDump(content: SwitchContent, tenant: string, owner: Pick<C
       key: row.key, source: row.source, execution, waitUntil: row.waitUntil, retry: row.retry, id: hash(row.key), agent: agentKey(tenant, execution),
       sequence: row.ordinal, phase: 'settled', generation: row.generation, taskId: row.taskId, notBefore: 0,
       attempts: attemptsOf(row.submission, row.generation), memoryBlocked: row.memoryBlocked, preparationError: row.preparationError,
-      occurrence: OCCURRENCE_INTENT_KEY.test(row.key) ? row.key.slice('occurrence:'.length) : undefined, retryUntil: row.retryUntil,
+      retryUntil: row.retryUntil,
       cancelReason: row.cancelReason, conclusion: row.conclusion,
     }) as Intent;
     s.intents[intent.id] = intent;
@@ -244,7 +236,6 @@ export function switchDump(content: SwitchContent, tenant: string, owner: Pick<C
     });
     if (row.conclusion === 'succeeded') s.applied[row.taskId] = true;
     if (row.handler !== undefined) Object.defineProperty(hostIntents, row.key, { value: { handler: row.handler }, enumerable: true, writable: true, configurable: true });
-    if (intent.occurrence) conclusions.set(intent.occurrence, row.conclusion);
   }
   for (const row of byOrdinal(content.routines)) {
     s.routines[hash(row.id)] = defined({
@@ -255,12 +246,14 @@ export function switchDump(content: SwitchContent, tenant: string, owner: Pick<C
   }
   for (const row of byOrdinal(content.occurrences)) {
     const wakeKey = routineWakeKey(row.routineId, row.definitionVersion, row.trigger.plannedAt);
+    // The occurrence names its intent (K4 `promote`): the format checks that each occurrence intent names one.
     const intent = s.intents[hash(occurrenceIntentKey(row.key))];
+    if (intent) intent.occurrence = row.key;
     const superseded = row.executionSuperseded ? { executionSuperseded: true as const } : {};
     s.occurrences[row.key] = defined({
       key: row.key, routineId: row.routineId, definitionVersion: row.definitionVersion, trigger: row.trigger, wakeKey, recordedAt: row.recordedAt,
       nextAt: row.nextAt, intentId: intent?.id, job: row.job ? { ...row.job, ...superseded } : undefined, hook: row.job ? undefined : superseded,
-      attempts: intent?.attempts ?? 0, conclusion: intent ? conclusions.get(row.key) : row.conclusion, slotReplayCount: row.slotReplayCount,
+      attempts: intent?.attempts ?? 0, conclusion: intent ? intent.conclusion : row.conclusion, slotReplayCount: row.slotReplayCount,
     }) as Occurrence;
     s.slots[hash(wakeKey)] = row.key;
   }

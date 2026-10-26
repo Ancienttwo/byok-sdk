@@ -1,6 +1,6 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import type { MemoryIntentRow } from './memory';
-import { hash, taskId, time, type Json, type LedgerState, type Occurrence } from './model';
+import { hash, isOccurrenceIntentKey, occurrenceIntentKey, taskId, time, type Json, type LedgerState, type Occurrence } from './model';
 import { agentKey } from './transitions';
 
 export interface ProjectionOutboxLimits { maxCount?: number; maxBytes?: number }
@@ -60,8 +60,6 @@ function rowId(id: unknown): void {
 
 export const MIN_TOMBSTONE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export type TombstoneKind = 'intent' | 'application' | 'slot';
-/** The core derives each routine occurrence intent key from its occurrence key (a SHA-256 hex digest). */
-const OCCURRENCE_INTENT_KEY = /^occurrence:[0-9a-f]{64}$/;
 /** A retired intent key, or a routine occurrence key outside its occurrence, cannot admit new work. */
 export class RetiredIntentIdentityError extends Error {
   readonly code = 'retired_intent_identity' as const;
@@ -198,7 +196,7 @@ export class HostLedger {
       for (const [id, intent] of Object.entries(state.intents)) {
         if (existing.has(id)) continue;
         // A derived routine key enters only with its own occurrence, so an expired routine row cannot reopen work.
-        if (retired.get(this.tenant, id) || OCCURRENCE_INTENT_KEY.test(intent.key) && (intent.key !== `occurrence:${intent.occurrence}`
+        if (retired.get(this.tenant, id) || isOccurrenceIntentKey(intent.key) && (intent.key !== occurrenceIntentKey(intent.occurrence!)
           || state.occurrences[intent.occurrence!]?.intentId !== id)) throw new RetiredIntentIdentityError();
       }
       if (this.projectionLimits && before) {
@@ -304,7 +302,7 @@ export class HostLedger {
         memoryIntents: 0, alreadyCompactedMemoryIntents: 0, expiredTombstones: 0, beforeBytes: Buffer.byteLength(body), afterBytes: 0 };
       if (this.compactVeto) {
         // An acknowledged occurrence retires the derived intent identity of its occurrence too.
-        for (const key of [...keys.filter(key => state.intents[hash(key)]), ...occurrenceKeys.map(key => `occurrence:${key}`)]) {
+        for (const key of [...keys.filter(key => state.intents[hash(key)]), ...occurrenceKeys.map(occurrenceIntentKey)]) {
           const reason: unknown = this.compactVeto(state, key);
           if (reason === undefined) continue;
           if (typeof reason !== 'string' || !reason) throw new Error('A compact veto returns a reason or undefined');
@@ -379,7 +377,7 @@ export class HostLedger {
         }
         // Caller keys retire permanently. A derived routine key expires with its slot: the routine
         // reservation refuses the old slot, and the transaction guard refuses direct reuse.
-        retire.run(this.tenant, 'intent', id, OCCURRENCE_INTENT_KEY.test(key) && key === `occurrence:${intent.occurrence}` ? expiresAt : null);
+        retire.run(this.tenant, 'intent', id, isOccurrenceIntentKey(key) && key === occurrenceIntentKey(intent.occurrence!) ? expiresAt : null);
         delete state.intents[id]; result.compactedIntents++;
       }
       const retireMemory = this.db.prepare('INSERT INTO host_retired_memory_intent (tenant,intent_id,approval,body,expires_at) VALUES (?,?,?,?,?)');
@@ -456,7 +454,7 @@ export class HostLedger {
     });
     const retired = new Set(tombstones.filter(([kind]) => kind === 'intent').map(([, identity]) => identity));
     for (const [id, intent] of Object.entries(record(body.intents, 'intents') as LedgerState['intents'])) {
-      if (retired.has(id) || OCCURRENCE_INTENT_KEY.test(intent.key) && (intent.key !== `occurrence:${intent.occurrence}`
+      if (retired.has(id) || isOccurrenceIntentKey(intent.key) && (intent.key !== occurrenceIntentKey(intent.occurrence!)
         || body.occurrences?.[intent.occurrence!]?.intentId !== id)) throw new RetiredIntentIdentityError();
       // The FIFO key includes the tenant, so an intent of another tenant would queue apart from new work here.
       if (intent.agent !== agentKey(this.tenant, intent.execution)) throw new Error('A switch dump intent must queue under this tenant');
