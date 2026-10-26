@@ -93,6 +93,14 @@ function result(id: InvariantId, details: string[]): InvariantResult {
   return { id, status: details.length === 0 ? 'held' : 'violated', details };
 }
 
+function memoryState(exists: boolean, revision: string): string {
+  return JSON.stringify([exists, revision]);
+}
+
+// Preserve the original initial-empty allowance; a terminal narrows it to
+// one exact observation. Missing and zero-byte files share a revision only.
+const INITIAL_MEMORY_STATES = [memoryState(false, EMPTY_REVISION), memoryState(true, EMPTY_REVISION)];
+
 /**
  * Check one cut: the device snapshot taken after the restart against the
  * Host journal up to the cut. A home whose ledger fails I1 cannot be read;
@@ -162,27 +170,31 @@ export function checkCut(snapshot: DeviceSnapshot, journal: readonly JournalEntr
     const paths = new Set([...Object.keys(home.files), ...(records ?? []).map((record) => record.path)]);
     for (const path of paths) {
       const file = home.files[path] ?? { exists: false, size: 0, revision: EMPTY_REVISION };
-      const issuedTargets = new Set([...issued.values()]
+      const issuedTargets = new Set([...INITIAL_MEMORY_STATES, ...[...issued.values()]
         .filter((intent) => intent.agentRef.agentId === home.agentId && intent.path === path && intent.targetRevision !== null)
-        .map((intent) => intent.targetRevision));
-      if (file.revision !== EMPTY_REVISION && !issuedTargets.has(file.revision)) {
+        .map((intent) => memoryState(true, intent.targetRevision!))]);
+      const observedState = memoryState(file.exists, file.revision);
+      if (!issuedTargets.has(observedState)) {
         i5.push(`${home.agentId}/${path}: ${file.size} bytes, ${file.revision} is no body the Host issued`);
       }
       if (records === undefined) continue;
       // The states each record leaves possible, in ledger (append) order.
       // A terminal records the file right after its CAS, or as observed.
-      let allowed = new Set([EMPTY_REVISION]);
+      let allowed = new Map(INITIAL_MEMORY_STATES.map(state => [state, EMPTY_REVISION]));
       for (const record of records) {
         if (record.path !== path) continue;
         const detail = record.detail;
         if (record.state === 'applying') {
-          if (allowed.has(record.baseRevision)) allowed.add(record.targetRevision ?? EMPTY_REVISION);
+          if ([...allowed.values()].includes(record.baseRevision)) {
+            const revision = record.targetRevision ?? EMPTY_REVISION;
+            allowed.set(memoryState(record.targetRevision !== null, revision), revision);
+          }
         } else if (detail !== null && !('code' in detail)) {
-          allowed = new Set([detail.revision]);
+          allowed = new Map([[memoryState(detail.exists, detail.revision), detail.revision]]);
         }
       }
-      if (!allowed.has(file.revision)) {
-        i4.push(`${home.agentId}/${path}: ${file.exists ? `${file.size} bytes ${file.revision}` : 'missing'}, ledger allows ${[...allowed].join(' | ')}`);
+      if (!allowed.has(observedState)) {
+        i4.push(`${home.agentId}/${path}: ${file.exists ? `${file.size} bytes ${file.revision}` : 'missing'}, ledger allows ${[...allowed.keys()].join(' | ')}`);
       }
     }
   }
