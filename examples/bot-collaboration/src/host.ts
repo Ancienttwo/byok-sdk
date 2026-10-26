@@ -16,7 +16,7 @@ import { DEFAULT_CANCEL_GRACE_MS, DEFAULT_INSTRUCTION_MAX_BYTES,
 import { checkReply, collaborationDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, expireCards, replyCheckDue, reportCardDecisions,
   commandBots, type Command, type CommandPorts, type CommandStore, type KeylessCommand, type ReplyCheck } from './rules/commands';
 import type { CommandRecord } from './rules/commit';
-import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, type CommitResult } from './commit';
+import { callCardsInLedger, CommitConflict, commitInLedger, retainInLedger, syncTurnInLedger, writeLedger, type CommitResult } from './commit';
 import type { RetentionInput, RetentionResult } from './retention';
 import { BOT_ROUTINE, botRoutines, createDefinition, endable, owned, routineCalendar, routineTurn,
   updateDefinition, type BotRoutineInput } from './routines';
@@ -29,8 +29,11 @@ import type { RoomFields } from '@byok-sdk/protocol';
 
 import { HISTORY_MAX_BYTES, HISTORY_MAX_ITEMS } from './history';
 import { flushHomes, type HomeServer } from './home-projections';
-import { admitBot, admitDevice, checkTopology, deviceRefusal, deviceTopology, homeSent, switchStep, switchWork, type DeviceTopology,
+import { admitBot, admitDevice, checkTopology, DeviceModeError, deviceRefusal, deviceTopology, homeSent, switchDrained, switchStep, switchWork,
+  type DeviceTopology,
   type SwitchWork } from './topology';
+import { checkSwitchRecords, refuseExported, sealLedger, switchContent, type SwitchHeader } from './switch';
+import { sealSwitchExport, SwitchExportError, type SwitchExport } from './migration';
 import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, type CoalescePolicy } from './coalesce';
 import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel';
 import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery';
@@ -213,6 +216,8 @@ export class BotCollaboration {
     const persisted = ledger.snapshot(), team = stateOf(persisted.application).team;
     // #957: the owner records are read before any pass. Each refusal reads them again in the transaction that would write.
     checkTopology(stateOf(persisted.application));
+    // #975: an uncommitted import refuses here, before the constructor's own write and before K4 starts.
+    checkSwitchRecords(stateOf(persisted.application));
     // The team mode is stored in the ledger. A restart cannot change it.
     if (options.team === 'external' ? !team.external && Object.keys(team.bots).length : team.external) {
       throw new Error(`This ledger has ${team.external ? 'an external' : 'a local'} team`);
@@ -271,8 +276,10 @@ export class BotCollaboration {
       occurrenceHooks: { [BOT_ROUTINE]: (run, tx) => {
         const state = stateOf(tx.application);
         // #957: a slot of a Bot whose device is frozen or owned by H throws, so K4 records neither the slot nor a Turn and the
-        // SDK delivers the wake again later. After an abort the slot runs; after a commit it refuses until the routine pauses.
+        // SDK delivers the wake again later. After an abort the slot runs. From the export on (#975) every slot refuses, and
+        // the new owner schedules the routine's wakes on its own SDK.
         admitBot(state, (run.input as BotRoutineInput).owner);
+        refuseExported(state);
         this.commitCallback(state, run.occurrenceKey, { kind: 'occurrence', key: run.occurrenceKey },
           { publish: tx.publish, occurrence: () => routineTurn(state, run) });
       } },
@@ -280,7 +287,8 @@ export class BotCollaboration {
       applyOutcome: (document, tx) => this.applyOutcome(document, tx),
       // #957: K4 sends nothing to a device that is frozen or owned by H: not the timer drain, not a `bot.core` call.
       admitSubmit: (intent, state) => !deviceRefusal(stateOf(state.application as LedgerState['application']), intent.execution.deviceId) });
-    ledger.transaction(s => {
+    // An exported domain stays as it was exported (#975), also across a restart.
+    if (!stateOf(persisted.application).switchExport) ledger.transaction(s => {
       const state = stateOf(s.application);
       promoteReplyReceipts(ledger, s, state, this.now());
       if (options.team === 'external') {
@@ -295,6 +303,11 @@ export class BotCollaboration {
   }
   private models(): Record<string, ExecutionTemplate> { return this.options.models ?? { default: this.options.execution }; }
   snapshot(): CollaborationState { return stateOf(this.ledger.snapshot().application); }
+  /**
+   * Every K8 write of this Host, except the switch steps (#975). It refuses while the domain is exported, after the work's
+   * own refusals, so a command on a frozen or H-owned device still gets its device refusal.
+   */
+  private write<T>(apply: (state: LedgerState, rows: ApplicationRows) => T): T { return writeLedger(this.ledger, apply); }
   private exclusive<T>(work: () => Promise<T>): Promise<T> {
     if (this.closed) return Promise.reject(new Error('Bot Host is closed'));
     const next = this.chain.then(work);
@@ -324,7 +337,7 @@ export class BotCollaboration {
     const kind = classifyInbound(message, this.owner.id, this.options.channel?.self), { channel, conversation, platformMessageId, sender } = message;
     if (kind === 'echo') {
       // A send can be waiting for this echo. Do not queue it behind that send.
-      this.ledger.transaction(s => {
+      this.write(s => {
         const state = stateOf(s.application), matches = echoCandidates(state, message);
         if (matches.length !== 1 || !acceptDeliveryEcho(matches[0]!, platformMessageId)) state.audit.push(`Delivery unmatched_echo: ${channel} ${platformMessageId}`.slice(0, 1024));
         cleanReplyTokens(s, state, this.now());
@@ -375,7 +388,7 @@ export class BotCollaboration {
   }
   /** Adapter data can be unverified, so one row is at most 1024 characters. */
   private audit(line: string): void {
-    this.ledger.transaction(s => { stateOf(s.application).audit.push(line.slice(0, 1024)); });
+    this.write(s => { stateOf(s.application).audit.push(line.slice(0, 1024)); });
   }
   /** R2: refuse an unverified principal. The audit row commits before the error. */
   private verifiedOnly(principal: Principal | undefined, action: string, target: string): Principal {
@@ -392,6 +405,7 @@ export class BotCollaboration {
   }
   private applyOutcome(document: unknown, tx: OutcomeTransaction): void {
     const state = stateOf(tx.application), taskId = tx.intent.taskId, key = tx.intent.key;
+    refuseExported(state);
     const owner = hostIntent(state, key);
     if (owner) return this.applyHostOutcome(key, owner.handler, document, tx);
     // Not a key that K8 wrote. It must never settle as a success.
@@ -435,7 +449,7 @@ export class BotCollaboration {
   private reportIntentFailures(): IntentOutcomeError | undefined {
     const failures = [...this.intentFailures.values()], fresh = failures.filter(f => this.auditedFailures.get(f.key) !== f.message);
     if (fresh.length) {
-      this.ledger.transaction(s => {
+      this.write(s => {
         const state = stateOf(s.application);
         for (const f of fresh) state.audit.push(`Intent outcome refused ${f.code}: ${f.key} ${f.message}`.slice(0, 1024));
       });
@@ -453,7 +467,7 @@ export class BotCollaboration {
       if (!this.hostIntentHandlers.has(handler)) throw new Error(`Unknown Host intent handler: ${handler}`);
       // A restart admits every open intent, so a Host intent passes the same toolset admission as a Bot execution.
       admitBotToolsets(input.execution, this.options.readOnlyToolsets);
-      this.ledger.transaction(s => {
+      this.write(s => {
         const state = stateOf(s.application), owner = hostIntent(state, input.key);
         if (Object.hasOwn(state.turns, input.key)) throw new Error('Host intent identity conflict: the key is a Bot Turn');
         if (owner ? owner.handler !== handler : s.intents[hash(input.key)]) throw new Error('Host intent identity conflict');
@@ -484,7 +498,7 @@ export class BotCollaboration {
       // A scan that stopped early may not have reached this key, so its error is the cause when the key has no refusal.
       const drained = await this.core.drain().then(() => undefined, (error: unknown) => ({ error }));
       const refused = this.intentFailures.get(key);
-      this.ledger.transaction(s => {
+      this.write(s => {
         const intent = openIntent(s.intents, key);
         if (!refused) throw drained ? drained.error : new Error(`Intent is not stuck: ${key} has no refused terminal`);
         settle(s, intent, 'failed');
@@ -528,12 +542,14 @@ export class BotCollaboration {
    */
   async consumeMessage(input: AgentMessageInput): Promise<{ outcome: 'accepted' | 'refused'; reasonCode?: string }> {
     if (this.closed) throw new Error('Bot Host is closed');
+    refuseExported(this.snapshot());
     const result = await this.core.consumeMessage(input);
     if (result.outcome === 'accepted') queueMicrotask(() => { if (!this.closed) void this.drain().catch(() => {}); });
     return result;
   }
   private applyMessage(input: AgentMessageInput, tx: MessageTransaction): { outcome: 'accepted' | 'refused'; reasonCode?: string } {
     const state = stateOf(tx.application);
+    refuseExported(state);
     let disposition;
     try {
       ({ disposition } = this.commitCallback(state, `${input.taskId}:${input.payload.messageId}`,
@@ -578,7 +594,7 @@ export class BotCollaboration {
     for (const d of Object.values(this.snapshot().delegations)) {
       if (!d.cancel || d.cancel.delivered) continue;
       await this.core.cancel(d.cancel.targetTurnId);
-      this.ledger.transaction(s => { stateOf(s.application).delegations[d.id]!.cancel!.delivered = true; });
+      this.write(s => { stateOf(s.application).delegations[d.id]!.cancel!.delivered = true; });
     }
   }
 
@@ -666,6 +682,8 @@ export class BotCollaboration {
   /** Owner API for the Main Bot's own routines. */
   async setRoutineLifecycle(id: string, value: Routine['lifecycle']): Promise<void> {
     await this.exclusive(async () => {
+      // #975: the K4 core writes this itself, outside the K8 write fence.
+      refuseExported(this.snapshot());
       try { await this.core.lifecycle(owned(this.routineRows(), this.options.botId, id).definition.id, value); }
       finally { await this.process(); }
     });
@@ -681,6 +699,7 @@ export class BotCollaboration {
   }
   async updateRoutine(action: UpdateRoutineAction): Promise<void> {
     await this.exclusive(async () => {
+      refuseExported(this.snapshot());
       try { await this.core.updateRoutine(updateDefinition(this.routineRows(), this.options.botId, action)); }
       finally { await this.process(); }
     });
@@ -689,7 +708,7 @@ export class BotCollaboration {
   /** K4 records routine wakes. The `bot-routine` hook writes the routine Turn in the same commit. */
   readonly consume = (wake: DueWake, signal: AbortSignal): Promise<void> => this.exclusive(async () => {
     signal.throwIfAborted();
-    this.ledger.transaction((s, rows) => { this.sync(s, rows); });
+    this.write((s, rows) => { this.sync(s, rows); });
     try { await this.core.consume(wake, signal); } finally { await this.process(); }
   });
   drain(): Promise<void> { return this.exclusive(() => this.process()); }
@@ -715,7 +734,7 @@ export class BotCollaboration {
    */
   freezeForSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology> {
     return this.exclusive(async () => {
-      this.ledger.transaction(s => switchStep(s, deviceId, expectedRevision, 'freeze'));
+      this.write(s => switchStep(s, deviceId, expectedRevision, 'freeze'));
       return this.topology(deviceId);
     });
   }
@@ -725,7 +744,7 @@ export class BotCollaboration {
    */
   drainForSwitch(deviceId: string, { cancel = false }: { cancel?: boolean } = {}): Promise<SwitchWork> {
     return this.exclusive(async () => {
-      const work = this.ledger.transaction(s => {
+      const work = this.write(s => {
         if (!deviceTopology(stateOf(s.application), deviceId).switching) throw new Error(`Device ${deviceId} is not switching`);
         const open = switchWork(s, deviceId);
         if (cancel) for (const key of open.intents) s.intents[hash(key)]!.cancelReason ??= 'cancelled';
@@ -739,19 +758,74 @@ export class BotCollaboration {
     });
   }
   /**
-   * Step 3, after H committed the device: L records that H owns it, on the frozen revision, only when the device has no open
-   * work in the same transaction. Every entry then refuses the device with `DeviceModeError`, also after a restart.
+   * Step 3 (#975): seals the domain's whole state into a switch export, after each of its devices is frozen at the given
+   * revision and drained. The export must name every device of a live Bot. From the export on, this Host writes nothing to
+   * the ledger, also after a restart, so the commit away can check that the ledger still holds what was exported. Refuses
+   * Agent memory, a pending projection (flush them first), and a pending Host job, which K4 would run while the export
+   * waits for its commit.
    */
-  commitSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology> {
+  exportForSwitch(devices: { deviceId: string; expectedRevision: number }[], exportedAt = this.now()): Promise<SwitchExport> {
     return this.exclusive(async () => {
-      this.ledger.transaction(s => switchStep(s, deviceId, expectedRevision, 'commit'));
+      const state = this.snapshot();
+      refuseExported(state);
+      for (const { deviceId, expectedRevision } of devices) {
+        const row = deviceTopology(state, deviceId);
+        if (row.revision !== expectedRevision) {
+          throw new CommitConflict('stale_revision', `Device ${deviceId} is at topology revision ${row.revision}, not ${expectedRevision}`);
+        }
+        if (row.mode !== 'L') throw new DeviceModeError(deviceId, row.mode, row.revision);
+        if (!row.switching) throw new Error(`Device ${deviceId} is not switching`);
+        if (!switchDrained(switchWork(this.ledger.snapshot(), deviceId))) throw new Error(`Device ${deviceId} still has open work`);
+      }
+      const header: SwitchHeader = { source: 'L', domain: this.ledger.tenant, exportedAt,
+        devices: devices.map(({ deviceId, expectedRevision }) => ({ deviceId, frozenRevision: expectedRevision })) };
+      // The dump, the seal and the mark run with no await between them, so no other write of this process comes between.
+      const dump = this.ledger.dumpForSwitch();
+      const job = Object.values(dump.body.outbox).find(row => row.kind === 'host-job');
+      if (job) throw new SwitchExportError('open_work', `Switch export source: Host job ${job.occurrenceKey} is pending; let it run first`);
+      const document = sealSwitchExport(switchContent(dump, this.ledger.tenant, header));
+      this.ledger.transaction(s => {
+        stateOf(s.application).switchExport = { digest: document.manifest.digest, exportedAt, devices: document.devices.map(device => ({ ...device })) };
+      });
+      return document;
+    });
+  }
+  /**
+   * Step 5, after the new owner imported and verified the export: L records that the new owner owns the whole domain. Every
+   * device of the export moves to H in one transaction, on its frozen revision, only when none has open work and `receipt`
+   * is the digest of this Host's export. The ledger is sealed again under the export's header and must give the same
+   * digest. `deviceId` and `expectedRevision` name one device of the export, whose record is returned. Every entry then
+   * refuses those devices with `DeviceModeError`, also after a restart. The export stays, so this Host keeps writing nothing.
+   */
+  commitSwitch(deviceId: string, expectedRevision: number, receipt: string): Promise<DeviceTopology> {
+    return this.exclusive(async () => {
+      // The device checks first, on a copy, so a device that is not ready refuses the same way with or without an export.
+      switchStep(structuredClone(this.ledger.snapshot()), deviceId, expectedRevision, 'commit');
+      const mark = this.snapshot().switchExport;
+      if (!mark) throw new Error('This Host has not exported its domain for a switch');
+      if (mark.digest !== receipt) throw new Error(`The receipt ${receipt} is not this Host's export ${mark.digest}`);
+      if (!mark.devices.some(device => device.deviceId === deviceId && device.frozenRevision === expectedRevision)) {
+        throw new Error(`Device ${deviceId} at revision ${expectedRevision} is not a device of the export`);
+      }
+      // The fence covers this Host's writes; the K4 core also writes on its own timers. A change to what moves refuses.
+      const now = sealLedger(this.ledger, { source: 'L', domain: this.ledger.tenant, devices: mark.devices, exportedAt: mark.exportedAt });
+      if (now.manifest.digest !== mark.digest) throw new Error(`The ledger changed after its export: ${now.manifest.digest}, not ${mark.digest}`);
+      this.ledger.transaction(s => { for (const device of mark.devices) switchStep(s, device.deviceId, device.frozenRevision, 'commit'); });
       return this.topology(deviceId);
     });
   }
-  /** A failed export or check: clears the freeze on the frozen revision, so L owns the device again and held Turns run. */
+  /**
+   * A failed export or check: clears the freeze on the frozen revision, so L owns the device again and held Turns run. An
+   * abort of a device of the export ends the export, and the new owner discards its import. After the commit every device
+   * of the export is owned by H, so none aborts.
+   */
   abortSwitch(deviceId: string, expectedRevision: number): Promise<DeviceTopology> {
     return this.exclusive(async () => {
-      this.ledger.transaction(s => switchStep(s, deviceId, expectedRevision, 'abort'));
+      this.ledger.transaction(s => {
+        const state = stateOf(s.application), step = switchStep(s, deviceId, expectedRevision, 'abort');
+        if (state.switchExport?.devices.some(device => device.deviceId === deviceId)) delete state.switchExport;
+        return step;
+      });
       await this.process();
       return this.topology(deviceId);
     });
@@ -765,7 +839,7 @@ export class BotCollaboration {
   }
   recover(): Promise<void> {
     return this.exclusive(async () => {
-      this.ledger.transaction((s, rows) => {
+      this.write((s, rows) => {
         for (const row of Object.values(stateOf(s.application).channel?.deliveries ?? {})) recoverDelivery(row);
         this.sync(s, rows);
       });
@@ -804,7 +878,7 @@ export class BotCollaboration {
         check = { taskId: intent.taskId, failed: false,
           readback: await this.server.tasks.agentMessage(intent.taskId, intent.execution.deviceId, intent.execution.payload.agentRef) };
       } catch { check = { taskId: intent.taskId, failed: true }; }
-      this.ledger.transaction(s => {
+      this.write(s => {
         const state = stateOf(s.application);
         checkReply(state, state.delegations[d.id]!, check, this.now(), (key: string, value: Json) => project(s, key, value), this.timers.uncertainAfterMs);
       });
@@ -836,14 +910,14 @@ export class BotCollaboration {
     if (port.readback) for (const old of Object.values(this.snapshot().channel?.deliveries ?? {}).filter(row => row.state === 'unknown')) {
       try {
         const result = await port.readback(old.id);
-        this.ledger.transaction(s => {
+        this.write(s => {
           const row = stateOf(s.application).channel?.deliveries[old.id];
           if (row) readbackDelivery(row, old.attempts, result, this.now());
         });
       } catch { continue; } // Missing readback evidence leaves this row unknown.
     }
     for (const old of Object.values(this.snapshot().channel?.deliveries ?? {})) {
-      const claim = this.ledger.transaction(s => {
+      const claim = this.write(s => {
         const state = stateOf(s.application), row = state.channel!.deliveries[old.id]!;
         if (row.state !== 'pending' || (row.nextAttemptAt ?? 0) > this.now()) return;
         const route = deliveryRoute(state, row, this.now());
@@ -860,19 +934,19 @@ export class BotCollaboration {
         const result = await Promise.race([
           Promise.resolve().then(() => port.send({ deliveryId: claim.row.id, route: claim.route, body: claim.row.body }, controller.signal)), deadline,
         ]);
-        this.ledger.transaction(s => settleDelivery(stateOf(s.application).channel!.deliveries[claim.row.id]!, claim.row.attempts, result, this.now()));
+        this.write(s => settleDelivery(stateOf(s.application).channel!.deliveries[claim.row.id]!, claim.row.attempts, result, this.now()));
       } catch {
         // send has started: neither an exception nor a deadline proves absence.
-        this.ledger.transaction(s => unknownDelivery(stateOf(s.application).channel!.deliveries[claim.row.id]!, claim.row.attempts,
+        this.write(s => unknownDelivery(stateOf(s.application).channel!.deliveries[claim.row.id]!, claim.row.attempts,
           controller.signal.aborted ? 'send_timeout' : 'send_failed'));
       } finally { clearTimeout(timer); }
     }
-    this.ledger.transaction(s => cleanReplyTokens(s, stateOf(s.application), this.now()));
+    this.write(s => cleanReplyTokens(s, stateOf(s.application), this.now()));
   }
   /** One sync transaction. In history mode, phase 1 reads the history first, outside the transaction. */
   private async syncWithHistory(): Promise<boolean> {
     const injected = await this.readHistory();
-    return this.ledger.transaction((s, rows) => this.sync(s, rows, injected));
+    return this.write((s, rows) => this.sync(s, rows, injected));
   }
   private async readHistory(): Promise<InjectedHistory | undefined> {
     const read = this.options.history, readRoom = this.options.roomHistory;
@@ -910,6 +984,8 @@ export class BotCollaboration {
    * The pass does not repeat after it, and it rethrows the first drain error for the caller and the SDK hook.
    */
   private async pass(): Promise<void> {
+    // An exported domain runs nothing: no sync, send, expiry or K4 drain changes what it holds (#975).
+    if (this.snapshot().switchExport) return;
     this.unread.clear();
     let failure: { error: unknown } | undefined;
     let more: boolean;
@@ -942,7 +1018,7 @@ export class BotCollaboration {
   }
   private armTimer(): void {
     clearTimeout(this.timer);
-    if (!this.closed) {
+    if (!this.closed && !this.snapshot().switchExport) {
       // Durable state is authority. The timer only retries outbox work, expires cards and seals input batches at their window end.
       const ledger = this.ledger.snapshot(), state = stateOf(ledger.application);
       // K4 retries a failed wake call from its own timer.
@@ -972,7 +1048,7 @@ export class BotCollaboration {
         new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Device discovery timed out')), 1000); }),
       ]);
     } catch { return; } finally { clearTimeout(timer); }
-    this.ledger.transaction(s => observeDevices(s, stateOf(s.application), new Map(devices.map(d => [d.deviceId, d.connected])),
+    this.write(s => observeDevices(s, stateOf(s.application), new Map(devices.map(d => [d.deviceId, d.connected])),
       (key, value) => project(s, key, value)));
   }
   async close(): Promise<void> {

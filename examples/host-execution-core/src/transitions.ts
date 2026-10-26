@@ -1,4 +1,4 @@
-import { canonical, DEFAULT_RETRY, hash, isSealed, project, taskId, validateInput,
+import { canonical, DEFAULT_RETRY, frozenInput, hash, isSealed, project, taskId, validateInput,
   type Conclusion, type Intent, type IntentExecution, type IntentInput, type Json, type LedgerIntentInput, type LedgerState } from './model';
 
 /**
@@ -24,7 +24,7 @@ export function admit(state: LedgerState, tenant: string, input: LedgerIntentInp
   const intent: Intent = { ...frozen, id, agent: agentKey(tenant, input.execution),
     sequence: ++state.sequence, phase: 'queued', generation: 0, taskId: taskId(input.key, 0), notBefore: 0, attempts: 0 };
   state.intents[id] = intent;
-  state.executions[intent.taskId] = { input: { ...structuredClone(input.execution), taskId: intent.taskId }, submission: 'reserved', started: false };
+  state.executions[intent.taskId] = { input: frozenInput(input.execution, intent.taskId), submission: 'reserved', started: false };
   state.outbox[`intent:${id}`] = { kind: 'intent', intentId: id };
   return intent;
 }

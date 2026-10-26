@@ -1,5 +1,5 @@
 import { canonical, hash } from '@byok-sdk/example-host-execution-core/canonical';
-import { taskId as taskIdOf, validateJson, type Conclusion, type Intent, type Json, type Occurrence, type RetryPolicy, type Routine,
+import { isOccurrenceIntentKey, occurrenceIntentKey, routineWakeKey, taskId as taskIdOf, validateJson, validateRetry, type Conclusion, type Intent, type Json, type Occurrence, type RetryPolicy, type Routine,
   type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState } from './model';
 
@@ -24,10 +24,10 @@ import type { CollaborationState } from './model';
  *   (`core.ts` begin); K8 passes none;
  * - K4 `applied`: the current task id exactly when `conclusion` is `succeeded`, which K4 sets only with that settle
  *   (`core.ts` terminal);
- * - a K4 occurrence's wake key and slot, `${routineId}:${definitionVersion}:${trigger.plannedAt}` and its hash. K4 records
+ * - a K4 occurrence's wake key and slot, K4 `routineWakeKey(routineId, definitionVersion, trigger.plannedAt)` and its hash. K4 records
  *   and compacts one slot with each occurrence (`routines.ts` recordOccurrence, `ledger.ts` compact), and H's slot is the
  *   occurrence's unique `(routine_id, definition_version, planned_at)`, so the format has no slot section;
- * - an occurrence's intent id, and K4 `attempts` (see `IntentRecord` and `OccurrenceRecord`).
+ * - an occurrence's intent id, the hash of K4 `occurrenceIntentKey(key)`, and K4 `attempts` (`switchAttempts`).
  * An occurrence key is checked here as well: K4 `hash([routineId, definitionVersion, trigger])`.
  *
  * The digest covers the header too: `domain` is the source's tenant or scope id, never the target's (a switch back to L
@@ -87,8 +87,9 @@ export interface IntentRecord {
   cancelReason?: 'expired' | 'cancelled'; retryUntil?: number; conclusion: Conclusion;
 }
 /**
- * A routine: L K4 `routines` (its insertion order is `ordinal`), H `routine`. `nextAt` is the planned slot. The schedule
- * retry fields and `lastError` are K4's pacing of a slot past the SDK's furthest wake, and `lastError` is never cleared.
+ * A routine: L K4 `routines`, H `routine`. `ordinal` is its position in the section, exactly 0 to n - 1: K4 stores only the
+ * insertion order. `nextAt` is the planned slot. The schedule retry fields and `lastError` are K4's pacing of a slot past
+ * the SDK's furthest wake, and `lastError` is never cleared.
  */
 export interface RoutineRecord {
   id: string; ordinal: number; definition: RoutineDefinition; pending?: RoutineDefinition;
@@ -96,7 +97,7 @@ export interface RoutineRecord {
   scheduleRetryAt?: number; scheduleRetryCount?: number; lastError?: NonNullable<Routine['lastError']>;
 }
 /**
- * An occurrence: L K4 `occurrences` (its insertion order is `ordinal`), H `occurrence`. `job` is a Host job's tries and
+ * An occurrence: L K4 `occurrences`, H `occurrence`, with `ordinal` its position as a routine's. `job` is a Host job's tries and
  * summary, `null` for an occurrence hook. `conclusion` is set only on one with no intent; a promoted one has its intent's.
  * K4 `attempts` is not carried: it is its intent's, or 0. `slotReplayCount` counts redelivered wakes of its slot.
  */
@@ -112,7 +113,10 @@ export interface TombstoneRecord { kind: 'intent' | 'row' | 'slot' | 'applicatio
 
 export interface SwitchContent {
   version: typeof SWITCH_EXPORT_VERSION; source: 'L' | 'H'; domain: string; devices: SwitchDevice[]; exportedAt: number;
-  /** The live state. The source Host's owner records (L `topology`, L `hostIntents`, now on each intent) are not part of it. */
+  /**
+   * The live state. The source Host's owner records (L `topology`, L `hostIntents`, now on each intent) and L's switch
+   * records (`switchExport`, `switchImport`) are not part of it.
+   */
   collaboration: CollaborationState;
   archived: ArchivedRecord[]; intents: IntentRecord[]; routines: RoutineRecord[]; occurrences: OccurrenceRecord[];
   outbox: OutboxRecord[]; tombstones: TombstoneRecord[];
@@ -120,6 +124,15 @@ export interface SwitchContent {
 /** The count and digest of each section, and `digest` over them and the header: the identity of one export. */
 export interface SwitchManifest { counts: Record<SwitchSection, number>; digests: Record<SwitchSection, string>; digest: string }
 export interface SwitchExport extends SwitchContent { manifest: SwitchManifest }
+
+/**
+ * K4 `attempts`, which the format does not carry (#975 D5): one per generation begun, so 0 while the intent is `reserved`
+ * and `generation + 1` once it began. An occurrence has its intent's, and 0 without one. Both builders and both importers
+ * use it.
+ */
+export function switchAttempts(intent: Pick<IntentRecord, 'submission' | 'generation'> | undefined): number {
+  return intent === undefined || intent.submission === 'reserved' ? 0 : intent.generation + 1;
+}
 
 export type SwitchExportRefusal = 'invalid' | 'unsorted' | 'duplicate' | 'reference' | 'receipt_mismatch' | 'owner_record' | 'device_missing' | 'open_work'
   | 'home_sent' | 'projection_pending' | 'card_call' | 'execution_routine' | 'manifest';
@@ -224,8 +237,6 @@ function keys(value: unknown, required: readonly string[], allowed: readonly str
 }
 const receiptShape = (value: unknown) => keys(value, ['messageId', 'contentHash']) && text(value.messageId) && text(value.contentHash);
 /** K4's JSON rule: a value that serialization would change (`NaN`, `undefined`, a class instance) cannot be digested. */
-/** K4 `ledger.ts` OCCURRENCE_INTENT_KEY: a routine occurrence's intent key. */
-const OCCURRENCE_INTENT_KEY = /^occurrence:[0-9a-f]{64}$/;
 function json(value: unknown): boolean { try { validateJson(value); return true; } catch { return false; } }
 function invalid(message: string): never { throw new SwitchExportError('invalid', `Invalid switch export: ${message}`); }
 function ensure(ok: boolean, message: string): void { if (!ok) invalid(message); }
@@ -266,12 +277,10 @@ function occurrenceRecord(row: unknown): boolean {
     && typeof row.executionSuperseded === 'boolean' && optional(row.conclusion, conclusionText)
     && optional(row.slotReplayCount, count => time(count) && count >= 1);
 }
-/** The policy K4 `validateRetry` (`model.ts`) accepts. K4 does not export it from its package index. */
-function retryPolicy(retry: unknown): retry is { maxAttempts: number } {
-  return keys(retry, ['maxAttempts', 'delaysMs', 'retryFailures'])
-    && Number.isSafeInteger(retry.maxAttempts) && (retry.maxAttempts as number) >= 1 && (retry.maxAttempts as number) <= 100
-    && Array.isArray(retry.delaysMs) && retry.delaysMs.length >= (retry.maxAttempts as number) - 1 && retry.delaysMs.every(time)
-    && typeof retry.retryFailures === 'boolean';
+/** A policy with exactly K4's keys that K4 `validateRetry` accepts. */
+function retryPolicy(retry: unknown): retry is RetryPolicy {
+  if (!keys(retry, ['maxAttempts', 'delaysMs', 'retryFailures']) || !Array.isArray(retry.delaysMs)) return false;
+  try { validateRetry(retry as unknown as RetryPolicy); return true; } catch { return false; }
 }
 const executionShape = (row: Record<string, unknown>) => typeof row.started === 'boolean'
   && optional(row.attempt, object) && optional(row.terminal, object) && optional(row.messageReceipt, receiptShape);
@@ -351,16 +360,23 @@ function checkReferences(content: SwitchContent): void {
     const ordinals = content[section].map(row => row.ordinal);
     if (new Set(ordinals).size !== ordinals.length) throw new SwitchExportError('duplicate', `Switch export ${section} repeats an ordinal`);
   }
+  // A routine's or occurrence's ordinal is its position: what moves is their order, which is all K4 stores (its insertion
+  // order). An intent keeps its source value, K4 `sequence` or H `ordinal`, which may have gaps.
+  for (const section of ['routines', 'occurrences'] as const) {
+    const ordinals = content[section].map(row => row.ordinal).sort((a, b) => a - b);
+    ensure(ordinals.every((ordinal, position) => ordinal === position), `${section} ordinals are not their positions 0 to ${ordinals.length - 1}`);
+  }
   const occurrences = new Map(content.occurrences.map(row => [row.key, row]));
+  const occurrenceOfIntent = new Map(content.occurrences.map(row => [occurrenceIntentKey(row.key), row.key]));
   const promoted = new Set<string>();
   for (const row of content.intents) {
     reference(row.taskId === taskIdOf(row.key, row.generation), `intent ${row.key} has task id ${row.taskId}, not that of generation ${row.generation}`);
     ensure((row.input as { taskId?: unknown }).taskId === row.taskId, `intent ${row.key} input is not frozen for its task id`);
-    // K4's own test for an occurrence intent (`ledger.ts` OCCURRENCE_INTENT_KEY, not exported); any other key is a Host's.
-    if (OCCURRENCE_INTENT_KEY.test(row.key)) {
-      const key = row.key.slice('occurrence:'.length);
-      reference(occurrences.has(key), `intent ${row.key} names no occurrence of the export`);
-      promoted.add(key);
+    // K4's own test for an occurrence intent; any other key is a Host's.
+    if (isOccurrenceIntentKey(row.key)) {
+      const key = occurrenceOfIntent.get(row.key);
+      reference(key !== undefined, `intent ${row.key} names no occurrence of the export`);
+      promoted.add(key!);
     }
   }
   const routineById = new Map(content.routines.map(row => [row.id, row]));
@@ -371,7 +387,7 @@ function checkReferences(content: SwitchContent): void {
     reference(routine !== undefined, `occurrence ${row.key} names no routine of the export: ${row.routineId}`);
     reference(row.key === hash([row.routineId, row.definitionVersion, row.trigger]), `occurrence ${row.key} is not the key of its routine slot and trigger`);
     // One occurrence per slot: the target derives the slot from it.
-    const slot = `${row.routineId}:${row.definitionVersion}:${row.trigger.plannedAt}`;
+    const slot = routineWakeKey(row.routineId, row.definitionVersion, row.trigger.plannedAt);
     if (slots.has(slot)) throw new SwitchExportError('duplicate', `Switch export has two occurrences of the slot of ${row.key}`);
     slots.add(slot);
     // A promoted occurrence's conclusion is its intent's, which K4 copies and H does not store.
@@ -379,8 +395,10 @@ function checkReferences(content: SwitchContent): void {
     // By the routine's run kind, which a version cannot change (K4 `routines.ts` updateRoutine). A Host job's outbox row
     // goes in the step that concludes or promotes its occurrence (K4 `core.ts` runHostJobs, `routines.ts`; H `store.ts`).
     if (routine!.definition.hostJob) {
-      ensure(row.job !== null && pendingJobs.has(row.key) === (row.conclusion === undefined && !promoted.has(row.key)),
-        `Host job occurrence ${row.key} has a pending job exactly when it is open and not promoted`);
+      // K8 never promotes one (#954): L runs K4 with `hostJobExecution: 'fail'`, and H concludes such a result `failed`
+      // (`store.ts` settleHostJob), so a job result with an execution concludes the occurrence `failed` on both Hosts.
+      ensure(row.job !== null && !promoted.has(row.key) && pendingJobs.has(row.key) === (row.conclusion === undefined),
+        `Host job occurrence ${row.key} is not promoted, and has a pending job exactly when it is open`);
     } else ensure(row.job === null, `occurrence ${row.key} has a Host job, but its routine runs a hook`);
   }
   // The K8 accepted reply of a task, live or retained (#798), is the same fact as the K4 message receipt of that task.
@@ -403,7 +421,10 @@ function checkReferences(content: SwitchContent): void {
   }
 }
 
-/** The K8 state keys (`model.ts`). The source's owner records (`topology`, `hostIntents`) are refused as `owner_record`. */
+/**
+ * The K8 state keys (`model.ts`). The source's owner records (`topology`, `hostIntents`) and L's switch records
+ * (`switchExport`, `switchImport`) are refused as `owner_record`.
+ */
 const COLLABORATION_KEYS = ['version', 'team', 'turns', 'budgets', 'delegations', 'batches', 'units', 'replies', 'schemas', 'questions', 'cards',
   'rejected', 'audit', 'sequence'];
 const COLLABORATION_OPTIONAL = ['inputs', 'inputBatches', 'channel', 'revision', 'commands', 'cardCalls'];
@@ -417,6 +438,9 @@ function checkCollaboration(content: SwitchContent): void {
   ensure(object(state), 'collaboration state');
   if (state.topology !== undefined) throw new SwitchExportError('owner_record', 'Switch export carries the source owner records (topology)');
   if (state.hostIntents !== undefined) throw new SwitchExportError('owner_record', 'Switch export carries L hostIntents; each intent carries its handler');
+  if (state.switchExport !== undefined || state.switchImport !== undefined) {
+    throw new SwitchExportError('owner_record', 'Switch export carries an L switch record (switchExport or switchImport)');
+  }
   ensure(keys(state, COLLABORATION_KEYS, COLLABORATION_OPTIONAL) && state.version === 3 && object(state.team) && object(state.team.bots)
     && Array.isArray(state.team.homeOperations) && object(state.turns) && optional(state.inputBatches, object) && optional(state.cardCalls, object),
   'collaboration state');
