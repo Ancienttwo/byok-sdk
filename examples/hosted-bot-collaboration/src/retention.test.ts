@@ -151,7 +151,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H retention on real Postgres (#793 
       Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
       state.turns.q1 = { id: 'q1', root: 'q1', botId: 'main', source: 'user', request: 'First', hop: 0, status: 'queued', authority: 'owner' };
     });
-    await opened!.pool.query(`INSERT INTO ${table('retired_identity')} (scope, identity) VALUES ($1, $2)`, [storedKey(h.scope), hash(['turn', 'q1'])]);
+    await opened!.pool.query(`INSERT INTO ${table('retired_identity')} (scope, kind, identity) VALUES ($1, 'row', $2)`, [storedKey(h.scope), hash(['turn', 'q1'])]);
     await store().sync(h.scope, { ...SYNC_OPTIONS, history: undefined });
     expect((await h.state()).turns.q1).toMatchObject({ status: 'failed', conclusion: 'failed', reported: true });
     expect((await opened!.pool.query(`SELECT 1 FROM ${table('intent')} WHERE scope = $1`, [storedKey(h.scope)])).rows).toEqual([]);

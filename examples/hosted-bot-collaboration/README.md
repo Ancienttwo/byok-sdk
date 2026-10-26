@@ -86,7 +86,7 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 | `outbox` | work for the sender: a projection's value and send state, a delivery's scan index (owner §54a, signed), a card's connector call claim, an Agent home operation's scan index, or a Host job's claim (#793 §6, signed) |
 | `intent` | Turn intent or Host intent (with its handler name, #955): the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
 | `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision, its revoke time and the target of an open owner switch |
-| `retired_identity` | K8 identity that retention retired for good, `hash([namespace, id])`, or a compacted intent, `hash(['intent', turnId])` |
+| `retired_identity` | Tombstones in K4's scheme `(kind, identity, expires_at)`: kind `row` for a K8 identity that retention retired, `hash([namespace, id])`; kind `intent` for a compacted intent, its K4 intent id `hash(key)`. H writes only permanent ones; kinds `slot` and `application` are K4's, for an owner switch |
 | `archived_row` | row that retention moved out of the state, by namespace and id; a command record has an expiry |
 | `routine` | K4 routine of a Bot: its definition, staged version, lifecycle, status and next slot |
 | `occurrence` | K4 occurrence of a routine slot; its conclusion only when it has no intent, and a Host job's state (`job`) |
@@ -469,11 +469,12 @@ scope lock does all of it, and a refusal or a throw writes nothing.
   the Turn is concluded and reported, no unresolved delegation references it, its room seat is released, and its reply
   receipt is settled. A refusal throws K4's `CompactVetoError`.
 - The store refuses a row with no conclusion, and a Turn id with neither a row nor an intent tombstone.
-- Each removed row leaves a permanent `hash(['intent', turnId])` row in `retired_identity`. A later call counts that
-  Turn as already compacted. `freezeIntent` refuses the Turn with K4's `RetiredIntentIdentityError`, and the sync fails
-  a Turn that never saw its result as `result_retired`, as L does.
-- It does not cover routine intents, and refuses them. K4 gives a routine occurrence's intent tombstone the expiry of
-  its slot, and `retired_identity` rows never expire.
+- Each removed row leaves a permanent intent tombstone in `retired_identity`, kind `intent` with K4's intent id
+  `hash(turnId)`, as K4 `compact` writes it. A later call counts that Turn as already compacted. `freezeIntent`
+  refuses the Turn with K4's `RetiredIntentIdentityError`, and the sync fails a Turn that never saw its result as
+  `result_retired`, as L does.
+- It does not cover routine intents, and refuses them. K4 compacts a routine intent with its occurrence, retiring the
+  slot and giving the intent tombstone the slot's expiry, and H does not compact occurrences.
 - After compaction, an Agent message for the task is refused as `unknown_task`, because its frozen input left with the
   row.
 
