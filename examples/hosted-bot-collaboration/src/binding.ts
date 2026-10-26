@@ -48,6 +48,10 @@ function refusalOf(row: BindingRow | undefined): SyncRefusal | undefined {
 const BINDING = `SELECT device, mode, mode_revision::text, revoked_at IS NOT NULL AS revoked, switching FROM device_binding WHERE scope = $1`;
 const readRow = async (client: PoolClient, scopeKey: string, deviceId: string) =>
   (await client.query<BindingRow>(`${BINDING} AND device = $2`, [scopeKey, storedKey(deviceId)])).rows[0];
+/** The binding rows of these devices in one query, by device id. */
+const readRows = async (client: PoolClient, scopeKey: string, deviceIds: readonly string[]) =>
+  new Map((await client.query<BindingRow & { device: string }>(`${BINDING} AND device = ANY($2::text[])`,
+    [scopeKey, deviceIds.map(storedKey)])).rows.map(row => [JSON.parse(row.device) as string, row]));
 const viewOf = (row: BindingRow): DeviceBinding =>
   ({ mode: row.mode, revision: Number(row.mode_revision), ...(row.switching ? { switching: row.switching } : {}), revoked: row.revoked });
 
@@ -63,14 +67,20 @@ export async function activeBinding(client: PoolClient, scopeKey: string, device
 }
 
 /**
- * The owner-switch fence of a write that #956 lets through for an unbound device (#957): it throws `DeviceSwitchingError`
- * while a switch of the device is open, and `DeviceBindingError` with `mode` once the device's row names mode L. A device
- * with no row, a revoked one and one bound to H pass: the sync holds or runs their work as before.
+ * L's admission of a new command on H (K8 host.ts `admitCommand`, #957, #975): the refusal of the first of these devices
+ * that is frozen for an owner switch (`DeviceSwitchingError`) or whose row names mode L, the other Host's
+ * (`DeviceBindingError` with `mode`), read in one query. A device with no row, a revoked one and one bound to H pass: the
+ * sync holds or runs their work as before (#956). It only reads, so the caller throws it after the replay lookup.
  */
-export async function switchFence(client: PoolClient, scopeKey: string, deviceId: string): Promise<void> {
-  const row = await readRow(client, scopeKey, deviceId), refusal = row && refusalOf(row);
-  if (refusal === 'switching') throw new DeviceSwitchingError(deviceId, row!.switching!, Number(row!.mode_revision));
-  if (refusal === 'mode') throw new DeviceBindingError(deviceId, 'mode');
+export async function switchRefusal(client: PoolClient, scopeKey: string, deviceIds: readonly string[]): Promise<Error | undefined> {
+  if (!deviceIds.length) return undefined;
+  const rows = await readRows(client, scopeKey, deviceIds);
+  for (const deviceId of deviceIds) {
+    const row = rows.get(deviceId), refusal = row && refusalOf(row);
+    if (refusal === 'switching') return new DeviceSwitchingError(deviceId, row!.switching!, Number(row!.mode_revision));
+    if (refusal === 'mode') return new DeviceBindingError(deviceId, 'mode');
+  }
+  return undefined;
 }
 
 /**
@@ -89,8 +99,7 @@ export async function refusesHomeWrites(client: PoolClient, scopeKey: string, de
  * and no entry for a device with an active binding in mode H.
  */
 export async function deviceRefusals(client: PoolClient, scopeKey: string, deviceIds: readonly string[]): Promise<Map<string, SyncRefusal>> {
-  const rows = new Map((await client.query<BindingRow & { device: string }>(`${BINDING} AND device = ANY($2::text[])`,
-    [scopeKey, deviceIds.map(storedKey)])).rows.map(row => [JSON.parse(row.device) as string, row]));
+  const rows = await readRows(client, scopeKey, deviceIds);
   return new Map(deviceIds.flatMap(id => {
     const refusal = refusalOf(rows.get(id));
     return refusal ? [[id, refusal] as const] : [];
