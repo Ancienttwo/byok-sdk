@@ -61,6 +61,7 @@ const AGENT_OFFER_FIELDS = (surface: MessageType): readonly WireAddition[] => [
   { kind: 'envelope', rule: 'gated', surface, field: 'requiredToolsets', capability: 'toolset-selection', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface, field: 'terminalProjection', capability: 'terminal-projection-selection', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface, field: 'homeAccess', capability: 'agent-home-readers', advertisedBy: 'device' },
+  { kind: 'envelope', rule: 'gated', surface, field: 'harnessId', capability: 'custom-harness', advertisedBy: 'device' },
 ];
 
 const EGRESS_OFFER_FIELDS = (surface: MessageType): readonly WireAddition[] => [
