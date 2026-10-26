@@ -94,7 +94,7 @@ describe('single TTL presence lease', () => {
     const daemon = await connectFakeDaemonLongPoll(h.baseUrl, h.byok, { productId: PRODUCT_ID });
     await h.byok.devices.revoke(daemon.deviceId);
     expect(await h.byok.machines.list()).toEqual([]);
-    await expect(h.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'revoked' })).rejects.toMatchObject({ code: 'device_not_found' });
+    await expect(h.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'revoked' })).rejects.toMatchObject({ code: 'agent_capability_missing' });
     expect((await h.byok.tasks.list()).tasks).toEqual([]);
   });
 

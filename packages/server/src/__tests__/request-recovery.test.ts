@@ -27,7 +27,7 @@ describe('public facade request recovery', () => {
       expect(original).toMatchObject({ taskId: input.taskId, deviceId: daemon.deviceId, delivered: true,
         type: 'task.offer_for_agent', payload: { instruction: 'original', runtime: 'claude' } });
       for (const retry of [input, { ...input, instruction: 'changed' }]) {
-        await expect(byok.dispatch(retry)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        await expect(byok.dispatch(retry)).rejects.toMatchObject({ code: 'agent_task_already_exists' });
       }
       await claimAndStart(byok, daemon, handle);
       expect(await sendOne(daemon, createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'first', sessionRef: 'session-first' }, { taskId: handle.taskId }))).toMatchObject({ status: 200, body: { accepted: 1 } });

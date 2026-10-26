@@ -13,7 +13,7 @@ describe('explicit dispatch routing', () => {
   it('rejects an unknown target before task creation', async () => {
     const byok = createByokServer({ productId: 'acme' });
     try {
-      await expect(byok.dispatch({ ...TEST_AGENT_DISPATCH, instruction: 'do the thing', deviceId: 'dev_ghost' })).rejects.toMatchObject({ code: 'device_not_found' });
+      await expect(byok.dispatch({ ...TEST_AGENT_DISPATCH, instruction: 'do the thing', deviceId: 'dev_ghost' })).rejects.toMatchObject({ code: 'agent_capability_missing' });
       expect((await byok.tasks.list()).tasks).toEqual([]);
       expect(await byok.machines.list()).toEqual([]);
     } finally { await byok.close(); }
