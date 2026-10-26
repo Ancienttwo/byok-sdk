@@ -445,12 +445,28 @@ S1 和 S2 并行，各自一个 worktree、一个 draft PR。
 | 分支 | 影响 |
 | --- | --- |
 | `api/openai-completions.js:1269`，openrouter `anthropic/*` 的 `cacheControlFormat` | 这些条目都不可表达，没有条目受影响。keys 有测试守住这一点 |
-| `api/openai-responses.js:308`，xai 的 `reasoning.encrypted_content` include | grok-4.3 在 off（effort `none`）时请求和内置不同，实际影响未核实。grok-4.5 及以后不能设为 off |
-| `utils/overflow.js:146`，cerebras 无 body 的上下文溢出识别 | 2 个 cerebras 条目认不出这种溢出，对压缩重试的实际影响未核实 |
+| `api/openai-responses.js:308`，xai 的 `reasoning.encrypted_content` include | 只在 grok-4.3 被显式设成 off 时不同，见表后的核实结果。grok-4.5 及以后不能设为 off |
+| `utils/overflow.js:146`，cerebras 无 body 的上下文溢出识别 | 只在 body 为空的 400 上不同，见表后的核实结果。涉及 2 个 cerebras 条目 |
 | `api/openai-responses-shared.js:104`，Responses 的 tool-call id | 见 14.4 |
 | `api/openai-responses.js:182`，错误信息前缀 | 只影响文本 |
 
 #987 的 client 漂移测试把 pinned pi-ai 里每一行按 provider id 字面值判断的分支连同审阅理由固定下来，升级 pi-ai 时会要求重新审阅。用变量查表这类间接判断不在它的覆盖范围内。#988 在 spec 和 keys README 里写明了这个边界。
+
+cerebras 和 xai 两处在 2026-10-26 核实过。方法是用本地 mock 跑 pinned 的 pi-ai 和 pi-coding-agent 1.4.0，再查 Pi 的提交历史和 Cerebras、xAI 的公开资料。没有用真实 API。
+
+- cerebras：provider id 只影响 body 为空的 400，pi-ai 把它报成 `400 status code (no body)`。body 为空的 413 对任何 provider id 都算溢出。
+  - pinned 的 openai 7.19.0（`client.js` 的 `makeStatusError`）会保留没有 `error` 键的错误 body。
+  - 据两份第三方记录，Cerebras 溢出时返回 400 和带 `context_length_exceeded` 的 JSON body。这段文字命中 pi-ai 的通用溢出规则，和 provider id 无关。
+  - 用这个 body 跑 pi-coding-agent 的 session（自动压缩打开，和 RPC lane 的默认设置一样），内置 id 和 byok 的 id 都压缩后自动重试。
+- cerebras 剩下的差异只在 body 为空的 400 上，这种响应目前没有捕获记录。
+  - 内置 id 把它当溢出处理，byok 的 id 让这一轮以错误结束。
+  - Pi 自己的 token 估算超过阈值时，会压缩但不重试，用户再发一句就能继续。估算偏低时不压缩，之后每次请求都失败，直到手动压缩。
+  - 只有 RPC lane 受影响。prepared 和 durable lane 对两种 id 都关了自动压缩。
+- xai：只在 grok-4.3 被显式设成 off 时不同。两边的 effort 都是 `none`，内置 xai 带 include，byok 不带。
+  - 其他级别两边请求一致。model-route 默认给 grok-4.3 选 `medium`。
+  - AWS Bedrock 的 grok-4.3 模型卡说 `none` 会关闭推理，这样就没有要重放的推理。
+  - xAI 没有写明 `store: false` 下重放缺 `encrypted_content` 的 reasoning item 会怎样。如果它像 OpenAI 那样报 404，byok 的第二轮会失败；这一条只在 mock 里按 OpenAI 的行为模拟过。
+- 两处都不足以支持在 0.31.0 改 Pi provider 的命名。照搬内置的 cerebras 规则也有代价：Pi 曾把别的 provider 的空 body 400 误判成溢出，之后才把这条规则收窄到 cerebras（[earendil-works/pi#9482](https://github.com/earendil-works/pi/issues/9482)）。
 
 ### 14.4 openai Responses 的 tool-call id
 
@@ -464,7 +480,7 @@ S1 和 S2 并行，各自一个 worktree、一个 draft PR。
 ### 14.5 还没做的
 
 - 合入和发布：14.1 的三步，都由 owner 操作。
-- 两处运行时差异还没核实：cerebras 的溢出识别和 xai 的 include。核实后再决定 Pi provider 的命名。
+- cerebras 和 xai 两处没有用真实 API 验证（14.3）。要定论，xai 需要用真实 key 在 grok-4.3 off 下跑一次两轮工具调用，cerebras 需要抓一次真实的溢出响应。
 - S3：AiphaBee 采用。0.31.0 发布后在下游仓库单独开 PR，按 §11 验收。
 - §13 列的后续工作（provider 模型发现、runtime 可选状态、第二阶段）还没有开 issue。
 - 实施中发现的既有缺口，只报告，没有修：
