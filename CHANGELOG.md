@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.30.2 — source candidate
+
+0.30.2 is a PATCH release under a one-release exception to the pre-1.0
+policy, as 0.30.1 was. The owner chose 0.30.2 instead of 0.31.0 (issues #978
+and #977), although it adds public API and Postgres migration 0029, and it
+has breaking changes. #924, #938 and #605, and the #654 changes of §77b and
+E5b-2, are breaking in client. E5b-2 is also breaking in core, cloud and
+protocol: scope key packages are version 2, the Host takes only version 2
+puts, and the daemon advertises `sealed-payload-v1` only where the Host
+declares `e2ee.member.kem-epoch`, so the Host upgrades first. Migration 0029,
+and the first 0.30.2 open of a SQLite store, refuse a member chain that
+already holds a `rotate` entry. The examples changes of #793 S9, #794 H3 and
+#975 slice 5b are also breaking for a Host that copies the hosted
+collaboration example. The envelope wire stays v3. This candidate is not
+published. See the [release notes](docs/releases/v0.30.2.md) for scope, what
+is not in 0.30.2 and the known limits, and the
+[Host upgrade checklist](docs/releases/host-upgrade-0.30.2.md) for the
+upgrade steps. All nine public manifests and their lock records move to
+0.30.2.
+
 - **Feature (examples)** — the hosted collaboration example runs
   summary-only Host job routines (#793 S14), as L's `hostJobs`. Host code
   adds them with `addHostJobRoutine`, `updateHostJobRoutine` and

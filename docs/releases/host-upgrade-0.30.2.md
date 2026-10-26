@@ -2,24 +2,24 @@
 
 This page lists what a Host must do to move from 0.29.x, 0.30.0 or 0.30.1 to
 0.30.2 (#978). It covers only changes merged to `main`. The CHANGELOG is the
-authority: this page summarizes the `## Unreleased` section and the 0.30.1,
-0.30.0 and 0.29.0 sections, and links to them. When the two disagree, the
-CHANGELOG wins.
+authority: this page summarizes the 0.30.2, 0.30.1, 0.30.0 and 0.29.0
+sections, and links to them. When the two disagree, the CHANGELOG wins.
 
 This page is an upgrade checklist. It does not say that 0.30.2, or a Host on
 it, is ready for production. The product loop gate is #977.
 
-0.30.2 is not published. The release preparation record will be
-`docs/releases/v0.30.2.md`.
+0.30.2 is not published. The release preparation record is
+[`docs/releases/v0.30.2.md`](v0.30.2.md).
 
 ## Version policy
 
 0.30.2 is a PATCH release with breaking changes, under a one-release
 exception to the pre-1.0 policy, as 0.30.1 was. By that policy it would be a
 MINOR: it changes public API in client, core, cloud and protocol, and it adds
-Postgres migration 0029. The exception clause goes into `docs/spec.md` at
-release, next to the 0.30.1 clause. The exception does not change the general
-policy or waive validation, publication authorization or registry readback.
+Postgres migration 0029. `docs/spec.md` records the exception clause next to
+the 0.30.1 clause ([version policy](../spec.md#pre-10-package-version-policy)).
+The exception does not change the general policy or waive validation,
+publication authorization or registry readback.
 
 ## Fixed revisions
 
@@ -39,8 +39,8 @@ All nine public packages move together. Pin each one to exactly 0.30.2.
 
 | Release field | Value |
 | --- | --- |
-| Git tag | Filled in at release |
-| Release commit SHA | Filled in at release |
+| Git tag | `v0.30.2` |
+| Release commit SHA | The exact merged `main` SHA of the 0.30.2 release preparation, recorded after merge |
 
 The install command for each install set is in the README
 [install sets](../../README.md#install-sets) section. That block is checked
@@ -185,8 +185,8 @@ left in its journal is replaced at the next start.
 
 ## Breaking changes that touch Host config
 
-These are the eight Breaking entries of `## Unreleased`. One is in the
-private examples and is out of scope (above). The other seven:
+The 0.30.2 CHANGELOG section has ten Breaking entries. Two are in the
+private examples and are out of scope (above). The other eight:
 
 | Package | Change | What the Host does |
 | --- | --- | --- |
@@ -194,6 +194,7 @@ private examples and is out of scope (above). The other seven:
 | client | A refused sealed terminal sent by `ciphertextRef` is replaced once (above). | A Host that injects its own `LocalTaskJournal` implements `replaceRefusedTerminal`, and makes `confirmTerminal` and `rejectTerminal` accept the hash of replaced bytes as a no-op. |
 | client | The daemon advertises `sealed-payload-v1` only where the Host declares `e2ee.member` and `e2ee.member.kem-epoch`. | Upgrade the Host first. |
 | client | `byok-agent doctor` no longer scans `os.tmpdir()`; `doctor --json` drops `legacyTemp`; `doctor --fix` no longer deletes those directories. | Stop reading `legacyTemp`. Remove any leftover pre-0.27.0 temp directories by hand. |
+| client | An Agent home root on a filesystem without hard links fails at its first acquire, with an error that names the directory (#605). Examples are FAT32, exFAT, and some network or FUSE filesystems. | Keep each Agent home root on a filesystem with hard links. |
 | core | Scope key packages are version 2; `sealScopeKeyPackage` and `openScopeKeyPackage` take `recipient.kemEpoch`. | Web clients that seal packages pass the recipient's KEM epoch. |
 | cloud | The Host takes version 2 puts only; the device package read needs exactly one of `epoch` and `afterEpoch`. | A Host with its own `E2eeMemberStore` implements `readOwnScopeKeyPackages`, takes `rotations` in `E2eeMemberChainAppendInput` and `recipientKemEpoch` on put rows, and can return `kem_epoch_stale`. |
 | protocol | `E2eeScopeKeyPackage` is version 1 or 2; `E2eeScopeKeyPackageV2Schema` is the put shape; a `rotate` subject must be exactly `{ memberId, kemPublicJwk, kemEpoch, kemSig }`. | Code that builds puts uses the version 2 schema. |
