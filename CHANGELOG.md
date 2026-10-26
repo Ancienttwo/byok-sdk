@@ -34,8 +34,9 @@
     `wireV4TypeOf` and `migrateWireV3Envelope`; `@byok-sdk/cloud` adds
     `wireV4ReceiptKind`, `migrateWireV3Receipt` and
     `WireV4ReceiptMigrationError`; `@byok-sdk/cloud-dataplane` adds
-    `migratePostgresReceiptsToWireV4`. They ship in 0.31.x only and are
-    removed in the next minor.
+    `migratePostgresReceiptsToWireV4` and `@byok-sdk/server` adds
+    `migrateSqliteReceiptsToWireV4`. They ship in 0.31.x only and are removed
+    in the next minor.
   - The protocol test alias `byok-protocol-previous` pins 0.30.2, the last v3
     release, as the rejection oracle. `byok-protocol-floor` (0.27.0) and
     `published-compat.test.ts` are removed until a v4 release is published.

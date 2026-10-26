@@ -300,8 +300,10 @@ authorize deleting those fences.
 
 Offer and terminal receipts hold wire bytes, and a wire v4 server reads only
 v4 bytes. A SQLite file written by a v3 build needs the one-shot receipt
-migration (`migrateWireV3Receipt` from `@byok-sdk/cloud`, 0.31.x only) before a
-v4 server opens it; this package does not ship a SQLite runner for it yet. See
+migration before a v4 server opens it: stop the server, then call
+`migrateSqliteReceiptsToWireV4(path)` (0.31.x only). It takes the file's
+exclusive ownership, so it fails while a server owns the file, and it changes
+nothing when any receipt is refused. See
 [the wire v4 upgrade note](../../docs/releases/925-wire-v4.md).
 
 ## Stats and liveness

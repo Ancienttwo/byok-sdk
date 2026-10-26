@@ -585,7 +585,8 @@ error; deleting identity fences is not a quota strategy.
 Offer and terminal receipts hold wire bytes, and a wire v4 build reads only v4
 bytes. A store written by a v3 build needs the one-shot receipt migration
 (`migrateWireV3Receipt`, 0.31.x only) after draining and before a v4 server
-starts; the embedded SQLite store has no runner for it yet. See
+starts. `migrateSqliteReceiptsToWireV4(path)` (`@byok-sdk/server`) runs it on a
+stopped embedded store. See
 [the wire v4 upgrade note](releases/925-wire-v4.md).
 
 ### Bot turn outcome fragments and routine time points

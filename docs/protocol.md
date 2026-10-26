@@ -418,7 +418,9 @@ it.
   changes no receipt.
 
 `migratePostgresReceiptsToWireV4(pool)` (`@byok-sdk/cloud-dataplane`) runs the
-migration over the hosted `device_request_receipts` table in one transaction.
+migration over the hosted `device_request_receipts` table in one transaction;
+`migrateSqliteReceiptsToWireV4(path)` (`@byok-sdk/server`) runs it over a
+stopped embedded store.
 
 ## 1. Envelope
 

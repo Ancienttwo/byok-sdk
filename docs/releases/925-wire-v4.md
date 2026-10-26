@@ -57,9 +57,11 @@ bytes and hash change) or `refused`. A run that refuses any receipt changes
 nothing and throws `WireV4ReceiptMigrationError`, which lists each refused
 receipt. An offer receipt of a removed offer type cannot be migrated.
 `migratePostgresReceiptsToWireV4(pool)` (`@byok-sdk/cloud-dataplane`) runs it
-over `device_request_receipts` in one transaction. The embedded SQLite store
-has no runner yet. The migration ships in 0.31.x only and is removed in the
-next minor.
+over `device_request_receipts` in one transaction.
+`migrateSqliteReceiptsToWireV4(path)` (`@byok-sdk/server`) runs it over a
+stopped embedded store's `request_receipt` table; it takes the file's exclusive
+ownership, so it fails while a server owns the file. The migration ships in
+0.31.x only and is removed in the next minor.
 
 ## Coordinated upgrade
 
