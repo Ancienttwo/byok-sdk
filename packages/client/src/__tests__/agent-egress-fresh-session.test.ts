@@ -9,7 +9,6 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -217,7 +216,6 @@ describe('fresh Agent egress session authority', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'fresh-fsync-test',

@@ -9,7 +9,6 @@ import { AGENT_HOME_DIRECTORY, AgentHomeManager } from '../agent-home';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
@@ -40,7 +39,7 @@ async function harness() {
     agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-grok-reader',
     send: (envelope) => sent.push(envelope),
     blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-    sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+    approvalRegistry: new ApprovalRegistry(),
     storeDir, productId: 'grok-reader-test', tenantId: 'tenant-grok-reader',
   });
   let seq = 0;

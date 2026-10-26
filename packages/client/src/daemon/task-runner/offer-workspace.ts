@@ -1,11 +1,8 @@
-// `handleOffer` stage: bind the Agent home, or the Git or plain workspace
+// `handleOffer` stage: bind the Agent home
 // (see ./support.ts for how a member module runs).
-import { randomUUID } from 'node:crypto';
-import path from 'node:path';
 import type { TerminalAgentHomeProjection } from '@byok-sdk/protocol';
 import { AgentHomeBusyError, AgentHomeReaderRunMissingError, AgentHomeResolutionError } from '../../agent-home';
 import { digestAgentHomeMemory } from '../../agent-home-readers';
-import type { SessionWorkspaceStore } from '../session-workspace-store';
 import type { ActiveTask, OfferPhaseContext } from './support';
 import { errorMessage, outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
@@ -17,7 +14,7 @@ export interface OfferWorkspaceInput extends Pick<OfferRequest, 'agentRef' | 're
   readonly terminalProjection: ActiveTask['terminalProjection'];
 }
 
-/** Binds the Agent home, or the Git or plain workspace, for an admitted offer. */
+/** Binds the Agent home for an admitted offer. */
 export async function bindOfferWorkspace(this: TaskRunner, phase: OfferPhaseContext, held: OfferHeld, input: OfferWorkspaceInput) {
   const { taskId, decline, releaseReservation } = phase;
   const { agentRef, readerAttempt, sessionRef, homeAccess, homeBusyCode, pick, messageRequirement, terminalProjection } = input;
@@ -58,146 +55,98 @@ export async function bindOfferWorkspace(this: TaskRunner, phase: OfferPhaseCont
     }
   }
 
-  let known: Awaited<ReturnType<SessionWorkspaceStore['get']>> = undefined;
-  let workspaceDir: string;
-  let gitWorkspaceId: string | undefined;
-  let gitBaseline: string | undefined;
-  let gitExisting = false;
-  let plainWorkspaceNeedsResolve = false;
+  // readOfferRequest declined every offer without an AgentRef, so the Agent
+  // home binding above is the only workspace an offer can have.
+  if (held.agentBinding === undefined) {
+    decline('Agent offer requires the SDK-owned agent-home-contract layout and handoff store', false);
+    return;
+  }
+  const workspaceDir = held.agentBinding.lease.cwd;
   let appliedAgentHomeProjection: TerminalAgentHomeProjection | undefined;
   let readerMemoryBaseline: ActiveTask['readerMemoryBaseline'];
-  if (held.agentBinding !== undefined) {
-    workspaceDir = held.agentBinding.lease.cwd;
-    if (sessionRef !== undefined) {
-      try {
-        await this['deps'].agentSessionHandoffs!.requireMatch({
-          agentRef: held.agentBinding.resolution.agentRef,
-          sessionRef,
-          runtimeId: pick.descriptor.id,
-          home: held.agentBinding.resolution.canonicalHome,
-          cwd: workspaceDir,
-          ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
-        });
-      } catch (error) {
-        await held.agentBinding.lease.release().catch(() => {});
-        held.agentBinding = undefined;
-        decline(`Agent session handoff mismatch: ${outboundErrorMessage(error)}`, false);
-        return;
-      }
-    }
-    if (readerAttempt) {
-      const fresh = sessionRef === undefined;
-      try {
-        await this['deps'].agentHome!.prepareReaderRun(held.agentBinding, { fresh });
-      } catch (error) {
-        await held.agentBinding.lease.release().catch(() => {});
-        held.agentBinding = undefined;
-        // A busy run directory (a redelivered task found a directory it
-        // cannot reuse) may clear; every other failure is permanent.
-        decline(error instanceof AgentHomeReaderRunMissingError
-          ? `Agent session ${sessionRef} cannot resume: its reader run directory no longer exists`
-          : `Agent reader run directory preparation failed: ${outboundErrorMessage(error)}`,
-          error instanceof AgentHomeBusyError,
-          error instanceof AgentHomeBusyError ? homeBusyCode : undefined);
-        return;
-      }
-    }
+  if (sessionRef !== undefined) {
     try {
-      await this['deps'].agentHome!.initializeExecution(held.agentBinding);
+      await this['deps'].agentSessionHandoffs!.requireMatch({
+        agentRef: held.agentBinding.resolution.agentRef,
+        sessionRef,
+        runtimeId: pick.descriptor.id,
+        home: held.agentBinding.resolution.canonicalHome,
+        cwd: workspaceDir,
+        ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
+      });
     } catch (error) {
       await held.agentBinding.lease.release().catch(() => {});
       held.agentBinding = undefined;
-      decline(`Agent home initialization failed: ${outboundErrorMessage(error)}`, error instanceof AgentHomeBusyError,
+      decline(`Agent session handoff mismatch: ${outboundErrorMessage(error)}`, false);
+      return;
+    }
+  }
+  if (readerAttempt) {
+    const fresh = sessionRef === undefined;
+    try {
+      await this['deps'].agentHome!.prepareReaderRun(held.agentBinding, { fresh });
+    } catch (error) {
+      await held.agentBinding.lease.release().catch(() => {});
+      held.agentBinding = undefined;
+      // A busy run directory (a redelivered task found a directory it
+      // cannot reuse) may clear; every other failure is permanent.
+      decline(error instanceof AgentHomeReaderRunMissingError
+        ? `Agent session ${sessionRef} cannot resume: its reader run directory no longer exists`
+        : `Agent reader run directory preparation failed: ${outboundErrorMessage(error)}`,
+        error instanceof AgentHomeBusyError,
         error instanceof AgentHomeBusyError ? homeBusyCode : undefined);
       return;
     }
-    // Terminal evidence only (#318): an unreadable projection record must not
-    // block an Attempt that ran before this evidence existed, so omit it.
-    appliedAgentHomeProjection = await this['deps'].agentHome!.readAppliedProjection(held.agentBinding).catch((error: unknown) => {
-      console.warn(`[byok/client] Agent-home projection record is unreadable for ${taskId}; terminal evidence omits it: ${errorMessage(error)}`);
-      return undefined;
-    });
-    // Evidence only (#317): the SDK does not make memory read-only. The
-    // reader terminal compares this digest with one taken at the terminal.
-    if (readerAttempt) {
-      readerMemoryBaseline = { digest: await digestAgentHomeMemory(held.agentBinding.resolution.canonicalHome) };
-    }
-    if (messageRequirement !== undefined) {
-      try {
-        const outbox = await this['agentMessageOutbox'](held.agentBinding.resolution.canonicalHome);
-        this['pendingMessageTasks'].set(taskId, {
-          taskId,
-          agentRef: held.agentBinding.resolution.agentRef,
-          requirement: messageRequirement,
-          outbox,
-        });
-      } catch (error) {
-        await held.agentBinding.lease.release().catch(() => {});
-        held.agentBinding = undefined;
-        decline(`Agent message outbox initialization failed: ${outboundErrorMessage(error)}`, true);
-        return;
-      }
-    }
-    if (terminalProjection?.mode === 'result-document') {
-      try {
-        const store = await this['agentResultStore'](held.agentBinding.resolution.canonicalHome);
-        const context = this['resultContextByTask'].get(taskId);
-        if (context === undefined) throw new Error('the task result context was revoked before its Agent home was bound');
-        context.store = store;
-        context.agentRef = held.agentBinding.resolution.agentRef;
-      } catch (error) {
-        await held.agentBinding.lease.release().catch(() => {});
-        held.agentBinding = undefined;
-        decline(`Agent result store initialization failed: ${outboundErrorMessage(error)}`, true);
-        return;
-      }
-    }
-  } else if (this['deps'].gitWorkspaceManager && this['deps'].gitWorkspaceStore) {
-    known = sessionRef ? await this['deps'].sessionWorkspaces.get(sessionRef) : undefined;
-    const gitManager = this['deps'].gitWorkspaceManager;
-    const gitStore = this['deps'].gitWorkspaceStore;
-    if (sessionRef) {
-      const ledger = await gitStore.findBySessionAnyPhase(sessionRef).catch(() => undefined);
-      const sameProtocolTask = ledger?.taskId === taskId;
-      const interruptedOldTask = ledger?.phase === 'interrupted' && sameProtocolTask;
-      const activeDifferentTask = ledger !== undefined && ledger.taskId !== taskId && (ledger.phase === 'preparing' || ledger.phase === 'active');
-      if (!known || known.workspaceKind !== 'git' || !known.gitWorkspaceId || !ledger ||
-          ledger.workspaceId !== known.gitWorkspaceId || ledger.sessionRef !== sessionRef ||
-          path.resolve(ledger.workspaceDir) !== path.resolve(known.workspaceDir) ||
-          interruptedOldTask || activeDifferentTask) {
-        decline('session is incompatible with Git workspace mode', true);
-        return;
-      }
-      workspaceDir = known.workspaceDir;
-      gitWorkspaceId = known.gitWorkspaceId;
-      gitBaseline = ledger.baseline;
-      gitExisting = true;
-      try {
-        await gitManager.validateExisting(workspaceDir);
-      } catch {
-        decline('workspace is busy or unavailable', true);
-        return;
-      }
-    } else {
-      workspaceDir = this['legacyWorkspaceDir'](taskId);
-      gitWorkspaceId = randomUUID();
-    }
-    try {
-      held.gitLease = await gitManager.acquireLease(workspaceDir, sessionRef);
-    } catch {
-      decline('workspace is busy or unavailable', true);
-      return;
-    }
-  } else if (!this['deps'].gitWorkspaceManager && !this['deps'].gitWorkspaceStore) {
-    known = sessionRef ? await this['deps'].sessionWorkspaces.get(sessionRef) : undefined;
-    workspaceDir = known?.workspaceDir ?? this['legacyWorkspaceDir'](taskId);
-    plainWorkspaceNeedsResolve = true;
-  } else {
-    decline('workspace mode is unavailable', true);
+  }
+  try {
+    await this['deps'].agentHome!.initializeExecution(held.agentBinding);
+  } catch (error) {
+    await held.agentBinding.lease.release().catch(() => {});
+    held.agentBinding = undefined;
+    decline(`Agent home initialization failed: ${outboundErrorMessage(error)}`, error instanceof AgentHomeBusyError,
+      error instanceof AgentHomeBusyError ? homeBusyCode : undefined);
     return;
   }
-  return {
-    known, workspaceDir, gitWorkspaceId, gitBaseline, gitExisting, plainWorkspaceNeedsResolve, appliedAgentHomeProjection,
-    readerMemoryBaseline,
-  };
+  // Terminal evidence only (#318): an unreadable projection record must not
+  // block an Attempt that ran before this evidence existed, so omit it.
+  appliedAgentHomeProjection = await this['deps'].agentHome!.readAppliedProjection(held.agentBinding).catch((error: unknown) => {
+    console.warn(`[byok/client] Agent-home projection record is unreadable for ${taskId}; terminal evidence omits it: ${errorMessage(error)}`);
+    return undefined;
+  });
+  // Evidence only (#317): the SDK does not make memory read-only. The
+  // reader terminal compares this digest with one taken at the terminal.
+  if (readerAttempt) {
+    readerMemoryBaseline = { digest: await digestAgentHomeMemory(held.agentBinding.resolution.canonicalHome) };
+  }
+  if (messageRequirement !== undefined) {
+    try {
+      const outbox = await this['agentMessageOutbox'](held.agentBinding.resolution.canonicalHome);
+      this['pendingMessageTasks'].set(taskId, {
+        taskId,
+        agentRef: held.agentBinding.resolution.agentRef,
+        requirement: messageRequirement,
+        outbox,
+      });
+    } catch (error) {
+      await held.agentBinding.lease.release().catch(() => {});
+      held.agentBinding = undefined;
+      decline(`Agent message outbox initialization failed: ${outboundErrorMessage(error)}`, true);
+      return;
+    }
+  }
+  if (terminalProjection?.mode === 'result-document') {
+    try {
+      const store = await this['agentResultStore'](held.agentBinding.resolution.canonicalHome);
+      const context = this['resultContextByTask'].get(taskId);
+      if (context === undefined) throw new Error('the task result context was revoked before its Agent home was bound');
+      context.store = store;
+      context.agentRef = held.agentBinding.resolution.agentRef;
+    } catch (error) {
+      await held.agentBinding.lease.release().catch(() => {});
+      held.agentBinding = undefined;
+      decline(`Agent result store initialization failed: ${outboundErrorMessage(error)}`, true);
+      return;
+    }
+  }
+  return { workspaceDir, appliedAgentHomeProjection, readerMemoryBaseline };
 }

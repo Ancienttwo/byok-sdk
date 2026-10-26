@@ -23,7 +23,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { CursorStore } from '../daemon/cursor-store';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type AdmissionGuardDecision, type TaskRunnerDeps } from '../daemon/task-runner';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { DaemonConfigFieldRemovedError } from '../daemon/daemon-errors';
@@ -481,7 +480,6 @@ async function makeRunner(
       sent.push(envelope);
     },
     blobClient: unusedBlobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-guard-store-')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',

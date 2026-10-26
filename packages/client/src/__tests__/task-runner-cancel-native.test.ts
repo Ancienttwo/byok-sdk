@@ -11,7 +11,6 @@ import { ClaudeProcessClient } from '../adapters/claude/process-client';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import type { RuntimeAdapter, Session } from '../types';
@@ -142,7 +141,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
       resolveInstruction: async () => { throw new Error('unexpected blob resolution'); },
       uploadArtifact: async () => { throw new Error('unexpected artifact upload'); },
     },
-    sessionWorkspaces: new SessionWorkspaceStore(path.join(dir, 'sessions')), approvalRegistry: new ApprovalRegistry(),
+    approvalRegistry: new ApprovalRegistry(),
     localAgentRelease: Object.freeze({ version: '0.24.0-rc.1' }),
     shutdownInterruptTimeoutMs: 100,
     ...overrides,

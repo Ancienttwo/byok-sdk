@@ -14,7 +14,6 @@ import {
 } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
@@ -99,7 +98,6 @@ describe('unknown AgentEvent tolerance on the client inbound path (pre-freeze pr
         sent.push(envelope);
       },
       blobClient: unusedBlobClient,
-      sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-envelope-tolerance-store-')),
       approvalRegistry: new ApprovalRegistry(),
       storeDir: 'unused-store-dir',
       productId: 'unused-product-id',

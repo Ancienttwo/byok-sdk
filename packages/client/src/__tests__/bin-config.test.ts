@@ -109,8 +109,6 @@ describe('bin/config: loadConfig', () => {
         [() => loadConfig(path.join(dir, 'missing.json')), `could not read config at "${path.join(dir, 'missing.json')}"; check the path and read permissions`],
         [() => loadConfig(undefined, { productName: sentinel }), 'config is missing required field "productId"'],
         [() => loadConfig(undefined, { ...base, localAgentRelease: { version: sentinel } } as never), 'config field "localAgentRelease" is distribution-owned and must not be supplied'],
-        [() => loadConfig(undefined, { ...base, gitWorkspace: sentinel } as never), 'gitWorkspace must be an object'],
-        [() => loadConfig(undefined, { ...base, gitWorkspace: { mode: sentinel } } as never), 'gitWorkspace.mode must be local-checkpoints'],
       ];
       for (const [load, message] of cases) {
         let caught: unknown;
@@ -122,13 +120,6 @@ describe('bin/config: loadConfig', () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
-  });
-
-  it('strictly validates the optional Git workspace config', () => {
-    const base = { productName: 'Acme', productId: 'acme', serverUrl: 'http://example', workspaceRoot: '/ws' };
-    expect(loadConfig(undefined, { ...base, gitWorkspace: { mode: 'local-checkpoints' } }).gitWorkspace).toEqual({ mode: 'local-checkpoints' });
-    expect(() => loadConfig(undefined, { ...base, gitWorkspace: { mode: 'local-checkpoints', extra: true } as never })).toThrow(ConfigError);
-    expect(() => loadConfig(undefined, { ...base, gitWorkspace: { mode: 'invalid' } as never })).toThrow(ConfigError);
   });
 
 });

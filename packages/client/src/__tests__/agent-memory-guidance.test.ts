@@ -21,12 +21,9 @@ import {
   prependAgentReaderResultGuidance,
 } from '../daemon/memory-guidance';
 import { serveAgentMemoryMcpOverStdio, serveGrantedAgentMemoryMcpOverStdio } from '../bin/agent-memory-mcp-server';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
-import { GitWorkspaceManager } from '../daemon/git-workspace';
-import { GitWorkspaceStore } from '../daemon/git-workspace-store';
 
 const roots: string[] = [];
 
@@ -83,7 +80,6 @@ describe('Agent memory guidance', () => {
       deviceId: 'device-memory-guidance',
       send: () => {},
       blobClient,
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-memory-guidance',
@@ -192,10 +188,6 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
   const storeDir = await makeRoot();
   const adapter = new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true, mcpToolsets });
   const sent: Envelope[] = [];
-  const gitWorkspaceStore = new GitWorkspaceStore(storeDir);
-  await gitWorkspaceStore.initialize();
-  const gitWorkspaceManager = new GitWorkspaceManager(workspaceRoot, { ownerId: 'agent-memory-admission-test' });
-  await gitWorkspaceManager.preflight();
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot,
@@ -207,9 +199,6 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
       resolveInstruction: async () => { throw new Error('not used in this test'); },
       uploadArtifact: async () => { throw new Error('not used in this test'); },
     },
-    sessionWorkspaces: new SessionWorkspaceStore(storeDir),
-    gitWorkspaceManager,
-    gitWorkspaceStore,
     approvalRegistry: new ApprovalRegistry(),
     storeDir,
     productId: 'product-memory-admission',

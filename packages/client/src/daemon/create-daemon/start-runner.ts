@@ -17,7 +17,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
   const {
     adapters, config, agentHomeManager, agentHomeReaderLimit, scratchRoot, agentSessionHandoffs,
     toolsetRegistry, daemonState, inputPreparationLimits, egressBatcherOptions, egressPolicy,
-    sessionWorkspaces, gitWorkspaceManager, gitWorkspaceStore, observer, approvalRegistry, storeDir,
+    observer, approvalRegistry, storeDir,
     localAgentRelease, overrides, terminalCommits, agentMemoryMcpBin, agentMemoryDescribeBin,
     resolveAgentMemoryFilesystemHelperBin, taskContextCapabilityAvailable, waitForHostTaskContext,
   } = daemonScope;
@@ -30,7 +30,6 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     runtimeAllowlist: config.runtimeAllowlist,
     // M5 batch-3: see `DaemonConfig.runtimePreference`'s own doc comment above.
     runtimePreference: config.runtimePreference,
-    ...(config.workspaceRoot === undefined ? {} : { workspaceRoot: config.workspaceRoot }),
     ...(agentHomeManager === undefined ? {} : { agentHome: agentHomeManager }),
     // Already validated up front — see `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`.
     maxConcurrentReaderAttemptsPerAgentHome: agentHomeReaderLimit,
@@ -83,18 +82,6 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     batcherOptions: egressBatcherOptions,
     agentEgress: daemonState.agentEgress,
     ...(config.agentEgress === undefined ? {} : { agentEgressPolicy: egressPolicy }),
-    sessionWorkspaces,
-    gitWorkspaceManager,
-    gitWorkspaceStore,
-    onGitWorkspaceEvent: (event) => observer.noteGitWorkspace({
-      taskId: event.taskId,
-      workspaceId: event.workspaceId,
-      phase: event.phase,
-      headChanged: event.observation?.headChanged,
-      commitsSinceBaseline: event.observation?.commitsSinceBaseline,
-      dirty: event.observation ? { staged: event.observation.staged, unstaged: event.observation.unstaged, untracked: event.observation.untracked, conflicted: event.observation.conflicted } : undefined,
-      errorCategory: event.errorCategory,
-    }),
     onRuntimeDisposalFailure: (event) => observer.noteRuntimeDisposalFailure(event),
     onExecutionRecord: (record) => observer.noteExecutionRecord(record),
 

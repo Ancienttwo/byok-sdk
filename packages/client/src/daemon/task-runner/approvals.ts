@@ -221,7 +221,6 @@ export async function handleReject(this: TaskRunner, taskId: string, reason: str
   this['clearPendingApproval'](resolvedId, 'reject', reason);
   await this['settleSemanticTerminal'](active, async () => {
     await this['interruptBounded'](active);
-    await this['observeGit'](active, 'salvage');
     // As with cancel, the server has already closed its progress stream.
     await this['persistAgentTerminalEvidence'](active, 'failed', reason ?? 'rejected');
     return createEnvelope('task.fail', {

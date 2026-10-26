@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type AgentEvent, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { ExecutionRecord } from '../daemon/execution-record';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter, type StubSession } from './fixtures/stub-adapter';
@@ -54,7 +53,6 @@ async function makeRunner(options: RunnerOptions = {}) {
       resolveInstruction: async () => { throw new Error('unused'); },
       uploadArtifact: async () => { throw new Error('unused'); },
     },
-    sessionWorkspaces: new SessionWorkspaceStore(path.join(directory, 'store')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: directory,
     productId: 'execution-record-product',
@@ -199,7 +197,7 @@ describe('TaskRunner execution record', () => {
       adapters: [adapter], workspaceRoot: path.join(directory, 'workspace'), deviceId: 'execution-record-device',
       send: envelope => { sent.push(envelope); },
       blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(path.join(directory, 'store')), approvalRegistry: new ApprovalRegistry(),
+      approvalRegistry: new ApprovalRegistry(),
       storeDir: directory, productId: 'execution-record-product', onExecutionRecord,
     });
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: RECORD_AGENT,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));

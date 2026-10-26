@@ -25,7 +25,6 @@ import type { ApprovalOrigin } from '../approvals';
 import type { BlobResolver } from '../blob-client';
 import { ExecutionRecordAccumulator, type ExecutionRecord } from '../execution-record';
 import { ProgressBatcher } from '../progress-batcher';
-import type { GitWorkspaceLease } from '../git-workspace';
 import { AgentMessageOutbox } from '../agent-message-outbox';
 import { AgentResultStore } from '../agent-result-store';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
@@ -39,9 +38,6 @@ import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REA
 export type AcceptedOfferPayload = Parameters<NonNullable<TaskRunnerDeps['admissionGuard']>>[0]['payload'];
 
 export const AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS = 20;
-
-/** Bound best-effort Git observation so terminal protocol outcomes cannot wait forever on repository I/O. */
-export const GIT_OBSERVATION_TIMEOUT_MS = 5_000;
 
 /** Inline artifact payloads must stay under this many UTF-8 bytes — mirrors the frozen `TaskArtifactPayloadSchema.inline` limit in `packages/protocol` (see docs/protocol.md §7). Anything bigger goes through the blob client. */
 export const MAX_INLINE_ARTIFACT_BYTES = 64 * 1024;
@@ -134,9 +130,6 @@ export interface ActiveTask {
   terminalReason?: string;
   agentTerminalPersisted?: boolean;
   agentTerminalEvidenceFailureReported?: boolean;
-  gitWorkspaceId?: string;
-  gitLease?: GitWorkspaceLease;
-  gitBaseline?: string;
   batcher: ProgressBatcher;
   summaryParts: string[];
   /**
@@ -645,7 +638,7 @@ export type OpenArtifactResult = { ok: true; handle: FileHandle } | { ok: false;
  * must never be mistaken for the guard having held.
  */
 export async function openArtifact(workspaceDir: string, name: string): Promise<OpenArtifactResult> {
-  // Workspace root is daemon-created (see `resolveWorkspaceDir`) and
+  // The workspace is the SDK-owned Agent home cwd and
   // trusted — realpath'd exactly once, not derived from the untrusted
   // `name`, so this step has no TOCTOU exposure of its own.
   const realWorkspaceDir = await fs.realpath(workspaceDir).catch(() => workspaceDir);

@@ -3,8 +3,6 @@ import type { RuntimeTaskInput } from '../types';
 import type { ActivityIngress } from '@byok-sdk/protocol';
 import type { ScratchRoot } from './retention/scratch';
 import { StartupOwnership } from './startup-ownership';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import {
   createEnvelope,
   type AgentMessageContentType,
@@ -68,9 +66,6 @@ import type { LocalAgentReleaseIdentity } from '../release-identity';
 import {
   type ProgressBatcherOptions,
 } from './progress-batcher';
-import type { SessionWorkspaceStore } from './session-workspace-store';
-import type { GitWorkspaceManager, GitWorkspaceObservation, GitErrorCategory } from './git-workspace';
-import type { GitWorkspaceStore, GitWorkspacePhase } from './git-workspace-store';
 import type { AgentEgressController } from './agent-egress-controller';
 import { AgentMessageOutbox, type AgentMessageOutboxRecord } from './agent-message-outbox';
 import { AgentResultStore } from './agent-result-store';
@@ -99,7 +94,7 @@ import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, inter
 import { admitOffer, reserveOfferHome, admitOfferLimits, handleSealedOffer, declineSealedOffer } from './task-runner/offer-admission';
 import { prepareOfferRuntime, pickAdapter } from './task-runner/offer-runtime';
 import { requestApproval, dispatchApproval, clearPendingApproval, handleApprove, handleReject } from './task-runner/approvals';
-import { terminalInferenceUsagePayload, preparedObservationPayload, agentTerminalPayload, resolveStagedResult, observeGit, persistAgentTerminalEvidence, measureReaderMemoryChange, retryAgentTerminalEvidence, reportAgentTerminalEvidenceFailure } from './task-runner/terminal-evidence';
+import { terminalInferenceUsagePayload, preparedObservationPayload, agentTerminalPayload, resolveStagedResult, persistAgentTerminalEvidence, measureReaderMemoryChange, retryAgentTerminalEvidence, reportAgentTerminalEvidenceFailure } from './task-runner/terminal-evidence';
 import { fail, failClaimedAgent, homeFinalizations, finishOnce, publishExecutionRecord, settleSemanticTerminal, releasePreparationPin } from './task-runner/finish';
 import { pump, publishSuccessfulCompletion, sendArtifact, reportArtifactError } from './task-runner/event-pump';
 import { handleOffer } from './task-runner/offer';
@@ -331,8 +326,6 @@ export interface TaskRunnerDeps {
     /** `toolsetId` -> definition revision, from one registry read per call. */
     readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
   };
-  /** Parent of Git workspace mode's `workspaceRoot/<taskId>` workspaces. */
-  workspaceRoot?: string;
   /** Agent offer authority. Absent, every offer is declined. */
   agentHome?: AgentHomeManager;
   /**
@@ -356,23 +349,6 @@ export interface TaskRunnerDeps {
   beforeClaim?: (taskId: string, runtime: string) => Promise<void>;
   blobClient: BlobResolver;
   batcherOptions?: ProgressBatcherOptions;
-  /**
-   * Finding #3 (session/workspace continuity): persists `sessionRef ->
-   * workspaceDir` across daemon restarts so a `task.offer` naming a
-   * previously-reported `sessionRef` reuses that exact workspace instead of
-   * a fresh `workspaceRoot/<taskId>` — see `handleOffer` and
-   * `SessionWorkspaceStore`'s own doc comment.
-   */
-  sessionWorkspaces: SessionWorkspaceStore;
-  gitWorkspaceManager?: GitWorkspaceManager;
-  gitWorkspaceStore?: GitWorkspaceStore;
-  onGitWorkspaceEvent?: (event: {
-    taskId: string;
-    workspaceId: string;
-    phase: GitWorkspacePhase;
-    observation?: GitWorkspaceObservation;
-    errorCategory?: string;
-  }) => void;
   /** Local-only evidence that a semantic terminal outcome could not yet release its runtime ownership. */
   onRuntimeDisposalFailure?: (event: {
     taskId: string;
@@ -870,12 +846,6 @@ export class TaskRunner {
         taskId, runtimeId, stage: failure.stage, reason: failure.message,
       }),
     });
-  }
-
-  /** A legacy offer's workspace. Only a non-strict runner admits one, and its constructor required the root. */
-  private legacyWorkspaceDir(taskId: string): string {
-    if (this.deps.workspaceRoot === undefined) throw new Error('legacy workspace requested from a strict Agent-only runner');
-    return path.join(this.deps.workspaceRoot, taskId);
   }
 
   get activeTaskCount(): number {
@@ -1895,17 +1865,6 @@ export class TaskRunner {
     return resolveStagedResult.call(this, active);
   }
 
-  private observeGit(active: ActiveTask, phase: GitWorkspacePhase): Promise<void> {
-    return observeGit.call(this, active, phase);
-  }
-
-  private async updateGitPhaseBestEffort(workspaceId: string | undefined, phase: GitWorkspacePhase, errorCategory?: GitErrorCategory): Promise<void> {
-    if (!workspaceId || !this.deps.gitWorkspaceStore) return;
-    const current = await this.deps.gitWorkspaceStore.get(workspaceId).catch(() => undefined);
-    if (!current) return;
-    await this.deps.gitWorkspaceStore.upsert({ ...current, phase, ...(errorCategory ? { errorCategory } : {}) }).catch(() => {});
-  }
-
   /** Persist Agent terminal truth before wire when local storage is available. */
   private persistAgentTerminalEvidence(
     active: ActiveTask,
@@ -2013,13 +1972,6 @@ export class TaskRunner {
       const oldest = this.strictDeclinedTaskIds.values().next().value;
       if (oldest !== undefined) this.strictDeclinedTaskIds.delete(oldest);
     }
-  }
-
-  /** `reuseDir`, when set (a known sessionRef's recorded workspace), is used verbatim instead of a fresh `workspaceRoot/<taskId>` directory — `mkdir recursive` is idempotent either way, so ensuring-exists is safe to do unconditionally. */
-  private async resolveWorkspaceDir(taskId: string, reuseDir: string | undefined): Promise<string> {
-    const dir = reuseDir ?? this.legacyWorkspaceDir(taskId);
-    await fs.mkdir(dir, { recursive: true });
-    return dir;
   }
 
   /**

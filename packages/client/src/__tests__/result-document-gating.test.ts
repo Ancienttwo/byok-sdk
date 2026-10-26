@@ -39,7 +39,6 @@ async function baseConfig(serverUrl = 'http://127.0.0.1:9'): Promise<DaemonConfi
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'result-gating',
     serverUrl,
-    workspaceRoot: await tmpDir('byok-result-gating-workspace-'),
     agentHome: testAgentHomeConfig(),
     storeDir: await tmpDir('byok-result-gating-store-'),
   };
@@ -66,9 +65,16 @@ describe('removed DaemonConfig fields (TE-B)', () => {
     ['mcpLaunchCwd', { mcpLaunchCwd: '/tmp' }],
     ['toolImplementationAuthority', { toolImplementationAuthority: {} }],
     ['maxConcurrentMutableSessionsPerAgentHome', { maxConcurrentMutableSessionsPerAgentHome: 1 }],
+    ['gitWorkspace', { gitWorkspace: { mode: 'local-checkpoints' } }],
+    ['workspaceRoot', { workspaceRoot: '/tmp' }],
   ])('%s throws DaemonConfigFieldRemovedError with its path', async (field, extra) => {
     const config = { ...(await baseConfig()), ...extra } as unknown as DaemonConfig;
     expectRemoved(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()]), field);
+  });
+
+  it('refuses the removed overrides.gitWorkspace seam with the typed error', async () => {
+    const config = await baseConfig();
+    expectRemoved(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { gitWorkspace: {} } as never), 'gitWorkspace');
   });
 });
 

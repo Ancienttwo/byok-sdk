@@ -330,23 +330,6 @@ async function inspectJournal(storeDir: string): Promise<DiagnosticsSnapshot['jo
   }
 }
 
-async function inspectWorkspace(workspaceRoot: string | undefined): Promise<DiagnosticsSnapshot['workspace']> {
-  if (workspaceRoot === undefined) return { status: 'not-configured' };
-  try {
-    const stat = await fs.stat(workspaceRoot);
-    if (!stat.isDirectory()) return { status: 'unavailable', reason: 'workspace root is not a directory' };
-    try {
-      await fs.access(workspaceRoot, fsConstants.R_OK | fsConstants.W_OK);
-      return { status: 'available', writable: true };
-    } catch {
-      return { status: 'available', writable: false };
-    }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'missing' };
-    return { status: 'unavailable', reason: 'workspace root could not be inspected' };
-  }
-}
-
 interface PinnedQuarantineFile {
   sizeBytes: number;
   modifiedAt: string;
@@ -645,16 +628,6 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
       summary: snapshot.journal.status,
     },
     {
-      id: 'workspace',
-      status:
-        snapshot.workspace.status === 'unavailable'
-          ? 'fail'
-          : snapshot.workspace.status === 'missing' || snapshot.workspace.writable === false
-            ? 'warn'
-            : 'pass',
-      summary: `${snapshot.workspace.status}${snapshot.workspace.writable === false ? '; read-only' : ''}`,
-    },
-    {
       id: 'quarantine',
       status: snapshot.quarantine.status === 'unavailable' ? 'fail' : snapshot.quarantine.count > 0 ? 'warn' : 'pass',
       summary: `${snapshot.quarantine.count} evidence file(s)`,
@@ -678,11 +651,10 @@ export async function collectDiagnostics(
 ): Promise<DiagnosticsSnapshot> {
   const resolvedStoreDir = path.resolve(storeDir);
   const connectControl = options.connectControl ?? connectControlClient;
-  const [device, health, journal, workspace, quarantine, controlConnection, lastAudited, lastEnvironment] = await Promise.all([
+  const [device, health, journal, quarantine, controlConnection, lastAudited, lastEnvironment] = await Promise.all([
     inspectDevice(resolvedStoreDir),
     inspectOperationalHealthFile(resolvedStoreDir),
     inspectJournal(resolvedStoreDir),
-    inspectWorkspace(config.workspaceRoot),
     inspectQuarantine(resolvedStoreDir),
     connectControl({ storeDir: resolvedStoreDir, productId: config.productId }),
     readLastLifecycleRecord(resolvedStoreDir).catch(() => undefined),
@@ -766,7 +738,6 @@ export async function collectDiagnostics(
     lifecycle,
     health,
     journal,
-    workspace,
     quarantine,
   };
   return { ...withoutChecks, checks: checksFor(withoutChecks) };

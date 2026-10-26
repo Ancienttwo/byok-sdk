@@ -11,7 +11,6 @@ import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -55,7 +54,6 @@ async function makeRunner(
     deviceId: 'device-final-message',
     send: (envelope) => sent.push(envelope),
     blobClient: unusedBlobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-final-message-store-')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',

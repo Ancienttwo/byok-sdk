@@ -241,30 +241,27 @@ describe('Codex persistent app-server adapter', () => {
       phase: 'start', message: expect.stringMatching(/timed out/), failure: { class: 'unknown' },
     });
   });
-  it('plain and prepared Git workspaces use the same sealed cwd, with no exec skip-git arguments', async () => {
-    for (const git of [false, true]) {
-      const captures: string[][] = [];
-      const resources = await ctx();
-      if (git) resources.gitWorkspace = { workspaceId: 'w' };
-      const s = await open(
-        adapter({
-          spawnFn: ((
-            cmd: string,
-            args: string[],
-            opts: Parameters<typeof spawn>[2],
-          ) => {
-            captures.push(args);
-            return spawn(cmd, args, opts);
-          }) as typeof spawn,
-        }),
-        task,
-        resources,
-      );
-      await turn(s);
-      expect(captures[0]).toContain('app-server');
-      expect(captures[0]).not.toContain('exec');
-      expect(captures[0]).not.toContain('--skip-git-repo-check');
-    }
+  it('uses the sealed cwd with no exec skip-git arguments', async () => {
+    const captures: string[][] = [];
+    const resources = await ctx();
+    const s = await open(
+      adapter({
+        spawnFn: ((
+          cmd: string,
+          args: string[],
+          opts: Parameters<typeof spawn>[2],
+        ) => {
+          captures.push(args);
+          return spawn(cmd, args, opts);
+        }) as typeof spawn,
+      }),
+      task,
+      resources,
+    );
+    await turn(s);
+    expect(captures[0]).toContain('app-server');
+    expect(captures[0]).not.toContain('exec');
+    expect(captures[0]).not.toContain('--skip-git-repo-check');
   });
   it('makes the Agent home the Codex project root for a memory-reader run directory only (#317)', async () => {
     // Codex reads AGENTS.md from its project root down to cwd. Without a

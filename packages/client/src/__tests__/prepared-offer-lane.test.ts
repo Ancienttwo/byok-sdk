@@ -16,7 +16,6 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { buildRuntimeEnv } from '../daemon/environment';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import {
   PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX,
   PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX,
@@ -366,7 +365,6 @@ async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelo
     deviceId: DEVICE_ID,
     send: (envelope) => sent.push(envelope),
     blobClient: unusedBlobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(storeDir),
     approvalRegistry: new ApprovalRegistry(),
     storeDir,
     productId: 'prepared-offer-lane',

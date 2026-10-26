@@ -1,5 +1,5 @@
-// `TaskRunner` members for terminal payloads, the staged result, Git
-// observation and Agent terminal evidence (see ./support.ts for how a member
+// `TaskRunner` members for terminal payloads, the staged result and Agent
+// terminal evidence (see ./support.ts for how a member
 // module runs).
 import type { ResultReplyFailure } from '../result-reply-failure';
 import { terminalIdentity } from '../terminal-identity';
@@ -7,12 +7,10 @@ import { TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_MAX_
 import type { AgentRef } from '../../agent-home';
 import { compareAgentHomeMemory, digestAgentHomeMemory } from '../../agent-home-readers';
 import type { AgentTerminalCause } from '../agent-session-handoff-store';
-import type { GitWorkspaceObservation, GitWorkspaceError, GitErrorCategory } from '../git-workspace';
-import type { GitWorkspacePhase } from '../git-workspace-store';
 import { AGENT_RESULT_TOOL_NAME } from '../../sdk-reserved-mcp';
 import type { AgentResultRecord } from '../agent-result-store';
 import type { ActiveTask } from './support';
-import { AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS, GIT_OBSERVATION_TIMEOUT_MS, isKnownRuntimeId, terminalUsageNumber, errorMessage } from './support';
+import { AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS, isKnownRuntimeId, terminalUsageNumber, errorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
 import { AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS, RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from '../task-runner';
 
@@ -103,26 +101,6 @@ export async function resolveStagedResult(
     return { deliver: false };
   }
   return { deliver: true, document: record.outcome };
-}
-
-export async function observeGit(this: TaskRunner, active: ActiveTask, phase: GitWorkspacePhase): Promise<void> {
-  if (!active.gitWorkspaceId || !this['deps'].gitWorkspaceManager || !this['deps'].gitWorkspaceStore) return;
-  try {
-    const observation = await new Promise<GitWorkspaceObservation>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Git workspace observation timed out')), GIT_OBSERVATION_TIMEOUT_MS);
-      timer.unref?.();
-      void this['deps'].gitWorkspaceManager!.observe(active.workspaceDir, active.gitBaseline).then(
-        (value) => { clearTimeout(timer); resolve(value); },
-        (error) => { clearTimeout(timer); reject(error); },
-      );
-    });
-    await this['deps'].gitWorkspaceStore.updateObservation(active.gitWorkspaceId, observation, phase);
-    this['deps'].onGitWorkspaceEvent?.({ taskId: active.taskId, workspaceId: active.gitWorkspaceId, phase, observation });
-  } catch (err) {
-    const category = ((err as GitWorkspaceError).category ?? 'repository-invalid') as GitErrorCategory;
-    await this['updateGitPhaseBestEffort'](active.gitWorkspaceId, phase, category);
-    this['deps'].onGitWorkspaceEvent?.({ taskId: active.taskId, workspaceId: active.gitWorkspaceId, phase, errorCategory: category });
-  }
 }
 
 export async function persistAgentTerminalEvidence(

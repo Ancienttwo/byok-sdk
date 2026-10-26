@@ -8,7 +8,6 @@ import { AgentSessionHandoffStore } from '../../daemon/agent-session-handoff-sto
 import { ApprovalRegistry } from '../../daemon/approvals';
 import type { BlobResolver } from '../../daemon/blob-client';
 import { buildRuntimeEnv } from '../../daemon/environment';
-import { SessionWorkspaceStore } from '../../daemon/session-workspace-store';
 import { TaskRunner } from '../../daemon/task-runner';
 import {
   InputPreparationStore,
@@ -189,7 +188,6 @@ const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot
   deviceId: DEVICE_ID,
   send: (envelope) => sent.push(envelope),
   blobClient: unusedBlobClient,
-  sessionWorkspaces: new SessionWorkspaceStore(config.runnerStoreDir),
   approvalRegistry: new ApprovalRegistry(),
   storeDir: config.runnerStoreDir,
   productId: PRODUCT_ID,

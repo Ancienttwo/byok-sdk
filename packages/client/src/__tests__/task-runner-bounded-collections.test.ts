@@ -7,7 +7,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { MAX_TRACKED_TASK_IDS, TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
@@ -35,7 +34,6 @@ async function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[]): Promis
       sent.push(envelope);
     },
     blobClient: unusedBlobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-taskrunner-bounded-store-')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',

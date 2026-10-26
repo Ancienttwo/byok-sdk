@@ -14,7 +14,6 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { waitForOpen } from './fixtures/lifecycle-barrier';
@@ -84,7 +83,7 @@ function runnerDeps(manager: ConnectionManager, sentPublishes: Envelope[], store
       manager.send(envelope);
     },
     blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-    sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+    approvalRegistry: new ApprovalRegistry(),
   };
 }
 

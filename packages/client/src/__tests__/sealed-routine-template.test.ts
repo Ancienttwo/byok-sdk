@@ -15,7 +15,6 @@ import { AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SealedTasks, type SealedScopeKeyring } from '../daemon/sealed-task';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
@@ -93,7 +92,7 @@ async function device(keyring: SealedScopeKeyring = new GoldenKeyring()) {
     deviceId: 'device-golden-1', tenantId: GOLDEN_TENANT, productId: 'sealed-routine', storeDir,
     getServerCapabilities: () => ['sealed-payload-v1'], send: (envelope) => { sent.push(envelope); },
     blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-    sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+    approvalRegistry: new ApprovalRegistry(),
     agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
     agentMessageMcpPreflight: async () => {},
     sealedTasks: new SealedTasks({

@@ -9,7 +9,6 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
@@ -44,7 +43,6 @@ describe('Salesko fake connector MCP end to end', () => {
       deviceId: 'device-salesko',
       send: (envelope) => sent.push(envelope),
       blobClient: unusedBlobClient,
-      sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-salesko-e2e-store-')),
       approvalRegistry: new ApprovalRegistry(),
       storeDir: 'unused-store-dir',
       productId: 'salesko',

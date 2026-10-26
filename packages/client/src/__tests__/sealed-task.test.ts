@@ -18,7 +18,6 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SealedTasks, type SealedScopeKeyring } from '../daemon/sealed-task';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
@@ -128,7 +127,7 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
       deviceId: 'draft-device', tenantId: 'draft-tenant', productId: 'sealed-draft', storeDir,
       getServerCapabilities: () => ['agent-message-draft', 'sealed-payload-v1'], send: (envelope) => { sent.push(envelope); },
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      approvalRegistry: new ApprovalRegistry(),
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
       agentMessageMcpPreflight: async () => {},
       sealedTasks,

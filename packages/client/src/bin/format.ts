@@ -1,7 +1,6 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { DaemonBranding, DaemonEvent, DaemonTaskInfo, LocalAgentReleaseIdentity } from '../index';
 import { parseDaemonLifecycle, type DaemonHaltReason, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
 import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import type { McpToolsetReloadReceipt, McpToolsetStatus } from '../types';
@@ -21,24 +20,6 @@ import type { TaskCounts, DerivedTaskInfo } from './tasks-view';
 
 function quote(text: string): string {
   return JSON.stringify(text);
-}
-
-/**
- * Git failures are rendered only from the closed stable category set —
- * projected from `daemon/git-workspace.ts`'s `GIT_ERROR_CATEGORIES` (the
- * single source of truth for the `GitErrorCategory` union) rather than
- * carrying a literal copy that could drift from it; the runtime half of
- * that guarantee is `__tests__/git-category-drift.test.ts`. Typed
- * `Set<string>` (not `Set<GitErrorCategory>`) because what it filters is
- * unvalidated ledger strings, never typed values.
- *
- * @internal Exported for the drift-guard test only (never re-exported from
- * `index.ts`).
- */
-export const STABLE_GIT_ERROR_CATEGORIES = new Set<string>(GIT_ERROR_CATEGORIES);
-
-function stableGitErrorCategory(value: string | undefined): string | undefined {
-  return value !== undefined && STABLE_GIT_ERROR_CATEGORIES.has(value) ? value : undefined;
 }
 
 /** Renders one `task.progress`-derived `AgentEvent` compactly — the inner payload of a `progress`-kind `DaemonEvent`. */
@@ -179,18 +160,6 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
       ].filter((part): part is string => part !== undefined);
       return parts.join(' ');
     }
-    case 'git-workspace': {
-      const parts = [
-        `${prefix} git-workspace taskId=${event.taskId}`,
-        `workspaceId=${event.workspaceId}`,
-        `phase=${event.phase}`,
-        event.headChanged !== undefined ? `headChanged=${event.headChanged}` : undefined,
-        event.commitsSinceBaseline !== undefined ? `commits=${event.commitsSinceBaseline}` : undefined,
-        event.dirty ? `dirty=${event.dirty.staged}/${event.dirty.unstaged}/${event.dirty.untracked}/${event.dirty.conflicted}` : undefined,
-        stableGitErrorCategory(event.errorCategory) ? `errorCategory=${stableGitErrorCategory(event.errorCategory)}` : undefined,
-      ].filter((part): part is string => part !== undefined);
-      return parts.join(' ');
-    }
     case 'device-assertion': {
       // Plan `device-assertion-broker`. No signature or envelope to render —
       // the event type cannot carry either. codex round-2 F4: the DENIED
@@ -225,19 +194,10 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
 }
 
 export function formatTaskLine(task: DaemonTaskInfo | DerivedTaskInfo): string {
-  const git = 'git' in task ? task.git : undefined;
-  const gitStatus = git
-    ? [
-        `git=${git.phase}`,
-        git.commitsSinceBaseline !== undefined ? `commits=${git.commitsSinceBaseline}` : undefined,
-        git.dirty ? `dirty=${git.dirty.staged}/${git.dirty.unstaged}/${git.dirty.untracked}/${git.dirty.conflicted}` : undefined,
-      ].filter((part): part is string => part !== undefined).join(' ')
-    : undefined;
   const parts = [
     task.taskId,
     task.state,
     task.runtime ? `runtime=${task.runtime}` : undefined,
-    gitStatus,
     task.claimedRuntime !== undefined ? `claimedRuntime=${task.claimedRuntime}` : undefined,
     `updatedAt=${task.updatedAt}`,
     task.sessionRef ? `sessionRef=${task.sessionRef}` : undefined,

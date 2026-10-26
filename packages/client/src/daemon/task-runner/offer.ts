@@ -3,7 +3,6 @@
 import type { ExecutionScratch } from '../retention/scratch';
 import { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode, type TaskDeclinePayload } from '@byok-sdk/protocol';
 import { type AgentHomeExecutionBinding, type AgentRef } from '../../agent-home';
-import type { GitWorkspaceLease } from '../git-workspace';
 import type { OfferPhaseContext } from './support';
 import { offeredPreparation, sameEgressPolicy, offeredAgentRef, offeredSessionRef, offeredHomeAccess, errorMessage, outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
@@ -15,7 +14,6 @@ import { sealOfferManifest, claimOffer, startOfferRuntime } from './offer-launch
 export interface OfferHeld {
   owner: 'offer' | 'startup' | 'active';
   agentBinding?: AgentHomeExecutionBinding;
-  gitLease?: GitWorkspaceLease;
 }
 export type OfferRequest = NonNullable<ReturnType<typeof readOfferRequest>>;
 export type OfferLimits = NonNullable<ReturnType<TaskRunner['admitOfferLimits']>>;
@@ -172,32 +170,30 @@ export async function handleOffer(
       agentRef, readerAttempt, sessionRef, homeAccess, homeBusyCode, pick, messageRequirement, terminalProjection,
     });
     if (workspace === undefined) return;
-    const { agentBinding, gitLease } = held;
-    const { known, gitExisting, plainWorkspaceNeedsResolve, appliedAgentHomeProjection, readerMemoryBaseline } = workspace;
-    let { workspaceDir, gitWorkspaceId, gitBaseline } = workspace;
+    const { agentBinding } = held;
+    const { workspaceDir, appliedAgentHomeProjection, readerMemoryBaseline } = workspace;
 
     const sealed = await sealOfferManifest.call(this, phase, {
-      agentBinding, gitLease, agentRef, agentMemory, preparation, preparedMemorySelected, readerAttempt, sessionRef, env, mcpEnv,
-      mcpToolsetTools, offered, pick, prepared, scratch, requiredToolsets, resolvedMcp, known, workspaceDir, gitWorkspaceId,
-      gitBaseline, blobAbort, preparationLane, terminalProjection,
+      agentBinding, agentRef, agentMemory, preparation, preparedMemorySelected, readerAttempt, sessionRef, env, mcpEnv,
+      mcpToolsetTools, offered, pick, prepared, scratch, requiredToolsets, resolvedMcp, workspaceDir, blobAbort,
+      preparationLane, terminalProjection,
     });
     if (sealed === undefined) return;
     const { runtimeLaunch, manifest, preparedLaunch, preparedObservation } = sealed;
 
     const claimed = await claimOffer.call(this, phase, {
-      agentBinding, gitLease, agentRef, sessionRef, pick, known, gitExisting, plainWorkspaceNeedsResolve, manifest, preparedLaunch,
-      blobAbort, payload, workspaceDir, gitWorkspaceId, gitBaseline, taskMcpServers,
+      agentBinding, agentRef, pick, manifest, preparedLaunch, blobAbort, payload, taskMcpServers,
     });
     if (claimed === undefined) return;
     const { resolvedInstruction } = claimed;
-    ({ workspaceDir, gitWorkspaceId, gitBaseline, taskMcpServers } = claimed);
+    ({ taskMcpServers } = claimed);
 
     await startOfferRuntime.call(this, phase, held, {
-      agentBinding, gitLease, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, pick, prepared, scratch, manifest,
-      preparedLaunch, runtimeLaunch, resolvedInstruction, gitWorkspaceId, taskMcpServers, blobAbort, startupDeadline,
+      agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, pick, prepared, scratch, manifest,
+      preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline,
     }, {
-      agentBinding, gitLease, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
-      workspaceDir, gitWorkspaceId, gitBaseline, blobAbort, payload, messageRequirement, terminalProjection,
+      agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
+      workspaceDir, blobAbort, payload, messageRequirement, terminalProjection,
     });
   } finally {
     clearTimeout(startupTimer);
@@ -223,7 +219,6 @@ export async function handleOffer(
         this['revokeAgentMemoryContext'](taskId);
         this['deleteHostToolsetContexts'](taskId);
         await held.agentBinding?.lease.release().catch(() => {});
-        held.gitLease?.release();
         await this['releasePreparationPin'](taskId);
       }
       // An active task's Session owns the runtime launch. The projection

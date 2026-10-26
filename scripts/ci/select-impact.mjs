@@ -225,9 +225,9 @@ export const familyOwners = Object.freeze({
     /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|provider-profile-binding|secret-store|secret-value|sqlite-profile-store|command-runner)\.ts)$/,
   ],
   'windows-git-workspace': [
-    /^packages\/client\/src\/daemon\/(?:git-workspace|git-workspace-store|session-workspace-store|auth-manager|daemon-lifecycle|daemon-owner|daemon-record)\.ts$/,
+    /^packages\/client\/src\/daemon\/(?:auth-manager|daemon-lifecycle|daemon-owner|daemon-record)\.ts$/,
     /^packages\/client\/src\/(?:util\/(?:secure-dir|atomic-write)\.ts|diagnostics\/|bin\/commands\/)/,
-    /^packages\/client\/src\/__tests__\/(?:git-workspace|bin-workspaces|secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity)[^/]*$/,
+    /^packages\/client\/src\/__tests__\/(?:secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity)[^/]*$/,
     // #738: the Agent-home file write crash test, its child process and the code it qualifies.
     /^packages\/client\/src\/(?:agent-home\.ts|__tests__\/(?:fixtures\/)?agent-home-write-file[^/]*)$/,
     // #712: the Hermes suites this job runs on Windows, their fakes and the code they qualify.

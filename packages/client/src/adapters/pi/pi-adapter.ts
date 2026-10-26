@@ -279,9 +279,9 @@ export class PiAdapter implements RuntimeAdapter {
     // Inline factories are owned by the SDK entry; no runtime extension path resolution here.
     // Session/workspace continuity:
     // `task.sessionRef` is only ever non-empty here when `task-runner.ts`
-    // has (a) found a recorded workspace for this exact sessionRef in its
-    // `SessionWorkspaceStore` and (b) spawned this adapter with
-    // `ctx.workspaceDir` set to that SAME directory — see task-runner.ts's
+    // has (a) matched this exact sessionRef in the Agent home's
+    // `AgentSessionHandoffStore` and (b) spawned this adapter with
+    // `ctx.workspaceDir` set to that SAME recorded cwd — see task-runner.ts's
     // `handleOffer`. That matters because pi's real `--session <id>` resume
     // is scoped to the cwd/project a session was created under: resuming
     // from a *different* cwd prompts an interactive "Session found in
@@ -1013,7 +1013,7 @@ function sameDispatchSelection(
  * `crypto.randomUUID()` whenever `get_state` failed, timed out, or omitted
  * `sessionId` — minting an id pi itself never knew about, which could never
  * actually be resumed and silently looked like a legitimate, resumable
- * session to every caller (`TaskRunner`'s `SessionWorkspaceStore`, a future
+ * session to every caller (`TaskRunner`'s `AgentSessionHandoffStore`, a future
  * follow-up's `task.offer.sessionRef`, etc). Fail closed instead: if pi
  * doesn't hand back an authoritative session id, `start()` itself fails
  * with the real underlying error (stderr context is already folded in when

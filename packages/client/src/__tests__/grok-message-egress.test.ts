@@ -10,7 +10,6 @@ import { GrokAdapter } from '../adapters/grok/grok-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
@@ -40,7 +39,7 @@ it('publishes the closing Grok reply on the message lane when Grok never called 
     agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-grok-egress',
     send: (envelope) => sent.push(envelope),
     blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-    sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+    approvalRegistry: new ApprovalRegistry(),
     storeDir, productId: 'grok-egress-test', tenantId: 'tenant-grok-egress',
     agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
   });

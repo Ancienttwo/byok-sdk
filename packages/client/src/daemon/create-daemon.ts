@@ -9,7 +9,6 @@ import type {
 } from '@byok-sdk/protocol';
 import type {
   RuntimeAdapter,
-  GitWorkspaceConfig,
   McpStdioServerConfig,
   McpToolsetConfig,
   McpToolsetObservation,
@@ -40,8 +39,6 @@ import {
 import { deterministicJitterMs } from './deterministic-jitter';
 import { type OperationalHealthSnapshot } from './operational-health';
 import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
-import { GitWorkspaceManager } from './git-workspace';
-import { GitWorkspaceStore } from './git-workspace-store';
 import { type DeviceEnrollment } from './store';
 import { type DeviceMemberStatus } from './e2ee-key-package-notice';
 import { type LocalTaskJournal } from './journal/journal';
@@ -126,12 +123,6 @@ export interface DaemonConfig {
    */
   machineId?: () => Promise<string | undefined>;
   /**
-   * Parent directory of Git workspace mode's `workspaceRoot/<taskId>`
-   * workspaces. Required with `gitWorkspace`. An Agent offer runs in its
-   * SDK-owned home and never reads this path.
-   */
-  workspaceRoot?: string;
-  /**
    * Strict Agent execution boundary. The host selects one absolute branded
    * storage root; the SDK alone composes `agents/<agentId>`, initializes the
    * durable home, and binds it as runtime cwd. `projection` may write opaque,
@@ -184,12 +175,6 @@ export interface DaemonConfig {
    * policy/reliable protocol surface.
    */
   agentEgress?: AgentEgressConfig;
-  /**
-   * Disabled by default. Enables local-only Git checkpoint repositories for
-   * legacy task workspaces. Mutually exclusive with `agentHome`: strict Agent
-   * execution has one canonical workspace authority.
-   */
-  gitWorkspace?: GitWorkspaceConfig;
   /**
    * Restricts which runtimes this daemon will ever use — enforced in two
    * places that must stay consistent: `createDaemon` (this file) builds its
@@ -695,15 +680,6 @@ export interface DaemonOverrides {
     idleDelayMs?: number;
   };
   /**
-   * Test/product injection seam for the local Git workspace boundary. The
-   * supplied manager/store are used only when `config.gitWorkspace` is enabled;
-   * an absent Git config therefore cannot accidentally activate either object.
-   */
-  gitWorkspace?: {
-    manager?: GitWorkspaceManager;
-    store?: GitWorkspaceStore;
-  };
-  /**
    * A durable local journal the host supplies instead of `SqliteLocalTaskJournal`
    * (§12.7.2). It must meet the same contract (a resolved `appendEnvelope` is
    * fsynced); the daemon does not check that. `stop()` does not close it:
@@ -773,17 +749,15 @@ export function buildDaemonWithAdapters(
 
   const memberStatus = (): DeviceMemberStatus => daemonState.deviceMember ?? (daemonState.memberResuming ? 'resuming' : 'none');
   const {
-    logMember, operationalHealth, ownedProcessLedger, cursorStore, sessionWorkspaces, agentHomeManager,
-    agentSessionHandoffs, agentContentReadPolicies, initialAgentEgress, gitWorkspaceManager,
-    gitWorkspaceStore,
-  } = composeDaemonWorkspaces({ storeDir, config, egressPolicy, overrides });
+    logMember, operationalHealth, ownedProcessLedger, cursorStore, agentHomeManager,
+    agentSessionHandoffs, agentContentReadPolicies, initialAgentEgress,
+  } = composeDaemonWorkspaces({ storeDir, config, egressPolicy });
 
   const retentionRegistry = createRetentionRegistry({
     storeDir, scratch: scratchRoot, config: storageConfig, clock: retentionClock,
     journal: () => daemonState.journal, identity: () => daemonState.retentionIdentity, preparation: () => daemonState.inputPreparationService,
     ...(agentHomeManager === undefined ? {} : { home: agentHomeManager }),
     ...(agentSessionHandoffs === undefined ? {} : { handoffs: agentSessionHandoffs }),
-    ...(config.workspaceRoot === undefined ? {} : { workspaceRoot: config.workspaceRoot }),
     ...(config.piByokLauncher?.sessionDir === undefined ? {} : { piSessionDir: config.piByokLauncher.sessionDir }),
   });
   const retentionSweeper = new RetentionSweeper({
@@ -911,9 +885,9 @@ export function buildDaemonWithAdapters(
     egressBatcherOptions, presenceCadence, deviceAssertionAudiences, deviceAssertionTtlMs, storeDir,
     storageConfig, retentionClock, scratchRoot, storagePressure, inputPreparationLimits,
     preparedToolSurface, teamWorkspaces, store, memberRecords, sealIdentityOf, memberStatus,
-    logMember, operationalHealth, ownedProcessLedger, cursorStore, sessionWorkspaces,
+    logMember, operationalHealth, ownedProcessLedger, cursorStore,
     agentHomeManager, agentSessionHandoffs, agentContentReadPolicies, initialAgentEgress,
-    gitWorkspaceManager, gitWorkspaceStore, retentionRegistry, retentionSweeper, terminalCommits,
+    retentionRegistry, retentionSweeper, terminalCommits,
     outbound, observer, approvalRegistry, capabilityDiscoveryTimeoutMs, pendingLateMutationBarriers,
     buildAuthManager, daemonState,
     get controlMethods() { return controlMethods; },

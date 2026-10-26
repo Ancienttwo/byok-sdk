@@ -29,11 +29,6 @@ export type {
 } from './mcp/observation';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 
-
-export interface GitWorkspaceConfig {
-  mode: 'local-checkpoints';
-}
-
 /**
  * Failure vocabulary shared by the detection contract and local diagnostics.
  */
@@ -386,8 +381,6 @@ export interface RuntimeOperationManifest {
   };
   readonly workspace: {
     readonly workspaceDir: string;
-    readonly workspaceId?: string;
-    readonly baseline?: string;
   };
   /** Names are audit-safe; credential values intentionally never enter the manifest. */
   readonly forwardedEnvironmentNames: readonly string[];

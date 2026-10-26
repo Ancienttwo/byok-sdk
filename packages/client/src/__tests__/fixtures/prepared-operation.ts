@@ -26,7 +26,6 @@ export interface PreparedOperationResources {
    * authority and this is the swapped-in one.
    */
   startMcpToolsetTools?: McpToolsetToolObservation;
-  gitWorkspace?: { workspaceId: string; baseline?: string };
   approvalChannel?: ApprovalChannel;
   /** Seals a `memory-reader` Agent manifest whose run directory is `workspaceDir`. */
   reader?: { canonicalHome: string };
@@ -67,12 +66,7 @@ export async function startPreparedOperation(
       homeAccess: 'memory-reader' as const,
       lease: { leaseId: 'adapter-unit-lease', canonicalHome: resources.reader.canonicalHome },
     }),
-    workspace: {
-      workspaceDir: resources.workspaceDir,
-      ...(resources.gitWorkspace === undefined
-        ? {}
-        : { workspaceId: resources.gitWorkspace.workspaceId, baseline: resources.gitWorkspace.baseline }),
-    },
+    workspace: { workspaceDir: resources.workspaceDir },
     forwardedEnvironmentNames: Object.keys(resources.env).sort(),
   });
   const scratch = resources.scratch ?? await testExecutionScratch();

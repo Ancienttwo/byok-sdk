@@ -12,7 +12,6 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import {
   McpAuthorityError,
@@ -82,7 +81,6 @@ async function makeRunner(
     deviceId: 'device-1',
     send: (envelope) => sent.push(envelope),
     blobClient: unusedBlobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-mcp-toolsets-store-')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
@@ -700,7 +698,6 @@ describe('TaskRunner host toolset context nonce injection', () => {
       deviceId: 'device-host-toolset',
       send: (envelope) => sent.push(envelope),
       blobClient: unusedBlobClient,
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'host-toolset-product',

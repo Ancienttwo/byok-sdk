@@ -11,7 +11,6 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import * as runtimeStart from '../daemon/runtime-start';
 import { RuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../runtime-failure';
@@ -45,7 +44,7 @@ async function cancellationFixture() {
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-cancel',
       send: envelope => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      approvalRegistry: new ApprovalRegistry(),
       storeDir, productId: 'cancel-test', tenantId: 'tenant-cancel',
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
       agentMessageMcpPreflight: async () => {},
@@ -449,7 +448,7 @@ describe('required Agent message completion gate', () => {
       adapters: [], workspaceRoot: root, storeDir: root, productId: 'recovery-test', deviceId: 'device-one', tenantId: 'tenant-one',
       send: (envelope) => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(root), approvalRegistry: new ApprovalRegistry(),
+      approvalRegistry: new ApprovalRegistry(),
     });
     const runner = createRunner();
     await runner.recoverAgentMessageOutboxes(path.join(root, 'agents'));
@@ -487,7 +486,7 @@ describe('required Agent message completion gate', () => {
         agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-refusal',
         send: (envelope) => sent.push(envelope),
         blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-        sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+        approvalRegistry: new ApprovalRegistry(),
         storeDir, productId: 'refusal-test', tenantId: 'tenant-refusal',
         agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
         agentMessageMcpPreflight: async () => {},
@@ -576,7 +575,7 @@ describe('required Agent message completion gate', () => {
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-message',
       send: (envelope) => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      approvalRegistry: new ApprovalRegistry(),
       storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
       agentMessageMcpBin: { command: '/compiled/salesko-agent', args: ['__byok_sdk_helper', 'agent-message-mcp'] },
       agentMessageMcpPreflight: async () => { throw new Error('unknown command'); },
@@ -609,7 +608,7 @@ describe('required Agent message completion gate', () => {
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-message',
       send: (envelope) => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      approvalRegistry: new ApprovalRegistry(),
       storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
       agentMessageMcpPreflight: helperPreflight,
@@ -709,7 +708,6 @@ describe('required Agent message completion gate', () => {
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-message',
       send: (envelope) => restartSent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(await temporary('byok-message-restart-store-')),
       approvalRegistry: new ApprovalRegistry(), storeDir: await temporary('byok-message-restart-control-'),
       productId: 'message-test', tenantId: 'tenant-message-test',
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
@@ -732,7 +730,7 @@ describe('required Agent message completion gate', () => {
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-message',
       send: (envelope) => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      approvalRegistry: new ApprovalRegistry(),
       storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
     });
@@ -775,7 +773,7 @@ describe('required Agent message completion gate', () => {
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-message',
       send: (envelope) => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      approvalRegistry: new ApprovalRegistry(),
       storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
     });
@@ -810,7 +808,7 @@ describe('required Agent message completion gate', () => {
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-message',
       send: (envelope) => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      approvalRegistry: new ApprovalRegistry(),
       storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
     });
@@ -861,7 +859,7 @@ describe('required Agent message completion gate', () => {
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-message',
       send: (envelope) => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      approvalRegistry: new ApprovalRegistry(),
       storeDir, productId: 'message-test', tenantId: 'tenant-message-test',
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
     });

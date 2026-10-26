@@ -6,7 +6,6 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -38,7 +37,6 @@ async function makeRunner(overrides: Partial<Pick<TaskRunnerDeps, 'awaitTerminal
       resolveInstruction: async () => { throw new Error('unused'); },
       uploadArtifact: async () => { throw new Error('unused'); },
     },
-    sessionWorkspaces: new SessionWorkspaceStore(path.join(directory, 'store')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: directory,
     productId: 'close-receipt-product',

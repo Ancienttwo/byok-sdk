@@ -12,7 +12,6 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from '../adapters/pi/rpc-client';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { ExecutionRecord } from '../daemon/execution-record';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
@@ -66,7 +65,6 @@ async function runPi(trajectory?: string): Promise<{ sent: Envelope[]; records: 
       resolveInstruction: async () => { throw new Error('unused'); },
       uploadArtifact: async () => { throw new Error('unused'); },
     },
-    sessionWorkspaces: new SessionWorkspaceStore(path.join(directory, 'store')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: directory,
     productId: 'pi-record-product',

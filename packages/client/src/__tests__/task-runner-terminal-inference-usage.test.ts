@@ -9,7 +9,6 @@ import { RuntimeExecutionFailure } from '../runtime-failure';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -41,7 +40,6 @@ async function makeRunner(
     deviceId: 'device-terminal-usage',
     send: (envelope) => sent.push(envelope),
     blobClient: unusedBlobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-terminal-usage-store-')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',

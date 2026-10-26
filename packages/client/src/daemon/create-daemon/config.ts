@@ -43,6 +43,12 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   if (Object.hasOwn(config, 'strictAgentOnly')) {
     throw new DaemonConfigFieldRemovedError('strictAgentOnly', 'DaemonConfig.strictAgentOnly was removed: since wire v4 every offer is an Agent offer, so every daemon runs Agent offers only');
   }
+  if (Object.hasOwn(config, 'gitWorkspace') || Object.hasOwn(overrides, 'gitWorkspace')) {
+    throw new DaemonConfigFieldRemovedError('gitWorkspace', 'DaemonConfig.gitWorkspace was removed: since wire v4 every offer is an Agent offer and runs in its SDK-owned Agent home, so there are no Git task workspaces (overrides.gitWorkspace is gone too); configure agentHome');
+  }
+  if (Object.hasOwn(config, 'workspaceRoot')) {
+    throw new DaemonConfigFieldRemovedError('workspaceRoot', 'DaemonConfig.workspaceRoot was removed: since wire v4 every offer runs in its SDK-owned Agent home, never in a workspaceRoot/<taskId> directory; configure agentHome');
+  }
   if (Object.hasOwn(config, 'resultDocument')) {
     throw new DaemonConfigFieldRemovedError('resultDocument', 'DaemonConfig.resultDocument was removed: a result-document offer carries its frozen schema and the runtime submits the outcome through the SDK-reserved submit_result tool');
   }
@@ -57,11 +63,6 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
       typeof config.agentMemoryIntents.complete !== 'function')
   ) {
     throw new Error('DaemonConfig.agentMemoryIntents must be a transport with fetch and complete functions when present');
-  }
-  if (config.agentHome !== undefined && config.gitWorkspace !== undefined) {
-    throw new Error(
-      'DaemonConfig.agentHome and DaemonConfig.gitWorkspace are mutually exclusive; Agent home is the only workspace authority for Agent offers',
-    );
   }
   if (config.agentMemoryMcp !== undefined && config.agentMemoryMcp !== 'auto' && config.agentMemoryMcp !== 'off') {
     throw new Error('DaemonConfig.agentMemoryMcp must be auto or off when present');
@@ -160,9 +161,6 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   validateProgressBatcherOptions(config.progressBatch);
   if (config.agentEgress !== undefined && config.agentHome === undefined) {
     throw new Error('DaemonConfig.agentEgress requires DaemonConfig.agentHome for the per-Agent local spool');
-  }
-  if (config.gitWorkspace !== undefined && (typeof config.workspaceRoot !== 'string' || config.workspaceRoot === '')) {
-    throw new Error('DaemonConfig.gitWorkspace requires DaemonConfig.workspaceRoot');
   }
   // WP0: same up-front discipline as `maxTaskOutputBytes` above. A cap that
   // governs how many writers may share one Agent home is a correctness

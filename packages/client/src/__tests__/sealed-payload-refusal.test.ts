@@ -14,7 +14,6 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope, type MessageType } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
@@ -34,18 +33,14 @@ const sealedOffers = SEALED_OFFER_TYPES.flatMap((type) => [
 ] as const);
 const sealedSteer = corpus.find((line) => line.type === 'task.steer_sealed')!.payload;
 
-const dirs: Array<{ dir: string; store: SessionWorkspaceStore }> = [];
+const dirs: string[] = [];
 afterEach(async () => {
-  for (const { dir, store } of dirs.splice(0)) {
-    await store.get('cleanup-barrier');
-    await fs.rm(dir, { recursive: true, force: true });
-  }
+  for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
 });
 
 async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[], serverCapabilities: readonly string[] = []): Promise<TaskRunner> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-refusal-'));
-  const store = new SessionWorkspaceStore(path.join(dir, 'sessions'));
-  dirs.push({ dir, store });
+  dirs.push(dir);
   return new TaskRunner({...testAgentHomeDeps(), 
     getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter], workspaceRoot: path.join(dir, 'workspace'),
@@ -54,7 +49,6 @@ async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[], serverC
       resolveInstruction: async () => { throw new Error('unexpected blob resolution'); },
       uploadArtifact: async () => { throw new Error('unexpected upload'); },
     },
-    sessionWorkspaces: store,
     approvalRegistry: new ApprovalRegistry(), storeDir: dir, productId: 'sealed-refusal',
     localAgentRelease: Object.freeze({ version: '0.24.0-rc.1' }),
     getServerCapabilities: () => serverCapabilities,

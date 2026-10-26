@@ -116,7 +116,7 @@ test('a platform family is selected only by a path it owns', () => {
     'agent-memory-helper': 'packages/client/src/daemon/agent-memory-intent.ts',
     'execution-recovery-native': 'packages/client/src/daemon/journal/sqlite-journal.ts',
     'adapter-lifecycle-smoke': 'packages/client/src/adapters/codex/codex-adapter.ts',
-    'windows-git-workspace': 'packages/client/src/daemon/git-workspace.ts',
+    'windows-git-workspace': 'packages/client/src/daemon/auth-manager.ts',
     'packageability-smoke': 'packages/client/src/sdk-native-assets.ts',
     'windows-service-smoke': 'packages/client/src/lifecycle/winsw.ts',
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',

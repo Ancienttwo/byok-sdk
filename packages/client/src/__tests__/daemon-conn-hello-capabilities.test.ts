@@ -384,26 +384,6 @@ describe('conn.hello.capabilities', () => {
     await expect(daemon.start()).rejects.toThrow(/hostStorageRoot/);
     expect(server.received.some((event) => event.type === 'conn.hello')).toBe(false);
   });
-
-  it('rejects simultaneous Agent-home and Git workspace authorities', async () => {
-    const workspaceRoot = await tmpDir('byok-conn-hello-agent-git-workspace-');
-    const storeDir = await tmpDir('byok-conn-hello-agent-git-store-');
-    const hostStorageRoot = await tmpDir('byok-conn-hello-agent-git-root-');
-
-    expect(() => createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },
-        localAgentRelease: { version: '0.0.0-test' },
-        productName: 'Test Product',
-        productId: 'test-product',
-        serverUrl: server.url,
-        workspaceRoot,
-        storeDir,
-        agentHome: { hostStorageRoot },
-        gitWorkspace: { mode: 'local-checkpoints' },
-      },
-      [],
-    )).toThrow(/mutually exclusive/);
-  });
 });
 
 /**

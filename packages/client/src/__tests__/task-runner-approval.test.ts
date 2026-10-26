@@ -8,7 +8,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type AgentEvent, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import {
   DEFAULT_APPROVAL_TIMEOUT_MS,
   MAX_PENDING_APPROVALS_PER_TASK,
@@ -67,7 +66,6 @@ async function makeRunner(
       sent.push(envelope);
     },
     blobClient: unusedBlobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-taskrunner-approval-store-')),
     approvalRegistry,
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
@@ -168,7 +166,6 @@ async function makeChannelRunner(
       sent.push(envelope);
     },
     blobClient: unusedBlobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-taskrunner-approval-channel-store-')),
     approvalRegistry,
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',

@@ -23,7 +23,6 @@ import { AGENT_MEMORY_TOOLS, handleAgentMemoryToolCall } from '../bin/agent-memo
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -200,7 +199,6 @@ describe('Agent memory MCP local authority', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'memory-mcp-toolsets',
@@ -254,7 +252,6 @@ describe('Agent memory MCP local authority', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'memory-mcp-selection',

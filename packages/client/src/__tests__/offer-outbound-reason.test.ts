@@ -12,7 +12,6 @@ import { preflightAgentMessageMcp } from '../daemon/agent-message-mcp-preflight'
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { DurableJsonlFile } from '../util/durable-jsonl';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -91,7 +90,6 @@ async function runner(adapter: StubRuntimeAdapter, extra: Partial<TaskRunnerDeps
     deviceId: 'device-outbound-offer',
     send: (envelope) => sent.push(envelope),
     blobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(storeDir),
     approvalRegistry: new ApprovalRegistry(),
     storeDir,
     productId: 'outbound-offer',

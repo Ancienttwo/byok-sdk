@@ -10,7 +10,6 @@ import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import * as mutationGate from '../daemon/path-mutation-gate';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -60,7 +59,7 @@ async function cancellationFixture(overrides: Partial<TaskRunnerDeps> = {}) {
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-cancel',
       send: envelope => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      approvalRegistry: new ApprovalRegistry(),
       storeDir, productId: 'cancel-test', tenantId: 'tenant-cancel',
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
       agentMessageMcpPreflight: async () => {},
