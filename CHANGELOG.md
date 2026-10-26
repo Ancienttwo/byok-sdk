@@ -48,10 +48,12 @@
     `<storeDir>/git-workspaces.json` and old task directories untouched.
   - `ByokServer.dispatch` takes only `AgentResumeDispatchInput` (`agentRef`
     and `sessionRef`); `LegacyDispatchInput` is removed. Fresh work uses
-    `executions.submit`. Two `dispatch` refusal codes change, because the
-    Agent lane answers them: an unknown or revoked device is
-    `agent_capability_missing` (was `device_not_found`), and a taskId that
-    already exists is `agent_task_already_exists` (was
+    `executions.submit`, which returns no `TaskHandle`: a submitted task has
+    no per-task stream of Agent events and artifacts yet, only the
+    `task.created` and `task.state` server events. Two `dispatch` refusal
+    codes change, because the Agent lane answers them: an unknown or revoked
+    device is `agent_capability_missing` (was `device_not_found`), and a
+    taskId that already exists is `agent_task_already_exists` (was
     `coordination_input_invalid`). A Host that matches on the old codes must
     match the new ones.
   - One-shot wire v4 migration of stored state, in two steps per store. The

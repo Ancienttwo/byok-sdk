@@ -32,6 +32,12 @@ reader and no capability negotiation between the two majors.
   `tasks.reject` (the same path and refusals as `TaskHandle.approve` and
   `reject`). Steering needs a `TaskHandle`, which only a dispatched resume
   returns.
+- A Host that moves fresh work from `dispatch` to `executions.submit` has no
+  per-task event stream for it yet. `TaskHandle.events()` carried the
+  task's Agent events, artifacts and approval requests; for a submitted task,
+  `byok.events.subscribe()` reports only `task.created` and `task.state`, and
+  `tasks.get` reads the current snapshot. Progress and artifact events are not
+  available for submitted tasks in this release.
 - `dispatch` refusals come from the Agent lane: an unknown or revoked device
   is `agent_capability_missing` (was `device_not_found`), and an existing
   taskId is `agent_task_already_exists` (was `coordination_input_invalid`).

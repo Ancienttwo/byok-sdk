@@ -664,10 +664,12 @@ flowchart LR
   Detect(["detect allowed runtimes"]):::stage
   Runner(["create TaskRunner"]):::stage
   Connect(["ConnectionManager.start"]):::stage
-  Ack(["waitForAck"]):::done
+  Open(["conn.hello accepted → open"]):::done
 
-  Config --> Secure --> Local --> Control --> Detect --> Runner --> Connect --> Ack
+  Config --> Secure --> Local --> Control --> Detect --> Runner --> Connect -.-> Open
 ```
+
+`ConnectionManager.start` 只读回 cursor 并启动重连循环，`start()` 不等 server 回应。循环每一轮先单独发一个 `conn.hello`，server 接受后连接状态变为 `open`（`onStateChange`），被拒绝则 daemon 以 `handshake_rejected` 停止。wire v4 没有 `conn.ack`。
 
 统一 graceful shutdown 顺序是：停止接收新 offer → 发布每个 active task 的单一 terminal → 等待 quiescent runtime disposal（成功后才释放 task/Agent home ownership）→ bounded drain outbox → stop connection/auth → close control socket。disposal rejection 保持 mutation barrier 未闭合并阻止 daemon-owner lease 提前释放。取消、shutdown RPC 与 library `stop()` 共用同一条序列，避免三套不同清理语义。
 
