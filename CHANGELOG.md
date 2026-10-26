@@ -10,6 +10,15 @@
   root `properties` and no such branches, or with malformed `properties`,
   is still refused with `prepared_transcript_invalid`. Before, every tool
   schema without root `properties` was refused.
+- **Feature (keys)** — `PiModelConfigSchema.compat` accepts
+  `sendSessionAffinityHeaders` (`openai-completions` and `anthropic-messages`)
+  and `allowEmptySignature` (`anthropic-messages`), both booleans, as pinned
+  pi-ai 1.4.0 reads them; `openai-responses` refuses both. The regenerated
+  `@byok-sdk/keys/pi-catalog` table returns 752 of 1,019 pinned entries (178
+  before): 324 more OpenRouter, 238 more Vercel AI Gateway and 12 more
+  Baseten entries. The prepared entry still refuses
+  `sendSessionAffinityHeaders`, which its frozen wire does not carry, and
+  compiles no `anthropic-messages` request.
 
 ## 0.30.2 — 2026-10-26 (published)
 

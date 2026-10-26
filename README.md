@@ -419,9 +419,9 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/core` | Shared contracts and validation | `zod` | allowed | 126523 B |
 | `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1403 B |
 | `@byok-sdk/core/sealed-payload` | Sealed payload v1 byte rules | `zod` | allowed | 196627 B |
-| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 288693 B |
+| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 288901 B |
 | `@byok-sdk/keys/package.json` | Package metadata | — | forbidden | 1466 B |
-| `@byok-sdk/keys/pi-catalog` | Pinned pi-ai catalog lookup for pi_model | `zod` | allowed | 173028 B |
+| `@byok-sdk/keys/pi-catalog` | Pinned pi-ai catalog lookup for pi_model | `zod` | allowed | 354516 B |
 | `@byok-sdk/protocol` | Wire schemas and codecs; codegen negative control | `@cfworker/json-schema`, `zod` | allowed | 155792 B |
 | `@byok-sdk/protocol/constants` | Schema-free protocol values | — | forbidden | 5460 B |
 | `@byok-sdk/protocol/package.json` | Package metadata | — | forbidden | 1667 B |
@@ -436,7 +436,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `bin:byok-agent-team-mcp` | Agent team MCP helper | — | forbidden | 51018 B |
 | `bin:byok-pi-durable` | Pi durable launcher; host loads lazily | — | forbidden | 471 B |
 | `bin:byok-pi-prepared` | Pi prepared launcher; host loads lazily | — | forbidden | 554 B |
-| `bin:byok-pi-provider-launcher` | Provider credential custody launcher | `zod` | allowed | 215928 B |
+| `bin:byok-pi-provider-launcher` | Provider credential custody launcher | `zod` | allowed | 216003 B |
 | `bin:byok-pi-rpc` | Pi RPC launcher; host loads lazily | — | forbidden | 526 B |
 
 <!-- END generated: api-surface/entries.json -->

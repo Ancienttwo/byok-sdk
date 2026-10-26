@@ -9,6 +9,7 @@ import { InMemoryProviderProfileStore } from './profile-store';
 import { TruthStoreProviderProfileStore } from './truth-profile-store';
 import { ProviderRegistry } from './registry';
 import { InMemorySecretStore } from './secret-store';
+import { ModelProviderProfileSchema } from './provider-profile';
 
 const profileInput = {
   adapter: 'openai_compatible', auth_mode: 'none', base_url: 'http://127.0.0.1:9191/v1',
@@ -125,6 +126,7 @@ describe('Pi compat keys added for the pinned pi-ai catalog', () => {
   it.each([
     ['openai-completions', 'supportsStrictMode'],
     ['openai-completions', 'requiresReasoningContentOnAssistantMessages'],
+    ['openai-completions', 'sendSessionAffinityHeaders'],
     ['openai-responses', 'supportsStrictMode'],
   ] as const)('admits %s compat.%s and projects it to Pi', (api, key) => {
     const pi_model = { ...PI_MODEL_FIXTURE, ...(api === 'openai-responses' ? { api } : {}),
@@ -142,10 +144,45 @@ describe('Pi compat keys added for the pinned pi-ai catalog', () => {
     expect(provider.models[0].compat).toEqual({ forceAdaptiveThinking: true });
   });
 
+  it('admits compat.sendSessionAffinityHeaders and compat.allowEmptySignature on an anthropic profile and projects both to Pi', () => {
+    const compat = { sendSessionAffinityHeaders: true, allowEmptySignature: false };
+    const profile = parseModelProviderProfile({ ...anthropicProfile, pi_model: { ...PI_MODEL_FIXTURE, compat } });
+    const provider = (buildPiProviderProjection(profile, 'pi-rpc') as any).providers['byok-sdk-test-zai'];
+    expect(provider.api).toBe('anthropic-messages');
+    expect(provider.models[0].compat).toEqual(compat);
+  });
+
+  it.each([
+    ['sendSessionAffinityHeaders', 'true'],
+    ['sendSessionAffinityHeaders', 1],
+    ['allowEmptySignature', 'false'],
+    ['allowEmptySignature', null],
+  ] as const)('rejects compat.%s set to %j, which Pi types as a boolean', (key, value) => {
+    const result = ModelProviderProfileSchema.safeParse({ ...anthropicProfile, pi_model: { ...PI_MODEL_FIXTURE, compat: { [key]: value } } });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => [issue.path.join('.'), issue.code]))
+      .toEqual([[`pi_model.compat.${key}`, 'invalid_type']]);
+  });
+
+  it('refuses sendSessionAffinityHeaders on the prepared entry, whose frozen wire does not carry it', () => {
+    const pi_model = { ...PI_MODEL_FIXTURE, compat: { ...PI_MODEL_FIXTURE.compat, sendSessionAffinityHeaders: true } };
+    const profile = parseModelProviderProfile({ ...profileInput, auth_mode: 'bearer', pi_model });
+    expect(() => assertPiPreparedProviderProfile(profile))
+      .toThrow(/declares Pi compat\.sendSessionAffinityHeaders; the prepared model wire does not carry these fields/);
+  });
+
+  it('refuses an allowEmptySignature profile on the prepared entry, which compiles no anthropic-messages request', () => {
+    const profile = parseModelProviderProfile({ ...anthropicProfile, pi_model: { ...PI_MODEL_FIXTURE, compat: { allowEmptySignature: true } } });
+    expect(() => assertPiPreparedProviderProfile(profile)).toThrow(/anthropic adapter; the prepared runtime entry compiles openai-completions only/);
+  });
+
   it.each([
     ['openai-completions forceAdaptiveThinking', profileInput, { compat: { forceAdaptiveThinking: true } }, /forceAdaptiveThinking does not apply to openai-completions/],
     ['openai-responses forceAdaptiveThinking', profileInput, { api: 'openai-responses', compat: { forceAdaptiveThinking: true } }, /forceAdaptiveThinking does not apply to openai-responses/],
     ['openai-responses requiresReasoningContentOnAssistantMessages', profileInput, { api: 'openai-responses', compat: { requiresReasoningContentOnAssistantMessages: true } }, /requiresReasoningContentOnAssistantMessages does not apply to openai-responses/],
+    ['openai-completions allowEmptySignature', profileInput, { compat: { allowEmptySignature: true } }, /allowEmptySignature does not apply to openai-completions/],
+    ['openai-responses allowEmptySignature', profileInput, { api: 'openai-responses', compat: { allowEmptySignature: true } }, /allowEmptySignature does not apply to openai-responses/],
+    ['openai-responses sendSessionAffinityHeaders', profileInput, { api: 'openai-responses', compat: { sendSessionAffinityHeaders: true } }, /sendSessionAffinityHeaders does not apply to openai-responses/],
   ] as const)('rejects %s', (_, base, override, message) => {
     expect(() => parseModelProviderProfile({ ...base, pi_model: { ...PI_MODEL_FIXTURE, ...override } })).toThrow(message);
   });
