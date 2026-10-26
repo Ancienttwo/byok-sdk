@@ -40,9 +40,11 @@
     `workspaceId` and `baseline`. The `byok-agent workspaces` command, the
     `git-workspace` daemon event and audit record, the doctor `workspace`
     check and the support bundle's `workspace` field are removed; an older
-    audit log's `git-workspace` lines are skipped as an unknown kind. The
-    daemon leaves `<storeDir>/git-workspaces.json` and old task directories
-    untouched.
+    audit log's `git-workspace` lines are skipped as an unknown kind.
+    `ProtectedClassId` and `RetentionClassId` lose `'workspace'`: storage
+    usage no longer reports a workspace class, and an older audit log's
+    `retention-failure` line for it is skipped. The daemon leaves
+    `<storeDir>/git-workspaces.json` and old task directories untouched.
   - `ByokServer.dispatch` takes only `AgentResumeDispatchInput` (`agentRef`
     and `sessionRef`); `LegacyDispatchInput` is removed. Fresh work uses
     `executions.submit`. Two `dispatch` refusal codes change, because the

@@ -42,7 +42,8 @@ reader and no capability negotiation between the two majors.
 - Git workspace mode is removed. `DaemonConfig.gitWorkspace`,
   `DaemonOverrides.gitWorkspace` and `DaemonConfig.workspaceRoot` raise
   `DaemonConfigFieldRemovedError`; delete them from the daemon config. The
-  `byok-agent workspaces` command is gone. The daemon leaves
+  `byok-agent workspaces` command is gone, and the `workspace` retention
+  class leaves `ProtectedClassId` and `RetentionClassId`. The daemon leaves
   `<storeDir>/git-workspaces.json` and old task directories untouched.
 - `Daemon.approve` and `Daemon.reject` take `{ approvalId }`.
 - Runtime adapters take `RuntimeTaskInput` from `@byok-sdk/client`. The wire
