@@ -727,10 +727,10 @@ export declare function readTaskAgentMessageDraft(stores: TenantStores, deviceId
  *     the previous one resolved has moved on, and the newest request is what
  *     an operator is being asked about (`hub.ts:1399`).
  *   - `approval_resolved(X)` CLEARS the slot when the slot's own id is `X`, or
- *     when the slot has no id at all (a pre-M5 daemon never reported one, so
- *     the resolution can only be about the single outstanding request). A
- *     resolution naming some OTHER id is about an approval already superseded
- *     and leaves the current slot standing (`hub.ts:1569`).
+ *     when the slot has no id at all (a request recorded before wire v4 named
+ *     none, so the resolution can only be about the single outstanding
+ *     request). A resolution naming some OTHER id is about an approval already
+ *     superseded and leaves the current slot standing (`hub.ts:1569`).
  *
  * Two ways there is legitimately nothing pending: the tail has no unresolved
  * request, or the tail is gone entirely — it is a bounded, TTL'd observation
@@ -764,10 +764,9 @@ export declare class StaleApprovalError extends Error {
 /** The one approval a task currently has outstanding. */
 export interface PendingApproval {
     /**
-     * The daemon's own id for this approval. ABSENT for a pre-M5 daemon that
-     * reported `task.await_approval` without one — the approval is still pending
-     * and still resolvable, it just cannot be targeted, so a caller-supplied
-     * `approvalId` proceeds untargeted exactly as it does on the server.
+     * The daemon's own id for this approval. Wire v4 requires one; it is ABSENT
+     * only on a request recorded before v4. A host decision refuses such a
+     * request, because a v4 `task.approve`/`task.reject` must name it.
      */
     readonly approvalId?: string;
     /** Immutable daemon envelope identity for this exact request observation. */
@@ -1403,7 +1402,7 @@ import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agen
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskOfferSealedPayload, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type TaskOfferWithToolsetsPayload, type TaskOfferWithToolsetsSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageV2Schema } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageV2Schema } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1558,17 +1557,6 @@ export type LimitedPublicRoute = {
 };
 /** `true` admits the request; `false` answers 429 before the handler or any store runs. */
 export type PublicRouteLimiter = (route: LimitedPublicRoute, request: Request) => boolean | Promise<boolean>;
-export interface EnqueueOfferInput {
-    /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
-    readonly taskId?: string;
-    readonly payload: TaskOfferPayload;
-}
-export interface EnqueueToolsetOfferInput {
-    /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
-    readonly taskId?: string;
-    /** Strict control payload containing logical ids only; executable MCP definitions are not part of this type. */
-    readonly payload: TaskOfferWithToolsetsPayload;
-}
 /**
  * Strict Agent dispatch input. The device path is intentionally a separate
  * argument on {@link ByokCloud.enqueueAgentOffer}; no legacy offer field is
@@ -1614,23 +1602,12 @@ export interface AgentEgressDispatchInput {
     readonly agentMessageContext?: AgentMessageServerContext;
 }
 /**
- * Sealed offer inputs (#654). Each sealed wire type has its own entry, as
+ * The sealed lane of {@link AgentDispatchInput} (#654). Resume-only, as the
+ * plaintext lane is. Each sealed wire type has its own input, as
  * {@link PreparedDispatchInput} does: a plaintext lane refuses `sealing` and
  * `sealed`, so a caller cannot reach the plaintext lane by a missing field,
  * and no lane strips a sealing policy.
  */
-export interface EnqueueSealedOfferInput {
-    /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
-    readonly taskId?: string;
-    readonly payload: TaskOfferSealedPayload;
-}
-/** The sealed lane of {@link EnqueueToolsetOfferInput} (#654). */
-export interface EnqueueSealedToolsetOfferInput {
-    /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
-    readonly taskId?: string;
-    readonly payload: TaskOfferWithToolsetsSealedPayload;
-}
-/** The sealed lane of {@link AgentDispatchInput} (#654). Resume-only, as the plaintext lane is. */
 export interface SealedAgentDispatchInput {
     /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
     readonly taskId?: string;
@@ -1740,10 +1717,6 @@ export interface ByokCloud {
         readonly productId: string;
         readonly ttlMs?: number;
     }): Promise<PairingCodeInfo>;
-    /** Host control plane: hand a device a frozen-v1 `task.offer`. The hosted replacement for `dispatch()` — a function, not a handle. */
-    enqueueOffer(tenant: TenantId, deviceId: string, input: EnqueueOfferInput): Promise<EnqueuedOffer>;
-    /** Host control plane: enqueue the additive fail-closed offer variant that requires local MCP toolsets. */
-    enqueueToolsetOffer(tenant: TenantId, deviceId: string, input: EnqueueToolsetOfferInput): Promise<EnqueuedOffer>;
     /**
      * Host control plane: enqueue a strict Agent resume offer to an explicit
      * device. Resume-only: the payload must carry an exact `sessionRef`, and one
@@ -1782,8 +1755,6 @@ export interface ByokCloud {
      * The plaintext siblings refuse `sealing` and `sealed` with
      * `coordination_input_invalid`.
      */
-    enqueueSealedOffer(tenant: TenantId, deviceId: string, input: EnqueueSealedOfferInput): Promise<EnqueuedOffer>;
-    enqueueSealedToolsetOffer(tenant: TenantId, deviceId: string, input: EnqueueSealedToolsetOfferInput): Promise<EnqueuedOffer>;
     enqueueSealedAgentOffer(tenant: TenantId, deviceId: string, input: SealedAgentDispatchInput): Promise<EnqueuedOffer>;
     enqueueSealedAgentEgressOffer(tenant: TenantId, deviceId: string, input: SealedAgentEgressDispatchInput): Promise<EnqueuedOffer>;
     submitSealedAgentExecution(tenant: TenantId, input: SealedAgentExecutionInput): Promise<EnqueuedOffer>;
@@ -1946,17 +1917,17 @@ export interface ByokCloud {
      *      terminal attempt, an unclaimed one, and a timeline with no unresolved
      *      request (expired or never written). Checked BEFORE targeting, so it
      *      still wins when both would apply;
-     *   3. `opts.approvalId` names an approval this task has already superseded
-     *      -> {@link StaleApprovalError}. When the daemon never reported an id
-     *      at all, the call proceeds untargeted, exactly as on the server.
+     *   3. the pending request has no `approvalId` (recorded before wire v4)
+     *      -> `task_not_awaiting_approval`;
+     *   4. `opts.approvalId` names an approval this task has already superseded
+     *      -> {@link StaleApprovalError}.
      *
      * Delivery is a best-effort notification, the same contract the wire message
      * has always had (`TaskApprovePayloadSchema`, `@byok-sdk/protocol`): the
      * enqueued envelope is durable, the runtime's response to it is observable
      * only through that task's own later messages. The outgoing `approvalId` is
-     * the pending request's id, else omitted; `opts.approvalId` is only compared
-     * against it (gate 3) and is never sent, even when the pending request has
-     * no id.
+     * the pending request's id; `opts.approvalId` is only compared against it
+     * (gate 4) and is never sent.
      */
     approveTask(tenant: TenantId, taskId: string, opts?: ApproveTaskOptions): Promise<EnqueuedAgentControl>;
     /**
@@ -3122,7 +3093,7 @@ export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud';
 export type { TaskAgentMessage } from './task-agent-message';
-export type { ByokCloud, ByokCloudOptions, LimitedPublicRoute, PublicRouteLimiter, AgentDispatchInput, AgentEgressDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, ProviderProvisioningNoticeInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, EnqueueSealedOfferInput, EnqueueSealedToolsetOfferInput, SealedAgentDispatchInput, SealedAgentEgressDispatchInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud';
+export type { ByokCloud, ByokCloudOptions, LimitedPublicRoute, PublicRouteLimiter, AgentDispatchInput, AgentEgressDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, ProviderProvisioningNoticeInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, SealedAgentDispatchInput, SealedAgentEgressDispatchInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud';
 export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections';
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
 export { inputPreparationCompletionKey, inputPreparationRequestKey, readInputPreparationStatus, recordInputPreparationCompletion, sameInputPreparationRequest, } from './input-preparations';
@@ -3191,6 +3162,8 @@ export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS,
 export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport, ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofReceiptRetentionOptions, } from './maintenance';
 export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
 export type { ReceiptRetentionClass } from './receipt-retention';
+export { ReceiptMigrationUnmappableError, WireV4LegacyTaskListMismatchError, assertWireV4MigrationConfirmed, hasUnnamedApproval, isWireV4MailboxBody, migrateWireV3Receipt, wireV3LegacyOfferReceiptKeys, wireV3LegacyOfferType, wireV4ReceiptKind, } from './wire-v4-receipt-migration';
+export type { WireV3LegacyTask, WireV4MigrationPreflight, WireV4ReceiptKind, WireV4ReceiptMigration, WireV4ReceiptMigrationResult, WireV4UnmappableRow, } from './wire-v4-receipt-migration';
 export type { ReceiptCollectExpiredInput } from './stores/ports';
 export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
 export { createInProcessMailboxWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS } from './stores/in-memory/mailbox-wake';
@@ -5338,3 +5311,124 @@ export declare class TruthCommitError extends Error {
     constructor(code: TruthCommitErrorCode, message: string, current?: unknown);
 }
 export declare function isTruthCommitError(value: unknown): value is TruthCommitError;
+// ==== @byok-sdk/cloud dist/wire-v4-receipt-migration.d.ts ====
+/**
+ * The store-independent half of the one-shot wire v3 -> v4 migration (#925).
+ * A store runner first lists, read-only, the legacy tasks and every row with
+ * no v4 form ({@link WireV4MigrationPreflight}). The operator passes the legacy
+ * task list back; the runner then deletes those tasks' rows and re-encodes the
+ * rest in one transaction, or changes nothing. It ships in 0.31.x only; 0.32.0
+ * removes it (#1017).
+ */
+import { type WireV4MigrationRefusal } from '@byok-sdk/protocol';
+export type WireV4ReceiptKind = 'offer' | 'terminal';
+/** Which migrated receipt family `key` belongs to, or `undefined` for every other receipt. */
+export declare function wireV4ReceiptKind(key: string): WireV4ReceiptKind | undefined;
+export type WireV4ReceiptMigration = 
+/** `body` is already readable under v4: a v4 terminal, an offer receipt whose type v4 keeps, or a redaction tombstone. */
+{
+    readonly outcome: 'unchanged';
+} | {
+    readonly outcome: 'migrated';
+    readonly body: string;
+} | {
+    readonly outcome: 'refused';
+    readonly refusal: WireV4MigrationRefusal;
+    readonly type?: string;
+};
+/**
+ * Migrates one stored receipt of a {@link WireV4ReceiptKind}. An offer receipt
+ * is `{ deviceId, type, payload }` without a wire version: it keeps its bytes
+ * when v4 keeps its type unchanged. A terminal receipt is a v3 envelope and is
+ * re-encoded under v4.
+ */
+export declare function migrateWireV3Receipt(kind: WireV4ReceiptKind, body: string): WireV4ReceiptMigration;
+/** What a store runner changed. */
+export interface WireV4ReceiptMigrationResult {
+    /** Receipts rewritten to v4 bytes. */
+    readonly migrated: number;
+    /** Offer and terminal receipts already readable under v4. */
+    readonly unchanged: number;
+    /** Legacy tasks whose rows were deleted. */
+    readonly deletedTasks: number;
+}
+/**
+ * A task offered as a v3 type that v4 removed (`task.offer`,
+ * `task.offer_with_toolsets` or their sealed twins). It has no AgentRef and no
+ * v4 form; after operator confirmation the migration deletes every row it owns.
+ */
+export interface WireV3LegacyTask {
+    readonly tenantId: string;
+    readonly taskId: string;
+    readonly deviceId: string;
+    /** The removed offer type, or `null` when the offer receipt was never recorded. */
+    readonly type: string | null;
+}
+/** A stored row the migration cannot carry into v4. Any one fails the run. */
+export type WireV4UnmappableRow = {
+    readonly kind: 'receipt';
+    readonly tenantId: string;
+    readonly key: string;
+    readonly receiptKind: WireV4ReceiptKind;
+    readonly refusal: WireV4MigrationRefusal;
+    readonly type?: string;
+}
+/** An approval request or resolution recorded without the approvalId v4 requires. */
+ | {
+    readonly kind: 'approval';
+    readonly tenantId: string;
+    readonly taskId: string;
+    readonly refusal: 'approval_id_missing';
+}
+/**
+ * A mailbox row of a non-legacy task that a v4 device would still receive
+ * as older wire bytes: pending, or an expired dead letter a store can replay.
+ */
+ | {
+    readonly kind: 'mailbox';
+    readonly tenantId: string;
+    readonly deviceId: string;
+    readonly seq: number;
+    readonly state: 'pending' | 'expired';
+    readonly refusal: 'wire_version_unsupported';
+};
+/** The read-only result an operator reviews before the migration changes anything. */
+export interface WireV4MigrationPreflight {
+    readonly legacyTasks: readonly WireV3LegacyTask[];
+    readonly unmappable: readonly WireV4UnmappableRow[];
+}
+/**
+ * The removed offer type an offer receipt holds, or `undefined`. A redaction
+ * tombstone keeps the original `type`, so a redacted legacy offer is still found.
+ */
+export declare function wireV3LegacyOfferType(body: string): string | undefined;
+/**
+ * The offer receipt keys of a task offered without an AgentRef, as a v3 build
+ * derived them. Every legacy task was offered this way.
+ */
+export declare function wireV3LegacyOfferReceiptKeys(tenantId: string, taskId: string, deviceId: string): Promise<{
+    readonly offer: string;
+    readonly delivered: string;
+}>;
+/** True when a stored mailbox envelope is wire v4 bytes. */
+export declare function isWireV4MailboxBody(body: string): boolean;
+/** True when a stored approval timeline entry list names an approval without an id. */
+export declare function hasUnnamedApproval(entries: unknown): boolean;
+/** The migration changed nothing because these rows have no v4 form. */
+export declare class ReceiptMigrationUnmappableError extends Error {
+    readonly unmappable: readonly WireV4UnmappableRow[];
+    readonly code = "wire_v4_migration_unmappable";
+    constructor(unmappable: readonly WireV4UnmappableRow[]);
+}
+/** The confirmed legacy task list differs from the one this store holds; nothing was changed. */
+export declare class WireV4LegacyTaskListMismatchError extends Error {
+    readonly found: readonly WireV3LegacyTask[];
+    readonly confirmed: readonly WireV3LegacyTask[];
+    readonly code = "wire_v4_legacy_task_list_mismatch";
+    constructor(found: readonly WireV3LegacyTask[], confirmed: readonly WireV3LegacyTask[]);
+}
+/**
+ * Fails closed unless the store has no unmappable row and the operator
+ * confirmed exactly the legacy tasks the preflight found.
+ */
+export declare function assertWireV4MigrationConfirmed(preflight: WireV4MigrationPreflight, confirmedLegacyTasks: readonly WireV3LegacyTask[]): void;

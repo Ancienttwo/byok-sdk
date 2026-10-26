@@ -116,6 +116,7 @@ export { TENANT_ERASURE_ERROR_CODES, TENANT_ERASURE_TABLES, PostgresTenantErasur
 export type { PostgresTenantErasureCompositionOptions, PostgresTenantErasureOptions, TenantErasureConflict, TenantErasureErrorCode, TenantErasureReadback, TenantErasureResult, TenantErasureStatus, } from './tenant-erasure';
 export { createPostgresMailboxWake } from './mailbox-wake';
 export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake';
+export { migratePostgresToWireV4, preflightPostgresWireV4Migration } from './wire-v4-receipt-migration';
 // ==== @byok-sdk/cloud-dataplane dist/mailbox-wake.d.ts ====
 import { type MailboxWake } from '@byok-sdk/cloud';
 export interface PostgresMailboxWakeOptions {
@@ -1665,3 +1666,25 @@ export declare class PostgresTruthCommitter implements TruthCommitter {
     listManifest(tenant: TenantId, query: Parameters<TruthCommitter['listManifest']>[1]): Promise<readonly import("@byok-sdk/core").TruthManifestEntry[]>;
     commit(tenant: TenantId, input: TruthCommitInput): Promise<TruthCommitResult>;
 }
+// ==== @byok-sdk/cloud-dataplane dist/wire-v4-receipt-migration.d.ts ====
+/**
+ * The Postgres runner of the one-shot wire v3 -> v4 migration (#925). An
+ * operator runs it once, after draining v3 work and before starting a v4
+ * cloud: {@link preflightPostgresWireV4Migration} lists, read-only, the legacy
+ * tasks and every row with no v4 form; {@link migratePostgresToWireV4} takes
+ * the confirmed legacy task list back and changes the store in one
+ * transaction, or not at all. It ships in 0.31.x only; 0.32.0 removes it
+ * (#1017).
+ */
+import { type WireV3LegacyTask, type WireV4MigrationPreflight, type WireV4ReceiptMigrationResult } from '@byok-sdk/cloud';
+import type { Pool } from 'pg';
+/** Lists the legacy tasks and every unmappable row. Changes nothing. */
+export declare function preflightPostgresWireV4Migration(pool: Pool): Promise<WireV4MigrationPreflight>;
+/**
+ * Migrates the store when the preflight finds no unmappable row and
+ * `confirmedLegacyTasks` is exactly the preflight's legacy task list: deletes
+ * every row of those tasks, then re-encodes the remaining offer and terminal
+ * receipts, in one transaction. Otherwise it throws and changes nothing.
+ * Writers must be stopped while it runs.
+ */
+export declare function migratePostgresToWireV4(pool: Pool, confirmedLegacyTasks: readonly WireV3LegacyTask[]): Promise<WireV4ReceiptMigrationResult>;

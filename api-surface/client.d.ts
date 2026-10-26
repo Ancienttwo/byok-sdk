@@ -2790,9 +2790,8 @@ export declare class AgentSessionHandoffMismatchError extends AgentSessionHandof
 /**
  * Durable, fail-closed session evidence stored inside the canonical Agent
  * home. Each session gets one hash-addressed append-only JSONL ledger under
- * `.byok/runtime-sessions/`; session text never becomes a pathname. Unlike
- * the legacy SessionWorkspaceStore, corrupt bytes are never interpreted as a
- * missing mapping. Reader sessions keep their ledger in the home too, not in
+ * `.byok/runtime-sessions/`; session text never becomes a pathname. Corrupt
+ * bytes are never interpreted as a missing mapping. Reader sessions keep their ledger in the home too, not in
  * their run directory, so a resume can find the run directory by sessionRef.
  */
 export declare class AgentSessionHandoffStore {
@@ -2864,7 +2863,7 @@ export declare class AgentSessionHandoffStore {
  */
 export type ApprovalDecision = 'approve' | 'reject';
 /**
- * M4 (additive-minor, `task.approval_resolved`): distinguishes a resolution
+ * Distinguishes a resolution
  * that arrived over the wire (a server-sent `task.approve`/`task.reject`,
  * relayed here via `RuntimeOperationStartInput.approvalChannel.resolve` — `task-runner.ts`'s
  * `handleOffer`) from one this device decided on its own (the local
@@ -2873,8 +2872,8 @@ export type ApprovalDecision = 'approve' | 'reject';
  * this to decide whether to report `task.approval_resolved` back to the
  * server: a wire-triggered resolution is something the server already knows
  * about (it sent the decision itself) and must never be echoed back;
- * everything else is new information only the device has, and — capability
- * permitting — gets reported. `'local'` is the default (see `resolve()`
+ * everything else is new information only the device has, and gets
+ * reported. `'local'` is the default (see `resolve()`
  * below) precisely because it's the common case: every call site in this
  * module and `task-runner.ts` except the one wire-relay closure is local by
  * construction.
@@ -3552,14 +3551,10 @@ export declare class ConnectionManager {
     /**
      * Findings F2 + F3. Two rules, both pinned in docs/protocol.md §1.2/§9:
      *
-     * - F2 (redelivery dead on reconnect): cursor accounting covers ONLY
-     *   `task.*` envelopes. `conn.ack` carries a `seq` too (required by the
-     *   schema for schema uniformity across every server->daemon type), but a
-     *   reconnecting server sends it BEFORE replaying the backlog and always
-     *   assigns it the next (i.e. highest-so-far) per-device seq — advancing
-     *   the cursor for it would make every backlog envelope's (necessarily
-     *   lower) seq look already-delivered and drop it. `conn.*` envelopes
-     *   never advance the cursor.
+     * - F2 (redelivery dead on reconnect): cursor accounting covers only
+     *   work envelopes. `conn.*` envelopes never advance the cursor, so a
+     *   handshake frame can never make a backlog envelope's lower seq look
+     *   already delivered.
      * - F3 (at-most-once): the old code persisted the cursor advance BEFORE
      *   `onEnvelope` even ran (fire-and-forget) — a handler that then failed
      *   left a redelivery-proof envelope permanently marked processed. Inbound
@@ -4228,7 +4223,7 @@ import type { OutboundStatus } from './outbound-settlement';
 import { type RuntimeObservation } from '../runtime-detection';
 import { type ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
-import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
+import type { RuntimeAdapter, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
@@ -4238,8 +4233,6 @@ import { type ControlStorageStatus } from './control-protocol';
 import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation';
 import { type OperationalHealthSnapshot } from './operational-health';
 import { type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
-import { GitWorkspaceManager } from './git-workspace';
-import { GitWorkspaceStore } from './git-workspace-store';
 import { type DeviceEnrollment } from './store';
 import { type LocalTaskJournal } from './journal/journal';
 import type { JournalOpenFaultSeam } from './journal/sqlite-support';
@@ -4294,13 +4287,6 @@ export interface DaemonConfig {
      */
     machineId?: () => Promise<string | undefined>;
     /**
-     * Parent directory of each legacy offer's `workspaceRoot/<taskId>`
-     * workspace, and of Git workspace mode. Required unless `strictAgentOnly`
-     * is true: a strict Agent daemon refuses every legacy offer and runs each
-     * Agent offer in its SDK-owned home, so it never reads this path.
-     */
-    workspaceRoot?: string;
-    /**
      * Strict Agent execution boundary. The host selects one absolute branded
      * storage root; the SDK alone composes `agents/<agentId>`, initializes the
      * durable home, and binds it as runtime cwd. `projection` may write opaque,
@@ -4326,11 +4312,6 @@ export interface DaemonConfig {
      * must also call `runSdkReservedHelperCommand()` before its own CLI parser.
      */
     sdkHelperHost?: SdkHelperHostConfig;
-    /**
-     * Refuse legacy task offers locally. This is an additive capability only
-     * after the SDK-owned Agent home has passed construction-time preflight.
-     */
-    strictAgentOnly?: boolean;
     /**
      * How many `homeAccess: 'memory-reader'` Attempts this daemon lets run
      * CONCURRENTLY in one canonical Agent home, across every lane and every
@@ -4358,12 +4339,6 @@ export interface DaemonConfig {
      * policy/reliable protocol surface.
      */
     agentEgress?: AgentEgressConfig;
-    /**
-     * Disabled by default. Enables local-only Git checkpoint repositories for
-     * legacy task workspaces. Mutually exclusive with `agentHome`: strict Agent
-     * execution has one canonical workspace authority.
-     */
-    gitWorkspace?: GitWorkspaceConfig;
     /**
      * Restricts which runtimes this daemon will ever use — enforced in two
      * places that must stay consistent: `createDaemon` (this file) builds its
@@ -4824,11 +4799,18 @@ export interface Daemon {
      * exactly as an honest, doing-nothing-magic implementation should. Ready
      * for the day a runtime adapter implements real interactive approval, with
      * no further changes needed here. A no-op (resolves immediately) for a
-     * `taskId` this daemon doesn't currently have active.
+     * `taskId` this daemon doesn't currently have active. `approvalId` names
+     * the pending approval, as a wire v4 decision does; a different id is a
+     * stale decision and changes nothing.
      */
-    approve(taskId: string): Promise<void>;
+    approve(taskId: string, opts: {
+        approvalId: string;
+    }): Promise<void>;
     /** M3-2a: same as {@link approve} but rejects — see that method's doc comment. */
-    reject(taskId: string, reason?: string): Promise<void>;
+    reject(taskId: string, opts: {
+        approvalId: string;
+        reason?: string;
+    }): Promise<void>;
 }
 /** Custom adapter composition. Available custom descriptors are published through
  * the capability-gated harness inventory; built-in RuntimeId remains closed. */
@@ -4859,15 +4841,6 @@ export interface DaemonOverrides {
         retryDelayMs?: number;
         /** Minimum delay before the next long-poll request after an empty (no-events) response — avoids busy-looping against a server that responds instantly. Default 250ms. */
         idleDelayMs?: number;
-    };
-    /**
-     * Test/product injection seam for the local Git workspace boundary. The
-     * supplied manager/store are used only when `config.gitWorkspace` is enabled;
-     * an absent Git config therefore cannot accidentally activate either object.
-     */
-    gitWorkspace?: {
-        manager?: GitWorkspaceManager;
-        store?: GitWorkspaceStore;
     };
     /**
      * A durable local journal the host supplies instead of `SqliteLocalTaskJournal`
@@ -5184,21 +5157,6 @@ export type DaemonRecord = Extract<DaemonEvent, {
     decision: 'approve' | 'reject';
     reasonBytes?: number;
 } | {
-    kind: 'git-workspace';
-    ts: string;
-    taskId: string;
-    workspaceId: string;
-    phase: string;
-    headChanged?: boolean;
-    commitsSinceBaseline?: number;
-    dirty?: {
-        staged: number;
-        unstaged: number;
-        untracked: number;
-        conflicted: number;
-    };
-    errorCategory?: string;
-} | {
     kind: 'runtime-disposal-failed';
     ts: string;
     taskId: string;
@@ -5280,14 +5238,6 @@ export interface DaemonRecordProjector {
     /** Closes every open turn (`closedBy: 'stop'`) — call once the daemon has stopped. */
     flush(ts: string): DaemonRecord[];
 }
-/**
- * Git failures are recorded only from this closed set, projected from
- * `GIT_ERROR_CATEGORIES` (`git-workspace.ts`), never as raw Git errors.
- *
- * @internal Exported for the drift-guard test only (never re-exported from
- * `index.ts`).
- */
-export declare const STABLE_GIT_ERROR_CATEGORIES: Set<string>;
 /** The one closed environment shape, shared by projection and persistent/live readers. */
 export declare function parseEnvironmentRecord(value: unknown): ServiceEnvironmentRecord | undefined;
 /**
@@ -5656,158 +5606,6 @@ export declare class ExecutionRecordAccumulator {
     private openCall;
     private answerCall;
 }
-// ==== @byok-sdk/client dist/daemon/git-workspace-store.d.ts ====
-import type { GitErrorCategory, GitWorkspaceObservation } from './git-workspace';
-export type GitWorkspacePhase = 'preparing' | 'active' | 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'salvage';
-export interface GitWorkspaceLedgerRecord {
-    workspaceId: string;
-    taskId: string;
-    workspaceDir: string;
-    sessionRef?: string;
-    phase: GitWorkspacePhase;
-    baseline?: string;
-    current?: string;
-    commitsSinceBaseline: number;
-    staged: number;
-    unstaged: number;
-    untracked: number;
-    conflicted: number;
-    createdAt: string;
-    updatedAt: string;
-    errorCategory?: GitErrorCategory;
-}
-export interface GitWorkspaceLedger {
-    version: 1;
-    records: GitWorkspaceLedgerRecord[];
-}
-/** Private, versioned, serialized recovery ledger for local Git workspaces. */
-export declare class GitWorkspaceStore {
-    readonly storeDir: string;
-    readonly filePath: string;
-    private queue;
-    private readonly maxRecords;
-    constructor(storeDir: string, options?: {
-        maxRecords?: number;
-    });
-    initialize(): Promise<void>;
-    list(): Promise<GitWorkspaceLedgerRecord[]>;
-    get(workspaceId: string): Promise<GitWorkspaceLedgerRecord | undefined>;
-    findBySession(sessionRef: string): Promise<GitWorkspaceLedgerRecord | undefined>;
-    findBySessionAnyPhase(sessionRef: string): Promise<GitWorkspaceLedgerRecord | undefined>;
-    attachSession(workspaceId: string, sessionRef: string): Promise<void>;
-    upsert(record: GitWorkspaceLedgerRecord): Promise<void>;
-    updateObservation(workspaceId: string, observation: GitWorkspaceObservation, phase?: GitWorkspacePhase, errorCategory?: GitErrorCategory): Promise<void>;
-    /** Marks old preparation/active records interrupted without reviving protocol tasks. */
-    reconcile(validate?: (record: GitWorkspaceLedgerRecord) => Promise<boolean>): Promise<void>;
-    private prune;
-    private enqueue;
-    private load;
-    private save;
-}
-export declare const GIT_WORKSPACE_LEDGER_FILE = "git-workspaces.json";
-export declare const GIT_WORKSPACE_LEDGER_MAX_RECORDS = 500;
-// ==== @byok-sdk/client dist/daemon/git-workspace.d.ts ====
-export interface GitWorkspaceConfig {
-    mode: 'local-checkpoints';
-}
-export type GitErrorCategory = 'git-unavailable' | 'git-timeout' | 'git-output-limit' | 'git-command-failed' | 'workspace-root-invalid' | 'workspace-root-conflict' | 'workspace-not-owned' | 'repository-root-mismatch' | 'repository-invalid' | 'lease-busy' | 'ledger-invalid';
-/**
- * Runtime projection of {@link GitErrorCategory}: every union member, once,
- * in union order — the single source of truth the CLI's stable-output
- * validators (`bin/format.ts`, `bin/audit-log.ts`, `bin/tasks-view.ts`,
- * `bin/commands/workspaces.ts`) project from when deciding which category
- * strings from ledger records are stable enough to render, so those filters
- * can never drift from the union. The `satisfies` half rejects a string
- * that isn't a union member; the `AssertExhaustive` proof below rejects a
- * union member missing from this list — extending either side alone is a
- * compile error. The runtime half (no duplicates, every consumer projects
- * exactly this list) is `__tests__/git-category-drift.test.ts`.
- */
-export declare const GIT_ERROR_CATEGORIES: readonly ["git-unavailable", "git-timeout", "git-output-limit", "git-command-failed", "workspace-root-invalid", "workspace-root-conflict", "workspace-not-owned", "repository-root-mismatch", "repository-invalid", "lease-busy", "ledger-invalid"];
-/**
- * Runtime projection of `GitWorkspacePhase` (the type itself lives in
- * `git-workspace-store.ts`; the projection lives here beside
- * {@link GIT_ERROR_CATEGORIES} so both category/phase single sources ship
- * from one module) — same exhaustiveness contract, consumed by
- * `bin/tasks-view.ts`'s phase filter.
- */
-export declare const GIT_WORKSPACE_PHASES: readonly ["preparing", "active", "completed", "failed", "cancelled", "interrupted", "salvage"];
-export declare class GitWorkspaceError extends Error {
-    readonly category: GitErrorCategory;
-    constructor(category: GitErrorCategory, message?: string);
-}
-export interface GitCommandResult {
-    code: number;
-    stdout: string;
-    stderr: string;
-}
-export interface GitCommandOptions {
-    cwd?: string;
-    timeout?: number;
-    maxBuffer?: number;
-    env?: NodeJS.ProcessEnv;
-}
-export type GitRunner = (args: readonly string[], options?: GitCommandOptions) => Promise<GitCommandResult>;
-declare const DEFAULT_TIMEOUT_MS = 5000;
-declare const DEFAULT_MAX_OUTPUT_BYTES: number;
-export declare function stableGitWorkspaceOwnerId(storeDir: string, productId: string): string;
-/** A bounded, no-shell runner for the small Git command allowlist. */
-export declare const defaultGitRunner: GitRunner;
-export interface GitWorkspaceOptions {
-    run?: GitRunner;
-    timeoutMs?: number;
-    maxOutputBytes?: number;
-    platform?: NodeJS.Platform;
-    ownerId?: string;
-}
-export interface GitWorkspaceObservation {
-    workspaceDir: string;
-    head?: string;
-    baseline?: string;
-    headChanged: boolean;
-    commitsSinceBaseline: number;
-    staged: number;
-    unstaged: number;
-    untracked: number;
-    conflicted: number;
-}
-export interface GitWorkspaceLease {
-    readonly workspaceDir: string;
-    readonly sessionRef?: string;
-    release(): void;
-}
-/** Local Git checkpoint manager. It never invokes a shell or mutating Git command other than init. */
-export declare class GitWorkspaceManager {
-    readonly workspaceRoot: string;
-    readonly ownerId: string;
-    private readonly run;
-    private readonly timeoutMs;
-    private readonly maxOutputBytes;
-    private readonly platform;
-    constructor(workspaceRoot: string, options?: GitWorkspaceOptions);
-    static validateConfig(value: unknown): GitWorkspaceConfig | undefined;
-    preflight(): Promise<void>;
-    ensureOwnerMarker(): Promise<void>;
-    prepareFresh(workspaceDir: string): Promise<GitWorkspaceObservation>;
-    /** Validate an already prepared repository without creating directories or running mutating Git commands. */
-    validateExisting(workspaceDir: string): Promise<GitWorkspaceObservation>;
-    observe(workspaceDir: string, baseline?: string): Promise<GitWorkspaceObservation>;
-    acquireLease(workspaceDir: string, sessionRef?: string): Promise<GitWorkspaceLease>;
-    static guidance(): string;
-    static prependGuidance(instruction: string): string;
-    private commandOptions;
-    private read;
-    private readTopLevel;
-    private assertTaskRoot;
-    private assertExistingAncestry;
-    private assertExistingTaskRoot;
-}
-export declare const GIT_WORKSPACE_OWNER_MARKER = ".byok-git-workspace-owner.json";
-export declare const LOCAL_GIT_WORKSPACE_GUIDANCE: string;
-export declare function prependGitWorkspaceGuidance(instruction: string): string;
-export declare function isGitWorkspaceConfig(value: unknown): value is GitWorkspaceConfig;
-export declare function canonicalWorkspaceRoot(value: string): Promise<string>;
-export { DEFAULT_MAX_OUTPUT_BYTES as GIT_WORKSPACE_MAX_OUTPUT_BYTES, DEFAULT_TIMEOUT_MS as GIT_WORKSPACE_TIMEOUT_MS };
 // ==== @byok-sdk/client dist/daemon/input-preparation-retirement.d.ts ====
 /**
  * The bounded, operator-invoked retirement of an input-preparation namespace
@@ -6674,9 +6472,8 @@ export interface WithheldOfferTask extends Omit<RecoverableTask, 'envelopeBytes'
 /**
  * What recovery decided about a task. `interrupted` is the honest default for
  * a daemon restart: local runtime sessions do not survive the process, so the
- * task is recorded as interrupted rather than pretended back into life — the
- * same semantics `GitWorkspaceStore.reconcile()` already applies to a lease
- * whose owner is gone. Nothing here deletes anything; a row that has been
+ * task is recorded as interrupted rather than pretended back into life.
+ * Nothing here deletes anything; a row that has been
  * through recovery carries a marker, and §12.7.2.1 forbids auto-deleting
  * those.
  */
@@ -7377,21 +7174,6 @@ export type DaemonEvent = ({
     decision: 'approve' | 'reject';
     reason?: string;
 } | {
-    kind: 'git-workspace';
-    ts: string;
-    taskId: string;
-    workspaceId: string;
-    phase: string;
-    headChanged?: boolean;
-    commitsSinceBaseline?: number;
-    dirty?: {
-        staged: number;
-        unstaged: number;
-        untracked: number;
-        conflicted: number;
-    };
-    errorCategory?: string;
-} | {
     kind: 'runtime-disposal-failed';
     ts: string;
     taskId: string;
@@ -7612,20 +7394,6 @@ export declare class DaemonObserver {
     }): void;
     /** M4 Phase 3 hardening: see the `stale-approval-decision` `DaemonEvent` variant's own doc comment. */
     noteStaleApprovalDecision(taskId: string, decision: 'approve' | 'reject', reason?: string): void;
-    noteGitWorkspace(event: {
-        taskId: string;
-        workspaceId: string;
-        phase: string;
-        headChanged?: boolean;
-        commitsSinceBaseline?: number;
-        dirty?: {
-            staged: number;
-            unstaged: number;
-            untracked: number;
-            conflicted: number;
-        };
-        errorCategory?: string;
-    }): void;
     /** WP2I-S2: see the `agent-memory-intent-integrity` `DaemonEvent` variant's own doc comment. */
     noteAgentMemoryIntentIntegrity(event: {
         intentId: string;
@@ -8355,82 +8123,6 @@ export declare class SealedTasks {
     /** The closed plaintext form of a terminal that has no sealing key (decision 12d). */
     unsealable(envelope: Envelope): Envelope | undefined;
 }
-// ==== @byok-sdk/client dist/daemon/session-workspace-store.d.ts ====
-/** What's recoverable for a given `sessionRef` — see the class doc comment. */
-export interface SessionWorkspaceRecord {
-    workspaceDir: string;
-    /**
-     * The underlying runtime's own resumable session identifier.
-     */
-    runtimeSessionId: string;
-    /** Additive workspace kind; missing legacy values remain plain. */
-    workspaceKind?: 'plain' | 'git';
-    /** Opaque private Git workspace ledger identifier. */
-    gitWorkspaceId?: string;
-}
-/**
- * Persists `sessionRef -> {workspaceDir, runtimeSessionId}` across daemon
- * restarts (finding #3 from the 2026-07-16 live GLM run): a `task.offer`
- * carrying a `sessionRef` this device has previously reported (via a prior
- * task's `task.complete.sessionRef`) reuses that exact workspace directory
- * as the new task's cwd — which is what lets a runtime adapter's own resume
- * mechanism (e.g. pi's `--session <id>`, scoped to the cwd/project a session
- * was created under — see pi-adapter.ts) actually find the session again.
- * An unknown or absent `sessionRef` is simply not in this map, and
- * `task-runner.ts` treats that identically to "no sessionRef was ever
- * offered" — fresh workspace, fresh session.
- *
- * One JSON file under `storeDir`, mirroring `DeviceStore`/`CursorStore`'s
- * own persistence style: always read/write straight through to disk, no
- * in-memory cache that could go stale or need invalidating across multiple
- * `TaskRunner`/daemon instances sharing the same `storeDir` (exactly the
- * "map persisted across daemon restart" requirement).
- *
- * Two correctness properties `task-runner.ts` depends on, neither of which
- * a bare `fs.writeFile` + independent `fs.readFile` calls actually gives
- * you:
- *
- * 1. **No torn reads.** `record()` is deliberately fire-and-forgotten from
- *    `handleOffer` (see its call site) — it must never block `task.started`
- *    on a disk write. But a bare `fs.writeFile` is not atomic: it truncates
- *    the file before writing the new bytes, so a `get()` racing an
- *    in-flight `record()` on another task's offer can `JSON.parse` a
- *    half-written file, fail, and silently fall back to `{}` (see `load()`)
- *    — resolving what should have been a resume to a fresh workspace.
- *    `save()` below instead writes to a private temp file in the same
- *    directory and `fs.rename`s it onto the real path, which POSIX
- *    guarantees is atomic when both paths share a filesystem (true here —
- *    same directory): any concurrent reader sees either the fully-old or
- *    fully-new bytes, never a partial write.
- * 2. **No lost updates.** Two `record()` calls for two different
- *    `sessionRef`s that overlap (both `load()` the same on-disk snapshot,
- *    each mutate their own key into their own in-memory copy, then `save()`
- *    back to back) would otherwise let the second `save()` overwrite the
- *    first's key with a snapshot that never saw it — each individual
- *    `save()` being atomic does not prevent this. `enqueue()` below chains
- *    every `get()`/`record()` through one serial promise queue per
- *    instance, so no two load-modify-save cycles (or a read and a
- *    concurrent write) ever interleave.
- */
-export declare class SessionWorkspaceStore {
-    private readonly filePath;
-    /**
-     * Serial "mutex" queue: every `get()`/`record()` chains its work off this
-     * promise and replaces it, so operations on this instance always run
-     * one-at-a-time, in call order — never interleaved. The queue's own tail
-     * is never allowed to reject (a failed task must not wedge every
-     * subsequent caller behind a rejected promise); the failure still
-     * propagates to that call's own caller via the returned promise.
-     */
-    private queue;
-    constructor(storeDir: string);
-    get(sessionRef: string): Promise<SessionWorkspaceRecord | undefined>;
-    record(sessionRef: string, entry: SessionWorkspaceRecord): Promise<void>;
-    /** See the class doc comment's "no lost updates" property. */
-    private enqueue;
-    private load;
-    private save;
-}
 // ==== @byok-sdk/client dist/daemon/skill-pack-installer.d.ts ====
 import { type CapabilityDeclaration } from '@byok-sdk/core';
 import type { AuthManager } from './auth-manager';
@@ -8713,7 +8405,7 @@ export declare function readDeviceEnrollmentIdentity(options: DeviceEnrollmentSt
 import { type ResultReplyFailure } from './result-reply-failure';
 import type { ActivityIngress } from '@byok-sdk/protocol';
 import type { ScratchRoot } from './retention/scratch';
-import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type RuntimeId, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type RuntimeId, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload } from '@byok-sdk/protocol';
 import { type McpStdioServerConfig, type McpToolsetConfig, type RuntimeAdapter } from '../types';
 import type { InputPreparationStore } from './input-preparation-store';
 import { type InputPreparationRuntimeIdentityV1, type InputPreparationBindingV1 } from '../input-preparation';
@@ -8727,9 +8419,6 @@ import type { AgentResultDescribeParams, AgentResultDescribeResult, AgentResultS
 import { type ExecutionRecord } from './execution-record';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import { type ProgressBatcherOptions } from './progress-batcher';
-import type { SessionWorkspaceStore } from './session-workspace-store';
-import type { GitWorkspaceManager, GitWorkspaceObservation } from './git-workspace';
-import type { GitWorkspaceStore, GitWorkspacePhase } from './git-workspace-store';
 import type { AgentEgressController } from './agent-egress-controller';
 import { type McpToolsProbeOptions } from './mcp-tools-probe';
 import { type McpServerObservation } from '../mcp/observation';
@@ -8940,12 +8629,8 @@ export interface TaskRunnerDeps {
         /** `toolsetId` -> definition revision, from one registry read per call. */
         readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
     };
-    /** Parent of legacy `workspaceRoot/<taskId>` workspaces. Required unless `strictAgentOnly` is true. */
-    workspaceRoot?: string;
-    /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
+    /** Agent offer authority. Absent, every offer is declined. */
     agentHome?: AgentHomeManager;
-    /** Local authority: legacy offers are declined after journal/dedup/cancel precedence. */
-    strictAgentOnly?: boolean;
     /**
      * How many `memory-reader` Attempts may run concurrently in ONE canonical
      * Agent home — see `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`'s
@@ -8967,23 +8652,6 @@ export interface TaskRunnerDeps {
     beforeClaim?: (taskId: string, runtime: string) => Promise<void>;
     blobClient: BlobResolver;
     batcherOptions?: ProgressBatcherOptions;
-    /**
-     * Finding #3 (session/workspace continuity): persists `sessionRef ->
-     * workspaceDir` across daemon restarts so a `task.offer` naming a
-     * previously-reported `sessionRef` reuses that exact workspace instead of
-     * a fresh `workspaceRoot/<taskId>` — see `handleOffer` and
-     * `SessionWorkspaceStore`'s own doc comment.
-     */
-    sessionWorkspaces: SessionWorkspaceStore;
-    gitWorkspaceManager?: GitWorkspaceManager;
-    gitWorkspaceStore?: GitWorkspaceStore;
-    onGitWorkspaceEvent?: (event: {
-        taskId: string;
-        workspaceId: string;
-        phase: GitWorkspacePhase;
-        observation?: GitWorkspaceObservation;
-        errorCategory?: string;
-    }) => void;
     /** Local-only evidence that a semantic terminal outcome could not yet release its runtime ownership. */
     onRuntimeDisposalFailure?: (event: {
         taskId: string;
@@ -9090,9 +8758,8 @@ export interface TaskRunnerDeps {
      */
     maxInlineEventBytes?: number;
     /**
-     * M4 (additive-minor, `task.approval_resolved`): the capabilities advertised
-     * by the CURRENT transport's server (`conn.ack` on WS, the latest successful
-     * events response on long-poll) — read fresh at call time (mirrors
+     * The capabilities advertised by the server on the latest successful
+     * long-poll events response — read fresh at call time (mirrors
      * `getCursor`/`getToken`'s own
      * "read fresh, not captured once" convention elsewhere in this codebase),
      * since the capability is learned asynchronously, after this `TaskRunner`
@@ -9100,7 +8767,7 @@ export interface TaskRunnerDeps {
      * before `connection` exists). `create-daemon.ts` wires this to
      * `ConnectionManager.getServerCapabilities`. Optional, and treated as "no
      * capabilities" when absent, so a minimal test harness that doesn't care
-     * about this gate isn't forced to supply one — see `sendApprovalResolved`.
+     * about these gates isn't forced to supply one.
      */
     getServerCapabilities?: () => readonly string[];
     /**
@@ -9209,7 +8876,7 @@ export type AdmissionGuardDecision = {
     readonly reason: string;
     readonly retryable: boolean;
 };
-type AcceptedOfferPayload = TaskOfferPayload | TaskOfferWithToolsetsPayload | TaskOfferForAgentPayload | TaskOfferForAgentWithEgressPayload | TaskOfferForAgentWithEgressFreshPayload | TaskOfferPreparedPayload;
+type AcceptedOfferPayload = TaskOfferForAgentPayload | TaskOfferForAgentWithEgressPayload | TaskOfferForAgentWithEgressFreshPayload | TaskOfferPreparedPayload;
 /**
  * The SDK-owned environment variable that carries one host toolset server's
  * `BYOK_HOST_TOOLSET_CONTEXT` nonce (contract §8.1).
@@ -9427,8 +9094,6 @@ export declare class TaskRunner {
      */
     private stoppingOffers;
     constructor(deps: TaskRunnerDeps);
-    /** A legacy offer's workspace. Only a non-strict runner admits one, and its constructor required the root. */
-    private legacyWorkspaceDir;
     get activeTaskCount(): number;
     /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
     private get maxTaskOutputBytes();
@@ -9865,14 +9530,10 @@ export declare class TaskRunner {
      */
     private dispatchApproval;
     /**
-     * M4 (additive-minor, `task.approval_resolved` — see `messages.ts`'s own
-     * doc comment on `TaskApprovalResolvedPayloadSchema` for the full wire
-     * rationale): report a LOCALLY-resolved approval to the server
-     * immediately, gated on the negotiated `approval_resolved` capability
-     * (`deps.getServerCapabilities` — an old server that never advertises it
-     * never receives this message; the daemon then falls back to the
-     * pre-existing implicit-resume inference, unconditionally, exactly as
-     * before this message existed — the N/N-1 compatibility path).
+     * Report a LOCALLY-resolved approval to the server immediately (see
+     * `messages.ts`'s doc comment on `TaskApprovalResolvedPayloadSchema`).
+     * Baseline since wire v4: every server reads it, and it is the server's
+     * only source for a local resolution.
      *
      * Ordering (verified by `task-runner-approval-resolved.test.ts`): this is
      * called, and therefore `deps.send` pushes this envelope onto the outbox,
@@ -10064,8 +9725,6 @@ export declare class TaskRunner {
      * document. Failure, cancel and interrupt paths never come here.
      */
     private resolveStagedResult;
-    private observeGit;
-    private updateGitPhaseBestEffort;
     /** Persist Agent terminal truth before wire when local storage is available. */
     private persistAgentTerminalEvidence;
     /**
@@ -10108,8 +9767,6 @@ export declare class TaskRunner {
     /** M3-B: bounded insert for `finishedTaskIds` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest (first-inserted) entry once over cap. */
     private addFinishedTaskId;
     private addStrictDeclinedTaskId;
-    /** `reuseDir`, when set (a known sessionRef's recorded workspace), is used verbatim instead of a fresh `workspaceRoot/<taskId>` directory — `mkdir recursive` is idempotent either way, so ensuring-exists is safe to do unconditionally. */
-    private resolveWorkspaceDir;
     /**
      * Selects which adapter runs this offer, gated on CAPABILITY (MCP toolset
      * projection, when required) and PRESENCE (`adapter.detect()`) — pre-claim,
@@ -10591,7 +10248,7 @@ import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import type { ServiceEnvironmentRecord } from '../lifecycle/service-environment';
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 export interface DiagnosticCheck {
-    id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'health' | 'journal' | 'workspace' | 'quarantine';
+    id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'health' | 'journal' | 'quarantine';
     status: DiagnosticStatus;
     summary: string;
 }
@@ -10664,12 +10321,6 @@ export interface DiagnosticsSnapshot {
         failedTerminalCount?: number;
         reason?: string;
     };
-    /** `not-configured`: a strict Agent daemon has no `workspaceRoot`; each Agent offer runs in its SDK-owned home. */
-    workspace: {
-        status: 'available' | 'missing' | 'unavailable' | 'not-configured';
-        writable?: boolean;
-        reason?: string;
-    };
     quarantine: {
         status: 'available' | 'missing' | 'unavailable';
         count: number;
@@ -10695,7 +10346,7 @@ export type OperationalHealthFixResult = {
     sizeBytes: number;
 };
 // ==== @byok-sdk/client dist/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, Session, MessageDraftDelta, SessionEvidence, GitWorkspaceConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
 export type { AgentRef } from './agent-home';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store';
@@ -10711,10 +10362,6 @@ export { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, runSdkReserved
 export type { SdkHelperHostConfig, SdkReservedHelperKind, ResolvedSdkReservedHelperBin, } from './sdk-reserved-helper-host';
 export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure';
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure';
-export { GitWorkspaceManager, GitWorkspaceError, isGitWorkspaceConfig, prependGitWorkspaceGuidance } from './daemon/git-workspace';
-export type { GitWorkspaceObservation, GitWorkspaceLease, GitWorkspaceOptions, GitErrorCategory } from './daemon/git-workspace';
-export { GitWorkspaceStore } from './daemon/git-workspace-store';
-export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } from './daemon/git-workspace-store';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';
 export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors';
 export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner';
@@ -13448,16 +13095,18 @@ import type { NativeInteractionCapabilities, NativeInteractionChannel } from './
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, TaskOfferForAgentPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
 import type { AgentRef } from './agent-home';
 import type { McpToolsetServerObservation } from './mcp/observation';
 export type { AgentRef } from './agent-home';
+/**
+ * The offer fields a runtime adapter receives. The client owns this shape;
+ * the daemon projects each wire offer onto it.
+ */
+export type RuntimeTaskInput = Pick<TaskOfferForAgentPayload, 'instruction' | 'runtime' | 'harnessId' | 'dispatchSelection' | 'sessionRef' | 'limits'>;
 export type { McpServerObservation, McpToolDescriptor, McpToolsetServerObservation, } from './mcp/observation';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
-export interface GitWorkspaceConfig {
-    mode: 'local-checkpoints';
-}
 /**
  * Failure vocabulary shared by the detection contract and local diagnostics.
  */
@@ -13617,7 +13266,7 @@ export interface Session {
     /** Inject steering text into a running turn (mid-stream). */
     steer(text: string): Promise<void>;
     /** Send a new instruction on the same session after it has gone idle. */
-    followUp(task: TaskOfferPayload): Promise<void>;
+    followUp(task: RuntimeTaskInput): Promise<void>;
     /** Best-effort abort of the current turn (used for `task.cancel`). */
     interrupt(): Promise<void>;
     /**
@@ -13715,7 +13364,7 @@ export interface RuntimeAdapterDescriptor {
 export interface RuntimeAdapterPrepareInput {
     /** Admission cancellation; late pure results are discarded and never started. */
     signal?: AbortSignal;
-    offer: TaskOfferPayload;
+    offer: RuntimeTaskInput;
     descriptor: RuntimeAdapterDescriptor;
     requiredToolsetIds: readonly string[];
     /** Locally resolved MCP authority; available for pure admission validation only. */
@@ -13767,7 +13416,7 @@ export interface RuntimeOperationManifest {
     readonly descriptor: RuntimeAdapterDescriptor;
     readonly requiredToolsetIds: readonly string[];
     /** The credential-free runtime/lane/provider/model authority for this operation. */
-    readonly dispatchSelection?: TaskOfferPayload['dispatchSelection'];
+    readonly dispatchSelection?: RuntimeTaskInput['dispatchSelection'];
     readonly sessionRef?: string;
     /** Strict Agent identity, present only for task.offer_for_agent. */
     readonly agentRef?: AgentRef;
@@ -13790,8 +13439,6 @@ export interface RuntimeOperationManifest {
     };
     readonly workspace: {
         readonly workspaceDir: string;
-        readonly workspaceId?: string;
-        readonly baseline?: string;
     };
     /** Names are audit-safe; credential values intentionally never enter the manifest. */
     readonly forwardedEnvironmentNames: readonly string[];
