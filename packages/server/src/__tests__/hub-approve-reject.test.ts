@@ -107,20 +107,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
     expect(snapshot?.result?.state === 'Failed' ? snapshot.result.reason : undefined).toBe('looked risky');
   });
 
-  // 2d gap: three cases the pre-fold file expressed by constructing a
-  // `ConnectionHub` and calling `approveTask('no-such-task')`/
-  // `rejectTask('no-such-task')` directly — "unknown taskId throws
-  // UnknownTaskError (404-equivalent)", its `rejectTask` twin, and
-  // "UnknownTaskError carries taskId". There is no public way to name an
-  // arbitrary taskId on this surface: a `TaskHandle` only ever comes from
-  // `dispatch()`, so the task it names always exists. The kernel's own gate
-  // does fail closed (`ByokCloudError('task_not_found')`,
-  // `packages/cloud/src/cloud.ts`) and `packages/cloud`'s suite owns that pin.
-  // Orchestrator decision: leave it to the cloud suite, or add a
-  // taskId-addressed approval surface to `ByokServer`.
-  it.skip('approve/reject on an unknown taskId fails closed with a typed error carrying the taskId', async () => {
-    expect.fail('no public surface names an arbitrary taskId — see the 2d gap note above');
-  });
+  // An unknown taskId is refused through ByokServer.tasks.approve/reject, which names an arbitrary taskId: tasks-approval.test.ts.
 
   it('approve() on a task NOT currently AwaitApproval (e.g. still Running) fails closed with task_not_awaiting_approval, leaving state unchanged', async () => {
     const { byok: instance, daemon } = await start();

@@ -57,7 +57,7 @@ import {
 import { TaskEventRelay } from './relay';
 import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot';
 import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
-import { createTaskHandle } from './task-handle';
+import { approvePendingApproval, createTaskHandle, rejectPendingApproval } from './task-handle';
 import type {
   ByokServerEvent,
   AgentContentReadRequest,
@@ -232,6 +232,14 @@ export interface ByokServer {
     messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
     /** Request cancellation through the kernel without a process-owned TaskHandle. */
     cancel(taskId: string, reason?: string): Promise<void>;
+    /**
+     * Approve the task's pending approval without a process-owned TaskHandle,
+     * such as a task `executions.submit` created. The same decision and
+     * refusals as {@link TaskHandle.approve}.
+     */
+    approve(taskId: string, opts?: { approvalId?: string }): Promise<void>;
+    /** Reject the task's pending approval; the same decision and refusals as {@link TaskHandle.reject}. */
+    reject(taskId: string, reason?: string, opts?: { approvalId?: string }): Promise<void>;
     /**
      * One bounded page, keyset-paged by task id. Paged rather than "all of
      * them" because the underlying store is: an unbounded `list()` would have
@@ -781,6 +789,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
           relay.noteHostTransition(taskId, 'Cancelled', attempt.cancellation.requestedAt);
         }
       },
+      approve(taskId, opts) { return approvePendingApproval({ tenant, cloud, relay }, taskId, opts); },
+      reject(taskId, reason, opts) { return rejectPendingApproval({ tenant, cloud, relay }, taskId, reason, opts); },
       async get(taskId: string): Promise<TaskSnapshot | undefined> {
         const attempt = await cloud.readTaskAttempt(tenant, taskId);
         return attempt === undefined ? undefined : projectTask(attempt);

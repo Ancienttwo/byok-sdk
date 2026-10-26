@@ -106,6 +106,33 @@ export interface TaskHandleDeps {
   readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
 }
 
+type ApprovalDeps = Pick<TaskHandleDeps, 'tenant' | 'cloud' | 'relay'>;
+
+/**
+ * The host's approval decision, shared by {@link TaskHandle.approve} and
+ * `ByokServer.tasks.approve`. Cloud atomically records it in the one approval
+ * timeline before this notification is enqueued; the relay remains a
+ * notification projection, never a second writer for that authority.
+ */
+export async function approvePendingApproval(deps: ApprovalDeps, taskId: string, opts?: { approvalId?: string }): Promise<void> {
+  await deps.cloud.approveTask(deps.tenant, taskId, opts);
+  deps.relay.noteHostTransition(taskId, 'Running', new Date().toISOString());
+}
+
+/** The rejection counterpart of {@link approvePendingApproval}. */
+export async function rejectPendingApproval(
+  deps: ApprovalDeps,
+  taskId: string,
+  reason?: string,
+  opts?: { approvalId?: string },
+): Promise<void> {
+  await deps.cloud.rejectTask(deps.tenant, taskId, {
+    ...(opts?.approvalId === undefined ? {} : { approvalId: opts.approvalId }),
+    ...(reason === undefined ? {} : { reason }),
+  });
+  deps.relay.noteHostTransition(taskId, 'Running', new Date().toISOString());
+}
+
 /**
  * One in-flight task's control surface.
  *
@@ -138,20 +165,12 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
       deps.relay.noteHostTransition(taskId, 'Cancelled', attempt.cancellation.requestedAt);
     },
 
-    async approve(opts?: { approvalId?: string }): Promise<void> {
-      await deps.cloud.approveTask(deps.tenant, taskId, opts);
-      // Cloud atomically records the host decision in the one approval
-      // timeline before this notification is enqueued. The relay remains a
-      // notification projection, never a second writer for that authority.
-      deps.relay.noteHostTransition(taskId, 'Running', new Date().toISOString());
+    approve(opts?: { approvalId?: string }): Promise<void> {
+      return approvePendingApproval(deps, taskId, opts);
     },
 
-    async reject(reason?: string, opts?: { approvalId?: string }): Promise<void> {
-      await deps.cloud.rejectTask(deps.tenant, taskId, {
-        ...(opts?.approvalId === undefined ? {} : { approvalId: opts.approvalId }),
-        ...(reason === undefined ? {} : { reason }),
-      });
-      deps.relay.noteHostTransition(taskId, 'Running', new Date().toISOString());
+    reject(reason?: string, opts?: { approvalId?: string }): Promise<void> {
+      return rejectPendingApproval(deps, taskId, reason, opts);
     },
 
     async steer(text: string): Promise<void> {
