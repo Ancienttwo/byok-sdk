@@ -404,31 +404,33 @@ export class QemuDriver implements PowerCutDriver {
     return { link: { input: socket, output: socket }, ended: once(socket, 'close').then(() => undefined) };
   }
 
+  // A handle is cleared only once its step succeeded, so close() can still
+  // kill a VM and drop a connection that a failed cut or stop left behind.
   async cut(): Promise<void> {
-    const socket = this.#socket;
-    this.#socket = undefined;
     if (this.fault === 'os-crash') {
       await qmpExecute(this.#options.qmpSocket, 'inject-nmi');
     } else {
       const qemu = this.#qemu;
-      this.#qemu = undefined;
       if (qemu === undefined) throw new Error('QEMU is not running');
       await this.#options.storage.cut();
       qemu.kill('SIGKILL');
       await exited(qemu);
+      this.#qemu = undefined;
       await this.#options.storage.prepareBoot();
     }
     // The guest cannot close this socket any more; the Host side drops it.
-    socket?.destroy();
+    this.#socket?.destroy();
+    this.#socket = undefined;
   }
 
   async stop(): Promise<void> {
     this.#socket?.destroy();
+    this.#socket = undefined;
     const qemu = this.#qemu;
-    this.#qemu = undefined;
     if (qemu !== undefined) {
       await qmpExecute(this.#options.qmpSocket, 'quit');
       await exited(qemu);
+      this.#qemu = undefined;
     }
     this.#server?.close();
     this.#server = undefined;

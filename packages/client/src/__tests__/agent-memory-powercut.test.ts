@@ -504,4 +504,41 @@ describe.skipIf(process.platform === 'win32')('W5 QEMU driver against a fake QEM
       expect(commands(log)).toEqual(fault === 'os-crash' ? ['inject-nmi', 'quit'] : ['quit']);
     }
   }, 30_000);
+
+  it('leaves QEMU and the guest connection to close() when a cut or a stop fails', async () => {
+    const cases = [
+      { name: 'storage cut fails', fault: 'power-loss', monitor: 'real', step: 'cut' },
+      { name: 'NMI fails', fault: 'os-crash', monitor: 'missing', step: 'cut' },
+      { name: 'quit fails', fault: 'os-crash', monitor: 'missing', step: 'stop' },
+    ] as const;
+    for (const { name, fault, monitor, step } of cases) {
+      const dir = scratch();
+      const qmp = path.join(dir, 'q.sock');
+      const listenPort = await freePort();
+      const driver = new QemuDriver({
+        fault, command: process.execPath, args: ['-e', FAKE_QEMU, qmp, path.join(dir, 'log')],
+        qmpSocket: monitor === 'real' ? qmp : path.join(dir, 'missing.sock'), listenPort,
+        storage: {
+          profile: DROPS,
+          cut: async () => { throw new Error('storage layer refused the cut'); },
+          prepareBoot: async () => {},
+        },
+        bootTimeoutMs: 10_000,
+      });
+      let guest: net.Socket | undefined;
+      try {
+        const first = driver.start();
+        guest = await guestConnects(listenPort);
+        const run = await first;
+        await qmpReady(qmp);
+        await expect(step === 'cut' ? driver.cut() : driver.stop(), name).rejects.toThrow();
+        await driver.close();
+        await run.ended;
+        await expect(qmpExecute(qmp, 'query-status'), `${name}: QEMU outlived close()`).rejects.toThrow();
+      } finally {
+        guest?.destroy();
+        await driver.close();
+      }
+    }
+  }, 30_000);
 });
