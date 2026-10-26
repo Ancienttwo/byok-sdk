@@ -689,6 +689,8 @@ export class BotCollaboration {
   /** Owner API for the Main Bot's own routines. */
   async setRoutineLifecycle(id: string, value: Routine['lifecycle']): Promise<void> {
     await this.exclusive(async () => {
+      // #975: the K4 core writes this itself, outside the K8 write fence.
+      refuseExported(this.snapshot());
       try { await this.core.lifecycle(owned(this.routineRows(), this.options.botId, id).definition.id, value); }
       finally { await this.process(); }
     });
@@ -704,6 +706,7 @@ export class BotCollaboration {
   }
   async updateRoutine(action: UpdateRoutineAction): Promise<void> {
     await this.exclusive(async () => {
+      refuseExported(this.snapshot());
       try { await this.core.updateRoutine(updateDefinition(this.routineRows(), this.options.botId, action)); }
       finally { await this.process(); }
     });

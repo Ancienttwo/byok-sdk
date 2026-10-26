@@ -260,6 +260,10 @@ it('writes nothing after the export, refuses each entry, and commits away only o
   await expect(bot.drainForSwitch(device())).rejects.toBeInstanceOf(SwitchExportedError);
   await expect(bot.exportForSwitch([{ deviceId: device(), expectedRevision: 1 }])).rejects.toMatchObject({ code: 'switch_exported' });
   await expect(bot.consumeMessage({} as never)).rejects.toBeInstanceOf(SwitchExportedError);
+  // The routine mutators that K4 writes itself refuse too.
+  const routine = Object.values(fixture!.ledger.snapshot().routines)[0]!.definition.id;
+  await expect(bot.setRoutineLifecycle(routine, 'paused')).rejects.toBeInstanceOf(SwitchExportedError);
+  await expect(bot.updateRoutine({ routineId: routine } as never)).rejects.toBeInstanceOf(SwitchExportedError);
   // Time passes and the K4 core keeps its timers: the passes and the timer run nothing.
   offset += 3_600_000;
   await bot.drain();
