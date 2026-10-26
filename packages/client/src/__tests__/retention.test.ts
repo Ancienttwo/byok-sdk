@@ -179,6 +179,15 @@ it('a usage walk past its entry limit reports lower bounds per root without fail
  for(const id of ['exec-sdk','agent-result','agent-content','reader-run'] as const)expect(usage(g,id)).toMatchObject({measured:false,truncated:true});
  expect(usage(g,'confirmed-journal')).toMatchObject({truncated:false});
 });
+it('a skill-pack listing past the entry limit leaves every walked class unreached while old revisions still expire',async()=>{
+ const f=await fixture({usageScanLimit:1}),root=path.join(f.store,'skill-packs','known'),current=path.join(root,'a'.repeat(64)),prior=path.join(root,'b'.repeat(64));
+ await fs.mkdir(current,{recursive:true});await fs.mkdir(prior);await fs.writeFile(path.join(current,'current'),'keep');await fs.writeFile(path.join(prior,'old'),'remove');await old(prior);
+ await fs.writeFile(path.join(root,'lock.json'),JSON.stringify({schema:'byok-skill-pack-lock-v1',name:'known',content_hash:'sha256:'+'a'.repeat(64),files:[]}));
+ await fs.mkdir(path.join(f.store,'skill-packs','unknown'));
+ expect((await f.sweeper.runPass('startup')).failures).toBe(0);expect(f.failures).toEqual([]);
+ for(const id of ['skill-pack-current','skill-pack-old','journal','exec-sdk'] as const)expect(usage(f,id)).toMatchObject({measured:false,truncated:true,bytes:0});
+ expect(await exists(prior)).toBe(false);expect(await exists(current)).toBe(true);
+});
 it('a truncated lower bound above the hard watermark still refuses admission',async()=>{
  const store=testScratchRoot();await fs.writeFile(path.join(store,'big'),'x'.repeat(2000));
  const {binding,home}=await idleHome(40);await binding.lease.release();

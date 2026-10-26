@@ -132,6 +132,34 @@ describe('pruneAgentResults', () => {
     expect(await fs.readdir(dir)).toHaveLength(4);
   });
 
+  it('removes expired files while listing, so a budget shared with the listing still drains a backlog', async () => {
+    const dir = await home();
+    for (let index = 0; index < 20; index++) await file(dir, name(index), 30 * DAY);
+    // One budget for listing steps and removals, as the per-home retention budget is.
+    let units = 10;
+    const spend = (): boolean => units-- > 0;
+    const listed: string[] = [], removed: string[] = [];
+    async function* limited(): AsyncGenerator<import('node:fs').Dirent> {
+      for await (const entry of await fs.opendir(dir)) {
+        if (!spend()) return;
+        listed.push(entry.name);
+        yield entry;
+      }
+    }
+    await pruneAgentResults({
+      resultsRoot: dir, entries: limited(), nowMs: NOW, maxAgeMs: 7 * DAY,
+      remove: async (target) => {
+        if (!spend()) return false;
+        await fs.rm(target);
+        removed.push(path.basename(target));
+        return true;
+      },
+    });
+    expect(listed).toHaveLength(5);
+    expect(removed).toEqual(listed);
+    expect(await fs.readdir(dir)).toHaveLength(15);
+  });
+
   it('stops at the first removal its caller refuses', async () => {
     const dir = await home();
     for (let index = 0; index < 4; index++) await file(dir, name(index), 30 * DAY);
