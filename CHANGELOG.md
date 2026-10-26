@@ -519,6 +519,11 @@ upgrade steps. All nine public manifests and their lock records move to
   links now fails at its first acquire, with an error that names the
   directory (#605). Examples are FAT32, exFAT, and some network or FUSE
   filesystems. Before this change, acquire did not need hard links.
+- **Changed (client)** — `AgentHomeLeaseCorruptError` for an Agent home lease
+  marker now says how to recover (#605): confirm that no process uses this
+  Agent home, then delete the lease marker file and retry. A crash before
+  0.30.2 could leave an empty marker. Such a marker is still refused; the SDK
+  does not delete or reclaim it on restart.
 - **Feature (examples)** — K8 gains the owner switch format (#975 slice 2):
   the `./migration` entry, also exported from the K8 root. `SwitchExport`
   version 1 holds one whole coordination domain (an L tenant or an H scope) in
