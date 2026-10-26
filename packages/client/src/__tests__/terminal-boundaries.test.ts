@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -46,14 +47,14 @@ describe('terminal durability and actual harness boundaries', () => {
     const candidates: LocalTerminalRecord[] = [];
     const write = journal.recordTerminal.bind(journal);
     vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => { candidates.push(record); return write(record); });
-    const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
+    const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
     cleanup.push(async () => { fail = false; await daemon.stop(); await journal.close(); });
     await daemon.pair('pairing-code');
     const record = (await createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
     await daemon.start();
     const identity = { tenantId: record.tenantId, deviceId: record.deviceId, productId: cfg.productId };
     const seq = server.nextSeq();
-    const offer = createEnvelope('task.offer', { instruction: 'run once' }, { taskId: 'pending-decline', seq });
+    const offer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'run once' }, { taskId: 'pending-decline', seq });
     server.send(offer);
     await vi.waitFor(() => expect(candidates.length).toBeGreaterThan(0));
     expect((await journal.readTask('pending-decline', identity))?.localState).toBe('received');
@@ -87,12 +88,12 @@ describe('terminal durability and actual harness boundaries', () => {
     const candidates: LocalTerminalRecord[] = [];
     const write = journal.recordTerminal.bind(journal);
     vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => { candidates.push(record); return write(record); });
-    const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
+    const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
     cleanup.push(async () => { fail = false; await daemon.stop().catch(() => undefined); await journal.close(); });
     await daemon.pair('pairing-code');
     await daemon.start();
     const taskId = 'queued-past-stop';
-    server.send(createEnvelope('task.offer', { instruction: 'run once' }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'run once' }, { taskId, seq: server.nextSeq() }));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     fail = true;
     adapter.sessions[0]!.emit({ type: 'progress', text: 'the real result' });
@@ -117,7 +118,7 @@ describe('terminal durability and actual harness boundaries', () => {
         const cloud = await startRealCloud({ productId: 'terminal-boundaries' }); cleanup.push(() => cloud.close());
         const cfg = await config(cloud.url);
         const adapter = new StubRuntimeAdapter('acme-harness');
-        const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter]); cleanup.push(() => daemon.stop());
+        const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter]); cleanup.push(() => daemon.stop());
         const pairing = await cloud.createPairingCode();
         await daemon.pair(pairing.code);
         const device = (await createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
@@ -149,7 +150,7 @@ describe('terminal durability and actual harness boundaries', () => {
       const cloud = await startRealCloud({ productId: 'terminal-boundaries' }); cleanup.push(() => cloud.close());
       const cfg = await config(cloud.url);
       const adapter = new StubRuntimeAdapter('acme-harness');
-      const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter]); cleanup.push(() => daemon.stop());
+      const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter]); cleanup.push(() => daemon.stop());
       const device = await daemon.pair((await cloud.createPairingCode()).code); await daemon.start();
       await vi.waitFor(async () => expect((await cloud.cloud.listDevices(cloud.tenant))[0]?.harnesses?.[0]?.id).toBe('acme-harness'));
       const offer = await cloud.cloud.enqueueOffer(cloud.tenant, device.deviceId, { payload: {
@@ -178,7 +179,7 @@ it('R1/R6: committed decline settles its failed receipt after cancellation filte
   const candidates: LocalTerminalRecord[] = [];
   const recordTerminal = journal.recordTerminal.bind(journal);
   vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => { candidates.push(record); return recordTerminal(record); });
-  const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 5, idleDelayMs: 5 } });
+  const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 5, idleDelayMs: 5 } });
   cleanup.push(async () => { fail = false; await daemon.stop(); await journal.close(); });
   const device = await daemon.pair((await cloud.createPairingCode()).code);
   const a = await cloud.enqueueOffer(device.deviceId, 'declined while temporarily unavailable');

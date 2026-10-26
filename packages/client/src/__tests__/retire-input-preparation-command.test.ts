@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -42,6 +43,7 @@ async function seed(): Promise<{ root: string; storeDir: string; config: DaemonC
     productId: 'acme-product',
     serverUrl: 'http://example.invalid',
     workspaceRoot: path.join(root, 'ws'),
+    agentHome: testAgentHomeConfig(),
     storeDir,
   };
   return { root, storeDir, config };

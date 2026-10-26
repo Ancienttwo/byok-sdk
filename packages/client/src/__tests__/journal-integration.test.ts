@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchRoot, testScratchOwner } from "./fixtures/execution-scratch";
 /**
  * L-002: the durable journal wired into the daemon.
@@ -186,6 +187,7 @@ describe('hosted journal integration (L-002)', () => {
         productId: 'test-product-journal',
         serverUrl: server.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         ...configOverrides,
       },
@@ -216,7 +218,7 @@ describe('hosted journal integration (L-002)', () => {
         rejected.push(event);
       }
     });
-    server.send(createEnvelope('task.offer', { instruction: 'PAYLOAD_SENTINEL' }, { taskId: 'terminal-rejected', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'PAYLOAD_SENTINEL' }, { taskId: 'terminal-rejected', seq: server.nextSeq() }));
     await server.waitFor((envelope) => envelope.type === 'task.started');
     adapter.sessions[0]!.emit({ type: 'progress', text: 'PAYLOAD_SENTINEL' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
@@ -243,7 +245,7 @@ describe('hosted journal integration (L-002)', () => {
       await recordTerminal(record);
     });
     const { adapter } = await startDaemon({}, journal);
-    server.send(createEnvelope('task.offer', { instruction: 'unique result' },
+    server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'unique result' },
       { taskId: 'terminal-retry', seq: server.nextSeq() }));
     await server.waitFor(e => e.type === 'task.started');
     adapter.sessions[0]!.emit({ type: 'turn_end' });
@@ -270,7 +272,7 @@ describe('hosted journal integration (L-002)', () => {
     });
     const { adapter, storeDir, deviceId } = await startDaemon({}, journal);
     const seq = server.nextSeq();
-    const offer = createEnvelope('task.offer', { instruction: 'invalid limit', limits: { maxTokens: 1 } },
+    const offer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'invalid limit', limits: { maxTokens: 1 } },
       { taskId: 'decline-retry', seq });
     server.send(offer);
     await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(1));
@@ -297,11 +299,12 @@ describe('hosted journal integration (L-002)', () => {
         productId: 'test-product-journal',
         serverUrl: server.url,
         workspaceRoot: await tmpDir('byok-journal-cfg-workspace-'),
+        agentHome: testAgentHomeConfig(),
         storeDir: await tmpDir('byok-journal-cfg-store-'),
       };
 
       expect(() =>
-        createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...base, hostedJournal: { mode: 'sqlite' } } as DaemonConfig, []),
+        createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...base, hostedJournal: { mode: 'sqlite' } } as DaemonConfig, []),
       ).toThrow(DaemonConfigFieldRemovedError);
       // Nothing was constructed on the rejected path.
       expect(journalConstructions.storeDirs).toEqual([]);
@@ -313,15 +316,15 @@ describe('hosted journal integration (L-002)', () => {
       const journal = new RecordingJournal();
       const { adapter, storeDir, deviceId } = await startDaemon({}, journal);
       const cursorStore = new CursorStore(storeDir);
-      // The handshake's own inbound envelope (`conn.ack`) is journaled too —
-      // EVERY inbound envelope is, since every one of them can move the
-      // cursor. Baseline past it so this test is about the offer.
+      // EVERY inbound envelope is journaled, since every one of them can
+      // move the cursor. Baseline past any earlier one so this test is about
+      // the offer.
       const priorAppends = journal.appended.length;
       const cursorBeforeOffer = await cursorStore.load(server.url, deviceId);
 
       const release = journal.blockAppends();
       const seq = server.nextSeq();
-      server.send(createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-order-1', seq }));
+      server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-order-1', seq }));
 
       // The append has been ENTERED (so the journal is genuinely on the
       // inbound path, not merely constructed) and is now held open.
@@ -355,7 +358,7 @@ describe('hosted journal integration (L-002)', () => {
       const { adapter } = await startDaemon({}, journal);
 
       server.send(
-        createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-terminal-1', seq: server.nextSeq() }),
+        createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-terminal-1', seq: server.nextSeq() }),
       );
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-terminal-1');
       adapter.sessions[0]?.emit({ type: 'turn_end' });
@@ -383,7 +386,7 @@ describe('hosted journal integration (L-002)', () => {
         // recovery exists for.
         const storeDir = await tmpDir('byok-journal-recover-store-');
         const seeded = new SqliteLocalTaskJournal({ storeDir });
-        const bytes = encodeEnvelope(createEnvelope('task.offer', { instruction: 'recover' }, { taskId: 'task-recover-1', seq: 7 }));
+        const bytes = encodeEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'recover' }, { taskId: 'task-recover-1', seq: 7 }));
         await seeded.appendEnvelope({
           identity: { tenantId: 'tenant-test', productId: 'test-product-journal', deviceId: 'device-1' },
           envelopeId: 'env-crashed',
@@ -404,6 +407,7 @@ describe('hosted journal integration (L-002)', () => {
             productId: 'test-product-journal',
             serverUrl: server.url,
             workspaceRoot: await tmpDir('byok-journal-recover-workspace-'),
+            agentHome: testAgentHomeConfig(),
             storeDir,
           },
           [adapter],
@@ -471,6 +475,7 @@ async function makeRunner(
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-guard-workspace-'),
+    ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => {
       sent.push(envelope);
@@ -486,7 +491,7 @@ async function makeRunner(
 }
 
 function offer(taskId: string): Envelope {
-  return createEnvelope('task.offer', { instruction: 'x' }, { taskId, seq: 1 });
+  return createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId, seq: 1 });
 }
 
 describe('TaskRunner.admissionGuard (L-002 seam)', () => {

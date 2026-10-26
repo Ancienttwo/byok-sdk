@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -21,6 +22,7 @@ function baseConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
     productId: 'acme-product',
     serverUrl: 'http://example.invalid',
     workspaceRoot: '/ws',
+    agentHome: testAgentHomeConfig(),
     storeDir: '/tmp/acme-store',
     ...overrides,
     localAgentRelease: overrides.localAgentRelease ?? { version: '0.0.0-test' },

@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -30,6 +31,7 @@ async function makeRunner(overrides: Partial<Pick<TaskRunnerDeps, 'awaitTerminal
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: path.join(directory, 'workspace'),
+    ...testAgentHomeDeps(),
     deviceId: 'close-receipt-device',
     send: envelope => { sent.push(envelope); },
     blobClient: {
@@ -43,7 +45,7 @@ async function makeRunner(overrides: Partial<Pick<TaskRunnerDeps, 'awaitTerminal
     ...overrides,
   });
   const taskId = 'close-receipt-task';
-  await runner.handleEnvelope(createEnvelope('task.offer', { instruction: 'run' }, { taskId, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'run' }, { taskId, seq: 1 }));
   const session = adapter.sessions[0]!;
   const terminals = () => sent.filter(event => ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type));
   return { runner, session, taskId, terminals };

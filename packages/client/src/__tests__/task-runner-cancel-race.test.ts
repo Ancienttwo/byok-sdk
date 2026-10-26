@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -33,6 +34,7 @@ async function makeRunner(
     ...overrides,
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-workspace-'),
+    ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => {
       sent.push(envelope);
@@ -78,8 +80,8 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
     const runner = await makeRunner(adapter, sent);
     const taskId = 'task-cancel-terminal-race';
     await runner.handleEnvelope(createEnvelope(
-      'task.offer',
-      { instruction: 'cancel me' },
+      'task.offer_for_agent',
+      { agentRef: freshTestAgentRef(),  instruction: 'cancel me' },
       { taskId, seq: 1 },
     ));
     const session = adapter.sessions[0]!;
@@ -104,8 +106,8 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
     const releaseStart = adapter.blockStart();
     const taskId = 'task-race-window';
     const offerEnvelope = createEnvelope(
-      'task.offer',
-      { instruction: 'race the cancel' },
+      'task.offer_for_agent',
+      { agentRef: freshTestAgentRef(),  instruction: 'race the cancel' },
       { taskId, seq: 1 },
     );
     const cancelEnvelope = createEnvelope('task.cancel', { reason: 'cancel during start()' }, { taskId, seq: 2 });
@@ -148,7 +150,7 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
     const releaseStart = adapter.blockStart();
     const taskId = 'task-cancel-pending-start';
 
-    const offerPromise = runner.handleEnvelope(createEnvelope('task.offer', { instruction: 'slow start' }, { taskId, seq: 1 }));
+    const offerPromise = runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'slow start' }, { taskId, seq: 1 }));
     await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
     await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'cancel while starting' }, { taskId, seq: 2 }));
     await vi.waitFor(() => expect(sent.some((e) => e.type === 'task.cancelled' && e.task_id === taskId)).toBe(true));
@@ -186,8 +188,8 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
 
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer',
-        { instruction: 'too late' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'too late' },
         { taskId, seq: 2 },
       ),
     );

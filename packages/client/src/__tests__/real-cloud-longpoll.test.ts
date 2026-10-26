@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -49,7 +50,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: cloud.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: cloud.url, workspaceRoot, storeDir },
       [adapter],
       {
         // Keep retries short while exercising the only daemon transport.
@@ -70,7 +71,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     // `dispatch()`, this returns no handle to await — the offer is bytes in a
     // mailbox from the moment it lands, so there is no connection to race.
     const offer = await cloud.enqueueOffer(record.deviceId, 'do it over long-poll');
-    expect(offer.envelope.type).toBe('task.offer');
+    expect(offer.envelope.type).toBe('task.offer_for_agent');
     expect(offer.envelope.seq).toBe(1);
 
     // Claim: proves the offer was received over GET /byok/events and the
@@ -172,6 +173,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
         productId: 'test-product',
         serverUrl: cloud.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
       },
       [adapter],

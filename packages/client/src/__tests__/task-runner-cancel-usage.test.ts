@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -29,7 +30,7 @@ describe('TaskRunner metering at the cancellation boundary', () => {
     const sent: Envelope[] = [];
     let enteredUpload!: () => void;
     const uploading = new Promise<void>(resolve => { enteredUpload = resolve; });
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: path.join(dir, 'workspace'),
       deviceId: 'cancel-usage-device', send: event => { sent.push(event); },
       blobClient: {
@@ -46,7 +47,7 @@ describe('TaskRunner metering at the cancellation boundary', () => {
       shutdownInterruptTimeoutMs: 20,
       maxInlineEventBytes: 4096,
     });
-    await runner.handleEnvelope(createEnvelope('task.offer', {
+    await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), 
       instruction: 'cancel while metering settles', runtime,
     }, { taskId: 'metered-task', seq: 1 }));
     const session = adapter.sessions[0]!;

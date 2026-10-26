@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -290,6 +291,7 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
         productId: 'test-product',
         serverUrl: handle.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         presence: { intervalMs: 50, minimumIntervalMs: 10, ttlMs: 2_000 },
       },
@@ -464,6 +466,7 @@ describe('presence re-discovery on reconnect', () => {
         productId: 'test-product',
         serverUrl: url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         presence: { intervalMs: 50, minimumIntervalMs: 10, ttlMs: 2_000 },
       },

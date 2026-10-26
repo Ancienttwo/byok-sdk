@@ -1,10 +1,12 @@
+import type { RuntimeTaskInput } from '../types';
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOverrides } from '../daemon/create-daemon';
 import { connectControlClient } from '../bin/control-client';
 import type { ApprovalsListResult, ApprovalsRequestResult, ControlStatusResult } from '../daemon/control-protocol';
@@ -126,7 +128,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
     const workspaceRoot = await tmpDir(`byok-confirm-e2e-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-confirm-e2e-${productId}-store-`);
     const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
-    const built = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter], overrides);
+    const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter], overrides);
     await built.pair('pairing-code');
     await built.start();
     return { daemon: built, config, storeDir };
@@ -139,7 +141,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-approve-1';
     server.send(
-      createEnvelope('task.offer', { instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -151,13 +153,14 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
       summary: 'Bash: rm -rf /tmp/whatever',
     });
 
-    await server.waitFor((e) => e.type === 'task.await_approval' && e.task_id === taskId);
+    const awaited = await server.waitFor((e) => e.type === 'task.await_approval' && e.task_id === taskId);
+    const { approvalId } = awaited.payload as { approvalId: string };
 
     // The SaaS/server side decides to approve — a real Hub would send this
     // itself (hub.ts's approveTask); this test drives the wire message
     // directly, matching daemon-control-socket.test.ts's own convention of
     // exercising TaskRunner's server-facing side via a raw envelope.
-    server.send(createEnvelope('task.approve', {}, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.approve', { approvalId }, { taskId, seq: server.nextSeq() }));
 
     const outcome = await requestPromise;
     expect(outcome).toEqual({ approved: true, reason: undefined });
@@ -176,7 +179,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-approvalid-surfaces-1';
     server.send(
-      createEnvelope('task.offer', { instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -226,7 +229,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-reject-1';
     server.send(
-      createEnvelope('task.offer', { instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -273,7 +276,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-race-1';
     server.send(
-      createEnvelope('task.offer', { instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -292,7 +295,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
     // network hop, unlike the wire message below), but this test does not
     // depend on which one wins — only that exactly one does, cleanly.
     const cliResolvePromise = conn.client.request('approvals.resolve', { approvalId, decision: 'reject', reason: 'CLI won the race' });
-    server.send(createEnvelope('task.approve', {}, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.approve', { approvalId: approvalId! }, { taskId, seq: server.nextSeq() }));
 
     const outcome = await requestPromise;
     // Whichever path actually won, requestApproval settles exactly once —
@@ -319,7 +322,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-timeout-1';
     server.send(
-      createEnvelope('task.offer', { instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -346,7 +349,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-stale-approve-1';
     server.send(
-      createEnvelope('task.offer', { instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -374,7 +377,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
     // NOW the stale wire task.approve arrives — strictly after the local
     // resolution above already settled this exact approval, mirroring
     // task-runner.ts's handleApprove doc comment (Decision #3 fix).
-    server.send(createEnvelope('task.approve', {}, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.approve', { approvalId: approvalId! }, { taskId, seq: server.nextSeq() }));
     await vi.waitFor(() => {
       expect(
         events.some((e) => e.kind === 'stale-approval-decision' && e.taskId === taskId && e.decision === 'approve'),
@@ -401,7 +404,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-stale-reject-1';
     server.send(
-      createEnvelope('task.offer', { instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -431,7 +434,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
     // unconditionally interrupted the session and sent task.fail regardless
     // of whether resolveApproval even threw (see task-runner.ts's own doc
     // comment on this — a worse bug than handleApprove's).
-    server.send(createEnvelope('task.reject', { reason: 'stale server-side reject' }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.reject', { reason: 'stale server-side reject', approvalId: approvalId! }, { taskId, seq: server.nextSeq() }));
     await vi.waitFor(() => {
       expect(
         events.some((e) => e.kind === 'stale-approval-decision' && e.taskId === taskId && e.decision === 'reject'),
@@ -473,7 +476,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-targeting-approve-1';
     server.send(
-      createEnvelope('task.offer', { instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -537,7 +540,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-targeting-reject-1';
     server.send(
-      createEnvelope('task.offer', { instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -580,36 +583,6 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
     // B resolves normally afterward.
     await conn.client.request('approvals.resolve', { approvalId: approvalIdB, decision: 'reject', reason: 'B declined' });
     await expect(requestB).resolves.toEqual({ approved: false, reason: 'B declined' });
-
-    conn.client.close();
-  });
-
-  it('(h) [M5 approval targeting, compat] a wire task.approve with NO approvalId still resolves whichever approval is currently pending — untargeted behavior is unchanged from pre-M5 (a legacy server never learned/sent an id)', async () => {
-    const adapter = new ApprovalAwareAdapter();
-    const built = await pairedAndStarted('acme-confirm-targeting-compat', adapter);
-    daemon = built.daemon;
-
-    const taskId = 't-targeting-compat-1';
-    server.send(
-      createEnvelope('task.offer', { instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
-    );
-    await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
-
-    const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
-    if (!conn.ok) throw new Error('expected reachable');
-
-    const requestPromise = conn.client.request<ApprovalsRequestResult>('approvals.request', {
-      taskId,
-      summary: 'Bash: legacy server, no approvalId',
-    });
-    await server.waitFor((e) => e.type === 'task.await_approval' && e.task_id === taskId);
-
-    // A legacy (pre-M5) server's task.approve carries no approvalId at all.
-    server.send(createEnvelope('task.approve', {}, { taskId, seq: server.nextSeq() }));
-
-    const outcome = await requestPromise;
-    expect(outcome).toEqual({ approved: true, reason: undefined });
-    expect(adapter.sessions[0]?.resolveApprovalCalls).toEqual([{ approved: true }]);
 
     conn.client.close();
   });

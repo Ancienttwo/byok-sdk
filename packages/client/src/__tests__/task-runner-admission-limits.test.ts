@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -49,6 +50,7 @@ describe('task.offer admission gates (M5 batch-3)', () => {
         productId: 'test-product-admission',
         serverUrl: server.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         ...configOverrides,
       },
@@ -65,8 +67,8 @@ describe('task.offer admission gates (M5 batch-3)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'x', limits: { maxTokens: 4000 } },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxTokens: 4000 } },
           { taskId: 'task-maxtokens-1', seq: server.nextSeq() },
         ),
       );
@@ -84,8 +86,8 @@ describe('task.offer admission gates (M5 batch-3)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'x', limits: { maxDurationMs: 60_000 } },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 60_000 } },
           { taskId: 'task-maxduration-1', seq: server.nextSeq() },
         ),
       );

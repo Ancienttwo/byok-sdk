@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -28,6 +29,7 @@ async function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[]): Promis
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-bounded-workspace-'),
+    ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => {
       sent.push(envelope);
@@ -127,8 +129,8 @@ describe('TaskRunner: bounded finishedTaskIds/pendingCancelled (M3-B)', () => {
 
     const taskId = 'task-recent';
     const offer = createEnvelope(
-      'task.offer',
-      { instruction: 'finish me' },
+      'task.offer_for_agent',
+      { agentRef: freshTestAgentRef(),  instruction: 'finish me' },
       { taskId, seq: 1 },
     );
     await runner.handleEnvelope(offer);
@@ -148,8 +150,8 @@ describe('TaskRunner: bounded finishedTaskIds/pendingCancelled (M3-B)', () => {
     // still be a no-op: never a second adapter.start() call, never a second
     // task.claim/task.complete.
     const redelivered = createEnvelope(
-      'task.offer',
-      { instruction: 'finish me' },
+      'task.offer_for_agent',
+      { agentRef: freshTestAgentRef(),  instruction: 'finish me' },
       { taskId, seq: 2 },
     );
     await runner.handleEnvelope(redelivered);
@@ -177,8 +179,8 @@ describe('TaskRunner: bounded finishedTaskIds/pendingCancelled (M3-B)', () => {
     const releaseStart = adapter.blockStart();
     const taskId = 'task-race-window-bounded';
     const offerEnvelope = createEnvelope(
-      'task.offer',
-      { instruction: 'race the cancel under a full map' },
+      'task.offer_for_agent',
+      { agentRef: freshTestAgentRef(),  instruction: 'race the cancel under a full map' },
       { taskId, seq: 1 },
     );
     const cancelEnvelope = createEnvelope(
@@ -229,8 +231,8 @@ describe('TaskRunner: bounded finishedTaskIds/pendingCancelled (M3-B)', () => {
     const releaseStart = adapter.blockStart();
     const taskId = 'task-A-in-flight';
     const offerEnvelope = createEnvelope(
-      'task.offer',
-      { instruction: 'block me in adapter.start' },
+      'task.offer_for_agent',
+      { agentRef: freshTestAgentRef(),  instruction: 'block me in adapter.start' },
       { taskId, seq: 1 },
     );
     const offerPromise = runner.handleEnvelope(offerEnvelope);

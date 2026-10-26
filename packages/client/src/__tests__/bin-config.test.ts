@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { formatStartErrorReason } from '../bin/commands/start';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -27,6 +28,7 @@ describe('bin/config: loadConfig', () => {
       productId: 'acme',
       serverUrl: 'http://new.example',
       workspaceRoot: '/ws',
+      agentHome: testAgentHomeConfig(),
       localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE,
     });
   });
@@ -41,6 +43,7 @@ describe('bin/config: loadConfig', () => {
         productId: 'acme',
         serverUrl: 'http://example',
         workspaceRoot: '/ws',
+        agentHome: testAgentHomeConfig(),
         authRequestDeadlineMs: 250,
       }),
     );
@@ -58,6 +61,7 @@ describe('bin/config: loadConfig', () => {
         productId: 'acme',
         serverUrl: 'http://example',
         workspaceRoot: '/ws',
+        agentHome: testAgentHomeConfig(),
         localAgentRelease: { version: '9.9.9' },
       }),
     );
@@ -69,6 +73,7 @@ describe('bin/config: loadConfig', () => {
       productId: 'acme',
       serverUrl: 'http://example',
       workspaceRoot: '/ws',
+      agentHome: testAgentHomeConfig(),
       localAgentRelease: { version: '9.9.9' },
     } as never)).toThrow(/localAgentRelease.*distribution/i);
   });
@@ -78,13 +83,10 @@ describe('bin/config: loadConfig', () => {
     expect(() => loadConfig(undefined, { productName: 'Acme' })).toThrow(/productId/);
   });
 
-  it('requires workspaceRoot unless the config is strict Agent-only (#319)', () => {
+  it('does not require workspaceRoot: every daemon runs its offers in the Agent home (#319, #925)', () => {
     const base = { productName: 'Acme', productId: 'acme', serverUrl: 'http://example' };
-    expect(() => loadConfig(undefined, base)).toThrow(ConfigError);
-    expect(() => loadConfig(undefined, base)).toThrow(/workspaceRoot/);
-    expect(loadConfig(undefined, { ...base, strictAgentOnly: true })).toEqual({
+    expect(loadConfig(undefined, base)).toEqual({
       ...base,
-      strictAgentOnly: true,
       localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE,
     });
   });

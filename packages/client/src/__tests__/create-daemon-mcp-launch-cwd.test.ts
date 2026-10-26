@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -20,6 +21,7 @@ describe('createDaemonWithAdapters: removed DaemonConfig.mcpLaunchCwd', () => {
       productId: 'test-product-mcp-launch-cwd',
       serverUrl: 'http://localhost:1',
       workspaceRoot: await fs.mkdtemp(path.join(os.tmpdir(), 'byok-launch-cwd-workspace-')),
+      agentHome: testAgentHomeConfig(),
       storeDir: await fs.mkdtemp(path.join(os.tmpdir(), 'byok-launch-cwd-store-')),
       mcpLaunchCwd: { dir: '/' },
     } as DaemonConfig;

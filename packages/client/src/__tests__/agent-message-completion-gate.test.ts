@@ -1,3 +1,4 @@
+import { testAgentHomeDeps } from './fixtures/test-agent';
 import { AgentResultStore } from '../daemon/agent-result-store';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
@@ -444,7 +445,7 @@ describe('required Agent message completion gate', () => {
     const record = await outbox.activate('pending', 'session-one');
     const payload = outbox.publishPayload(record!);
     const sent: Envelope[] = [];
-    const createRunner = () => new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const createRunner = () => new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [], workspaceRoot: root, storeDir: root, productId: 'recovery-test', deviceId: 'device-one', tenantId: 'tenant-one',
       send: (envelope) => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },

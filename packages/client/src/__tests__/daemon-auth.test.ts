@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore, testDeviceCredentials } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
@@ -560,6 +561,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
         productId: 'test-auth-deadline',
         serverUrl: server.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         authRequestDeadlineMs: 40,
       },
@@ -633,6 +635,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       productId: 'test-hosted-owner',
       serverUrl: server.url,
       workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
     };
     const pairer = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
@@ -723,6 +726,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       productId: 'test-open-cleanup-owner',
       serverUrl: server.url,
       workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
     };
     const pairer = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);

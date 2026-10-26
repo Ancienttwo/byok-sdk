@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -41,6 +42,7 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
         productId: 'salesko',
         serverUrl: cloud.url,
         workspaceRoot: await tmpDir('byok-hosted-salesko-mcp-workspace-'),
+        agentHome: testAgentHomeConfig(),
         storeDir: await tmpDir('byok-hosted-salesko-mcp-store-'),
         runtimeAllowlist: ['claude'],
         runtimePreference: ['claude'],
@@ -81,7 +83,7 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
       requiredToolsets: ['salesko.connectors'],
     });
     expect(offer.envelope).toMatchObject({
-      type: 'task.offer_with_toolsets',
+      type: 'task.offer_for_agent',
       payload: { runtime: 'claude', requiredToolsets: ['salesko.connectors'] },
     });
     // The host sends logical ids only. Local commands remain device authority.

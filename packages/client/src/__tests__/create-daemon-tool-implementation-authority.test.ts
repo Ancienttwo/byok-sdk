@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -19,6 +20,7 @@ describe('createDaemonWithAdapters: removed DaemonConfig.toolImplementationAutho
       productId: 'test-product-tool-authority',
       serverUrl: 'http://localhost:1',
       workspaceRoot: await fs.mkdtemp(path.join(os.tmpdir(), 'byok-tool-authority-workspace-')),
+      agentHome: testAgentHomeConfig(),
       storeDir: await fs.mkdtemp(path.join(os.tmpdir(), 'byok-tool-authority-store-')),
       toolImplementationAuthority: { mode: 'dev' },
     } as DaemonConfig;

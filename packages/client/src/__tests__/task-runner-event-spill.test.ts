@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -66,6 +67,7 @@ async function makeRunner(
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-spill-workspace-'),
+    ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => {
       sent.push(envelope);
@@ -103,7 +105,7 @@ describe('TaskRunner: maxInlineEventBytes spill to the blob plane', () => {
     });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-spill', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-spill', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();
@@ -162,7 +164,7 @@ describe('TaskRunner: maxInlineEventBytes spill to the blob plane', () => {
     });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-unstored', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-unstored', seq: 1 }),
     );
     const session = adapter.sessions[0];
     session!.emit({ type: 'tool_use', tool: 'write_file', input: OUTPUT_300_KIB });
@@ -221,7 +223,7 @@ describe('TaskRunner: maxInlineEventBytes spill to the blob plane', () => {
     });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-locator', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-locator', seq: 1 }),
     );
     const session = adapter.sessions[0];
     session!.emit({ type: 'tool_result', tool: 'bash', toolCallId: 'call-locator', output: OUTPUT_300_KIB });
@@ -252,7 +254,7 @@ describe('TaskRunner: maxInlineEventBytes spill to the blob plane', () => {
     const runner = await makeRunner(adapter, sent, client, { maxInlineEventBytes: 64 * 1024 });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-small', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-small', seq: 1 }),
     );
     const session = adapter.sessions[0];
     const event: AgentEvent = { type: 'tool_result', tool: 'bash', toolCallId: 'c1', output: { stdout: 'ok' } };

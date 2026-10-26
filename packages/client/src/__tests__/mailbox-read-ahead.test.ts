@@ -30,8 +30,8 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   const connection = new ConnectionManager({ serverUrl: cloud.url, deviceId: device.deviceId, productId: 'read-ahead',
     capabilities: [], runtimes: [], auth, cursorStore, longPollIdleDelayMs: 5, longPollRetryDelayMs: 5,
     onEnvelope: async envelope => {
-      if (envelope.type === 'task.offer' && envelope.task_id === a.taskId) { aCalls++; await gate; }
-      if (envelope.type === 'task.offer' && envelope.task_id === b.taskId) bCalls++;
+      if (envelope.type === 'task.offer_for_agent' && envelope.task_id === a.taskId) { aCalls++; await gate; }
+      if (envelope.type === 'task.offer_for_agent' && envelope.task_id === b.taskId) bCalls++;
       if (envelope.type === 'task.approve' || envelope.type === 'task.cancel') controls.push(envelope.type);
     } });
   cleanup.push(async () => { release(); await connection.stop(); await auth.stop(); });

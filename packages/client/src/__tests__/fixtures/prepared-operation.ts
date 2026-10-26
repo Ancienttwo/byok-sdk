@@ -1,7 +1,7 @@
+import type { RuntimeTaskInput } from '../../types';
 import { isRuntimeStartupDisposalFailure } from '../../runtime-failure';
 import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
 import { testExecutionScratch } from './execution-scratch';
-import type { TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   sealRuntimeOperationManifest,
   type ApprovalChannel,
@@ -37,7 +37,7 @@ export interface PreparedOperationResources {
 /** Exercise the public descriptor → prepare → sealed-manifest → operation path in adapter unit tests. */
 export async function startPreparedOperation(
   adapter: RuntimeAdapter,
-  offer: TaskOfferPayload,
+  offer: RuntimeTaskInput,
   resources: PreparedOperationResources,
 ): Promise<Session> {
   const prepared = await adapter.prepare({

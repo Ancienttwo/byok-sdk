@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { readdirSync, readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
@@ -208,10 +209,11 @@ describe('requestDeviceAssertion', () => {
       productId,
       serverUrl: server.url,
       workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
       ...(deviceAssertion === undefined ? {} : { deviceAssertion }),
     };
-    const built = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
+    const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
     daemons.push(built);
     await built.pair('pairing-code');
     await built.start();
@@ -339,7 +341,7 @@ describe('requestTaskAssertion', () => {
       deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },
       mcpToolsets: { [TOOLSET]: { mcpServers: { [SERVER_NAME]: { command: '/opt/salesko/read' } } } },
     };
-    const built = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
+    const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
     daemons.push(built);
     await built.pair('pairing-code');
     await built.start();

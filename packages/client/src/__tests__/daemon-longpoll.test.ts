@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -30,14 +31,15 @@ describe('long-poll lifecycle (protocol §8)', () => {
     daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' },
       productName: 'Test', productId: 'test-product', serverUrl: server.url,
       workspaceRoot: await tmpDir('byok-independent-work-'), storeDir: await tmpDir('byok-independent-store-'),
+      agentHome: testAgentHomeConfig(),
     }, [slow, other], { longPoll: { retryDelayMs: 20 } });
     await daemon.pair('code');
     await daemon.start();
     try {
-      server.pushLongPollEvent(createEnvelope('task.offer', { instruction: 'blocked', runtime: 'codex' },
+      server.pushLongPollEvent(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'blocked', runtime: 'codex' },
         { taskId: 'slow-start', seq: server.nextSeq() }));
       await server.waitFor(e => e.type === 'task.claim');
-      server.pushLongPollEvent(createEnvelope('task.offer', { instruction: 'independent', runtime: 'pi' },
+      server.pushLongPollEvent(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'independent', runtime: 'pi' },
         { taskId: 'other-start', seq: server.nextSeq() }));
       await vi.waitFor(() => expect(other.sessions).toHaveLength(1));
       server.pushLongPollEvent(createEnvelope('task.cancel', { reason: 'remote' },
@@ -58,7 +60,7 @@ describe('long-poll lifecycle (protocol §8)', () => {
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter],
       {
         longPoll: { retryDelayMs: 20 },
@@ -77,8 +79,8 @@ describe('long-poll lifecycle (protocol §8)', () => {
     const offerSeq = server.nextSeq();
     server.pushLongPollEvent(
       createEnvelope(
-        'task.offer',
-        { instruction: 'do the thing' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'do the thing' },
         { taskId: 'task-long-poll-1', seq: offerSeq },
       ),
     );
@@ -100,8 +102,8 @@ describe('long-poll lifecycle (protocol §8)', () => {
     const secondSeq = server.nextSeq();
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'do another thing' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'do another thing' },
         { taskId: 'task-recovered-1', seq: secondSeq },
       ),
     );

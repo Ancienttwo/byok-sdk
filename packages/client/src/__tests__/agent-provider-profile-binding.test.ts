@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -101,13 +102,14 @@ describe('Agent provider profile binding admission', () => {
       productId: 'provider-binding-test',
       serverUrl: server.url,
       workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
     }, [adapter]);
     try {
       await daemon.pair('pairing-code');
       await daemon.start();
       const taskId = 'task-stale-provider-profile';
-      server.send(createEnvelope('task.offer', {
+      server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), 
         instruction: 'inspect image',
         dispatchSelection: {
           lane: 'byok-profile',

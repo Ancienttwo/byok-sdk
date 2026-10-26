@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -53,6 +54,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
         productId: 'acme-start-product',
         serverUrl: server.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         branding: { displayName: 'Acme Coder' },
       },
@@ -85,8 +87,8 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     // Drive one task through so the audit log picks up task-lifecycle events too.
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'do the thing' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'do the thing' },
         { taskId: 'task-1', seq: server.nextSeq() },
       ),
     );
@@ -124,7 +126,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     await fs.writeFile(storeDir, 'x');
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, workspaceRoot, storeDir: parent },
+      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, workspaceRoot, storeDir: parent },
       [adapter],
     );
     // Daemon itself uses `parent` (a real dir) for its OWN device store, but
@@ -196,7 +198,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
       } finally {
         connection.client.close();
       }
-      const offer = (taskId: string) => server.send(createEnvelope('task.offer', { instruction: `do ${SENTINEL}` }, { taskId, seq: server.nextSeq() }));
+      const offer = (taskId: string) => server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: `do ${SENTINEL}` }, { taskId, seq: server.nextSeq() }));
 
       // Content in every AgentEvent field, an artifact that exists (name and
       // inline bytes) and one that does not (its name reaches the error
@@ -315,7 +317,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     const workspaceRoot = await tmpDir('byok-start-workspace-');
     const storeDir = await tmpDir('byok-start-store-revoked-');
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-revoked', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-revoked', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter('pi')],
     );
     const record = await daemon.pair('pairing-code');

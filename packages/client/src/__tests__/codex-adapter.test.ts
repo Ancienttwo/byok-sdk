@@ -1,10 +1,11 @@
+import type { RuntimeTaskInput } from '../types';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import type { Session, MessageDraftDelta } from '../types';
 import {
@@ -25,7 +26,7 @@ const fixture = fileURLToPath(
 );
 const sessions: Session[] = [];
 const dirs: string[] = [];
-const task: TaskOfferPayload = {
+const task: RuntimeTaskInput = {
   instruction: 'hello',
 };
 function adapter(options: ConstructorParameters<typeof CodexAdapter>[0] = {}) {

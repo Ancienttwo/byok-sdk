@@ -1,3 +1,4 @@
+import { testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -11,6 +12,8 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter, type StubSession } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+
+const RECORD_AGENT = { agentId: 'record-agent', profileRevision: 'rev-1' } as const;
 
 const TASK_ID = 'execution-record-task';
 const TERMINAL_TYPES = ['task.complete', 'task.fail', 'task.cancelled'];
@@ -44,6 +47,7 @@ async function makeRunner(options: RunnerOptions = {}) {
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: path.join(directory, 'workspace'),
+    ...testAgentHomeDeps(),
     deviceId: 'execution-record-device',
     send: envelope => { sent.push(envelope); },
     blobClient: {
@@ -57,7 +61,7 @@ async function makeRunner(options: RunnerOptions = {}) {
     ...(options.withoutRecords === true ? {} : { onExecutionRecord: (record: ExecutionRecord) => { records.push(record); } }),
     ...options.deps,
   });
-  await runner.handleEnvelope(createEnvelope('task.offer', { instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: RECORD_AGENT,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
   const session = adapter.sessions[0]!;
   const terminals = () => sent.filter(envelope => TERMINAL_TYPES.includes(envelope.type));
   const finished = () => vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
@@ -112,7 +116,7 @@ describe('TaskRunner execution record', () => {
     session.emit(use('a'));
     session.fail(new RuntimeExecutionFailure({ phase: 'run', category: 'infrastructure', retry: 'retryable', reason: 'runtime exited' }));
     await finished();
-    expect(terminals().map(envelope => [envelope.type, envelope.payload])).toEqual([['task.fail', { reason: 'runtime exited', retryable: true }]]);
+    expect(terminals().map(envelope => [envelope.type, envelope.payload])).toEqual([['task.fail', { agentRef: RECORD_AGENT, reason: 'runtime exited', retryable: true }]]);
     expect(records).toEqual([{
       taskId: TASK_ID, terminal: 'failed', status: 'partial', source: 'event-stream',
       gaps: [{ reason: 'unpaired_tool_call', count: 1 }, { reason: 'stream_ended_early', count: 1 }],
@@ -191,14 +195,14 @@ describe('TaskRunner execution record', () => {
     adapter.startError = new RuntimeExecutionFailure({ phase: 'start', category: 'infrastructure', retry: 'retryable', reason: 'spawn failed' });
     const sent: Envelope[] = [];
     const onExecutionRecord = vi.fn();
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: path.join(directory, 'workspace'), deviceId: 'execution-record-device',
       send: envelope => { sent.push(envelope); },
       blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },
       sessionWorkspaces: new SessionWorkspaceStore(path.join(directory, 'store')), approvalRegistry: new ApprovalRegistry(),
       storeDir: directory, productId: 'execution-record-product', onExecutionRecord,
     });
-    await runner.handleEnvelope(createEnvelope('task.offer', { instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
+    await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: RECORD_AGENT,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
     expect(sent.filter(envelope => TERMINAL_TYPES.includes(envelope.type)).map(envelope => envelope.type)).toEqual(['task.fail']);
     expect(onExecutionRecord).not.toHaveBeenCalled();
   });

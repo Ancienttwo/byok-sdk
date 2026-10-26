@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
@@ -122,6 +123,7 @@ describe('authenticated enrollment tenant projection', () => {
         productId: 'enrollment-repair-test',
         serverUrl: server.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
       },
       [new StubRuntimeAdapter('pi')],
@@ -167,6 +169,7 @@ describe('authenticated enrollment tenant projection', () => {
         productId,
         serverUrl: server.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
       },
       [new StubRuntimeAdapter('pi')],
@@ -355,7 +358,7 @@ describe('authenticated enrollment tenant projection', () => {
     expect(appended).toMatchObject({ ok: true, record: { tenantId: 'tenant-daemon' } });
 
     const sequence = server.nextSeq();
-    server.send(createEnvelope('task.offer', { instruction: 'journal identity' }, {
+    server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'journal identity' }, {
       taskId: 'enrollment-journal-task',
       seq: sequence,
     }));

@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -47,6 +48,7 @@ async function makeRunner(
   return new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-final-message-workspace-'),
+    ...testAgentHomeDeps(),
     deviceId: 'device-final-message',
     send: (envelope) => sent.push(envelope),
     blobClient: unusedBlobClient,
@@ -60,7 +62,7 @@ async function makeRunner(
 
 async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'claude' | 'codex'): Promise<void> {
   await runner.handleEnvelope(
-    createEnvelope('task.offer', { instruction: 'reply with exactly: CONSOLIDATED', runtime }, { taskId, seq: 1 }),
+    createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'reply with exactly: CONSOLIDATED', runtime }, { taskId, seq: 1 }),
   );
 }
 

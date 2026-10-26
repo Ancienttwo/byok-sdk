@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -65,7 +66,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     const workspaceRoot = await tmpDir('byok-observer-workspace-');
     const storeDir = storeDirOverride ?? (await tmpDir('byok-observer-store-'));
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter],
     );
     await daemon.pair('pairing-code');
@@ -79,7 +80,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     const workspaceRoot = await tmpDir('byok-observer-workspace-');
     const storeDir = await tmpDir('byok-observer-store-');
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter],
     );
     // Subscribe BEFORE pair()/start() so `paired`/`runtimes-detected`/`connection` are all caught too.
@@ -93,8 +94,8 @@ describe('daemon local observability (DaemonObserver)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'do the thing' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'do the thing' },
         { taskId: 'task-seq-1', seq: server.nextSeq() },
       ),
     );
@@ -139,6 +140,7 @@ describe('daemon local observability (DaemonObserver)', () => {
         productId: 'test-product-observer-decline',
         serverUrl: server.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
       },
       [adapter],
@@ -151,8 +153,8 @@ describe('daemon local observability (DaemonObserver)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'do something risky', harnessId: 'acme-harness', runtime: 'claude' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'do something risky', harnessId: 'acme-harness', runtime: 'claude' },
         { taskId: 'task-decline-1', seq: server.nextSeq() },
       ),
     );
@@ -176,8 +178,8 @@ describe('daemon local observability (DaemonObserver)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'do work' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'do work' },
         { taskId: 'task-list-1', seq: server.nextSeq() },
       ),
     );
@@ -226,7 +228,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     const workspaceRoot = await tmpDir('byok-observer-workspace-');
     const storeDir = await tmpDir('byok-observer-store-');
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer-fresh', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer-fresh', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
     );
     await expect(daemon.unpair()).resolves.toBeUndefined();
@@ -243,8 +245,8 @@ describe('daemon local observability (DaemonObserver)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'x' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x' },
         { taskId: 'task-unsub-1', seq: server.nextSeq() },
       ),
     );
@@ -258,8 +260,8 @@ describe('daemon local observability (DaemonObserver)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'y' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'y' },
         { taskId: 'task-unsub-2', seq: server.nextSeq() },
       ),
     );
@@ -285,8 +287,8 @@ describe('daemon local observability (DaemonObserver)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'x' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x' },
         { taskId: 'task-throw-1', seq: server.nextSeq() },
       ),
     );
@@ -325,8 +327,8 @@ describe('daemon local observability (DaemonObserver)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'x' },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'x' },
           { taskId: 'task-async-throw-1', seq: server.nextSeq() },
         ),
       );
@@ -365,7 +367,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       const total = MAX_TRACKED_TASKS * 2;
       for (let i = 0; i < total; i++) {
         observer.handleInboundEnvelope(
-          createEnvelope('task.offer', { instruction: 'x' }, { taskId: `t-${i}`, seq: i + 1 }),
+          createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: `t-${i}`, seq: i + 1 }),
         );
       }
 
@@ -388,8 +390,8 @@ describe('daemon local observability (DaemonObserver)', () => {
 
         observer.handleInboundEnvelope(
           createEnvelope(
-            'task.offer',
-            { instruction: 'run it', runtime: 'claude' },
+            'task.offer_for_agent',
+            { agentRef: freshTestAgentRef(),  instruction: 'run it', runtime: 'claude' },
             { taskId: 'task-runtime-1', seq: 1 },
           ),
         );
@@ -478,8 +480,8 @@ describe('daemon local observability (DaemonObserver)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'needs a human' },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'needs a human' },
           { taskId: 'task-approve-local-1', seq: server.nextSeq() },
         ),
       );
@@ -498,8 +500,8 @@ describe('daemon local observability (DaemonObserver)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'needs a human' },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'needs a human' },
           { taskId: 'task-reject-local-1', seq: server.nextSeq() },
         ),
       );
@@ -524,7 +526,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       const workspaceRoot = await tmpDir('byok-observer-workspace-');
       const storeDir = await tmpDir('byok-observer-store-');
       daemon = createDaemonWithAdapters(
-        { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer-not-started', serverUrl: server.url, workspaceRoot, storeDir },
+        {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer-not-started', serverUrl: server.url, workspaceRoot, storeDir },
         [new StubRuntimeAdapter()],
       );
       await expect(daemon.approve('task-x')).rejects.toThrow(/not started/i);
@@ -556,7 +558,7 @@ it('projects a refused terminal after restart without an accepted lifecycle even
   observer.noteOutboundRejected(terminal, { envelopeId: terminal.id, type: terminal.type, taskId: 'recovered', reason: 'not_permitted', terminal: true });
   expect(observer.tasks()).toMatchObject([{ taskId: 'recovered', state: 'Complete', delivery: 'rejected', summary: 'local terminal truth' }]);
   expect(events.map((event) => event.kind)).toEqual(['outbound-rejected']);
-  const offer = createEnvelope('task.offer', { instruction: 'new' }, { taskId: 'active', seq: 1 });
+  const offer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'new' }, { taskId: 'active', seq: 1 });
   observer.handleInboundEnvelope(offer);
   const progress = createEnvelope('task.progress', { seq: 1, events: [{ type: 'progress', text: 'partial' }] }, { taskId: 'active' });
   observer.noteOutboundRejected(progress, { envelopeId: progress.id, type: progress.type, taskId: 'active', reason: 'limit_exceeded', terminal: false });

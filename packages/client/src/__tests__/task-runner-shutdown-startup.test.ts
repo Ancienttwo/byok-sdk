@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -16,7 +17,7 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
     const sent: Envelope[] = [];
     const adapter = new StubRuntimeAdapter();
     const release = adapter.blockStart();
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], deviceId: 'shutdown-device', workspaceRoot: path.join(dir, 'workspace'),
       send: event => { sent.push(event); },
       blobClient: {
@@ -26,7 +27,7 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
       sessionWorkspaces: new SessionWorkspaceStore(path.join(dir, 'sessions')),
       approvalRegistry: new ApprovalRegistry(), storeDir: dir, productId: 'shutdown-start',
     });
-    const offered = runner.handleEnvelope(createEnvelope('task.offer', {
+    const offered = runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), 
       instruction: 'blocked startup',
     }, { taskId: 'starting-task', seq: 1 }));
     try {

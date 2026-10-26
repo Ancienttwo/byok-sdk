@@ -1,3 +1,4 @@
+import type { RuntimeTaskInput } from '../types';
 import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { createHash } from 'node:crypto';
@@ -8,7 +9,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   getDocsPath,
   getExamplesPath,
@@ -353,7 +353,7 @@ interface StartOverrides {
   captureLaunch?: (resources: { projectionDir?: string; release: () => Promise<void> }) => void;
   /** Everything a BYOK-profile prepared launch adds, and nothing else. */
   byok?: {
-    selection: NonNullable<TaskOfferPayload['dispatchSelection']>;
+    selection: NonNullable<RuntimeTaskInput['dispatchSelection']>;
     launcher?: PiAdapterOptions['byokLauncher'];
     projectionRoot: string;
   };
@@ -371,11 +371,11 @@ const __executionScratch = await testExecutionScratch();
     ...(byok?.launcher === undefined ? {} : { byokLauncher: byok.launcher }),
     ...(overrides.spawnFn === undefined ? {} : { spawnFn: overrides.spawnFn }),
   });
-  const offer: TaskOfferPayload = {
+  const offer: RuntimeTaskInput = {
     taskId: 'prepared-launch-test',
     instruction: 'unused on the prepared lane',
     ...(byok === undefined ? {} : { dispatchSelection: byok.selection }),
-  } as unknown as TaskOfferPayload;
+  } as unknown as RuntimeTaskInput;
   const result = await adapter.prepare({
     offer,
     descriptor: adapter.descriptor,
@@ -923,7 +923,7 @@ async function byokFixture(endpoint: ProviderEndpoint): Promise<{
   profile: ModelProviderProfile;
   launcher: NonNullable<PiAdapterOptions['byokLauncher']>;
   projectionRoot: string;
-  selection: NonNullable<TaskOfferPayload['dispatchSelection']>;
+  selection: NonNullable<RuntimeTaskInput['dispatchSelection']>;
 }> {
   const profile = byokProfile(endpoint.baseUrl);
   const prepared = await prepareOnThisDevice(endpoint, (snapshot) => {
@@ -942,7 +942,7 @@ async function byokFixture(endpoint: ProviderEndpoint): Promise<{
     projectionRoot: await tempDir('byok-pi-prepared-projections-'),
     selection: {
       lane: 'byok', runtimeId: 'pi', providerId: BYOK_PROFILE_REF, modelId: 'glm-4.6',
-    } as unknown as NonNullable<TaskOfferPayload['dispatchSelection']>,
+    } as unknown as NonNullable<RuntimeTaskInput['dispatchSelection']>,
   };
 }
 

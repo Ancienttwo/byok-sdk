@@ -11,8 +11,8 @@ export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
  * additions against; cross-release gates stay unproven until one exists.
  *
  * v4 completes the ADR-034 cutover and retires the approval paths kept for
- * pre-M5 peers. It removes `conn.ack`, the runtime-only offers `task.offer`
- * and `task.offer_with_toolsets` with their sealed twins, and the
+ * pre-M5 peers. It removes the v3 handshake answer, the runtime-only offers
+ * (with and without toolsets) with their sealed twins, and the
  * `strict-agent-only` flag: every offer is Agent-bound. `approvalId` is
  * required on `task.await_approval`, `task.approve` and `task.reject`, so a
  * decision resolves only the approval it names. `task.approval_resolved` is

@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner, testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -36,6 +37,7 @@ async function makeRunner(
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-terminal-usage-workspace-'),
+    ...testAgentHomeDeps(),
     deviceId: 'device-terminal-usage',
     send: (envelope) => sent.push(envelope),
     blobClient: unusedBlobClient,
@@ -51,8 +53,8 @@ async function makeRunner(
 async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'claude' | 'codex'): Promise<void> {
   await runner.handleEnvelope(
     createEnvelope(
-      'task.offer',
-      {
+      'task.offer_for_agent',
+      { agentRef: freshTestAgentRef(), 
         instruction: 'observe terminal usage',
         runtime,
         // This requested selection must NOT become provider/model terminal
@@ -174,6 +176,7 @@ describe('TaskRunner terminal inference usage projection', () => {
           productId: 'terminal-usage-composition-test',
           serverUrl: server.url,
           workspaceRoot: await tmpDir('byok-terminal-usage-daemon-workspace-'),
+          agentHome: testAgentHomeConfig(),
           storeDir: await tmpDir('byok-terminal-usage-daemon-store-'),
         },
         [adapter],
@@ -182,8 +185,8 @@ describe('TaskRunner terminal inference usage projection', () => {
       await daemon.start();
       const taskId = 'terminal-composition-release-identity';
       server.send(createEnvelope(
-        'task.offer',
-        { instruction: 'finish', runtime: 'codex' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'finish', runtime: 'codex' },
         { taskId, seq: server.nextSeq() },
       ));
       await server.waitFor((event) => event.type === 'task.started' && event.task_id === taskId);

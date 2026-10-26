@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -56,6 +57,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
         productId: 'test-product-selection',
         serverUrl: server.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         ...configOverrides,
       },
@@ -73,7 +75,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       await setup([pi, claude]);
 
       server.send(
-        createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-order-1', seq: server.nextSeq() }),
+        createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-order-1', seq: server.nextSeq() }),
       );
 
       const claim = await server.waitFor((e) => e.type === 'task.claim');
@@ -93,7 +95,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       await setup([pi]);
 
       server.send(
-        createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-order-2', seq: server.nextSeq() }),
+        createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-order-2', seq: server.nextSeq() }),
       );
 
       const claim = await server.waitFor((e) => e.type === 'task.claim');
@@ -110,7 +112,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     await setup([pi, claude, codex], { runtimePreference: ['codex', 'claude', 'pi'] });
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-preference-1', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-preference-1', seq: server.nextSeq() }),
     );
 
     const claim = await server.waitFor((e) => e.type === 'task.claim');
@@ -135,8 +137,8 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
 
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'x', runtime: 'pi' },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'pi' },
           { taskId: 'task-unavailable-1', seq: server.nextSeq() },
         ),
       );
@@ -188,7 +190,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
         await setup([adapter]);
         const taskId = 'task-descriptor-snapshot';
         server.send(
-          createEnvelope('task.offer', { instruction: 'x', runtime: 'pi' }, { taskId, seq: server.nextSeq() }),
+          createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'pi' }, { taskId, seq: server.nextSeq() }),
         );
         const claim = await server.waitFor((envelope) => envelope.type === 'task.claim' && envelope.task_id === taskId);
         await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === taskId);
@@ -227,6 +229,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
           productId: 'test-product-pi-falsifier',
           serverUrl: server.url,
           workspaceRoot,
+          agentHome: testAgentHomeConfig(),
           storeDir,
         },
         [pi],
@@ -236,8 +239,8 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
 
       server.send(
         createEnvelope(
-          'task.offer',
-          {
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(), 
             instruction: 'x',
             dispatchSelection: {
               lane: 'byok',
@@ -278,8 +281,8 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       };
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'x', dispatchSelection },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'x', dispatchSelection },
           { taskId: 'task-selection-1', seq: server.nextSeq() },
         ),
       );
@@ -298,8 +301,8 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
 
       server.send(
         createEnvelope(
-          'task.offer',
-          {
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(), 
             instruction: 'x',
             runtime: 'claude',
             dispatchSelection: {

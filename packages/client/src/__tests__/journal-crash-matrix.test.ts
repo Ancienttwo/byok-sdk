@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 /**
@@ -51,7 +52,7 @@ async function tmpDir(prefix: string): Promise<string> {
 }
 
 function offerRecord(taskId: string, seq: number): ReceivedEnvelopeRecord {
-  const bytes = JSON.stringify({ v: 1, id: `env-${taskId}`, type: 'task.offer', task_id: taskId, seq });
+  const bytes = JSON.stringify({ v: 1, id: `env-${taskId}`, type: 'task.offer_for_agent', task_id: taskId, seq });
   return {
     identity: IDENTITY,
     envelopeId: `env-${taskId}`,
@@ -289,6 +290,7 @@ describe('S3.4 crash matrix, points 1-6', () => {
           productId: 'test-product',
           serverUrl: cloud.url,
           workspaceRoot,
+          agentHome: testAgentHomeConfig(),
           storeDir,
         },
         [adapter],

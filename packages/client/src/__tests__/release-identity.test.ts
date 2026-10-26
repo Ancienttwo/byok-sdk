@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -57,6 +58,7 @@ describe('LocalAgentReleaseIdentity', () => {
         productId: 'release-test',
         serverUrl: 'http://127.0.0.1:1',
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         localAgentRelease: input,
       },
@@ -76,6 +78,7 @@ describe('LocalAgentReleaseIdentity', () => {
       productId: 'release-test-missing',
       serverUrl: 'http://127.0.0.1:1',
       workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       localAgentRelease: undefined,
     } as never, [new StubRuntimeAdapter()])).toThrow(/localAgentRelease/);
   });

@@ -1,3 +1,4 @@
+import { freshTestAgentRef } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -168,7 +169,7 @@ describe('local paths in outbound handleOffer reasons', () => {
     });
     localRoots.push(path.dirname(path.dirname(missingServer)));
 
-    await taskRunner.handleEnvelope(createEnvelope('task.offer_with_toolsets', {
+    await taskRunner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), 
       instruction: 'outbound offer work', runtime: 'pi', requiredToolsets: ['team'],
     }, { taskId: 'toolset-path', seq: 1 }));
 
@@ -225,7 +226,7 @@ describe('local paths in outbound handleOffer reasons', () => {
     const { runner: taskRunner, sent, localRoots } = await runner(adapter);
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    await taskRunner.handleEnvelope(createEnvelope('task.offer', { instruction: 'outbound offer work' }, { taskId: 'artifact-path', seq: 1 }));
+    await taskRunner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'outbound offer work' }, { taskId: 'artifact-path', seq: 1 }));
     adapter.sessions[0]!.emit({ type: 'artifact', name: 'missing report.txt', contentType: 'text/plain' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some((entry) => entry.type === 'task.complete' && entry.task_id === 'artifact-path')).toBe(true));

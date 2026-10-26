@@ -179,7 +179,7 @@ describe.skipIf(process.platform !== 'darwin' || !hasAgentMemoryHelperBuild())('
     const storeDir = path.join(root, 'store');
     const hostStorageRoot = path.join(root, 'homes');
     let w: Awaited<ReturnType<typeof world>>;
-    const daemon = createDaemonWithAdapters({ strictAgentOnly: true, productName: 'Helper crash', productId: 'helper-crash', serverUrl: server.url,
+    const daemon = createDaemonWithAdapters({ productName: 'Helper crash', productId: 'helper-crash', serverUrl: server.url,
       storeDir, storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, agentHome: { hostStorageRoot },
       agentMemoryIntents: { fetch: request => w.transport.fetch(request), complete: completion => w.transport.complete(completion) },
     }, [], { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });

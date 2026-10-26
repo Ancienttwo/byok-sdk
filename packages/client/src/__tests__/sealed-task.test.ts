@@ -1,3 +1,4 @@
+import { freshTestAgentRef } from './fixtures/test-agent';
 /**
  * #654 E3c: every outbound of a task that seals its output goes through one
  * per-task queue, so a plaintext type sent after a sealed one cannot pass it
@@ -250,7 +251,7 @@ describe('a terminal built for a sealed task in a run that may not seal it (#866
   });
 
   it('keeps every terminal of a task whose offer does not seal output', async () => {
-    const plainOffer = createEnvelope('task.offer', { instruction: 'plain instruction' }, { taskId: 'recovered', seq: 1 });
+    const plainOffer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'plain instruction' }, { taskId: 'recovered', seq: 1 });
     const fail = createEnvelope('task.fail', { reason: 'plain reason', retryable: false }, { taskId: 'recovered' });
     expect(await tasks().sealRecovered(plainOffer, fail, false)).toBe(fail);
   });

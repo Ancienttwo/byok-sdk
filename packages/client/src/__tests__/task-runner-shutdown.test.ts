@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -41,6 +42,7 @@ async function makeRunner(
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-shutdown-workspace-'),
+    ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => {
       sent.push(envelope);
@@ -64,7 +66,7 @@ describe('TaskRunner.stopAcceptingOffers', () => {
 
     runner.stopAcceptingOffers();
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'too late' }, { taskId: 'task-late', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'too late' }, { taskId: 'task-late', seq: 1 }),
     );
 
     expect(adapter.startCalls).toHaveLength(0);
@@ -82,7 +84,7 @@ describe('TaskRunner.stopAcceptingOffers', () => {
     runner.stopAcceptingOffers();
     runner.stopAcceptingOffers();
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-1', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-1', seq: 1 }),
     );
     expect(sent.filter((e) => e.type === 'task.decline')).toHaveLength(1);
   });
@@ -93,7 +95,7 @@ describe('TaskRunner.stopAcceptingOffers', () => {
     const runner = await makeRunner(adapter, sent);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'already running' }, { taskId: 'task-early', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'already running' }, { taskId: 'task-early', seq: 1 }),
     );
     expect(runner.activeTaskCount).toBe(1);
 
@@ -109,7 +111,7 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     const runner = await makeRunner(adapter, sent);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'do work' }, { taskId: 'task-1', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do work' }, { taskId: 'task-1', seq: 1 }),
     );
     expect(runner.activeTaskCount).toBe(1);
     const session = adapter.sessions[0];
@@ -132,7 +134,7 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     const runner = await makeRunner(adapter, sent);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'do work' }, { taskId: 'task-1', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do work' }, { taskId: 'task-1', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();
@@ -152,7 +154,7 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     const runner = await makeRunner(adapter, sent, { shutdownInterruptTimeoutMs: 20 });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'do work' }, { taskId: 'task-hang', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do work' }, { taskId: 'task-hang', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();
@@ -176,7 +178,7 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
     const runner = await makeRunner(adapter, sent, { shutdownInterruptTimeoutMs: 10 });
-    await runner.handleEnvelope(createEnvelope('task.offer', {
+    await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), 
       instruction: 'cancel me',
     }, { taskId: 'bounded-cancel', seq: 1 }));
     const session = adapter.sessions[0]!;
@@ -194,10 +196,10 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     const runner = await makeRunner(adapter, sent);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'a' }, { taskId: 'task-a', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'a' }, { taskId: 'task-a', seq: 1 }),
     );
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'b' }, { taskId: 'task-b', seq: 2 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'b' }, { taskId: 'task-b', seq: 2 }),
     );
     expect(runner.activeTaskCount).toBe(2);
 
@@ -217,7 +219,7 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'do work' }, { taskId: 'task-disposal', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do work' }, { taskId: 'task-disposal', seq: 1 }),
     );
     const session = adapter.sessions[0]!;
     const close = session.close.bind(session);

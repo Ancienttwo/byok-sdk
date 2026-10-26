@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -207,11 +208,12 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
       productId: options.productId,
       serverUrl: server.url,
       workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
       mcpToolsets: { ...TOOLSETS },
       ...(options.enabled ? { inputPreparation: { limits: LIMITS, authorityResolver, counter } } : {}),
     };
-    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
+    daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
     await daemon.pair('pairing-code');
     await daemon.start();
     const connected = await connectControlClient({ storeDir, productId: options.productId });
@@ -251,6 +253,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
       productId,
       serverUrl: server.url,
       workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
       mcpToolsets: { ...TOOLSETS },
       inputPreparation: { limits: LIMITS, authorityResolver, counter },
@@ -283,7 +286,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
 
     // An ordinary task still runs end to end.
     server.send(
-      createEnvelope('task.offer', { instruction: 'do work' }, { taskId: 't-ordinary', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do work' }, { taskId: 't-ordinary', seq: server.nextSeq() }),
     );
     await server.waitFor((envelope) => envelope.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -312,6 +315,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
           productId: 'acme-prep-badpolicy',
           serverUrl: server.url,
           workspaceRoot,
+          agentHome: testAgentHomeConfig(),
           storeDir,
           inputPreparation: {
             limits: { revision: 'r', maxRequestBytes: 0 } as never,
@@ -392,7 +396,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
       ...JSON.parse(line), artifactExpiresAt: new Date(0).toISOString(), recordExpiresAt: new Date(1).toISOString(),
     }));
     await fs.writeFile(logPath, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
-    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
+    daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
     await daemon.start();
     expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
     expect(await fs.readFile(logPath, 'utf8')).toBe('');

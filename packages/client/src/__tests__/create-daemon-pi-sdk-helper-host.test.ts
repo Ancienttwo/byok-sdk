@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import os from 'node:os';
 import path from 'node:path';
@@ -23,6 +24,7 @@ describe('createDaemon: DaemonConfig.sdkHelperHost reaches the Pi adapter', () =
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'pi-sdk-helper-host-test',
       serverUrl: 'http://127.0.0.1:1',
       workspaceRoot: path.join(os.tmpdir(), 'byok-pi-helper-host-workspaces'),
+      agentHome: testAgentHomeConfig(),
       storeDir: path.join(os.tmpdir(), 'byok-pi-helper-host-store'),
       ...(sdkHelperHost === undefined ? {} : { sdkHelperHost }),
     });

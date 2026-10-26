@@ -1,3 +1,4 @@
+import { echoedTestAgentRef, freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -33,6 +34,7 @@ describe('TaskRunner typed runtime failure projection', () => {
         productId: 'runtime-failure-test',
         serverUrl: server.url,
         workspaceRoot: await temporaryDirectory('byok-runtime-failure-workspace-'),
+        agentHome: testAgentHomeConfig(),
         storeDir: await temporaryDirectory('byok-runtime-failure-store-'),
       },
       [adapter],
@@ -42,7 +44,7 @@ describe('TaskRunner typed runtime failure projection', () => {
   }
 
   async function offer(taskId: string): Promise<void> {
-    server.send(createEnvelope('task.offer', { instruction: 'run' }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'run' }, { taskId, seq: server.nextSeq() }));
     await server.waitFor((event) => event.type === 'task.claim' && event.task_id === taskId);
   }
 
@@ -57,7 +59,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     await start(adapter);
     await offer('typed-start-infrastructure');
     const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'typed-start-infrastructure');
-    expect(failed.payload).toEqual({ reason: 'runtime process could not be spawned', retryable: true });
+    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'runtime process could not be spawned', retryable: true });
   });
 
   it('projects typed run semantic failure as non-retryable after forwarding diagnostics', async () => {
@@ -75,7 +77,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     }));
 
     const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'typed-run-semantic');
-    expect(failed.payload).toEqual({ reason: 'runtime reported terminal task failure', retryable: false });
+    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'runtime reported terminal task failure', retryable: false });
     const progress = await server.waitFor((event) => event.type === 'task.progress' && event.task_id === 'typed-run-semantic');
     expect(progress.payload).toMatchObject({ events: [{ type: 'error', message: 'provider diagnostic' }] });
   });
@@ -112,7 +114,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     adapter.sessions[0]!.fail(new Error('temporary timeout please retry'));
 
     const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'untyped-run');
-    expect(failed.payload).toEqual({
+    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef,
       reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.run,
       retryable: false,
     });
@@ -131,7 +133,7 @@ describe('TaskRunner typed runtime failure projection', () => {
     adapter.sessions[0]!.endAbruptly();
 
     const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'clean-end-without-success');
-    expect(failed.payload).toEqual({
+    expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef,
       reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.run,
       retryable: false,
     });
@@ -151,7 +153,7 @@ describe('TaskRunner typed runtime failure projection', () => {
         failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' },
       }));
       const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'class-run');
-      expect(failed.payload).toEqual({ reason: 'usage limit', retryable: false, failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' } });
+      expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'usage limit', retryable: false, failure: { class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' } });
     });
 
     it('sends unknown for a start failure with no class and for a failure the daemon makes', async () => {
@@ -162,14 +164,14 @@ describe('TaskRunner typed runtime failure projection', () => {
       await start(adapter);
       await offer('class-start');
       const started = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'class-start');
-      expect(started.payload).toEqual({ reason: 'spawn failed', retryable: true, failure: { class: 'unknown' } });
+      expect(started.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'spawn failed', retryable: true, failure: { class: 'unknown' } });
 
       adapter.startError = undefined;
       await offer('class-contract');
       await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'class-contract');
       adapter.sessions.at(-1)!.endAbruptly();
       const violated = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'class-contract');
-      expect(violated.payload).toEqual({ reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.run, retryable: false, failure: { class: 'unknown' } });
+      expect(violated.payload).toEqual({ agentRef: echoedTestAgentRef, reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.run, retryable: false, failure: { class: 'unknown' } });
       diagnostic.mockRestore();
     });
 
@@ -182,7 +184,7 @@ describe('TaskRunner typed runtime failure projection', () => {
         phase: 'run', category: 'semantic', retry: 'non-retryable', reason: 'login expired', failure: { class: 'auth' },
       }));
       const failed = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'class-old-server');
-      expect(failed.payload).toEqual({ reason: 'login expired', retryable: false });
+      expect(failed.payload).toEqual({ agentRef: echoedTestAgentRef, reason: 'login expired', retryable: false });
     });
   });
 });

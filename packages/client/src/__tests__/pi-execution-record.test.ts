@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { spawn as realSpawn, type SpawnOptions } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -58,6 +59,7 @@ async function runPi(trajectory?: string): Promise<{ sent: Envelope[]; records: 
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }), spawnFn })],
     workspaceRoot: path.join(directory, 'workspace'),
+    ...testAgentHomeDeps(),
     deviceId: 'pi-record-device',
     send: envelope => { sent.push(envelope); },
     blobClient: {
@@ -70,7 +72,7 @@ async function runPi(trajectory?: string): Promise<{ sent: Envelope[]; records: 
     productId: 'pi-record-product',
     onExecutionRecord: record => { records.push(record); recorded(); },
   });
-  await runner.handleEnvelope(createEnvelope('task.offer', { instruction: 'say hi', runtime: 'pi' }, { taskId: TASK_ID, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'say hi', runtime: 'pi' }, { taskId: TASK_ID, seq: 1 }));
   // The runner publishes the record after Session.close() and lets the task go right after it.
   await published;
   await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));

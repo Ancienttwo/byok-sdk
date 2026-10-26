@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 /**
  * #869: a Host reads a failed task's runtime failure class from
  * `tasks.get(taskId).result.failure` on the real embedded server, never from
@@ -76,6 +77,7 @@ async function failedTask(runtime: keyof typeof ADAPTERS, options: { oldServer?:
     storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' },
     productName: 'Failure class test', productId, serverUrl: server.url,
     workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'store'),
+    agentHome: testAgentHomeConfig(),
   }, [ADAPTERS[runtime]()], { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });
   const record = await daemon.pair((await server.createPairingCode()).code);
   await daemon.start();

@@ -1,3 +1,4 @@
+import { testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -92,6 +93,7 @@ describe('unknown AgentEvent tolerance on the client inbound path (pre-freeze pr
     const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [], // never consulted — task.progress touches no adapter/session machinery
       workspaceRoot: await tmpDir('byok-envelope-tolerance-workspace-'),
+      ...testAgentHomeDeps(),
       deviceId: 'device-1',
       send: (envelope) => {
         sent.push(envelope);

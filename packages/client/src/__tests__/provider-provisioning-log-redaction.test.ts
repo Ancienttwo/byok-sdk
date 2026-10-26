@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs, readdirSync, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
@@ -218,6 +219,7 @@ describe('daemon log chain for a failing provisioning handler', () => {
         productId: 'test-product',
         serverUrl: server.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         providerProvisioning: async (notice) => build(deviceId)(notice),
       },

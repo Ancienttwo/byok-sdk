@@ -10,8 +10,6 @@ import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { GitWorkspaceManager } from '../daemon/git-workspace';
-import { GitWorkspaceStore } from '../daemon/git-workspace-store';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure } from '../runtime-failure';
@@ -69,12 +67,6 @@ function agentOffer(taskId: string, seq: number, extra: { sessionRef?: string } 
   }, { taskId, seq });
 }
 
-function plainOffer(taskId: string, seq: number, sessionRef?: string): Envelope {
-  return createEnvelope('task.offer', {
-    instruction: 'characterized work', ...(sessionRef === undefined ? {} : { sessionRef }),
-  }, { taskId, seq });
-}
-
 async function agentRunner(
   adapter: StubRuntimeAdapter,
   extra: Partial<TaskRunnerDeps> = {},
@@ -99,37 +91,6 @@ async function agentRunner(
   };
   const runner = new TaskRunner(deps);
   return { runner, agentHome, sent, deps };
-}
-
-async function gitRunner(
-  adapter: StubRuntimeAdapter,
-  send?: (envelope: Envelope, sent: Envelope[]) => void,
-): Promise<{
-  runner: TaskRunner; sent: Envelope[]; root: string; manager: GitWorkspaceManager;
-  store: GitWorkspaceStore; sessionStore: SessionWorkspaceStore;
-}> {
-  const root = await temporary('byok-offer-char-git-root-');
-  const storeDir = await temporary('byok-offer-char-git-store-');
-  const store = new GitWorkspaceStore(storeDir);
-  await store.initialize();
-  const manager = new GitWorkspaceManager(root, { ownerId: `offer-char-${path.basename(storeDir)}` });
-  await manager.preflight();
-  const sessionStore = new SessionWorkspaceStore(storeDir);
-  const sent: Envelope[] = [];
-  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-    adapters: [adapter],
-    workspaceRoot: root,
-    deviceId: 'device-offer-char',
-    send: (envelope) => (send === undefined ? sent.push(envelope) : send(envelope, sent)),
-    blobClient,
-    sessionWorkspaces: sessionStore,
-    gitWorkspaceManager: manager,
-    gitWorkspaceStore: store,
-    approvalRegistry: new ApprovalRegistry(),
-    storeDir,
-    productId: 'offer-characterization-git',
-  });
-  return { runner, sent, root, manager, store, sessionStore };
 }
 
 /** Finishes the one admitted Session of a redelivery and waits until nothing is owned. */
@@ -292,81 +253,6 @@ describe('handleOffer exit characterization (before the phase split)', () => {
     expect(runner.activeTaskCount).toBe(0);
   });
 
-  it('workspace is busy or unavailable: an existing Git workspace that fails validation declines before the lease acquire', async () => {
-    const adapter = new StubRuntimeAdapter('pi');
-    const { runner, sent, root, manager, store, sessionStore } = await gitRunner(adapter);
-    const workspaceDir = path.join(root, 'existing-workspace');
-    const observation = await manager.prepareFresh(workspaceDir);
-    const sessionRef = 'existing-session';
-    const workspaceId = 'existing-workspace-id';
-    const now = new Date().toISOString();
-    await sessionStore.record(sessionRef, {
-      workspaceDir, runtimeSessionId: 'old-runtime-session', workspaceKind: 'git', gitWorkspaceId: workspaceId,
-    });
-    await store.upsert({
-      workspaceId, taskId: 'earlier-task', workspaceDir, sessionRef, phase: 'completed',
-      baseline: observation.head, current: observation.head,
-      commitsSinceBaseline: observation.commitsSinceBaseline, staged: observation.staged,
-      unstaged: observation.unstaged, untracked: observation.untracked, conflicted: observation.conflicted,
-      createdAt: now, updatedAt: now,
-    });
-    vi.spyOn(manager, 'validateExisting').mockRejectedValueOnce(new Error('validate fixture failure'));
-    const acquire = vi.spyOn(manager, 'acquireLease');
-    const taskId = 'existing-workspace-invalid';
-
-    await runner.handleEnvelope(plainOffer(taskId, 1, sessionRef));
-
-    expect(declines(sent, taskId).map((entry) => entry.payload)).toEqual([{
-      reason: 'workspace is busy or unavailable', retryable: true,
-    }]);
-    expect(acquire).not.toHaveBeenCalled();
-    expect(claimed(sent, taskId)).toBe(0);
-    expect(adapter.startCalls).toHaveLength(0);
-    const lease = await manager.acquireLease(workspaceDir, sessionRef);
-    lease.release();
-
-    await runner.handleEnvelope(plainOffer(taskId, 2, sessionRef));
-    expect(declines(sent, taskId)).toHaveLength(1);
-    expect(claimed(sent, taskId)).toBe(1);
-    expect(adapter.startCalls[0]?.ctx.workspaceDir).toBe(workspaceDir);
-    await completeAdmitted(runner, adapter, sent, taskId);
-  });
-
-  it('workspace mode is unavailable: declines a half-configured Git mode with nothing held', async () => {
-    const adapter = new StubRuntimeAdapter('pi');
-    const root = await temporary('byok-offer-char-half-git-root-');
-    const storeDir = await temporary('byok-offer-char-half-git-store-');
-    const sent: Envelope[] = [];
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-      adapters: [adapter],
-      workspaceRoot: root,
-      deviceId: 'device-offer-char',
-      send: (envelope) => sent.push(envelope),
-      blobClient,
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
-      // A manager without its ledger store is neither Git mode nor plain mode.
-      gitWorkspaceManager: new GitWorkspaceManager(root, { ownerId: `offer-char-half-${path.basename(storeDir)}` }),
-      approvalRegistry: new ApprovalRegistry(),
-      storeDir,
-      productId: 'offer-characterization-half-git',
-    });
-    const taskId = 'workspace-mode-unavailable';
-
-    await runner.handleEnvelope(plainOffer(taskId, 1));
-
-    expect(declines(sent, taskId).map((entry) => entry.payload)).toEqual([{
-      reason: 'workspace mode is unavailable', retryable: true,
-    }]);
-    expect(claimed(sent, taskId)).toBe(0);
-    expect(adapter.startCalls).toHaveLength(0);
-    expect(runner.activeTaskCount).toBe(0);
-
-    // The in-flight marker is gone: the redelivery is evaluated again, not dropped.
-    await runner.handleEnvelope(plainOffer(taskId, 2));
-    expect(declines(sent, taskId)).toHaveLength(2);
-    expect(claimed(sent, taskId)).toBe(0);
-  });
-
   it('could not bind the runtime session: fails the claimed Agent task and releases the lease through the startup owner', async () => {
     const adapter = new DriftingSessionAdapter('pi');
     const { runner, agentHome, sent } = await agentRunner(adapter);
@@ -399,27 +285,30 @@ describe('handleOffer exit characterization (before the phase split)', () => {
     await binding.lease.release();
   });
 
-  it('runtime activation failed: fails the claimed task and releases the Session and Git lease through the startup owner', async () => {
+  it('runtime activation failed: fails the claimed task and releases the Session and Agent lease through the startup owner', async () => {
     const adapter = new StubRuntimeAdapter('pi');
-    const { runner, sent, root, manager } = await gitRunner(adapter, (envelope, sent) => {
+    const sent: Envelope[] = [];
+    const { runner, agentHome } = await agentRunner(adapter, {
       // A transport that throws on the `task.started` send fails activation
       // after the startup owner was registered and before the active handoff.
-      if (envelope.type === 'task.started') throw new Error('send fixture failure');
-      sent.push(envelope);
+      send: (envelope) => {
+        if (envelope.type === 'task.started') throw new Error('send fixture failure');
+        sent.push(envelope);
+      },
     });
     const taskId = 'runtime-activation-failed';
 
-    await runner.handleEnvelope(plainOffer(taskId, 1));
+    await runner.handleEnvelope(agentOffer(taskId, 1));
 
     expect(claimed(sent, taskId)).toBe(1);
     expect(terminals(sent, taskId).map((entry) => ({ type: entry.type, payload: entry.payload }))).toEqual([{
-      type: 'task.fail', payload: { reason: 'runtime activation failed: send fixture failure', retryable: false },
+      type: 'task.fail', payload: { reason: 'runtime activation failed: send fixture failure', retryable: false, agentRef: AGENT },
     }]);
     expect(adapter.sessions).toHaveLength(1);
     expect(adapter.sessions[0]!.closeCalled).toBe(true);
     expect(runner.activeTaskCount).toBe(0);
-    const lease = await manager.acquireLease(path.join(root, taskId));
-    lease.release();
+    const binding = await agentHome.acquire(AGENT);
+    await binding.lease.release();
   });
 });
 

@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { spawn as realSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -223,6 +224,7 @@ describe('daemon admission', () => {
         productId: 'test-product',
         serverUrl: server.url,
         workspaceRoot: await tempDir('byok-minimal-guardrails-workspace-'),
+        agentHome: testAgentHomeConfig(),
         storeDir: await tempDir('byok-minimal-guardrails-store-'),
       },
       [adapter],
@@ -230,7 +232,7 @@ describe('daemon admission', () => {
     await daemon.pair('pairing-code');
     await daemon.start();
 
-    const offer = createEnvelope('task.offer', { instruction: 'no policy' }, { taskId: 'task-no-policy', seq: server.nextSeq() });
+    const offer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'no policy' }, { taskId: 'task-no-policy', seq: server.nextSeq() });
     expect('policy' in offer.payload).toBe(false);
     server.send(offer);
 

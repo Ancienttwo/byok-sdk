@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
@@ -39,6 +40,7 @@ describe('Salesko fake connector MCP end to end', () => {
       adapters: [adapter],
       runtimeAllowlist: ['claude'],
       workspaceRoot: await tmpDir('byok-salesko-e2e-workspace-'),
+      ...testAgentHomeDeps(),
       deviceId: 'device-salesko',
       send: (envelope) => sent.push(envelope),
       blobClient: unusedBlobClient,
@@ -62,8 +64,8 @@ describe('Salesko fake connector MCP end to end', () => {
 
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_with_toolsets',
-        {
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(), 
           instruction: 'salesko:find-leads',
           runtime: 'claude',
           requiredToolsets: ['salesko'],

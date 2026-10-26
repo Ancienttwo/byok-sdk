@@ -20,11 +20,11 @@ async function tmpDir(prefix: string): Promise<string> {
  * hand-rolled stub server would not reliably reproduce.
  *
  * WP3B Step 2 restates the scenario on the one transport that still exists.
- * The original root cause was handshake-shaped: `conn.ack` carries a `seq` higher than
- * any backlog envelope about to be redelivered right after it, and the old
- * client advanced its cursor from ANY envelope's seq, so the reconnect ack
- * wrongly skipped the backlog. Over long-poll the daemon has no `conn.ack`
- * at all — the equivalent gap is the daemon simply not receiving for a while
+ * The original root cause was handshake-shaped: the WS handshake answer
+ * carried a `seq` higher than any backlog envelope about to be redelivered
+ * right after it, and the old client advanced its cursor from ANY envelope's
+ * seq, so the reconnect answer wrongly skipped the backlog. Long-poll has no
+ * such answer — the equivalent gap is the daemon simply not receiving for a while
  * (`GET /byok/events` failing at the network layer, a genuine transport
  * outage, not a simulated one) — but the FACT under test is the same one and
  * is the reason the finding mattered: a server-side action taken while the

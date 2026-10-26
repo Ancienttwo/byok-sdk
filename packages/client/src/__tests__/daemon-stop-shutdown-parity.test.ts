@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -121,7 +122,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     const workspaceRoot = await tmpDir(`byok-stop-parity-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-stop-parity-${productId}-store-`);
     const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
-    const built = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } }, ...(config) }, [adapter]);
+    const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } }, ...(config) }, [adapter]);
     await built.pair('pairing-code');
     await built.start();
     return { daemon: built, config, storeDir };
@@ -133,7 +134,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'long task' }, { taskId: 't1', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'long task' }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -178,8 +179,8 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     const built = await pairedAndStarted('acme-stop-runtime-disposal-barrier', adapter);
     daemon = built.daemon;
     server.send(createEnvelope(
-      'task.offer',
-      { instruction: 'long task' },
+      'task.offer_for_agent',
+      { agentRef: freshTestAgentRef(),  instruction: 'long task' },
       { taskId: 't-disposal-barrier', seq: server.nextSeq() },
     ));
     await server.waitFor((event) => event.type === 'task.started');
@@ -212,7 +213,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'long task' }, { taskId: 't-idem', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'long task' }, { taskId: 't-idem', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -246,7 +247,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'long task' }, { taskId: 't-double', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'long task' }, { taskId: 't-double', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -266,9 +267,10 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
       productId: 'acme-stop-barrier',
       serverUrl: server.url,
       workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
     };
-    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } }, ...(config) }, [new StubRuntimeAdapter('pi')]);
+    daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } }, ...(config) }, [new StubRuntimeAdapter('pi')]);
     await daemon.pair('pairing-code');
     await daemon.start();
 
@@ -299,6 +301,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
         productId: 'acme-stop-concurrent',
         serverUrl: server.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         shutdownGraceMs: 20,
       },
@@ -307,7 +310,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     await daemon.pair('pairing-code');
     await daemon.start();
     server.send(
-      createEnvelope('task.offer', { instruction: 'late writer' }, { taskId: 't-late', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'late writer' }, { taskId: 't-late', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));

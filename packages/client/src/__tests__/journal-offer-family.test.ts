@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -17,7 +18,7 @@ import { TestServer } from './fixtures/test-server';
 
 // Independent completeness oracle: enumerate the declared wire family, not the
 // implementation's classifier. Payloads still pass the real EnvelopeSchema.
-const offerTypes = MESSAGE_TYPES.filter((type) => type === 'task.offer' || type.startsWith('task.offer_'));
+const offerTypes = MESSAGE_TYPES.filter((type) => type === 'task.offer_for_agent' || type.startsWith('task.offer_'));
 
 /**
  * Observation budget for this file's eventual-state polls: the durable cursor
@@ -53,7 +54,7 @@ const EVENTUAL_STATE_BUDGET_MS = 4_000;
  * instruction stays plaintext; this daemon does not advertise
  * `sealed-payload-v1` and declines it `sealed_payload_unsupported`.
  */
-const declinedByThisFixture = new Set(['task.offer_with_toolsets', 'task.offer_prepared', ...offerTypes.filter((type) => type.endsWith('_sealed'))]);
+const declinedByThisFixture = new Set(['task.offer_for_agent', 'task.offer_prepared', ...offerTypes.filter((type) => type.endsWith('_sealed'))]);
 const agentRef = { agentId: 'journal-family-agent', profileRevision: 'r1' };
 let daemon: Daemon | undefined;
 let server: TestServer;
@@ -91,7 +92,7 @@ async function setup(type: string) {
     } finally { await binding.lease.release(); }
   }
   const adapter = new StubRuntimeAdapter('pi');
-  daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
+  daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
   const device = await daemon.pair('pair-code');
   await daemon.start();
   const payload = type === 'task.offer_prepared'
@@ -108,7 +109,7 @@ async function setup(type: string) {
       ...(type.includes('for_agent') ? { agentRef } : {}),
       ...(type.includes('with_egress') ? { egressPolicy: DEFAULT_AGENT_EGRESS_POLICY } : {}),
       ...(type === 'task.offer_for_agent_with_egress' || type === 'task.offer_for_agent_with_egress_sealed' ? { sessionRef: 'resume-session' } : {}),
-      ...(type === 'task.offer_with_toolsets' || type === 'task.offer_with_toolsets_sealed' ? { requiredToolsets: ['test-missing'] } : {}),
+      ...(type === 'task.offer_for_agent' || type === 'task.offer_with_toolsets_sealed' ? { requiredToolsets: ['test-missing'] } : {}),
       ...(type.endsWith('_sealed') ? { sealing: { scopeId: 'journal-family-scope', epoch: 1, categories: ['task-output'] } } : {}),
     };
   const seq = server.nextSeq();
@@ -152,7 +153,7 @@ describe('issue #147 protocol offer family through real hosted SQLite journal', 
     // POST can be accepted (and confirmed locally) before start() returns. Hold
     // that acceptance so the read below sees the row strictly before confirmation.
     const releaseConfirmation = server.holdNextMessagesResponse((event) => event.type === 'task.fail' && event.task_id === 'task-147');
-    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [restartedAdapter]);
+    daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [restartedAdapter]);
     await daemon.start();
     const interrupted = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'task-147');
     const recovered = rows(storeDir, 'SELECT recovery_marker FROM journal_task');

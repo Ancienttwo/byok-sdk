@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -63,7 +64,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     const retryDelayMs = 100;
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         longPoll: { retryDelayMs, idleDelayMs: 20 },
@@ -123,13 +124,13 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       const url = input instanceof Request ? input.url : String(input);
       if (taskBId !== undefined && url.includes('/byok/events') && response.ok) {
         const body = await response.clone().json() as { events?: Array<{ type?: string; task_id?: string }> };
-        taskBOfferReads += body.events?.filter((event) => event.type?.startsWith('task.offer') && event.task_id === taskBId).length ?? 0;
+        taskBOfferReads += body.events?.filter((event) => event.type?.startsWith('task.offer_for_agent') && event.task_id === taskBId).length ?? 0;
       }
       return response;
     }) as typeof fetch);
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         longPoll: { retryDelayMs, idleDelayMs: 20 },
@@ -210,7 +211,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     const retryDelayMs = 30;
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         longPoll: { retryDelayMs, idleDelayMs: 20 },

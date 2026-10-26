@@ -37,7 +37,7 @@ async function config(mode: unknown) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-memory-admission-'));
   roots.push(root);
   return { productId: 'memory-admission', productName: 'Memory admission', serverUrl: server?.url ?? 'http://localhost:1',
-    localAgentRelease: { version: '0.0.0-test' }, strictAgentOnly: true, storeDir: path.join(root, 'store'),
+    localAgentRelease: { version: '0.0.0-test' }, storeDir: path.join(root, 'store'),
     storage: { scratchRoot: testScratchRoot() }, agentHome: { hostStorageRoot: path.join(root, 'homes') },
     ...(mode === undefined ? {} : { agentMemoryMcp: mode }),
   } as DaemonConfig;
@@ -83,7 +83,6 @@ it('reports the effective memory MCP admission in status', async () => {
   expect(createDaemonWithAdapters(await config('off'), []).status().agentMemoryMcp).toBe('off');
   const noHome = await config(undefined);
   delete noHome.agentHome;
-  delete noHome.strictAgentOnly;
   noHome.workspaceRoot = path.join(path.dirname(noHome.storeDir!), 'workspace');
   expect(createDaemonWithAdapters(noHome, []).status().agentMemoryMcp).toBe('unavailable');
   for (const mode of [undefined, 'auto'] as const) {

@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -56,6 +57,7 @@ async function startDaemon(config: Record<string, unknown> = {}): Promise<{ life
       productId: 'lifecycle-test',
       serverUrl: server!.url,
       workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
       ...config,
     },
@@ -189,7 +191,7 @@ describe('daemon lifecycle (#391)', () => {
     const workspaceRoot = await tmpDir('byok-lifecycle-workspace-');
     const storeDir = await tmpDir('byok-lifecycle-store-');
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-lifecycle-test' }, productName: 'Lifecycle test', productId: 'lifecycle-test', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-lifecycle-test' }, productName: 'Lifecycle test', productId: 'lifecycle-test', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter('pi')],
     );
     const { deviceId } = await daemon.pair('lifecycle-pair-code');
@@ -222,7 +224,7 @@ describe('daemon lifecycle (#391)', () => {
       const workspaceRoot = await tmpDir('byok-lifecycle-workspace-');
       const storeDir = await tmpDir('byok-lifecycle-store-');
       daemon = createDaemonWithAdapters(
-        { localAgentRelease: { version: '0.0.0-lifecycle-test' }, productName: 'Lifecycle test', productId: 'lifecycle-test', serverUrl: server.url, workspaceRoot, storeDir },
+        {agentHome: testAgentHomeConfig(),  localAgentRelease: { version: '0.0.0-lifecycle-test' }, productName: 'Lifecycle test', productId: 'lifecycle-test', serverUrl: server.url, workspaceRoot, storeDir },
         [new StubRuntimeAdapter('pi')],
         { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } },
       );

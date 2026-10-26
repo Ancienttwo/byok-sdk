@@ -1,3 +1,5 @@
+import type { RuntimeTaskInput } from '../types';
+import { echoedTestAgentRef, freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -38,6 +40,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
         productId: 'test-product',
         serverUrl: server.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         ...configOverrides,
       },
@@ -54,8 +57,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'do the thing' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'do the thing' },
         { taskId: 'task-1', seq: server.nextSeq() },
       ),
     );
@@ -73,7 +76,10 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const [session] = adapter.sessions;
     expect(session).toBeDefined();
-    expect(adapter.startCalls[0]?.ctx.workspaceDir).toContain('task-1');
+    // An Agent offer runs in its Agent home, <hostStorageRoot>/agents/<agentId>.
+    const workspaceDir = adapter.startCalls[0]!.ctx.workspaceDir;
+    expect(path.basename(workspaceDir)).toMatch(/^test-agent-\d+$/);
+    expect(path.basename(path.dirname(workspaceDir))).toBe('agents');
 
     session?.emit({ type: 'progress', text: 'working...' });
     session?.emit({ type: 'turn_end' });
@@ -101,8 +107,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'long running thing' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'long running thing' },
         { taskId: 'task-2', seq: server.nextSeq() },
       ),
     );
@@ -133,8 +139,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'buffer some progress then cancel' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'buffer some progress then cancel' },
         { taskId: 'task-cancel-buffered', seq: server.nextSeq() },
       ),
     );
@@ -164,8 +170,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'race me' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'race me' },
         { taskId: 'task-race', seq: server.nextSeq() },
       ),
     );
@@ -201,14 +207,14 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
   it('declines (never claims) an offer naming an unavailable runtime (M1 gap #5)', async () => {
     // `runtime` is constrained by the frozen protocol to 'pi'|'claude'|'codex'
     // (RuntimeIdSchema), so the stub must claim one of those ids to exercise
-    // "runtime known but not detected as present" through a real TaskOfferPayload.
+    // "runtime known but not detected as present" through a real RuntimeTaskInput.
     const adapter = new StubRuntimeAdapter('pi', { kind: 'not-found' });
     await setupDaemon(adapter);
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'x', runtime: 'pi' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'pi' },
         { taskId: 'task-4', seq: server.nextSeq() },
       ),
     );
@@ -230,8 +236,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'x' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x' },
         { taskId: 'task-6', seq: server.nextSeq() },
       ),
     );
@@ -251,14 +257,14 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'x' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x' },
         { taskId: 'task-7', seq: server.nextSeq() },
       ),
     );
     await server.waitFor((e) => e.type === 'task.claim');
     const fail = await server.waitFor((e) => e.type === 'task.fail');
-    expect(fail.payload).toEqual({
+    expect(fail.payload).toEqual({ agentRef: echoedTestAgentRef,
       reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.start,
       retryable: false,
     });
@@ -272,8 +278,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'x' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x' },
         { taskId: 'task-5', seq: server.nextSeq() },
       ),
     );
@@ -293,8 +299,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'x', runtime: 'pi' },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'pi' },
           { taskId: 'task-runtime-explicit', seq: server.nextSeq() },
         ),
       );
@@ -309,8 +315,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'x' }, // no `runtime` — daemon auto-selects
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'x' }, // no `runtime` — daemon auto-selects
           { taskId: 'task-runtime-auto', seq: server.nextSeq() },
         ),
       );
@@ -329,8 +335,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'needs a human' },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'needs a human' },
           { taskId, seq: server.nextSeq() },
         ),
       );
@@ -355,10 +361,10 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     }
 
     it('task.approve resolves approval(true) and progress resumes to completion', async () => {
-      const { adapter } = await offerAndAwaitApproval('task-approve-1');
+      const { adapter, approvalId } = await offerAndAwaitApproval('task-approve-1');
       const session = adapter.sessions[0];
 
-      server.send(createEnvelope('task.approve', {}, { taskId: 'task-approve-1', seq: server.nextSeq() }));
+      server.send(createEnvelope('task.approve', { approvalId }, { taskId: 'task-approve-1', seq: server.nextSeq() }));
       await vi.waitFor(() => expect(session?.resolveApprovalCalls).toEqual([{ approved: true }]));
 
       // Proof progress resumes: the session keeps producing events and the
@@ -372,11 +378,11 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     });
 
     it('task.reject resolves approval(false, reason) and stops the session, reporting task.fail', async () => {
-      const { adapter } = await offerAndAwaitApproval('task-reject-1');
+      const { adapter, approvalId } = await offerAndAwaitApproval('task-reject-1');
       const session = adapter.sessions[0];
 
       server.send(
-        createEnvelope('task.reject', { reason: 'not authorized' }, { taskId: 'task-reject-1', seq: server.nextSeq() }),
+        createEnvelope('task.reject', { reason: 'not authorized', approvalId }, { taskId: 'task-reject-1', seq: server.nextSeq() }),
       );
 
       const fail = await server.waitFor((e) => e.type === 'task.fail' && e.task_id === 'task-reject-1');

@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 /**
  * #654 E3a: this daemon does not open sealed content, and it does not
  * advertise `sealed-payload-v1`. A Host that skips the gate can still send it
@@ -47,7 +48,7 @@ async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[], serverC
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-refusal-'));
   const store = new SessionWorkspaceStore(path.join(dir, 'sessions'));
   dirs.push({ dir, store });
-  return new TaskRunner({
+  return new TaskRunner({...testAgentHomeDeps(), 
     getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter], workspaceRoot: path.join(dir, 'workspace'),
     deviceId: 'sealed-refusal-device', send: (event) => { sent.push(event); },
@@ -114,7 +115,7 @@ describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', 
     const runner = await runnerWith(adapter, sent);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      await runner.handleEnvelope(createEnvelope('task.offer', { instruction: 'plain task', runtime: 'pi' }, { taskId: 'plain-task', seq: 1 }));
+      await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'plain task', runtime: 'pi' }, { taskId: 'plain-task', seq: 1 }));
       const session = adapter.sessions[0]!;
 
       await runner.handleEnvelope(createEnvelope('task.steer_sealed', sealedSteer as never, { taskId: 'plain-task', seq: 2 }));

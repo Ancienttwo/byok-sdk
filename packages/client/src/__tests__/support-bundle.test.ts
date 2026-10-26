@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -41,6 +42,7 @@ function config(storeDir: string): DaemonConfig {
     productId: 'SENTINEL_PRODUCT_ID',
     serverUrl: 'https://user:SENTINEL_URL_SECRET@example.invalid/private/path?token=SENTINEL_QUERY_SECRET',
     workspaceRoot: path.join(storeDir, 'SENTINEL_WORKSPACE_PATH'),
+    agentHome: testAgentHomeConfig(),
     storeDir,
     runtimeAllowlist: ['SENTINEL_ALLOWLIST_SECRET'],
   };
@@ -256,7 +258,7 @@ describe('outbound rejection diagnostics #397', () => {
     const { createEnvelope, encodeEnvelope } = await import('@byok-sdk/protocol');
     const dir = await tempDir();
     const journal = new SqliteLocalTaskJournal({ storeDir: dir });
-    const offer = createEnvelope('task.offer', { instruction: 'SECRET_PAYLOAD_BYTES' }, { taskId: 'rejected-task', seq: 1 });
+    const offer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'SECRET_PAYLOAD_BYTES' }, { taskId: 'rejected-task', seq: 1 });
     const bytes = encodeEnvelope(offer);
     await journal.appendEnvelope({ identity: { tenantId: 'tenant', productId: 'product', deviceId: 'device' },
       envelopeId: offer.id, seq: 1, taskId: 'rejected-task', bytes, bytesHash: journalHash(bytes), receivedAt: new Date().toISOString(), opensTask: true });

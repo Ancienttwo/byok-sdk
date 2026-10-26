@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -28,6 +29,7 @@ describe('createDaemonWithAdapters: DaemonConfig.maxTaskOutputBytes validation',
       productId: 'test-product-resource-limits',
       serverUrl: 'http://localhost:1',
       workspaceRoot: await tmpDir('byok-resource-limits-workspace-'),
+      agentHome: testAgentHomeConfig(),
       storeDir: await tmpDir('byok-resource-limits-store-'),
       maxTaskOutputBytes,
     };
@@ -71,6 +73,7 @@ describe('createDaemonWithAdapters: DaemonConfig.progressBatch validation', () =
       productId: 'test-product-progress-batch',
       serverUrl: 'http://localhost:1',
       workspaceRoot: await tmpDir('byok-progress-batch-workspace-'),
+      agentHome: testAgentHomeConfig(),
       storeDir: await tmpDir('byok-progress-batch-store-'),
       progressBatch,
     };
@@ -119,6 +122,7 @@ describe('createDaemonWithAdapters: DaemonConfig.maxInlineEventBytes validation'
       productId: 'test-product-inline-event-bytes',
       serverUrl: 'http://localhost:1',
       workspaceRoot: await tmpDir('byok-inline-event-workspace-'),
+      agentHome: testAgentHomeConfig(),
       storeDir: await tmpDir('byok-inline-event-store-'),
       maxInlineEventBytes,
     };

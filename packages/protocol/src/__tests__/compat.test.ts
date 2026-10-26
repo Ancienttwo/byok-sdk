@@ -151,7 +151,7 @@ function undecodedEntries(line: HttpCorpusLine, decoded: Record<string, unknown>
 
 /**
  * A retired-major line is rejected on its protocol version. A type a later
- * major removed (v4: `conn.ack` and the runtime-only offers) is unknown to the
+ * major removed (v4: the handshake answer and the runtime-only offers) is unknown to the
  * current decoder before its version is read.
  */
 function expectRetiredMajorRejected(line: CorpusLine, message: string): void {

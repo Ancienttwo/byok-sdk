@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner, testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -131,7 +132,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   });
   const sent: Envelope[] = [];
   const terminalPublished = deferred();
-  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter], deviceId: 't1-native-device', workspaceRoot: path.join(dir, 'workspace'), storeDir: dir, productId: 't1-cancel',
     send: event => {
       timing.observeTerminal(event); sent.push(event);
@@ -147,7 +148,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
     ...overrides,
   });
   const taskId = 'native-task';
-  const offer = (limits?: { maxDurationMs: number }) => runner.handleEnvelope(createEnvelope('task.offer', {
+  const offer = (limits?: { maxDurationMs: number }) => runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), 
     instruction: 'observe native cancellation', runtime, limits,
   }, { taskId, seq: 1 }));
   const cancel = () => {
@@ -344,11 +345,12 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       productName: 'T1 cancellation integration', productId: 't1-native-host', serverUrl: server.url,
       workspaceRoot: path.join(c.dir, 'host-workspace'), storeDir: path.join(c.dir, 'host-store'),
+      agentHome: testAgentHomeConfig(),
       localAgentRelease: { version: '0.24.0-rc.1' },
     }, [c.adapter]);
     try {
       await daemon.pair('pairing-code'); await daemon.start();
-      server.send(createEnvelope('task.offer', { instruction: 'Host cancellation', runtime },
+      server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'Host cancellation', runtime },
         { taskId: 'host-task', seq: server.nextSeq() }));
       // Long-poll delivery, native spawn and the progress batch flush can exceed
       // the 2s default under load.

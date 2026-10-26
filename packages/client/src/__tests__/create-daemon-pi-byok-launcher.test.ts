@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +11,7 @@ function config(piByokLauncher: DaemonConfig['piByokLauncher']): DaemonConfig {
     productId: 'pi-launcher-config-test',
     serverUrl: 'http://127.0.0.1:1',
     workspaceRoot: path.join(os.tmpdir(), 'byok-pi-launcher-workspaces'),
+    agentHome: testAgentHomeConfig(),
     storeDir: path.join(os.tmpdir(), 'byok-pi-launcher-store'),
     piByokLauncher,
   };

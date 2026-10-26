@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchOwner, testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -12,8 +13,6 @@ import { resolveAgentMemoryMcpBin } from '../daemon/resolve-agent-memory-mcp-bin
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { GitWorkspaceManager } from '../daemon/git-workspace';
-import { GitWorkspaceStore } from '../daemon/git-workspace-store';
 import {
   AGENT_MEMORY_GUIDANCE,
   AGENT_MEMORY_READER_GUIDANCE,
@@ -26,6 +25,8 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { GitWorkspaceManager } from '../daemon/git-workspace';
+import { GitWorkspaceStore } from '../daemon/git-workspace-store';
 
 const roots: string[] = [];
 
@@ -55,7 +56,7 @@ describe('Agent memory guidance', () => {
     expect(prependAgentMemoryGuidance(instruction)).toBe(`${expected}\n\n${instruction}`);
   });
 
-  it('injects guidance and the reserved MCP only for strict Agent tasks across the shared runtime seam', async () => {
+  it('injects guidance and the reserved MCP into Agent tasks across the shared runtime seam', async () => {
     const hostStorageRoot = await makeRoot();
     const workspaceRoot = await makeRoot();
     const storeDir = await makeRoot();
@@ -66,10 +67,6 @@ describe('Agent memory guidance', () => {
       approvalInteractive: true,
       mcpToolsets: true,
     }));
-    const gitWorkspaceStore = new GitWorkspaceStore(storeDir);
-    await gitWorkspaceStore.initialize();
-    const gitWorkspaceManager = new GitWorkspaceManager(workspaceRoot, { ownerId: 'agent-memory-guidance-test' });
-    await gitWorkspaceManager.preflight();
     const blobClient: BlobResolver = {
       resolveInstruction: async () => {
         throw new Error('not used in this test');
@@ -87,8 +84,6 @@ describe('Agent memory guidance', () => {
       send: () => {},
       blobClient,
       sessionWorkspaces: new SessionWorkspaceStore(storeDir),
-      gitWorkspaceManager,
-      gitWorkspaceStore,
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-memory-guidance',
@@ -111,26 +106,11 @@ describe('Agent memory guidance', () => {
       );
     }
 
-    for (const runtime of runtimes) {
-      await runner.handleEnvelope(
-        createEnvelope(
-          'task.offer',
-          {
-            instruction: `ordinary instruction for ${runtime}`,
-            runtime,
-          },
-          { taskId: `ordinary-task-${runtime}`, seq: seq++ },
-        ),
-      );
-    }
-
     for (const [index, runtime] of runtimes.entries()) {
       const adapter = adapters[index]!;
       expect(adapter.startCalls[0]?.task.instruction).toBe(
         prependAgentMemoryGuidance(`agent instruction for ${runtime}`),
       );
-      expect(adapter.startCalls[1]?.task.instruction).toContain(`ordinary instruction for ${runtime}`);
-      expect(adapter.startCalls[1]?.task.instruction).not.toContain('At the start of this Agent task');
       const strictMcp = adapter.startCalls[0]?.ctx.mcpServers?.byokagentmemory;
       if (isAgentMemorySecureFilesystemAvailable()) {
         expect(strictMcp).toMatchObject({ command: 'node', args: ['memory-mcp.js'] });
@@ -138,8 +118,6 @@ describe('Agent memory guidance', () => {
       } else {
         expect(strictMcp).toBeUndefined();
       }
-      expect(adapter.startCalls[1]?.ctx.mcpServers).toBeUndefined();
-      expect(adapter.startCalls[1]?.ctx.gitWorkspace).toBeDefined();
     }
 
     const piToken = adapters[0]?.startCalls[0]?.ctx.mcpServers?.byokagentmemory?.env?.BYOK_AGENT_MEMORY_CONTEXT;
@@ -156,10 +134,7 @@ describe('Agent memory guidance', () => {
     for (const adapter of adapters) {
       for (const session of adapter.sessions) session.emit({ type: 'turn_end' });
     }
-    // Ordinary tasks finish only after their Git observation, which spawns
-    // serial git processes and is bounded at 5s in TaskRunner. The 1s
-    // waitFor default is below that bound and fails on slow spawn hosts.
-    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0), { timeout: 5_000 });
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
     expect(consoleError).not.toHaveBeenCalled();
     if (isAgentMemorySecureFilesystemAvailable()) {
       await expect(runner.recallAgentMemory({ contextToken: piToken!, path: 'MEMORY.md' })).rejects.toThrow('invalid');

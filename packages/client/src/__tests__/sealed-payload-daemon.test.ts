@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 /**
  * #654 E3c, E2d-3, E2d-4: a daemon that is a verified E2EE member opens a sealed
  * task's input and seals its output with the keys of its member keyring.
@@ -169,7 +170,7 @@ async function sealedOffer(
   if (!sealing.categories.includes('task-input')) {
     return createEnvelope('task.offer_sealed', { ...plain, instruction, sealing } as never, { taskId, seq });
   }
-  const bound = binding('task.offer', 'server-to-daemon', { taskId }, deviceId, options.boundSealing ?? sealing);
+  const bound = binding('task.offer_for_agent', 'server-to-daemon', { taskId }, deviceId, options.boundSealing ?? sealing);
   const { header, ciphertext } = await sealedMember(member, { instruction }, bound);
   return createEnvelope('task.offer_sealed', { ...plain, sealing, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId, seq });
 }
@@ -203,7 +204,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.setCapabilityDeclaration(E2EE_DECLARATION);
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
     dirs.push(root);
-    daemon = createDaemonWithAdapters({
+    daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), 
       storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed daemon test', productId: 'sealed-daemon-test',
       serverUrl: server.url, storeDir: path.join(root, 'store'), workspaceRoot: path.join(root, 'workspace'),
@@ -376,7 +377,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
   it('declines content whose sender view is not on the verified chain with sealed_open_failed', async () => {
     const { server, adapter, deviceId, member } = await start();
-    const bound = binding('task.offer', 'server-to-daemon', { taskId: 'foreign-head' }, deviceId, BOTH);
+    const bound = binding('task.offer_for_agent', 'server-to-daemon', { taskId: 'foreign-head' }, deviceId, BOTH);
     const { header, ciphertext } = await sealContent({
       scopeKey: member.scopeKey, scope: { id: SCOPE, epoch: EPOCH }, chainHead: { seq: member.web.head!.seq, hash: `sha256:${'0'.repeat(64)}` },
       sender: member.web.member.memberId, category: 'task-input', binding: bound, plaintext: { instruction: 'never runs' } as never,
@@ -851,7 +852,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const { server, adapter, deviceId, member } = await start();
     const instruction = 'i'.repeat(300 * 1024);
     const offerOf = async (taskId: string, corrupt: boolean): Promise<Envelope> => {
-      const { header, ciphertext } = await sealedMember(member, { instruction }, binding('task.offer', 'server-to-daemon', { taskId }, deviceId, BOTH));
+      const { header, ciphertext } = await sealedMember(member, { instruction }, binding('task.offer_for_agent', 'server-to-daemon', { taskId }, deviceId, BOTH));
       const bytes = Buffer.from(ciphertext);
       const blobId = `blob-${taskId}`;
       server.seedBlob(blobId, bytes, 'application/octet-stream');

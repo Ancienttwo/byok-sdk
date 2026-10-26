@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
@@ -90,6 +91,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
         productId: 'test-product',
         serverUrl: server.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         mcpToolsets: {
           'salesko.connectors': {
@@ -560,6 +562,7 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
         productId: 'test-product',
         serverUrl: server.url,
         workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         agentMemoryIntents: { fetch: async () => undefined } as unknown as AgentMemoryIntentTransport,
       },
