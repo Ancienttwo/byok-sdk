@@ -1804,6 +1804,28 @@ per-daemon via `DaemonConfig.runtimePreference`), and this field is what lets
 the server finally learn which adapter it picked, recorded separately as
 `TaskSnapshot.claimedRuntime`.**
 
+**Attempt phase instants (#980, cloud only).** `@byok-sdk/cloud` records four
+write-once instants on its `TaskAttempt`, from the same clock and in the same
+format as `updatedAt`:
+
+- `offeredAt`: the offer that creates the attempt.
+- `claimedAt`: the winning `task.claim`, written with `claimedRuntime`; a
+  redelivered or losing claim leaves it as it is.
+- `firstOutputAt`: the first `agent.message.draft` with text, or the first
+  `agent.message.publish`, after the claim. `task.progress` is not output, and
+  output before the claim is not recorded, so it is never earlier than
+  `claimedAt`. The body is stamped in the write that reserves it; the draft is
+  stamped in a separate write after the draft lands, so a crash between the
+  two leaves the instant to a later output, never to a time with no output.
+- `terminalAt`: the first entry into `Complete`, `Failed` or `Cancelled`,
+  including a cancellation of an unclaimed attempt.
+
+Like `claimedRuntime`, each stops changing at the transition that sets it, so
+none is the execution state ADR-028 keeps out of cloud. An instant that was
+not recorded is absent: attempts stored before these fields are not backfilled, and
+a reader reports no duration that needs a missing instant. The wire is
+unchanged.
+
 ### 3.2 Declined vs. Failed (M1 gap #5)
 
 `task.decline` lets a daemon fail-closed a pre-claim offer (no compatible
