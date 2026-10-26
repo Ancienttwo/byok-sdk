@@ -423,12 +423,23 @@ export type {
 } from './maintenance';
 export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
 export type { ReceiptRetentionClass } from './receipt-retention';
-export { WireV4ReceiptMigrationError, migrateWireV3Receipt, wireV4ReceiptKind } from './wire-v4-receipt-migration';
+export {
+  ReceiptMigrationUnmappableError,
+  WireV4LegacyTaskListMismatchError,
+  assertWireV4MigrationConfirmed,
+  hasUnnamedApproval,
+  migrateWireV3Receipt,
+  wireV3LegacyOfferReceiptKeys,
+  wireV3LegacyOfferType,
+  wireV4ReceiptKind,
+} from './wire-v4-receipt-migration';
 export type {
+  WireV3LegacyTask,
+  WireV4MigrationPreflight,
   WireV4ReceiptKind,
   WireV4ReceiptMigration,
   WireV4ReceiptMigrationResult,
-  WireV4ReceiptRefusal,
+  WireV4UnmappableRow,
 } from './wire-v4-receipt-migration';
 export type { ReceiptCollectExpiredInput } from './stores/ports';
 export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';

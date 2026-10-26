@@ -1,7 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { decodeEnvelope } from '@byok-sdk/protocol';
-import { migrateWireV3Receipt, wireV4ReceiptKind, WireV4ReceiptMigrationError } from '../wire-v4-receipt-migration';
+import {
+  ReceiptMigrationUnmappableError,
+  WireV4LegacyTaskListMismatchError,
+  assertWireV4MigrationConfirmed,
+  hasUnnamedApproval,
+  migrateWireV3Receipt,
+  wireV3LegacyOfferType,
+  wireV4ReceiptKind,
+} from '../wire-v4-receipt-migration';
 
 const v3Lines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd().split('\n');
@@ -61,11 +69,42 @@ describe('wire v3 -> v4 receipt migration (#925)', () => {
     expect(migrateWireV3Receipt('terminal', '{"byokRedacted":1,"type":"task.complete"}')).toEqual({ outcome: 'unchanged' });
   });
 
-  it('names every refused receipt in its error', () => {
-    const error = new WireV4ReceiptMigrationError([
-      { tenantId: 'tenant-a', key: 'task-offer:m1', kind: 'offer', refusal: 'type_without_v4_form', type: 'task.offer' },
+  it('names every unmappable row in its error', () => {
+    const error = new ReceiptMigrationUnmappableError([
+      { kind: 'receipt', tenantId: 'tenant-a', key: 'task-offer:m1', receiptKind: 'offer', refusal: 'invalid_under_v4', type: 'task.offer_for_agent' },
+      { kind: 'approval', tenantId: 'tenant-a', taskId: 't1', refusal: 'approval_id_missing' },
     ]);
-    expect(error.code).toBe('wire_v4_receipt_migration_refused');
-    expect(error.message).toContain('tenant-a/task-offer:m1 (task.offer: type_without_v4_form)');
+    expect(error.code).toBe('wire_v4_migration_unmappable');
+    expect(error.message).toContain('tenant-a/task-offer:m1 (task.offer_for_agent: invalid_under_v4)');
+    expect(error.message).toContain('tenant-a/approvals/t1 (approval_id_missing)');
+  });
+
+  it('finds the removed offer type of a legacy offer receipt, redacted or not', () => {
+    for (const type of ['task.offer', 'task.offer_with_toolsets', 'task.offer_sealed', 'task.offer_with_toolsets_sealed']) {
+      expect(wireV3LegacyOfferType(offerReceipt(type, { instruction: 'x' }))).toBe(type);
+      expect(wireV3LegacyOfferType(JSON.stringify({ byokRedacted: 1, sha256: `sha256:${'a'.repeat(64)}`, bytes: 1, type }))).toBe(type);
+    }
+    expect(wireV3LegacyOfferType(offerReceipt('task.offer_for_agent', { instruction: 'x', agentRef: AGENT }))).toBeUndefined();
+    expect(wireV3LegacyOfferType('not json')).toBeUndefined();
+  });
+
+  it('flags an approval timeline that holds an approval without an id', () => {
+    const entry = (event: object, revision: number) => ({ taskId: 't1', sourceEnvelopeId: `e${revision}`, revision, receivedAt: '2026-10-01T00:00:00.000Z', event });
+    expect(hasUnnamedApproval([entry({ type: 'approval_requested', summary: 's', approvalId: 'a1' }, 1)])).toBe(false);
+    expect(hasUnnamedApproval([entry({ type: 'approval_requested', summary: 's' }, 1)])).toBe(true);
+  });
+
+  it('runs only when nothing is unmappable and the confirmed legacy list matches exactly', () => {
+    const task = { tenantId: 'tenant-a', taskId: 't1', deviceId: 'd1', type: 'task.offer' };
+    const clean = { legacyTasks: [task], unmappable: [] };
+    expect(() => assertWireV4MigrationConfirmed(clean, [task])).not.toThrow();
+    expect(() => assertWireV4MigrationConfirmed({ legacyTasks: [], unmappable: [] }, [])).not.toThrow();
+    for (const confirmed of [[], [task, task], [{ ...task, deviceId: 'd2' }], [task, { ...task, taskId: 't2' }]]) {
+      expect(() => assertWireV4MigrationConfirmed(clean, confirmed)).toThrow(WireV4LegacyTaskListMismatchError);
+    }
+    expect(() => assertWireV4MigrationConfirmed(
+      { legacyTasks: [task], unmappable: [{ kind: 'approval', tenantId: 'tenant-a', taskId: 't9', refusal: 'approval_id_missing' }] },
+      [task],
+    )).toThrow(ReceiptMigrationUnmappableError);
   });
 });
