@@ -25,6 +25,21 @@ describe('wire v3 -> v4 receipt migration (#925)', () => {
     expect(migrateWireV3Receipt('terminal', migrated.body)).toEqual({ outcome: 'unchanged' });
   });
 
+  it('re-encodes every v3 terminal, with or without agentRef, and v4 reads its agentRef unchanged', () => {
+    const terminals = v3Lines.filter((line) => ['task.complete', 'task.fail', 'task.cancelled'].includes((JSON.parse(line) as { type: string }).type));
+    const withoutAgent = terminals.filter((line) => !('agentRef' in (JSON.parse(line) as { payload: object }).payload));
+    expect(withoutAgent.length).toBeGreaterThan(0);
+    expect(withoutAgent.length).toBeLessThan(terminals.length);
+    for (const line of terminals) {
+      const v3 = (JSON.parse(line) as { payload: { agentRef?: unknown } }).payload;
+      const migrated = migrateWireV3Receipt('terminal', line);
+      if (migrated.outcome !== 'migrated') throw new Error(`expected migrated, got ${JSON.stringify(migrated)}`);
+      const decoded = decodeEnvelope(migrated.body);
+      expect(decoded.v).toBe(4);
+      expect((decoded.payload as { agentRef?: unknown }).agentRef).toEqual(v3.agentRef);
+    }
+  });
+
   it('keeps an offer receipt whose type v4 keeps, and refuses a legacy offer type', () => {
     expect(migrateWireV3Receipt('offer', offerReceipt('task.offer_for_agent', { instruction: 'x', agentRef: AGENT })))
       .toEqual({ outcome: 'unchanged' });
