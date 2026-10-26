@@ -11,7 +11,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createDaemonWithAdapters, type Daemon } from '@byok-sdk/client';
+import { createDaemonWithAdapters, type AgentEgressConfig, type Daemon } from '@byok-sdk/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BotStubAdapter } from './goal-btw.test-support';
 
@@ -91,7 +91,9 @@ describe('examples/basic quickstart with default settings', () => {
       serverUrl: server.url,
       storeDir: path.join(root, 'store'),
       agentHome: { hostStorageRoot: path.join(root, 'home') },
-      agentEgress: {},
+      // The README's JSON `"agentEgress": {}`, cast as the CLI config loader
+      // casts it: an absent policy is the client default policy.
+      agentEgress: {} as AgentEgressConfig,
     }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
 
     // Step 1 of the README: the page's "Create pairing code" button.
