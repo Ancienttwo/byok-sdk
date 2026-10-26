@@ -72,7 +72,10 @@
     `taskRedactionReceiptKey`. Expired v3 dead letters are left in place:
     `replayDeadLetter` refuses their v3 bytes with `cleanup_invalid_input`,
     and `discardDeadLetter` still drops them. Replay or discard them before
-    the upgrade. `@byok-sdk/protocol` adds `WIRE_V3_TO_V4_TYPES`,
+    the upgrade. Acked rows stay v3 bytes: within the acked retention (1 day
+    by default) a retry with the same messageId fails with an envelope
+    decoding error and delivers nothing; after it, the retry is a new
+    message. `@byok-sdk/protocol` adds `WIRE_V3_TO_V4_TYPES`,
     `wireV4TypeOf` and `migrateWireV3Envelope`; `@byok-sdk/cloud` adds the
     store-independent half (`migrateWireV3Receipt`, `wireV4ReceiptKind`,
     `assertWireV4MigrationConfirmed` and the types and errors above). All of

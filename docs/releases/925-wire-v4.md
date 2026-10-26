@@ -148,6 +148,26 @@ fences (`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`,
 `DaemonJournalProtocolUnsupportedError`). These checks do not rewrite or
 delete rows.
 
+### Retries of messages acked before the upgrade
+
+The migration leaves acked mailbox rows as v3 bytes. An acked row stays for
+the acked retention, 1 day by default. Within it, a retry that names the
+same messageId reads that row back and fails with an envelope decoding
+error; nothing is delivered twice. After the retention the row is gone, and
+the retry is a new message, as any retry after the retention is today.
+
+These paths read a row back by messageId:
+
+- Host operations: an offer (`executions.submit`, `dispatch`), an approval
+  decision, a steer, a scope key package notice, and a cancellation of a task
+  whose cancellation was already enqueued.
+- Device reports the cloud acknowledges: a reliable Agent egress event, a
+  content-read receipt and an Agent message publish.
+
+After the upgrade steps above, such a retry follows only a Host request
+that lost its response before the stop, or a daemon that stopped between
+acking a mailbox row and clearing its local spool.
+
 ## Compatibility evidence
 
 The v2 and v3 corpora and registries are read-only. The new v4 corpora prove
