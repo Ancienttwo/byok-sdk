@@ -74,6 +74,12 @@ Scopes are `tasks.dispatch`, `tasks.read`, `tasks.cancel`, `artifacts.read`,
 `routines.read`, `routines.write`, `memory.read` and `memory.write`. Dispatch,
 memory and routine grants require one AgentRef: `issueKey` refuses a
 `tasks.dispatch` key without one, and every submitted task runs as that Agent.
+A key without an AgentRef fails authentication with `invalid_input`. Wire v4
+has fresh Agent executions only, so a `tasks.dispatch` key issued before it
+without an AgentRef must be revoked and issued again with one. An Agent home
+has one writer, so a device runs one task of a key at a time and declines a
+second one while the first holds the home, even when the key's
+`runningTasks` quota allows more.
 Beta v1 has no memory-write tool (`byok_memory_propose` waits for beta plan §9 Q9
 and PRD P5). `tasks.read`, `tasks.cancel` and `artifacts.read` need no AgentRef.
 

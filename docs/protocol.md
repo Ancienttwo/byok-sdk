@@ -418,8 +418,8 @@ before the v4 server starts. It ships in 0.31.x only; 0.32.0 removes it
   `wireV3LegacyOfferType(body)` and `wireV3LegacyOfferReceiptKeys(...)` find
   its offer receipts. It is deleted, not mapped.
 - `WireV4UnmappableRow` is a row with no v4 form: a refused `receipt`, an
-  `approval` recorded without `approvalId`, or a `mailbox` row of a
-  non-legacy task that a v4 device could still receive in older bytes.
+  `approval` recorded without `approvalId`, or a pending `mailbox` row of a
+  non-legacy task in older bytes.
 - `assertWireV4MigrationConfirmed(preflight, confirmedLegacyTasks)` throws
   `ReceiptMigrationUnmappableError` (code `wire_v4_migration_unmappable`)
   when any row is unmappable, and `WireV4LegacyTaskListMismatchError` (code

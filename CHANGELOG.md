@@ -61,10 +61,18 @@
     list back and, in one transaction, deletes every row of those tasks and
     re-encodes the remaining offer and terminal receipts. It changes nothing
     and throws `ReceiptMigrationUnmappableError` when a receipt has no v4
-    form, an approval was recorded without an id, or a v3 mailbox row of
-    another task could still reach a device; and
+    form, an approval was recorded without an id, or a pending v3 mailbox row
+    of another task could still reach a device; and
     `WireV4LegacyTaskListMismatchError` when the confirmed list differs from
-    the store's. `@byok-sdk/protocol` adds `WIRE_V3_TO_V4_TYPES`,
+    the store's. A legacy task's `task-redaction:<taskId>` audit receipt is
+    deleted with it, so a new Agent task may reuse the id;
+    `migratePostgresToWireV4` returns those receipts
+    (`deletedRedactionReceipts`: `redactedAt` and `counts`) for the
+    operator's records, and `@byok-sdk/cloud` exports
+    `taskRedactionReceiptKey`. Expired v3 dead letters are left in place:
+    `replayDeadLetter` refuses their v3 bytes with `cleanup_invalid_input`,
+    and `discardDeadLetter` still drops them. Replay or discard them before
+    the upgrade. `@byok-sdk/protocol` adds `WIRE_V3_TO_V4_TYPES`,
     `wireV4TypeOf` and `migrateWireV3Envelope`; `@byok-sdk/cloud` adds the
     store-independent half (`migrateWireV3Receipt`, `wireV4ReceiptKind`,
     `assertWireV4MigrationConfirmed` and the types and errors above). All of

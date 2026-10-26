@@ -94,18 +94,25 @@ A row is unmappable when it is:
 - on Postgres, an approval timeline entry without the `approvalId` v4
   requires (SQLite keeps the timeline in memory). The migration never makes
   up an id;
-- a mailbox row of a non-legacy task whose bytes are not v4 and that a v4
-  device could still receive: a pending row on either store, or on Postgres
-  an expired dead letter, which `replayDeadLetter` can still send. SQLite has
-  no dead-letter replay. Acked rows are never sent again and stay.
+- a pending mailbox row of a non-legacy task whose bytes are not v4. A v4
+  daemon fails to decode it and its cursor stops there. Acked rows are never
+  sent again and stay until retention removes them. An expired dead letter
+  also stays: `replayDeadLetter` decodes it under v4 and refuses its v3
+  bytes with `cleanup_invalid_input`, and `discardDeadLetter` drops it.
 
 Deleting a legacy task removes its offer, delivered and terminal receipts,
 its mailbox rows, its Agent message admission, its `sealed-task` object
 reference and its task attempt. On Postgres it also removes the approval and
-activity tails, the message draft, the terminal truth object reference and
-the `task.terminal` attested record. Object bytes are left to orphan GC. The
-`task-redaction:<taskId>` audit receipt and the memory-projection metering
-receipts hold no wire bytes and stay.
+activity tails, the message draft, the terminal truth object reference, the
+`task.terminal` attested record and the `task-redaction:<taskId>` audit
+receipt. Object bytes are left to orphan GC. The id is then free: a new
+Agent task may reuse it. Inbound reads the redaction receipt as "this task
+was redacted" and would release a new task's sealed artifact at once, so the
+receipt cannot stay. `migratePostgresToWireV4` returns each deleted receipt
+in `deletedRedactionReceipts` (`tenantId`, `taskId`, `redactedAt`, `counts`);
+keep that list as the audit record. Only the Postgres store redacts tasks.
+Memory-projection metering receipts stay: they are keyed by Agent and epoch,
+and nothing reads them by taskId.
 
 The SQLite pair takes the file's exclusive ownership, so it fails while a
 server owns the file. Both pairs ship in 0.31.x only; 0.32.0 removes them
@@ -113,16 +120,17 @@ server owns the file. Both pairs ship in 0.31.x only; 0.32.0 removes them
 
 ## Coordinated upgrade
 
-1. On the old SDK, stop submitting new work. Let pending server mailbox
-   entries be processed and acknowledged; settle in-flight executions and
-   confirm every daemon pending terminal.
+1. On the old SDK, stop Host enqueues. Let the daemons receive and
+   acknowledge every pending mailbox entry before you migrate; settle
+   in-flight executions and confirm every daemon pending terminal.
 2. Let every approval recorded without an id expire: wait
    `DEFAULT_APPROVAL_TIMELINE_TTL_MS` (10 minutes) and let maintenance
    collect the tail.
-3. On Postgres, settle each v3 dead letter while v3 devices still run:
-   replay it with `PostgresCloudCleanup.replayDeadLetter` if the device must
-   still get it, then delete it with `discardDeadLetter`. A replay leaves the
-   original expired row in place.
+3. On Postgres, replay or discard each dead letter before the upgrade:
+   replay it with `PostgresCloudCleanup.replayDeadLetter` while v3 devices
+   still run if the device must still get it, or delete it with
+   `discardDeadLetter`. After the upgrade a pre-v4 dead letter cannot be
+   replayed; it stays until `discardDeadLetter` drops it.
 4. Stop writers and keep a backup of the existing state.
 5. Run the preflight, review the legacy tasks and unmappable rows, then run
    the migration with the confirmed list. If it fails, the store is
