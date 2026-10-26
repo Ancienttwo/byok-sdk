@@ -328,9 +328,13 @@ if (submission.ok) {
   branches.
 - Errors are codes from `MODEL_ROUTE_ERROR_CODES`, one per visible field. A
   change value of the wrong type, as page JSON may carry, gets a code too.
-- Policy `models` lists the only model ids a vendor admits, from any source.
-  A Host entry must project the api it is listed under. A policy that repeats
-  a Host entry throws.
+- Policy `models` lists the only model ids a vendor admits, from any source. A
+  Host entry is offered only when `PiModelConfigSchema` accepts its config, it
+  projects the api it is listed under, and the vendor adapter's profile rules
+  (`providerProfileRouteIssues`) accept it; otherwise it is unrepresentable,
+  and selecting it falls back to manual. `modelRouteContext` throws on a
+  policy that repeats a Host entry or has one whose model id a profile cannot
+  hold.
 - The key is write-only. A view shows `keep`, `none` or `replace`, never the
   key. `providerSecretReusable` keeps a stored key only while `profile_ref`,
   `provider_kind`, `adapter`, `auth_mode` and the normalized `base_url` are
