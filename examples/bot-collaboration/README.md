@@ -1030,6 +1030,99 @@ admits nothing before it knows the freeze.
 L has no step for H → L: once a device is in mode H, every step refuses. Moving
 a device back to L belongs to the state export and import work (§8).
 
+### Owner switch export format (#975)
+
+The `./migration` entry (`src/migration.ts`) is the one form in which a whole
+coordination domain moves between owners: an L ledger tenant or an H scope.
+Neither Host's storage is the format. The old owner builds a `SwitchContent`
+once every device of the domain is frozen and drained, and
+`sealSwitchExport` checks it, orders each section by its identity and adds a
+manifest. The manifest has the count and the `hash(canonical(section))` of
+each list section, and one digest over them and the header (source, domain,
+frozen device revisions, export time). The collaboration digest is the hash
+of its JSON text, because the insertion order of its maps is state: K8 reads
+Turns in that order for context and retention, so a target must keep it. The new owner runs `verifySwitchExport` on
+the document before it writes anything, and again on its own rows read back
+into this form, so the digest it records in its receipt is the source's. The
+digest covers the header, and `domain` is the source's tenant or scope id (a
+switch back to L opens a new tenant). So the read-back copies the document's
+header as it is and rebuilds only the sections from the target's rows. Devices
+are in JS string order of their id, and each section in JS string order of
+`canonical(identity)`, so a read-back sorts that way in JS or reseals; a
+database `ORDER BY` may give `unsorted`.
+
+A record holds what a target needs to rebuild the row, with values the source
+stores, never a default. Routines and occurrences carry their ordinal, intents
+their frozen input (a sealed one stays sealed). H stores only part of this
+today: the K4-only fields get H columns in the H slice that imports them.
+Every object has an exact set of keys.
+
+A value that a Host derives from others is not in a record, and the target
+derives its own. The format never sees the source's stored copies, so each
+Host's export builder checks them against these rules and refuses to build an
+export where one differs:
+- an intent's FIFO key, K4 `agentKey(domain, execution)`, from the target's
+  own tenant or scope and the device and Agent of the frozen input;
+- the execution input of each earlier generation (`input` with that
+  generation's task id), and K4 `intent.execution` (`input` without
+  `taskId`), which hold while K4 runs without its memory option, as K8 does;
+- K4 `applied`: the current task id exactly when the intent `succeeded`;
+- a K4 occurrence's wake key and slot. Each occurrence has exactly one slot on
+  both Hosts, so the format has no slot section;
+- an occurrence's intent id, and K4 `attempts`.
+
+An intent carries the K4 execution of each earlier generation (submission,
+start, attempt, terminal and message receipt), because K4 compacts an intent
+only with the execution of every generation. A message for an earlier task is
+answered from its execution: by its receipt, or else `stale_generation`.
+Nothing relies on a replay after the switch getting `accepted`: the target's
+SDK passes an Agent message to the Host only when its own stores hold the
+device's task and offer binding, which this export does not carry.
+
+The format refuses, with `SwitchExportError` and a `reason`:
+- the source's owner records (L `topology`, and L `hostIntents`, whose handler
+  each intent carries);
+- a K4 message receipt, of the current generation or an earlier one, that is
+  not the K8 accepted reply of the same task id, or a reply with no receipt
+  (`receipt_mismatch`);
+- a record that names one the export does not hold (`reference`): an
+  occurrence intent (K4's `occurrence:<sha-256>` key) or Host job outbox row
+  without its occurrence, an occurrence without its routine, an occurrence key
+  that is not K4's hash of its routine slot and trigger, or a task id that is
+  not `hash([key, generation])`;
+- state that K4 cannot produce (`invalid`): a retry policy outside K4's
+  `validateRetry` bounds, on an intent or a routine definition; a generation at
+  or past `maxAttempts`; a `reserved` intent past generation 0 or with
+  anything from a submission; an earlier generation without its terminal and
+  attempt, or that was not begun; an occurrence that does not match its
+  routine's run kind (a Host job routine's occurrence has a job, and a pending
+  job exactly while it is open and not promoted; a hook routine's has no job);
+  and two occurrences of one slot (`duplicate`);
+- an execution routine (`execution_routine`): a K8 domain holds only Turn and
+  Host intents (#954), L refuses execution routines and H refuses them at
+  create, and K8 Bot routines are occurrence hooks;
+- a live Bot on a device the export does not move;
+- open work: an open Turn or input batch, an intent with no conclusion, or a
+  card call in flight;
+- a pending Agent home write that is `sent` or has a `retryAt`, because it may
+  have reached the device. An unsent one moves and is sent by the new owner;
+- a pending projection (`projection_pending`): H's receiver deduplicates by
+  `(scope, id)`, and L does not record whether it was sent (H raises `tries`
+  before the send), so the source flushes its projections first;
+- rows out of identity order, a repeated identity or ordinal, a key outside the
+  format, malformed fields, a value that is not JSON by K4's `validateJson`
+  (`NaN`, `undefined`, a class instance, checked before the seal clones the
+  content), and a manifest that does not match the content.
+
+A channel delivery moves under its id,
+`hash([taskId, messageId, routeKey, nonce?])`, which names no Host domain, so
+the target's readback or resend of a `sending` or `unknown` delivery uses the
+source's idempotency key. Whether a platform honors that key is its adapter's
+concern (`docs/host-im-adapter.md`); the switch does not change it.
+
+The export, the import and the commit of the switch on each Host come in
+later #975 slices. This entry has no I/O.
+
 ### Second-device placement and device wait
 
 One embedded server and one Host ledger can serve Bots on two enrolled
