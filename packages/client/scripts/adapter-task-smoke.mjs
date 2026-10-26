@@ -17,6 +17,15 @@ const serverDistIndex = path.join(clientDir, '..', 'server', 'dist', 'index.js')
 const fixtureDir = path.join(clientDir, 'src', '__tests__', 'fixtures');
 const runtimes = ['claude', 'codex', 'pi'];
 const timeoutMs = 20_000;
+// The client default Agent egress policy. The daemon below runs it (an empty
+// `agentEgress`) and declines an offer that names any other policy.
+const egressPolicy = {
+  policyRevision: 'default-v1',
+  activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 256 * 1024 },
+  reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4 * 1024 * 1024, maxPendingBytesPerTenant: 16 * 1024 * 1024 },
+  transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
+};
+const terminalStates = new Set(['Complete', 'Failed', 'Cancelled']);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -58,16 +67,25 @@ function closeHttpServer(httpServer) {
   });
 }
 
-async function collectTaskEvents(handle) {
-  const events = [];
-  for await (const event of handle.events()) {
-    events.push(event);
-  }
-  return events;
-}
-
-function stateNames(events) {
-  return events.filter((event) => event.kind === 'state').map((event) => event.state);
+/**
+ * Records every server state transition by taskId. A submitted execution has
+ * no TaskHandle, so the server's event feed is its lifecycle; the server
+ * announces the Offered state as `task.created`.
+ */
+function recordServerStates(byok) {
+  const states = new Map();
+  const feed = byok.events.subscribe()[Symbol.asyncIterator]();
+  const done = (async () => {
+    for (let next = await feed.next(); !next.done; next = await feed.next()) {
+      const event = next.value;
+      const state = event.kind === 'task.created' ? 'Offered' : event.kind === 'task.state' ? event.state : undefined;
+      if (state !== undefined) states.set(event.taskId, [...(states.get(event.taskId) ?? []), state]);
+    }
+  })();
+  return {
+    of: (taskId) => states.get(taskId) ?? [],
+    stop: async () => { await feed.return?.(); await done; },
+  };
 }
 
 function indexOfOrThrow(values, value, label) {
@@ -166,6 +184,7 @@ async function smokeNpmShimDetection(client, shimBin, hostPath) {
 
 let failed = false;
 let workDir;
+let serverStates;
 let scratchRoot;
 let daemon;
 let byok;
@@ -258,10 +277,8 @@ try {
   // serves the wire over HTTP only (WP3B Step 2 removed the WS attachment), so
   // the daemon below runs the protocol §8 long-poll transport with the default
   // hold; stopping the daemon aborts the in-flight poll.
-  // The default task-event retention is intentional here: `handle.events()`
-  // must end at the terminal event itself, independently of when the relay
-  // later reclaims its retained buffer.
   byok = createByokServer({ productId });
+  serverStates = recordServerStates(byok);
   const listening = await new Promise((resolve) => {
     httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => resolve(info));
   });
@@ -307,6 +324,8 @@ try {
       runtimeAllowlist: runtimes,
       runtimePreference: runtimes,
       shutdownGraceMs: 2_000,
+      agentHome: { hostStorageRoot: path.join(workDir, 'agent-home') },
+      agentEgress: {},
     },
     adapters,
     {
@@ -335,11 +354,35 @@ try {
     'server-observed device connection',
   );
 
+  // Each task runs as its own Agent, in its own Agent home.
+  const submit = async (taskId, payload) => {
+    await byok.executions.submit({
+      taskId,
+      deviceId,
+      payload: {
+        agentRef: { agentId: taskId, profileRevision: '1' },
+        egressPolicy,
+        terminalProjection: { mode: 'none' },
+        ...payload,
+      },
+    });
+    return { taskId };
+  };
+  const terminalResult = async (taskId, label) => {
+    let result;
+    await waitForAsync(async () => {
+      const snapshot = await byok.tasks.get(taskId);
+      result = snapshot?.result;
+      return result !== undefined && terminalStates.has(snapshot.state);
+    }, label);
+    return result;
+  };
+
   const preAdmissionPiSpawns = piSpawnCount;
   const rejected = await withTimeout(
-    byok.dispatch({
-      deviceId,
+    submit('adapter-smoke-pi-byok', {
       instruction: 'adapter task smoke: missing Pi BYOK launcher',
+      runtime: 'pi',
       dispatchSelection: {
         lane: 'byok',
         runtimeId: 'pi',
@@ -347,13 +390,9 @@ try {
         modelId: 'gpt-5.2',
       },
     }),
-    'Pi BYOK missing-launcher dispatch',
+    'Pi BYOK missing-launcher submit',
   );
-  const rejectedEventsPromise = collectTaskEvents(rejected);
-  const [rejectedEvents, rejectedResult] = await withTimeout(
-    Promise.all([rejectedEventsPromise, rejected.result()]),
-    'Pi BYOK missing-launcher lifecycle',
-  );
+  const rejectedResult = await terminalResult(rejected.taskId, 'Pi BYOK missing-launcher lifecycle');
   // Server terminal receipt precedes the HTTP answer and the daemon's
   // journal-backed settlement. Observe the Host independently before reading it.
   await waitFor(
@@ -366,7 +405,7 @@ try {
     .map((event) => event.kind);
   assert(rejectedResult.state === 'Failed', `missing launcher result was not Failed: ${JSON.stringify(rejectedResult)}`);
   assert(rejectedSnapshot?.state === 'Failed', `missing launcher task was not Failed: ${JSON.stringify(rejectedSnapshot)}`);
-  assert(stateNames(rejectedEvents).includes('Failed'), `missing launcher did not reach Failed: ${JSON.stringify(rejectedEvents)}`);
+  assert(serverStates.of(rejected.taskId).includes('Failed'), `missing launcher did not reach Failed: ${JSON.stringify(serverStates.of(rejected.taskId))}`);
   assert(rejectedLocalKinds.includes('failed'), `missing launcher did not project local failure: ${JSON.stringify(rejectedLocalKinds)}`);
   assert(!rejectedLocalKinds.includes('claimed') && !rejectedLocalKinds.includes('started'), `missing launcher published claim/start: ${JSON.stringify(rejectedLocalKinds)}`);
   assert(piSpawnCount === preAdmissionPiSpawns, `missing launcher spawned Pi before decline (${preAdmissionPiSpawns} -> ${piSpawnCount})`);
@@ -374,20 +413,16 @@ try {
 
   for (const runtime of runtimes) {
     const handle = await withTimeout(
-      byok.dispatch({ deviceId, instruction: `adapter task smoke: ${runtime}`, runtime }),
-      `${runtime} dispatch`,
+      submit(`adapter-smoke-${runtime}`, { instruction: `adapter task smoke: ${runtime}`, runtime }),
+      `${runtime} submit`,
     );
-    const taskEventsPromise = collectTaskEvents(handle);
-    const [serverEvents, result] = await withTimeout(
-      Promise.all([taskEventsPromise, handle.result()]),
-      `${runtime} task lifecycle`,
-    );
+    const result = await terminalResult(handle.taskId, `${runtime} task lifecycle`);
     await waitFor(
       () => localEvents.some((event) => event.taskId === handle.taskId && event.kind === 'completed'),
       `${runtime} Host terminal settlement`,
     );
     const snapshot = await byok.tasks.get(handle.taskId);
-    const serverStates = stateNames(serverEvents);
+    const states = serverStates.of(handle.taskId);
     const localTask = daemon.tasks().find((task) => task.taskId === handle.taskId);
     const localClaim = localEvents.find((event) => event.taskId === handle.taskId && event.kind === 'claimed');
     const localKinds = localEvents
@@ -401,11 +436,11 @@ try {
     assert(localClaim?.claimedRuntime === runtime, `${runtime} local claimed event runtime mismatch: ${JSON.stringify(localClaim)}`);
     assert(localTask?.claimedRuntime === runtime, `${runtime} local observer claimedRuntime mismatch: ${JSON.stringify(localTask)}`);
 
-    const offered = indexOfOrThrow(serverStates, 'Offered', `${runtime} server states`);
-    const claimed = indexOfOrThrow(serverStates, 'Claimed', `${runtime} server states`);
-    const started = indexOfOrThrow(serverStates, 'Running', `${runtime} server states`);
-    const complete = indexOfOrThrow(serverStates, 'Complete', `${runtime} server states`);
-    assert(offered < claimed && claimed < started && started < complete, `${runtime} server lifecycle order was ${JSON.stringify(serverStates)}`);
+    const offered = indexOfOrThrow(states, 'Offered', `${runtime} server states`);
+    const claimed = indexOfOrThrow(states, 'Claimed', `${runtime} server states`);
+    const started = indexOfOrThrow(states, 'Running', `${runtime} server states`);
+    const complete = indexOfOrThrow(states, 'Complete', `${runtime} server states`);
+    assert(offered < claimed && claimed < started && started < complete, `${runtime} server lifecycle order was ${JSON.stringify(states)}`);
     for (const kind of ['offered', 'claimed', 'started', 'completed']) {
       assert(localKinds.includes(kind), `${runtime} local observer omitted ${kind}: ${JSON.stringify(localKinds)}`);
     }
@@ -428,8 +463,8 @@ try {
     process.env[envNames.hang] = '1';
     try {
       const handle = await withTimeout(
-        byok.dispatch({ deviceId, instruction: `adapter lifecycle smoke: ${runtime}`, runtime }),
-        `${runtime} lifecycle dispatch`,
+        submit(`adapter-lifecycle-${runtime}`, { instruction: `adapter lifecycle smoke: ${runtime}`, runtime }),
+        `${runtime} lifecycle submit`,
       );
       await waitFor(
         () => localEvents.some((event) => event.taskId === handle.taskId && event.kind === 'started'),
@@ -450,7 +485,7 @@ try {
         assert(Number.isSafeInteger(pid) && pid > 0, `${runtime} receipt did not record a ${level} pid`);
         assert(processExists(pid), `${runtime} ${level} was not live before cancellation`);
       }
-      await withTimeout(handle.cancel('lifecycle smoke cancellation'), `${runtime} lifecycle cancel`);
+      await withTimeout(byok.tasks.cancel(handle.taskId, 'lifecycle smoke cancellation'), `${runtime} lifecycle cancel`);
       await waitFor(() => daemon.status().activeTaskCount === 0, `${runtime} quiescent disposal`);
       for (const [level, pid] of tree) {
         assert(!processExists(pid), `${runtime} ${level} remained live after TaskRunner released ownership`);
@@ -474,6 +509,7 @@ try {
       console.error(`daemon cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
     });
   }
+  await serverStates?.stop();
   await byok?.close();
   await withTimeout(closeHttpServer(httpServer), 'HTTP server cleanup', 10_000).catch((error) => {
     console.error(`HTTP server cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
