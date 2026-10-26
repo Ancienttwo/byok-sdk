@@ -515,14 +515,23 @@
   names a missing record, a message receipt that is not its K8 reply, an
   execution routine, state K4 cannot produce, or a manifest that does not
   match. No Host uses it yet. No SDK, wire or SQL change.
+- **Changed (examples)** — H stores tombstones in K4's scheme (#975 slice 4):
+  `retired_identity` is `(scope, kind, identity, expires_at)`, as K4
+  `host_retired_identity`, with the kinds `row`, `intent`, `slot` and
+  `application`. A compacted intent's tombstone is kind `intent` with K4's
+  intent id `hash(key)`, in place of `hash(['intent', key])`, and K8 row
+  tombstones are kind `row`. Readers filter by kind. So an owner switch moves
+  tombstones between L and H as they are. H DDL change; H is unreleased, so
+  there is no migration. No SDK or wire change.
 - **Feature (examples)** — K8 L runs both sides of the owner switch (#975
   slice 3). `exportForSwitch(devices)` seals a frozen, drained domain into a
   switch export after it checks every stored copy against the value it is
   derived from, and from then on the Host writes nothing to its ledger
   (`SwitchExportedError`). `commitSwitch(deviceId, revision, receipt)` now
   needs the new owner's receipt, seals the ledger again to check that it did
-  not change, and moves every device of the export to H in one transaction. `importForSwitch(ledger, document)` writes an H export into
-  an empty L tenant and reads it back to the same digest, `commitImport`
+  not change, and moves every device of the export to H in one transaction.
+  `importForSwitch(ledger, document)` writes an H export into an empty L
+  tenant and reads it back to the same digest, `commitImport`
   hands its devices to L, and `discardImport` deletes an import that was not
   committed. A `BotCollaboration` refuses a ledger with an uncommitted import.
   The `./migration` format now requires each routine and occurrence `ordinal`

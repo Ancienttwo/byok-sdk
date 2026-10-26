@@ -37,8 +37,8 @@ const conclude = (scope: string, key: string) =>
   query(`UPDATE ${table('intent')} SET conclusion = 'succeeded' WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(key)]);
 const intentRows = (scope: string) => query<{ key: string }>(`SELECT key FROM ${table('intent')} WHERE scope = $1 ORDER BY key`, [storedKey(scope)])
   .then(rows => rows.map(row => JSON.parse(row.key) as string));
-const tombstones = (scope: string) => query<{ identity: string }>(`SELECT identity FROM ${table('retired_identity')} WHERE scope = $1 ORDER BY identity`,
-  [storedKey(scope)]).then(rows => rows.map(row => row.identity));
+const tombstones = (scope: string) => query<{ kind: string; identity: string; expires_at: string | null }>(
+  `SELECT kind, identity, expires_at FROM ${table('retired_identity')} WHERE scope = $1 ORDER BY kind, identity`, [storedKey(scope)]);
 const sync = (scope: string) => store().sync(scope, { ...SYNC_OPTIONS, history: undefined });
 const compact = (scope: string, acknowledgedTurnIds: string[]) => store().compactIntents(scope, { acknowledgedTurnIds });
 /** A scope whose user Turn `k1` has a succeeded intent that the sync concluded and reported. */
@@ -64,7 +64,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H intent compaction on real Postgre
     expect(await intentRows(scope)).toEqual(['k1']);
     expect(await compact(scope, ['k1', 'k1'])).toEqual({ compactedIntents: 1, alreadyCompactedIntents: 0 });
     expect(await intentRows(scope)).toEqual([]);
-    expect(await tombstones(scope)).toEqual([hash(['intent', 'k1'])]);
+    // K4's intent tombstone: kind `intent`, the intent id `hash(key)`, permanent.
+    expect(await tombstones(scope)).toEqual([{ kind: 'intent', identity: hash('k1'), expires_at: null }]);
     const stored = await store().dump(scope);
     expect(await compact(scope, ['k1'])).toEqual({ compactedIntents: 0, alreadyCompactedIntents: 1 });
     expect(await store().dump(scope)).toBe(stored);
@@ -109,6 +110,15 @@ describe.skipIf(POSTGRES_URL === undefined)('H intent compaction on real Postgre
     expect(await store().dump(scope)).toBe(stored);
   });
 
+  it('reads an intent tombstone by its kind: a tombstone of another kind with the same digest retires no intent', async () => {
+    const scope = await scoped();
+    await query(`INSERT INTO ${table('retired_identity')} (scope, kind, identity) VALUES ($1, 'row', $2), ($1, 'slot', $2)`,
+      [storedKey(scope), hash('k9')]);
+    await expect(compact(scope, ['k9'])).rejects.toThrow('Acknowledged intent not found');
+    await query(`INSERT INTO ${table('retired_identity')} (scope, kind, identity) VALUES ($1, 'intent', $2)`, [storedKey(scope), hash('k9')]);
+    expect(await compact(scope, ['k9'])).toEqual({ compactedIntents: 0, alreadyCompactedIntents: 1 });
+  });
+
   it('never compacts a routine intent', async () => {
     const id = `occurrence:${hash('daily')}`;
     const scope = await scoped(turn(id, { source: 'routine', status: 'succeeded', conclusion: 'succeeded', reported: true }));
@@ -123,8 +133,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H intent compaction on real Postgre
 
   it('fails a queued Turn whose intent was retired as result_retired, before a retired Turn id, and freezes no intent, as the L sync does', async () => {
     const scope = await scoped(turn('q1', { status: 'queued' }));
-    await query(`INSERT INTO ${table('retired_identity')} (scope, identity) VALUES ($1, $2), ($1, $3)`,
-      [storedKey(scope), hash(['intent', 'q1']), hash(['turn', 'q1'])]);
+    await query(`INSERT INTO ${table('retired_identity')} (scope, kind, identity) VALUES ($1, 'intent', $2), ($1, 'row', $3)`,
+      [storedKey(scope), hash('q1'), hash(['turn', 'q1'])]);
     await sync(scope);
     const state: CollaborationState = await store().read(scope);
     expect(state.turns.q1).toMatchObject({ status: 'failed', conclusion: 'failed', reported: true });
