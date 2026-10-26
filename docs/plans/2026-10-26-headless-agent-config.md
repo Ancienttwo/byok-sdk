@@ -1,6 +1,6 @@
 # Headless agent 配置逻辑：SDK 给出选项、联动、校验和提交载荷，Host 自己渲染（设计草案）
 
-状态：设计草案。2026-10-26 owner 指示按本文建议实施，目标版本 0.31.0，不进 0.30.2。D3 的预算数值由实现 PR 提出、owner 批准；D6 在 S2 实现时核实。本文本身不改变现行 SDK API、wire、spec 或部署，也不授权发布或下游迁移。
+状态：设计草案。2026-10-26 owner 指示按本文建议实施，目标版本 0.31.0，不进 0.30.2。实施进展、owner 的决定和 D6 的核实结果见 §14。本文本身不改变现行 SDK API、wire、spec 或部署，也不授权发布或下游迁移。
 
 日期：2026-10-26（Asia/Taipei）。
 SDK 基线：`0b15e6eb0e1ef68119dcc6d396bb953f4ad7c39b`。下文 SDK 仓库内的 `file:line` 都指这个基线。
@@ -407,6 +407,71 @@ S1 和 S2 并行，各自一个 worktree、一个 draft PR。
 合入时机：0.30.2 的版本准备 PR 合入之后才合，这样两个 PR 都进 0.31.0。
 
 本文所在的 PR 不开 issue。
+
+## 14. 实施状态（2026-10-26）
+
+### 14.1 PR 与合入顺序
+
+| 切片 | PR | 状态 |
+| --- | --- | --- |
+| S1 | [#987](https://github.com/Ancienttwo/byok-sdk/pull/987) | draft。两轮只读验收审阅都通过 |
+| S2 | [#988](https://github.com/Ancienttwo/byok-sdk/pull/988) | draft。两轮审阅共提出 6 个问题，都已修复，并用复现脚本在合并后的产物上确认 |
+
+两个 PR 在 `0d1d71e6` 上合并后（S1 `6079ce72`，S2 `3b9c1437`；之后两边只改了文字）跑过这些检查，都通过：build、生成文件检查、keys 与 client 的 typecheck、keys 全量测试、client 的 Pi 测试、依赖 keys 的 cloud-do 和两个 example、CI 脚本测试、version-authority。api-surface 只剩三个预算超标，超出的部分正好是两个 PR 各自增量的和，按下面第 3 步处理。
+
+合入顺序：
+
+1. 0.30.2 的版本准备 PR 合入。
+2. #987 转为 ready 后合入。
+3. #988 先 merge `origin/main`，运行 `bun run check:api-surface -- --update`，再按合并后的实测值 × 1.1 重新提出 `@byok-sdk/keys`、`@byok-sdk/keys/model-route`、`bin:byok-pi-provider-launcher` 三个预算，同步 README 的入口表，然后合入。按集成实测的 289,135 B、353,435 B、216,134 B 估算，三个预算约为 318,049 B、388,779 B、237,748 B，最终以合并时的实测为准。
+
+### 14.2 owner 的决定
+
+| 事项 | 决定 |
+| --- | --- |
+| D3 预算取值 | 取实测值 × 1.1，向上取整。`@byok-sdk/keys/pi-catalog` 维持 354,516 B（322,287 B × 1.1） |
+| model-route 入口体积 | 接受入口带整张 catalog 表：合并后 353,435 B，gzip 后 22,110 B。0.31.0 不拆分。D3 里“源码约 157 KB”是按 S1 之前的 178 条可表达条目估的，S1 之后是 752 条 |
+
+### 14.3 D6 核实结果
+
+只有草稿的 base URL 规范化后等于 vendor 的 base URL 时，catalog 条目和 Host 条目才适用。在这个 URL 上，可表达的条目逐字段等于 pinned pi-ai 内置模型的配置。pi-ai 还有一些运行时分支按它自己的 provider id 判断，这些分支不在上述承诺内，因为投影后的 provider id 是 `byok-sdk-<profile_ref>`。pi-ai 1.4.0 里有这几处：
+
+| 分支 | 影响 |
+| --- | --- |
+| `api/openai-completions.js:1269`，openrouter `anthropic/*` 的 `cacheControlFormat` | 这些条目都不可表达，没有条目受影响。keys 有测试守住这一点 |
+| `api/openai-responses.js:308`，xai 的 `reasoning.encrypted_content` include | grok-4.3 在 off（effort `none`）时请求和内置不同，实际影响未核实。grok-4.5 及以后不能设为 off |
+| `utils/overflow.js:146`，cerebras 无 body 的上下文溢出识别 | 2 个 cerebras 条目认不出这种溢出，对压缩重试的实际影响未核实 |
+| `api/openai-responses-shared.js:104`，Responses 的 tool-call id | 见 14.4 |
+| `api/openai-responses.js:182`，错误信息前缀 | 只影响文本 |
+
+#987 的 client 漂移测试把 pinned pi-ai 里每一行按 provider id 字面值判断的分支连同审阅理由固定下来，升级 pi-ai 时会要求重新审阅。用变量查表这类间接判断不在它的覆盖范围内。#988 在 spec 和 keys README 里写明了这个边界。
+
+### 14.4 openai Responses 的 tool-call id
+
+结论：同一模型的多轮工具调用不受影响。
+
+- pi-ai 1.4.0 的 `transformMessages`（`api/transform-messages.js:87`、`:120`）只在历史消息的 provider、api、model id 不全相同时才规范化 tool-call id。同一个 profile 的多轮对话走不到压平分支。
+- 复现方法：用 pinned pi-ai 的 openai-responses 路径请求本地 mock 服务，跑两轮。第一轮返回 reasoning 和 `function_call`，第二轮带上工具结果。同一模型时，`byok-sdk-<ref>` 的第二轮请求和内置 `openai` 一致，带 encrypted_content 的 reasoning、`function_call` 的 item id 和 call_id 都保留。
+- 换模型或 `profile_ref` 变了之后重放历史，两边都会丢掉 reasoning 和 item id。只有 byok 会把 `callId|itemId` 压平成一个 call_id（`|` 换成 `_`，最长 64 个字符），调用和输出用的是同一个值。
+- 目前查到的 OpenAI 要求只有一条：`function_call_output` 的 call_id 要能在输入里找到对应的 `function_call`。没有查到格式或长度限制。这一点没有用真实 API 验证。
+
+### 14.5 还没做的
+
+- 合入和发布：14.1 的三步，都由 owner 操作。
+- #988 里待 owner 决定的事项：
+  - 只支持 off 的模型是否要求用户显式选择；
+  - 新错误码 `invalid_value`；
+  - 新 key 的 2560 字节上限；
+  - 同一 model id 出现在多个 api 下时如何处理；
+  - `policy.models` 是否也约束手填的 model；
+  - Pi provider 的命名。
+- 两处运行时差异还没核实：cerebras 的溢出识别和 xai 的 include。
+- S3：AiphaBee 采用。0.31.0 发布后在下游仓库单独开 PR，按 §11 验收。
+- §13 列的后续工作（provider 模型发现、runtime 可选状态、第二阶段）还没有开 issue。
+- 实施中发现的既有缺口，只报告，没有修：
+  - 只改 catalog 生成文件时，`select-impact` 不会选中 `packages/client`；
+  - profile binding 没有固定哈希值的测试；
+  - model-route 的约束测试看不到副作用 import 和动态 `import()`。这类问题 entry-closure 检查能拦住。
 
 [#398]: https://github.com/Ancienttwo/byok-sdk/issues/398
 [#513]: https://github.com/Ancienttwo/byok-sdk/issues/513
