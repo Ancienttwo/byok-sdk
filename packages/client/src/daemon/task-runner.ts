@@ -1,4 +1,5 @@
 import { type ResultReplyFailure } from './result-reply-failure';
+import type { RuntimeTaskInput } from '../types';
 import type { ActivityIngress } from '@byok-sdk/protocol';
 import type { ScratchRoot } from './retention/scratch';
 import { StartupOwnership } from './startup-ownership';
@@ -18,7 +19,6 @@ import {
   type TerminalAgentHomeProjection,
   type TerminalAgentHomeMemoryChange,
   type TerminalProjectionSelection,
-  type TaskOfferPayload,
   type TaskDeclinePayload,
   type TaskFailure,
   type TaskOfferForAgentPayload,
@@ -1397,7 +1397,7 @@ export class TaskRunner {
   }
 
   /** Protocol §7: an instruction too large to inline arrives as a `blobRef` — resolve it via the blob client rather than failing closed. */
-  private async resolveInstruction(instruction: TaskOfferPayload['instruction'], signal: AbortSignal): Promise<string> {
+  private async resolveInstruction(instruction: RuntimeTaskInput['instruction'], signal: AbortSignal): Promise<string> {
     if (typeof instruction === 'string') return instruction;
     return this.deps.blobClient.resolveInstruction(instruction.blobRef, { signal });
   }

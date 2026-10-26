@@ -1,4 +1,5 @@
 // Types and helpers shared by `TaskRunner` (../task-runner.ts) and the member
+import type { RuntimeTaskInput } from '../../types';
 // modules in this directory.
 //
 // A member module holds the bodies of `TaskRunner` methods as functions that
@@ -15,7 +16,7 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import { RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalProjectionSelection, type TaskOfferPayload, type TaskDeclinePayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
+import { RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalProjectionSelection, type TaskDeclinePayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, RuntimeAdapterDescriptor, Session } from '../../types';
 import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home';
 import type { AgentHomeAccessMode, AgentHomeMemoryDigest } from '../../agent-home-readers';
@@ -405,7 +406,7 @@ export function adapterSupportsMcpToolsets(descriptor: RuntimeAdapterDescriptor)
   return descriptor.capabilities.mcpToolsets === true;
 }
 
-export function withoutRequiredToolsets(payload: AcceptedOfferPayload): TaskOfferPayload {
+export function withoutRequiredToolsets(payload: AcceptedOfferPayload): RuntimeTaskInput {
   const { requiredToolsets, egressPolicy, messageEgress, preparation, ...offer } = payload as TaskOfferForAgentPayload
     & Partial<TaskOfferForAgentWithEgressPayload>
     & Partial<TaskOfferForAgentWithEgressFreshPayload>
@@ -417,7 +418,7 @@ export function withoutRequiredToolsets(payload: AcceptedOfferPayload): TaskOffe
   // admits a RUNTIME, and a preparation reference is not a runtime input. The
   // prepared lane carries it to `start()` as its own start variant instead.
   void preparation;
-  return offer as TaskOfferPayload;
+  return offer as RuntimeTaskInput;
 }
 
 /**
@@ -439,7 +440,7 @@ export function offeredPreparation(payload: AcceptedOfferPayload): InputPreparat
  * prepared run that resolved a separate instruction would have two answers to
  * what it is about to send.
  */
-export function offeredInstruction(payload: AcceptedOfferPayload): TaskOfferPayload['instruction'] | undefined {
+export function offeredInstruction(payload: AcceptedOfferPayload): RuntimeTaskInput['instruction'] | undefined {
   return 'instruction' in payload ? payload.instruction : undefined;
 }
 

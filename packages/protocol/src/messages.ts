@@ -232,7 +232,7 @@ export type ConnHelloPayload = z.infer<typeof ConnHelloPayloadSchema>;
 // ---------------------------------------------------------------------------
 
 /**
- * The out-of-band-reference form of `TaskOfferPayload.instruction` (the
+ * The out-of-band-reference form of an offer's `instruction` (the
  * alternative to an inlined string). `.strict()`: this is control data — it's
  * the task instruction itself,
  * the thing that authorizes what work gets done — so per the freeze rule's
@@ -297,30 +297,6 @@ export type DispatchSelection = z.infer<typeof DispatchSelectionSchema>;
  * `*_sealed` type.
  */
 const NO_SEALED_MEMBER = { sealed: z.never().optional(), sealing: z.never().optional() };
-
-/**
- * The offer fields a runtime adapter receives when a session starts. Every
- * offer message type carries them; this shape is not itself a message type.
- *
- * `taskId` is carried only by the envelope's `task_id` (M1 gap #7 — single
- * source of truth for routing).
- */
-export const TaskOfferPayloadSchema = z.object({
-  ...NO_SEALED_MEMBER,
-  instruction: z.union([z.string(), InstructionBlobRefSchema]),
-  runtime: RuntimeIdSchema.optional(),
-  harnessId: HarnessIdSchema.optional(),
-  dispatchSelection: DispatchSelectionSchema.optional(),
-  sessionRef: z.string().optional(),
-  workspaceHint: z.string().optional(),
-  limits: z
-    .object({
-      maxDurationMs: z.number().int().positive().optional(),
-      maxTokens: z.number().int().positive().optional(),
-    })
-    .optional(),
-});
-export type TaskOfferPayload = z.infer<typeof TaskOfferPayloadSchema>;
 
 /** Every named toolset is required; duplicates are rejected instead of silently de-duplicated. */
 export const RequiredToolsetsSchema = z
@@ -837,7 +813,7 @@ export type TaskSteerPayload = z.infer<typeof TaskSteerPayloadSchema>;
  *
  * `runtime` (M5, additive-minor — docs/protocol.md §3.1): the ACTUAL
  * adapter this device selected for the task, distinct from `task.offer`'s
- * own `runtime` (the merely REQUESTED one, `TaskOfferPayloadSchema.runtime`
+ * own `runtime` (the merely REQUESTED one, `TaskOfferForAgentPayloadSchema.runtime`
  * above). When an offer names no runtime the daemon auto-selects (pi-first —
  * `TaskRunner.pickAdapter`, `packages/client`'s `task-runner.ts`), and before
  * this field existed the server had no way to learn which adapter actually

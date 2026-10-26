@@ -2,6 +2,7 @@ export type {
   RuntimeAdapter,
   RuntimeAdapterDescriptor,
   RuntimeAdapterPrepareInput,
+  RuntimeTaskInput,
   RuntimeAdapterPrepareResult,
   RuntimeAdapterRejectedOperation,
   RuntimeAdapterPreparedOperation,

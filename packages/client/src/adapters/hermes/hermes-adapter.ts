@@ -1,11 +1,12 @@
 import { ownHermesLauncher, prepareHermesCustody, hermesCustodyArgs, type HermesByokLauncher, type PreparedHermesCustody } from './hermes-custody';
+import type { RuntimeTaskInput } from '../../types';
 export type { HermesByokLauncher } from './hermes-custody';
 import { randomBytes } from 'node:crypto';
 import { promises as fs, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import {
   freezeRuntimeAdapterDescriptor,
   PolicyUnsupportedError,
