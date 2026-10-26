@@ -45,8 +45,8 @@ describe('SealedTasks send order (#654 E3c)', () => {
       blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
       serverCapabilities: () => [],
     });
-    const opened = await tasks.openOffer(createEnvelope('task.offer_sealed', {
-      instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+    const opened = await tasks.openOffer(createEnvelope('task.offer_for_agent_sealed', {
+      agentRef: freshTestAgentRef(), instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
     } as never, { taskId: 'ordered', seq: 1 }));
     expect(opened.ok).toBe(true);
 
@@ -78,8 +78,8 @@ describe('SealedTasks memory after a terminal (#654 E3c)', () => {
       blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
       serverCapabilities: () => [],
     });
-    await tasks.openOffer(createEnvelope('task.offer_sealed', {
-      instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+    await tasks.openOffer(createEnvelope('task.offer_for_agent_sealed', {
+      agentRef: freshTestAgentRef(), instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
     } as never, { taskId: 'finished', seq: 1 }));
 
     const sendTerminal = async (): Promise<WeakRef<Envelope>> => {
@@ -161,8 +161,8 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
 describe('the failure class of a sealed task (#869)', () => {
   const sealedTasks = async (keyring: SealedScopeKeyring, taskId: string, flags: readonly string[] = []) => {
     const tasks = new SealedTasks({ keyring, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } }, serverCapabilities: () => flags });
-    await tasks.openOffer(createEnvelope('task.offer_sealed', {
-      instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+    await tasks.openOffer(createEnvelope('task.offer_for_agent_sealed', {
+      agentRef: freshTestAgentRef(), instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
     } as never, { taskId, seq: 1 }));
     return tasks;
   };
@@ -202,8 +202,8 @@ describe('the failure class of a sealed task (#869)', () => {
     let flags: readonly string[] | undefined = ['runtime-failure-class'];
     const open = async (taskId: string) => {
       const tasks = new SealedTasks({ keyring: keyless, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } }, serverCapabilities: () => flags });
-      await tasks.openOffer(createEnvelope('task.offer_sealed', {
-        instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+      await tasks.openOffer(createEnvelope('task.offer_for_agent_sealed', {
+        agentRef: freshTestAgentRef(), instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
       } as never, { taskId, seq: 1 }));
       return tasks;
     };
@@ -227,8 +227,8 @@ describe('a terminal built for a sealed task in a run that may not seal it (#866
     blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
     serverCapabilities: () => [],
   });
-  const sealedOffer = createEnvelope('task.offer_sealed', {
-    instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+  const sealedOffer = createEnvelope('task.offer_for_agent_sealed', {
+    agentRef: freshTestAgentRef(), instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
   } as never, { taskId: 'recovered', seq: 1 });
 
   it.each([

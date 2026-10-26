@@ -19,13 +19,11 @@ import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; payload: Record<string, unknown> });
 const SEALED_OFFER_TYPES = [
-  'task.offer_sealed',
-  'task.offer_with_toolsets_sealed',
   'task.offer_for_agent_sealed',
   'task.offer_for_agent_with_egress_sealed',
   'task.offer_for_agent_with_egress_fresh_sealed',
@@ -83,7 +81,7 @@ describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', 
         payload: { reason: expect.stringMatching(/^sealed_payload_unsupported:/u), retryable: false },
       });
       expect(declines[0]!.payload).not.toHaveProperty('code');
-      if (line.payload.agentRef !== undefined) expect(declines[0]!.payload).toMatchObject({ agentRef: line.payload.agentRef });
+      expect(declines[0]!.payload).toMatchObject({ agentRef: line.payload.agentRef });
       expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
       expect(adapter.startCalls).toHaveLength(0);
     },
@@ -103,7 +101,7 @@ describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', 
         reason: 'sealed_key_unavailable',
         code: 'sealed_key_unavailable',
         retryable: false,
-        ...(line.payload.agentRef === undefined ? {} : { agentRef: line.payload.agentRef }),
+        agentRef: line.payload.agentRef,
       }]);
       expect(adapter.startCalls).toHaveLength(0);
     },

@@ -28,7 +28,7 @@ import { openJournalDatabase } from '../daemon/journal/sqlite-support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; payload: Record<string, unknown> });
@@ -87,7 +87,7 @@ async function start() {
 }
 
 describe('a task-opening envelope over the journal bound (#826)', () => {
-  it('declines a plain offer once, journals no bytes, and lets the next offer be acked', async () => {
+  it('declines an offer once, journals no bytes, and lets the next offer be acked', async () => {
     const { storeDir, server, cursor } = await start();
     const big = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x'.repeat(OVER_BOUND) }, { taskId: 'big', seq: server.nextSeq() });
     const small = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'hi' }, { taskId: 'small', seq: server.nextSeq() });
@@ -95,7 +95,7 @@ describe('a task-opening envelope over the journal bound (#826)', () => {
     server.send(small);
 
     const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'big', EVENTUAL_STATE_BUDGET_MS);
-    expect(decline.payload).toEqual({ reason: DECLINE_REASON, retryable: false });
+    expect(decline.payload).toEqual({ reason: DECLINE_REASON, retryable: false, agentRef: big.payload.agentRef });
     await vi.waitFor(async () => expect(await cursor()).toBe(small.seq), EVENTUAL_STATE_BUDGET_MS);
     const length = Buffer.byteLength(encodeEnvelope(big));
     expect(rows(storeDir, `SELECT bytes, bytes_hash, withheld_bytes FROM journal_envelope WHERE envelope_id = '${big.id}'`))
@@ -118,10 +118,10 @@ describe('a task-opening envelope over the journal bound (#826)', () => {
 
   it('declines a sealed offer whose plaintext metadata passes the inline floor', async () => {
     const { server, cursor } = await start();
-    const payload = golden('task.offer_sealed', (candidate) => (candidate.sealed as { ciphertext?: string } | undefined)?.ciphertext !== undefined);
-    const big = envelopeOf('task.offer_sealed', 'big-sealed', server.nextSeq(), {
+    const payload = golden('task.offer_for_agent_sealed', (candidate) => (candidate.sealed as { ciphertext?: string } | undefined)?.ciphertext !== undefined);
+    const big = envelopeOf('task.offer_for_agent_sealed', 'big-sealed', server.nextSeq(), {
       ...payload,
-      workspaceHint: 'w'.repeat(100 * 1024),
+      sessionRef: 's'.repeat(100 * 1024),
       sealed: {
         ...(payload.sealed as Record<string, unknown>),
         paddedLength: SEALED_INLINE_MAX_PADDED_LENGTH,
@@ -131,7 +131,7 @@ describe('a task-opening envelope over the journal bound (#826)', () => {
     server.send(big);
 
     const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'big-sealed', EVENTUAL_STATE_BUDGET_MS);
-    expect(decline.payload).toEqual({ reason: DECLINE_REASON, retryable: false });
+    expect(decline.payload).toEqual({ reason: DECLINE_REASON, retryable: false, agentRef: payload.agentRef });
     await vi.waitFor(async () => expect(await cursor()).toBe(big.seq), EVENTUAL_STATE_BUDGET_MS);
   });
 
@@ -154,7 +154,7 @@ describe('a non-opening envelope over the journal bound (#826)', () => {
   it.each([
     ['task.steer', { text: 's'.repeat(OVER_BOUND) }],
     ['task.cancel', { reason: 'c'.repeat(OVER_BOUND) }],
-    ['task.reject', { reason: 'r'.repeat(OVER_BOUND) }],
+    ['task.reject', { reason: 'r'.repeat(OVER_BOUND), approvalId: 'approval-over-bound' }],
   ] as const)('drops %s without journaling it and moves the cursor', async (type, payload) => {
     const { storeDir, server, cursor } = await start();
     const envelope = createEnvelope(type, payload, { taskId: 'no-such-task', seq: server.nextSeq() });
