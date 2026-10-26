@@ -378,6 +378,22 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
     expect(await facts()).toMatchObject({ started: [true, true, false], decline: undefined });
     await h.set(h.id, `terminal = NULL, started = true`);
     expect(await facts()).toMatchObject({ started: [true, true, false], decline: undefined });
+    // An imported intent (#975) started when any generation did, as K8 intentFacts reads every generation: B is at generation
+    // 1 with no start, and its generation 0 is an execution row that the import moved.
+    await h.set(h.id, `started = false, generation = 1, task_id = '${taskId(h.id, 1)}', input = jsonb_set(input::jsonb, '{taskId}', '"${taskId(h.id, 1)}"')::json`);
+    expect(await facts()).toMatchObject({ started: [false, true, false], intent: { taskId: taskId(h.id, 1) } });
+    const earlier = async (started: boolean, terminal: Json) => {
+      await opened!.pool.query(`DELETE FROM ${table('intent_execution')} WHERE scope = $1`, [storedKey(h.scope)]);
+      await opened!.pool.query(`INSERT INTO ${table('intent_execution')} (scope, key, generation, task_id, submission, started, attempt, terminal)
+        VALUES ($1, $2, 0, $3, 'delivered', $4, '{}'::json, $5::json)`, [storedKey(h.scope), storedKey(h.id), taskId(h.id, 0), started, JSON.stringify(terminal)]);
+    };
+    await earlier(true, null);
+    expect(await facts()).toMatchObject({ started: [true, true, false] });
+    const envelope = (type: string) => ({ envelope: { task_id: taskId(h.id, 0), type, payload: {} } });
+    await earlier(false, envelope('task.decline'));
+    expect(await facts()).toMatchObject({ started: [false, true, false] });
+    await earlier(false, envelope('task.fail'));
+    expect(await facts()).toMatchObject({ started: [true, true, false] });
   });
 
   describe('reply checks (#793 S7)', () => {

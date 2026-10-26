@@ -107,18 +107,21 @@ type IntentFact = NonNullable<ReturnType<SyncFacts['intent']>>;
 async function loadIntentFacts(client: PoolClient, scope: string, turnIds: readonly string[]) {
   const found = await client.query<{ key: string; task_id: string; conclusion: IntentFact['conclusion'] | null;
     cancel_reason: IntentFact['cancelReason'] | null; started: boolean; terminal_type: string | null; decline_code: string | null;
-    offered_to: string | null }>(
+    offered_to: string | null; earlier_started: boolean }>(
     `SELECT key, task_id, conclusion, cancel_reason, started, terminal->'envelope'->>'type' AS terminal_type,
       terminal->'envelope'->'payload'->>'code' AS decline_code,
       CASE WHEN conclusion IS NULL AND submission = 'delivered' AND NOT started AND attempt->>'status' = 'offered'
-        THEN input->>'deviceId' END AS offered_to
+        THEN input->>'deviceId' END AS offered_to,
+      EXISTS (SELECT 1 FROM intent_execution e WHERE e.scope = intent.scope AND e.key = intent.key
+        AND (e.started OR e.terminal->'envelope'->>'type' <> 'task.decline')) AS earlier_started
       FROM intent WHERE scope = $1 AND key = ANY($2::text[])`,
     [storedKey(scope), turnIds.map(storedKey)]);
   const facts = new Map(found.rows.map(row => [row.key, { taskId: row.task_id, ...(row.conclusion ? { conclusion: row.conclusion } : {}),
     ...(row.cancel_reason ? { cancelReason: row.cancel_reason } : {}) } satisfies IntentFact]));
   return { intent: (turnId: string) => facts.get(storedKey(turnId)), started: new Set(found.rows.filter(row => row.started).map(row => row.key)),
     terminals: new Map(found.rows.flatMap(row => row.terminal_type === null ? [] : [[row.key, { type: row.terminal_type, code: row.decline_code }] as const])),
-    offered: new Map(found.rows.flatMap(row => row.offered_to === null ? [] : [[row.key, row.offered_to] as const])) };
+    offered: new Map(found.rows.flatMap(row => row.offered_to === null ? [] : [[row.key, row.offered_to] as const])),
+    earlierStarted: new Set(found.rows.filter(row => row.earlier_started).map(row => row.key)) };
 }
 /**
  * The intent facts that a command reads (K8 `CommandPorts.intents`), as L reads its K4 intents in the commit transaction.
@@ -200,17 +203,17 @@ export async function deliverCancels(client: PoolClient, scope: string, state: C
 
 /**
  * The K4 facts that K8 `settleDelegations` (#793 D2f-5) and `observeDevices` (#793 S11) read, from the intent rows of these
- * Turns, as K8 `intentFacts` reads them from L's ledger. H keeps generation 0 only, so "any generation" is this row: it
- * started when the reconciliation saw a claim (`started`) or it has a terminal that is not a decline. The caller holds the
- * scope lock.
+ * Turns, as K8 `intentFacts` reads them from L's ledger: a Turn started when any generation of its intent did, the current
+ * row or an earlier one that an import moved (`intent_execution`, #975). A generation started when the reconciliation saw a
+ * claim (`started`) or it has a terminal that is not a decline. The caller holds the scope lock.
  */
 export async function settleFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<SettleFacts> {
-  const { intent, started, terminals, offered } = await loadIntentFacts(client, scope, turnIds);
+  const { intent, started, terminals, offered, earlierStarted } = await loadIntentFacts(client, scope, turnIds);
   return {
     intent,
     started: turnId => {
       const terminal = terminals.get(storedKey(turnId));
-      return started.has(storedKey(turnId)) || terminal !== undefined && terminal.type !== 'task.decline';
+      return started.has(storedKey(turnId)) || terminal !== undefined && terminal.type !== 'task.decline' || earlierStarted.has(storedKey(turnId));
     },
     declineCode: turnId => {
       const terminal = terminals.get(storedKey(turnId));

@@ -589,6 +589,16 @@
   `slot_replay_count`, `scope.switch_import`, and `device_binding.switching`
   only `'L'`. H is unreleased, so there is no migration. No SDK or wire
   change.
+- **Feature (examples)** — H admits each owner command by the K8
+  `commandBots` rule, as L's `admitCommand` does (#975 slice 6): its
+  `CommandPorts.admit` refuses a new command, after the replay lookup, while
+  a named Bot's device is frozen for an owner switch (`DeviceSwitchingError`)
+  or owned by L (`DeviceBindingError` with `mode`). This covers the command
+  entry, the store's `commit` and the inbound channel. A decision and a room
+  input that mentions no Bot of the frozen device are now refused too; the
+  inbound fence that checked only the work a commit added is gone. H's
+  delegation settlement now counts a start of any generation of an imported
+  intent, as K8 `intentFacts`. No SDK or wire change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

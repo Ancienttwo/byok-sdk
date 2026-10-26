@@ -698,6 +698,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch import on real Postgres (#
     // An imported scope takes no switch away before its commit.
     await expect(store().exportScope(target, [{ deviceId: 'device', expectedRevision: 1 }], clock)).rejects.toEqual(importedError(digest));
     await expect(store().abortSwitch(target, 'device', 1)).rejects.toEqual(importedError(digest));
+    await expect(store().commitSwitch(target, 'device', 1, digest)).rejects.toEqual(importedError(digest));
     await store().commitImport(target, digest);
     await expect(store().commitImport(target, digest)).rejects.toThrow('This scope holds no switch import record');
     await expect(store().discardImport(target)).rejects.toThrow('This scope holds no switch import record');
