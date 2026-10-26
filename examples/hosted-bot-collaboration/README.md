@@ -963,8 +963,8 @@ three and runs these suites.
   switch, the typed refusal of each entry during the freeze and after a commit to L, the refusal of each command that
   K8 `commandBots` says reaches the frozen device (an answer, a decision and room input that mentions only another
   device's Bot), the replay of an answer accepted before the freeze, a Turn held during the freeze and frozen after an
-  abort, a submit claimed before the freeze, the drain and cancel with a tried intent that holds the commit until it concludes, the cancel of a Host intent with no Turn, a routine fire during
-  the freeze and after an abort, a new store that reads the freeze, and home flushes during the switch. Each commit away
+  abort, a submit claimed before the freeze, the drain and cancel with a tried intent that holds the commit until it
+  concludes, the cancel of a Host intent with no Turn, a routine fire during the freeze and after an abort, a new store that reads the freeze, and home flushes during the switch. Each commit away
   exports the scope first and passes the export's digest.
 - The switch export tests (`switch-export.test.ts`, #975) move a scope that holds a retained and compacted Turn, a Bot
   routine with a settled occurrence and routine Turn, a Host intent and an unsent home write into a new L tenant: K8
