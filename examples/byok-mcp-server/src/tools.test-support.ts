@@ -51,6 +51,8 @@ export class FakeRuntime implements RuntimeAdapter {
     capabilities: { steer: false, resume: false, mcpToolsets: false, approvalInteractive: false } });
   readonly sessions = new Map<string, FakeSession>();
   readonly offers: RuntimeAdapterPrepareInput['offer'][] = [];
+  /** What the daemon reported, quoted when a session does not start. */
+  diagnostics: () => unknown = () => undefined;
   async detect(): Promise<RuntimeDetectResult> { return { kind: 'available', version: '0.0.0-fake' }; }
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     this.offers.push(input.offer);
@@ -59,7 +61,7 @@ export class FakeRuntime implements RuntimeAdapter {
     } } };
   }
   async session(taskId: string): Promise<FakeSession> {
-    await vi.waitFor(() => expect(this.sessions.has(taskId)).toBe(true), { timeout: 3000, interval: 20 });
+    await vi.waitFor(() => expect(this.sessions.has(taskId), JSON.stringify(this.diagnostics())).toBe(true), { timeout: 3000, interval: 20 });
     return this.sessions.get(taskId)!;
   }
 }
@@ -93,6 +95,9 @@ export async function openDaemonHost() {
     serverUrl: host.origin, storeDir: join(host.root, 'sdk'),
     agentHome: { hostStorageRoot: join(host.root, 'homes') }, agentEgress: { policy } },
   [runtime], { deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });
+  const events: unknown[] = [];
+  const unsubscribe = daemon.subscribe(event => events.push(event)); cleanup.push(unsubscribe);
+  runtime.diagnostics = () => ({ events, status: daemon.status() });
   const { deviceId } = await daemon.pair((await host.server.pairing.createPairingCode({ productId: PRODUCT_ID })).code);
   await daemon.start(); cleanup.push(() => daemon.stop());
   await vi.waitFor(() => expect(daemon.status().lifecycle).toEqual({ phase: 'running', connection: 'open' }), { timeout: 3000, interval: 20 });
