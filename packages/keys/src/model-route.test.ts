@@ -570,6 +570,72 @@ describe('acceptance review fixes', () => {
   });
 });
 
+describe('stored capabilities decide catalog recognition', () => {
+  const context = modelRouteContext();
+
+  /** The profile the device stores for a fresh catalog selection. */
+  function storedFor(model: string, level: string) {
+    return persisted(named(context,
+      { field: 'provider_kind', value: 'groq' },
+      { field: 'model', value: model },
+      { field: 'thinking_level', value: level as ModelRouteDraft['thinking_level'] & string },
+      { field: 'secret', value: { replace: 'k' } }), context).profile;
+  }
+
+  it('keeps an image-capable entry stored without image-input as manual, and submits it unchanged', () => {
+    const profile = storedFor('qwen/qwen3.6-27b', 'high');
+    expect(profile.capabilities).toEqual(['image-input']);
+    const without = { ...profile, capabilities: [] };
+    const reopened = modelRouteContext({ stored: { profile: without, secret_configured: true } });
+    const draft = createModelRouteDraft(reopened);
+    expect(draft).toMatchObject({ model_source: 'manual', model_api: null, capabilities: [], secret: 'keep' });
+    const renamed = applyModelRouteChange(draft, { field: 'display_name', value: 'Renamed' }, reopened);
+    const saved = persisted(renamed, reopened).profile;
+    expect(saved.display_name).toBe('Renamed');
+    expect(saved.capabilities).toEqual([]);
+    expect(saved.pi_model).toEqual(without.pi_model);
+  });
+
+  it('recognizes the entry when the stored capabilities match the entry', () => {
+    const profile = storedFor('qwen/qwen3.6-27b', 'high');
+    const reopened = modelRouteContext({ stored: { profile, secret_configured: true } });
+    expect(createModelRouteDraft(reopened)).toMatchObject({
+      model_source: 'catalog', model_api: 'openai-completions', pi_model: null, thinking_level: 'high',
+    });
+  });
+
+  it('keeps a text-only entry stored with image-input as manual', () => {
+    const profile = { ...storedFor('openai/gpt-oss-120b', 'high'), capabilities: ['image-input' as const] };
+    const reopened = modelRouteContext({ stored: { profile, secret_configured: true } });
+    const draft = createModelRouteDraft(reopened);
+    expect(draft).toMatchObject({ model_source: 'manual', capabilities: ['image-input'] });
+    const saved = persisted(draft, reopened).profile;
+    expect(saved.capabilities).toEqual(['image-input']);
+    expect(saved.pi_model).toEqual(profile.pi_model);
+  });
+
+  it('applies the same rule to a Host entry', () => {
+    const override = {
+      provider_kind: 'groq' as const, api: 'openai-completions' as const, model: 'openai/gpt-oss-120b',
+      config: { contextWindow: 131072, maxTokens: 8192, reasoning: true, compat: { supportsStrictMode: true } },
+      input: ['text' as const],
+    };
+    const policy: ModelRoutePolicy = { overrides: [override] };
+    const host = modelRouteContext({ policy });
+    const profile = persisted(named(host,
+      { field: 'provider_kind', value: 'groq' },
+      { field: 'model', value: override.model },
+      { field: 'secret', value: { replace: 'k' } }), host).profile;
+    expect(createModelRouteDraft(modelRouteContext({ policy, stored: { profile, secret_configured: true } })))
+      .toMatchObject({ model_source: 'host', pi_model: null });
+    const withImage = { ...profile, capabilities: ['image-input' as const] };
+    const reopened = modelRouteContext({ policy, stored: { profile: withImage, secret_configured: true } });
+    const draft = createModelRouteDraft(reopened);
+    expect(draft).toMatchObject({ model_source: 'manual', capabilities: ['image-input'] });
+    expect(persisted(draft, reopened).profile).toMatchObject({ capabilities: ['image-input'], pi_model: profile.pi_model });
+  });
+});
+
 describe('submission', () => {
   it('returns errors instead of a payload for an invalid draft', () => {
     const context = modelRouteContext();

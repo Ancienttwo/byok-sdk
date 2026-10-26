@@ -261,8 +261,11 @@ export function createModelRouteDraft(context: ModelRouteContext): ModelRouteDra
   };
   const api: PiModelApi = profile.adapter === 'anthropic' ? 'anthropic-messages' : storedPi?.api ?? 'openai-completions';
   const choice = modelChoices(draft, context).find((entry) => entry.value === profile.model && entry.api === api);
+  // A catalog or Host selection submits the entry's own capabilities, so a stored
+  // profile whose capabilities differ stays manual and keeps them.
   if (storedPi === undefined || choice?.status !== 'representable'
-    || !sameJson(entryConfig(choice, profile.provider_kind, context), config)) {
+    || !sameJson(entryConfig(choice, profile.provider_kind, context), config)
+    || !sameJson([...capabilitiesFor(choice.input)].sort(), [...profile.capabilities].sort())) {
     return draft;
   }
   return { ...draft, model_api: choice.api, model_source: choice.source, pi_model: null };
