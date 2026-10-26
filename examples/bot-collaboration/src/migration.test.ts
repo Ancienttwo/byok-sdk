@@ -304,6 +304,20 @@ describe('switch export format (#975)', () => {
     expect(() => sealSwitchExport(content(state => { state.team.bots.b2 = bot('b2', 'd3', true); }))).not.toThrow();
   });
 
+  it('refuses a routine Turn whose id is not an occurrence intent key, when sealed and when verified', () => {
+    const turn = (id: string) => ({ id, source: 'routine', conclusion: 'answered' }) as CollaborationState['turns'][string];
+    const sealed = sealSwitchExport(content(state => { state.turns[`occurrence:${O2}`] = turn(`occurrence:${O2}`); }));
+    expect(() => verifySwitchExport(sealed)).not.toThrow();
+    for (const id of ['t1', 'occurrence:k', `occurrence:${O2}0`]) {
+      refused(() => sealSwitchExport(content(state => { state.turns[id] = turn(id); })), 'invalid');
+      const document = structuredClone(sealed), row = document.collaboration.turns[`occurrence:${O2}`]!;
+      row.id = id;
+      refused(() => verifySwitchExport(document), 'invalid');
+    }
+    // A user Turn keeps any id.
+    expect(() => sealSwitchExport(content(state => { state.turns.t1 = { ...turn('t1'), source: 'user' }; }))).not.toThrow();
+  });
+
   it('refuses open work: an open Turn, an open input batch, an intent without a conclusion, a card call in flight', () => {
     refused(() => sealSwitchExport(content(state => { state.turns.t1 = { id: 't1' } as CollaborationState['turns'][string]; })), 'open_work');
     expect(() => sealSwitchExport(content(state => { state.turns.t1 = { id: 't1', conclusion: 'answered' } as CollaborationState['turns'][string]; }))).not.toThrow();
