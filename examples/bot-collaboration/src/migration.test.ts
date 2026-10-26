@@ -1,6 +1,6 @@
 import { hash } from '@byok-sdk/example-host-execution-core/canonical';
 import { describe, expect, it } from 'vitest';
-import { sealSwitchExport, SwitchExportError, verifySwitchExport, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type RoutineRecord,
+import { sealSwitchExport, switchAttempts, SwitchExportError, verifySwitchExport, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type RoutineRecord,
   type SwitchContent, type SwitchExport, type SwitchExportRefusal } from './migration';
 import { stateOf, type CollaborationState } from './model';
 import type { BotProfile, HomeOperation } from './team-model';
@@ -111,7 +111,7 @@ describe('switch export format (#975)', () => {
     reordered.turns = { b: reordered.turns.b!, a: reordered.turns.a! };
     const ordered = sealSwitchExport(turns);
     refused(() => verifySwitchExport({ ...ordered, collaboration: reordered }), 'manifest');
-    refused(() => verifySwitchExport({ ...sealed, routines: [{ ...sealed.routines[0]!, ordinal: 7 }, sealed.routines[1]!] }), 'manifest');
+    refused(() => verifySwitchExport({ ...sealed, routines: [{ ...sealed.routines[0]!, ordinal: 1 }, { ...sealed.routines[1]!, ordinal: 0 }] }), 'manifest');
   });
 
   it('refuses rows out of identity order and repeated identities or ordinals', () => {
@@ -176,6 +176,11 @@ describe('switch export format (#975)', () => {
       value => { Object.assign(value.occurrences[0]!, { job: { attempts: 1, summary: { ok: true } }, conclusion: 'succeeded' }); },
       // ... and only for one with no intent.
       value => { value.intents.push(intent(`occurrence:${O1}`, 3, { source: 'routine' })); },
+      // K8 never promotes a Host job occurrence: L and H run K4 with `hostJobExecution: 'fail'` (#954).
+      value => { value.intents.push(intent(`occurrence:${O1}`, 3, { source: 'routine' })); value.outbox = []; },
+      // A routine's or occurrence's ordinal is its position: a gap, or a first ordinal other than 0.
+      value => { value.routines[1]!.ordinal = 2; },
+      value => { for (const row of value.occurrences) row.ordinal += 1; },
       // An open Host job occurrence without its pending job would never run or compact.
       value => { value.outbox = []; },
       // A Host job routine's occurrence has a job, and a hook routine's has none.
@@ -360,5 +365,12 @@ describe('switch export format (#975)', () => {
       value => { (value.collaboration.team.bots.b1 as { execution: unknown }).execution = null; },
       value => { value.collaboration.turns.t1 = null as unknown as CollaborationState['turns'][string]; },
     ]);
+  });
+
+  it('derives K4 attempts: one per generation begun, and an occurrence has its intent\'s', () => {
+    expect(switchAttempts({ submission: 'reserved', generation: 0 })).toBe(0);
+    expect(switchAttempts({ submission: 'uncertain', generation: 0 })).toBe(1);
+    expect(switchAttempts({ submission: 'delivered', generation: 2 })).toBe(3);
+    expect(switchAttempts(undefined)).toBe(0);
   });
 });

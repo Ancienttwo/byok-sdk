@@ -525,7 +525,12 @@
   an empty L tenant and reads it back to the same digest, `commitImport`
   hands its devices to L, and `discardImport` deletes an import that was not
   committed. A `BotCollaboration` refuses a ledger with an uncommitted import.
-  No SDK, wire or SQL change.
+  The `./migration` format now requires each routine and occurrence `ordinal`
+  to be its position (0 to n - 1), refuses a promoted Host job occurrence, and
+  exports `switchAttempts`, the K4 `attempts` that it does not carry. K4
+  exports the encodings a switch derives again and calls them itself:
+  `routineWakeKey`, `occurrenceIntentKey`, `isOccurrenceIntentKey`,
+  `frozenInput`, and also `validateRetry`. No SDK, wire or SQL change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

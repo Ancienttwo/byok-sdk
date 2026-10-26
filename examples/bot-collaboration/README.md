@@ -1096,9 +1096,9 @@ runs on an import before its commit, and a committed tenant has no record to
 discard. The import writes each derived value from the format: `agent` for the
 new tenant, the task ids and inputs of every generation, `applied`, slots, wake
 keys, intent ids, `attempts` and the Host intent handlers. A concluded intent
-gets K4's cursors of a new row (`phase: 'settled'`, `notBefore: 0`). Routine
-and occurrence ordinals must be their positions 0 to n - 1, since K4 keeps only
-their order.
+gets K4's cursors of a new row (`phase: 'settled'`, `notBefore: 0`). Routines
+and occurrences go in the order of their ordinals, which the format makes their
+positions.
 
 Not moved: the source SDK's wakes, that is the `schedule` and `cancel-wake`
 rows and the scan wake. The new owner's `recover()` schedules each routine's
@@ -1129,8 +1129,11 @@ are in JS string order of their id, and each section in JS string order of
 database `ORDER BY` may give `unsorted`.
 
 A record holds what a target needs to rebuild the row, with values the source
-stores, never a default. Routines and occurrences carry their ordinal, intents
-their frozen input (a sealed one stays sealed). H stores only part of this
+stores, never a default. Routines and occurrences carry their ordinal, which is
+their position in their section, exactly 0 to n - 1: what moves is their order,
+which is all K4 stores, and H stores the position in its column. An intent
+carries K4 `sequence` or H `ordinal` as it is, gaps included, and its frozen
+input (a sealed one stays sealed). H stores only part of this
 today: the K4-only fields get H columns in the H slice that imports them.
 Every object has an exact set of keys.
 
@@ -1144,9 +1147,10 @@ export where one differs:
   generation's task id), and K4 `intent.execution` (`input` without
   `taskId`), which hold while K4 runs without its memory option, as K8 does;
 - K4 `applied`: the current task id exactly when the intent `succeeded`;
-- a K4 occurrence's wake key and slot. Each occurrence has exactly one slot on
-  both Hosts, so the format has no slot section;
-- an occurrence's intent id, and K4 `attempts`.
+- a K4 occurrence's wake key and slot (K4 `routineWakeKey`). Each occurrence
+  has exactly one slot on both Hosts, so the format has no slot section;
+- an occurrence's intent id (K4 `occurrenceIntentKey`), and K4 `attempts`,
+  which `switchAttempts` derives for both Hosts.
 
 An intent carries the K4 execution of each earlier generation (submission,
 start, attempt, terminal and message receipt), because K4 compacts an intent
@@ -1172,9 +1176,11 @@ The format refuses, with `SwitchExportError` and a `reason`:
   or past `maxAttempts`; a `reserved` intent past generation 0 or with
   anything from a submission; an earlier generation without its terminal and
   attempt, or that was not begun; an occurrence that does not match its
-  routine's run kind (a Host job routine's occurrence has a job, and a pending
-  job exactly while it is open and not promoted; a hook routine's has no job);
-  and two occurrences of one slot (`duplicate`);
+  routine's run kind (a Host job routine's occurrence has a job, is never
+  promoted, since both Hosts run K4 with `hostJobExecution: 'fail'`, and has a
+  pending job exactly while it is open; a hook routine's has no job); a routine
+  or occurrence ordinal that is not its position; and two occurrences of one
+  slot (`duplicate`);
 - an execution routine (`execution_routine`): a K8 domain holds only Turn and
   Host intents (#954), L refuses execution routines and H refuses them at
   create, and K8 Bot routines are occurrence hooks;
@@ -1197,8 +1203,8 @@ the target's readback or resend of a `sending` or `unknown` delivery uses the
 source's idempotency key. Whether a platform honors that key is its adapter's
 concern (`docs/host-im-adapter.md`); the switch does not change it.
 
-The export, the import and the commit of the switch on each Host come in
-later #975 slices. This entry has no I/O.
+This entry has no I/O. L's export, import and commit are in "Owner switch on L";
+H's come in a later #975 slice.
 
 ### Second-device placement and device wait
 
