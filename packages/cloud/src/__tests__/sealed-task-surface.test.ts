@@ -139,7 +139,8 @@ describe('the Host read surface of a sealed task (#654 E4a)', () => {
 
     expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toEqual({
       tenantId: TENANT_A, taskId, deviceId: device.deviceId, ownerDeviceId: device.deviceId, claimedRuntime: 'pi',
-      status: 'complete', updatedAt: expect.any(String),
+      status: 'complete', offeredAt: expect.any(String), claimedAt: expect.any(String), terminalAt: expect.any(String),
+      updatedAt: expect.any(String),
     });
 
     expect((await harness.cloud.readDeviceTerminal(TENANT_A, taskId))?.envelope.payload)

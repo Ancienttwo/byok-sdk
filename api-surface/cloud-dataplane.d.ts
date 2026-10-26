@@ -1455,9 +1455,13 @@ export interface TaskRow {
     readonly claimed_harness_id: string | null;
     readonly claimed_runtime: string | null;
     readonly claimed_runtime_capabilities: RuntimeCapabilities | null;
+    readonly offered_at: Date | null;
+    readonly claimed_at: Date | null;
+    readonly first_output_at: Date | null;
+    readonly terminal_at: Date | null;
     readonly updated_at: Date;
 }
-export declare const TASK_SELECT_COLUMNS = "tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_runtime, claimed_harness_id, claimed_runtime_capabilities, updated_at";
+export declare const TASK_SELECT_COLUMNS = "tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_runtime, claimed_harness_id, claimed_runtime_capabilities, offered_at, claimed_at, first_output_at, terminal_at, updated_at";
 export declare function taskRowToAttempt(row: TaskRow): TaskAttempt;
 export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     #private;
@@ -1481,6 +1485,10 @@ export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
         readonly messageId: string;
         readonly payloadBody: string;
     }): Promise<'reserved' | 'pending' | 'rejected'>;
+    recordFirstOutput(tenant: TenantId, input: {
+        readonly taskId: string;
+        readonly deviceId: string;
+    }): Promise<TaskAttempt | undefined>;
     readTaskAgentMessage(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
