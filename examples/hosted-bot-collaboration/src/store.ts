@@ -11,9 +11,9 @@ import { admitUserInput, coalescePolicy, projectInputBatches, sealDueBatches, ty
 type UpdateRoutineAction = Parameters<typeof updateDefinition>[2];
 import { addTurn, stateOf, type Card, type CollaborationState, type Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { advanceRoomSeats, cardCallDue, checkReply, CONNECTOR_OUTCOME_UNKNOWN, collaborationDue, commitCommand, expireCards, observeDevices, replyCheckDue, reportCardDecisions,
-  seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
+  commandBots, seatTurn, settleCardCall, settleDelegations, syncTurn, type Command, type CommandPorts, type DelegationTimers, type ReplyCheck, type SyncOptions, type SyncStep } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { activeBinding, beginSwitch, refusesHomeWrites, switchFence, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
+import { activeBinding, beginSwitch, refusesHomeWrites, requireBound, switchRefusal, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
 import { cancelIntent, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
@@ -199,6 +199,10 @@ function addedDevices(state: CollaborationState): () => string[] {
     return [...new Set(bots.flatMap(botId => state.team.bots[botId] ? [state.team.bots[botId]!.execution.deviceId] : []))];
   };
 }
+/** The devices of the Bots that K8 `commandBots` names for `command`, once each, in its order. */
+function commandDevices(state: CollaborationState, command: Command): string[] {
+  return [...new Set(commandBots(state, command).map(botId => state.team.bots[botId]!.execution.deviceId))];
+}
 /** The open work of a device during its switch (#957), by kind. `homes`: sequences of sent Agent home writes with no terminal readback. */
 export interface DeviceWork { intents: string[]; turns: string[]; batches: string[]; homes: number[] }
 /** The open work of `deviceId` in `state` and the intent rows. The caller's transaction reads it. */
@@ -271,15 +275,20 @@ export class HostedCollaborationStore {
    *
    * The store builds every command port from the scope's Host config (#793 S9). `clock` is the Host clock.
    *
-   * With `requireBinding` (the command entry's commits, #793 S10), a new commit checks, under the scope lock, that each Bot
-   * of the work that the commit added (see `addedDevices`) runs on a device with an active H binding, and throws
-   * `DeviceBindingError` otherwise, so the commit rolls back. It reads what the K8 rule produced, so H keeps no copy of the
+   * A new command is admitted as L admits it (K8 host.ts `admitCommand`, #975): it is refused, and writes nothing, while a
+   * device of a Bot that K8 `commandBots` names is frozen for an owner switch (`DeviceSwitchingError`) or owned by L
+   * (`DeviceBindingError` with `mode`). The check runs after the replay lookup, so an exact replay returns its first result.
+   *
+   * With `requireBinding` (the command entry's commits, #793 S10), a new commit also checks, under the scope lock, that each
+   * Bot of the work that the commit added (see `addedDevices`) runs on a device with an active H binding, and throws
+   * `DeviceBindingError` otherwise, so the commit rolls back. A frozen device passes that check: only the admission refuses
+   * the freeze, so H and L refuse the same commands. It reads what the K8 rule produced, so H keeps no copy of the
    * mention and seat selection.
    */
   commit(scope: string, request: CommitRequest<Command>, clock: () => number, options: { requireBinding?: boolean } = {}): Promise<CommitResult> {
     if (CALLBACK_KINDS.has(request.command.kind)) return Promise.reject(new CallbackCommandError(request.command.kind));
     if (request.command.kind === 'receive') return Promise.reject(new InboundCommandError());
-    return this.commitWith(scope, request, clock, undefined, options.requireBinding === true ? 'binding' : undefined);
+    return this.commitWith(scope, request, clock, undefined, options.requireBinding === true ? 'binding' : 'owner');
   }
 
   /**
@@ -315,17 +324,17 @@ export class HostedCollaborationStore {
       const command: Command = kind === 'owner_input'
         ? { kind: 'receive', inbound: kind, key, botId: conversation.id, request: message.text, sender: from }
         : { kind: 'receive', inbound: kind, key, roomId: conversation.id, text: message.text, mentions: message.mentions, from };
-      // Input for a Bot whose device is switching, or was switched to L, rolls back with the typed refusal (#957). Input for
-      // an unbound or revoked device is still taken and held by the sync (#956): the channel entry is not the command entry.
+      // Input that reaches a device that is switching, or was switched to L, is refused as L refuses it (#957, #975). Input
+      // for an unbound or revoked device is still taken and held by the sync (#956): the channel entry is not the command entry.
       const result = await this.commitWith(scope, { scope, commandId: hash(['receive', key]), command }, clock,
-        state => ({ remember: this.channel ? (root: string) => rememberInbound(state, message, root) : undefined }), 'switch');
+        state => ({ remember: this.channel ? (root: string) => rememberInbound(state, message, root) : undefined }), 'owner');
       return { kind, id: turnOf(result) };
     }
     if (kind === 'bot_background') {
       // R5: a bot message is room background. Its mention entities select no seat.
       const key = inboundKey(message);
       const result = await this.commitWith(scope, { scope, commandId: hash(['room_input', conversation.id, key]),
-        command: { kind: 'room_input', key, roomId: conversation.id, text: message.text, mentions: [], from: sender!.id } }, clock, undefined, 'switch');
+        command: { kind: 'room_input', key, roomId: conversation.id, text: message.text, mentions: [], from: sender!.id } }, clock, undefined, 'owner');
       return { kind, id: turnOf(result) };
     }
     const who = verified(sender) ? ` ${sender.kind}:${sender.id}` : '';
@@ -346,10 +355,14 @@ export class HostedCollaborationStore {
       ? { outcome: { ...outcome, manage: ports.manage(command.taskId) } } : {});
   }
 
-  /** One commit with the store's ports and `extra`, the ports that only the store's own entries add. */
+  /**
+   * One commit with the store's ports and `extra`, the ports that only the store's own entries add. `owner`: an owner
+   * command, admitted as L admits it (see `commit`). `binding`: an owner command of the command entry, which also needs an
+   * active H binding for the work it added. Neither: a callback, which L commits with no admission either.
+   */
   private async commitWith(scope: string, request: CommitRequest<Command>, clock: () => number,
     extra?: (state: CollaborationState, ports: StorePorts) => { remember?: CommandPorts['remember']; outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
-    fence?: 'binding' | 'switch', guard?: (client: PoolClient) => Promise<void>): Promise<CommitResult> {
+    entry?: 'owner' | 'binding', guard?: (client: PoolClient) => Promise<void>): Promise<CommitResult> {
     const key = storedKey(scope), config = await this.host(scope);
     return this.change(scope, request.commandId, async (state, publish, client) => {
       await guard?.(client);
@@ -358,13 +371,16 @@ export class HostedCollaborationStore {
       const { manage, ...own } = this.ports(config, state, publish, clock), head = revisionOf(state);
       const slice = request.command.kind === 'end_routine' ? await loadSlice(client, key) : undefined;
       const commands = slice && hostedRoutineCommands(slice, own.now());
+      // Read before the commit, thrown by `admit` after its replay lookup.
+      const refusal = entry && await switchRefusal(client, key, commandDevices(state, request.command));
       const base = { ...own, ...extra?.(state, { ...own, manage }), admitInput: (fields: InputFields) => admitUserInput(state, fields, this.coalesce, own.now()),
-        routines: commands && { end: (id: string) => commands.lifecycle(endable(commands.list(), id).definition.id, 'completed') } };
-      const before = fence ? addedDevices(state) : undefined;
+        routines: commands && { end: (id: string) => commands.lifecycle(endable(commands.list(), id).definition.id, 'completed') },
+        ...(entry ? { admit: () => { if (refusal) throw refusal; } } : {}) };
+      const before = entry === 'binding' ? addedDevices(state) : undefined;
       const result = await commitStored(client, scope, state, request, base, this.channel);
       // A new commit moves the head by 1. A replay returns its first result and writes nothing.
       if (result.revision !== head + 1) return { value: result, outbox: [] };
-      if (before) for (const deviceId of before()) await (fence === 'binding' ? activeBinding : switchFence)(client, key, deviceId);
+      if (before) await requireBound(client, key, before());
       const value = result.disposition.outcome === 'accepted'
         ? result.disposition.value as { target?: string; admitted?: boolean; deliver?: boolean } | undefined : undefined;
       if (request.command.kind === 'cancel_turn' && value?.admitted && value.target !== undefined) {

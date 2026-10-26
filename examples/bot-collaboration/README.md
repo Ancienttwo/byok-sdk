@@ -1126,6 +1126,8 @@ them. The product runs the steps in order and keeps the document:
 - The export document is kept until the target committed toward its owner.
 - If an import is lost after the old owner committed away, the kept document
   is imported into a new tenant.
+- Only one import of a digest is committed; every other one is discarded. The
+  receipt names no tenant, so one document can be imported into two tenants.
 - From the export on the old owner refuses all work, so two owners never run
   the domain at the same time.
 

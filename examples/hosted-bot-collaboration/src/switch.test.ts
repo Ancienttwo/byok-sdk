@@ -7,7 +7,7 @@ import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import { routineCalendar } from '@byok-sdk/example-bot-collaboration/routines';
 import type { InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
-import { DEVICE_SWITCHING } from '@byok-sdk/example-bot-collaboration/rules/commands';
+import { DEVICE_SWITCHING, type Command } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
 import { storedKey } from './layout';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
@@ -127,6 +127,42 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     // After the commit to L, the same input is refused for good with the mode reason.
     await store().commitSwitch(scope, 'device', 2, await receipt(scope, 2));
     await expect(store().receive(scope, owner, IDENTITY, clock)).rejects.toEqual(modeRefusal);
+  });
+
+  it('refuses each command that K8 commandBots says reaches the frozen device, as L admits, and replays one accepted before', async () => {
+    const scope = `tenant:${randomUUID()}`;
+    // Room r1 has the Main Bot on the frozen device and a helper on another bound device.
+    await store().seed(scope, state => {
+      seedCollaboration(state);
+      Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+      state.questions.q2 = { id: 'q2', turnId: 't1', value: { question: 'Again?', answerKind: 'text' } };
+      state.team.bots.helper = { ...state.team.bots.main!, id: 'helper', name: 'Helper', mainBot: false, execution: template('other', 'helper') };
+      state.team.rooms.r1 = { id: 'r1', name: 'R', members: ['main', 'helper'], mode: 'mention', announcement: '', visibleFrom: {}, messages: [] };
+    });
+    await store().bindDevice(scope, 'device');
+    await store().bindDevice(scope, 'other');
+    const commit = (commandId: string, command: Command, requireBinding = true) =>
+      store().commit(scope, { scope, commandId, command }, clock, { requireBinding });
+    const answered = await commit('a2', { kind: 'answer', questionId: 'q2', answer: 'Yes' });
+    await store().beginSwitch(scope, 'device', 'L', 1);
+    const frozen = await store().dump(scope);
+    // The check runs after the replay lookup, so the answer accepted before the freeze returns its first result.
+    expect(await commit('a2', { kind: 'answer', questionId: 'q2', answer: 'Yes' })).toEqual(answered);
+    const room = (mentions: string[]): Command => ({ kind: 'room_input', key: randomUUID(), roomId: 'r1', text: 'Go', mentions, from: 'owner' });
+    const group = (sender: InboundMessage['sender']): InboundMessage => ({ channel: 'fake', platformMessageId: randomUUID(),
+      conversation: { kind: 'group', id: 'r1' }, sender, text: 'Go', mentions: ['helper'] });
+    for (const work of [
+      () => commit(randomUUID(), { kind: 'answer', questionId: 'q1', answer: 'Yes' }),
+      () => commit(randomUUID(), { kind: 'answer', questionId: 'q1', answer: 'Yes' }, false),
+      // A decision adds its action_result Turn and its connector call in the sync, not in the commit.
+      () => commit(randomUUID(), { kind: 'decide', cardId: 'c1', decision: 'confirmed' }),
+      // Room input refuses while any Bot member is frozen, whichever members it mentions.
+      () => commit(randomUUID(), room(['helper'])),
+      () => commit(randomUUID(), room([]), false),
+      () => store().receive(scope, group({ id: 'alice', kind: 'human' }), IDENTITY, clock),
+      () => store().receive(scope, group({ id: 'other-bot', kind: 'bot' }), IDENTITY, clock),
+    ]) await expect(work()).rejects.toEqual(switching('L', 2));
+    expect(await store().dump(scope)).toBe(frozen);
   });
 
   it('holds a Turn that reaches the sync during the freeze, and freezes it after an abort', async () => {
