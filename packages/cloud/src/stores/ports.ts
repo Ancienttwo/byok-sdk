@@ -346,7 +346,8 @@ export interface TaskAttempt {
   /** The winning `task.claim` (`offered -> claimed`); a redelivered or losing claim leaves it as the winner left it. */
   readonly claimedAt?: string;
   /**
-   * The first visible output after the claim: an Agent message draft or body.
+   * The first visible output after the claim: an Agent message draft with
+   * text, or a message body.
    * `task.progress` is not output. Output before the claim is not recorded, so
    * this is never earlier than `claimedAt`.
    */

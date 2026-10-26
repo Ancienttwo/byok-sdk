@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Feature (cloud)** — `TaskAttempt` (`ByokCloud.readTaskAttempt`) records
+  four write-once phase instants: `offeredAt`, `claimedAt`, `firstOutputAt`
+  and `terminalAt` (#980). Each is written by the store operation that makes
+  its transition and never again: a redelivered or losing claim and a
+  terminal retry leave them as they are. `firstOutputAt` is the first Agent
+  message draft with text or message body after the claim; `task.progress`
+  does not count. Postgres adds migration 0030 (four nullable `timestamptz`
+  columns on `task`); a SQLite store adds the columns when it opens, with no
+  schema version change. Attempts stored before this are not backfilled, so
+  their instants are absent. No duration fields are derived.
+- **Breaking (cloud)** — `TaskAttemptStore` gains the required
+  `recordFirstOutput(tenant, { taskId, deviceId })`, the write-once
+  `firstOutputAt` for an Agent message draft (#980). A Host that implements
+  its own `TenantStores` or `TaskAttemptStore` must add it. Its other methods
+  report the instants only if they write them as the bundled stores do; a
+  cancellation of an unclaimed attempt also sets `terminalAt`.
 - **Feature (keys)** — add `@byok-sdk/keys/model-route`, the headless logic
   of a Pi model route page (#986 S2). It loads in a browser: no Node builtins,
   no custody module, no network. `listPiCatalogModels` lists the pinned
