@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { promises as fs, type Dirent } from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { AgentRef } from '../agent-home';
@@ -11,6 +11,13 @@ export const AGENT_RESULT_DIRECTORY = path.join('.byok', 'results');
 
 /** Upper bound on one record file; a staged outcome is at most 64 KiB and a schema 16 KiB. */
 const RECORD_MAX_BYTES = 1024 * 1024;
+
+/** A staged record file name. */
+export const AGENT_RESULT_RECORD_NAME = /^result-[a-f0-9]{64}\.json$/u;
+/** The temp file `atomicWriteFile` leaves when a stage crashes before its rename. */
+export const AGENT_RESULT_TEMP_NAME = /^result-[a-f0-9]{64}\.json\.\d+-\d+\.tmp$/u;
+/** Records kept per Agent home once the home is idle; at most 64 KiB each. */
+export const AGENT_RESULT_MAX_RETAINED = 256;
 
 /**
  * One immutable staged outcome of one task. `outcome` is the canonical
@@ -68,7 +75,7 @@ function isString(value: unknown): value is string {
 function parseRecord(raw: string, taskId: string): AgentResultRecord {
   let value: unknown;
   try { value = JSON.parse(raw); } catch {
-    throw new AgentResultStoreError('result_record_invalid', `staged result for task ${taskId} is not valid JSON; preserve the file for explicit repair`);
+    throw new AgentResultStoreError('result_record_invalid', `staged result for task ${taskId} is not valid JSON`);
   }
   const record = value as Partial<AgentResultRecord> | null;
   if (record === null || typeof record !== 'object' || record.schema !== 1 || record.taskId !== taskId
@@ -78,7 +85,7 @@ function parseRecord(raw: string, taskId: string): AgentResultRecord {
     || record.agentRef === null || typeof record.agentRef !== 'object'
     || !isString(record.agentRef.agentId) || !isString(record.agentRef.profileRevision)
     || agentResultDigest(record.outcome) !== record.contentHash) {
-    throw new AgentResultStoreError('result_record_invalid', `staged result for task ${taskId} is malformed; preserve the file for explicit repair`);
+    throw new AgentResultStoreError('result_record_invalid', `staged result for task ${taskId} is malformed`);
   }
   return Object.freeze(record as AgentResultRecord);
 }
@@ -93,10 +100,10 @@ function parseRecord(raw: string, taskId: string): AgentResultRecord {
  *
  * The store is never a terminal or replay authority: only the `turn_end` of
  * the same live task reads it, and a restart, failure or cancel never does —
- * the journal stays the only terminal truth. A record is local audit evidence
- * and is retained with the task's other per-task Agent-home evidence (for
- * example `.byok/runtime-sessions/*-task-*.jsonl`): nothing sweeps it
- * automatically; removing the Agent home or explicit operator maintenance does.
+ * the journal stays the only terminal truth. A record is local audit evidence.
+ * That live task holds the home's execution lease for as long as it can read
+ * the record, so once the home is idle no reader remains, and retention
+ * removes records by {@link pruneAgentResults} under the idle-home lease.
  */
 export class AgentResultStore {
   private writeTail: Promise<unknown> = Promise.resolve();
@@ -180,5 +187,46 @@ export class AgentResultStore {
     this.writeTail = new Promise<void>((resolve) => { release = resolve; });
     await prior;
     try { return await fn(); } finally { release(); }
+  }
+}
+
+/**
+ * Remove staged records and crashed-stage temps from one idle home's
+ * `.byok/results/`. The caller holds the idle-home lease, so no listed file
+ * has a reader left; age and count only bound the local audit window.
+ *
+ * - Records and temps whose mtime is at least `maxAgeMs` old are removed.
+ * - Then, while more than `maxRetained` records remain, the oldest is removed.
+ *   Temps do not count toward `maxRetained`.
+ *
+ * Content is never parsed, so a malformed record expires like any other.
+ * Other names, directories and symbolic links are left alone. A record is
+ * written once, so its mtime is its creation time. Removal stops at the first
+ * `remove` that returns false.
+ */
+export async function pruneAgentResults(input: {
+  readonly resultsRoot: string;
+  readonly entries: AsyncIterable<Dirent>;
+  readonly nowMs: number;
+  readonly maxAgeMs: number;
+  readonly maxRetained?: number;
+  readonly remove: (file: string) => Promise<boolean>;
+}): Promise<void> {
+  const files: { readonly file: string; readonly mtimeMs: number; readonly record: boolean }[] = [];
+  for await (const entry of input.entries) {
+    const record = AGENT_RESULT_RECORD_NAME.test(entry.name);
+    if (!entry.isFile() || !(record || AGENT_RESULT_TEMP_NAME.test(entry.name))) continue;
+    const file = path.join(input.resultsRoot, entry.name);
+    const stat = await fs.lstat(file);
+    if (stat.isFile()) files.push({ file, mtimeMs: stat.mtimeMs, record });
+  }
+  const kept: typeof files = [];
+  for (const entry of files) {
+    if (input.nowMs - entry.mtimeMs < input.maxAgeMs) { if (entry.record) kept.push(entry); continue; }
+    if (!await input.remove(entry.file)) return;
+  }
+  kept.sort((left, right) => left.mtimeMs - right.mtimeMs);
+  for (let index = 0; index < kept.length - (input.maxRetained ?? AGENT_RESULT_MAX_RETAINED); index++) {
+    if (!await input.remove(kept[index]!.file)) return;
   }
 }

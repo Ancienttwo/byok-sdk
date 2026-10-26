@@ -418,7 +418,7 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
   if (storage !== undefined) {
     lines.push(`live-storage: used=${storage.usedBytes} free=${storage.freeBytes ?? 'unknown'} measuredAt=${storage.measuredAt ?? 'unknown'}`);
     if (storage.budget) lines.push(`live-storage-budget: state=${storage.budget.pressureState} bytes=${storage.budget.budgetBytes}`);
-    for (const entry of storage.classes) lines.push(`live-storage-class: ${entry.classId} bytes=${entry.bytes} entries=${entry.entries} protected=${entry.protected} measured=${entry.measured}`);
+    for (const entry of storage.classes) lines.push(`live-storage-class: ${entry.classId} bytes=${entry.bytes} entries=${entry.entries} protected=${entry.protected} measured=${entry.measured} truncated=${entry.truncated}`);
     if (storage.lastSweep) lines.push(`live-storage-sweep: trigger=${storage.lastSweep.trigger} deleted=${storage.lastSweep.deleted} failures=${storage.lastSweep.failures} truncated=${storage.lastSweep.truncated}`);
   }
   return lines;

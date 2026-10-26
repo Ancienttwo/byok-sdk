@@ -355,6 +355,12 @@ describe('bin/format: formatLiveStatusLines', () => {
     };
   }
 
+  it('renders each storage class with whether its measurement was truncated', () => {
+    const lines = formatLiveStatusLines(baseLive({ storage: { measuredAt: 'T', usedBytes: 5, freeBytes: 9, lastSweep: null,
+      classes: [{ classId: 'agent-result', protected: false, measured: true, truncated: true, bytes: 5, entries: 1, oldestAgeMs: 0 }] } }));
+    expect(lines).toContain('live-storage-class: agent-result bytes=5 entries=1 protected=false measured=true truncated=true');
+  });
+
   it('renders pid/uptime/lifecycle, paired+deviceId, and runtimes on their own lines', () => {
     const lines = formatLiveStatusLines(baseLive({ deviceId: 'dev-1', runtimes: ['pi', 'claude'].map(id => ({ id, present: true, outcome: 'available' as const, steer: true, resume: true })) }));
     expect(lines).toContain('live: pid=123 uptimeMs=4567 phase=running connection=open');
