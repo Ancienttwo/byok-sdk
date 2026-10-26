@@ -22,6 +22,8 @@ import {
   stopServer,
   waitFor,
   type FakeLongPollDaemon,
+  TEST_AGENT_DISPATCH,
+  TEST_AGENT_REF,
 } from './test-support';
 
 const PRODUCT_ID = 'server-reliability';
@@ -159,7 +161,7 @@ describe('issues #141-#144 server reliability regressions', () => {
       deviceId: 'device-a',
       envelope: createEnvelope(
         'task.complete',
-        { summary: 'completed before enqueue returned', sessionRef: 'session-provisional' },
+        { agentRef: TEST_AGENT_REF, summary: 'completed before enqueue returned', sessionRef: 'session-provisional' },
         { taskId },
       ),
       outcome: 'accepted',
@@ -177,7 +179,7 @@ describe('issues #141-#144 server reliability regressions', () => {
 
   it('#143 retries the same host rejection payload and does not enqueue another executable control', async () => {
     const { byok: instance, daemon } = await start();
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'approval retry' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'approval retry' });
     await claimAndStart(instance, daemon, handle);
     await moveToAwaitApproval(instance, daemon, handle, { approvalId: 'approval-retry' });
 
@@ -190,38 +192,5 @@ describe('issues #141-#144 server reliability regressions', () => {
     const controls = (await daemon.next()).filter((envelope) => envelope.type === 'task.approve' || envelope.type === 'task.reject');
     expect(controls).toHaveLength(1);
     expect(controls[0]).toMatchObject({ type: 'task.reject', payload: { approvalId: 'approval-retry', reason: 'first reason' } });
-  });
-
-  it('#144 keeps host approval id-less when a pre-M5 request had no native approvalId', async () => {
-    const { byok: instance, daemon } = await start();
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'id-less host approval' });
-    await claimAndStart(instance, daemon, handle);
-    await moveToAwaitApproval(instance, daemon, handle);
-
-    await handle.approve({ approvalId: 'caller-only-id' });
-
-    const controls = (await daemon.next()).filter((envelope) => envelope.type === 'task.approve');
-    expect(controls).toHaveLength(1);
-    expect(controls[0]?.payload).toEqual({});
-  });
-
-  it('#144 resolves an id-less pending approval only after a later committed activity', async () => {
-    const { byok: instance, daemon } = await start();
-    const handle: TaskHandle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'id-less approval' });
-    await claimAndStart(instance, daemon, handle);
-    await moveToAwaitApproval(instance, daemon, handle);
-
-    await daemon.send(
-      createEnvelope(
-        'task.progress',
-        { seq: 1, events: [{ type: 'progress', text: 'continued after local approval' }] },
-        { taskId: handle.taskId },
-      ),
-    );
-
-    await waitFor(async () => (await instance.tasks.get(handle.taskId))?.state === 'Running', 1_000);
-    const snapshot = await instance.tasks.get(handle.taskId);
-    expect(snapshot?.state).toBe('Running');
-    expect(snapshot?.pendingApprovalId).toBeUndefined();
   });
 });

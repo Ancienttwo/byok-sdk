@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryPresenceStore } from '@byok-sdk/core';
 import { composeFacadeStores, serverTenantId } from '../stores';
 import { createByokServer, type ByokServer } from '../index';
-import { connectFakeDaemonLongPoll, nextEnvelope, startServer, stopServer, waitFor } from './test-support';
+import { connectFakeDaemonLongPoll, nextEnvelope, startServer, stopServer, waitFor, TEST_AGENT_DISPATCH } from './test-support';
 
 const PRODUCT_ID = 'single-presence-lease';
 const T0 = Date.parse('2026-10-14T00:00:00.000Z');
@@ -82,10 +82,10 @@ describe('single TTL presence lease', () => {
     const daemon = await connectFakeDaemonLongPoll(h.baseUrl, h.byok, { productId: PRODUCT_ID });
     vi.setSystemTime(T0 + 1_001);
     expect((await h.byok.machines.list())[0]?.connected).toBe(false);
-    const task = await h.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'wait for this laptop' });
+    const task = await h.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'wait for this laptop' });
     expect((await h.byok.tasks.get(task.taskId))?.state).toBe('Offered');
     const offer = await nextEnvelope(daemon);
-    expect(offer).toMatchObject({ type: 'task.offer', task_id: task.taskId });
+    expect(offer).toMatchObject({ type: 'task.offer_for_agent', task_id: task.taskId });
     expect((await h.byok.machines.list())[0]?.connected).toBe(true);
   });
 
@@ -94,7 +94,7 @@ describe('single TTL presence lease', () => {
     const daemon = await connectFakeDaemonLongPoll(h.baseUrl, h.byok, { productId: PRODUCT_ID });
     await h.byok.devices.revoke(daemon.deviceId);
     expect(await h.byok.machines.list()).toEqual([]);
-    await expect(h.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'revoked' })).rejects.toMatchObject({ code: 'device_not_found' });
+    await expect(h.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'revoked' })).rejects.toMatchObject({ code: 'device_not_found' });
     expect((await h.byok.tasks.list()).tasks).toEqual([]);
   });
 

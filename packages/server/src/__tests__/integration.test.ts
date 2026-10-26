@@ -12,6 +12,8 @@ import {
   startServer,
   stopServer,
   type FakeLongPollDaemon,
+  TEST_AGENT_DISPATCH,
+  TEST_AGENT_REF,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -64,18 +66,17 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
       }),
     ]);
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'say hello' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'say hello' });
     expect(handle.taskId).toBeTruthy();
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Offered');
 
     const offerEnvelope = await nextEnvelope(daemon);
-    expect(offerEnvelope.type).toBe('task.offer');
-    if (offerEnvelope.type !== 'task.offer') throw new Error('unreachable');
+    expect(offerEnvelope.type).toBe('task.offer_for_agent');
+    if (offerEnvelope.type !== 'task.offer_for_agent') throw new Error('unreachable');
     // M1 gap #7: taskId is no longer duplicated in the payload — the envelope's `task_id` is the sole routing key.
     expect(offerEnvelope.task_id).toBe(handle.taskId);
     // Per-device `seq` is one shared counter across all server->daemon types
-    // (§1.2). The offer is `1` rather than the pre-fold `2` because there is no
-    // `conn.ack` row over long-poll: the announcement is answered by the
+    // (§1.2). The offer is `1`: the announcement is answered by the
     // `POST /byok/messages` response, not by an enqueued envelope.
     expect(offerEnvelope.seq).toBe(1);
     expect(offerEnvelope.payload.instruction).toBe('say hello');
@@ -98,7 +99,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     );
     await sendOne(
       daemon,
-      createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_1' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_1' }, { taskId: handle.taskId }),
     );
 
     const result = await handle.result();
@@ -151,8 +152,8 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     byok = instance;
     const daemon = await connectFakeDaemonLongPoll(startedServer.baseUrl, instance, { productId: PRODUCT_ID });
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'end at the terminal' });
-    await nextEnvelope(daemon); // task.offer
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'end at the terminal' });
+    await nextEnvelope(daemon); // task.offer_for_agent
 
     // A consumer already iterating when the terminal lands.
     const live = (async () => {
@@ -164,7 +165,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     await claimAndStart(instance, daemon, handle);
     await sendOne(
       daemon,
-      createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_end' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_end' }, { taskId: handle.taskId }),
     );
 
     expect((await live).map((e) => (e.kind === 'state' ? e.state : null))).toEqual([
@@ -185,12 +186,12 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'say hello' });
-    await nextEnvelope(daemon); // task.offer
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'say hello' });
+    await nextEnvelope(daemon); // task.offer_for_agent
 
     const claimEnvelope = createEnvelope(
       'task.claim',
-      { deviceId: daemon.deviceId },
+      { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId },
       { taskId: handle.taskId },
     );
     const startedEnvelope = createEnvelope('task.started', {}, { taskId: handle.taskId });
@@ -206,7 +207,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     await sendOne(daemon, startedEnvelope);
     await sendOne(
       daemon,
-      createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_3' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_3' }, { taskId: handle.taskId }),
     );
 
     const result = await handle.result();
@@ -228,9 +229,9 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'a long task' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'a long task' });
     const offer = await nextEnvelope(daemon);
-    expect(offer.type).toBe('task.offer');
+    expect(offer.type).toBe('task.offer_for_agent');
 
     await handle.cancel('changed my mind');
 
@@ -251,19 +252,11 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'do something risky' });
-    await nextEnvelope(daemon); // task.offer
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'do something risky' });
+    await nextEnvelope(daemon); // task.offer_for_agent
     await claimAndStart(started.byok, daemon, handle);
 
-    // The daemon reports an `approvalId` (M5, docs/protocol.md §5.3), which is
-    // what a current build sends. 2d gap: the PRE-M5 shape — an
-    // `task.await_approval` with no id at all — is the narrow hole recorded in
-    // 2a's Deviations: the kernel's `approval_resolved` requires a non-blank
-    // `approvalId`, so a host decision on an unidentified approval reaches the
-    // device but cannot be written to the timeline the read model derives from,
-    // and `tasks.get()` keeps reporting `AwaitApproval` while `events()` already
-    // reports `Running`. That path is not covered here and is flagged in the
-    // notes rather than worked around.
+    // Every v4 approval request names its approval (docs/protocol.md §5.3).
     await sendOne(
       daemon,
       createEnvelope(
@@ -282,7 +275,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
 
     await sendOne(
       daemon,
-      createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_2' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_2' }, { taskId: handle.taskId }),
     );
 
     const result = await handle.result();
@@ -328,9 +321,9 @@ describe('redelivery from a stale cursor (§9)', () => {
 
     // task1 stays Running — steer() below produces an envelope the daemon
     // never reads before it "drops".
-    const handle1 = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'long running task' });
+    const handle1 = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'long running task' });
     const offer1 = (await pageAt(daemon, 0))[0];
-    if (offer1?.type !== 'task.offer') throw new Error('unreachable');
+    if (offer1?.type !== 'task.offer_for_agent') throw new Error('unreachable');
     const cursor = offer1.seq; // "I've fully processed everything through this seq"
 
     await claimAndStart(started.byok, daemon, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
@@ -341,7 +334,7 @@ describe('redelivery from a stale cursor (§9)', () => {
     // must not be redelivered; its task.cancel IS exempt (N1/F4) precisely
     // because a cancellation is recorded BEFORE the notification is queued, so
     // without the exemption a dropped cancel could never be redelivered.
-    const handle2 = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'short task' });
+    const handle2 = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'short task' });
     await handle2.cancel('not needed after all');
     await handle2.result();
     expect((await started.byok.tasks.get(handle2.taskId))?.state).toBe('Cancelled');
@@ -384,12 +377,12 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
   it('task.decline moves Offered -> Failed (pre-claim fail-closed rejection, §3.2)', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'unsupported instruction shape' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'unsupported instruction shape' });
     await nextEnvelope(daemon); // offer
 
     await sendOne(
       daemon,
-      createEnvelope('task.decline', { reason: 'no compatible runtime', retryable: true }, { taskId: handle.taskId }),
+      createEnvelope('task.decline', { agentRef: TEST_AGENT_REF, reason: 'no compatible runtime', retryable: true }, { taskId: handle.taskId }),
     );
 
     const result = await handle.result();
@@ -421,7 +414,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
   it('task.cancelled is the authoritative trigger when the daemon observes a cancellation the server did not initiate', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x' });
     await nextEnvelope(daemon);
     await claimAndStart(instance, daemon, handle);
 
@@ -429,7 +422,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     // stop action in the branded CLI's UI) and reports it directly.
     await sendOne(
       daemon,
-      createEnvelope('task.cancelled', { reason: 'user stopped it locally' }, { taskId: handle.taskId }),
+      createEnvelope('task.cancelled', { agentRef: TEST_AGENT_REF, reason: 'user stopped it locally' }, { taskId: handle.taskId }),
     );
 
     const result = await handle.result();
@@ -439,7 +432,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
   it('task.cancelled after a server-initiated cancel is a silent idempotent ack, not a warning (M0 gatekeeper finding)', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'task one' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'task one' });
     await nextEnvelope(daemon);
     await claimAndStart(instance, daemon, handle);
     await handle.cancel('server decided');
@@ -450,7 +443,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     // The send's own response is the barrier — the kernel applied (or dropped)
     // this envelope inside the request, so no ordering marker is needed.
-    await sendOne(daemon, createEnvelope('task.cancelled', { reason: 'stopped locally' }, { taskId: handle.taskId }));
+    await sendOne(daemon, createEnvelope('task.cancelled', { agentRef: TEST_AGENT_REF, reason: 'stopped locally' }, { taskId: handle.taskId }));
 
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Cancelled'); // unchanged, not re-applied
     expect((await instance.tasks.get(handle.taskId))?.result).toEqual(recorded);
@@ -461,7 +454,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
   it('task.fail after a server-initiated cancel is also a silent stale drop, not a warning (§9)', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'task one' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'task one' });
     await nextEnvelope(daemon);
     await claimAndStart(instance, daemon, handle);
     await handle.cancel('server decided');
@@ -474,7 +467,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
     // task.fail must not resurrect/overwrite the Cancelled outcome.
     await sendOne(
       daemon,
-      createEnvelope('task.fail', { reason: 'crashed', retryable: false }, { taskId: handle.taskId }),
+      createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'crashed', retryable: false }, { taskId: handle.taskId }),
     );
 
     expect((await instance.tasks.get(handle.taskId))?.result).toEqual(recorded);
@@ -502,7 +495,7 @@ describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok-sdk/protoco
     byok = instance;
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, instance, { productId: PRODUCT_ID });
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x' });
     await nextEnvelope(daemon); // offer
     await claimAndStart(instance, daemon, handle);
 
@@ -534,7 +527,7 @@ describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok-sdk/protoco
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
     await sendOne(
       daemon,
-      createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_unknown_evt' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_unknown_evt' }, { taskId: handle.taskId }),
     );
     const result = await handle.result();
     expect(result).toEqual({ state: 'Complete', summary: 'done', sessionRef: 'sess_unknown_evt' });

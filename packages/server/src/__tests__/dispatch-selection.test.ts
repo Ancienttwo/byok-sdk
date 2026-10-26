@@ -7,6 +7,7 @@ import {
   startServer,
   stopServer,
   type FakeLongPollDaemon,
+  TEST_AGENT_DISPATCH,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -36,7 +37,7 @@ describe('dispatchSelection authority', () => {
     started: { byok: ByokServer; baseUrl: string },
     capabilities: string[],
   ): Promise<FakeLongPollDaemon> {
-    return connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID, capabilities });
+    return connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID, capabilities: ['agent-home-contract', ...capabilities] });
   }
 
   it('derives the requested runtime and carries the exact BYOK selection in task.offer', async () => {
@@ -49,11 +50,11 @@ describe('dispatchSelection authority', () => {
       providerId: 'openai',
       modelId: 'gpt-5.2',
     };
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'use exact target', dispatchSelection });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'use exact target', dispatchSelection });
     const offer = await nextEnvelope(daemon);
 
-    expect(offer.type).toBe('task.offer');
-    if (offer.type !== 'task.offer') throw new Error('unreachable');
+    expect(offer.type).toBe('task.offer_for_agent');
+    if (offer.type !== 'task.offer_for_agent') throw new Error('unreachable');
     expect(offer.task_id).toBe(handle.taskId);
     expect(offer.payload.runtime).toBe('pi');
     expect(offer.payload.dispatchSelection).toEqual(dispatchSelection);
@@ -64,7 +65,7 @@ describe('dispatchSelection authority', () => {
     const daemon = await connect(started, ['dispatch-selection']);
 
     await expect(
-      started.byok.dispatch({ deviceId: daemon.deviceId,
+      started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId,
         instruction: 'contradictory target',
         runtime: 'claude',
         dispatchSelection: {
@@ -82,7 +83,7 @@ describe('dispatchSelection authority', () => {
     const daemon = await connect(started, ['dispatch-selection']);
 
     await expect(
-      started.byok.dispatch({ deviceId: daemon.deviceId,
+      started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId,
         instruction: 'malformed target',
         dispatchSelection: {
           lane: 'subscription',
@@ -99,7 +100,7 @@ describe('dispatchSelection authority', () => {
     const daemon = await connect(started, []);
 
     await expect(
-      started.byok.dispatch({ deviceId: daemon.deviceId,
+      started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId,
         instruction: 'must not degrade to runtime-only dispatch',
         dispatchSelection: {
           lane: 'subscription',

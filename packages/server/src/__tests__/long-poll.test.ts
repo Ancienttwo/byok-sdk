@@ -1,14 +1,17 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type Envelope } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer } from '../index';
 import {
+  announceHello,
   connectFakeDaemonLongPoll,
   pairFakeDaemon,
   startServer,
   stopServer,
   testPairingClaims,
   waitForTaskEvent,
+  TEST_AGENT_DISPATCH,
+  TEST_AGENT_REF,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -42,6 +45,16 @@ describe('long-poll transport (§8)', () => {
     server = started.server;
     const { code } = await instance.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const { deviceId, accessToken } = await pairFakeDaemon(started.baseUrl, code);
+    // Every v4 offer is an Agent offer, admitted only to a device whose
+    // durable capabilities include agent-home-contract.
+    const hello = await fetch(`${started.baseUrl}/byok/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ messages: [createEnvelope('conn.hello', {
+        protocolVersions: [PROTOCOL_VERSION], capabilities: ['agent-home-contract'], deviceId, productId: PRODUCT_ID,
+      })] }),
+    });
+    expect(hello.status).toBe(200);
 
     // Start the poll before dispatch to exercise immediate delivery into a
     // held read. Its TTL observation is the synchronization barrier only;
@@ -52,13 +65,13 @@ describe('long-poll transport (§8)', () => {
     await waitUntil(async () => (await instance.machines.list()).some((m) => m.deviceId === deviceId && m.connected));
 
     const triggeredAt = Date.now();
-    const handle = await instance.dispatch({ instruction: 'x', deviceId });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, instruction: 'x', deviceId });
     const pollRes = await pollPromise;
     const elapsedMs = Date.now() - triggeredAt;
 
     expect(pollRes.status).toBe(200);
     const body = (await pollRes.json()) as { events: Envelope[]; cursor: number; capabilities?: string[] };
-    expect(body.events.map((e) => e.type)).toEqual(['task.offer']);
+    expect(body.events.map((e) => e.type)).toEqual(['task.offer_for_agent']);
     expect(body.events[0]?.task_id).toBe(handle.taskId);
     expect(body.capabilities).toContain('mailbox-read-ahead');
     // Wire v3 folded the former `result-document` flag into the baseline.
@@ -135,8 +148,11 @@ describe('POST /byok/messages (§8, finding F6)', () => {
       (await instance.machines.list()).some((m) => m.deviceId === daemon.deviceId && m.connected),
     );
 
-    const handle = await instance.dispatch({ instruction: 'x', deviceId: daemon.deviceId });
-    const res = await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+    // The Agent offer needs the durable agent-home-contract capability, which
+    // only a conn.hello records.
+    await announceHello(daemon, { productId: PRODUCT_ID });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, instruction: 'x', deviceId: daemon.deviceId });
+    const res = await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ accepted: 1 });

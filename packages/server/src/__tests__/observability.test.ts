@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { INBOUND_REFUSAL_REASONS } from '@byok-sdk/cloud';
 import { createByokServer, type ByokServer } from '../index';
-import { connectFakeDaemonLongPoll, sendOne, startServer, stopServer, waitForTaskEvent } from './test-support';
+import { connectFakeDaemonLongPoll, sendOne, startServer, stopServer, waitForTaskEvent, TEST_AGENT_DISPATCH, TEST_AGENT_REF } from './test-support';
 
 const PRODUCT_ID = 'acme';
 /** Short injected hold so a long-poll in these tests never waits out the real ~50s default. */
@@ -49,8 +49,8 @@ describe('M4 Phase 4: ByokServer.stats() (part B.1)', () => {
     const started = await startServer(instance);
     server = started.server;
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, instance, { productId: PRODUCT_ID });
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'count refusals' });
-    const claim = createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'count refusals' });
+    const claim = createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId });
     expect(await sendOne(daemon, claim)).toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: claim.id, outcome: 'accepted' }] } });
     await waitForTaskEvent(handle, (event) => event.kind === 'state' && event.state === 'Claimed');
     const blob = 'x'.repeat(40 * 1024);
@@ -75,10 +75,10 @@ describe('M4 Phase 4: ByokServer.stats() (part B.1)', () => {
 
     expect((await instance.stats()).connectedDeviceCount).toBe(1);
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x' });
     expect((await instance.stats()).taskCountsByState.Offered).toBe(1);
 
-    const claimEnvelope = createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId });
+    const claimEnvelope = createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId });
     expect((await daemon.send(claimEnvelope)).status).toBe(200);
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
 
