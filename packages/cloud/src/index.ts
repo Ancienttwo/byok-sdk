@@ -98,7 +98,7 @@ export type {
   AgentMemoryProjectionStore,
 } from './agent-memory-projection';
 
-export { TASK_REDACTION_MAX_TASKS, taskRedactionReceiptKey } from './task-redaction';
+export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
 export type {
   TaskRedactionCodec,
   TaskRedactionCounts,
@@ -423,6 +423,10 @@ export type {
 } from './maintenance';
 export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
 export type { ReceiptRetentionClass } from './receipt-retention';
+// One-shot wire v3 -> v4 migration (#925), operator-invoked. Shipped in 0.31.x
+// only; 0.32.0 removes it with `taskRedactionReceiptKey`, which only the
+// Postgres runner uses (#1017).
+export { taskRedactionReceiptKey } from './task-redaction';
 export {
   ReceiptMigrationUnmappableError,
   WireV4LegacyTaskListMismatchError,

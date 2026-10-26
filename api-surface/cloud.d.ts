@@ -3107,7 +3107,7 @@ export { ByokCloudError, CLOUD_ERROR_CODES, TaskOfferAppendRefusedError, isCloud
 export type { CloudErrorCode } from './errors';
 export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore, } from './stores/in-memory/agent-memory-projection';
 export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionStore, } from './agent-memory-projection';
-export { TASK_REDACTION_MAX_TASKS, taskRedactionReceiptKey } from './task-redaction';
+export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
 export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction';
 export { parseRecordedWriteResult } from './e2ee-member';
 export type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeProofRequest, E2eeProvenWrite, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow, E2eeScopeShred, } from './e2ee-member';
@@ -3162,6 +3162,7 @@ export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS,
 export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport, ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofReceiptRetentionOptions, } from './maintenance';
 export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
 export type { ReceiptRetentionClass } from './receipt-retention';
+export { taskRedactionReceiptKey } from './task-redaction';
 export { ReceiptMigrationUnmappableError, WireV4LegacyTaskListMismatchError, assertWireV4MigrationConfirmed, hasUnnamedApproval, isWireV4MailboxBody, migrateWireV3Receipt, wireV3LegacyOfferReceiptKeys, wireV3LegacyOfferType, wireV4ReceiptKind, } from './wire-v4-receipt-migration';
 export type { WireV3LegacyTask, WireV4MigrationPreflight, WireV4ReceiptKind, WireV4ReceiptMigration, WireV4ReceiptMigrationResult, WireV4UnmappableRow, } from './wire-v4-receipt-migration';
 export type { ReceiptCollectExpiredInput } from './stores/ports';
