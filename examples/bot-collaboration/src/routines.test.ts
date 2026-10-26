@@ -335,3 +335,11 @@ it('fails a promoted routine Turn whose intent a writer without the veto compact
   const next = await bot!.input('k2', 'next');
   expect(fixture!.ledger.snapshot().intents[hash(next)]).toBeDefined();
 });
+
+it('reads a routine Turn\'s occurrence from its id, and throws for an id that names none', () => {
+  const key = hash(['r1', 1, 'slot']);
+  expect(routineOccurrence({ id: `occurrence:${key}` })).toBe(key);
+  for (const id of ['t1', 'occurrence:', 'occurrence:k', `occurrence:${key}0`]) {
+    expect(() => routineOccurrence({ id }), id).toThrow(`Routine Turn ${id} names no occurrence`);
+  }
+});

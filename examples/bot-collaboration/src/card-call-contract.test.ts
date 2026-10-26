@@ -99,6 +99,20 @@ it('#958: ends a card whose claim never settled with the unknown outcome, and ne
     request: JSON.stringify({ cardId: 'c1', state: 'confirmed', conclusion: 'failed', error: CONNECTOR_OUTCOME_UNKNOWN }) });
 });
 
+it('#975: a ledger with an uncommitted switch import refuses the card call before the connector runs, a command, a sync step and retention', async () => {
+  const subject = await confirmed();
+  subject.change(state => { state.switchImport = { digest: 'd', devices: ['d1'] }; });
+  const before = subject.stored(), refusal = 'This ledger holds the switch import d; commit it toward L or discard it first';
+  let calls = 0;
+  await expect(subject.callCards(async () => { calls++; return { sent: true }; })).rejects.toThrow(refusal);
+  expect(calls).toBe(0);
+  expect(() => subject.commit({ scope: subject.scope, commandId: 'cancel', command: { kind: 'cancel_turn', turnId: 't1' } })).toThrow(refusal);
+  expect(() => subject.sync(VECTOR_NOW)).toThrow(refusal);
+  expect(() => retainInLedger(subject.ledger, { acknowledgedRoots: [], now: VECTOR_NOW, retentionMs: MIN_TOMBSTONE_RETENTION_MS },
+    { contextTurnLimit: 1 })).toThrow(refusal);
+  expect(subject.stored()).toBe(before);
+});
+
 it('#975: an exported ledger refuses the card call before the connector runs, a command, a sync step and retention', async () => {
   const subject = await confirmed();
   subject.change(state => { state.switchExport = { digest: 'd', exportedAt: VECTOR_NOW, devices: [{ deviceId: 'd1', frozenRevision: 1 }] }; });

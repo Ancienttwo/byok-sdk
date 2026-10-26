@@ -33,6 +33,15 @@ test('docs and known CI contracts select light checks, not release families', ()
   }
 });
 
+test('the W5 runner probe workflow selects only the CI script checks (#605)', () => {
+  assert.deepEqual(selectImpact(['.github/workflows/w5-runner-probe.yml']), {
+    dirs: [], files: ['.github/workflows/w5-runner-probe.yml'], families: [], reason: 'root-ci-scripts',
+  });
+  const workflow = readFileSync(new URL('.github/workflows/w5-runner-probe.yml', root), 'utf8');
+  assert.match(workflow, /^on:\n  workflow_dispatch:\n\n/m);
+  assert.doesNotMatch(workflow, /actions\/checkout|pull_request|push:/);
+});
+
 test('packages/AGENTS.md and packages/CLAUDE.md are docs-only like the root agent files', () => {
   assert.deepEqual(selectImpact(['packages/AGENTS.md', 'packages/CLAUDE.md']), {
     dirs: [], files: ['packages/AGENTS.md', 'packages/CLAUDE.md'], families: [], reason: 'docs-only',

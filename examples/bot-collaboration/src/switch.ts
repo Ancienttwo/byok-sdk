@@ -34,11 +34,18 @@ export function refuseExported(state: CollaborationState): void {
   if (state.switchExport) throw new SwitchExportedError(state.switchExport.digest);
 }
 /**
+ * Throws while the ledger holds a switch import, which is not committed toward L yet: no K8 work runs on it. The switch
+ * steps `commitImport` and `discardImport` write it themselves.
+ */
+export function refuseImported(state: CollaborationState): void {
+  if (state.switchImport) throw new Error(`This ledger holds the switch import ${state.switchImport.digest}; commit it toward L or discard it first`);
+}
+/**
  * A restart reads the switch records before any write. A ledger with an import is not committed toward L yet, so no
  * `BotCollaboration` may run on it; a malformed export mark fails closed.
  */
 export function checkSwitchRecords(state: CollaborationState): void {
-  if (state.switchImport) throw new Error(`This ledger holds the switch import ${state.switchImport.digest}; commit it toward L or discard it first`);
+  refuseImported(state);
   const mark = state.switchExport;
   if (mark === undefined) return;
   const valid = !!mark && Object.keys(mark).sort().join(',') === 'devices,digest,exportedAt' && typeof mark.digest === 'string'

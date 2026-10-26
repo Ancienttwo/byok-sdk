@@ -260,7 +260,8 @@ it('writes nothing after the export, refuses each entry, and commits away only o
   await work();
   exported = await exportDomain();
   const digest = digestOf(), stored = JSON.stringify(fixture!.ledger.dumpForSwitch());
-  // A command on the frozen device gets its device refusal; every other write refuses with the export.
+  // A new command on the frozen device gets its device refusal; the other writes here refuse with the export. A refusal the
+  // write raises first (a replayed command id, `stale_revision`, `RetentionRefused`) also writes nothing.
   await expect(bot.input('k9', 'late')).rejects.toBeInstanceOf(DeviceSwitchingError);
   await expect(bot.retain({ acknowledgedRoots: [], now: now(), retentionMs: MIN_TOMBSTONE_RETENTION_MS })).rejects.toBeInstanceOf(SwitchExportedError);
   await expect(bot.recover()).rejects.toBeInstanceOf(SwitchExportedError);
