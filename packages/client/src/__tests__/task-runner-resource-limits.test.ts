@@ -52,6 +52,8 @@ async function makeRunner(
   const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
+    // An enrolled daemon always passes its tenant; without it a closing Agent task logs a skipped memory snapshot on Linux.
+    tenantId: 'tenant-1',
     deviceId: 'device-1',
     send: (envelope) => {
       sent.push(envelope);

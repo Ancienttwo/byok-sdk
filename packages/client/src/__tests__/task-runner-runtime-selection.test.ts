@@ -157,6 +157,8 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
           steer: true,
           resume: true,
           approvalInteractive: false,
+          // Pi projects MCP toolsets. An Agent offer carries the Agent memory MCP whenever the daemon admits it.
+          mcpToolsets: true,
         },
       };
       const starts: RuntimeOperationStartInput[] = [];

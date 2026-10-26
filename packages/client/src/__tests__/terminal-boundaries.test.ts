@@ -128,8 +128,9 @@ describe('terminal durability and actual harness boundaries', () => {
           capabilities: ['custom-harness', 'agent-home-contract'], runtimes: [], harnesses: [{ id: 'acme-harness', capabilities: { ...adapter.descriptor.capabilities } }],
         }));
         // Never run, only recovered from the crash image: the resume lane carries an offer that may name no target.
+        const agentRef = freshTestAgentRef();
         const offer = await cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: {
-          instruction: 'interrupted', agentRef: freshTestAgentRef(), sessionRef: 'interrupted-session',
+          instruction: 'interrupted', agentRef, sessionRef: 'interrupted-session',
           ...(explicit ? { harnessId: 'acme-harness' } : {}),
         } });
         const journal = new SqliteLocalTaskJournal({ storeDir: cfg.storeDir! });
@@ -138,7 +139,7 @@ describe('terminal durability and actual harness boundaries', () => {
           taskId: offer.taskId, envelopeId: offer.envelope.id, seq: offer.seq, bytes, bytesHash: journalHash(bytes),
           opensTask: true, receivedAt: new Date().toISOString() });
         await journal.recordAdmission({ taskId: offer.taskId, admitted: true, claimedRuntime: 'acme-harness', decidedAt: new Date().toISOString() });
-        if (claimed) await post(cloud.url, device.accessToken, createEnvelope('task.claim', { deviceId: device.deviceId, harnessId: 'acme-harness' }, { taskId: offer.taskId }));
+        if (claimed) await post(cloud.url, device.accessToken, createEnvelope('task.claim', { deviceId: device.deviceId, harnessId: 'acme-harness', agentRef }, { taskId: offer.taskId }));
         await journal.close(); // Persisted crash image; no graceful task finalization.
         await daemon.start();
         await vi.waitFor(async () => expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('failed'), { timeout: 4000 });

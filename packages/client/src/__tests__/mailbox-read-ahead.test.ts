@@ -27,10 +27,11 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   };
   // Agent offer admission reads the durable capability snapshot a hello records.
   await post(createEnvelope('conn.hello', { deviceId: device.deviceId, productId: 'read-ahead', protocolVersions: [PROTOCOL_VERSION], capabilities: ['agent-home-contract'] }));
-  const resume = (instruction: string, sessionRef: string) =>
-    cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: { instruction, agentRef: freshTestAgentRef(), sessionRef } });
+  const resume = (instruction: string, sessionRef: string, agentRef = freshTestAgentRef()) =>
+    cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: { instruction, agentRef, sessionRef } });
+  const agentB = freshTestAgentRef();
   const a = await resume('slow A', 'session-a');
-  const b = await resume('fast B', 'session-b');
+  const b = await resume('fast B', 'session-b', agentB);
   const cursorStore = new CursorStore(root);
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -46,7 +47,7 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   cleanup.push(async () => { release(); await connection.stop(); await auth.stop(); });
   await connection.start();
   await vi.waitFor(() => expect([aCalls, bCalls]).toEqual([1, 1]));
-  await post(createEnvelope('task.claim', { deviceId: device.deviceId, runtime: 'pi' }, { taskId: b.taskId }));
+  await post(createEnvelope('task.claim', { deviceId: device.deviceId, runtime: 'pi', agentRef: agentB }, { taskId: b.taskId }));
   await post(createEnvelope('task.started', {}, { taskId: b.taskId }));
   await post(createEnvelope('task.await_approval', { summary: 'approve B', approvalId: 'approval-b' }, { taskId: b.taskId }));
   await cloud.cloud.approveTask(cloud.tenant, b.taskId);

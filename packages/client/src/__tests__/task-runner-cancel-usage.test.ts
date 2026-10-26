@@ -27,7 +27,8 @@ describe('TaskRunner metering at the cancellation boundary', () => {
     const uploading = new Promise<void>(resolve => { enteredUpload = resolve; });
     const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
-      deviceId: 'cancel-usage-device', send: event => { sent.push(event); },
+      // An enrolled daemon always passes its tenant; without it a closing Agent task logs a skipped memory snapshot on Linux.
+      tenantId: 'cancel-usage-tenant', deviceId: 'cancel-usage-device', send: event => { sent.push(event); },
       blobClient: {
         resolveInstruction: async () => { throw new Error('unexpected blob resolution'); },
         uploadArtifact: async (_content, _type, options) => {

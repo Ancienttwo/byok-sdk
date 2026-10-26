@@ -118,6 +118,8 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
       steer: false,
       resume: true,
       approvalInteractive: false,
+      // As the steerable adapter above: an Agent offer carries the Agent memory MCP whenever the daemon admits it.
+      mcpToolsets: true,
     });
 
     daemon = createDaemonWithAdapters(

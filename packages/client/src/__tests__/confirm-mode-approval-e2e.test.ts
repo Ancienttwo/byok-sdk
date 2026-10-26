@@ -126,7 +126,8 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
     overrides: DaemonOverrides = {},
   ): Promise<{ daemon: Daemon; config: DaemonConfig; storeDir: string }> {
     const storeDir = await tmpDir(`byok-confirm-e2e-${productId}-store-`);
-    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, storeDir };
+    // The approval stub projects no MCP toolsets, so the daemon must not attach the Agent memory MCP to its offers.
+    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, storeDir, agentMemoryMcp: 'off' };
     const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter], overrides);
     await built.pair('pairing-code');
     await built.start();

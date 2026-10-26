@@ -99,8 +99,9 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
     expect(terminalBody).not.toContain(SALESKO_MCP_FIXTURE);
     const terminal = decodeEnvelope(terminalBody ?? '');
     expect(terminal).toMatchObject({ type: 'task.complete', task_id: offer.taskId });
+    // Fake Claude returns this result only from the configured `salesko` server's `find_leads` tool. Agent
+    // egress coalesces activity to its latest value, so the tool call itself is not kept in the activity tail.
     expect(JSON.stringify(terminal)).toContain('Ada Lead');
     expect(JSON.stringify(terminal)).toContain('salesko-fake');
-    expect(JSON.stringify(await cloud.readActivity(offer.taskId))).toContain('mcp__salesko__find_leads');
   }, 15_000);
 });
