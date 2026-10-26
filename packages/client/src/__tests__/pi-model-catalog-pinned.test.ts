@@ -186,7 +186,9 @@ const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
   ['api/openai-responses.js', 'else if (model.provider !== "github-copilot" && model.thinkingLevelMap?.off !== null) {', 'unreachable',
     'a byok id takes the same non-copilot branch as every catalog vendor'],
   ['api/openai-responses.js', 'if (model.provider === "xai")', 'differs',
-    'xai adds include reasoning.encrypted_content with thinking off; grok-4.3 supports off (effort none), so its request differs there; effect unverified'],
+    'xai adds include reasoning.encrypted_content with thinking off; only grok-4.3 at an explicit off differs (effort none). '
+    + 'AWS Bedrock says none disables grok-4.3 reasoning; xAI does not document a store:false replay without '
+    + 'encrypted_content; not checked against the xAI API'],
   ['api/typesafe-system-one.js', 'detectCompat: (model) => model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai")', 'url', 'not a projected api; matches by URL regardless'],
   ['compat.js', 'if (model.provider.startsWith("cloudflare-") && !hasResolvedCloudflareAuth(options)) {', 'unreachable', 'no cloudflare-* catalog vendor'],
   ['compat.js', 'if (model.provider.startsWith("cloudflare-") && !hasResolvedCloudflareAuth(options)) {', 'unreachable', 'no cloudflare-* catalog vendor'],
@@ -201,7 +203,9 @@ const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
   ['utils/identity.js', 'return (target.provider === "opencode" || target.provider === "opencode-go" || matchesHost(target.baseUrl, OPENCODE_HOST));', 'unreachable',
     'opencode vendors are not in the catalog'],
   ['utils/overflow.js', 'if (message.provider === "cerebras" && CEREBRAS_BODYLESS_OVERFLOW_PATTERN.test(message.errorMessage)) {', 'differs',
-    'bodyless context overflow is not recognised for the representable cerebras rows'],
+    'only an empty-body 400 differs: pinned openai 7.19.0 keeps a body without an error key, and the overflow body '
+    + 'cerebras is reported to send matches the generic patterns under any provider id; no empty-body 400 overflow '
+    + 'has been captured'],
 ];
 
 const PI_PROVIDER_BRANCH = /provider (===|!==) ?"|provider\.startsWith|\.has\((model\.)?provider\)/u;
