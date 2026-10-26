@@ -99,9 +99,9 @@ The mapping from a pi-ai catalog entry to `pi_model`:
 
 | Pi api | Compat keys |
 | --- | --- |
-| `openai-completions` | `supportsStore`, `supportsDeveloperRole`, `supportsReasoningEffort`, `supportsUsageInStreaming`, `maxTokensField`, `thinkingFormat`, `zaiToolStream`, `supportsLongCacheRetention`, `supportsStrictMode`, `requiresReasoningContentOnAssistantMessages` |
+| `openai-completions` | `supportsStore`, `supportsDeveloperRole`, `supportsReasoningEffort`, `supportsUsageInStreaming`, `maxTokensField`, `thinkingFormat`, `zaiToolStream`, `supportsLongCacheRetention`, `supportsStrictMode`, `requiresReasoningContentOnAssistantMessages`, `sendSessionAffinityHeaders` |
 | `openai-responses` | `supportsDeveloperRole`, `supportsLongCacheRetention`, `supportsStrictMode` |
-| `anthropic-messages` | `supportsLongCacheRetention`, `forceAdaptiveThinking` |
+| `anthropic-messages` | `supportsLongCacheRetention`, `forceAdaptiveThinking`, `sendSessionAffinityHeaders`, `allowEmptySignature` |
 
 An `anthropic` profile also accepts the `openai-completions` keys, as it did
 before. Pi's Anthropic compat schema does not read them.
@@ -115,10 +115,11 @@ the same check before admission and before spawn.
 
 The prepared runtime entry compiles `'openai-completions'` only. It refuses a
 profile that declares `'openai-responses'` or `inputLimits`. It also refuses
-`compat.supportsLongCacheRetention`, `compat.supportsStrictMode` and
-`compat.requiresReasoningContentOnAssistantMessages`, because the frozen
-prepared wire does not carry them. A profile without `thinkingLevelMap`
-passes: the prepared wire may leave the map out.
+`compat.supportsLongCacheRetention`, `compat.supportsStrictMode`,
+`compat.requiresReasoningContentOnAssistantMessages` and
+`compat.sendSessionAffinityHeaders`, because the frozen prepared wire does not
+carry them. A profile without `thinkingLevelMap` passes: the prepared wire may
+leave the map out.
 
 The SQLite profile schema changes in this candidate. Existing stores are
 rejected and preserved: explicitly provision a separate current-schema store

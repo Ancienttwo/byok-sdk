@@ -1070,6 +1070,8 @@ declare const compat: z.ZodObject<{
     supportsStrictMode: z.ZodOptional<z.ZodBoolean>;
     requiresReasoningContentOnAssistantMessages: z.ZodOptional<z.ZodBoolean>;
     forceAdaptiveThinking: z.ZodOptional<z.ZodBoolean>;
+    sendSessionAffinityHeaders: z.ZodOptional<z.ZodBoolean>;
+    allowEmptySignature: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strict>;
 export type PiCompatKey = keyof z.infer<typeof compat>;
 /** The subset of Pi's per-API compat schema this package carries, for each Pi wire API. */
@@ -1148,6 +1150,8 @@ export declare const PiModelConfigSchema: z.ZodObject<{
         supportsStrictMode: z.ZodOptional<z.ZodBoolean>;
         requiresReasoningContentOnAssistantMessages: z.ZodOptional<z.ZodBoolean>;
         forceAdaptiveThinking: z.ZodOptional<z.ZodBoolean>;
+        sendSessionAffinityHeaders: z.ZodOptional<z.ZodBoolean>;
+        allowEmptySignature: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strict>;
     inputLimits: z.ZodOptional<z.ZodObject<{
         maxRequestBytes: z.ZodOptional<z.ZodNumber>;
@@ -1825,6 +1829,8 @@ export declare const ModelProviderProfileSchema: z.ZodObject<{
             supportsStrictMode: z.ZodOptional<z.ZodBoolean>;
             requiresReasoningContentOnAssistantMessages: z.ZodOptional<z.ZodBoolean>;
             forceAdaptiveThinking: z.ZodOptional<z.ZodBoolean>;
+            sendSessionAffinityHeaders: z.ZodOptional<z.ZodBoolean>;
+            allowEmptySignature: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strict>;
         inputLimits: z.ZodOptional<z.ZodObject<{
             maxRequestBytes: z.ZodOptional<z.ZodNumber>;
