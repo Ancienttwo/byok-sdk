@@ -499,6 +499,22 @@
   links now fails at its first acquire, with an error that names the
   directory (#605). Examples are FAT32, exFAT, and some network or FUSE
   filesystems. Before this change, acquire did not need hard links.
+- **Feature (examples)** — K8 gains the owner switch format (#975 slice 2):
+  the `./migration` entry, also exported from the K8 root. `SwitchExport`
+  version 1 holds one whole coordination domain (an L tenant or an H scope) in
+  neutral records with exact key sets: the collaboration state without the
+  source's owner records, retention rows, concluded intents (with their frozen
+  input and the K4 execution of every earlier generation), routines and
+  occurrences with their ordinals, pending Host jobs and tombstones, plus a
+  manifest of per-section counts and digests and one digest over them. Values
+  a Host derives (an intent's FIFO key, slots, wake keys) are not in it.
+  `sealSwitchExport` orders and seals it; `verifySwitchExport` checks a
+  document or a target's read-back and throws `SwitchExportError` for open
+  work, a home write that may have been sent, a pending projection, a card
+  call in flight, a Bot on a device the export does not move, a record that
+  names a missing record, a message receipt that is not its K8 reply, an
+  execution routine, state K4 cannot produce, or a manifest that does not
+  match. No Host uses it yet. No SDK, wire or SQL change.
 
 ## 0.30.1 — 2026-10-24 (published)
 
