@@ -74,7 +74,9 @@ from Node before `wrangler dev` starts. The Worker never migrates.
 | `H_FAULT` | var, tests only | a comma-separated list of `drop-notify`, `duplicate-notify`, `drop-alarm`, `duplicate-alarm`, `hang-after-submit`, `hang-after-terminal-read`, `hang-after-consume` |
 
 One scope is one SDK tenant, and the scope string is the tenant id. `host_scope` holds each scope's owner session hash,
-owner principal and H Host config. It stands in for a product's own user and device tables.
+owner principal and H Host config. It stands in for a product's own user and device tables. An invocation reads only
+the rows it needs, each once: H awaits `host(scope)` and the entry's `owner(scope)`, and the owner's token is looked up
+by its hash.
 
 ## Tests
 
@@ -159,12 +161,9 @@ Proposed text for lane K8 or the coordinator to apply. The status stays OPEN:
   scope. H's own tests cover the retry after the wait.
 - One clock for the whole deployment. Each alarm pass reads every scope's due rows: at most 100 routine fires and 100 due
   syncs a pass, so about 10 of each a second at the default 10 s. A slot or due step is late by up to `H_CLOCK_MS` plus
-  the time of the pass before it. At 10x scopes the pass grows (the `host_scope` read below, the due scan, one sync per
-  due scope), so lateness climbs toward the K8 late bound (60 s), past which a slot fires as `catch_up` with an
+  the time of the pass before it. At 10x scopes the pass grows (the due scan, one sync per due scope), so lateness climbs toward the K8 late bound (60 s), past which a slot fires as `catch_up` with an
   occurrence key that differs from L's. Requests never reach the clock object: only the alarm and the once-a-minute
   arm-only cron do, so an alarm that is gone is replaced within a minute, with or without traffic. The next step is an
   alarm per scope: each scope's object sets its alarm to its own next due time and passes only its own rows.
-- H's `host(scope)` is synchronous, so each invocation reads every `host_scope` row before it runs. At 10x scopes that
-  read grows with them; a per-pass read of only the due scopes needs an H change.
 - The H bundle pulls `node:sqlite` and `node:http` through the K4 index. workerd loads them today, and H never calls
   them.

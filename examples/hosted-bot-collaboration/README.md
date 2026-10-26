@@ -265,7 +265,8 @@ a TypeScript API; the deployment mounts it on its own HTTP framework. It takes:
 
 - `authenticate(credential)`: the product's session check, which returns the scope that the caller owns and the principal of
   the request. A throw or no result is an `UnauthenticatedError`, with nothing written. H never reads a token itself;
-- `owner(scope)`: the owner principal id of the scope, the value that the inbound entry's `InboundIdentity.owner` gives;
+- `owner(scope)`: resolves to the owner principal id of the scope, the value that the inbound entry's `InboundIdentity.owner`
+  gives;
 - `sync(scope, now)`: the deployment's composed sync, the function that the due scheduler runs;
 - `failStuckIntent(scope, key)` (optional): the reconciler's `failStuckIntent` for the scope's tenant. Without it, the
   entry's `failStuckIntent` refuses.
@@ -753,8 +754,10 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   (`new HostedCollaborationStore(pool, schema, { host })`), and `migrate()` creates the H tables there. The SDK tables come from
   the `@byok-sdk/cloud-dataplane` migrations (`migrate(pool, migrationsDir())`), in the same database or another one.
   No path assumes one atomic commit across the two (see Database). A scope row of an unknown store version is refused.
-- **Host config.** `host(scope)` returns the scope's model templates (each with the user's own device) and read-only
-  toolsets, as L's `models` and `readOnlyToolsets`. Every store over one schema must be built with the same `host`.
+- **Host config.** `host(scope)` resolves to the scope's model templates (each with the user's own device) and read-only
+  toolsets, as L's `models` and `readOnlyToolsets`. Every store over one schema must be built with the same `host`. It
+  returns a Promise, so a product reads the one scope's record when it is asked. Each store method awaits it once and
+  never while it holds a connection, so the product may read it from the store's own pool.
 - **Object storage.** The SDK stores need an S3-compatible endpoint: `objectStorage` with `endpoint`, `bucket`,
   `accessKeyId`, `secretAccessKey`, `region` and a `signingClock`, passed to `createPostgresCoreStores` and
   `createPostgresCloudStores`. H stores no objects itself.

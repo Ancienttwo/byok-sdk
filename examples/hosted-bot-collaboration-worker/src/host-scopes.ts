@@ -18,14 +18,21 @@ function table(schema: string): string {
 export const hostScopeDdl = (schema: string): string => `CREATE TABLE IF NOT EXISTS ${table(schema)} (
   scope text PRIMARY KEY, owner_token_sha256 text NOT NULL UNIQUE, owner jsonb NOT NULL, config jsonb NOT NULL)`;
 
-/**
- * Every scope row, read once per invocation. H's `host(scope)` is synchronous, so a Worker loads the configs before it runs a
- * pass. That read grows with the number of scopes (README, Limits).
- */
-export async function readHostScopes(pool: Pool, schema: string): Promise<Map<string, HostScope>> {
-  const found = await pool.query<{ scope: string; owner_token_sha256: string; owner: Principal; config: HostConfig }>(
-    `SELECT scope, owner_token_sha256, owner, config FROM ${table(schema)}`);
-  return new Map(found.rows.map(row => [row.scope, { scope: row.scope, ownerTokenSha256: row.owner_token_sha256, owner: row.owner, config: row.config }]));
+type HostScopeRow = { scope: string; owner_token_sha256: string; owner: Principal; config: HostConfig };
+const hostScope = (row: HostScopeRow | undefined): HostScope | undefined =>
+  row && { scope: row.scope, ownerTokenSha256: row.owner_token_sha256, owner: row.owner, config: row.config };
+
+/** The row of one scope, by its primary key, or nothing for an unknown scope. */
+export async function readHostScope(pool: Pool, schema: string, scope: string): Promise<HostScope | undefined> {
+  const found = await pool.query<HostScopeRow>(`SELECT scope, owner_token_sha256, owner, config FROM ${table(schema)} WHERE scope = $1`, [scope]);
+  return hostScope(found.rows[0]);
+}
+
+/** The row whose owner session token hashes to `sha256`, through the column's unique index, or nothing. */
+export async function readHostScopeByToken(pool: Pool, schema: string, sha256: string): Promise<HostScope | undefined> {
+  const found = await pool.query<HostScopeRow>(
+    `SELECT scope, owner_token_sha256, owner, config FROM ${table(schema)} WHERE owner_token_sha256 = $1`, [sha256]);
+  return hostScope(found.rows[0]);
 }
 
 export async function writeHostScope(pool: Pool, schema: string, row: HostScope): Promise<void> {

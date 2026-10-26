@@ -545,6 +545,15 @@
   `occurrenceOfIntentKey`, `frozenInput`, and also `validateRetry`. K4
   `loadForSwitch(dump, verify)` checks the read-back before it commits. No SDK,
   wire or SQL change.
+- **Breaking (examples)** — H reads a scope's Host config and its owner
+  through Promises (#794 H3): `HostedStoreOptions.host` returns
+  `Promise<HostConfig>` and `CommandEntryOptions.owner` returns
+  `Promise<string>`. Each store method awaits the config once and never while
+  it holds a connection, so a product may read it from the store's own pool;
+  the K8 rules stay synchronous. The Worker now reads only the
+  `host_scope` rows an invocation touches, by scope or by the owner token's
+  hash, instead of every row on each invocation. Wrap a synchronous config in
+  an `async` function. H is unreleased; no SDK or wire change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

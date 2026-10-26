@@ -83,8 +83,12 @@ export class InboundCommandError extends Error {
  */
 export interface InboundIdentity { owner: string; self?: Record<string, readonly string[]> }
 export interface HostedStoreOptions {
-  /** The Host config of a scope: its model templates and read-only toolsets (#793 S9). Every port and sync reads it. */
-  host: (scope: string) => HostConfig;
+  /**
+   * The Host config of a scope: its model templates and read-only toolsets (#793 S9). Every port and sync reads it. A store
+   * method awaits it once, and never while it holds a connection, so a product may read the one scope's record when it is
+   * asked, from the store's own pool too.
+   */
+  host: (scope: string) => Promise<HostConfig>;
   /** The Host has a channel: a K4 callback queues its channel deliveries, as L does with `channel` set. */
   channel?: boolean;
   /**
@@ -217,7 +221,7 @@ export class HostedCollaborationStore {
   private readonly channel: boolean;
   private readonly coalesce?: CoalescePolicy;
   private readonly timers: DelegationTimers | undefined;
-  private readonly host: (scope: string) => HostConfig;
+  private readonly host: (scope: string) => Promise<HostConfig>;
   /** The Host job handlers by type (#793 S14). */
   readonly hostJobs: ReadonlyMap<string, HostJobHandler>;
   /** The Host intent handlers by name (#955). */
@@ -340,15 +344,15 @@ export class HostedCollaborationStore {
   }
 
   /** One commit with the store's ports and `extra`, the ports that only the store's own entries add. */
-  private commitWith(scope: string, request: CommitRequest<Command>, clock: () => number,
+  private async commitWith(scope: string, request: CommitRequest<Command>, clock: () => number,
     extra?: (state: CollaborationState, ports: StorePorts) => { remember?: CommandPorts['remember']; outcome?: Omit<NonNullable<CommandPorts['outcome']>, 'committed'> },
     fence?: 'binding' | 'switch', guard?: (client: PoolClient) => Promise<void>): Promise<CommitResult> {
-    const key = storedKey(scope);
+    const key = storedKey(scope), config = await this.host(scope);
     return this.change(scope, request.commandId, async (state, publish, client) => {
       await guard?.(client);
       // The store admits each input with its own policy, as L does (K8 host.ts `commitOwner`), so the admission and the sync's
       // seal use one policy.
-      const { manage, ...own } = this.ports(scope, state, publish, clock), head = revisionOf(state);
+      const { manage, ...own } = this.ports(config, state, publish, clock), head = revisionOf(state);
       const slice = request.command.kind === 'end_routine' ? await loadSlice(client, key) : undefined;
       const commands = slice && hostedRoutineCommands(slice, own.now());
       const base = { ...own, ...extra?.(state, { ...own, manage }), admitInput: (fields: InputFields) => admitUserInput(state, fields, this.coalesce, own.now()),
@@ -377,8 +381,8 @@ export class HostedCollaborationStore {
    * The command ports of one transaction on `state`, from the scope's Host config, as L `commitOwner` and `applyOutcome` build
    * them (K8 host.ts). The route ports exist only with a channel.
    */
-  private ports(scope: string, state: CollaborationState, publish: Publish, now: () => number): StorePorts {
-    const { models, readOnlyToolsets = [] } = this.host(scope);
+  private ports(config: HostConfig, state: CollaborationState, publish: Publish, now: () => number): StorePorts {
+    const { models, readOnlyToolsets = [] } = config;
     return { now, publish,
       updatePersona: (botId, persona) => updateBot(state, { botId, persona }, models, readOnlyToolsets),
       teamBot: row => writeSnapshotBot(state, row, models, readOnlyToolsets),
@@ -458,7 +462,7 @@ export class HostedCollaborationStore {
   async sync(scope: string, options: HostedSyncOptions): Promise<SyncResult> {
     // As L checks its coalesce policy against its ContextPack budget (K8 host.ts constructor).
     if (this.coalesce) coalescePolicy(this.coalesce, options.limits.contextMaxBytes);
-    const key = storedKey(scope), config = this.host(scope), models = Object.keys(config.models), readOnlyToolsets = config.readOnlyToolsets ?? [];
+    const key = storedKey(scope), config = await this.host(scope), models = Object.keys(config.models), readOnlyToolsets = config.readOnlyToolsets ?? [];
     return this.change(scope, undefined, async (state, publish, client) => {
       const published = new Set<string>();
       const slice = await loadSlice(client, key), routines = botRoutines(Object.values(slice.state.routines));
@@ -632,12 +636,18 @@ export class HostedCollaborationStore {
    * command. A scope with no row has no task, so it is refused with nothing written. A throw writes nothing and leaves the
    * SDK admission pending.
    */
-  consume(scope: string, input: AgentMessageInput, clock: () => number): Promise<MessageDecision> {
+  async consume(scope: string, input: AgentMessageInput, clock: () => number): Promise<MessageDecision> {
     const key = storedKey(scope);
+    const refused: MessageDecision = { outcome: 'refused', reasonCode: 'unknown_task' };
+    const exists = (client: PoolClient) => client.query('SELECT 1 FROM scope WHERE scope = $1', [key]).then(found => found.rows.length > 0);
+    // The scope check runs alone first, so a scope that H does not have reads no Host config, and the config is read with no
+    // connection held. The check in the transaction is the one that decides.
+    if (!await this.transaction(exists, true)) return refused;
+    const config = await this.host(scope);
     return this.transaction(async client => {
-      if (!(await client.query('SELECT 1 FROM scope WHERE scope = $1', [key])).rows[0]) return { outcome: 'refused', reasonCode: 'unknown_task' };
+      if (!await exists(client)) return refused;
       return this.decideIn(client, key, messageCommandId(input), (state, publish) => decideMessage(client, scope, state, input,
-        this.ports(scope, state, publish, clock), this.channel));
+        this.ports(config, state, publish, clock), this.channel));
     }, false);
   }
 
@@ -646,9 +656,10 @@ export class HostedCollaborationStore {
    * projections and the intent's conclusion commit together, under the scope lock. Returns the conclusion that it wrote,
    * or nothing when the intent already had one. A throw writes nothing.
    */
-  finish(scope: string, turnId: string, evidence: TaskEvidence, clock: () => number): Promise<Conclusion | undefined> {
+  async finish(scope: string, turnId: string, evidence: TaskEvidence, clock: () => number): Promise<Conclusion | undefined> {
+    const config = await this.host(scope);
     return this.transaction(client => this.decideIn(client, storedKey(scope), evidence.terminal.envelope.task_id,
-      (state, publish) => decideFinish(client, scope, turnId, state, evidence, this.ports(scope, state, publish, clock), this.channel,
+      (state, publish) => decideFinish(client, scope, turnId, state, evidence, this.ports(config, state, publish, clock), this.channel,
         this.hostIntents)), false);
   }
 
@@ -660,9 +671,9 @@ export class HostedCollaborationStore {
    * scope's Host config does not declare read-only, a key that is a Bot Turn, a key whose row has another handler or none,
    * and every refusal of `freezeIntent`: another identity, a retired key, a retry policy, and a device with no active H binding.
    */
-  enqueueHostIntent(scope: string, input: IntentInput, handler: string, clock: () => number): Promise<HostIntent> {
-    if (!this.hostIntents.has(handler)) return Promise.reject(new Error(`Unknown Host intent handler: ${handler}`));
-    try { admitBotToolsets(input.execution, this.host(scope).readOnlyToolsets ?? []); } catch (error) { return Promise.reject(error); }
+  async enqueueHostIntent(scope: string, input: IntentInput, handler: string, clock: () => number): Promise<HostIntent> {
+    if (!this.hostIntents.has(handler)) throw new Error(`Unknown Host intent handler: ${handler}`);
+    admitBotToolsets(input.execution, (await this.host(scope)).readOnlyToolsets ?? []);
     const scopeKey = storedKey(scope), key = storedKey(input.key);
     return this.change(scope, undefined, async (state, _publish, client) => {
       if (Object.hasOwn(state.turns, input.key)) throw new Error('Host intent identity conflict: the key is a Bot Turn');
