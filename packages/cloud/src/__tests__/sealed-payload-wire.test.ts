@@ -5,7 +5,7 @@
  * core. This package depends on both, so it proves the two equal: what core
  * seals, the wire schema accepts; what the wire schema accepts, core reads as
  * a header; a field that one rejects, the other rejects too. It also opens
- * every inline sealed line of the v3 golden corpus with the corpus scope key,
+ * every inline sealed line of the v4 golden corpus with the corpus scope key,
  * so those lines are real ciphertext under the binding a receiver rebuilds
  * from the split table.
  */
@@ -42,15 +42,13 @@ import {
 
 import { SealedAgentExecutionInputSchema } from '../index';
 import type {
-  EnqueueSealedOfferInput,
-  EnqueueSealedToolsetOfferInput,
   SealedAgentDispatchInput,
   SealedAgentEgressDispatchInput,
   SealedAgentExecutionInput,
 } from '../index';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
-import { PRODUCT_ID, TENANT_A, createHarness } from './support/harness';
+import { PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload } from './support/harness';
 
 type Json = { [key: string]: unknown };
 
@@ -61,7 +59,7 @@ const GOLDEN_DEVICE = 'device-golden-1';
 const GOLDEN_SCOPE = { scopeId: 'scope-golden-device-1', epoch: 2 };
 const GOLDEN_CATEGORIES = ['task-input', 'task-output'] as const;
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; ts: string; payload: Json });
@@ -384,29 +382,36 @@ describe('sealed payload v1: a task without output sealing refuses sealed output
       { kind: 'device', tenantId: TENANT_A, productId: PRODUCT_ID, deviceId: device.deviceId },
       { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
     );
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: { instruction: 'plain', runtime: 'pi' } });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload('plain') });
     const send = (envelopeType: string, payload: unknown) =>
       handleInboundEnvelope(stores, device.deviceId, createEnvelope(envelopeType as Envelope['type'], payload as never, { taskId }) as Envelope);
     if (type !== 'task.decline' && type !== 'task.decline_sealed') {
-      expect(await send('task.claim', { deviceId: device.deviceId, runtime: 'pi' })).toEqual({ outcome: 'accepted' });
+      expect(await send('task.claim', { deviceId: device.deviceId, runtime: 'pi', agentRef: TEST_AGENT_REF })).toEqual({ outcome: 'accepted' });
     }
     return { harness, taskId, send };
   }
 
-  /** The line without the Agent, harness and recovery bindings that this plain task does not have. */
-  function unbound(payload: Json): Json {
+  /**
+   * The line without the harness and recovery bindings that this plain task
+   * does not have, and with this task's Agent where the type echoes one: a
+   * claim or terminal must echo the attempt's Agent exactly.
+   */
+  function unbound(type: MessageType, payload: Json): Json {
     const { agentRef: _agentRef, harnessId: _harnessId, recovery: _recovery, ...rest } = payload;
-    return rest;
+    const plainType = isSealedMessageType(type) ? SEALED_SPLIT_TABLE[type].plainType : type;
+    return ECHOES_AGENT.includes(plainType) ? { ...rest, agentRef: TEST_AGENT_REF } : rest;
   }
+  const ECHOES_AGENT: readonly MessageType[] = ['task.decline', 'task.complete', 'task.fail', 'task.cancelled'];
 
   it.each(sealedInbound.filter((line) => isSealedMessageType(line.type)).map((line, index) => [index, line.type, line] as const))(
     'line %i (%s) is rejected before the envelope identity is reserved',
     async (_index, type, line) => {
       const { send } = await plainTask(type);
       const refused = { outcome: 'rejected', reason: 'sealed_payload_unsupported' };
-      expect(await send(type, unbound(line.payload))).toEqual(refused);
+      expect(await send(type, unbound(type, line.payload))).toEqual(refused);
       // The refusal reserved no envelope identity: the same envelope is refused again, not deduplicated.
-      expect(await send(type, unbound(line.payload))).toEqual(refused);
+      expect(await send(type, unbound(type, line.payload))).toEqual(refused);
     },
   );
 
@@ -414,7 +419,7 @@ describe('sealed payload v1: a task without output sealing refuses sealed output
     'a plaintext decline with the sealed code %s is accepted, and keeps the code as the terminal cause',
     async (code, line) => {
       const { harness, taskId, send } = await plainTask('task.decline');
-      expect(await send('task.decline', line.payload)).toEqual({ outcome: 'accepted' });
+      expect(await send('task.decline', { ...line.payload, agentRef: TEST_AGENT_REF })).toEqual({ outcome: 'accepted' });
       expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toMatchObject({ status: 'failed', terminalCause: code });
     },
   );
@@ -426,14 +431,6 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
   const withContext = (payload: { messageEgress?: unknown }) => (payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT });
   /** Each sealed offer type: its sealed entry and its plaintext sibling. */
   const lanes: Record<string, { sealed: Lane; plain: Lane }> = {
-    'task.offer_sealed': {
-      sealed: (h, d, payload) => h.cloud.enqueueSealedOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
-      plain: (h, d, payload) => h.cloud.enqueueOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
-    },
-    'task.offer_with_toolsets_sealed': {
-      sealed: (h, d, payload) => h.cloud.enqueueSealedToolsetOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
-      plain: (h, d, payload) => h.cloud.enqueueToolsetOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
-    },
     'task.offer_for_agent_sealed': {
       sealed: (h, d, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
       plain: (h, d, payload) => h.cloud.enqueueAgentOffer(TENANT_A, d, { taskId: 'sealed-lane', payload }),
@@ -463,8 +460,6 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
       taskId: 'sealed-root', deviceId: 'device-root', payload: fresh.payload, ...withContext(fresh.payload as never),
     });
     expect(input.payload.sealing).toEqual(fresh.payload.sealing);
-    expectTypeOf<EnqueueSealedOfferInput>().toHaveProperty('payload');
-    expectTypeOf<EnqueueSealedToolsetOfferInput>().toHaveProperty('payload');
     expectTypeOf<SealedAgentDispatchInput>().toHaveProperty('payload');
     expectTypeOf<SealedAgentEgressDispatchInput>().toHaveProperty('payload');
   });
@@ -500,10 +495,8 @@ describe('sealed payload v1: each sealed type has its own hosted entry (#654)', 
     },
   );
 
-  // The four enqueue lanes take an optional task id. The fresh lane always requires one.
+  // The two enqueue lanes take an optional task id. The fresh lane always requires one.
   const enqueueLanes: Record<string, (harness: ReturnType<typeof createHarness>, deviceId: string, payload: never, taskId?: string) => Promise<{ taskId: string }>> = {
-    'task.offer_sealed': (h, d, payload, taskId) => h.cloud.enqueueSealedOffer(TENANT_A, d, { taskId, payload }),
-    'task.offer_with_toolsets_sealed': (h, d, payload, taskId) => h.cloud.enqueueSealedToolsetOffer(TENANT_A, d, { taskId, payload }),
     'task.offer_for_agent_sealed': (h, d, payload, taskId) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId, payload }),
     'task.offer_for_agent_with_egress_sealed': (h, d, payload, taskId) =>
       h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId, payload, ...withContext(payload as { messageEgress?: unknown }) }),

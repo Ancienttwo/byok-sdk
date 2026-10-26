@@ -14,7 +14,7 @@
  */
 import { createEnvelope, PROTOCOL_VERSION, type MessagesSendResponse } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
-import { TENANT_A, createHarness, decodeEventsPage, offerPayload } from './support/harness';
+import { TENANT_A, createHarness, decodeEventsPage, grantAgentHome, offerPayload } from './support/harness';
 
 /**
  * The exact advertisement, in declaration order
@@ -53,7 +53,8 @@ describe('GET /byok/events protocol capability advertisement', () => {
   it('serves the same list on the delivered-page path', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload(),
     });
 

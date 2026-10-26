@@ -7,7 +7,7 @@ import {
   BoardFeedRetryableError,
   BoardFeedStoppedError,
 } from '../coordination-client';
-import { createHarness, TENANT_A, TENANT_B, type CloudHarness, type PairedDevice } from './support/harness';
+import { createHarness, grantAgentHome, offerPayload, TENANT_A, TENANT_B, TEST_AGENT_REF, type CloudHarness, type PairedDevice } from './support/harness';
 
 function jsonInit(device: PairedDevice, body: unknown, method = 'POST'): RequestInit {
   return {
@@ -138,13 +138,14 @@ describe('board coordination surface', () => {
     const harness = createHarness({ activityCapacity: 2 });
     const device = await harness.pairDevice(TENANT_A);
     await createBoardFixture(harness, 'projected');
-    await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       taskId: 'projected',
-      payload: { instruction: 'explicit instruction' },
+      payload: offerPayload('explicit instruction'),
     });
     await harness.json('/byok/board/projected/claim', jsonInit(device, { expectedStatus: 'todo' }));
 
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: 'projected' });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: 'projected' });
     const progress = createEnvelope(
       'task.progress',
       {
@@ -159,7 +160,7 @@ describe('board coordination surface', () => {
     );
     const complete = createEnvelope(
       'task.complete',
-      { summary: 'complete', sessionRef: 'session-1' },
+      { summary: 'complete', sessionRef: 'session-1', agentRef: TEST_AGENT_REF },
       { taskId: 'projected' },
     );
     const sent = await harness.json('/byok/messages', jsonInit(device, { messages: [claim, progress, complete] }));

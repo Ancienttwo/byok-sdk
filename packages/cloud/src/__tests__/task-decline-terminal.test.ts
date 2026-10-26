@@ -18,7 +18,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor, type TenantStores } from '../tenant-stores';
-import { TENANT_A, createHarness, offerPayload, type CloudHarness } from './support/harness';
+import { TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
 function devicePrincipal(tenant: TenantId, deviceId: string) {
   return { kind: 'device', tenantId: tenant, productId: 'test-product', deviceId } as const;
@@ -33,6 +33,7 @@ describe('task.decline terminal', () => {
     harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     deviceId = device.deviceId;
+    await grantAgentHome(harness, TENANT_A, deviceId);
     stores = tenantStoresFor(devicePrincipal(TENANT_A, deviceId), {
       core: harness.core,
       cloud: harness.stores,
@@ -42,7 +43,7 @@ describe('task.decline terminal', () => {
 
   /** An offered task, NOT claimed — a decline is pre-claim by definition. */
   async function offeredTask(): Promise<string> {
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, {
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, {
       payload: offerPayload(),
     });
     return taskId;
@@ -53,7 +54,7 @@ describe('task.decline terminal', () => {
     const outcome = await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.decline', { reason: 'no runtime available', retryable: true }, { taskId }),
+      createEnvelope('task.decline', { agentRef: TEST_AGENT_REF, reason: 'no runtime available', retryable: true }, { taskId }),
     ).then((result) => result.outcome);
     expect(outcome).toBe('accepted');
 
@@ -84,7 +85,7 @@ describe('task.decline terminal', () => {
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.decline', { reason: 'policy rejected', retryable: false }, { taskId }),
+      createEnvelope('task.decline', { agentRef: TEST_AGENT_REF, reason: 'policy rejected', retryable: false }, { taskId }),
     ).then((result) => result.outcome);
 
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);
@@ -96,7 +97,7 @@ describe('task.decline terminal', () => {
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.decline', { reason: 'no runtime' }, { taskId }),
+      createEnvelope('task.decline', { agentRef: TEST_AGENT_REF, reason: 'no runtime' }, { taskId }),
     ).then((result) => result.outcome);
 
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);
@@ -109,14 +110,14 @@ describe('task.decline terminal', () => {
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.decline', { reason: 'agent home busy', retryable: true }, { taskId }),
+      createEnvelope('task.decline', { agentRef: TEST_AGENT_REF, reason: 'agent home busy', retryable: true }, { taskId }),
     ).then((result) => result.outcome);
     const late = await handleInboundEnvelope(
       stores,
       deviceId,
       createEnvelope(
         'task.complete',
-        { summary: 'late terminal', sessionRef: 'session-late' },
+        { agentRef: TEST_AGENT_REF, summary: 'late terminal', sessionRef: 'session-late' },
         { taskId },
       ),
     ).then((result) => result.outcome);
@@ -130,16 +131,16 @@ describe('task.decline terminal', () => {
 
   it('keeps a completed result when a late decline races it', async () => {
     const taskId = await offeredTask();
-    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId }, { taskId })).then((result) => result.outcome);
+    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId })).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.complete', { summary: 'did the thing', sessionRef: 'session-1' }, { taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'did the thing', sessionRef: 'session-1' }, { taskId }),
     ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.decline', { reason: 'late decline', retryable: true }, { taskId }),
+      createEnvelope('task.decline', { agentRef: TEST_AGENT_REF, reason: 'late decline', retryable: true }, { taskId }),
     ).then((result) => result.outcome);
 
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);
@@ -153,12 +154,12 @@ describe('task.decline terminal', () => {
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.decline', { reason: 'first decline', retryable: true }, { taskId }),
+      createEnvelope('task.decline', { agentRef: TEST_AGENT_REF, reason: 'first decline', retryable: true }, { taskId }),
     ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.decline', { reason: 'second decline', retryable: false }, { taskId }),
+      createEnvelope('task.decline', { agentRef: TEST_AGENT_REF, reason: 'second decline', retryable: false }, { taskId }),
     ).then((result) => result.outcome);
 
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);

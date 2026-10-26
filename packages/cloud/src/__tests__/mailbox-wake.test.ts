@@ -3,7 +3,7 @@ import type { EventsPollResponse } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MailboxWake } from '../mailbox-wake';
 import { createInProcessMailboxWake } from '../stores/in-memory/mailbox-wake';
-import { TENANT_A, TENANT_B, createHarness, offerPayload, type CloudHarness } from './support/harness';
+import { TENANT_A, TENANT_B, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
 function observeReads(harness: CloudHarness) {
   let reads = 0;
@@ -55,11 +55,12 @@ describe('wake-driven events hold', () => {
     const tracked = trackedWake(createInProcessMailboxWake());
     const harness = createHarness({ longPollHoldMs: 5_000, mailboxWake: tracked.wake });
     const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
     const observed = observeReads(harness);
     const held = harness.request('/byok/events', { headers: device.authorization });
     await observed.first;
     const started = performance.now();
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     const response = await held;
     expect(performance.now() - started).toBeLessThan(100);
     expect(await response.json()).toMatchObject({ events: [{ task_id: offer.taskId }] });
@@ -70,7 +71,8 @@ describe('wake-driven events hold', () => {
   it('wakes for a host cancellation committed through the cancellation store', async () => {
     const harness = createHarness({ longPollHoldMs: 5_000, mailboxWake: createInProcessMailboxWake() });
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     await harness.request('/byok/events', { headers: device.authorization });
     const observed = observeReads(harness);
     const held = harness.request(`/byok/events?cursor=${offer.seq}`, { headers: device.authorization });
@@ -84,10 +86,11 @@ describe('wake-driven events hold', () => {
     const inner = createInProcessMailboxWake({ fallbackMs: 40 });
     const harness = createHarness({ longPollHoldMs: 5_000, mailboxWake: { ...inner, appended() {} } });
     const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
     const observed = observeReads(harness);
     const held = harness.request('/byok/events', { headers: device.authorization });
     await observed.first;
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     await vi.advanceTimersByTimeAsync(40);
     expect(await (await held).json()).toMatchObject({ events: [{ task_id: offer.taskId }] });
     expect(observed.count()).toBe(2);
@@ -101,7 +104,8 @@ describe('wake-driven events hold', () => {
     });
     const harness = createHarness({ longPollHoldMs: 5_000, mailboxWake: tracked.wake });
     const device = await harness.pairDevice(TENANT_A);
-    append = async () => { await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() }); };
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    append = async () => { await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() }); };
     const observed = observeReads(harness);
     const response = await harness.request('/byok/events', { headers: device.authorization });
     expect(((await response.json()) as EventsPollResponse).events).toHaveLength(1);
@@ -146,7 +150,8 @@ describe('wake-driven events hold', () => {
     const clock = createMutableClock();
     const harness = createHarness({ clock, longPollHoldMs: 100, mailboxWake: createInProcessMailboxWake({ fallbackMs: 40 }) });
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'cancelled offer');
     // A read-ahead caller scans beyond the delivered cancellation without
     // acknowledging either row. Expiry must invalidate its original cursor.

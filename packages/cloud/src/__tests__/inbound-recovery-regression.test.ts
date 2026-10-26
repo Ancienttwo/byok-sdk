@@ -11,7 +11,7 @@ import { createEnvelope, encodeEnvelope, PROTOCOL_VERSION, type Envelope } from 
 import { describe, expect, it } from 'vitest';
 import { handleInboundEnvelope, terminalReceiptKey } from '../inbound';
 import { tenantStoresFor, type TenantStores } from '../tenant-stores';
-import { TENANT_A, createHarness, offerPayload } from './support/harness';
+import { TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload } from './support/harness';
 
 function devicePrincipal(tenant: TenantId, deviceId: string) {
   return { kind: 'device', tenantId: tenant, productId: 'test-product', deviceId } as const;
@@ -26,18 +26,19 @@ function storesFor(harness: ReturnType<typeof createHarness>, deviceId: string):
 }
 
 function claim(taskId: string, deviceId: string): Envelope {
-  return createEnvelope('task.claim', { deviceId }, { taskId });
+  return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId });
 }
 
 function complete(taskId: string): Envelope {
-  return createEnvelope('task.complete', { summary: 'completed', sessionRef: 'session-recovery' }, { taskId });
+  return createEnvelope('task.complete', { summary: 'completed', sessionRef: 'session-recovery', agentRef: TEST_AGENT_REF }, { taskId });
 }
 
 async function offeredTask() {
   const harness = createHarness();
   const device = await harness.pairDevice(TENANT_A);
   const stores = storesFor(harness, device.deviceId);
-  const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+  await grantAgentHome(harness, TENANT_A, device.deviceId);
+  const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
   return { harness, device, stores, taskId: offer.taskId };
 }
 
@@ -361,7 +362,7 @@ describe('inbound lifecycle recovery', () => {
     await handleInboundEnvelope(stores, device.deviceId, claim(taskId, device.deviceId)).then((result) => result.outcome);
     const winning = complete(taskId);
     await stores.receipts.record({ key: terminalReceiptKey(taskId), body: encodeEnvelope(winning) });
-    const losing = createEnvelope('task.fail', { reason: 'must not win' }, { taskId });
+    const losing = createEnvelope('task.fail', { reason: 'must not win', agentRef: TEST_AGENT_REF }, { taskId });
 
     await expect(handleInboundEnvelope(stores, device.deviceId, losing).then((result) => result.outcome)).resolves.toBe('accepted');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('complete');

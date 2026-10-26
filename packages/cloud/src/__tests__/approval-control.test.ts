@@ -25,8 +25,10 @@ import {
   PRODUCT_ID,
   TENANT_A,
   TENANT_B,
+  TEST_AGENT_REF,
   createHarness,
   decodeEventsPage,
+  grantAgentHome,
   offerPayload,
   type CloudHarness,
   type DecodedEventsPage,
@@ -61,19 +63,20 @@ interface PausedTask {
 
 /** Offer -> claim -> started: the state a runtime is in when it asks for an approval. */
 async function claimedTask(harness: CloudHarness, device: PairedDevice): Promise<PausedTask> {
-  const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+  await grantAgentHome(harness, TENANT_A, device.deviceId);
+  const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
     payload: offerPayload('needs a human'),
   });
   // Deliver the offer before anything polls past it: the mailbox refuses a
   // cursor beyond its own delivery watermark, so `offer.seq` is only a usable
   // cursor once the device has actually been handed that row.
-  expect((await poll(harness, device, 0)).events.map((event) => event.type)).toEqual(['task.offer']);
+  expect((await poll(harness, device, 0)).events.map((event) => event.type)).toEqual(['task.offer_for_agent']);
   const stores = deviceStores(harness, device);
   expect(
     await handleInboundEnvelope(
       stores,
       device.deviceId,
-      createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
     ).then((result) => result.outcome),
   ).toBe('accepted');
   expect(
@@ -91,7 +94,7 @@ async function awaitApproval(
   harness: CloudHarness,
   device: PairedDevice,
   taskId: string,
-  approvalId: string | undefined,
+  approvalId: string,
   summary = 'delete production',
 ): Promise<void> {
   expect(
@@ -100,7 +103,7 @@ async function awaitApproval(
       device.deviceId,
       createEnvelope(
         'task.await_approval',
-        { summary, ...(approvalId === undefined ? {} : { approvalId }) },
+        { summary, approvalId },
         { taskId },
       ),
     ).then((result) => result.outcome),
@@ -127,7 +130,7 @@ async function approvalResolved(
   ).toBe('accepted');
 }
 
-async function paused(harness: CloudHarness, device: PairedDevice, approvalId: string | undefined) {
+async function paused(harness: CloudHarness, device: PairedDevice, approvalId: string) {
   const task = await claimedTask(harness, device);
   await awaitApproval(harness, device, task.taskId, approvalId);
   return task;
@@ -186,34 +189,6 @@ describe('approveTask (GAP-1)', () => {
     expect(stale.currentApprovalId).toBe('approval-b');
     expect((await poll(harness, device, task.seq)).events).toHaveLength(0);
   });
-
-  it('does not manufacture an approvalId when the daemon never reported one', async () => {
-    const harness = createHarness();
-    const device = await harness.pairDevice(TENANT_A);
-    // A pre-M5 daemon: pending, resolvable, but not targetable. There is no id
-    // to disagree with, so the caller's own id is not stale, but it is not a
-    // protocol identity and must not enter the durable event or wire payload.
-    const task = await paused(harness, device, undefined);
-
-    await harness.cloud.approveTask(TENANT_A, task.taskId, { approvalId: 'approval-a' });
-
-    const page = await poll(harness, device, task.seq);
-    expect(page.events.map((event) => event.type)).toEqual(['task.approve']);
-    expect(page.events[0]?.payload).toEqual({});
-    const tail = await harness.stores.approvals.read(TENANT_A, task.taskId);
-    expect(tail?.entries.at(-1)).not.toHaveProperty('event.approvalId');
-  });
-
-  it('omits approvalId entirely when neither side has one', async () => {
-    const harness = createHarness();
-    const device = await harness.pairDevice(TENANT_A);
-    const task = await paused(harness, device, undefined);
-
-    await harness.cloud.approveTask(TENANT_A, task.taskId);
-
-    const page = await poll(harness, device, task.seq);
-    expect(page.events[0]?.payload).toEqual({});
-  });
 });
 
 describe('the gates that refuse before any mailbox row exists', () => {
@@ -228,6 +203,34 @@ describe('the gates that refuse before any mailbox row exists', () => {
       .catch((error: unknown) => error);
 
     expect(isCloudError(caught, 'task_not_awaiting_approval')).toBe(true);
+    expect((await poll(harness, device, task.seq)).events).toHaveLength(0);
+  });
+
+  it('refuses a pending request recorded before wire v4 without an approvalId, with no write', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await claimedTask(harness, device);
+    // The v4 wire refuses an id-less task.await_approval, so only a row
+    // recorded before v4 can hold one. A v4 decision must name its approval.
+    await harness.stores.approvals.append(TENANT_A, {
+      taskId: task.taskId,
+      sourceEnvelopeId: 'pre-v4-request',
+      event: { type: 'approval_requested', summary: 'delete production' },
+    });
+    const before = await harness.stores.approvals.read(TENANT_A, task.taskId);
+    expect(before?.entries.map(({ event }) => event)).toEqual([{ type: 'approval_requested', summary: 'delete production' }]);
+
+    for (const decide of [
+      () => harness.cloud.approveTask(TENANT_A, task.taskId),
+      () => harness.cloud.rejectTask(TENANT_A, task.taskId, { reason: 'no' }),
+    ]) {
+      const caught = await decide()
+        .then(() => undefined)
+        .catch((error: unknown) => error);
+      expect(isCloudError(caught, 'task_not_awaiting_approval')).toBe(true);
+    }
+
+    expect(await harness.stores.approvals.read(TENANT_A, task.taskId)).toEqual(before);
     expect((await poll(harness, device, task.seq)).events).toHaveLength(0);
   });
 
@@ -246,7 +249,8 @@ describe('the gates that refuse before any mailbox row exists', () => {
   it('refuses an unclaimed task even when a timeline entry exists', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('never claimed'),
     });
     // Reported without a claim: nothing owns this attempt, so no runtime is
@@ -265,16 +269,16 @@ describe('the gates that refuse before any mailbox row exists', () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const task = await paused(harness, device, 'approval-a');
-    // The runtime resolved locally and ran to completion without ever sending
-    // `task.approval_resolved` — the implicit path the server infers from the
-    // next message. The tail still shows a request; the attempt says otherwise.
+    // The runtime ran to completion without ever sending
+    // `task.approval_resolved`. The tail still shows a request; the attempt
+    // says otherwise.
     expect(
       await handleInboundEnvelope(
         deviceStores(harness, device),
         device.deviceId,
         createEnvelope(
           'task.complete',
-          { summary: 'did it anyway', sessionRef: 'resolved-locally' },
+          { summary: 'did it anyway', sessionRef: 'resolved-locally', agentRef: TEST_AGENT_REF },
           { taskId: task.taskId },
         ),
       ).then((result) => result.outcome),
