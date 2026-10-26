@@ -1027,7 +1027,7 @@ SDK 只交付 npm library 与 reference recipes。host product 拥有 binary sig
 CI 验证层次：
 
 1. Node 24.22.1 基线与 Node 26 forward-compatibility leg：build → typecheck → test；build 必须先跑，因为 workspace exports 指向 `dist`。
-2. Windows store/security tests，含特殊字符路径（job 仍名为 `windows-git-workspace`，Git 测试已随 wire v4 删除）。
+2. Windows client tests（job `windows-client`）：特殊字符路径下的 secure-dir，diagnostics、support-bundle、daemon-auth、daemon 停止流程，Agent-home 文件写入崩溃测试，Hermes adapter/custody/gateway/home 和 keys 的 Hermes launcher。
 3. Bun/SEA packageability smoke。
 4. WinSW real service install/start/stop/uninstall smoke。
 5. macOS/Linux/Windows control socket smoke。

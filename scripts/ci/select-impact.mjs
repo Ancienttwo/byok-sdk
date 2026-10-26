@@ -176,7 +176,7 @@ export const workspaceGraph = {
 export const knownFamilies = Object.freeze([
   'build-test', 'agent-memory-export-linux', 'agent-memory-helper-non-darwin', 'agent-memory-helper',
   'execution-recovery-native', 'adapter-lifecycle-smoke', 'dataplane',
-  'windows-git-workspace', 'packageability-smoke', 'npm-release-pack',
+  'windows-client', 'packageability-smoke', 'npm-release-pack',
   'release-pack-migrate', 'windows-service-smoke', 'ipc-smoke', 'credential-isolation-audit',
   'hermes-real-windows',
 ]);
@@ -224,7 +224,7 @@ export const familyOwners = Object.freeze({
     /^scripts\/ci\/run-windows-bot-tests\.mjs$/,
     /^packages\/keys\/src\/(?:windows-credential-custody[^/]*|(?:windows-credential-manager|device-sealing-key|sealed-provisioning|pi-provider-launcher-core|provider-profile|provider-profile-binding|secret-store|secret-value|sqlite-profile-store|command-runner)\.ts)$/,
   ],
-  'windows-git-workspace': [
+  'windows-client': [
     /^packages\/client\/src\/daemon\/(?:auth-manager|daemon-lifecycle|daemon-owner|daemon-record)\.ts$/,
     /^packages\/client\/src\/(?:util\/(?:secure-dir|atomic-write)\.ts|diagnostics\/|bin\/commands\/)/,
     /^packages\/client\/src\/__tests__\/(?:secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity)[^/]*$/,

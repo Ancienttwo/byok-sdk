@@ -116,7 +116,7 @@ test('a platform family is selected only by a path it owns', () => {
     'agent-memory-helper': 'packages/client/src/daemon/agent-memory-intent.ts',
     'execution-recovery-native': 'packages/client/src/daemon/journal/sqlite-journal.ts',
     'adapter-lifecycle-smoke': 'packages/client/src/adapters/codex/codex-adapter.ts',
-    'windows-git-workspace': 'packages/client/src/daemon/auth-manager.ts',
+    'windows-client': 'packages/client/src/daemon/auth-manager.ts',
     'packageability-smoke': 'packages/client/src/sdk-native-assets.ts',
     'windows-service-smoke': 'packages/client/src/lifecycle/winsw.ts',
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
@@ -136,8 +136,8 @@ test('a platform family is selected only by a path it owns', () => {
 });
 
 test('shared Windows filesystem helpers select their real Windows consumers', () => {
-  assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['dataplane', 'windows-git-workspace', 'windows-service-smoke']);
-  assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['dataplane', 'ipc-smoke', 'windows-git-workspace']);
+  assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['dataplane', 'windows-client', 'windows-service-smoke']);
+  assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['dataplane', 'ipc-smoke', 'windows-client']);
 });
 
 test('Hermes adapter, fake and custody launcher paths select the Windows Hermes suites', () => {
@@ -149,10 +149,10 @@ test('Hermes adapter, fake and custody launcher paths select the Windows Hermes 
     'packages/client/src/__tests__/fixtures/fake-hermes-command.ts',
     'packages/keys/src/hermes-provider-launcher.ts',
     'packages/keys/src/__tests__/hermes-provider-launcher.test.ts',
-  ]) assert.ok(selectImpact([path]).families.includes('windows-git-workspace'), path);
+  ]) assert.ok(selectImpact([path]).families.includes('windows-client'), path);
   // The job does not run these, so a change to them does not select it.
   for (const path of ['packages/client/src/adapters/codex/codex-adapter.ts', 'packages/keys/src/pi-provider-launcher.ts', 'packages/client/src/__tests__/hermes-pipe-open-errors.test.ts']) {
-    assert.ok(!selectImpact([path]).families.includes('windows-git-workspace'), path);
+    assert.ok(!selectImpact([path]).families.includes('windows-client'), path);
   }
 });
 
