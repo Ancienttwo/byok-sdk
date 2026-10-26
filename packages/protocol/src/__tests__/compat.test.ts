@@ -4,8 +4,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import * as previousRelease from 'byok-protocol-previous';
-import * as v3Release from 'byok-protocol-floor';
+import * as v3Release from 'byok-protocol-previous';
 import * as currentModule from '../index';
 import {
   AgentMemorySelectionSchema,
@@ -46,11 +45,9 @@ import {
  * 3. v4 self-consistency. `golden/v4.envelopes.ndjson` and
  *    `golden/v4.http.ndjson` are append-only and the current decoder reads
  *    them exactly. `golden/v4.releases.json` has no release and no floor yet.
- * 4. Published rejection oracle. `byok-protocol-floor` (0.27.0, the first
- *    stable v3 release) rejects every v4 corpus line and a v4 `conn.hello`:
- *    a v3 peer cannot read v4 bytes. None of its bytes is v4 evidence.
- *    `byok-protocol-previous` (0.26.1) is kept only for the strip-safe
- *    capability reader check below.
+ * 4. Published rejection oracle. `byok-protocol-previous` (0.30.2, the last
+ *    v3 release) rejects every v4 corpus line and a v4 `conn.hello`: a v3
+ *    peer cannot read v4 bytes. None of its bytes is v4 evidence.
  */
 
 const require = createRequire(import.meta.url);
@@ -385,10 +382,6 @@ function carries(line: CorpusLine, entry: WireAddition): boolean {
 }
 
 describe('compat v4: corpus coverage and WIRE_ADDITIONS', () => {
-  it('strips the optional messageDraft runtime field in the previous capability reader', () => {
-    expect(previousRelease.RuntimeCapabilitiesSchema.parse({ steer: true, messageDraft: true })).toEqual({ steer: true });
-  });
-
   it('declares exactly one server gate for draft frames', () => {
     expect(WIRE_ADDITIONS.filter(entry => entry.surface === 'agent.message.draft')).toEqual([
       { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
@@ -557,11 +550,11 @@ describe('compat v4: HTTP corpus (self-consistency; no published v4 decoder yet)
 // 4. Published rejection oracle: a published v3 decoder cannot read v4 bytes
 // ---------------------------------------------------------------------------
 
-describe('compat: published 0.27.0 (byok-protocol-floor) is a v3 rejection oracle only', () => {
-  it('the alias pins the first registered v3 release and never enters the v4 registry', () => {
-    const version = packageVersion('byok-protocol-floor');
-    expect(version).toBe('0.27.0');
-    expect(v3Registry.floor).toBe(version);
+describe('compat: published 0.30.2 (byok-protocol-previous) is the v4 rejection oracle', () => {
+  it('the alias pins the last registered v3 release and never enters the v4 registry', () => {
+    const version = packageVersion('byok-protocol-previous');
+    expect(version).toBe('0.30.2');
+    expect(v3Registry.releases.at(-1)?.version).toBe(version);
     expect(v4Registry.releases.some((entry) => entry.version === version)).toBe(false);
     expect(v3Release.PROTOCOL_VERSION).toBe(3);
   });
@@ -572,7 +565,7 @@ describe('compat: published 0.27.0 (byok-protocol-floor) is a v3 rejection oracl
       if ((v3Release.MESSAGE_TYPES as readonly string[]).includes(line.type)) {
         expect(() => v3Release.decodeEnvelope(line.raw)).toThrow(v3Release.EnvelopeValidationError);
       } else {
-        // A type added after 0.27.0 is unknown to it before its version is read.
+        // A type added after 0.30.2 is unknown to it before its version is read.
         expect(() => v3Release.decodeEnvelope(line.raw)).toThrow(v3Release.UnknownMessageTypeError);
       }
     },
