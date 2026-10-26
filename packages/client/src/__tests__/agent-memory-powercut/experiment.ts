@@ -197,7 +197,17 @@ export async function runExperiment(options: ExperimentOptions): Promise<Experim
 
     const trigger = triggers[round]!;
     let cutting: Promise<void> | undefined;
-    const cut = (): void => { cutting ??= driver.cut(); };
+    // A failed cut leaves the device connected, and a Host point has withheld
+    // its reply, so the delivery in flight would never settle. The round waits
+    // on this too, and a failed cut ends the run.
+    let cutFailed!: (error: unknown) => void;
+    const cutFailure = new Promise<never>((_resolve, reject) => { cutFailed = reject; });
+    cutFailure.catch(() => {});
+    const cut = (): void => {
+      if (cutting !== undefined) return;
+      cutting = driver.cut();
+      cutting.catch(cutFailed);
+    };
     const timer = trigger.kind === 'delay' ? setTimeout(cut, trigger.ms) : undefined;
     let issued = 0;
     let exitedBeforeCut = false;
@@ -216,7 +226,7 @@ export async function runExperiment(options: ExperimentOptions): Promise<Experim
         // A delay cut can fire while the intent is being issued.
         if (cutting !== undefined) break;
         if (trigger.kind === 'host' && trigger.intent === issued) session.arm(trigger.on, intent.intentId, cut);
-        const outcome = await session.deliver(intent);
+        const outcome = await Promise.race([session.deliver(intent), cutFailure]);
         if (outcome === 'failed') {
           cut();
           stoppedEarly = `round ${round}: a notice failed before any cut`;

@@ -211,8 +211,8 @@ async function closing<T>(driver: PowerCutDriver, stderr: readonly string[], run
   return result;
 }
 
-/** A device program that reports its store, then exits on its first notice. */
-function fakeDevice(dir: string, exitAt: 'start' | 'notice'): string {
+/** A device program that reports its store, then exits on its first notice, or never answers one. */
+function fakeDevice(dir: string, exitAt: 'start' | 'notice' | 'never'): string {
   const file = path.join(dir, 'fake-device.ts');
   const module = (name: string) => JSON.stringify(fileURLToPath(new URL(`./agent-memory-powercut/${name}.ts`, import.meta.url)));
   writeFileSync(file, [
@@ -221,7 +221,9 @@ function fakeDevice(dir: string, exitAt: 'start' | 'notice'): string {
     exitAt === 'start' ? `console.error('fake device: no snapshot'); process.exit(7);` : '',
     `writeMessage(process.stdout, { type: 'snapshot', snapshot: await takeDeviceSnapshot(process.argv[2]!) });`,
     `writeMessage(process.stdout, { type: 'ready' });`,
-    `for await (const message of readMessages<{ type: string }>(process.stdin)) if (message.type === 'notice') process.exit(3);`,
+    exitAt === 'never'
+      ? `for await (const _message of readMessages<{ type: string }>(process.stdin)) continue;`
+      : `for await (const message of readMessages<{ type: string }>(process.stdin)) if (message.type === 'notice') process.exit(3);`,
   ].join('\n'));
   return file;
 }
@@ -328,6 +330,22 @@ describe('W5 process-crash run', () => {
     expect(report.cuts).toEqual([]);
     await new Promise((resolve) => setTimeout(resolve, 1_200));
     expect(cuts).toBe(0);
+  }, 20_000);
+
+  // The device keeps its connection and never answers the notice, so only
+  // the failed cut can end the wait for that delivery.
+  it.skipIf(BUN_BIN === undefined)('fails the run when a cut fails while a notice is in flight', async () => {
+    const inner = new ProcessKillDriver({ command: BUN_BIN!, args: [fakeDevice(scratch(), 'never'), scratch()] });
+    const driver: PowerCutDriver = {
+      fault: inner.fault, storageProfile: inner.storageProfile,
+      start: () => inner.start(), stop: () => inner.stop(), close: () => inner.close(),
+      cut: async () => { throw new Error('the storage layer refused the cut'); },
+    };
+    const started = Date.now();
+    await expect(closing(driver, inner.stderr, () => runExperiment({
+      driver, host: new PowercutHost({ seed: 11, intentsPerHome: 3, journal: new HostJournal() }), triggers: [{ kind: 'delay', ms: 100 }],
+    }))).rejects.toThrow(/refused the cut/u);
+    expect(Date.now() - started).toBeLessThan(10_000);
   }, 20_000);
 
   it.skipIf(BUN_BIN === undefined)('refuses to cut a device that already exited', async () => {
