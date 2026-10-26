@@ -17,7 +17,6 @@ interface ChildConfig {
   readonly productId: string;
   readonly serverUrl: string;
   readonly storeDir: string;
-  readonly workspaceRoot: string;
   readonly controlDir: string;
   readonly pairingCode?: string;
   readonly action?: 'run' | 'unpair';
@@ -345,7 +344,6 @@ beforeEach(async () => {
       productId,
       serverUrl: `http://127.0.0.1:${port}`,
       storeDir: path.join(root, 'daemon-store'),
-      workspaceRoot: path.join(root, 'workspace'),
       controlDir: path.join(root, 'control'),
       // Wire v4 runs Agent offers only: every daemon of the suite has an Agent home and egress.
       agentHome: true,

@@ -41,9 +41,9 @@ afterEach(async () => {
 async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[], serverCapabilities: readonly string[] = []): Promise<TaskRunner> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-refusal-'));
   dirs.push(dir);
-  return new TaskRunner({...testAgentHomeDeps(), 
+  return new TaskRunner({...testAgentHomeDeps(),
     getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-    adapters: [adapter], workspaceRoot: path.join(dir, 'workspace'),
+    adapters: [adapter],
     deviceId: 'sealed-refusal-device', send: (event) => { sent.push(event); },
     blobClient: {
       resolveInstruction: async () => { throw new Error('unexpected blob resolution'); },

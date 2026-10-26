@@ -35,7 +35,6 @@ async function makeRunner(
   const release = Object.freeze({ version: '0.6.0' });
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: await tmpDir('byok-terminal-usage-workspace-'),
     ...testAgentHomeDeps(),
     deviceId: 'device-terminal-usage',
     send: (envelope) => sent.push(envelope),
@@ -52,7 +51,7 @@ async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'cl
   await runner.handleEnvelope(
     createEnvelope(
       'task.offer_for_agent',
-      { agentRef: freshTestAgentRef(), 
+      { agentRef: freshTestAgentRef(),
         instruction: 'observe terminal usage',
         runtime,
         // This requested selection must NOT become provider/model terminal
@@ -173,7 +172,6 @@ describe('TaskRunner terminal inference usage projection', () => {
           productName: 'Terminal usage composition test',
           productId: 'terminal-usage-composition-test',
           serverUrl: server.url,
-          workspaceRoot: await tmpDir('byok-terminal-usage-daemon-workspace-'),
           agentHome: testAgentHomeConfig(),
           storeDir: await tmpDir('byok-terminal-usage-daemon-store-'),
         },

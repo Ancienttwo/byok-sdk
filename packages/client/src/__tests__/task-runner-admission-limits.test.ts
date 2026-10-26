@@ -42,14 +42,12 @@ describe('task.offer admission gates (M5 batch-3)', () => {
 
   async function setup(configOverrides: Partial<DaemonConfig> = {}): Promise<{ daemon: Daemon; adapter: StubRuntimeAdapter }> {
     const adapter = new StubRuntimeAdapter('pi');
-    const workspaceRoot = await tmpDir('byok-admission-workspace-');
     const storeDir = await tmpDir('byok-admission-store-');
     daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-admission',
         serverUrl: server.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         storeDir,
         ...configOverrides,

@@ -57,7 +57,7 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   const adapter = new BotStubAdapter();
   const projection = createBotPersonaProjection();
   const daemon = createDaemonWithAdapters({ productId, productName: 'K8b', localAgentRelease: { version: '0.0.0-test' },
-    serverUrl: `http://127.0.0.1:${address.port}`, workspaceRoot: join(root, 'workspace'), storeDir: join(root, 'sdk'),
+    serverUrl: `http://127.0.0.1:${address.port}`, storeDir: join(root, 'sdk'),
     agentHome: { hostStorageRoot: join(root, 'homes'), projection: {
       ...projection, apply: async input => { await options.holdProjection?.(); return projection.apply!(input); },
     } }, agentEgress: { policy },

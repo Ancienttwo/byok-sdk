@@ -68,7 +68,7 @@ it('R5/R6: real paginated cancel retires never-returning prepare and permits sam
   const adapter = new StubRuntimeAdapter('acme-harness');
   const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  productId: 'read-ahead', productName: 'Read ahead',
     localAgentRelease: { version: '0.0.0-test' }, serverUrl: cloud.url, storeDir: root,
-    workspaceRoot: path.join(root, 'work'), agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
+    agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     startupTimeoutMs: 10000,
   }, [adapter], { longPoll: { idleDelayMs: 5, retryDelayMs: 5 } });
   let release!: () => void;

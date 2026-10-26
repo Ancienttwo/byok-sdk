@@ -48,12 +48,11 @@ describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_res
   it('local approvals.resolve over the real control socket reaches the real server as task.approval_resolved BEFORE any progress, moves the record straight to Running, and the task completes', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-approval-resolved-workspace-');
     const storeDir = await tmpDir('byok-e2e-approval-resolved-store-');
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },

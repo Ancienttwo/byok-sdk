@@ -22,7 +22,7 @@ it('runs two recurring executions through real HTTP and TaskRunner with distinct
   const adapter = new StubRuntimeAdapter('pi');
   const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-recurring-test' }, productName: 'recurring test', productId: 'execution-submit-integration',
-    serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'store'),
+    serverUrl: http.baseUrl, storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
   }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
   let releaseClose: (() => void) | undefined;
@@ -94,7 +94,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
   const storeDir = path.join(root, 'store');
   const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-summary-test' }, productName: 'summary test', productId: options.productId,
-    serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir,
+    serverUrl: http.baseUrl, storeDir,
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     // A result-document offer is admitted only by a daemon that journals its terminals.
   }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });

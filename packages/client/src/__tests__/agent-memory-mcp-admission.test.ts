@@ -83,7 +83,6 @@ it('reports the effective memory MCP admission in status', async () => {
   expect(createDaemonWithAdapters(await config('off'), []).status().agentMemoryMcp).toBe('off');
   const noHome = await config(undefined);
   delete noHome.agentHome;
-  noHome.workspaceRoot = path.join(path.dirname(noHome.storeDir!), 'workspace');
   expect(createDaemonWithAdapters(noHome, []).status().agentMemoryMcp).toBe('unavailable');
   for (const mode of [undefined, 'auto'] as const) {
     // Native Linux and the helper resolver seam above admit memory; Windows arm64 has no backend.

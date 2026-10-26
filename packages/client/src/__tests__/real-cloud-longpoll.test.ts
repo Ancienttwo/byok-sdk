@@ -45,12 +45,11 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
   it('offer -> claim -> started -> progress -> complete all travel over GET /byok/events + POST /byok/messages', async () => {
     cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, mailboxFallbackMs: 20 });
 
-    const workspaceRoot = await tmpDir('byok-cloud-e2e-workspace-');
     const storeDir = await tmpDir('byok-cloud-e2e-store-');
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: cloud.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: cloud.url, storeDir },
       [adapter],
       {
         // Keep retries short while exercising the only daemon transport.
@@ -111,7 +110,6 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
 
   it('admits and runs an Agent offer only after long-poll publishes agent-home-contract', async () => {
     cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, mailboxFallbackMs: 20 });
-    const workspaceRoot = await tmpDir('byok-cloud-agent-workspace-');
     const storeDir = await tmpDir('byok-cloud-agent-store-');
     const hostStorageRoot = await tmpDir('byok-cloud-agent-home-');
     const adapter = new StubRuntimeAdapter('pi');
@@ -121,7 +119,6 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
         productName: 'Test',
         productId: 'test-product',
         serverUrl: cloud.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
         agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
@@ -162,7 +159,6 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
   it('host cancellation interrupts the running session and the device acknowledges cancellation over long-poll', async () => {
     cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, mailboxFallbackMs: 20 });
 
-    const workspaceRoot = await tmpDir('byok-cloud-cancel-workspace-');
     const storeDir = await tmpDir('byok-cloud-cancel-store-');
     const adapter = new StubRuntimeAdapter();
 
@@ -172,7 +168,6 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
         productName: 'Test',
         productId: 'test-product',
         serverUrl: cloud.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir,

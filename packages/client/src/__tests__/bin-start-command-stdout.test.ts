@@ -45,7 +45,6 @@ function config(storeDir: string): DaemonConfig {
     productName: 'Acme',
     productId: 'acme-stdout',
     serverUrl: 'http://127.0.0.1:9',
-    workspaceRoot: storeDir,
     agentHome: testAgentHomeConfig(),
     storeDir,
   };

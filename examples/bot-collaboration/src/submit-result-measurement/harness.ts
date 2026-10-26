@@ -321,7 +321,7 @@ async function openHost(options: RunCellOptions): Promise<Host> {
   const recorder = new AdapterEventRecorder();
   const daemon = createDaemonWithAdapters({
     productId: PRODUCT_ID, productName: 'submit_result measurement', localAgentRelease: { version: '0.0.0-measurement' },
-    serverUrl: `http://127.0.0.1:${port}`, workspaceRoot: path.join(options.workRoot, 'workspace'), storeDir: path.join(options.workRoot, 'sdk'),
+    serverUrl: `http://127.0.0.1:${port}`, storeDir: path.join(options.workRoot, 'sdk'),
     agentHome: { hostStorageRoot: homes }, agentEgress: { policy: EGRESS_POLICY }, ...DAEMON_LIMITS,
   }, options.adapters().map(adapter => recorder.wrap(adapter)), { deviceCredentials: new InMemoryDeviceCredentialStore() });
   const close = async () => {

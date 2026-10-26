@@ -121,7 +121,7 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
     });
     const runner = new TaskRunner({
       getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-      adapters: [adapter], workspaceRoot: path.join(root, 'workspace'),
+      adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot: path.join(root, 'home') }),
       agentEgressPolicy: policy, agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'draft-device', tenantId: 'draft-tenant', productId: 'sealed-draft', storeDir,

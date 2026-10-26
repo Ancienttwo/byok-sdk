@@ -60,7 +60,7 @@ try {
     const config = { productId: `packed-${entry}-${randomUUID()}`, productName: 'Packed MCP', serverUrl, storeDir,
       ...(keychain === undefined ? {} : { deviceCredentials: { macosKeychainPath: keychain.path } }),
       agentHome: { hostStorageRoot: path.join(storeDir, 'homes') }, agentEgress: { policy },
-      workspaceRoot: path.join(storeDir, 'work'), runtimeAllowlist: ['codex'], serviceEnrollment: { enabled: true },
+      runtimeAllowlist: ['codex'], serviceEnrollment: { enabled: true },
       mcpToolsets: { probe: { mcpServers: { echo: { command: process.execPath,
         args: [fileURLToPath(new URL('../src/__tests__/fixtures/toolset-echo-mcp.mjs', import.meta.url)), audit] } } } } };
     const pairing = await cloud.createPairingCode(tenant, { productId: config.productId });

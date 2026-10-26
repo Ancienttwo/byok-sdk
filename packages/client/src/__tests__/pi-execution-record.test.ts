@@ -57,7 +57,6 @@ async function runPi(trajectory?: string): Promise<{ sent: Envelope[]; records: 
   const published = new Promise<void>(resolve => { recorded = resolve; });
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }), spawnFn })],
-    workspaceRoot: path.join(directory, 'workspace'),
     ...testAgentHomeDeps(),
     deviceId: 'pi-record-device',
     send: envelope => { sent.push(envelope); },

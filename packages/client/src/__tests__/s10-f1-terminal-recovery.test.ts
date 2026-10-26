@@ -54,7 +54,7 @@ async function cancellationFixture(overrides: Partial<TaskRunnerDeps> = {}) {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
     const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-      adapters: [adapter], workspaceRoot: await temporary('byok-publish-cancel-workspace-'),
+      adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-cancel',
       send: envelope => sent.push(envelope),

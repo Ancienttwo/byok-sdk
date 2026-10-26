@@ -119,9 +119,8 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     productId: string,
     adapter: StubRuntimeAdapter,
   ): Promise<{ daemon: Daemon; config: DaemonConfig; storeDir: string }> {
-    const workspaceRoot = await tmpDir(`byok-stop-parity-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-stop-parity-${productId}-store-`);
-    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
+    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, storeDir };
     const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } }, ...(config) }, [adapter]);
     await built.pair('pairing-code');
     await built.start();
@@ -260,13 +259,11 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
   }, 10000);
 
   it('retains the mutation lease when a writer teardown barrier fails, then releases it after a clean retry', async () => {
-    const workspaceRoot = await tmpDir('byok-stop-barrier-ws-');
     const storeDir = await tmpDir('byok-stop-barrier-store-');
     const config: DaemonConfig = {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId: 'acme-stop-barrier',
       serverUrl: server.url,
-      workspaceRoot,
       agentHome: testAgentHomeConfig(),
       storeDir,
     };
@@ -293,14 +290,12 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
 
   it('single-flights concurrent stops and retains ownership until a timed-out late task writer settles', async () => {
     const adapter = new StubRuntimeAdapter('pi');
-    const workspaceRoot = await tmpDir('byok-stop-concurrent-ws-');
     const storeDir = await tmpDir('byok-stop-concurrent-store-');
     daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-stop-concurrent',
         serverUrl: server.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         storeDir,
         shutdownGraceMs: 20,

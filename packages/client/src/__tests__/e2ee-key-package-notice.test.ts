@@ -39,7 +39,7 @@ async function setup() {
   const daemon = createDaemonWithAdapters({
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Key notice test', productId,
-    serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
+    serverUrl: server.url, storeDir,
   }, [new StubRuntimeAdapter('pi')]);
   daemons.push(daemon);
   const web = await E2eeWebClient.create(server.e2ee);

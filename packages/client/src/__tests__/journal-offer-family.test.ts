@@ -80,7 +80,7 @@ async function setup(type: string) {
   const hostStorageRoot = path.join(root, 'home');
   const config: DaemonConfig = {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Journal test', productId: 'journal-test',
-    serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
+    serverUrl: server.url, storeDir,
     agentHome: { hostStorageRoot },
     agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
   };

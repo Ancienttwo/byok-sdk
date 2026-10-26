@@ -46,14 +46,12 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
 
   it('writes every record to the audit log and the identical JSON line to stdout, then stops cleanly on abort', async () => {
     const adapter = new StubRuntimeAdapter('pi');
-    const workspaceRoot = await tmpDir('byok-start-workspace-');
     const storeDir = await tmpDir('byok-start-store-');
     daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-start-product',
         serverUrl: server.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         storeDir,
         branding: { displayName: 'Acme Coder' },
@@ -67,7 +65,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     let ready = false;
 
     const startPromise = runStartCommand(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-product', serverUrl: server.url, workspaceRoot, storeDir, branding: { displayName: 'Acme Coder' } },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-product', serverUrl: server.url, storeDir, branding: { displayName: 'Acme Coder' } },
       {
         daemon,
         log: (l) => lines.push(l),
@@ -118,7 +116,6 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
 
   it('an audit-log write failure is reported via error() but does not stop the daemon from starting', async () => {
     const adapter = new StubRuntimeAdapter('pi');
-    const workspaceRoot = await tmpDir('byok-start-workspace-badlog-');
     const parent = await tmpDir('byok-start-store-badlog-parent-');
     // storeDir itself is a FILE, not a directory — every audit append's own
     // `fs.mkdir(storeDir, {recursive:true})` will reject.
@@ -126,7 +123,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     await fs.writeFile(storeDir, 'x');
 
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, workspaceRoot, storeDir: parent },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, storeDir: parent },
       [adapter],
     );
     // Daemon itself uses `parent` (a real dir) for its OWN device store, but
@@ -139,7 +136,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     let ready = false;
 
     const startPromise = runStartCommand(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, storeDir },
       {
         daemon,
         log: (l) => lines.push(l),
@@ -164,11 +161,10 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
   it('#395 sentinel: no task content reaches stdout, stderr, audit.jsonl or the support bundle', async () => {
     const SENTINEL = 'SENTINEL-395';
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available', version: SENTINEL });
-    const workspaceRoot = await tmpDir('byok-start-workspace-sentinel-');
     const storeDir = await tmpDir('byok-start-store-sentinel-');
     const config = {
       storage: { scratchRoot: testScratchRoot() },
-      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-sentinel', serverUrl: server.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(),
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-sentinel', serverUrl: server.url, storeDir, agentHome: testAgentHomeConfig(),
     };
     daemon = createDaemonWithAdapters(config, [adapter]);
     await daemon.pair('pairing-code');
@@ -263,7 +259,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     controller.abort();
     const stderr: string[] = [];
     await expect(runStartCommand(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-disposal', serverUrl: 'http://example.invalid', workspaceRoot: '/ws', storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-disposal', serverUrl: 'http://example.invalid', storeDir },
       { daemon: fakeDaemon, log: () => {}, error: (line) => stderr.push(line), signal: controller.signal },
     )).rejects.toBe(failure);
     expect(stderr).toEqual([`cleanup failed during shutdown: RuntimeDisposalFailure stage=cleanup reasonBytes=${Buffer.byteLength(failure.message, 'utf8')}`]);
@@ -304,7 +300,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
 
     await expect(
       runStartCommand(
-        { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-throw', serverUrl: 'http://example.invalid', workspaceRoot: '/ws', storeDir },
+        { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-throw', serverUrl: 'http://example.invalid', storeDir },
         { daemon: fakeDaemon, signal: new AbortController().signal },
       ),
     ).rejects.toThrow(/boom-start/);
@@ -314,10 +310,9 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
   });
 
   it('#394: a revoked device ends start as halted/device_revoked after one authentication, recorded in the audit log', async () => {
-    const workspaceRoot = await tmpDir('byok-start-workspace-');
     const storeDir = await tmpDir('byok-start-store-revoked-');
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-revoked', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-revoked', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter('pi')],
     );
     const record = await daemon.pair('pairing-code');
@@ -326,7 +321,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     const errors: string[] = [];
 
     const outcome = await runStartCommand(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-revoked', serverUrl: server.url, workspaceRoot, storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-revoked', serverUrl: server.url, storeDir },
       { daemon, log: () => {}, error: (line) => errors.push(line), signal: new AbortController().signal },
     );
 
@@ -364,7 +359,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     const errors: string[] = [];
 
     const outcome = await runStartCommand(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-unpaired', serverUrl: 'http://example.invalid', workspaceRoot: '/ws', storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-unpaired', serverUrl: 'http://example.invalid', storeDir },
       { daemon: fakeDaemon, error: (line) => errors.push(line), log: () => {}, signal: new AbortController().signal },
     );
 
@@ -402,7 +397,7 @@ describe('bin/commands/start: a crash after start (#394)', () => {
     const storeDir = await tmpDir('byok-start-store-crashed-');
 
     await expect(runStartCommand(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-crashed', serverUrl: 'http://example.invalid', workspaceRoot: '/ws', storeDir },
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-crashed', serverUrl: 'http://example.invalid', storeDir },
       { daemon: fakeDaemon, log: () => {}, error: () => {}, signal: new AbortController().signal },
     )).rejects.toBeInstanceOf(DaemonCrashedError);
     expect(stop).toHaveBeenCalledTimes(1);

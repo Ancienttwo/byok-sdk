@@ -86,7 +86,7 @@ async function device(keyring: SealedScopeKeyring = new GoldenKeyring()) {
   const adapter = new StubRuntimeAdapter('pi');
   const runner = new TaskRunner({
     getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-    adapters: [adapter], workspaceRoot: path.join(root, 'workspace'),
+    adapters: [adapter],
     agentHome: new AgentHomeManager({ hostStorageRoot: path.join(root, 'home') }),
     agentEgressPolicy: first.payload.egressPolicy as never, agentSessionHandoffs: new AgentSessionHandoffStore(),
     deviceId: 'device-golden-1', tenantId: GOLDEN_TENANT, productId: 'sealed-routine', storeDir,

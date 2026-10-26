@@ -179,7 +179,6 @@ describe('Agent memory MCP local authority', () => {
 
   itWithMemoryMcp('declines a named strict Agent runtime that cannot project required memory MCP before claim', async () => {
     const hostStorageRoot = await root();
-    const workspaceRoot = await root();
     const storeDir = await root();
     const sent: Envelope[] = [];
     const adapter = new StubRuntimeAdapter('codex', { kind: 'available' }, {
@@ -190,7 +189,6 @@ describe('Agent memory MCP local authority', () => {
     });
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
-      workspaceRoot,
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'device-memory-mcp-toolsets',
@@ -226,7 +224,6 @@ describe('Agent memory MCP local authority', () => {
 
   itWithMemoryMcp('skips an unsupported runtime during automatic strict Agent selection and injects required memory MCP into the selected runtime', async () => {
     const hostStorageRoot = await root();
-    const workspaceRoot = await root();
     const storeDir = await root();
     const unsupported = new StubRuntimeAdapter('unsupported-memory-runtime', { kind: 'available' }, {
       steer: true,
@@ -243,7 +240,6 @@ describe('Agent memory MCP local authority', () => {
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [unsupported, supported],
       getServerCapabilities: () => ['custom-harness'],
-      workspaceRoot,
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'device-memory-mcp-selection',

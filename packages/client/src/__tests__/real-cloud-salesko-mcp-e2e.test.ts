@@ -42,7 +42,6 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Salesko Personal Agent',
         productId: 'salesko',
         serverUrl: cloud.url,
-        workspaceRoot: await tmpDir('byok-hosted-salesko-mcp-workspace-'),
         agentHome: testAgentHomeConfig(),
         agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir: await tmpDir('byok-hosted-salesko-mcp-store-'),

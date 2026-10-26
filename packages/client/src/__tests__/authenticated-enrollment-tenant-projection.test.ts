@@ -107,7 +107,6 @@ describe('authenticated enrollment tenant projection', () => {
   it('keeps a legacy record unusable for start/load but lets explicit pairing atomically replace it', async () => {
     server = await TestServer.start();
     server.setPairingTenantId('repair-code', 'tenant-repaired');
-    const workspaceRoot = await tmpDir('byok-enrollment-repair-workspace-');
     const storeDir = await tmpDir('byok-enrollment-repair-store-');
     await fs.writeFile(path.join(storeDir, 'device.json'), JSON.stringify({
       deviceId: 'legacy-device',
@@ -122,7 +121,6 @@ describe('authenticated enrollment tenant projection', () => {
         productName: 'Enrollment repair test',
         productId: 'enrollment-repair-test',
         serverUrl: server.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         storeDir,
       },
@@ -143,7 +141,6 @@ describe('authenticated enrollment tenant projection', () => {
     server.setPairingTenantId('legacy-with-authority-code', 'tenant-legacy-authority');
     const productId = 'legacy-authority-refusal-test';
     const storeDir = await tmpDir('byok-enrollment-legacy-authority-');
-    const workspaceRoot = await tmpDir('byok-enrollment-legacy-authority-workspace-');
     const store = createTestDeviceStore(storeDir, undefined, productId);
     const initial = new AuthManager({ serverUrl: server.url, store });
     await initial.pair('legacy-with-authority-code');
@@ -168,7 +165,6 @@ describe('authenticated enrollment tenant projection', () => {
         productName: 'Legacy authority refusal test',
         productId,
         serverUrl: server.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         storeDir,
       },
@@ -278,7 +274,6 @@ describe('authenticated enrollment tenant projection', () => {
     server = await TestServer.start();
     server.setPairingTenantId('active-first-code', 'tenant-active-first');
     server.setPairingTenantId('active-replacement-code', 'tenant-active-replacement');
-    const workspaceRoot = await tmpDir('byok-enrollment-active-workspace-');
     const storeDir = await tmpDir('byok-enrollment-active-store-');
     const hostStorageRoot = await tmpDir('byok-enrollment-active-agent-home-');
     daemon = createDaemonWithAdapters(
@@ -287,7 +282,6 @@ describe('authenticated enrollment tenant projection', () => {
         productName: 'Enrollment active test',
         productId: 'enrollment-active-test',
         serverUrl: server.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
         agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
@@ -316,7 +310,6 @@ describe('authenticated enrollment tenant projection', () => {
     server = await TestServer.start();
     server.setPairingTenantId('daemon-code', 'tenant-daemon');
     server.setAckCapabilities(['agent-egress-reliable-ack']);
-    const workspaceRoot = await tmpDir('byok-enrollment-workspace-');
     const storeDir = await tmpDir('byok-enrollment-store-');
     const hostStorageRoot = await tmpDir('byok-enrollment-agent-home-');
     const agentRef = { agentId: 'enrollment-agent', profileRevision: 'r1' };
@@ -337,7 +330,6 @@ describe('authenticated enrollment tenant projection', () => {
         productName: 'Enrollment test',
         productId: 'enrollment-test',
         serverUrl: server.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
         agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },

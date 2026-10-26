@@ -1,8 +1,5 @@
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
@@ -10,10 +7,6 @@ import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
-
-async function tmpDir(prefix: string): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
-}
 
 const unusedBlobClient: BlobResolver = {
   resolveInstruction: async () => {
@@ -32,7 +25,6 @@ async function makeRunner(
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     ...overrides,
     adapters: [adapter],
-    workspaceRoot: await tmpDir('byok-taskrunner-workspace-'),
     ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => {

@@ -55,12 +55,11 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
   it('a polled task.steer whose handler throws leaves the persisted cursor unadvanced; a re-poll redelivers it and only then advances', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
@@ -151,12 +150,11 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
   it('a polled task.steer whose handler throws SteerUnsupportedError is recorded and acked: the cursor advances and it is never redelivered', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },

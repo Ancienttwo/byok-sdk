@@ -43,12 +43,11 @@ describe('re-pair does not inherit a stale cursor from the previous device (find
 
   it('a fresh device (new deviceId from the server) receives its own low-seq envelopes after re-pairing, on the same storeDir', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-'); // shared across both pair()/start() cycles below
     const adapterA = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapterA],
       LONG_POLL_DAEMON_OPTIONS,
     );
@@ -78,7 +77,7 @@ describe('re-pair does not inherit a stale cursor from the previous device (find
 
     const adapterB = new StubRuntimeAdapter();
     const daemon2 = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapterB],
       LONG_POLL_DAEMON_OPTIONS,
     );

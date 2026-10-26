@@ -124,7 +124,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
   const daemon = createDaemonWithAdapters({
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-summary-boundary-test' }, productName: 'summary boundary test', productId: options.productId,
-    serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir,
+    serverUrl: http.baseUrl, storeDir,
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     // A result-document offer is admitted only by a daemon that journals its terminals.
   }, [adapter], { deviceCredentials: testDeviceCredentials(options.productId) });

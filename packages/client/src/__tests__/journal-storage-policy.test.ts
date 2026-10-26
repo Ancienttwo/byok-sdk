@@ -32,7 +32,7 @@ describe('storage configuration and protected authority', () => {
     expect(() => resolveStorageConfig(root, { scratchRoot: '/'+ 'x'.repeat(200) })).toThrow(ScratchRootPathError);
   });
   it('rejects removed configuration and old journal ports instead of silently disabling retention', () => {
-    const config = { localAgentRelease: { version: '0.0.0-test' }, productName:'Retention',productId:'retention-policy',serverUrl:'http://127.0.0.1:1',workspaceRoot:testScratchRoot(),storeDir:testScratchRoot(),storage:{scratchRoot:testScratchRoot()} };
+    const config = { localAgentRelease: { version: '0.0.0-test' }, productName:'Retention',productId:'retention-policy',serverUrl:'http://127.0.0.1:1',storeDir:testScratchRoot(),storage:{scratchRoot:testScratchRoot()} };
     expect(() => createDaemonWithAdapters({ ...config, hostedJournal: { mode:'sqlite',storagePolicy:BASE } } as never,[new StubRuntimeAdapter()])).toThrow(DaemonConfigFieldRemovedError);
     expect(() => createDaemonWithAdapters(config,[new StubRuntimeAdapter()],{hostedJournal:{pressureEngine:{}}} as never)).toThrow(DaemonConfigFieldRemovedError);
     expect(() => createDaemonWithAdapters(config,[new StubRuntimeAdapter()],{journal:{} as never})).toThrow(/confirmed-retention ports/);

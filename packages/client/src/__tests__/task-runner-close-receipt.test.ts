@@ -29,7 +29,6 @@ async function makeRunner(overrides: Partial<Pick<TaskRunnerDeps, 'awaitTerminal
   const sent: Envelope[] = [];
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: path.join(directory, 'workspace'),
     ...testAgentHomeDeps(),
     deviceId: 'close-receipt-device',
     send: envelope => { sent.push(envelope); },

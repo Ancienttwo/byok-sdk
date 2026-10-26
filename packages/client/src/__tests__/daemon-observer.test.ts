@@ -63,10 +63,9 @@ describe('daemon local observability (DaemonObserver)', () => {
     adapter: StubRuntimeAdapter,
     storeDirOverride?: string,
   ): Promise<{ daemon: Daemon; storeDir: string }> {
-    const workspaceRoot = await tmpDir('byok-observer-workspace-');
     const storeDir = storeDirOverride ?? (await tmpDir('byok-observer-store-'));
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer', serverUrl: server.url, storeDir },
       [adapter],
     );
     await daemon.pair('pairing-code');
@@ -77,10 +76,9 @@ describe('daemon local observability (DaemonObserver)', () => {
   it('emits the expected DaemonEvent sequence for a stub-adapter task end-to-end (offered -> ... -> completed), plus pairing/connection/runtime-detection events', async () => {
     const adapter = new StubRuntimeAdapter();
     const events: DaemonEvent[] = [];
-    const workspaceRoot = await tmpDir('byok-observer-workspace-');
     const storeDir = await tmpDir('byok-observer-store-');
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer', serverUrl: server.url, storeDir },
       [adapter],
     );
     // Subscribe BEFORE pair()/start() so `paired`/`runtimes-detected`/`connection` are all caught too.
@@ -132,14 +130,12 @@ describe('daemon local observability (DaemonObserver)', () => {
     // Exercises a non-retryable pre-claim decline: a custom harness id
     // combined with a built-in runtime selection is refused before claim.
     const adapter = new StubRuntimeAdapter();
-    const workspaceRoot = await tmpDir('byok-observer-workspace-');
     const storeDir = await tmpDir('byok-observer-store-');
     daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-observer-decline',
         serverUrl: server.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         storeDir,
       },
@@ -225,10 +221,9 @@ describe('daemon local observability (DaemonObserver)', () => {
   });
 
   it('unpair() is safe to call on a daemon that was never paired/started', async () => {
-    const workspaceRoot = await tmpDir('byok-observer-workspace-');
     const storeDir = await tmpDir('byok-observer-store-');
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer-fresh', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer-fresh', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter()],
     );
     await expect(daemon.unpair()).resolves.toBeUndefined();
@@ -533,10 +528,9 @@ describe('daemon local observability (DaemonObserver)', () => {
     });
 
     it('approve()/reject() before start() throw a clear precondition error', async () => {
-      const workspaceRoot = await tmpDir('byok-observer-workspace-');
       const storeDir = await tmpDir('byok-observer-store-');
       daemon = createDaemonWithAdapters(
-        {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer-not-started', serverUrl: server.url, workspaceRoot, storeDir },
+        {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer-not-started', serverUrl: server.url, storeDir },
         [new StubRuntimeAdapter()],
       );
       await expect(daemon.approve('task-x', { approvalId: 'approval-x' })).rejects.toThrow(/not started/i);

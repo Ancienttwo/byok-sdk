@@ -200,14 +200,12 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
   });
 
   async function start(options: { enabled: boolean; productId: string }): Promise<{ storeDir: string; config: DaemonConfig }> {
-    const workspaceRoot = await tmpDir(`byok-prep-${options.productId}-ws-`);
     const storeDir = await tmpDir(`byok-prep-${options.productId}-store-`);
     const config: DaemonConfig = {
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Acme',
       productId: options.productId,
       serverUrl: server.url,
-      workspaceRoot,
       agentHome: testAgentHomeConfig(),
       storeDir,
       mcpToolsets: { ...TOOLSETS },
@@ -233,7 +231,6 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
 
   it('starts with a leftover version-5 record log: only the preparation lane refuses, typed, and other tasks run', async () => {
     const productId = 'acme-prep-v5-log';
-    const workspaceRoot = await tmpDir(`byok-prep-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-prep-${productId}-store-`);
     // A record log exactly as a pre-cut build left it.
     const logPath = path.join(storeDir, 'input-preparation', 'records.jsonl');
@@ -252,7 +249,6 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
       productName: 'Acme',
       productId,
       serverUrl: server.url,
-      workspaceRoot,
       agentHome: testAgentHomeConfig(),
       storeDir,
       mcpToolsets: { ...TOOLSETS },
@@ -305,7 +301,6 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
   });
 
   it('refuses a daemon whose configured limits policy is invalid, at construction', async () => {
-    const workspaceRoot = await tmpDir('byok-prep-badpolicy-ws-');
     const storeDir = await tmpDir('byok-prep-badpolicy-store-');
     expect(() =>
       createDaemonWithAdapters(
@@ -314,7 +309,6 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
           productName: 'Acme',
           productId: 'acme-prep-badpolicy',
           serverUrl: server.url,
-          workspaceRoot,
           agentHome: testAgentHomeConfig(),
           storeDir,
           inputPreparation: {

@@ -57,7 +57,6 @@ async function fixture(serverUrl: string, macosKeychainPath?: string): Promise<{
     productName: 'Acme',
     productId: 'acme-login-shell',
     serverUrl,
-    workspaceRoot: home,
     agentHome: testAgentHomeConfig(),
     storeDir,
     runtimeAllowlist: ['claude'],

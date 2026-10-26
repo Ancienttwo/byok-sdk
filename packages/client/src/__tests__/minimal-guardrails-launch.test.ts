@@ -224,7 +224,6 @@ describe('daemon admission', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
-        workspaceRoot: await tempDir('byok-minimal-guardrails-workspace-'),
         agentHome: testAgentHomeConfig(),
         storeDir: await tempDir('byok-minimal-guardrails-store-'),
       },

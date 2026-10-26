@@ -28,7 +28,6 @@ interface Config {
   readonly productId: string;
   readonly serverUrl: string;
   readonly storeDir: string;
-  readonly workspaceRoot: string;
   readonly controlDir: string;
   readonly pairingCode?: string;
   readonly action?: 'run' | 'unpair';
@@ -239,7 +238,6 @@ const daemon = createDaemonWithAdapters(
     productName: 'Execution recovery fixture',
     productId: config.productId,
     serverUrl: config.serverUrl,
-    workspaceRoot: config.workspaceRoot,
     storage: { scratchRoot: config.scratchRoot }, storeDir: config.storeDir,
     deviceCredentials: config.deviceCredentials,
     sdkHelperHost: { mode: 'self-executable' },

@@ -142,7 +142,6 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
       setFreeBytes: (value: number) => void;
     }> {
       const storeDir = await tmpDir('byok-pressure-daemon-store-');
-      const workspaceRoot = await tmpDir('byok-pressure-daemon-workspace-');
       const journal = new SqliteLocalTaskJournal({ storeDir });
       let freeBytes = initialFreeBytes;
       let sweeper!: RetentionSweeper;
@@ -161,7 +160,6 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
           localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
           productId: 'test-product-pressure',
           serverUrl: server.url,
-          workspaceRoot,
           agentHome: testAgentHomeConfig(),
           storeDir,
           storage: { scratchRoot: testScratchRoot(), budget: freeDrivenPolicy() },
@@ -250,7 +248,6 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
     // -----------------------------------------------------------------
     it('10: an IO failure before the commit leaves no half row and freezes the cursor; the redelivery then succeeds', async () => {
       const storeDir = await tmpDir('byok-pressure-10-store-');
-      const workspaceRoot = await tmpDir('byok-pressure-10-workspace-');
       let failing = true;
       let faultFired = false;
       const journal = new SqliteLocalTaskJournal({
@@ -270,7 +267,6 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
           localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
           productId: 'test-product-pressure',
           serverUrl: server.url,
-          workspaceRoot,
           agentHome: testAgentHomeConfig(),
           storeDir,
           storage: { scratchRoot: testScratchRoot(), budget: freeDrivenPolicy() },

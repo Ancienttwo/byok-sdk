@@ -84,7 +84,6 @@ async function readerRunner(adapter: StubRuntimeAdapter): Promise<{
   const sent: Envelope[] = [];
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: await temporary('byok-outbound-reason-workspace-'),
     agentHome: new AgentHomeManager({ hostStorageRoot }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),
     deviceId: 'device-outbound-reason',

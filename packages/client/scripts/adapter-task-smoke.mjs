@@ -190,11 +190,9 @@ try {
   const home = path.resolve(suppliedHome ?? path.join(workDir, 'home'));
   const tmpDir = path.join(workDir, 'tmp');
   const storeDir = path.join(workDir, 'store');
-  const workspaceRoot = path.join(workDir, 'workspace');
   await Promise.all([
     fs.mkdir(home, { recursive: true, mode: 0o700 }),
     fs.mkdir(tmpDir, { recursive: true, mode: 0o700 }),
-    fs.mkdir(workspaceRoot, { recursive: true, mode: 0o700 }),
   ]);
 
   // The detection fixture prints a version and exits 0 for any other argument.
@@ -304,7 +302,6 @@ try {
       productName: 'Adapter Task Smoke',
       productId,
       serverUrl,
-      workspaceRoot,
       storeDir,
       storage: { scratchRoot },
       runtimeAllowlist: runtimes,

@@ -34,10 +34,9 @@ describe('blob client (protocol §7)', () => {
   });
 
   async function setupDaemon(adapter: RuntimeAdapter): Promise<Daemon> {
-    const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
       [adapter],
     );
     await daemon.pair('code');
@@ -56,7 +55,7 @@ describe('blob client (protocol §7)', () => {
     server.send(
       createEnvelope(
         'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(), 
+        { agentRef: freshTestAgentRef(),
           instruction: {
             blobRef: {
               blobId: 'instr-blob-1',
@@ -88,7 +87,7 @@ describe('blob client (protocol §7)', () => {
     server.send(
       createEnvelope(
         'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(), 
+        { agentRef: freshTestAgentRef(),
           instruction: {
             blobRef: {
               blobId: 'instr-blob-bundled-prepared',
@@ -130,7 +129,7 @@ describe('blob client (protocol §7)', () => {
     server.send(
       createEnvelope(
         'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(), 
+        { agentRef: freshTestAgentRef(),
           instruction: {
             blobRef: {
               blobId: 'no-such-blob',
@@ -161,7 +160,7 @@ describe('blob client (protocol §7)', () => {
     server.send(
       createEnvelope(
         'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(), 
+        { agentRef: freshTestAgentRef(),
           instruction: {
             blobRef: {
               blobId: 'instr-blob-tampered',

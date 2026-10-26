@@ -23,7 +23,7 @@ async function config(): Promise<DaemonConfig> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-detect-routing-'));
   dirs.push(root);
   return { localAgentRelease: { version: '0.0.0-test' }, productName: 'Observation', productId: 'observation',
-    workspaceRoot: root, storeDir: path.join(root, 'store'), serverUrl: 'http://example.invalid', runtimeAllowlist: ['codex'] };
+    storeDir: path.join(root, 'store'), serverUrl: 'http://example.invalid', runtimeAllowlist: ['codex'] };
 }
 function refusingAdapter() {
   const adapter = new StubRuntimeAdapter('codex');

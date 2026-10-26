@@ -22,8 +22,7 @@ describe('Agent-only daemon admission (#925)', () => {
     await server.close();
   });
 
-  async function startDaemon(options: { workspaceRoot?: boolean; agentHome?: boolean } = {}): Promise<StubRuntimeAdapter> {
-    const workspaceRoot = options.workspaceRoot === false ? undefined : await temp('byok-agent-only-workspace-');
+  async function startDaemon(options: { agentHome?: boolean } = {}): Promise<StubRuntimeAdapter> {
     const storeDir = await temp('byok-agent-only-store-');
     const hostStorageRoot = await temp('byok-agent-only-home-');
     const adapter = new StubRuntimeAdapter('pi');
@@ -32,7 +31,6 @@ describe('Agent-only daemon admission (#925)', () => {
       productName: 'Agent-only test',
       productId: `agent-only-${path.basename(storeDir)}`,
       serverUrl: server.url,
-      ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
       storeDir,
       ...(options.agentHome === false ? {} : { agentHome: { hostStorageRoot } }),
     }, [adapter]);
@@ -67,7 +65,6 @@ describe('Agent-only daemon admission (#925)', () => {
       productName: 'Agent-only test',
       productId: `agent-only-construction-${path.basename(root)}`,
       serverUrl: server.url,
-      workspaceRoot: path.join(root, 'workspace'),
       storeDir: path.join(root, 'store'),
       agentHome: { hostStorageRoot },
     }, [new StubRuntimeAdapter('pi')]);
@@ -97,8 +94,8 @@ describe('Agent-only daemon admission (#925)', () => {
     expect(adapter.sessions).toHaveLength(1);
   });
 
-  it('runs an Agent offer without a workspaceRoot (#319)', async () => {
-    const adapter = await startDaemon({ workspaceRoot: false });
+  it('runs an Agent offer in the Agent home (#319)', async () => {
+    const adapter = await startDaemon();
     server.send(createEnvelope('task.offer_for_agent', {
       instruction: 'agent work', agentRef: { agentId: 'no-root-agent', profileRevision: 'r1' },
     }, { taskId: 'no-root-agent-offer', seq: server.nextSeq() }));

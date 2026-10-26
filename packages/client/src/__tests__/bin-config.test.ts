@@ -17,7 +17,7 @@ describe('bin/config: loadConfig', () => {
     const configPath = path.join(dir, 'config.json');
     await fs.writeFile(
       configPath,
-      JSON.stringify({ productName: 'Acme', productId: 'acme', serverUrl: 'http://old.example', workspaceRoot: '/ws' }),
+      JSON.stringify({ productName: 'Acme', productId: 'acme', serverUrl: 'http://old.example', }),
     );
 
     const config = loadConfig(configPath, { serverUrl: 'http://new.example' });
@@ -26,7 +26,6 @@ describe('bin/config: loadConfig', () => {
       productName: 'Acme',
       productId: 'acme',
       serverUrl: 'http://new.example',
-      workspaceRoot: '/ws',
       localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE,
     });
   });
@@ -40,7 +39,6 @@ describe('bin/config: loadConfig', () => {
         productName: 'Acme',
         productId: 'acme',
         serverUrl: 'http://example',
-        workspaceRoot: '/ws',
         authRequestDeadlineMs: 250,
       }),
     );
@@ -57,7 +55,6 @@ describe('bin/config: loadConfig', () => {
         productName: 'Acme',
         productId: 'acme',
         serverUrl: 'http://example',
-        workspaceRoot: '/ws',
         localAgentRelease: { version: '9.9.9' },
       }),
     );
@@ -68,7 +65,6 @@ describe('bin/config: loadConfig', () => {
       productName: 'Acme',
       productId: 'acme',
       serverUrl: 'http://example',
-      workspaceRoot: '/ws',
       localAgentRelease: { version: '9.9.9' },
     } as never)).toThrow(/localAgentRelease.*distribution/i);
   });
@@ -103,7 +99,7 @@ describe('bin/config: loadConfig', () => {
     const sentinel = 'SENTINEL-395';
     try {
       await fs.writeFile(configPath, `{"secret":"${sentinel}", invalid}`);
-      const base = { productName: sentinel, productId: sentinel, serverUrl: sentinel, workspaceRoot: sentinel };
+      const base = { productName: sentinel, productId: sentinel, serverUrl: sentinel, };
       const cases: Array<[() => unknown, string]> = [
         [() => loadConfig(configPath), `config at "${configPath}" is not valid JSON`],
         [() => loadConfig(path.join(dir, 'missing.json')), `could not read config at "${path.join(dir, 'missing.json')}"; check the path and read permissions`],

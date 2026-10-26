@@ -45,7 +45,6 @@ async function makeRunner(options: RunnerOptions = {}) {
   const records: ExecutionRecord[] = [];
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: path.join(directory, 'workspace'),
     ...testAgentHomeDeps(),
     deviceId: 'execution-record-device',
     send: envelope => { sent.push(envelope); },
@@ -194,7 +193,7 @@ describe('TaskRunner execution record', () => {
     const sent: Envelope[] = [];
     const onExecutionRecord = vi.fn();
     const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-      adapters: [adapter], workspaceRoot: path.join(directory, 'workspace'), deviceId: 'execution-record-device',
+      adapters: [adapter], deviceId: 'execution-record-device',
       send: envelope => { sent.push(envelope); },
       blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },
       approvalRegistry: new ApprovalRegistry(),

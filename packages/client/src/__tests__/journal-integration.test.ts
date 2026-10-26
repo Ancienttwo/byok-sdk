@@ -178,14 +178,12 @@ describe('hosted journal integration (L-002)', () => {
     journal?: LocalTaskJournal,
   ): Promise<{ adapter: StubRuntimeAdapter; storeDir: string; deviceId: string }> {
     const adapter = new StubRuntimeAdapter('pi');
-    const workspaceRoot = await tmpDir('byok-journal-int-workspace-');
     const storeDir = await tmpDir('byok-journal-int-store-');
     daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-journal',
         serverUrl: server.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         storeDir,
         ...configOverrides,
@@ -297,7 +295,6 @@ describe('hosted journal integration (L-002)', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-journal',
         serverUrl: server.url,
-        workspaceRoot: await tmpDir('byok-journal-cfg-workspace-'),
         agentHome: testAgentHomeConfig(),
         storeDir: await tmpDir('byok-journal-cfg-store-'),
       };
@@ -405,7 +402,6 @@ describe('hosted journal integration (L-002)', () => {
             localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
             productId: 'test-product-journal',
             serverUrl: server.url,
-            workspaceRoot: await tmpDir('byok-journal-recover-workspace-'),
             agentHome: testAgentHomeConfig(),
             storeDir,
           },
@@ -473,7 +469,6 @@ async function makeRunner(
 ): Promise<TaskRunner> {
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: await tmpDir('byok-guard-workspace-'),
     ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => {

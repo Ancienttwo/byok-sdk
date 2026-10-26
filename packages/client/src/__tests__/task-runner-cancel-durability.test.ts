@@ -49,7 +49,7 @@ async function fixture(overrides: Partial<TaskRunnerDeps> = {}) {
   const awaitTerminalCommit = vi.fn(async () => { committing.resolve(); await committed.promise; });
   const runner = new TaskRunner({
     getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-    adapters: [adapter], workspaceRoot: path.join(root, 'workspace'),
+    adapters: [adapter],
     agentHome, agentSessionHandoffs: handoffs, deviceId: 'cancel-device',
     send: envelope => {
       sent.push(envelope);

@@ -91,7 +91,6 @@ async function makeHarness(): Promise<Harness> {
   const sent: Envelope[] = [];
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [piAdapter, claudeAdapter, codexAdapter],
-    workspaceRoot: await tmpDir('byok-taskrunner-env-workspace-'),
     ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => {

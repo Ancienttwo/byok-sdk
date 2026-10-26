@@ -66,12 +66,11 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     // an empty poll for its ~50s default. Readiness is the accepted handshake
     // `conn.hello`, so it does not wait for a poll at all.
     real = await startRealServer({ productId: 'test-product' });
-    const workspaceRoot = await tmpDir('byok-coldstart-workspace-');
     const storeDir = await tmpDir('byok-coldstart-store-');
     const adapter = new StubRuntimeAdapter();
     const traffic = recordTraffic();
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
     );
     const record = await daemon.pair((await real.createPairingCode()).code);
@@ -104,14 +103,13 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
 
   it('#391: every reconnect after a failed route handshakes with a fresh conn.hello before anything else', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
-    const workspaceRoot = await tmpDir('byok-resettle-workspace-');
     const storeDir = await tmpDir('byok-resettle-store-');
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     // The second poll fails; the session drops back to connecting and reconnects.
     const traffic = recordTraffic((index) => (index === 1 ? new Response('unavailable', { status: 503 }) : undefined));
     const lifecycles: unknown[] = [];
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [new StubRuntimeAdapter()],
       { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } },
     );
@@ -132,7 +130,6 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
 
   it('#391: opens only once the conn.hello is accepted, so Agent dispatch is admitted at once', async () => {
     real = await startRealServer({ productId: 'test-product' });
-    const workspaceRoot = await tmpDir('byok-hello-gate-workspace-');
     const storeDir = await tmpDir('byok-hello-gate-store-');
     const hostStorageRoot = await tmpDir('byok-hello-gate-home-');
     const nativeFetch = globalThis.fetch;
@@ -152,7 +149,6 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
         productName: 'Test',
         productId: 'test-product',
         serverUrl: real.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
         agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
@@ -184,7 +180,6 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
 
   it('aborts the active held GET when the daemon stops', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 5_000 });
-    const workspaceRoot = await tmpDir('byok-stop-workspace-');
     const storeDir = await tmpDir('byok-stop-store-');
     const adapter = new StubRuntimeAdapter();
     const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -197,7 +192,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     }) as typeof fetch);
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
@@ -222,12 +217,11 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     // a test that wants prompt polling cadence.
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         // Keep retry delays short for the test.
@@ -271,7 +265,6 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
 
   it('publishes agent-home-contract over long-poll before Agent dispatch admission', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
-    const workspaceRoot = await tmpDir('byok-agent-longpoll-workspace-');
     const storeDir = await tmpDir('byok-agent-longpoll-store-');
     const hostStorageRoot = await tmpDir('byok-agent-longpoll-home-');
     const adapter = new StubRuntimeAdapter('pi');
@@ -282,7 +275,6 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
         productName: 'Test',
         productId: 'test-product',
         serverUrl: real.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
         agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },

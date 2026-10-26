@@ -17,7 +17,7 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
     const adapter = new StubRuntimeAdapter();
     const release = adapter.blockStart();
     const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-      adapters: [adapter], deviceId: 'shutdown-device', workspaceRoot: path.join(dir, 'workspace'),
+      adapters: [adapter], deviceId: 'shutdown-device',
       send: event => { sent.push(event); },
       blobClient: {
         resolveInstruction: async () => { throw new Error('unexpected blob resolution'); },
@@ -25,7 +25,7 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
       },
       approvalRegistry: new ApprovalRegistry(), storeDir: dir, productId: 'shutdown-start',
     });
-    const offered = runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), 
+    const offered = runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),
       instruction: 'blocked startup',
     }, { taskId: 'starting-task', seq: 1 }));
     try {

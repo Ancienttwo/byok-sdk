@@ -55,7 +55,6 @@ describe('Agent memory guidance', () => {
 
   it('injects guidance and the reserved MCP into Agent tasks across the shared runtime seam', async () => {
     const hostStorageRoot = await makeRoot();
-    const workspaceRoot = await makeRoot();
     const storeDir = await makeRoot();
     const runtimes = ['pi', 'claude', 'codex'] as const;
     const adapters = runtimes.map((runtime) => new StubRuntimeAdapter(runtime, undefined, {
@@ -74,7 +73,6 @@ describe('Agent memory guidance', () => {
     };
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters,
-      workspaceRoot,
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'device-memory-guidance',
@@ -140,14 +138,12 @@ describe('Agent memory guidance', () => {
   it('rejects explicit hosted Agent memory configuration where the secure filesystem primitive is unavailable', async () => {
     if (isAgentMemorySecureFilesystemAvailable(process.platform === 'darwin')) return;
     const hostStorageRoot = await makeRoot();
-    const workspaceRoot = await makeRoot();
 
     expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Agent memory unsupported platform test',
       productId: 'agent-memory-unsupported-platform-test',
       serverUrl: 'http://localhost:1',
-      workspaceRoot,
       agentHome: { hostStorageRoot },
       agentMemory: {},
     }, [new StubRuntimeAdapter('pi')])).toThrow('requires a platform with safe descriptor-relative filesystem operations');
@@ -157,14 +153,12 @@ describe('Agent memory guidance', () => {
   it('rejects the removed product-owned helper configuration', async () => {
     if (isAgentMemorySecureFilesystemAvailable()) return;
     const hostStorageRoot = await makeRoot();
-    const workspaceRoot = await makeRoot();
     const helperBin = path.join(await makeRoot(), 'byok-agent-memory-fs');
     const config = {
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Agent memory external helper test',
       productId: 'agent-memory-external-helper-test',
       serverUrl: 'http://localhost:1',
-      workspaceRoot,
       agentHome: { hostStorageRoot },
       agentMemory: {},
       agentMemoryFilesystem: { helperBin },
@@ -184,13 +178,11 @@ describe('Agent memory guidance', () => {
 // `withHelperBin: false` under `auto` leaves out the memory MCP helper, which is admission `unavailable`.
 async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mcpToolsets = true, withHelperBin = true) {
   const hostStorageRoot = await makeRoot();
-  const workspaceRoot = await makeRoot();
   const storeDir = await makeRoot();
   const adapter = new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true, mcpToolsets });
   const sent: Envelope[] = [];
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot,
     agentHome: new AgentHomeManager({ hostStorageRoot }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),
     deviceId: 'device-memory-admission',

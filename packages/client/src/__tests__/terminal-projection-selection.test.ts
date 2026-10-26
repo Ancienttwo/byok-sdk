@@ -53,7 +53,6 @@ async function harness(overrides: Partial<TaskRunnerDeps> = {}) {
   const storeDir = await temporary('byok-result-control-');
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: await temporary('byok-result-workspace-'),
     agentHome: new AgentHomeManager({ hostStorageRoot }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),
     deviceId: 'device-result',

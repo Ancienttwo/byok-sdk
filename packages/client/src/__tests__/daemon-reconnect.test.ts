@@ -24,11 +24,10 @@ async function tmpDir(prefix: string): Promise<string> {
 
   it('persists the highest processed seq across a restart and sends it as conn.hello.cursor', async () => {
     server = await TestServer.start();
-    const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-'); // shared across both daemon instances below
 
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter()],
     );
     await daemon.pair('code');
@@ -46,7 +45,7 @@ async function tmpDir(prefix: string): Promise<string> {
     // persists), and it should know the cursor without ever having been told
     // directly: it's read back from disk.
     const daemon2 = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter()],
     );
     daemon = daemon2;
@@ -60,11 +59,10 @@ async function tmpDir(prefix: string): Promise<string> {
 
   it('dedupes a redelivered envelope whose seq is <= the already-processed cursor', async () => {
     server = await TestServer.start();
-    const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-');
 
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter()],
     );
     await daemon.pair('code');

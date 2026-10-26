@@ -49,14 +49,12 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
   });
 
   async function setup(adapters: RuntimeAdapter[], configOverrides: Partial<DaemonConfig> = {}): Promise<Daemon> {
-    const workspaceRoot = await tmpDir('byok-selection-workspace-');
     const storeDir = await tmpDir('byok-selection-store-');
     daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-selection',
         serverUrl: server.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         storeDir,
         ...configOverrides,
@@ -212,7 +210,6 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
 
     it('falsifier: missing Pi BYOK launcher must decline before claim, start, spawn, or workspace mutation', async () => {
       const taskId = 'task-pi-missing-launcher-falsifier';
-      const workspaceRoot = await tmpDir('byok-pi-falsifier-workspace-');
       const storeDir = await tmpDir('byok-pi-falsifier-store-');
       const spawnCalls: unknown[] = [];
       const pi = new PiAdapter({
@@ -228,7 +225,6 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
           localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
           productId: 'test-product-pi-falsifier',
           serverUrl: server.url,
-          workspaceRoot,
           agentHome: testAgentHomeConfig(),
           storeDir,
         },
@@ -240,7 +236,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       server.send(
         createEnvelope(
           'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(), 
+          { agentRef: freshTestAgentRef(),
             instruction: 'x',
             dispatchSelection: {
               lane: 'byok',
@@ -254,18 +250,13 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       );
 
       await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === taskId);
-      const workspaceExists = await fs
-        .stat(path.join(workspaceRoot, taskId))
-        .then(() => true)
-        .catch(() => false);
       expect({
         declined: server.received.some((envelope) => envelope.type === 'task.decline' && envelope.task_id === taskId),
         claimed: server.received.some((envelope) => envelope.type === 'task.claim' && envelope.task_id === taskId),
         prepares: prepareSpy.mock.calls.length,
         started: server.received.some((envelope) => envelope.type === 'task.started' && envelope.task_id === taskId),
         spawns: spawnCalls.length,
-        workspaceExists,
-      }).toEqual({ declined: true, claimed: false, prepares: 1, started: false, spawns: 0, workspaceExists: false });
+      }).toEqual({ declined: true, claimed: false, prepares: 1, started: false, spawns: 0 });
     });
 
     it('selects the adapter from dispatchSelection when the legacy runtime field is absent', async () => {
@@ -302,7 +293,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       server.send(
         createEnvelope(
           'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(), 
+          { agentRef: freshTestAgentRef(),
             instruction: 'x',
             runtime: 'claude',
             dispatchSelection: {

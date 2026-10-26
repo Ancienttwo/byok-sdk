@@ -62,9 +62,8 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     adapter: StubRuntimeAdapter,
     overrides: DaemonOverrides = {},
   ): Promise<{ daemon: Daemon; config: DaemonConfig; storeDir: string }> {
-    const workspaceRoot = await tmpDir(`byok-ctl-e2e-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-ctl-e2e-${productId}-store-`);
-    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
+    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, storeDir };
     const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter], overrides);
     await built.pair('pairing-code');
     await built.start();
@@ -75,14 +74,12 @@ describe('M4 Phase 2: control socket end-to-end', () => {
 
   it('service enrollment pairs under the running daemon identity, then converges to normal startup', async () => {
     const adapter = new StubRuntimeAdapter('pi');
-    const workspaceRoot = await tmpDir('byok-ctl-service-enroll-ws-');
     const storeDir = await tmpDir('byok-ctl-service-enroll-store-');
     const config: DaemonConfig = {
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Acme',
       productId: 'acme-ctl-service-enroll',
       serverUrl: server.url,
-      workspaceRoot,
       agentHome: testAgentHomeConfig(),
       storeDir,
       serviceEnrollment: { enabled: true },
@@ -371,9 +368,8 @@ describe('M4 Phase 2: control socket end-to-end', () => {
 
   it('runStartCommand exits cleanly when the control socket shutdown RPC fires, with no external abort signal ever sent', async () => {
     const adapter = new StubRuntimeAdapter('pi');
-    const workspaceRoot = await tmpDir('byok-ctl-e2e-startcmd-ws-');
     const storeDir = await tmpDir('byok-ctl-e2e-startcmd-store-');
-    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-ctl-startcmd', serverUrl: server.url, workspaceRoot, storeDir };
+    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-ctl-startcmd', serverUrl: server.url, storeDir };
     daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
     await daemon.pair('pairing-code');
 
@@ -405,13 +401,11 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     // runStartCommand (not a direct daemon.shutdownActiveTasks call, which
     // bypasses the race entirely) with a genuinely active task.
     const adapter = new StubRuntimeAdapter('pi');
-    const workspaceRoot = await tmpDir('byok-ctl-e2e-startcmd-active-ws-');
     const storeDir = await tmpDir('byok-ctl-e2e-startcmd-active-store-');
     const config: DaemonConfig = {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId: 'acme-ctl-startcmd-active',
       serverUrl: server.url,
-      workspaceRoot,
       agentHome: testAgentHomeConfig(),
       storeDir,
     };

@@ -50,12 +50,11 @@ describe('a task.cancel sent while the daemon is not polling is delivered when p
   it('resumed polling delivers task.cancel; session.interrupt() fires and the task reaches Cancelled', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },

@@ -361,7 +361,6 @@ async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelo
   const storeDir = await tempDir('byok-prepared-runner-store-');
   return new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: await tempDir('byok-prepared-workspace-'),
     deviceId: DEVICE_ID,
     send: (envelope) => sent.push(envelope),
     blobClient: unusedBlobClient,
@@ -2040,7 +2039,7 @@ it('the real daemon sends prepared Agent egress to the Host as the runtime produ
   vi.spyOn(mcpProbe, 'probeMcpServer').mockImplementation(async () => built.observation[SERVER_NAME]!);
   const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Prepared egress', productId: 'prepared-egress-transport',
-    serverUrl: server.url, storeDir: built.storeDir, workspaceRoot: await tempDir('prepared-wire-workspace-'),
+    serverUrl: server.url, storeDir: built.storeDir,
     agentHome: { hostStorageRoot: await tempDir('prepared-wire-home-') },
     agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     mcpToolsets: Object.fromEntries(built.toolsets),

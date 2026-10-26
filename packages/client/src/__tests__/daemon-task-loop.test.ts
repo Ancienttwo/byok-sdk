@@ -32,14 +32,12 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     adapter: StubRuntimeAdapter,
     configOverrides: Partial<Parameters<typeof createDaemonWithAdapters>[0]> = {},
   ): Promise<Daemon> {
-    const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         storeDir,
         ...configOverrides,

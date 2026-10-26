@@ -30,7 +30,7 @@ describe('long-poll lifecycle (protocol §8)', () => {
     const release = slow.blockStart();
     daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' },
       productName: 'Test', productId: 'test-product', serverUrl: server.url,
-      workspaceRoot: await tmpDir('byok-independent-work-'), storeDir: await tmpDir('byok-independent-store-'),
+      storeDir: await tmpDir('byok-independent-store-'),
       agentHome: testAgentHomeConfig(),
     }, [slow, other], { longPoll: { retryDelayMs: 20 } });
     await daemon.pair('code');
@@ -55,12 +55,11 @@ describe('long-poll lifecycle (protocol §8)', () => {
   it('runs a full task lifecycle over GET /byok/events and POST /byok/messages', async () => {
     server = await TestServer.start();
 
-    const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-');
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
       [adapter],
       {
         longPoll: { retryDelayMs: 20 },

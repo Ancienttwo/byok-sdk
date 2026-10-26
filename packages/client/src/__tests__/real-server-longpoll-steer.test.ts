@@ -49,7 +49,6 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
   it('a steer-capable adapter claiming over long-poll is steerable: the capability rides task.claim and the steer reaches the session', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 150 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     // Default stub capabilities include `steer: true` — an honest self-report
     // from an adapter that really does implement `Session.steer`.
@@ -57,7 +56,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
     expect(adapter.descriptor.capabilities.steer).toBe(true);
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
@@ -114,7 +113,6 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
     // and refuses when that report says `steer: false`.
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 150 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter('acme-harness', { kind: 'available', version: '0.0.0' }, {
       steer: false,
@@ -123,7 +121,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
     });
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },

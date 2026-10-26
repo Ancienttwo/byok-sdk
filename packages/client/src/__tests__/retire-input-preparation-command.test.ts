@@ -42,7 +42,6 @@ async function seed(): Promise<{ root: string; storeDir: string; config: DaemonC
     productName: 'Acme',
     productId: 'acme-product',
     serverUrl: 'http://example.invalid',
-    workspaceRoot: path.join(root, 'ws'),
     agentHome: testAgentHomeConfig(),
     storeDir,
   };

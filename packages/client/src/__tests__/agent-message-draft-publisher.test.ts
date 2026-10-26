@@ -340,7 +340,7 @@ describe('TaskRunner draft reconciliation before publish', () => {
       activity: { ...DEFAULT_AGENT_EGRESS_POLICY.activity, maxCoalesceMs: 10 } };
     const runner = new TaskRunner({
       getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-      adapters: [adapter], workspaceRoot: path.join(root, 'workspace'),
+      adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot: path.join(root, 'home') }),
       agentEgressPolicy: policy, agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'draft-device', tenantId: 'draft-tenant', productId: 'draft-finalize', storeDir,

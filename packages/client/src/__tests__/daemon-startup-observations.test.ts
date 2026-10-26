@@ -22,7 +22,7 @@ describe('#392: daemon startup observations are the live authority', () => {
   it('emits the environment event, caches failed detections too, and serves status/doctor/bundle without local probes', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-obs-'));
     const server = await TestServer.start();
-    const config = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'obs-392', serverUrl: server.url, workspaceRoot: dir, storeDir: dir };
+    const config = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'obs-392', serverUrl: server.url, storeDir: dir };
     const adapters = [new StubRuntimeAdapter('pi'), new StubRuntimeAdapter('claude', { kind: 'not-found' })];
     const detects = adapters.map(adapter => vi.spyOn(adapter, 'detect'));
     const environment = { source: 'login-shell' as const, shell: 'fish', durationMs: 12 };
@@ -96,7 +96,7 @@ describe('#392: daemon startup observations are the live authority', () => {
   it('a later start() reports no runtimes until its own detection finishes, never the previous start\'s', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-obs-restart-'));
     const server = await TestServer.start();
-    const config = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'obs-392-restart', serverUrl: server.url, workspaceRoot: dir, storeDir: dir };
+    const config = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'obs-392-restart', serverUrl: server.url, storeDir: dir };
     const adapter = new StubRuntimeAdapter('pi');
     const daemon = createDaemonWithAdapters(config, [adapter]);
     let releaseDetect: (() => void) | undefined;

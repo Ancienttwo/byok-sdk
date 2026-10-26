@@ -202,13 +202,11 @@ describe('requestDeviceAssertion', () => {
     storeDir: string;
     productId: string;
   }> {
-    const workspaceRoot = await tmpDir(`byok-assert-client-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-assert-client-${productId}-store-`);
     const config: DaemonConfig = {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId,
       serverUrl: server.url,
-      workspaceRoot,
       agentHome: testAgentHomeConfig(),
       storeDir,
       ...(deviceAssertion === undefined ? {} : { deviceAssertion }),
@@ -321,7 +319,6 @@ describe('requestTaskAssertion', () => {
     contextToken: string;
     adapter: StubRuntimeAdapter;
   }> {
-    const workspaceRoot = await tmpDir(`byok-task-client-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-task-client-${productId}-store-`);
     const hostStorageRoot = await tmpDir(`byok-task-client-${productId}-home-`);
     const adapter = new StubRuntimeAdapter(
@@ -335,7 +332,6 @@ describe('requestTaskAssertion', () => {
       productName: 'Acme',
       productId,
       serverUrl: server.url,
-      workspaceRoot,
       storeDir,
       agentHome: { hostStorageRoot },
       deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },

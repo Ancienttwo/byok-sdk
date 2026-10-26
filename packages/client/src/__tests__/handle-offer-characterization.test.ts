@@ -76,7 +76,6 @@ async function agentRunner(
   // Held by reference: the runner re-reads `startupTimeoutMs` per offer.
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: await temporary('byok-offer-char-workspace-'),
     agentHome,
     agentSessionHandoffs: new AgentSessionHandoffStore(),
     deviceId: 'device-offer-char',

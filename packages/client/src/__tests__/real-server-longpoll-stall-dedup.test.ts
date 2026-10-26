@@ -59,13 +59,12 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
   it('a persistently-throwing steer handler retries at a bounded, delay-spaced rate instead of a tight RTT-bound loop', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 150 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter();
     const retryDelayMs = 100;
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs, idleDelayMs: 20 },
@@ -111,7 +110,6 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
   it('a task.offer redelivered while its adapter.start() is still in flight (stalled behind an unrelated failing seq) never starts a second adapter session', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 150 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter();
     const retryDelayMs = 30;
@@ -129,7 +127,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     }) as typeof fetch);
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs, idleDelayMs: 20 },
@@ -219,13 +217,12 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
   it('a stalled seq that succeeds on retry executes exactly once, even if another redelivery of it piles up while the retry is still resolving', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 150 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter();
     const retryDelayMs = 30;
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs, idleDelayMs: 20 },

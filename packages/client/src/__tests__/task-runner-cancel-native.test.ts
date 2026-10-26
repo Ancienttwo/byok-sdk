@@ -132,7 +132,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   const sent: Envelope[] = [];
   const terminalPublished = deferred();
   const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-    adapters: [adapter], deviceId: 't1-native-device', workspaceRoot: path.join(dir, 'workspace'), storeDir: dir, productId: 't1-cancel',
+    adapters: [adapter], deviceId: 't1-native-device', storeDir: dir, productId: 't1-cancel',
     send: event => {
       timing.observeTerminal(event); sent.push(event);
       if (['task.cancelled', 'task.fail', 'task.complete'].includes(event.type)) terminalPublished.resolve();
@@ -147,7 +147,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
     ...overrides,
   });
   const taskId = 'native-task';
-  const offer = (limits?: { maxDurationMs: number }) => runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), 
+  const offer = (limits?: { maxDurationMs: number }) => runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),
     instruction: 'observe native cancellation', runtime, limits,
   }, { taskId, seq: 1 }));
   const cancel = () => {
@@ -343,7 +343,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     const server = await TestServer.start();
     const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       productName: 'T1 cancellation integration', productId: 't1-native-host', serverUrl: server.url,
-      workspaceRoot: path.join(c.dir, 'host-workspace'), storeDir: path.join(c.dir, 'host-store'),
+      storeDir: path.join(c.dir, 'host-store'),
       agentHome: testAgentHomeConfig(),
       localAgentRelease: { version: '0.24.0-rc.1' },
     }, [c.adapter]);

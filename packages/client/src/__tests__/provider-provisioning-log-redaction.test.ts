@@ -209,8 +209,7 @@ describe('daemon log chain for a failing provisioning handler', () => {
     servers.push(server);
     server.setPairingTenantId('pairing-code', TENANT);
     const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-provisioning-redaction-store-'));
-    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-provisioning-redaction-ws-'));
-    roots.push(storeDir, workspaceRoot);
+    roots.push(storeDir);
     let deviceId = '';
     const daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
@@ -218,7 +217,6 @@ describe('daemon log chain for a failing provisioning handler', () => {
         productName: 'Test',
         productId: 'test-product',
         serverUrl: server.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         storeDir,
         providerProvisioning: async (notice) => build(deviceId)(notice),

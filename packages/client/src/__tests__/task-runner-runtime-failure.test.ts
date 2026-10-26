@@ -33,7 +33,6 @@ describe('TaskRunner typed runtime failure projection', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Runtime failure test',
         productId: 'runtime-failure-test',
         serverUrl: server.url,
-        workspaceRoot: await temporaryDirectory('byok-runtime-failure-workspace-'),
         agentHome: testAgentHomeConfig(),
         storeDir: await temporaryDirectory('byok-runtime-failure-store-'),
       },

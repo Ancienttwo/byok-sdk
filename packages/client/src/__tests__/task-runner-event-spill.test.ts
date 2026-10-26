@@ -1,9 +1,6 @@
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type AgentEvent, type BlobRef, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
@@ -20,10 +17,6 @@ import { testIngressBudget } from './fixtures/activity-ingress';
  * a task that spills is not a task that flooded. See
  * `event-spill.test.ts` for the policy's own unit-level invariants.
  */
-
-async function tmpDir(prefix: string): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
-}
 
 interface RecordedUpload {
   content: string;
@@ -65,7 +58,6 @@ async function makeRunner(
 ): Promise<TaskRunner> {
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: await tmpDir('byok-taskrunner-spill-workspace-'),
     ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => {

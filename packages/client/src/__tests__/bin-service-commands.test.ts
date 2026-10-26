@@ -21,7 +21,6 @@ function baseConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
     productName: 'Acme',
     productId: 'acme-product',
     serverUrl: 'http://example.invalid',
-    workspaceRoot: '/ws',
     agentHome: testAgentHomeConfig(),
     storeDir: '/tmp/acme-store',
     ...overrides,

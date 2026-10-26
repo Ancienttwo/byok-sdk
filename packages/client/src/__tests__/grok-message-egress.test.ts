@@ -33,7 +33,6 @@ it('publishes the closing Grok reply on the message lane when Grok never called 
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [new GrokAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }) })],
     getServerCapabilities: () => ['custom-harness'],
-    workspaceRoot: await temporary('byok-grok-egress-workspace-'),
     agentHome: new AgentHomeManager({ hostStorageRoot: await temporary('byok-grok-egress-home-') }),
     agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-grok-egress',

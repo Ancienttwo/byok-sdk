@@ -75,10 +75,10 @@ async function start() {
   const root = await tmp();
   server = await TestServer.start();
   const storeDir = path.join(root, 'store');
-  daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), 
+  daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Over-bound journal test', productId: 'over-bound-journal-test',
-    serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
+    serverUrl: server.url, storeDir,
   }, [new StubRuntimeAdapter('pi')]);
   const device = await daemon.pair('pair-code');
   await daemon.start();

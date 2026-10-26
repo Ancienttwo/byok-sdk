@@ -83,14 +83,12 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     const claude = new ClaudeAdapter({ resolveBin: () => ({ command: claudeCommand, source: 'path' }) });
     const codex = new CodexAdapter({ resolveBin: () => ({ command: codexCommand, source: 'path' }) });
 
-    const workspaceRoot = await tmpDir('byok-conn-hello-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-store-');
     daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         storeDir,
         mcpToolsets: {
@@ -195,10 +193,9 @@ describe('conn.hello.capabilities', () => {
   it('advertises exactly the connection flags, with no approval flag', async () => {
     const pi = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }) });
 
-    const workspaceRoot = await tmpDir('byok-conn-hello-capflags-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-capflags-store-');
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, storeDir },
       [pi],
     );
     await daemon.pair('pairing-code');
@@ -230,10 +227,9 @@ describe('conn.hello.capabilities', () => {
         return { kind: 'reject', reason: 'not used by capability handshake test', retryable: false };
       },
     };
-    const workspaceRoot = await tmpDir('byok-conn-hello-capflags-custom-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-capflags-custom-store-');
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, storeDir },
       [opaquePi],
     );
     await daemon.pair('pairing-code');
@@ -245,10 +241,9 @@ describe('conn.hello.capabilities', () => {
   });
 
   it('withholds dispatch-selection when no selectable runtime adapter is configured', async () => {
-    const workspaceRoot = await tmpDir('byok-conn-hello-capflags-empty-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-capflags-empty-store-');
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, storeDir },
       [],
     );
     await daemon.pair('pairing-code');
@@ -260,7 +255,6 @@ describe('conn.hello.capabilities', () => {
   });
 
   it('advertises agent-home-contract only when an absolute hostStorageRoot is configured', async () => {
-    const workspaceRoot = await tmpDir('byok-conn-hello-agent-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-agent-store-');
     const hostStorageRoot = await tmpDir('byok-conn-hello-agent-root-');
     daemon = createDaemonWithAdapters(
@@ -269,7 +263,6 @@ describe('conn.hello.capabilities', () => {
         productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
       },
@@ -285,7 +278,6 @@ describe('conn.hello.capabilities', () => {
 
   // #614: `none` runs on every Agent-home daemon, so the flag does not follow memory admission.
   it('advertises agent-memory-selection with the Agent home, also when agentMemoryMcp is off', async () => {
-    const workspaceRoot = await tmpDir('byok-conn-hello-memory-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-memory-store-');
     const hostStorageRoot = await tmpDir('byok-conn-hello-memory-root-');
     daemon = createDaemonWithAdapters(
@@ -294,7 +286,6 @@ describe('conn.hello.capabilities', () => {
         productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
         agentMemoryMcp: 'off',
@@ -311,7 +302,6 @@ describe('conn.hello.capabilities', () => {
 
   // #815: `read-if-admitted` runs as `none` without admission, so its flag does not follow admission either.
   it('advertises agent-memory-read-if-admitted with the Agent home, also when agentMemoryMcp is off', async () => {
-    const workspaceRoot = await tmpDir('byok-conn-hello-memory-if-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-memory-if-store-');
     const hostStorageRoot = await tmpDir('byok-conn-hello-memory-if-root-');
     daemon = createDaemonWithAdapters(
@@ -320,7 +310,6 @@ describe('conn.hello.capabilities', () => {
         productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
         agentMemoryMcp: 'off',
@@ -337,7 +326,6 @@ describe('conn.hello.capabilities', () => {
 
   // #833: `read-write-if-admitted` runs as `none` without admission, so its flag does not follow admission either.
   it('advertises agent-memory-read-write-if-admitted with the Agent home, also when agentMemoryMcp is off', async () => {
-    const workspaceRoot = await tmpDir('byok-conn-hello-memory-rw-if-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-memory-rw-if-store-');
     const hostStorageRoot = await tmpDir('byok-conn-hello-memory-rw-if-root-');
     daemon = createDaemonWithAdapters(
@@ -346,7 +334,6 @@ describe('conn.hello.capabilities', () => {
         productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
         agentMemoryMcp: 'off',
@@ -362,7 +349,6 @@ describe('conn.hello.capabilities', () => {
   });
 
   it('fails start before advertising Agent capability when hostStorageRoot is not a directory', async () => {
-    const workspaceRoot = await tmpDir('byok-conn-hello-agent-invalid-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-agent-invalid-store-');
     const parent = await tmpDir('byok-conn-hello-agent-invalid-root-');
     const hostStorageRoot = path.join(parent, 'not-a-directory');
@@ -373,7 +359,6 @@ describe('conn.hello.capabilities', () => {
         productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
       },
@@ -413,7 +398,6 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
   });
 
   async function helloCapabilities(overrides: { transport?: AgentMemoryIntentTransport; agentHome?: boolean; helperBin?: string }): Promise<readonly string[]> {
-    const workspaceRoot = await tmpDir('byok-conn-hello-intent-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-intent-store-');
     lastStoreDir = storeDir;
     const hostStorageRoot = await tmpDir('byok-conn-hello-intent-root-');
@@ -423,7 +407,6 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
         productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
-        workspaceRoot,
         storeDir,
         ...(overrides.agentHome === false ? {} : { agentHome: { hostStorageRoot } }),
         ...(overrides.transport === undefined ? {} : { agentMemoryIntents: overrides.transport }),
@@ -526,7 +509,6 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
   });
 
   it('rejects a malformed transport at construction', async () => {
-    const workspaceRoot = await tmpDir('byok-conn-hello-intent-bad-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-intent-bad-store-');
     expect(() => createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
@@ -534,7 +516,6 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
         productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         storeDir,
         agentMemoryIntents: { fetch: async () => undefined } as unknown as AgentMemoryIntentTransport,

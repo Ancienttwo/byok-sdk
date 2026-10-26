@@ -84,7 +84,7 @@ export async function openDaemonHost() {
   const host = await openHost();
   const runtime = new FakeRuntime();
   const daemon = createDaemonWithAdapters({ productId: PRODUCT_ID, productName: 'B3 test', localAgentRelease: { version: '0.0.0-test' },
-    serverUrl: host.origin, workspaceRoot: join(host.root, 'workspace'), storeDir: join(host.root, 'sdk') },
+    serverUrl: host.origin, storeDir: join(host.root, 'sdk') },
   [runtime], { deviceCredentials: new InMemoryDeviceCredentialStore(), longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });
   const { deviceId } = await daemon.pair((await host.server.pairing.createPairingCode({ productId: PRODUCT_ID })).code);
   await daemon.start(); cleanup.push(() => daemon.stop());

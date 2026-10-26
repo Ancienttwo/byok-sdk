@@ -1,9 +1,6 @@
 import type { RuntimeTaskInput } from '../types';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type AgentEvent, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
@@ -37,10 +34,6 @@ import { testIngressBudget } from './fixtures/activity-ingress';
  * `real-server-approval-resolved-e2e.test.ts`.
  */
 
-async function tmpDir(prefix: string): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
-}
-
 const unusedBlobClient: BlobResolver = {
   resolveInstruction: async () => {
     throw new Error('not used in this test');
@@ -58,7 +51,6 @@ async function makeRunner(
   const approvalRegistry = overrides.approvalRegistry ?? new ApprovalRegistry();
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: await tmpDir('byok-taskrunner-approval-resolved-workspace-'),
     ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => {

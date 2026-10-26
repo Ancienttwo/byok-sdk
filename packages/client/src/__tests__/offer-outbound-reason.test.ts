@@ -79,12 +79,10 @@ async function runner(adapter: StubRuntimeAdapter, extra: Partial<TaskRunnerDeps
 }> {
   const storeDir = await temporary('byok outbound offer store-');
   const hostStorageRoot = await temporary('byok outbound offer home-');
-  const workspaceRoot = await temporary('byok outbound offer workspace-');
   const agentHome = new AgentHomeManager({ hostStorageRoot });
   const sent: Envelope[] = [];
   const taskRunner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot,
     agentHome,
     agentSessionHandoffs: new AgentSessionHandoffStore(),
     deviceId: 'device-outbound-offer',
@@ -95,7 +93,7 @@ async function runner(adapter: StubRuntimeAdapter, extra: Partial<TaskRunnerDeps
     productId: 'outbound-offer',
     ...extra,
   });
-  const localRoots = [storeDir, hostStorageRoot, workspaceRoot];
+  const localRoots = [storeDir, hostStorageRoot];
   localRoots.push(...await Promise.all(localRoots.map((root) => fs.realpath(root))));
   return { runner: taskRunner, agentHome, sent, localRoots };
 }
@@ -167,7 +165,7 @@ describe('local paths in outbound handleOffer reasons', () => {
     });
     localRoots.push(path.dirname(path.dirname(missingServer)));
 
-    await taskRunner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), 
+    await taskRunner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),
       instruction: 'outbound offer work', runtime: 'pi', requiredToolsets: ['team'],
     }, { taskId: 'toolset-path', seq: 1 }));
 

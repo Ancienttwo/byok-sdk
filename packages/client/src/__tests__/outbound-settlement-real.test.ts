@@ -23,7 +23,7 @@ it('default daemon/cloud limits deliver two 40 KiB tool results in separate acce
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-settle-real-')); dirs.push(dir);
   const adapter = new StubRuntimeAdapter();
   daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
-    productId: 'test-product', serverUrl: server.url, workspaceRoot: path.join(dir, 'workspace'), storeDir: path.join(dir, 'store'),
+    productId: 'test-product', serverUrl: server.url, storeDir: path.join(dir, 'store'),
     agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } }, [adapter],
     { longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
   await fs.mkdir(path.join(dir, 'workspace'));

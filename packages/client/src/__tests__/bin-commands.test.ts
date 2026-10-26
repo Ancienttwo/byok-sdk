@@ -54,7 +54,6 @@ function baseConfig(storeDir: string, overrides: Partial<DaemonConfig> = {}): Da
     productName: 'Acme',
     productId: 'acme-product',
     serverUrl: 'http://example.invalid',
-    workspaceRoot: '/ws',
     agentHome: testAgentHomeConfig(),
     storeDir,
     ...overrides,

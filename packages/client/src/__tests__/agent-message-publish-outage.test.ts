@@ -73,10 +73,10 @@ async function openConnection() {
   return { server: instance, manager, queuedPublishes, publishesPerPost };
 }
 
-function runnerDeps(manager: ConnectionManager, sentPublishes: Envelope[], storeDir: string, workspaceRoot: string): TaskRunnerDeps {
+function runnerDeps(manager: ConnectionManager, sentPublishes: Envelope[], storeDir: string): TaskRunnerDeps {
   return {
     getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-    adapters: [], workspaceRoot, storeDir, deviceId: 'device-outage',
+    adapters: [], storeDir, deviceId: 'device-outage',
     productId: 'publish-outage-test', tenantId: 'tenant-outage',
     send: (envelope) => {
       if (isPublish(envelope)) sentPublishes.push(envelope);
@@ -104,7 +104,7 @@ describe('one pending agent.message.publish per message during a route outage (#
     });
     const sentPublishes: Envelope[] = [];
     runner = new TaskRunner({
-      ...runnerDeps(f.manager, sentPublishes, storeDir, await temporary('byok-publish-outage-workspace-')),
+      ...runnerDeps(f.manager, sentPublishes, storeDir),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot: await temporary('byok-publish-outage-home-') }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -139,7 +139,7 @@ describe('one pending agent.message.publish per message during a route outage (#
       contentType: 'text/markdown', body: 'reply recovered after a crash', maxPendingEvents: 4, maxPendingBytes: 2000 });
     await outbox.activate('recovered-outage', 'session-outage');
     const sentPublishes: Envelope[] = [];
-    runner = new TaskRunner(runnerDeps(f.manager, sentPublishes, root, root));
+    runner = new TaskRunner(runnerDeps(f.manager, sentPublishes, root));
     await runner.recoverAgentMessageOutboxes(path.join(root, 'agents'));
 
     f.server.setFailMessagesSends(true);

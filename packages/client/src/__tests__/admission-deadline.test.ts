@@ -26,7 +26,7 @@ for (const phase of ['detect', 'prepare'] as const) {
       const adapter = new StubRuntimeAdapter('acme-harness');
       const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
         productId: `admission-${path.basename(root)}`, productName: 'Admission', localAgentRelease: { version: '0.0.0-test' },
-        serverUrl: server.url, storeDir: path.join(root, 'store'), workspaceRoot: path.join(root, 'work'),
+        serverUrl: server.url, storeDir: path.join(root, 'store'),
         agentHome: { hostStorageRoot: path.join(root, 'home') }, startupTimeoutMs: action === 'deadline' ? 250 : 5000,
       }, [adapter], { longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
       let release!: () => void;

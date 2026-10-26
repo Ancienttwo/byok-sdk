@@ -118,7 +118,7 @@ async function start(options: {
   const config = {
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed daemon test', productId: 'sealed-daemon-test',
-    serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'), agentHome: testAgentHomeConfig(),
+    serverUrl: server.url, storeDir, agentHome: testAgentHomeConfig(),
     ...(options.shutdown === undefined ? {} : { shutdownGraceMs: options.shutdown.graceMs }),
   };
   server.setCapabilityDeclaration(options.e2ee === false ? NO_E2EE_DECLARATION : options.e2ee === 'no-kem-epoch' ? NO_KEM_EPOCH_DECLARATION : E2EE_DECLARATION);
@@ -211,10 +211,10 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.setCapabilityDeclaration(E2EE_DECLARATION);
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
     dirs.push(root);
-    daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), 
+    daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),
       storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed daemon test', productId: 'sealed-daemon-test',
-      serverUrl: server.url, storeDir: path.join(root, 'store'), workspaceRoot: path.join(root, 'workspace'),
+      serverUrl: server.url, storeDir: path.join(root, 'store'),
     }, [new StubRuntimeAdapter('pi')]);
     await daemon.pair('pair-code');
     await daemon.start();

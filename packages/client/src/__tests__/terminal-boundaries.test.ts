@@ -21,7 +21,7 @@ async function config(serverUrl: string): Promise<DaemonConfig> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'byok-terminal-boundaries-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   return { serverUrl, productId: 'terminal-boundaries', productName: 'Terminal boundaries',
-    localAgentRelease: { version: '0.0.0-test' }, workspaceRoot: path.join(root, 'work'),
+    localAgentRelease: { version: '0.0.0-test' },
     storeDir: path.join(root, 'store'), storage: { journal: { maxRecordBytes: 2048 } } };
 }
 async function post(url: string, token: string, envelope: Envelope) {

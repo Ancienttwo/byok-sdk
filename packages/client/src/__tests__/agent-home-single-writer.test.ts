@@ -77,7 +77,6 @@ describe('canonical Agent home single writer (WP0)', () => {
     overrides: Partial<DaemonConfig> = {},
     fixed: { hostStorageRoot?: string; storeDir?: string; productId?: string } = {},
   ): Promise<Harness> {
-    const workspaceRoot = await temp('byok-single-writer-workspace-');
     const storeDir = fixed.storeDir ?? await temp('byok-single-writer-store-');
     const hostStorageRoot = fixed.hostStorageRoot ?? await temp('byok-single-writer-home-');
     const productId = fixed.productId ?? `single-writer-${path.basename(storeDir)}`;
@@ -88,7 +87,6 @@ describe('canonical Agent home single writer (WP0)', () => {
       productName: 'Single writer',
       productId,
       serverUrl: server.url,
-      workspaceRoot,
       storeDir,
       agentHome: { hostStorageRoot },
       ...overrides,
@@ -298,7 +296,6 @@ describe('canonical Agent home single writer (WP0)', () => {
   });
 
   it('refuses the removed maxConcurrentMutableSessionsPerAgentHome at construction, whatever its value', async () => {
-    const workspaceRoot = await temp('byok-single-writer-removed-workspace-');
     const storeDir = await temp('byok-single-writer-removed-store-');
     const hostStorageRoot = await temp('byok-single-writer-removed-home-');
     for (const limit of [1, 2]) {
@@ -307,7 +304,6 @@ describe('canonical Agent home single writer (WP0)', () => {
         productName: 'Single writer',
         productId: `single-writer-removed-${limit}`,
         serverUrl: server.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
         maxConcurrentMutableSessionsPerAgentHome: limit,
@@ -355,7 +351,6 @@ describe('canonical Agent home single writer (WP0)', () => {
     // The busy count runs BEFORE the host's admission veto, so it must read
     // the canonical home without materializing it: a vetoed offer has to leave
     // the Agent-home root exactly as it found it.
-    const workspaceRoot = await temp('byok-single-writer-veto-workspace-');
     const storeDir = await temp('byok-single-writer-veto-store-');
     const hostStorageRoot = await temp('byok-single-writer-veto-home-');
     const journal = new SqliteLocalTaskJournal({ storeDir });
@@ -365,7 +360,6 @@ describe('canonical Agent home single writer (WP0)', () => {
       productName: 'Single writer',
       productId: `single-writer-veto-${path.basename(storeDir)}`,
       serverUrl: server.url,
-      workspaceRoot,
       storeDir,
       agentHome: { hostStorageRoot },
     }, [pi], { journal, retention: { freeBytesProvider: async () => 50 * 1024 * 1024 } });
@@ -476,7 +470,6 @@ describe('canonical Agent home single writer (WP0)', () => {
   });
 
   it('rejects an unusable reader concurrency limit at construction instead of reinterpreting it', async () => {
-    const workspaceRoot = await temp('byok-single-writer-invalid-workspace-');
     const storeDir = await temp('byok-single-writer-invalid-store-');
     const hostStorageRoot = await temp('byok-single-writer-invalid-home-');
     const build = (limit: number): Daemon => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
@@ -484,7 +477,6 @@ describe('canonical Agent home single writer (WP0)', () => {
       productName: 'Single writer',
       productId: `single-writer-invalid-${limit}`,
       serverUrl: server.url,
-      workspaceRoot,
       storeDir,
       agentHome: { hostStorageRoot },
       maxConcurrentReaderAttemptsPerAgentHome: limit,

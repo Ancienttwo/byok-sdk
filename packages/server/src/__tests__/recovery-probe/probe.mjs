@@ -158,7 +158,7 @@ async function child(stage, root) {
   const daemonConfig = { productId: config.productId, productName: 'BYOK attribution probe',
     deviceCredentials: config.deviceCredentials,
     localAgentRelease: { version: '0.0.0-attribution' }, serverUrl,
-    storeDir: path.join(root, 'device'), workspaceRoot: path.join(root, 'workspace'),
+    storeDir: path.join(root, 'device'),
     agentHome: { hostStorageRoot: path.join(root, 'agent-home') }, agentEgress: { policy: EGRESS_POLICY },
     allowedRuntimes: ['pi'] };
   let byok, http, daemon, diagnosticDeviceId, selectServer;

@@ -125,9 +125,8 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
     adapter: ApprovalAwareAdapter,
     overrides: DaemonOverrides = {},
   ): Promise<{ daemon: Daemon; config: DaemonConfig; storeDir: string }> {
-    const workspaceRoot = await tmpDir(`byok-confirm-e2e-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-confirm-e2e-${productId}-store-`);
-    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
+    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, storeDir };
     const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter], overrides);
     await built.pair('pairing-code');
     await built.start();

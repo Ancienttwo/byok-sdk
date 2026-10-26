@@ -76,7 +76,6 @@ async function makeRunner(
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     mcpToolsetToolsProbe,
     adapters: [adapter],
-    workspaceRoot: await tmpDir('byok-mcp-toolsets-workspace-'),
     ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => sent.push(envelope),
@@ -111,7 +110,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(), 
+        { agentRef: freshTestAgentRef(),
           instruction: 'find qualified leads',
           runtime: 'claude',
           requiredToolsets: ['salesko'],
@@ -148,7 +147,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
       await runner.handleEnvelope(
         createEnvelope(
           'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(), 
+          { agentRef: freshTestAgentRef(),
             instruction: 'x',
             runtime: 'claude',
             requiredToolsets: ['salesko'],
@@ -196,7 +195,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(), 
+        { agentRef: freshTestAgentRef(),
           instruction: 'x',
           runtime: 'claude',
           requiredToolsets: ['mail', 'social'],
@@ -482,7 +481,6 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
     productId: 'test-product',
     serverUrl: 'http://localhost:3000',
-    workspaceRoot: '/tmp/byok-test-workspace',
     agentHome: testAgentHomeConfig(),
   };
 
@@ -618,7 +616,6 @@ describe('absolute toolset command, consistently across every runtime', () => {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
     productId: 'test-product',
     serverUrl: 'http://localhost:3000',
-    workspaceRoot: '/tmp/byok-test-workspace',
     agentHome: testAgentHomeConfig(),
   };
   const configured = { salesko: { mcpServers: { salesko: { command: 'salesko-agent' } } } };
@@ -692,7 +689,6 @@ describe('TaskRunner host toolset context nonce injection', () => {
     const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       mcpToolsetToolsProbe: stubToolsProbe,
       adapters: [adapter],
-      workspaceRoot: await tmpDir('byok-host-toolset-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot: await tmpDir('byok-host-toolset-home-') }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'device-host-toolset',

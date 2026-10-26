@@ -145,7 +145,7 @@ describe('daemon detection authority', () => {
     });
     const daemon = createDaemonWithAdapters({
       storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Metadata', productId: 'metadata',
-      workspaceRoot: root, storeDir: path.join(root, 'store'), serverUrl: server.url,
+      storeDir: path.join(root, 'store'), serverUrl: server.url,
       agentHome: testAgentHomeConfig(),
     }, [refused, available]);
     daemons.push(daemon);

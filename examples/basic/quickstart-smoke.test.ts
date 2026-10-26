@@ -89,7 +89,6 @@ describe('examples/basic quickstart with default settings', () => {
       productName: 'BYOK Example',
       productId: PRODUCT_ID,
       serverUrl: server.url,
-      workspaceRoot: path.join(root, 'workspace'),
       storeDir: path.join(root, 'store'),
     }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
 

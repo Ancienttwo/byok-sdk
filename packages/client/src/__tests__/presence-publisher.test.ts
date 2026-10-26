@@ -283,7 +283,6 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
   async function startDaemon(
     handle: RealCloudHandle,
   ): Promise<{ daemon: Daemon; adapter: StubRuntimeAdapter; deviceId: string }> {
-    const workspaceRoot = await tmpDir('byok-presence-workspace-');
     const storeDir = await tmpDir('byok-presence-store-');
     const adapter = new StubRuntimeAdapter();
     const started = createDaemonWithAdapters(
@@ -291,7 +290,6 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
         productId: 'test-product',
         serverUrl: handle.url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir,
@@ -460,14 +458,12 @@ describe('presence re-discovery on reconnect', () => {
   }
 
   async function startDaemon(url: string): Promise<Daemon> {
-    const workspaceRoot = await tmpDir('byok-presence-reconnect-workspace-');
     const storeDir = await tmpDir('byok-presence-reconnect-store-');
     const started = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
         productId: 'test-product',
         serverUrl: url,
-        workspaceRoot,
         agentHome: testAgentHomeConfig(),
         storeDir,
         presence: { intervalMs: 50, minimumIntervalMs: 10, ttlMs: 2_000 },

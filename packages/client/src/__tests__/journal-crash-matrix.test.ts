@@ -279,7 +279,6 @@ describe('S3.4 crash matrix, points 1-6', () => {
     }> {
       cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, mailboxFallbackMs: 20 });
       const storeDir = await store('byok-crash-cloud-store-');
-      const workspaceRoot = await store('byok-crash-cloud-workspace-');
       const adapter = new StubRuntimeAdapter();
       // The journal is injected so this test owns its lifetime — it has to
       // outlive the daemon that used it, which is the whole point of a crash.
@@ -290,7 +289,6 @@ describe('S3.4 crash matrix, points 1-6', () => {
           localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
           productId: 'test-product',
           serverUrl: cloud.url,
-          workspaceRoot,
           agentHome: testAgentHomeConfig(),
           agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
           storeDir,

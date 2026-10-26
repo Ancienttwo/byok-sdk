@@ -61,7 +61,6 @@ describe('one pending copy of each held reliable record across reconnects (#698)
         productName: 'Reconnect egress test',
         productId: 'reconnect-egress-test',
         serverUrl: server.url,
-        workspaceRoot: await tmpDir('byok-reconnect-egress-workspace-'),
         storeDir: await tmpDir('byok-reconnect-egress-store-'),
         agentHome: { hostStorageRoot: await tmpDir('byok-reconnect-egress-home-') },
         agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },

@@ -129,13 +129,11 @@ describe('device assertion broker: assertion.issue', () => {
     overrides: DaemonOverrides = {},
     adapter: StubRuntimeAdapter = new StubRuntimeAdapter('pi'),
   ): Promise<Started> {
-    const workspaceRoot = await tmpDir(`byok-assert-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-assert-${productId}-store-`);
     const full: DaemonConfig = {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId,
       serverUrl: server.url,
-      workspaceRoot,
       agentHome: testAgentHomeConfig(),
       storeDir,
       deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },
@@ -815,7 +813,6 @@ describe('device assertion broker: config validation is a construction error', (
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId: `acme-assert-config-${unique}`,
       serverUrl: 'https://api.example.com',
-      workspaceRoot: path.join(os.tmpdir(), `byok-assert-config-ws-${unique}`),
       agentHome: testAgentHomeConfig(),
       storeDir: path.join(os.tmpdir(), `byok-assert-config-store-${unique}`),
       deviceAssertion,
