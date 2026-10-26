@@ -75,6 +75,14 @@ describe.skipIf(POSTGRES_URL === undefined)('H intent compaction on real Postgre
     expect(await intentRows(scope)).toEqual([]);
   });
 
+  it('makes an expiring tombstone of the same identity permanent, as K4 retires a row', async () => {
+    const scope = await settled();
+    // An occurrence intent's tombstone that an owner switch brought in with its K4 expiry.
+    await query(`INSERT INTO ${table('retired_identity')} (scope, kind, identity, expires_at) VALUES ($1, 'intent', $2, 5)`, [storedKey(scope), hash('k1')]);
+    expect(await compact(scope, ['k1'])).toEqual({ compactedIntents: 1, alreadyCompactedIntents: 0 });
+    expect(await tombstones(scope)).toEqual([{ kind: 'intent', identity: hash('k1'), expires_at: null }]);
+  });
+
   it('refuses to freeze a Turn whose intent compaction retired, and writes nothing', async () => {
     const scope = await settled();
     await compact(scope, ['k1']);

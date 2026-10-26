@@ -59,7 +59,7 @@ export class HostedRoutineScheduler {
    * horizon re-plans it, and each scope with a staged version checks the switch. One transaction per scope.
    */
   async start(): Promise<RoutineFailure[]> {
-    const scopes = await this.scopes(`SELECT DISTINCT r.scope FROM routine r JOIN scope s ON s.scope = r.scope WHERE s.state_version = ANY($1::integer[])
+    const scopes = await this.scopes(`SELECT DISTINCT r.scope FROM routine r JOIN scope s ON s.scope = r.scope WHERE s.state_version = ANY($1::integer[]) AND s.switch_export IS NULL
       AND ((r.lifecycle = 'active' AND r.status = 'no_occurrence_within_horizon' AND r.pending IS NULL) OR r.pending IS NOT NULL) ORDER BY r.scope`, []);
     return this.plan(scopes, 'start');
   }
@@ -71,7 +71,7 @@ export class HostedRoutineScheduler {
    */
   async run(): Promise<SchedulerPass> {
     const now = this.now(), pass: SchedulerPass = { fired: 0, fenced: [], failed: [] }, changed = new Set<string>();
-    const retrying = await this.scopes(`SELECT DISTINCT r.scope FROM routine r JOIN scope s ON s.scope = r.scope WHERE s.state_version = ANY($1::integer[])
+    const retrying = await this.scopes(`SELECT DISTINCT r.scope FROM routine r JOIN scope s ON s.scope = r.scope WHERE s.state_version = ANY($1::integer[]) AND s.switch_export IS NULL
       AND r.status = 'schedule_retrying' AND r.next_at <= $2 ORDER BY r.scope`, [now + WAKE_HORIZON_MS]);
     pass.failed.push(...await this.plan(retrying, 'pass'));
     const batch = this.options.batch ?? 100, backoffMs = this.options.backoffMs ?? 60_000;
@@ -79,7 +79,7 @@ export class HostedRoutineScheduler {
     while (pass.fired < batch) {
       const due = await inSchema(this.pool, this.store.schema, client => client.query<DueRow>(
         `SELECT r.scope, r.id, r.next_at::text, r.ordinal::text FROM routine r JOIN scope s ON s.scope = r.scope
-          WHERE s.state_version = ANY($3::integer[]) AND r.lifecycle = 'active' AND r.next_at <= $1
+          WHERE s.state_version = ANY($3::integer[]) AND s.switch_export IS NULL AND r.lifecycle = 'active' AND r.next_at <= $1
           AND (r.retry_at IS NULL OR r.retry_at <= $1)
           AND (r.next_at, r.scope, r.ordinal) > ($4, $5, $6) ORDER BY r.next_at, r.scope, r.ordinal LIMIT $2`,
         [now, batch, [...SUPPORTED_STORE_VERSIONS], ...cursor]), true);
@@ -99,10 +99,16 @@ export class HostedRoutineScheduler {
         }
         // A throw wrote nothing. The routine keeps its old slot, which sorts ahead of healthy rows, so it waits before its
         // next try and does not run a transaction on every pass. Keyed on that slot: a write that moved it has cleared
-        // `retry_at`, and this one then matches no row.
+        // `retry_at`, and this one then matches no row. It takes no scope lock, so the switch fence does not see it. It
+        // takes a share lock on the scope row instead, scope before routine as every writer does: it waits for an export in
+        // flight and reads the committed mark, so an exported scope gets no backoff (#975).
         if (threw) {
-          await inSchema(this.pool, this.store.schema, client => client.query(
-            'UPDATE routine SET retry_at = $4 WHERE scope = $1 AND id = $2 AND next_at = $3', [row.scope, row.id, Number(row.next_at), at + backoffMs]));
+          await inSchema(this.pool, this.store.schema, async client => {
+            const scope = await client.query<{ open: boolean }>('SELECT switch_export IS NULL AS open FROM scope WHERE scope = $1 FOR SHARE', [row.scope]);
+            if (scope.rows[0]?.open) {
+              await client.query('UPDATE routine SET retry_at = $4 WHERE scope = $1 AND id = $2 AND next_at = $3', [row.scope, row.id, Number(row.next_at), at + backoffMs]);
+            }
+          });
         }
       }
       if (due.rows.length < batch) break;

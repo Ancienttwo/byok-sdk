@@ -556,6 +556,22 @@
   `host_scope` rows an invocation touches, by scope or by the owner token's
   hash, instead of every row on each invocation. Wrap a synchronous config in
   an `async` function. H is unreleased; no SDK or wire change.
+- **Feature (examples)** — H runs the old-owner side of the owner switch
+  (#975 slice 5a). `exportScope(scope, devices, clock)` seals a drained
+  scope into a switch export after each device has an open switch away from
+  H at its revision, and writes the export mark `scope.switch_export`. From
+  then on no write transaction that locks the scope commits
+  (`SwitchExportedError`, after the work's own refusals), and the scans
+  leave it out. `commitSwitch` takes a fourth argument, the new owner's
+  receipt: away from H it must be the export's digest, the scope must seal
+  to it again, and every device of the export moves to L in one
+  transaction. `abortSwitch` of a device of the export ends it. H DDL:
+  `scope.switch_export`, intent `retry` (H's own rows store K4's one-attempt
+  policy) and `preparation_error` (the sealed-lane failure code moves there
+  from `last_error`), and routine `schedule_retry_at`,
+  `schedule_retry_count` and `last_error`, which H's K4 routine calls now
+  keep. H is unreleased, so there is no migration. K8 exports `./switch`.
+  No SDK or wire change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

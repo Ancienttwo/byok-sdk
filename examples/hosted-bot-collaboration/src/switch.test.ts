@@ -62,6 +62,15 @@ function fakePort() {
   };
   return { port, submitted, hooks };
 }
+/**
+ * The steps of a switch away from H before its commit (#975): flushes the projections, exports the scope with `device`
+ * frozen at `revision`, and returns the receipt that the new owner gives for it, the export's digest.
+ */
+async function receipt(scope: string, revision: number): Promise<string> {
+  await new HostedOutboxSender(opened!.pool, store(), { projections: { deliver: async () => {} }, now: () => VECTOR_NOW + 86_400_000 }).run();
+  return (await store().exportScope(scope, [{ deviceId: 'device', expectedRevision: revision }], clock)).manifest.digest;
+}
+const exportedRefusal = expect.objectContaining({ name: 'SwitchExportedError', code: 'switch_exported' });
 const submitter = (port: FrozenSubmitPort) =>
   new HostedSubmitter(opened!.pool, store().schema, { port: () => port, now: clock, leaseMs: 1000, backoffMs: 500 });
 
@@ -74,19 +83,19 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     const scope = await bound();
     await expect(store().beginSwitch(scope, 'device', 'L', 0)).rejects.toEqual(refused('stale_revision'));
     await expect(store().beginSwitch(scope, 'device', 'H', 1)).rejects.toEqual(refused('same_mode'));
-    await expect(store().commitSwitch(scope, 'device', 1)).rejects.toEqual(refused('not_switching'));
+    await expect(store().commitSwitch(scope, 'device', 1, 'none')).rejects.toEqual(refused('not_switching'));
     expect(await binding(scope)).toEqual({ mode: 'H', mode_revision: '1', switching: null });
     expect(await store().beginSwitch(scope, 'device', 'L', 1)).toEqual({ mode: 'H', revision: 2, switching: 'L', revoked: false });
     const frozen = await store().dump(scope);
     await expect(store().beginSwitch(scope, 'device', 'L', 2)).rejects.toEqual(refused('switching'));
-    await expect(store().commitSwitch(scope, 'device', 1)).rejects.toEqual(refused('stale_revision'));
+    await expect(store().commitSwitch(scope, 'device', 1, 'none')).rejects.toEqual(refused('stale_revision'));
     await expect(store().abortSwitch(scope, 'device', 3)).rejects.toEqual(refused('stale_revision'));
     expect(await store().dump(scope)).toBe(frozen);
-    expect(await store().commitSwitch(scope, 'device', 2)).toEqual({ mode: 'L', revision: 3, revoked: false });
-    // The device is L's now. Coming back to H is another switch, never a bind.
+    expect(await store().commitSwitch(scope, 'device', 2, await receipt(scope, 2))).toEqual({ mode: 'L', revision: 3, revoked: false });
+    // The device is L's now, never bound again. The exported scope takes no other switch: a domain comes back to H by an
+    // import into a new scope (#975).
     await expect(store().bindDevice(scope, 'device')).rejects.toEqual(modeRefusal);
-    expect(await store().beginSwitch(scope, 'device', 'H', 3)).toEqual({ mode: 'L', revision: 4, switching: 'H', revoked: false });
-    expect(await store().abortSwitch(scope, 'device', 4)).toEqual({ mode: 'L', revision: 5, revoked: false });
+    await expect(store().beginSwitch(scope, 'device', 'H', 3)).rejects.toEqual(exportedRefusal);
   });
 
   it('switches a device with no row, in the default mode L at revision 0, to H, and then its work freezes', async () => {
@@ -101,7 +110,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     expect(await store().beginSwitch(scope, 'device', 'H', 0)).toEqual({ mode: 'L', revision: 1, switching: 'H', revoked: false });
     // H is the new owner here: L drains its own work, and H's queued Turn of the device is the work that runs after.
     await expect(store().drainDevice(scope, 'device', 1, { cancel: true }, clock)).rejects.toEqual(refused('not_owner'));
-    expect(await store().commitSwitch(scope, 'device', 1)).toEqual({ mode: 'H', revision: 2, revoked: false });
+    expect(await store().commitSwitch(scope, 'device', 1, 'none')).toEqual({ mode: 'H', revision: 2, revoked: false });
     await store().sync(scope, SYNC);
     expect((await intents(scope)).map(row => row.key)).toEqual(['q1']);
   });
@@ -111,7 +120,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     await store().beginSwitch(scope, 'device', 'L', 1);
     await store().revokeDevice(scope, 'device', 5);
     expect(await binding(scope)).toEqual({ mode: 'H', mode_revision: '3', switching: null });
-    await expect(store().commitSwitch(scope, 'device', 3)).rejects.toEqual(refused('revoked'));
+    await expect(store().commitSwitch(scope, 'device', 3, 'none')).rejects.toEqual(refused('revoked'));
     await expect(store().drainDevice(scope, 'device', 3, {}, clock)).rejects.toEqual(refused('revoked'));
   });
 
@@ -132,7 +141,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
       .rejects.toEqual(switching('L', 2));
     expect(await store().dump(scope)).toBe(frozen);
     // After the commit to L, the same input is refused for good with the mode reason.
-    await store().commitSwitch(scope, 'device', 2);
+    await store().commitSwitch(scope, 'device', 2, await receipt(scope, 2));
     await expect(store().receive(scope, owner, IDENTITY, clock)).rejects.toEqual(modeRefusal);
   });
 
@@ -174,7 +183,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     await store().beginSwitch(scope, 'device', 'L', 1);
     const before = await store().drainDevice(scope, 'device', 2, {}, clock);
     expect(before).toEqual({ open: { intents: ['q1', 'q2', 'q3'], turns: ['q1', 'q2', 'q3'], batches: [], homes: [] }, failed: [] });
-    await expect(store().commitSwitch(scope, 'device', 2)).rejects.toEqual(refused('open_work'));
+    await expect(store().commitSwitch(scope, 'device', 2, 'none')).rejects.toEqual(refused('open_work'));
     const drained = await store().drainDevice(scope, 'device', 2, { cancel: true }, clock);
     expect(drained.failed).toEqual([]);
     // The tried intent keeps its cancel reason and stays open until the reconciliation concludes it.
@@ -187,12 +196,12 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     const rows = await intents(scope);
     expect((await store().drainDevice(scope, 'device', 2, { cancel: true }, clock)).failed).toEqual([]);
     expect(await intents(scope)).toEqual(rows);
-    await expect(store().commitSwitch(scope, 'device', 2)).rejects.toEqual(refused('open_work'));
+    await expect(store().commitSwitch(scope, 'device', 2, 'none')).rejects.toEqual(refused('open_work'));
     // The reconciliation's conclusion of q1, as it writes it from the SDK evidence.
     await opened!.pool.query(`UPDATE ${table('intent')} SET conclusion = 'cancelled' WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey('q1')]);
     await store().sync(scope, SYNC);
     expect((await store().drainDevice(scope, 'device', 2, {}, clock)).open).toEqual({ intents: [], turns: [], batches: [], homes: [] });
-    expect(await store().commitSwitch(scope, 'device', 2)).toEqual({ mode: 'L', revision: 3, revoked: false });
+    expect(await store().commitSwitch(scope, 'device', 2, await receipt(scope, 2))).toEqual({ mode: 'L', revision: 3, revoked: false });
   });
 
   it('cancels a Host intent with no Turn in the drain, and then commits', async () => {
@@ -203,7 +212,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     expect(await store().drainDevice(scope, 'device', 2, { cancel: true }, clock))
       .toEqual({ open: { intents: [], turns: [], batches: [], homes: [] }, failed: [] });
     expect(await intents(scope)).toEqual([{ key: 'h1', tries: 0, cancel_reason: 'cancelled', conclusion: 'cancelled' }]);
-    expect(await store().commitSwitch(scope, 'device', 2)).toEqual({ mode: 'L', revision: 3, revoked: false });
+    expect(await store().commitSwitch(scope, 'device', 2, await receipt(scope, 2))).toEqual({ mode: 'L', revision: 3, revoked: false });
   });
 
   it('does not fire a Bot routine of the frozen device: nothing is written, and the slot fires after an abort', async () => {
@@ -272,7 +281,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     expect(await operation(scope, first)).toMatchObject({ status: 'pending', sent: true, retries: [] });
     await store().beginSwitch(scope, 'device', 'L', 1);
     expect((await store().drainDevice(scope, 'device', 2, {}, clock)).open.homes).toEqual([first]);
-    await expect(store().commitSwitch(scope, 'device', 2)).rejects.toEqual(refused('open_work'));
+    await expect(store().commitSwitch(scope, 'device', 2, 'none')).rejects.toEqual(refused('open_work'));
     // Past its retry time, the frozen device's write is read back, and no retry is enqueued.
     await homeSender(calls, VECTOR_NOW + 2_000).run();
     expect(calls).toEqual({ reads: [`r-${first}`, `r-${first}`], enqueued: [`r-${first}`] });
@@ -281,12 +290,9 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     await homeSender(calls, VECTOR_NOW + 30_000, 'applied').run();
     expect((await operation(scope, first)).status).toBe('applied');
     expect((await store().drainDevice(scope, 'device', 2, {}, clock)).open.homes).toEqual([]);
-    await store().commitSwitch(scope, 'device', 2);
-    // After the commit to L, a new write is L's: H never sends it.
-    const second = await pendingHome(scope);
-    await homeSender(calls, VECTOR_NOW + 30_000, 'applied').run();
-    expect(calls.reads).toHaveLength(3);
-    await backedOff(scope, second, VECTOR_NOW + 30_000);
+    await store().commitSwitch(scope, 'device', 2, await receipt(scope, 2));
+    // After the commit to L, home writes are L's: the exported scope takes no new one (#975).
+    await expect(pendingHome(scope)).rejects.toEqual(exportedRefusal);
   });
 
   it('sends no home write that a frozen device never got, and leaves it out of the drain', async () => {
@@ -300,7 +306,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     expect(await operation(scope, sequence)).not.toHaveProperty('sent');
     expect((await store().drainDevice(scope, 'device', 2, {}, clock)).open.homes).toEqual([]);
     // It moves with the state, so it does not hold the commit.
-    expect(await store().commitSwitch(scope, 'device', 2)).toEqual({ mode: 'L', revision: 3, revoked: false });
+    expect(await store().commitSwitch(scope, 'device', 2, await receipt(scope, 2))).toEqual({ mode: 'L', revision: 3, revoked: false });
   });
 
   it('backs off home flushes during a switch from L to H, and flushes them after its commit', async () => {
@@ -314,10 +320,25 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     await homeSender(calls).run();
     expect(calls.reads).toEqual([]);
     await backedOff(scope, sequence);
-    await store().commitSwitch(scope, 'device', 1);
+    await store().commitSwitch(scope, 'device', 1, 'none');
     // The row waits the backoff of its fenced try, then flushes.
     await homeSender(calls, VECTOR_NOW + 5_000, 'applied').run();
     expect(calls.reads).toEqual([`r-${sequence}`]);
+  });
+
+  it('sends no home write to a device whose row names mode L with no open switch', async () => {
+    const scope = `tenant:${randomUUID()}`, calls = { reads: [] as string[] };
+    await store().seed(scope, state => {
+      seedCollaboration(state);
+      Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+    });
+    // An aborted switch toward H leaves the device's row in mode L, on a scope that was never exported.
+    await store().beginSwitch(scope, 'device', 'H', 0);
+    expect(await store().abortSwitch(scope, 'device', 1)).toEqual({ mode: 'L', revision: 2, revoked: false });
+    const sequence = await pendingHome(scope);
+    await homeSender(calls).run();
+    expect(calls.reads).toEqual([]);
+    await backedOff(scope, sequence);
   });
 
   it('stops a drain that an abort overtook: no cancel after the abort, and the drain refuses', async () => {

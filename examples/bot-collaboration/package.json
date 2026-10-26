@@ -19,7 +19,8 @@
     "./delivery": "./src/delivery.ts",
     "./delivery-routing": "./src/delivery-routing.ts",
     "./delivery-vectors": "./src/delivery-vectors.test-support.ts",
-    "./migration": "./src/migration.ts"
+    "./migration": "./src/migration.ts",
+    "./switch": "./src/switch.ts"
   },
   "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": {

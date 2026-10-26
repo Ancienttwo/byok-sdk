@@ -79,16 +79,16 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 
 | Table | One row per |
 |---|---|
-| `scope` | scope: the store version, the frame (the state without its rows) and the due time |
+| `scope` | scope: the store version, the frame (the state without its rows), the due time and its owner switch export mark (#975) |
 | `entity` | map entry of the state (Turn, card, Bot, room, delivery, ...), keyed by its id |
 | `entry` | element of a list (audit, rejected, team note, home operation, room message), keyed by position |
 | `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
 | `outbox` | work for the sender: a projection's value and send state, a delivery's scan index (owner §54a, signed), a card's connector call claim, an Agent home operation's scan index, or a Host job's claim (#793 §6, signed) |
-| `intent` | Turn intent or Host intent (with its handler name, #955): the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
+| `intent` | Turn intent or Host intent (with its handler name, #955): the frozen SDK input, the stable task id, the K4 retry policy, the FIFO order, the submit state, the SDK result read back and K4's preparation error |
 | `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision, its revoke time and the target of an open owner switch |
-| `retired_identity` | Tombstones in K4's scheme `(kind, identity, expires_at)`: kind `row` for a K8 identity that retention retired, `hash([namespace, id])`; kind `intent` for a compacted intent, its K4 intent id `hash(key)`. H writes only permanent ones; kinds `slot` and `application` are K4's, for an owner switch |
+| `retired_identity` | Tombstones in K4's scheme `(kind, identity, expires_at)`: kind `row` for a K8 identity that retention retired, `hash([namespace, id])`; kind `intent` for a compacted intent, its K4 intent id `hash(key)`. H writes only permanent ones; kinds `slot` and `application` are K4's, for an owner switch. H reads no expiry and deletes no tombstone (see Owner switch export) |
 | `archived_row` | row that retention moved out of the state, by namespace and id; a command record has an expiry |
-| `routine` | K4 routine of a Bot: its definition, staged version, lifecycle, status and next slot |
+| `routine` | K4 routine of a Bot: its definition, staged version, lifecycle, status, next slot, and K4's schedule retry fields and last error |
 | `occurrence` | K4 occurrence of a routine slot; its conclusion only when it has no intent, and a Host job's state (`job`) |
 
 Each scope and each key is stored as `JSON.stringify(value)`, so two values that UTF-8 would merge stay
@@ -129,7 +129,8 @@ insertion order, in one transaction under the scope lock. It writes each step as
   same lock, so no SDK attempt can exist. A tried row waits for the reconciliation.
 - `routine`: K4 `promoteOccurrence` runs on the routine slice. The intent row takes the step's execution and the K4
   times: `wait_until` from the occurrence record, `retry_until` from the next slot, and `superseded` at once when a
-  newer slot marked the occurrence. It takes no K4 retry policy. The freeze checks the device binding.
+  newer slot marked the occurrence. It takes no K4 retry policy: its `retry` is H's one-attempt policy. The freeze checks the
+  device binding.
 - `ended`: a routine Turn that ends before promotion concludes its occurrence `cancelled` (K8 `concludeRoutineTurn`).
   Nothing for another Turn.
 
@@ -410,8 +411,9 @@ scope lock, on the expected mode revision, and returns the binding row read back
   scope, which concludes the cancelled Turns, and calls it again. For a switch toward H it refuses with `not_owner`: L
   drains its own work. Each cancel runs in its own transaction, which checks the open switch on its revision first, so a
   drain that an abort or a commit overtook stops with `not_switching` and cancels nothing more.
-- `commitSwitch(scope, deviceId, expectedRevision)` makes the target the owner mode and raises the revision. Away from H,
-  it refuses with `open_work` while the drain finds any open work, whatever its age: §4.1 has no timeout path.
+- `commitSwitch(scope, deviceId, expectedRevision, receipt)` makes the target the owner mode and raises the revision. Away
+  from H, it refuses with `open_work` while the drain finds any open work, whatever its age: §4.1 has no timeout path, and
+  it needs the scope's export and the new owner's receipt (see Owner switch export).
 - `abortSwitch(scope, deviceId, expectedRevision)` ends the switch on the old mode and raises the revision.
 
 A step on another revision, a second freeze, a commit with no open switch, a switch to the current mode and a step on a
@@ -436,9 +438,65 @@ During the freeze:
 
 After a commit to L, the same writes refuse with `DeviceBindingError` and `mode`. The home write rule of the freeze holds
 while the device's row names mode L too (after a commit to L, and during a switch from L to H until it commits): L writes
-them. The switch moves no data: the state export and import between H and an L
-ledger (the §8 migration set) is a follow-up. Until then, a room seat of a Bot on the device that has no Turn yet stays in
-H's state, and after a commit to L its Turn is held with `mode`.
+them. A switch away from H moves the whole scope to L with the state export below, and its commit needs the new owner's
+receipt.
+
+## Owner switch export (#975)
+
+`src/switch.ts` reads one scope into the switch format of K8 `./migration`. One function, `hostedSwitchContent`, states
+what an H scope holds; the commit away seals it again with the same function. The whole scope moves together.
+
+**Export.** After `beginSwitch(scope, deviceId, 'L', revision)` and the drain of each device,
+`exportScope(scope, devices, clock)` runs in one transaction under the scope lock: it reads the scope, seals it
+(`sealSwitchExport`) and writes the export mark `scope.switch_export`. It refuses:
+
+- a device that has no open switch away from H at its revision, or still has open work (`DeviceSwitchRefusedError`);
+- a live Bot on a device it does not name, and every other state the format refuses (`SwitchExportError`);
+- a pending projection: the outbox sender flushes it first, since H's receiver deduplicates by `(scope, id)`;
+- a card row with a connector call in flight, and a pending Host job, which would run while the export waits;
+- an intent with no conclusion, and a stored copy that differs from the value it is derived from, with `reference`: an
+  intent's `agent` (K4 `agentKey` with the scope), its task id and frozen input, a routine row's id, a promoted
+  occurrence with its own conclusion, and a Host job occurrence with no outbox row.
+
+H stores one generation of each intent (the task id CHECK pins generation 0), so each intent moves with no earlier
+execution. Its message receipt is the K8 accepted reply of its task id, live or retained (#975 D4). Its retry policy is
+the `retry` column: H's own rows store K4's one-attempt policy, since H never retries. A Host job's `attempts` are its
+outbox row's `tries`. Routines and occurrences move in the order of their ordinals, as their positions; an intent keeps
+its ordinal. The sections are sorted in JS, so no database collation can reorder them. Not moved: the scheduler cursors
+of a concluded row (`tries`, `next_at`, `reconcile_at`, `last_error`), settled projection rows, and the delivery, card
+and home index rows, which the target rebuilds from the state.
+
+**The fence.** From the mark on, also after a restart and after the commit, H writes nothing to the scope. Each write
+transaction of `inSchema` that locked an exported scope throws `SwitchExportedError` (`code: 'switch_exported'`) right
+before its commit, so the work's own refusals come first, as on L: a command on the frozen device still gets
+`DeviceSwitchingError`, and after the commit `DeviceBindingError` with `mode`. That covers every store method, the
+submitter, the reconciler, the outbox sender, retention and compaction, the routine fire and upkeep, the device observer
+and the reply checker. `lockScope` refuses to run outside such a transaction, so no writer skips the check. Only the
+switch steps pass: `exportScope`, `commitSwitch` and `abortSwitch`. The due, routine, submit, reconciliation and outbox
+scans leave an exported scope out. The due and routine backoff writes take no scope lock and do not write to an exported
+scope: the due backoff updates the scope row itself, and the routine backoff first takes a share lock on the scope row,
+so it waits for an export in flight and reads its mark. An outbox row of a scope exported after the sender's scan is
+reported failed and gets no wait, and the pass goes on with the other scopes.
+
+H reads no tombstone expiry and deletes no tombstone. K4's admission readers do not read the expiry either; K4
+`compact` does, and deletes expired tombstones. Only K4's routine kinds expire (an occurrence intent, a slot, an applied
+outcome), and H compacts no routine intent and no occurrence, so a tombstone H holds with an expiry stays as it is and
+moves on with that expiry.
+
+**Commit away.** After the new owner imported and verified the export, `commitSwitch(scope, deviceId, revision,
+receipt)` checks the receipt against the mark and `deviceId` at `revision` against the export's devices, seals the scope
+again under the export's header, and refuses a different digest. It then moves every device of the export to L in one
+transaction, each on its frozen revision and only with no open work, so a domain is never split between the owners. An
+abort of a device of the export ends the export and lifts the fence; the new owner discards its import. After the commit
+no device of the export aborts.
+
+**Ordering.** The receipt is the export's digest, and nothing between the two Hosts proves that the target imported it:
+there is no authentication between them. The product runs the steps in order and keeps the document:
+
+- The old owner commits away only after the target reported its import verified.
+- The export document is kept until the target committed toward its owner.
+- If an import is lost after the old owner committed away, the kept document is imported into a new tenant or scope.
+- From the export on the old owner refuses all work, so two owners never run the domain at the same time.
 
 ## Retention
 
@@ -526,8 +584,8 @@ H runs the K8 sealed Bot routines (#953, #654 E3d-4; K8 README, Sealed Bot routi
   `intent.input`. There is no DDL change and no second copy.
 - The sync passes K8 the template of each routine version, from the slice. A sealed occurrence intent goes through
   `FrozenSubmitPort.submitSealed`, the cloud's `submitSealedAgentExecution`. On a port without it, the submitter fails
-  an untried sealed row before any SDK call, as K4 `begin` does in L: the intent ends `failed`, the row keeps `This Host
-  has no sealed dispatch`, and the agent's queue moves on. The submitter reports the scope through its `changed` option,
+  an untried sealed row before any SDK call, as K4 `begin` does in L: the intent ends `failed`, the row keeps K4's
+  `preparation_error` `sealed_dispatch_unavailable`, and the agent's queue moves on. The submitter reports the scope through its `changed` option,
   and the deployment's sync then ends the Turn `failed`. A tried row may have reached the SDK, so it
   keeps its resubmit until `wait_until`.
 - K4 `enqueue` refuses every sealed execution. H's `freezeIntent` takes one only from the sync's freeze of a promoted
@@ -846,13 +904,20 @@ three and runs these suites.
   a Turn held during the freeze and frozen after an abort, a submit claimed before the freeze, the drain and cancel with a
   tried intent that holds the commit until it concludes, the cancel of a Host intent with no Turn, a routine fire during
   the freeze and after an abort, a new store that reads the freeze, and home flushes during the switch and after a
-  commit to L.
+  commit to L. Each commit away exports the scope first and passes the export's digest.
+- The switch export tests (`switch-export.test.ts`, #975) move a scope that holds a retained and compacted Turn, a Bot
+  routine with a settled occurrence and routine Turn, a Host intent and an unsent home write into a new L tenant: K8
+  `importForSwitch` reads it back to the same digest, and H commits away on its receipt. They cover each export refusal,
+  a receipt that is not the export's, a scope that changed after its export, an abort that lifts the fence, the refusal of
+  each write path after its own refusals with nothing written, the scans that leave an exported scope out, the backoff
+  writes of a scan that raced an export, and a scope lock outside `inSchema`.
 - The K8 retention vectors (`retentionVectors`) run on the store, with H tests for message replays after retention.
-- The compaction tests cover a settled intent and its tombstone, a repeated call, a refused freeze of a retired Turn, a
-  K8 veto, an unsettled row, an unknown Turn id, a routine intent, and the sync's `result_retired`.
+- The compaction tests cover a settled intent and its tombstone, an expiring tombstone of the same identity that becomes
+  permanent, a repeated call, a refused freeze of a retired Turn, a K8 veto, an unsettled row, an unknown Turn id, a
+  routine intent, and the sync's `result_retired`.
 - The routine tests seed each occurrence as the scheduler records it. They cover the outcome actions, the owner API,
-  promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, and the refusal of
-  an execution routine on the Bot path.
+  promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, the refusal of
+  an execution routine on the Bot path, and the SQL occurrence and intent key fragments against the K4 functions.
 - The D2f-1 routine vectors (`routineVectors`) run on the store, with the scheduler fire and a submitter pass on an SDK
   tenant in memory. The `end_routine` tests cover a refusal that writes nothing and a caller's `routines` port.
 - The K8 delivery vectors (`deliveryVectors`) run on the store, its inbound entry and the outbox sender, all 21. After each Host step, the delivery outbox index matches the K8 entities. The
