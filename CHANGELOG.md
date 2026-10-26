@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fixed (client)** — the prepared lane now accepts a tool schema whose
+  object root defines its fields only in `oneOf` branches, such as a result
+  document schema that `checkResultSchema` admits (#1003). Each branch must
+  be an object with its own `properties`, and the schema reaches the
+  provider unchanged: nothing is flattened or added. A tool schema with no
+  root `properties` and no such branches, or with malformed `properties`,
+  is still refused with `prepared_transcript_invalid`. Before, every tool
+  schema without root `properties` was refused.
 - **Feature (keys)** — `PiModelConfigSchema.compat` accepts
   `sendSessionAffinityHeaders` (`openai-completions` and `anthropic-messages`)
   and `allowEmptySignature` (`anthropic-messages`), both booleans, as pinned
@@ -11,6 +19,32 @@
   Baseten entries. The prepared entry still refuses
   `sendSessionAffinityHeaders`, which its frozen wire does not carry, and
   compiles no `anthropic-messages` request.
+
+## 0.30.2 — 2026-10-26 (published)
+
+0.30.2 is a PATCH release under a one-release exception to the pre-1.0
+policy, as 0.30.1 was. The owner chose 0.30.2 instead of 0.31.0 (issues #978
+and #977), although it adds public API and Postgres migration 0029, and it
+has breaking changes. #924, #938 and #605, and the #654 changes of §77b and
+E5b-2, are breaking in client. E5b-2 is also breaking in core, cloud and
+protocol: scope key packages are version 2, the Host takes only version 2
+puts, and the daemon advertises `sealed-payload-v1` only where the Host
+declares `e2ee.member.kem-epoch`, so the Host upgrades first. Migration 0029,
+and the first 0.30.2 open of a SQLite store, refuse a member chain that
+already holds a `rotate` entry. The examples changes of #793 S9, #794 H3 and
+#975 slice 5b are also breaking for a Host that copies the hosted
+collaboration example. The envelope wire stays v3. The npm registry lists
+all nine public packages at 0.30.2. The registry publication times fall on
+2026-10-26 (UTC). The registry read on 2026-10-26 at 13:36 UTC reports
+0.30.2 as `latest` for all nine. The tag `v0.30.2` and its GitHub Release
+point to `b1469e5a`. This release does not say that 0.30.2, or a Host on
+it, is ready for production; the product loop gate (#977) is evaluated
+after release. See the [release notes](docs/releases/v0.30.2.md) for scope,
+what is not in 0.30.2 and the known limits, and the
+[Host upgrade checklist](docs/releases/host-upgrade-0.30.2.md) for the
+upgrade steps. All nine public manifests and their lock records move to
+0.30.2.
+
 - **Feature (examples)** — the hosted collaboration example runs
   summary-only Host job routines (#793 S14), as L's `hostJobs`. Host code
   adds them with `addHostJobRoutine`, `updateHostJobRoutine` and
@@ -461,8 +495,163 @@
   fails before any SDK call, as in L. `freezeIntent` takes a sealed execution
   only from a routine occurrence with no Host handler. No DDL, SDK or wire
   change.
+- **Feature (examples)** — the Worker H Host has the sealed lane (#953): its
+  task port's `submitSealed` is the cloud's `submitSealedAgentExecution`, and an
+  owner route creates a sealed routine and another reseals it through H's
+  command entry. Each pass
+  syncs the scopes that the submitter reports for an intent it concluded with no
+  SDK call, so a queued expiry ends its Turn in the same pass. Local workerd
+  tests cover both; the synthetic device has no E2EE member keyring, so the SDK
+  refuses the sealed offer before its mailbox append.
+- **Feature (examples)** — the K4 `HostLedger` can move a whole tenant for a
+  topology switch (#975 slice 1). `dumpForSwitch()` returns a `LedgerDump`: the
+  ledger body, every tombstone and application row with its expiry as stored,
+  and the retired memory intents. `loadForSwitch(dump)` writes one into an
+  empty tenant in one transaction, keeps every expiry, runs the intent identity
+  checks of `transaction()`, and refuses while a core is bound. It loads only a
+  dump bound to the tenant: each intent's `agent` is `agentKey(tenant, …)`, a
+  scan wake key names the tenant, and there is no memory state. `discard()`
+  deletes every row of a tenant and closes the ledger, for an aborted import.
+  The K4 index exports `LedgerDump` and its row types.
+- **Fix (examples)** — H's due and routine schedulers keep their backoff in
+  Postgres (#794 H1): `scope.retry_at` and `routine.retry_at`. A scope whose
+  sync throws or stays due, and a routine whose fire throws or is fenced, wait
+  out `backoffMs` across scheduler instances and processes, so a Worker
+  invocation no longer retries them on every pass. A backoff holds only for the
+  due time or slot it was set on: the store write that moves `due_at` or
+  `next_at` clears it. The in-memory maps are gone. H DDL adds the two columns;
+  no SDK or wire change.
+- **Feature (examples)** — K8 exports the pure rule for which Bots a new
+  command reaches, `commandBots(state, command)` with its `CommandScopeState`
+  type, from `./rules/commands` (#975 slice 6). It names the Bot of `input` and
+  owner `receive`, every Bot member of the room for room input, and the Bot of
+  the question's or card's Turn for `answer` and `decide`. L's freeze admission
+  now uses it, with no change in behavior. A Host wires it into
+  `CommandPorts.admit`, so both Hosts refuse the same commands while a device
+  switches.
+- **Fixed (client)** — An Agent home lease marker is now published whole
+  (#605). `AgentHomeLeaseManager.acquire` created `.byok/agent-home.lease`
+  and then wrote it, so a process killed in between left an empty marker,
+  and every later acquire of that home failed with
+  `AgentHomeLeaseCorruptError`. It now writes and syncs a temp file beside
+  the marker and hard-links it onto the lease path. The exclusive create,
+  owner check and exact-owner reclaim are unchanged. The next acquire
+  removes the temp files of a killed one. An empty or unparseable marker
+  is still refused.
+- **Breaking (client)** — An Agent home root on a filesystem without hard
+  links now fails at its first acquire, with an error that names the
+  directory (#605). Examples are FAT32, exFAT, and some network or FUSE
+  filesystems. Before this change, acquire did not need hard links.
+- **Changed (client)** — `AgentHomeLeaseCorruptError` for an Agent home lease
+  marker now says how to recover (#605): confirm that no process uses this
+  Agent home, then delete the lease marker file and retry. A crash before
+  0.30.2 could leave an empty marker. Such a marker is still refused; the SDK
+  does not delete or reclaim it on restart.
+- **Feature (examples)** — K8 gains the owner switch format (#975 slice 2):
+  the `./migration` entry, also exported from the K8 root. `SwitchExport`
+  version 1 holds one whole coordination domain (an L tenant or an H scope) in
+  neutral records with exact key sets: the collaboration state without the
+  source's owner records, retention rows, concluded intents (with their frozen
+  input and the K4 execution of every earlier generation), routines and
+  occurrences with their ordinals, pending Host jobs and tombstones, plus a
+  manifest of per-section counts and digests and one digest over them. Values
+  a Host derives (an intent's FIFO key, slots, wake keys) are not in it.
+  `sealSwitchExport` orders and seals it; `verifySwitchExport` checks a
+  document or a target's read-back and throws `SwitchExportError` for open
+  work, a home write that may have been sent, a pending projection, a card
+  call in flight, a Bot on a device the export does not move, a record that
+  names a missing record, a message receipt that is not its K8 reply, an
+  execution routine, state K4 cannot produce, or a manifest that does not
+  match. No Host uses it yet. No SDK, wire or SQL change.
+- **Changed (examples)** — H stores tombstones in K4's scheme (#975 slice 4):
+  `retired_identity` is `(scope, kind, identity, expires_at)`, as K4
+  `host_retired_identity`, with the kinds `row`, `intent`, `slot` and
+  `application`. A compacted intent's tombstone is kind `intent` with K4's
+  intent id `hash(key)`, in place of `hash(['intent', key])`, and K8 row
+  tombstones are kind `row`. Readers filter by kind. So an owner switch moves
+  tombstones between L and H as they are. H DDL change; H is unreleased, so
+  there is no migration. No SDK or wire change.
+- **Feature (examples)** — K8 L runs both sides of the owner switch (#975
+  slice 3). `exportForSwitch(devices)` seals a frozen, drained domain into a
+  switch export after it checks every stored copy against the value it is
+  derived from, and from then on nothing of K8 writes to its ledger
+  (`SwitchExportedError`): not the Host, not the root ledger functions, and
+  not a compaction (the veto refuses with `switch_exported`). `commitSwitch(deviceId, revision, receipt)` now
+  needs the new owner's receipt, seals the ledger again to check that it did
+  not change, and moves every device of the export to H in one transaction.
+  `importForSwitch(ledger, document)` writes an H export into an empty L
+  tenant and reads it back to the same digest in the same transaction, or
+  writes nothing, `commitImport`
+  hands its devices to L, and `discardImport` deletes an import that was not
+  committed. A `BotCollaboration` refuses a ledger with an uncommitted import.
+  The `./migration` format now requires each routine and occurrence `ordinal`
+  to be its position (0 to n - 1), refuses a promoted Host job occurrence and
+  L's switch records (`owner_record`), and
+  exports `switchAttempts`, the K4 `attempts` that it does not carry. K4
+  exports the encodings a switch derives again and calls them itself:
+  `routineWakeKey`, `occurrenceIntentKey`, `isOccurrenceIntentKey`,
+  `occurrenceOfIntentKey`, `frozenInput`, and also `validateRetry`. K4
+  `loadForSwitch(dump, verify)` checks the read-back before it commits. The
+  root ledger functions also refuse a ledger with an uncommitted import, and the
+  format refuses a routine Turn whose id is not an occurrence intent key
+  (`invalid`). No SDK, wire or SQL change.
+- **Breaking (examples)** — H reads a scope's Host config and its owner
+  through Promises (#794 H3): `HostedStoreOptions.host` returns
+  `Promise<HostConfig>` and `CommandEntryOptions.owner` returns
+  `Promise<string>`. Each store method awaits the config once and never while
+  it holds a connection, so a product may read it from the store's own pool;
+  the K8 rules stay synchronous. The Worker now reads only the
+  `host_scope` rows an invocation touches, by scope or by the owner token's
+  hash, instead of every row on each invocation. Wrap a synchronous config in
+  an `async` function. H is unreleased; no SDK or wire change.
+- **Feature (examples)** — H runs the old-owner side of the owner switch
+  (#975 slice 5a). `exportScope(scope, devices, clock)` seals a drained
+  scope into a switch export after each device has an open switch away from
+  H at its revision, and writes the export mark `scope.switch_export`. From
+  then on no write transaction that locks the scope commits
+  (`SwitchExportedError`, after the work's own refusals), and the scans
+  leave it out. `commitSwitch` takes a fourth argument, the new owner's
+  receipt: away from H it must be the export's digest, the scope must seal
+  to it again, and every device of the export moves to L in one
+  transaction. `abortSwitch` of a device of the export ends it. H DDL:
+  `scope.switch_export`, intent `retry` (H's own rows store K4's one-attempt
+  policy) and `preparation_error` (the sealed-lane failure code moves there
+  from `last_error`), and routine `schedule_retry_at`,
+  `schedule_retry_count` and `last_error`, which H's K4 routine calls now
+  keep. H is unreleased, so there is no migration. K8 exports `./switch`.
+  No SDK or wire change.
+- **Feature (examples)** — H runs the new-owner side of the owner switch
+  (#975 slice 5b). `importScope(scope, document, clock)` writes an L export
+  into a new scope and reads it back to the export's digest in the same
+  Postgres transaction; a mismatch writes nothing. It returns the receipt
+  the old owner commits away on. Until `commitImport(scope, digest)` no
+  work runs on the scope (`SwitchImportedError`, after the work's own
+  refusals) and the scans leave it out; `discardImport(scope)` deletes an
+  uncommitted import. An imported intent keeps its earlier generations, and
+  a message for an earlier task gets its receipt or `stale_generation`, as
+  in K4. Breaking for H callers: H's switch toward H goes, so
+  `beginSwitch` takes only target `'L'` and H becomes an owner only by
+  import; `DeviceSwitchRefusedError` loses `not_owner`. H DDL: intent
+  `generation` (no default; H's own rows write 0) with the task id CHECK on
+  it, `memory_blocked`, the table `intent_execution`, occurrence
+  `slot_replay_count`, `scope.switch_import`, and `device_binding.switching`
+  only `'L'`. H is unreleased, so there is no migration. No SDK or wire
+  change.
+- **Feature (examples)** — H admits each owner command by the K8
+  `commandBots` rule, as L's `admitCommand` does (#975 slice 6): its
+  `CommandPorts.admit` refuses a new command, after the replay lookup, while
+  a named Bot's device is frozen for an owner switch (`DeviceSwitchingError`)
+  or owned by L (`DeviceBindingError` with `mode`). This covers the command
+  entry, the store's `commit` and the inbound channel. A decision and a room
+  input that mentions no Bot of the frozen device are now refused too; the
+  inbound fence that checked only the work a commit added is gone, and the
+  command entry's binding check of added work no longer refuses a frozen
+  device, so an abandoned delegation commits during a freeze, as on L, and
+  the sync holds its reply Turn. H's delegation settlement now counts a
+  start of any generation of an imported intent, as K8 `intentFacts`. No
+  SDK or wire change.
 
-## 0.30.1 — 2026-10-24 (published)
+## 0.30.1 — 2026-10-24 (published; superseded by 0.30.2)
 
 0.30.1 is a PATCH release under a one-release exception to the pre-1.0
 policy. On 2026-10-24 the owner chose 0.30.x instead of 0.31.0 (issue #872),
@@ -474,9 +663,9 @@ SQLite migration of #909 means that a migrated store cannot go back to Pi
 1.3.0. The examples changes of #882 and #884 are also breaking for a Host
 that copies the K8 example. The npm registry lists all nine public packages
 at 0.30.1. The registry publication times fall on 2026-10-24 (UTC). The
-registry read on 2026-10-24 at 19:19 UTC reports 0.30.1 as `latest` for all
-nine. The tag `v0.30.1` and its GitHub Release point to
-`142acbe2`. A 0.30.1 daemon paired as an E2EE member advertises
+registry read on 2026-10-24 at 19:19 UTC reported 0.30.1 as `latest` for all
+nine. The read on 2026-10-26 at 13:36 UTC reports 0.30.2 as `latest`. The
+tag `v0.30.1` and its GitHub Release point to `142acbe2`. A 0.30.1 daemon paired as an E2EE member advertises
 `sealed-payload-v1` while its member is verified and the deployment declares
 `e2ee.member`. See the [release notes](docs/releases/v0.30.1.md) for scope,
 the release rule of `sealed-payload-v1`, the upgrade notes and the
@@ -900,7 +1089,7 @@ of #783, #784, #831 and #834. The examples changes of #820, #823 and #852 are
 also breaking for a Host that copies the K8 example. The npm registry lists
 all nine public packages at 0.30.0. The registry publication times fall on
 2026-10-24 (UTC). The registry read on 2026-10-24 at 07:39 UTC reported
-0.30.0 as `latest` for all nine. The read on 2026-10-24 at 19:19 UTC reports
+0.30.0 as `latest` for all nine. The read on 2026-10-24 at 19:19 UTC reported
 0.30.1 as `latest`. The tag `v0.30.0` and its GitHub Release point to
 `6b779cff`. A default 0.30.0 daemon does not advertise `sealed-payload-v1`.
 See the [release notes](docs/releases/v0.30.0.md) for scope, the release rule

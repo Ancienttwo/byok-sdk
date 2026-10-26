@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, type ExecutionServer, type ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
+import { HostLedger, MIN_TOMBSTONE_RETENTION_MS, hash, occurrenceIntentKey, type ExecutionServer, type ExecutionTemplate } from '@byok-sdk/example-host-execution-core';
 import { template as k4template } from '@byok-sdk/example-host-execution-core/test-support';
 import { BotCollaboration } from './host';
 import { botCompactVeto } from './compaction';
@@ -61,25 +61,26 @@ it('archives a settled root out of the window, replays its input, and refuses a 
 it('L: refuses a Turn that still has its K4 intent and is not reported, and a routine Turn with an open occurrence', () => {
   const root = mkdtempSync(join(tmpdir(), 'k8-retain-')); roots.push(root);
   const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant'); closers.push(() => ledger.close());
+  const occurrenceKey = hash(['routine', 1, 'slot']), routineTurn = occurrenceIntentKey(occurrenceKey);
   const settled = (id: string, source: 'user' | 'routine' = 'user') => ({ id, root: id, botId: 'main', source, request: id, hop: 0,
     status: 'succeeded' as const, conclusion: 'succeeded', authority: 'owner' as const });
   ledger.transaction(s => {
     const state = stateOf(s.application);
     state.turns.a = settled('a');
-    state.turns['occurrence:k'] = { ...settled('occurrence:k', 'routine'), reported: true };
+    state.turns[routineTurn] = { ...settled(routineTurn, 'routine'), reported: true };
     state.turns.newest = { ...settled('newest'), reported: true };
     // Only the facts that retention reads: the intent row exists, the occurrence has no conclusion.
     (s.intents as Record<string, unknown>)[hash('a')] = { id: hash('a'), key: 'a' };
-    (s.occurrences as Record<string, unknown>).k = { key: 'k' };
+    (s.occurrences as Record<string, unknown>)[occurrenceKey] = { key: occurrenceKey };
   });
   const retain = (roots: string[]) => retainInLedger(ledger, { acknowledgedRoots: roots, now: 10_000, retentionMs: MIN_TOMBSTONE_RETENTION_MS }, { contextTurnLimit: 1 });
   const before = ledger.snapshot();
   expect(() => retain(['a'])).toThrow('Retention refused: A Turn of the root is not reported');
-  expect(() => retain(['occurrence:k'])).toThrow('Retention refused: A routine occurrence of the root is open');
+  expect(() => retain([routineTurn])).toThrow('Retention refused: A routine occurrence of the root is open');
   expect(ledger.snapshot()).toEqual(before);
   ledger.transaction(s => {
     stateOf(s.application).turns.a!.reported = true;
-    (s.occurrences as Record<string, { conclusion?: string }>).k!.conclusion = 'succeeded';
+    (s.occurrences as Record<string, { conclusion?: string }>)[occurrenceKey]!.conclusion = 'succeeded';
   });
-  expect(retain(['a', 'occurrence:k'])).toMatchObject({ archivedRoots: 2 });
+  expect(retain(['a', routineTurn])).toMatchObject({ archivedRoots: 2 });
 });

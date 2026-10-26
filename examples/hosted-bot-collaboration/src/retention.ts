@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import { hash, time, type Json } from '@byok-sdk/example-host-execution-core';
+import { hash, occurrenceOfIntentKey, time, type Json, type LedgerDumpTombstone } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { retainRoots, RetentionRefused, type RetentionInput, type RetentionLimits, type RetentionResult,
   type RetentionStore } from '@byok-sdk/example-bot-collaboration/retention';
@@ -31,17 +31,24 @@ export async function acceptedReply(client: PoolClient, scopeKey: string, state:
   return Object.hasOwn(state.replies, taskId) ? state.replies[taskId] : await archivedRow(client, scopeKey, 'replies', taskId) as AcceptedReply | undefined;
 }
 
-/** The tombstones among `hashes`. */
-async function retiredHashes(client: PoolClient, scopeKey: string, hashes: string[]): Promise<Set<string>> {
+/** A kind of K4 `host_retired_identity`, `row` included. */
+type TombstoneKind = LedgerDumpTombstone['kind'];
+/**
+ * The tombstones of `kind` among `hashes`. The expiry is not read, as K4's admission readers do not read it (`ledger.ts`
+ * isRetired and the transaction guard). K4 `compact` does read it, and deletes expired tombstones; only K4's routine
+ * kinds expire (an occurrence intent, a slot, an applied outcome), and H compacts no routine intent and no occurrence.
+ * So H deletes no tombstone, and one it imported with an expiry stays as it is and moves on with that expiry (#975).
+ */
+async function retiredHashes(client: PoolClient, scopeKey: string, kind: TombstoneKind, hashes: string[]): Promise<Set<string>> {
   if (!hashes.length) return new Set();
-  const found = await client.query<{ identity: string }>('SELECT identity FROM retired_identity WHERE scope = $1 AND identity = ANY($2::text[])',
-    [scopeKey, hashes]);
+  const found = await client.query<{ identity: string }>(
+    'SELECT identity FROM retired_identity WHERE scope = $1 AND kind = $2 AND identity = ANY($3::text[])', [scopeKey, kind, hashes]);
   return new Set(found.rows.map(row => row.identity));
 }
 /** Loads the tombstones of `ids` and returns a lookup, as K4 `isRetired`. A query outside `ids` throws. */
 async function tombstones(client: PoolClient, scopeKey: string, ids: Array<[RetiredNamespace | 'root', string]>) {
   const asked = new Set(ids.map(([namespace, id]) => hash([namespace, id])));
-  const retired = await retiredHashes(client, scopeKey, [...asked]);
+  const retired = await retiredHashes(client, scopeKey, 'row', [...asked]);
   return (namespace: string, id: string): boolean => {
     checkRow(namespace, id);
     const identity = hash([namespace, id]);
@@ -52,17 +59,18 @@ async function tombstones(client: PoolClient, scopeKey: string, ids: Array<[Reti
 const identities = (namespace: RetiredNamespace, id: string): Array<[RetiredNamespace, string]> =>
   namespace === 'round' ? [['round', id]] : [['turn', id], ['input', id]];
 
-/** The intent tombstone of a Turn id (#793 S8): compaction removed its intent row for good. `intent` is not a K8 row namespace. */
-export const intentIdentity = (turnId: string): string => hash(['intent', turnId]);
+/** The intent tombstone of a Turn id (#793 S8): compaction removed its intent row for good. K4's intent id, `hash(key)`. */
+export const intentIdentity = (turnId: string): string => hash(turnId);
 /** The Turn ids among `turnIds` whose intent compaction retired (#793 S8). */
 export async function retiredIntents(client: PoolClient, scopeKey: string, turnIds: readonly string[]): Promise<Set<string>> {
-  const retired = await retiredHashes(client, scopeKey, turnIds.map(intentIdentity));
+  const retired = await retiredHashes(client, scopeKey, 'intent', turnIds.map(intentIdentity));
   return new Set(turnIds.filter(id => retired.has(intentIdentity(id))));
 }
-/** Writes permanent tombstones. They never expire. */
-export async function retire(client: PoolClient, scopeKey: string, identities: Iterable<string>): Promise<void> {
+/** Writes permanent tombstones of `kind`. A tombstone already there becomes permanent, as K4's row retire does. */
+export async function retire(client: PoolClient, scopeKey: string, kind: TombstoneKind, identities: Iterable<string>): Promise<void> {
   for (const identity of identities) {
-    await client.query('INSERT INTO retired_identity (scope, identity) VALUES ($1, $2) ON CONFLICT DO NOTHING', [scopeKey, identity]);
+    await client.query(`INSERT INTO retired_identity (scope, kind, identity, expires_at) VALUES ($1, $2, $3, NULL)
+      ON CONFLICT (scope, kind, identity) DO UPDATE SET expires_at = NULL`, [scopeKey, kind, identity]);
   }
 }
 
@@ -140,7 +148,7 @@ export async function decideRetention(client: PoolClient, scopeKey: string, stat
   const rootOf = new Map(Object.values(state.turns).map(turn => [turn.id, turn.root]));
   const result = retainRoots(state, input, limits, {
     hasIntent: turnId => intents.has(storedKey(turnId)),
-    occurrenceOpen: turnId => openOccurrences.has(turnId.slice('occurrence:'.length)),
+    occurrenceOpen: turnId => { const key = occurrenceOfIntentKey(turnId); return key !== undefined && openOccurrences.has(key); },
   }, store);
   for (const row of puts.values()) {
     const body = JSON.stringify(row.value);
@@ -157,6 +165,6 @@ export async function decideRetention(client: PoolClient, scopeKey: string, stat
     }
     if (row.namespace === 'commands') await client.query('DELETE FROM command WHERE scope = $1 AND key = $2', [scopeKey, storedKey(row.id)]);
   }
-  await retire(client, scopeKey, retired);
+  await retire(client, scopeKey, 'row', retired);
   return result;
 }

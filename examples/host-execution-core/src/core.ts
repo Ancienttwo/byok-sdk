@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ByokServer, ByokServerEvent, CreateByokServerOptions, DueWake } from '@byok-sdk/server';
 import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory';
 import { HostLedger, OutboxFullError, type ApplicationRows } from './ledger';
-import { canonical, hash, isSealed, project, taskId, time, validateJson, type HostJobHandler, type HostOccurrenceRun, type Attempt,
+import { canonical, frozenInput, hash, isSealed, project, taskId, time, validateJson, type HostJobHandler, type HostOccurrenceRun, type Attempt,
   type Intent, type IntentInput, type Json, type LedgerState, type Occurrence, type Routine, type RoutineDefinition, type SealedAgentExecutionInput, type Terminal } from './model';
 import { nextIntervalOccurrence, type NextOccurrence } from './schedule';
 import { applyPlan, auditCalendarError, auditIgnoredWake, deferSchedule, nextWake, occurrenceRun, promote, recordOccurrence, routineCommands, scheduleNext,
@@ -715,7 +715,7 @@ export class HostExecutionCore {
       if (row.phase === 'backoff') {
         row.generation++;
         row.taskId = taskId(row.key, row.generation);
-        state.executions[row.taskId] = { input: { ...structuredClone(row.execution), taskId: row.taskId }, submission: 'reserved', started: false };
+        state.executions[row.taskId] = { input: frozenInput(row.execution, row.taskId), submission: 'reserved', started: false };
       }
       if (instruction !== undefined) state.executions[row.taskId]!.input.payload.instruction = instruction;
       row.phase = 'inflight'; row.attempts++;

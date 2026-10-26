@@ -82,6 +82,10 @@ The roots are `src/host.ts` (`BotCollaboration`) and `src/index.ts`. The package
 entries other than the vectors are in this layer too. `src/persona.ts` is the
 daemon side of the persona projection. It is the only K8 file that imports
 `@byok-sdk/client` directly. The K4 root entry needs that package too.
+`src/migration.ts`, the owner switch format, takes `validateJson` and K4
+types from the K4 root entry, and `hash` and `canonical` from `./canonical`.
+`src/switch.ts` is the L side of the owner switch: it reads an L ledger into
+that format and writes the format into an L tenant.
 
 ```vendor host
 src/channel.ts
@@ -95,6 +99,7 @@ src/history.ts
 src/home-projections.ts
 src/host.ts
 src/index.ts
+src/migration.ts
 src/model.ts
 src/persona.ts
 src/reply-receipts.ts
@@ -102,6 +107,7 @@ src/retention.ts
 src/rooms.ts
 src/routines.ts
 src/schema.ts
+src/switch.ts
 src/team-model.ts
 src/team.ts
 src/toolset-policy.ts
@@ -109,6 +115,7 @@ src/topology.ts
 @byok-sdk/client
 @byok-sdk/core
 @byok-sdk/example-host-execution-core
+@byok-sdk/example-host-execution-core/canonical: canonical hash
 @byok-sdk/protocol
 @byok-sdk/server
 node:crypto

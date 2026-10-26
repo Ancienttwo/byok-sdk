@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
-import { hash, MIN_TOMBSTONE_RETENTION_MS, taskId, type FrozenSubmitPort, type Json, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
+import { hash, MIN_TOMBSTONE_RETENTION_MS, occurrenceIntentKey, occurrenceOfIntentKey, taskId, type FrozenSubmitPort, type Json, type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { createDefinition, ROUTINE_WAIT_MS, routineCalendar, routineTurn } from '@byok-sdk/example-bot-collaboration/routines';
@@ -10,7 +10,7 @@ import { freezeIntent, HostedSubmitter } from './intents';
 import { storedKey } from './layout';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import { HostedReconciler, type TaskEvidence } from './reconcile';
-import { hostedRoutineCommands, loadSlice, writeSlice } from './routines';
+import { hostedRoutineCommands, INTENT_OF, loadSlice, OCCURRENCE_OF, writeSlice } from './routines';
 import { inSchema, lockScope } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
@@ -348,5 +348,15 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
     await expect(store().retain(scope, retention, { contextTurnLimit: 1 })).rejects.toThrow('A routine occurrence of the root is open');
     await store().sync(scope, { ...SYNC, now: FIRST });
     expect(await store().retain(scope, retention, { contextTurnLimit: 1 })).toMatchObject({ archivedRoots: 1 });
+  });
+
+  it('maps an occurrence key to its intent key and back in SQL as the K4 functions do', async () => {
+    for (const key of [hash('first'), hash(['routine', 1, { kind: 'scheduled', plannedAt: 0 }]), '0'.repeat(64)]) {
+      const intent = occurrenceIntentKey(key);
+      expect(await query<{ value: string }>(`SELECT ${INTENT_OF} AS value FROM (SELECT $1::text AS key) o`, [JSON.stringify(key)]))
+        .toEqual([{ value: JSON.stringify(intent) }]);
+      expect(await query<{ value: string }>(`SELECT ${OCCURRENCE_OF} AS value FROM (SELECT $1::text AS key) i`, [JSON.stringify(intent)]))
+        .toEqual([{ value: JSON.stringify(occurrenceOfIntentKey(intent)) }]);
+    }
   });
 });

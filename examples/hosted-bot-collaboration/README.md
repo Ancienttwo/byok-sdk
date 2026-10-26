@@ -79,17 +79,18 @@ schema. The SDK tables stay under the SDK migrations. This example never writes 
 
 | Table | One row per |
 |---|---|
-| `scope` | scope: the store version, the frame (the state without its rows) and the due time |
+| `scope` | scope: the store version, the frame (the state without its rows), the due time, and its owner switch export mark or import record (#975) |
 | `entity` | map entry of the state (Turn, card, Bot, room, delivery, ...), keyed by its id |
 | `entry` | element of a list (audit, rejected, team note, home operation, room message), keyed by position |
 | `command` | command record: the dedup evidence, the first result and the retention root (nullable) |
 | `outbox` | work for the sender: a projection's value and send state, a delivery's scan index (owner §54a, signed), a card's connector call claim, an Agent home operation's scan index, or a Host job's claim (#793 §6, signed) |
-| `intent` | Turn intent or Host intent (with its handler name, #955): the frozen SDK input, the stable task id, the FIFO order, the submit state and the SDK result read back |
-| `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision, its revoke time and the target of an open owner switch |
-| `retired_identity` | K8 identity that retention retired for good, `hash([namespace, id])`, or a compacted intent, `hash(['intent', turnId])` |
+| `intent` | Turn intent or Host intent (with its handler name, #955): the frozen SDK input, the generation and its task id, the K4 retry policy, the FIFO order, the submit state, the SDK result read back, K4's preparation error and memory block |
+| `intent_execution` | earlier generation of an imported intent (#975): its task id, submit state, claim, and the SDK attempt and terminal |
+| `device_binding` | device of a scope: its mode (`L` or `H`), its mode revision, its revoke time and an open owner switch away from H |
+| `retired_identity` | Tombstones in K4's scheme `(kind, identity, expires_at)`: kind `row` for a K8 identity that retention retired, `hash([namespace, id])`; kind `intent` for a compacted intent, its K4 intent id `hash(key)`. H's retention and compaction write only permanent ones; an import writes each tombstone of the export as it is, an expiring one too. Kinds `slot` and `application` are K4's, for an owner switch. H reads no expiry and deletes no tombstone (see Owner switch export) |
 | `archived_row` | row that retention moved out of the state, by namespace and id; a command record has an expiry |
-| `routine` | K4 routine of a Bot: its definition, staged version, lifecycle, status and next slot |
-| `occurrence` | K4 occurrence of a routine slot; its conclusion only when it has no intent, and a Host job's state (`job`) |
+| `routine` | K4 routine of a Bot: its definition, staged version, lifecycle, status, next slot, and K4's schedule retry fields and last error |
+| `occurrence` | K4 occurrence of a routine slot; its conclusion only when it has no intent, a Host job's state (`job`) and K4's slot replay count |
 
 Each scope and each key is stored as `JSON.stringify(value)`, so two values that UTF-8 would merge stay
 apart, and a NUL is safe. Each body is `json` text, so the stored bytes keep their key order. `ordinal`
@@ -129,7 +130,8 @@ insertion order, in one transaction under the scope lock. It writes each step as
   same lock, so no SDK attempt can exist. A tried row waits for the reconciliation.
 - `routine`: K4 `promoteOccurrence` runs on the routine slice. The intent row takes the step's execution and the K4
   times: `wait_until` from the occurrence record, `retry_until` from the next slot, and `superseded` at once when a
-  newer slot marked the occurrence. It takes no K4 retry policy. The freeze checks the device binding.
+  newer slot marked the occurrence. It takes no K4 retry policy: its `retry` is H's one-attempt policy. The freeze checks the
+  device binding.
 - `ended`: a routine Turn that ends before promotion concludes its occurrence `cancelled` (K8 `concludeRoutineTurn`).
   Nothing for another Turn.
 
@@ -165,8 +167,9 @@ for timers (see Deployment config).
 ### Delegation settlement
 
 Each sync round runs K8 `settleDelegations` after its Turn steps, as L's `sync()` does (#793 D2f-5). It reads its K4
-facts from the intent rows again after the steps wrote: `intent`, `started` (the reconciliation's claim, or a terminal
-that is not a decline; H has generation 0 only) and `declineCode`. `offeredTo` throws: settlement never reads it.
+facts from the intent rows again after the steps wrote: `intent`, `started` (any generation with the reconciliation's
+claim or a terminal that is not a decline, as K8 `intentFacts`: the intent row, and the earlier generations that an import
+moved to `intent_execution`) and `declineCode`. `offeredTo` throws: settlement never reads it.
 Settlement spends or releases units, moves a claimed delegation to `running`, writes the `lateTurnId` audit line,
 freezes the `target_archived` cancel, resolves a cancel once its target concluded, shows `uncertain` after the delegation
 timers, and gives a chain end that did not succeed its verdict. A verdict can add the `bot_reply` Turn of a batch join.
@@ -265,7 +268,8 @@ a TypeScript API; the deployment mounts it on its own HTTP framework. It takes:
 
 - `authenticate(credential)`: the product's session check, which returns the scope that the caller owns and the principal of
   the request. A throw or no result is an `UnauthenticatedError`, with nothing written. H never reads a token itself;
-- `owner(scope)`: the owner principal id of the scope, the value that the inbound entry's `InboundIdentity.owner` gives;
+- `owner(scope)`: resolves to the owner principal id of the scope, the value that the inbound entry's `InboundIdentity.owner`
+  gives;
 - `sync(scope, now)`: the deployment's composed sync, the function that the due scheduler runs;
 - `failStuckIntent(scope, key)` (optional): the reconciler's `failStuckIntent` for the scope's tenant. Without it, the
   entry's `failStuckIntent` refuses.
@@ -282,7 +286,11 @@ bot principal's mentions (R5); every other method needs the scope's owner. L tru
 The entry commits with `requireBinding`: under the scope lock, after the K8 rule, each Bot of the work that the commit
 added (a Turn that is not concluded, a room seat, a new input batch or an input added to an open one) must run on a
 device with an active H binding, or the commit throws `DeviceBindingError` and rolls back. A cancel commits on a revoked
-device: the Turn that it seals from an open batch is concluded. It reads what the rule produced, so H keeps no copy of the mention and seat selection. An error of the sync
+device: the Turn that it seals from an open batch is concluded. It reads what the rule produced, so H keeps no copy of the mention and seat selection.
+This check comes after the admission that every owner command gets, as L's (see Topology switch), and a device frozen
+for an owner switch passes it: only the admission refuses the freeze, so H and L refuse the same commands. Work that a
+command the admission does not name adds on a frozen device, such as the reply Turn of an abandoned delegation, is held
+by the sync. An error of the sync
 after a commit reaches the caller, as an error of L's pass does: the commit stays.
 
 ## Message consumer
@@ -291,17 +299,19 @@ after a commit reaches the caller, as an error of L's pass does: the commit stay
 `consume` decides each Agent message in one transaction under the scope lock, in the order of K4
 `consumeMessage`:
 
-1. A tenant whose scope has no row, or a task with no frozen intent: `unknown_task`.
+1. A tenant whose scope has no row, or a task that no generation of a frozen intent has: `unknown_task`.
 2. A device, Agent or message context that differs from the frozen input: `binding_mismatch`.
 3. Another message than the task's accepted reply: `message_conflict`. A task has one accepted reply.
-4. Otherwise the `message` command commits under the id `taskId:messageId`. A replay returns the decision of
+4. A task of an earlier generation of an imported intent (#975) with no accepted reply: `stale_generation`. Its
+   accepted reply, the receipt K4 stores on that generation's execution, is `accepted`.
+5. Otherwise the `message` command commits under the id `taskId:messageId`. A replay returns the decision of
    its command record. Other content for that id is `message_conflict`.
 
-Steps 1 to 3 write nothing. A replay gets the same decision, because the frozen input never changes and an
+Steps 1 to 4 write nothing. A replay gets the same decision, because the frozen input never changes and an
 accepted reply stays. H never returns `held`. A throw writes nothing and leaves the SDK admission pending.
 
-Two decisions differ from K4. A message for another tenant gets `unknown_task`, because H maps each tenant to
-its own scope. H has no `stale_generation`, because each H task is generation 0.
+One decision differs from K4. A message for another tenant gets `unknown_task`, because H maps each tenant to
+its own scope. Only an imported intent has earlier generations: H opens none itself.
 
 ## Reconciliation
 
@@ -322,7 +332,7 @@ of K4 `reconcile` and `finish`. It reads `readTaskOffer`, `readDeviceTerminal` a
 - The `outcome` command commits under the command id `taskId`, as L does. A replayed terminal gets the first result
   from the command record, so the outcome is applied once. `outcome.committed` is the H intent rows before this row
   concludes.
-- H never retries a task, so each task stays at generation 0. L does not retry a K8 Turn either: each K8 wait window
+- H never retries a task, so each task it freezes stays at generation 0. L does not retry a K8 Turn either: each K8 wait window
   (`OFFER_WAIT_MS`, `ROUTINE_WAIT_MS`) is at most the first K4 retry delay. A K8 test pins that.
 - Each SDK call runs outside the scope lock. Each write takes the lock and is fenced on `conclusion IS NULL`.
 - A row with no terminal is read again after `pollMs`. The SDK task observer does not wake the reconciler yet.
@@ -364,8 +374,8 @@ mode revision in one write, and keeps the row as the tombstone.
   returning device pairs under a new id. A revoke of a device id that was never bound is final too: it writes a
   tombstone row in the default mode L at revision 2 (creating the scope row if needed), so a later bind of the id is
   refused.
-- A bind is for a device that pairs with H first. A device whose row names mode L (after a switch to L, or an aborted
-  switch to H) refuses a bind with `mode`: it comes to H through a switch (see Topology switch).
+- A bind is for a device that pairs with H first. A device whose row names mode L (after a switch to L, or on an
+  uncommitted import) refuses a bind with `mode`: it comes to H through an import (see Owner switch import).
 - Each write that can create execution checks the binding under the scope lock, and throws `DeviceBindingError`
   unless the device has an active binding in mode H (`DeviceSwitchingError` while a switch of the device is open): the freeze of a new intent and the submit claim (the row backs off
   with the error). The freeze check is the last guard: the sync reads the bindings first (next bullet).
@@ -397,20 +407,20 @@ mode revision in one write, and keeps the row as the tombstone.
 The owner switch of plan §4.1 moves one device between L and H (#957). Each step runs in one transaction under the
 scope lock, on the expected mode revision, and returns the binding row read back in that transaction:
 
-- `beginSwitch(scope, deviceId, target, expectedRevision)` is the freeze. It sets `switching` to the target and raises
-  the revision. A device with no row is in the default mode L at revision 0, so a switch to H starts there with a mode L
-  row.
+- `beginSwitch(scope, deviceId, 'L', expectedRevision)` is the freeze of a device that H owns. It sets `switching` to L
+  and raises the revision. A device with no row is in the default mode L, so it has no switch to L (`same_mode`). H
+  becomes the owner of an L domain only through an import into a new scope (see Owner switch import).
 - `drainDevice(scope, deviceId, expectedRevision, { cancel }, clock)` returns the device's open work while H is the old
   owner: the open intent rows that run on the device, and for its Bots the Turns that are not concluded, the open input
   batches and the Agent home writes to the device that were sent and have no terminal readback (a write that was never
   sent moves with the state). With `cancel`, it first sends K8 `cancel_turn` for each Turn and batch,
   and the K4 cancel for an intent with no Turn, and returns each cancel that threw. A tried intent concludes only from SDK
   evidence, so it stays open until the reconciliation concludes it. The drain waits for nothing: the caller syncs the
-  scope, which concludes the cancelled Turns, and calls it again. For a switch toward H it refuses with `not_owner`: L
-  drains its own work. Each cancel runs in its own transaction, which checks the open switch on its revision first, so a
+  scope, which concludes the cancelled Turns, and calls it again. Each cancel runs in its own transaction, which checks the open switch on its revision first, so a
   drain that an abort or a commit overtook stops with `not_switching` and cancels nothing more.
-- `commitSwitch(scope, deviceId, expectedRevision)` makes the target the owner mode and raises the revision. Away from H,
-  it refuses with `open_work` while the drain finds any open work, whatever its age: §4.1 has no timeout path.
+- `commitSwitch(scope, deviceId, expectedRevision, receipt)` makes L the owner mode and raises the revision. It refuses
+  with `open_work` while the drain finds any open work, whatever its age: §4.1 has no timeout path, and it needs the
+  scope's export and the new owner's receipt (see Owner switch export).
 - `abortSwitch(scope, deviceId, expectedRevision)` ends the switch on the old mode and raises the revision.
 
 A step on another revision, a second freeze, a commit with no open switch, a switch to the current mode and a step on a
@@ -420,24 +430,133 @@ revoke ends an open switch in the same write, so a revoked device is never left 
 During the freeze:
 
 - every write that can create execution for the device throws `DeviceSwitchingError` (`code: 'device_switching'`, the
-  target and the frozen revision), as L's error with the same code: the command entry, the freeze of an intent (a Host
-  intent too), the submit claim and the read right before the SDK call. The freeze raises the revision, so a submit
+  target and the frozen revision), as L's error with the same code: the freeze of an intent (a Host intent too), the
+  submit claim and the read right before the SDK call. The freeze raises the revision, so a submit
   claimed before it is not made;
 - a Bot routine fire of the device throws it too and writes nothing (the scheduler counts it in `pass.fenced`); the
   slot stays due and fires after an abort;
-- the inbound channel entry refuses input that adds work for a Bot on the device with the same error. Input for an
-  unbound or revoked device is still taken and held (#956);
+- every owner command, from the command entry, the store's `commit` or the inbound channel entry, refuses with the same
+  error while a Bot that K8 `commandBots` names runs on the device, as L's `admitCommand` (#975): the Bot of `input` and of
+  owner input, every Bot member of the room for room input, and the Bot of the question's or card's Turn for `answer` and
+  `decide`. A decision and a room input that mentions no Bot of the device refuse too, though their work starts later in
+  the sync. The check runs after the replay lookup, so an exact replay returns its first result. Through the store's
+  `commit` and the inbound channel entry, input for an unbound or revoked device is still taken and held (#956); the
+  command entry refuses it (`requireBinding`);
 - the sync holds a Turn of the device's Bots with K8's `switching` refusal: `held: 'device_switching'` and a
   `held-switching:<turnId>` projection. An abort writes the due time 0, so the next sync freezes it;
 - H sends no new Agent home write to the device, as L. A write that was never sent waits; a sent one is still read back,
   with no new enqueue, and the commit waits for its terminal readback. H marks a write `sent` (K8 `HomeOperation.sent`)
   in the transaction that plans its first enqueue.
 
-After a commit to L, the same writes refuse with `DeviceBindingError` and `mode`. The home write rule of the freeze holds
-while the device's row names mode L too (after a commit to L, and during a switch from L to H until it commits): L writes
-them. The switch moves no data: the state export and import between H and an L
-ledger (the §8 migration set) is a follow-up. Until then, a room seat of a Bot on the device that has no Turn yet stays in
-H's state, and after a commit to L its Turn is held with `mode`.
+After a commit to L, the same writes refuse with `DeviceBindingError` and `mode`. A row that is not revoked names mode L only on a scope
+that the switch fence refuses (exported, or an uncommitted import), so no home flush to it commits. A switch away from H
+moves the whole scope to L with the state export below, and its commit needs the new owner's receipt.
+
+## Owner switch export (#975)
+
+`src/switch.ts` reads one scope into the switch format of K8 `./migration`. One function, `hostedSwitchContent`, states
+what an H scope holds; the commit away seals it again with the same function. The whole scope moves together.
+
+**Export.** After `beginSwitch(scope, deviceId, 'L', revision)` and the drain of each device,
+`exportScope(scope, devices, clock)` runs in one transaction under the scope lock: it reads the scope, seals it
+(`sealSwitchExport`) and writes the export mark `scope.switch_export`. It refuses:
+
+- a device that has no open switch away from H at its revision, or still has open work (`DeviceSwitchRefusedError`);
+- a live Bot on a device it does not name, and every other state the format refuses (`SwitchExportError`);
+- a pending projection: the outbox sender flushes it first, since H's receiver deduplicates by `(scope, id)`;
+- a card row with a connector call in flight, and a pending Host job, which would run while the export waits;
+- an intent with no conclusion, and a stored copy that differs from the value it is derived from, with `reference`: an
+  intent's `agent` (K4 `agentKey` with the scope), its task id and frozen input, a routine row's id, a promoted
+  occurrence with its own conclusion, and a Host job occurrence with no outbox row.
+
+Each intent moves with the execution facts of its earlier generations (`intent_execution`), which only an import writes:
+H's own rows are generation 0. The message receipt of each generation is the K8 accepted reply of its task id, live or
+retained (#975 D4). Its retry policy is
+the `retry` column: H's own rows store K4's one-attempt policy, since H never retries. A Host job's `attempts` are its
+outbox row's `tries`. Routines and occurrences move in the order of their ordinals, as their positions; an intent keeps
+its ordinal. The sections are sorted in JS, so no database collation can reorder them. Not moved: the scheduler cursors
+of a concluded row (`tries`, `next_at`, `reconcile_at`, `last_error`), settled projection rows, and the delivery, card
+and home index rows, which the target rebuilds from the state.
+
+**The fence.** From the mark on, also after a restart and after the commit, H writes nothing to the scope. Each write
+transaction of `inSchema` that locked an exported scope throws `SwitchExportedError` (`code: 'switch_exported'`) right
+before its commit, so the work's own refusals come first, as on L: a command on the frozen device still gets
+`DeviceSwitchingError`, and after the commit `DeviceBindingError` with `mode`. That covers every store method, the
+submitter, the reconciler, the outbox sender, retention and compaction, the routine fire and upkeep, the device observer
+and the reply checker. `lockScope` refuses to run outside such a transaction, so no writer skips the check. Only the
+switch steps pass: `exportScope`, `commitSwitch` and `abortSwitch`. The due, routine, submit, reconciliation and outbox
+scans leave an exported scope out. The due and routine backoff writes take no scope lock and do not write to an exported
+scope: the due backoff updates the scope row itself, and the routine backoff first takes a share lock on the scope row,
+so it waits for an export in flight and reads its mark. An outbox row of a scope exported after the sender's scan is
+reported failed and gets no wait, and the pass goes on with the other scopes.
+
+H reads no tombstone expiry and deletes no tombstone. K4's admission readers do not read the expiry either; K4
+`compact` does, and deletes expired tombstones. Only K4's routine kinds expire (an occurrence intent, a slot, an applied
+outcome), and H compacts no routine intent and no occurrence, so a tombstone H holds with an expiry stays as it is and
+moves on with that expiry.
+
+**Commit away.** After the new owner imported and verified the export, `commitSwitch(scope, deviceId, revision,
+receipt)` checks the receipt against the mark and `deviceId` at `revision` against the export's devices, seals the scope
+again under the export's header, and refuses a different digest. It then moves every device of the export to L in one
+transaction, each on its frozen revision and only with no open work, so a domain is never split between the owners. An
+abort of a device of the export ends the export and lifts the fence; the new owner discards its import. After the commit
+no device of the export aborts.
+
+**Ordering.** The receipt is the export's digest, and nothing between the two Hosts proves that the target imported it:
+there is no authentication between them. The product runs the steps in order and keeps the document:
+
+- The old owner commits away only after the target reported its import verified.
+- The export document is kept until the target committed toward its owner.
+- If an import is lost after the old owner committed away, the kept document is imported into a new tenant or scope.
+- From the export on the old owner refuses all work, so two owners never run the domain at the same time.
+
+## Owner switch import (#975)
+
+H becomes the owner of an L domain only through an import into a new scope, as L does for an H domain (K8 `./switch`). No
+H switch step goes toward H.
+
+1. `importScope(scope, document, clock)` verifies the L export and writes it into `scope`, which must have no row yet
+   (a switch to H opens a new scope), in one transaction: the K8 state through the store's own writer, the rows of each
+   section, each device of the export in mode L at revision 1 (owned by the old owner), and the import record
+   `scope.switch_import`. Before the transaction commits, the scope is read back with `hostedSwitchContent` under the
+   document's header and must seal to its digest; otherwise it throws `SwitchExportError` with `manifest` and writes
+   nothing. So an import is either verified or not there. It returns the receipt `{ digest, devices }` that the old
+   owner commits away on.
+2. After the old owner committed away, `commitImport(scope, digest)` gives H each device of the import (mode H at
+   revision 2), deletes the import record and writes the scope's due time.
+3. `discardImport(scope)` deletes an import that is not to be committed: every row of the scope and the scope row, in
+   one transaction. A committed scope has no import record, so it is refused.
+
+From the import until its commit no work runs on the scope. Each write transaction that locks it throws
+`SwitchImportedError` (`code: 'switch_imported'`) right before its commit, after its own refusals: a write that adds
+execution on a device of the import refuses with `DeviceBindingError` and `mode` first. The due, routine, submit,
+reconciliation and outbox scans leave it out. Only the import steps pass, and the scope takes no switch away before its
+commit (`exportScope`, `commitSwitch` and `abortSwitch` throw `SwitchImportedError`). The record is written only with a
+new scope row, so the backoff writes, which follow a scan of an existing scope, never meet one.
+
+The import writes each derived value from the format: `agent` with the new scope, the task id of every generation, and
+the outbox row of each Host job occurrence. That row's `tries` are the job's attempts; it is settled at the import time
+once the occurrence has a conclusion, and due at once while it is pending, so a pending Host job of the export runs after
+the commit. The delivery, card and home index rows are rebuilt from the state, so a moved unsent home write is sent
+after the commit. A concluded intent gets H's cursors of a new row: no tries, no backoff, no readback time and no
+`last_error` (#975 D6). Routines and occurrences go in the order of their ordinals.
+
+An L intent may have been retried, and K4 opens a generation for each retry (#975 D1). The import keeps its generation
+and the execution facts of each earlier one in `intent_execution`; their message receipts are the K8 accepted replies of
+their task ids, as for the current one. A message for an earlier task is answered as K4 answers it (see Message
+consumer), intent compaction deletes the earlier generations with the intent, and the reply check reads a delegation
+chain end's current task, as L does. `memoryBlocked` and `slotReplayCount` move as they are; H writes neither itself.
+
+**Ordering.** The receipt is the export's digest, and nothing between the two Hosts proves that H imported it: there is
+no authentication between them. The product runs the steps in order and keeps the document:
+
+- L commits away only after H reported its import verified.
+- The export document is kept until H committed its import.
+- If an import is lost after L committed away, the kept document is imported into another new scope.
+- Only one import of a digest is committed; every other one is discarded. The receipt names no scope, so one document
+  can be imported into two scopes.
+- From the export on L refuses all work, and H runs none before `commitImport`, so two owners never run the domain at
+  the same time.
 
 ## Retention
 
@@ -469,11 +588,12 @@ scope lock does all of it, and a refusal or a throw writes nothing.
   the Turn is concluded and reported, no unresolved delegation references it, its room seat is released, and its reply
   receipt is settled. A refusal throws K4's `CompactVetoError`.
 - The store refuses a row with no conclusion, and a Turn id with neither a row nor an intent tombstone.
-- Each removed row leaves a permanent `hash(['intent', turnId])` row in `retired_identity`. A later call counts that
-  Turn as already compacted. `freezeIntent` refuses the Turn with K4's `RetiredIntentIdentityError`, and the sync fails
-  a Turn that never saw its result as `result_retired`, as L does.
-- It does not cover routine intents, and refuses them. K4 gives a routine occurrence's intent tombstone the expiry of
-  its slot, and `retired_identity` rows never expire.
+- Each removed row leaves a permanent intent tombstone in `retired_identity`, kind `intent` with K4's intent id
+  `hash(turnId)`, as K4 `compact` writes it. A later call counts that Turn as already compacted. `freezeIntent`
+  refuses the Turn with K4's `RetiredIntentIdentityError`, and the sync fails a Turn that never saw its result as
+  `result_retired`, as L does.
+- It does not cover routine intents, and refuses them. K4 compacts a routine intent with its occurrence, retiring the
+  slot and giving the intent tombstone the slot's expiry, and H does not compact occurrences.
 - After compaction, an Agent message for the task is refused as `unknown_task`, because its frozen input left with the
   row.
 
@@ -524,8 +644,8 @@ H runs the K8 sealed Bot routines (#953, #654 E3d-4; K8 README, Sealed Bot routi
   `intent.input`. There is no DDL change and no second copy.
 - The sync passes K8 the template of each routine version, from the slice. A sealed occurrence intent goes through
   `FrozenSubmitPort.submitSealed`, the cloud's `submitSealedAgentExecution`. On a port without it, the submitter fails
-  an untried sealed row before any SDK call, as K4 `begin` does in L: the intent ends `failed`, the row keeps `This Host
-  has no sealed dispatch`, and the agent's queue moves on. The submitter reports the scope through its `changed` option,
+  an untried sealed row before any SDK call, as K4 `begin` does in L: the intent ends `failed`, the row keeps K4's
+  `preparation_error` `sealed_dispatch_unavailable`, and the agent's queue moves on. The submitter reports the scope through its `changed` option,
   and the deployment's sync then ends the Turn `failed`. A tried row may have reached the SDK, so it
   keeps its resubmit until `wait_until`.
 - K4 `enqueue` refuses every sealed execution. H's `freezeIntent` takes one only from the sync's freeze of a promoted
@@ -553,8 +673,9 @@ H has no SDK wake. `HostedRoutineScheduler` finds due slots in `routine_due` and
 `run()` is one pass. It reads due rows in slot order in keyset pages. Only fires count against `batch` (default 100),
 so fenced rows and failed rows cannot fill it. A fenced fire (`pass.fenced`: no active binding, or a device frozen for a
 switch) and a fire that throws (`pass.failed`) write
-nothing, and the routine waits `backoffMs` (default 60 s, in memory only) before its next try: a stuck row keeps its
-old slot, which sorts ahead of every healthy row. A wait that has ended is dropped at the start of a pass. Each fire
+nothing but the routine's `retry_at`: it waits `backoffMs` (default 60 s) before its next try, because a stuck row
+keeps its old slot, which sorts ahead of every healthy row. The wait is in Postgres (#794 H1), so every scheduler
+instance and process keeps it. It holds only for that slot: the store write that moves `next_at` clears it. Each fire
 reads the clock, as K4 does when it consumes a wake; the pass time only selects the due rows. The pass also sets `ok` on
 a `schedule_retrying` routine once its slot is within the K4 horizon, as K4 `scheduleNext`.
 
@@ -565,8 +686,8 @@ H has no timer. The deployment reads `scheduler.intervalMs` and runs `run()` at 
 the constructor refuses an interval at or above the K8 late bound (`ROUTINE_LATE_AFTER_MS`, 60 s): with a longer
 interval every slot would fire as `catch_up`, and its occurrence key would differ from L's.
 
-- Each pass reads the fenced and failed due rows again, and skips them while they wait. Their fire transactions run
-  once per `backoffMs`.
+- The due query leaves out the rows that wait, so they cannot fill a page. Postgres still reads them through
+  `routine_due` and drops them by `retry_at`. Their fire transactions run once per `backoffMs`.
 - A routine that waits fires late. Its next try records `catch_up` when the wait ends past the K8 late bound.
 - A promoted occurrence keeps `conclusion IS NULL` for good, so `occurrence_open` holds every promoted occurrence of a
   routine. The slice load still scans that history for the unpromoted open rows, so a fire costs more as the routine
@@ -589,8 +710,10 @@ clock for each sync; the pass time only selects the scopes. Only syncs that reso
   `sync` does not run `HostedReplyChecker` first. A sync that
   throws is reported in `failed`. With the composed `sync` (the reply checker, the device observer, then
   `store.sync`), each reply settle and the device observation commit in their own transactions: if a later step or
-  `store.sync` throws, the earlier steps of that pass stay committed, and one step never writes partly. Either scope waits `backoffMs` (default 60 s, in memory only)
-  before its next sync, so it is synced at most once per backoff, and each pass reports it again when it is retried.
+  `store.sync` throws, the earlier steps of that pass stay committed, and one step never writes partly. Either scope waits `backoffMs` (default 60 s)
+  before its next sync, so it is synced at most once per backoff, and each pass reports it again when it is retried. The
+  wait is `scope.retry_at` (#794 H1), keyed on the due time the scope still has, so every scheduler instance and process
+  keeps it. A store transaction that moves `due_at` clears it, so the new work is due at once.
 - H has no timer. The deployment runs `run()` on its own interval, which bounds how late a due step runs in a scope that
   is not stalled. A stalled scope keeps the due time that H cannot clear, so each of its other due times can run up to
   `backoffMs` late.
@@ -598,8 +721,8 @@ clock for each sync; the pass time only selects the scopes. Only syncs that reso
   sync resolves, so it counts. Once there are about `batch × backoffMs / interval` of them (1,200 with the defaults and
   a 5 s interval), each pass spends its whole batch on them, and a fresh due scope waits. A failed scope (a sync that
   throws, for example a settle that keeps throwing) does not count, so the pass pages on to the fresh due scopes. It is
-  retried once per `backoffMs`, and each retry adds the time of a failing sync to the pass. Each pass also reads every
-  backed-off due row. So H must run every step that clears a due time before it deploys.
+  retried once per `backoffMs`, and each retry adds the time of a failing sync to the pass. Postgres also reads every
+  backed-off due row through `scope_due` and drops it by `retry_at`. So H must run every step that clears a due time before it deploys.
 
 ## Outbox sender
 
@@ -749,8 +872,10 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   (`new HostedCollaborationStore(pool, schema, { host })`), and `migrate()` creates the H tables there. The SDK tables come from
   the `@byok-sdk/cloud-dataplane` migrations (`migrate(pool, migrationsDir())`), in the same database or another one.
   No path assumes one atomic commit across the two (see Database). A scope row of an unknown store version is refused.
-- **Host config.** `host(scope)` returns the scope's model templates (each with the user's own device) and read-only
-  toolsets, as L's `models` and `readOnlyToolsets`. Every store over one schema must be built with the same `host`.
+- **Host config.** `host(scope)` resolves to the scope's model templates (each with the user's own device) and read-only
+  toolsets, as L's `models` and `readOnlyToolsets`. Every store over one schema must be built with the same `host`. It
+  returns a Promise, so a product reads the one scope's record when it is asked. Each store method awaits it once and
+  never while it holds a connection, so the product may read it from the store's own pool.
 - **Object storage.** The SDK stores need an S3-compatible endpoint: `objectStorage` with `endpoint`, `bucket`,
   `accessKeyId`, `secretAccessKey`, `region` and a `signingClock`, passed to `createPostgresCoreStores` and
   `createPostgresCloudStores`. H stores no objects itself.
@@ -834,18 +959,31 @@ three and runs these suites.
 - The device binding tests use an SDK tenant in memory for the submit checks. The device hold tests (`device-hold.test.ts`,
   #956) cover a refused Bot's Turn held while another Bot's Turn freezes in the same sync, the due time at once after a bind
   that survives another transaction, and a `team_snapshot` that archives the Bot of a held Turn.
-- The topology switch tests (`switch.test.ts`, #957) cover each step's revision checks and refusals, a switch to H from a
-  device with no row, a revoke during a switch, the typed refusal of each entry during the freeze and after a commit to L,
-  a Turn held during the freeze and frozen after an abort, a submit claimed before the freeze, the drain and cancel with a
-  tried intent that holds the commit until it concludes, the cancel of a Host intent with no Turn, a routine fire during
-  the freeze and after an abort, a new store that reads the freeze, and home flushes during the switch and after a
-  commit to L.
+- The topology switch tests (`switch.test.ts`, #957) cover each step's revision checks and refusals, a revoke during a
+  switch, the typed refusal of each entry during the freeze and after a commit to L, the refusal of each command that
+  K8 `commandBots` says reaches the frozen device (an answer, a decision and room input that mentions only another
+  device's Bot), the replay of an answer accepted before the freeze, a Turn held during the freeze and frozen after an
+  abort, a submit claimed before the freeze, the drain and cancel with a tried intent that holds the commit until it
+  concludes, the cancel of a Host intent with no Turn, a routine fire during the freeze and after an abort, a new store that reads the freeze, and home flushes during the switch. Each commit away
+  exports the scope first and passes the export's digest.
+- The switch export tests (`switch-export.test.ts`, #975) move a scope that holds a retained and compacted Turn, a Bot
+  routine with a settled occurrence and routine Turn, a Host intent and an unsent home write into a new L tenant: K8
+  `importForSwitch` reads it back to the same digest, and H commits away on its receipt. They cover each export refusal,
+  a receipt that is not the export's, a scope that changed after its export, an abort that lifts the fence, the refusal of
+  each write path after its own refusals with nothing written, the scans that leave an exported scope out, the backoff
+  writes of a scan that raced an export, and a scope lock outside `inSchema`. The import tests take a domain from H to L
+  and back to a new H scope, and on to a new L tenant, with every section the one that left H. They cover earlier
+  generations, a memory block and a slot replay count, the answers to a message of an earlier task, compaction, the reply
+  check of a chain end in a later generation, a pending Host job that runs after the commit, an import that does not
+  read back and writes nothing, the import refusals, commit and discard, the refusal of each write path on an
+  uncommitted import, the scans that leave it out, and the device's work and the moved home write after the commit.
 - The K8 retention vectors (`retentionVectors`) run on the store, with H tests for message replays after retention.
-- The compaction tests cover a settled intent and its tombstone, a repeated call, a refused freeze of a retired Turn, a
-  K8 veto, an unsettled row, an unknown Turn id, a routine intent, and the sync's `result_retired`.
+- The compaction tests cover a settled intent and its tombstone, an expiring tombstone of the same identity that becomes
+  permanent, a repeated call, a refused freeze of a retired Turn, a K8 veto, an unsettled row, an unknown Turn id, a
+  routine intent, and the sync's `result_retired`.
 - The routine tests seed each occurrence as the scheduler records it. They cover the outcome actions, the owner API,
-  promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, and the refusal of
-  an execution routine on the Bot path.
+  promotion, the claim's `retry_until`, the version switch in each writer that concludes routine work, the refusal of
+  an execution routine on the Bot path, and the SQL occurrence and intent key fragments against the K4 functions.
 - The D2f-1 routine vectors (`routineVectors`) run on the store, with the scheduler fire and a submitter pass on an SDK
   tenant in memory. The `end_routine` tests cover a refusal that writes nothing and a caller's `routines` port.
 - The K8 delivery vectors (`deliveryVectors`) run on the store, its inbound entry and the outbox sender, all 21. After each Host step, the delivery outbox index matches the K8 entities. The
@@ -873,8 +1011,9 @@ three and runs these suites.
   the same sync after a Turn step blocks a seat, and a rollback.
 - The settlement tests build each delegation through the product path (an outcome `delegate`, then a sync), and cover
   each verdict, the units, `target_archived`, the timers, the late terminal audit, the Main Bot cancel in the terminal
-  transaction, a rollback, the settlement facts, a verdict at the sync of a reported scope, and the store's refusal of
-  invalid delegation timers.
+  transaction, a rollback, the settlement facts (with the earlier generation of an imported intent), a verdict at the
+  sync of a reported scope, the store's refusal of invalid delegation timers, and an abandon during a freeze, which
+  commits through the command entry while the sync holds its reply Turn.
 - The K8 reply vectors (`replyVectors`) run on the store, as on L: a reply body that the Host holds answers, after a
   pending read and after a read that throws; no message and a refused message fail with `no_reply`; a held message
   holds; a pending read checks again with backoff, not before its time, and becomes `uncertain` after

@@ -8,7 +8,9 @@ import { seedCollaboration, VECTOR_NOW, type CommitSubject, type SeedTeam } from
 import type { HostConfig, OutcomeRoutinePorts } from './store';
 
 /** The Host config of every test scope: the snapshot Bot template of the K8 vector subject (K8 commit-contract.test.ts). */
-export const TEST_HOST = (): HostConfig => ({ models: { default: template('device', 'main') }, readOnlyToolsets: [] });
+export const testHostConfig = (): HostConfig => ({ models: { default: template('device', 'main') }, readOnlyToolsets: [] });
+/** The store's `host` option for tests: every scope gets `testHostConfig()`. */
+export const TEST_HOST = async (): Promise<HostConfig> => testHostConfig();
 /** The vector clock, as the Host clock of a commit or a terminal transaction. */
 export const vectorClock = (): number => VECTOR_NOW;
 /**
@@ -16,7 +18,7 @@ export const vectorClock = (): number => VECTOR_NOW;
  * the outcome ports of a callback command, with a team management port that does nothing.
  */
 export function callbackPorts(state: CollaborationState, publish: CommandPorts['publish']): CommandPorts {
-  return { now: vectorClock, publish, teamBot: row => writeSnapshotBot(state, row, TEST_HOST().models),
+  return { now: vectorClock, publish, teamBot: row => writeSnapshotBot(state, row, testHostConfig().models),
     admitInput: fields => admitUserInput(state, fields, undefined, VECTOR_NOW),
     outcome: { committed: { intent: () => undefined }, manage: () => {}, ...VECTOR_ROUTINES } };
 }

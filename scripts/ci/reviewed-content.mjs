@@ -113,6 +113,16 @@ const K8_DELIVERY_EXPORTS = Object.freeze({
   './delivery-routing': './src/delivery-routing.ts',
   './delivery-vectors': './src/delivery-vectors.test-support.ts',
 });
+// #975 slice 2: the K8 owner switch format, added to the hosted, retention,
+// routine and delivery entries. src/migration.ts has no I/O and does not load
+// the K8 host.
+const K8_MIGRATION_EXPORTS = Object.freeze({ './migration': './src/migration.ts' });
+// #975 slice 5: the L side of the owner switch, added on top of the migration
+// entry, so the H tests can import an H export into an L tenant
+// (importForSwitch, commitImport). src/switch.ts loads the K4 root entry, and
+// with it node:sqlite (ledger.ts) and node:async_hooks (core.ts); it does not
+// load the K8 host. Only H tests import it; H's src does not.
+const K8_SWITCH_EXPORTS = Object.freeze({ './switch': './src/switch.ts' });
 /** The other workspace manifests, each with its dir. */
 function otherWorkspaceManifests(cwd, self) {
   const manifests = [];
@@ -278,6 +288,16 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     // #793 D2b-out-1: the delivery entries, only on top of exactly the hosted, retention and routine entries.
     const routed = { ...retained, ...K8_ROUTINE_EXPORTS };
     if (isDeepStrictEqual(before.exports, routed) && isDeepStrictEqual(after.exports, { ...routed, ...K8_DELIVERY_EXPORTS })) {
+      after.exports = before.exports;
+    }
+    // #975 slice 2: the migration entry, only on top of exactly the hosted, retention, routine and delivery entries.
+    const delivered = { ...routed, ...K8_DELIVERY_EXPORTS };
+    if (isDeepStrictEqual(before.exports, delivered) && isDeepStrictEqual(after.exports, { ...delivered, ...K8_MIGRATION_EXPORTS })) {
+      after.exports = before.exports;
+    }
+    // #975 slice 5: the switch entry, only on top of exactly the entries up to and including the migration entry.
+    const migrated = { ...delivered, ...K8_MIGRATION_EXPORTS };
+    if (isDeepStrictEqual(before.exports, migrated) && isDeepStrictEqual(after.exports, { ...migrated, ...K8_SWITCH_EXPORTS })) {
       after.exports = before.exports;
     }
   } else if (path === 'examples/host-execution-core/package.json') {

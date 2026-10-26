@@ -6,6 +6,7 @@ export { hostedMessageConsumer, type AgentMessageConsumer, type AgentMessageInpu
 export { freezeIntent, HostedSubmitter, type IntentFreeze, type SubmitFailure, type SubmitPass, type SubmitterOptions } from './intents';
 export { HostedReconciler, IntentOutcomeError, type HostedIntentHandler, type HostedIntentTransaction, type HostedTaskPort, type ReconcileFailure, type ReconcilePass, type ReconcilerOptions, type TaskEvidence } from './reconcile';
 export { DeviceBindingError, DeviceSwitchingError, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
+export { SwitchExportedError, SwitchImportedError, type SwitchExportMark, type SwitchImportMark, type SwitchReceipt } from './switch';
 export { connectedDevices, HostedDeviceObserver, type DeviceObserverOptions, type HostedDevicePort } from './devices';
 export { HostedDueScheduler, type DueFailure, type DuePass, type DueSchedulerOptions } from './due';
 export { HostedReplyChecker, type HostedReplyPort, type ReplyCheckerOptions } from './replies';

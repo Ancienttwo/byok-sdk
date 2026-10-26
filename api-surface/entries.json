@@ -818,7 +818,7 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96522,
+          "line": 96524,
           "rule": "opaque import()"
         },
         {
@@ -1147,7 +1147,7 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 95761,
+          "line": 95763,
           "rule": "opaque import()"
         },
         {

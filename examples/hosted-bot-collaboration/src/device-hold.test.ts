@@ -19,7 +19,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H device hold on real Postgres (#95
   beforeEach(async () => { opened = await openStore(); });
   afterEach(async () => { await opened?.close(); });
 
-  const hostStore = () => new HostedCollaborationStore(opened!.pool, opened!.store.schema, { host: () => ({ models: MODELS, readOnlyToolsets: [] }) });
+  const hostStore = () => new HostedCollaborationStore(opened!.pool, opened!.store.schema, { host: async () => ({ models: MODELS, readOnlyToolsets: [] }) });
   const intents = async (scope: string) => (await opened!.pool.query<{ key: string }>(`SELECT key FROM ${table('intent')} WHERE scope = $1 ORDER BY ordinal`,
     [storedKey(scope)])).rows.map(row => JSON.parse(row.key) as string);
   const dueAt = async (scope: string) => (await opened!.pool.query<{ due_at: string | null }>(`SELECT due_at::text FROM ${table('scope')} WHERE scope = $1`,

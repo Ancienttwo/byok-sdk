@@ -1291,7 +1291,7 @@ export declare class AgentHomeLeaseManager {
     acquireMaintenance(agentsRoot: string, canonicalHome: string): Promise<{
         release(): Promise<void>;
     }>;
-    private openLeaseMarker;
+    private linkLeaseMarker;
 }
 /**
  * WP0: counts-only readback of the per-canonical-Agent-home Attempt cap and
@@ -1360,7 +1360,7 @@ export declare class AgentHomeExecutionLeaseManager {
      * read this count again (#476); the count itself stays the only authority
      * on whether a slot is free. Crash residue: a restarted daemon starts with
      * an empty registry and reclaims the on-disk marker only under the same
-     * stable owner identity (`openLeaseMarker`), after its start ended the
+     * stable owner identity (`linkLeaseMarker`), after its start ended the
      * crashed run's owned runtime processes (`OwnedProcessLedger.reconcile`).
      *
      * Counted regardless of which lease manager owns the group: the invariant

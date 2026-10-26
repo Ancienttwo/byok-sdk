@@ -235,9 +235,9 @@ and `@byok-sdk/keys`. Before 1.0, PATCH is limited to corrections with no new
 public behavior, API, persistence, or security authority; MINOR covers additive
 public API/features, new forward migrations/authority, and any pre-1.0
 breaking cut. A version bump does not authorize publish. The current
-aligned release is `0.30.1`; publication requires separate release
+aligned release is `0.30.2`; publication requires separate release
 authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current release, `0.30.1`, proven from
+`@byok-sdk/core` edge must be the exact current release, `0.30.2`, proven from
 an isolated standard npm install rather than the workspace graph.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -248,12 +248,19 @@ in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
-0.30.1 uses a one-release exception. The owner's 2026-10-24 instruction
-selected PATCH (0.30.x instead of 0.31.0) despite the new public API, the
-gated wire additions, Postgres migration 0028 and the pre-1.0 breaking changes
-in cloud, client and cloud-do. This explicit exception does not change the
-general policy above or waive validation, publication authorization, or
-registry readback. See the [0.30.1 release notes](releases/v0.30.1.md).
+0.30.2 uses a one-release exception. The owner's release decisions, recorded
+on issues #978 and #977 on 2026-10-25 and 2026-10-26, selected PATCH (0.30.2
+instead of 0.31.0) despite the new public API, the pre-1.0 breaking public API
+changes in client, core, cloud and protocol, and Postgres migration 0029.
+This explicit exception does not change the general policy above or waive
+validation, publication authorization, or registry readback. See the
+[0.30.2 release notes](releases/v0.30.2.md).
+
+0.30.1 used an earlier one-release exception. The owner's 2026-10-24
+instruction selected PATCH (0.30.x instead of 0.31.0) despite the new public
+API, the gated wire additions, Postgres migration 0028 and the pre-1.0
+breaking changes in cloud, client and cloud-do. See the
+[0.30.1 release notes](releases/v0.30.1.md).
 
 0.30.0 was a MINOR under the general policy above, with no exception. It added
 gated wire types and public API, and it had pre-1.0 breaking cuts in protocol,
@@ -278,17 +285,17 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-Public registry metadata read on 2026-10-24 at 19:19 UTC reports `latest`
-0.30.1 for all nine packages. The keys 0.30.1 package depends on exactly
-`@byok-sdk/core` 0.30.1. The same read lists 0.30.0, 0.29.0, 0.28.3, 0.28.2,
-0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0 as the earlier published
-versions. The registry publication times are 2026-10-20 (UTC) for 0.28.0 /
-keys 0.13.0, 2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22 (UTC) for
-0.28.2 and 0.28.3, 2026-10-23 (UTC) for 0.29.0, and 2026-10-24 (UTC) for
-0.30.0 and 0.30.1. The tag `v0.30.1` and its GitHub Release point to
-`142acbe2`, the merge of #916. The tag `v0.30.0` points to `6b779cff`, the
-merge of #837. The 0.28.0 to 0.30.1 source-candidate notes are preparation
-history. They are not publication records. This read confirms registry
+Public registry metadata read on 2026-10-26 at 13:36 UTC reports `latest`
+0.30.2 for all nine packages. The keys 0.30.2 package depends on exactly
+`@byok-sdk/core` 0.30.2. The same read lists 0.30.1, 0.30.0, 0.29.0, 0.28.3,
+0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0 as the earlier
+published versions. The registry publication times are 2026-10-20 (UTC) for
+0.28.0 / keys 0.13.0, 2026-10-21 (UTC) for 0.28.1 / keys 0.13.1, 2026-10-22
+(UTC) for 0.28.2 and 0.28.3, 2026-10-23 (UTC) for 0.29.0, 2026-10-24 (UTC)
+for 0.30.0 and 0.30.1, and 2026-10-26 (UTC) for 0.30.2. The tag `v0.30.2`
+and its GitHub Release point to `b1469e5a`, the merge of #1006. The tag
+`v0.30.1` points to `142acbe2`, the merge of #916. The 0.28.0 to 0.30.2
+source-candidate notes are preparation history. They are not publication records. This read confirms registry
 availability. It does not establish isolated-install qualification. A later
 release needs the accepted final-commit CI artifact and separate owner
 authorization.
@@ -2060,6 +2067,10 @@ durable execution identity. The embedding host supplies one absolute
 `hostStorageRoot`; the client SDK exclusively composes
 `<hostStorageRoot>/agents/<agentId>` after validating `agentId` as one bounded
 path segment. No host resolver or `workspaceHint` participates in this path.
+The filesystem under `hostStorageRoot` must support hard links: each home's
+writer lease marker is published by linking a complete temp file onto
+`.byok/agent-home.lease`, and a root without hard links fails at its first
+acquire with an error that names the directory.
 
 The client validates existing-ancestor and realpath containment, rejects
 symlink and cross-Agent collisions, creates missing Agent home, `MEMORY.md`,

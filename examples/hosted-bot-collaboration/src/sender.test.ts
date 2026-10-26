@@ -10,7 +10,7 @@ import { TEST_HOST } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 import type { TaskEvidence } from './reconcile';
 import { HostedOutboxSender, type ProjectionPort, type SenderOptions } from './sender';
-import { HostedCollaborationStore, lockScope, UNKNOWN_WAIT_MS, type DeliveryClaim } from './store';
+import { HostedCollaborationStore, UNKNOWN_WAIT_MS, type DeliveryClaim } from './store';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
 const store = () => opened!.store;
@@ -342,7 +342,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H outbox sender on real Postgres (#
       try {
         await holder.query('BEGIN');
         await holder.query(`SET LOCAL search_path TO "${store().schema}"`);
-        await lockScope(holder, storedKey(scope));
+        // The scope row lock that `lockScope` takes, held outside `inSchema`, which commits a scope lock only through its switch fence.
+        await holder.query('SELECT 1 FROM scope WHERE scope = $1 FOR UPDATE', [storedKey(scope)]);
         const pid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
         const running = step();
         for (let tries = 0; !(await query<{ waiting: number }>('SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))',

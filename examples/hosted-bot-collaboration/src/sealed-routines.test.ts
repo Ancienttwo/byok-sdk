@@ -37,7 +37,8 @@ async function sealed(definitionVersion: number, prompt: string): Promise<Sealed
 const routineRow = async (scope: string) => (await query<{ definition: RoutineDefinition; pending: RoutineDefinition | null; next_at: string | null }>(
   `SELECT definition, pending, next_at::text FROM ${table('routine')} WHERE scope = $1 AND id = $2`, [storedKey(scope), storedKey(ID)]))[0];
 const intentRow = async (scope: string, key: string) => (await query<{ source: string; input: SealedAgentExecutionInput; last_error: string | null;
-  conclusion: string | null; tries: number }>(`SELECT source, input, last_error, conclusion, tries FROM ${table('intent')} WHERE scope = $1 AND key = $2`,
+  preparation_error: string | null; conclusion: string | null; tries: number }>(
+  `SELECT source, input, last_error, preparation_error, conclusion, tries FROM ${table('intent')} WHERE scope = $1 AND key = $2`,
 [storedKey(scope), storedKey(key)]))[0];
 
 describe.skipIf(POSTGRES_URL === undefined)('H sealed Bot routines on real Postgres (#953)', () => {
@@ -98,7 +99,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H sealed Bot routines on real Postg
     await new HostedSubmitter(opened!.pool, store().schema, { port: () => port, now: () => FIRST, changed: at => { changed.push(at); } }).run();
     expect(port.submit).not.toHaveBeenCalled();
     expect(port.offer).not.toHaveBeenCalled();
-    expect(await intentRow(scope, turn)).toMatchObject({ conclusion: 'failed', tries: 0, last_error: 'This Host has no sealed dispatch' });
+    expect(await intentRow(scope, turn)).toMatchObject({ conclusion: 'failed', tries: 0, last_error: null, preparation_error: 'sealed_dispatch_unavailable' });
     // The deployment syncs each scope that the submitter reports, which settles the Turn.
     expect(changed).toEqual([scope]);
     for (const at of changed) await store().sync(at, SYNC);
@@ -134,7 +135,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H sealed Bot routines on real Postg
 
   it('takes both as owner commands of the entry: a non-owner is refused with nothing written, and an owner write syncs', async () => {
     const scope = await scoped(false), synced: string[] = [];
-    const entry = new HostedCommandEntry<EntryCaller>(store(), { authenticate: async credential => credential, owner: () => 'owner',
+    const entry = new HostedCommandEntry<EntryCaller>(store(), { authenticate: async credential => credential, owner: async () => 'owner',
       sync: async (at, now) => { synced.push(at); return store().sync(at, { ...SYNC_OPTIONS, now, history: undefined }); }, now: () => NOW });
     const as = (id: string): EntryCaller => ({ scope, principal: { id, kind: 'human' } });
     await expect(entry.createSealedRoutine(as('mallory'), 'main', action(1, v1))).rejects.toMatchObject({ code: 'not_owner' });

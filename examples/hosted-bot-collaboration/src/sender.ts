@@ -3,6 +3,7 @@ import { validateJson, type Json } from '@byok-sdk/example-host-execution-core';
 import type { ChannelPort } from '@byok-sdk/example-bot-collaboration/channel';
 import { CONNECTOR_OUTCOME_UNKNOWN } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { SUPPORTED_STORE_VERSIONS } from './ddl';
+import { SwitchExportedError } from './switch';
 import { checkHomeReadback, homeRequests, type HomeReadback } from '@byok-sdk/example-bot-collaboration/team';
 import { errorText, HOST_JOB_EXECUTION_UNSUPPORTED, inSchema, lockScope, type DeliveryTimes, type HomeClaim, type HomeStep,
   type HostedCollaborationStore, type HostJobOutcome } from './store';
@@ -120,10 +121,11 @@ export class HostedOutboxSender {
   }
 
   async run(): Promise<SendPass> {
-    // A scope of a store version this code does not support is left out before the limit, as in the submitter.
+    // A scope of a store version this code does not support, or an exported one or one with an uncommitted import, is left out before the
+    // limit, as in the submitter.
     const due = await inSchema(this.pool, this.store.schema, client => client.query<DueRow>(
       `SELECT o.scope, o.key, o.kind FROM outbox o JOIN scope s ON s.scope = o.scope
-        WHERE s.state_version = ANY($1::integer[]) AND o.settled_at IS NULL AND o.next_at <= $2
+        WHERE s.state_version = ANY($1::integer[]) AND s.switch_export IS NULL AND s.switch_import IS NULL AND o.settled_at IS NULL AND o.next_at <= $2
         ORDER BY o.next_at, o.scope, o.ordinal LIMIT $3`, [[...SUPPORTED_STORE_VERSIONS], this.now(), this.batch]), true);
     const pass: SendPass = { steps: 0, failed: [] }, changed = new Set<string>();
     for (const row of due.rows) {
@@ -139,8 +141,12 @@ export class HostedOutboxSender {
       } catch (error) {
         pass.failed.push({ scope, id, error });
         // A failure to write the wait is a store failure, not a row failure, so it ends the pass. It keeps the step error.
+        // A scope exported since the scan takes no wait either (#975): its row stays as it is, and the pass goes on.
         try { await this.store.deferOutbox(scope, id, this.now, this.backoffMs); }
-        catch (deferError) { throw new AggregateError([deferError, error], errorText(deferError)); }
+        catch (deferError) {
+          if (deferError instanceof SwitchExportedError) continue;
+          throw new AggregateError([deferError, error], errorText(deferError));
+        }
       }
     }
     for (const scope of changed) this.options.changed?.(scope);

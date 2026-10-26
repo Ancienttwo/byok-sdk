@@ -1,6 +1,6 @@
 import { checkRoutineSchedule, nextRoutineOccurrence, type RoutineSchedule } from '@byok-sdk/core';
 import { MESSAGE_PAYLOAD_SCHEMAS, type CreateRoutineAction, type RoutineScheduleFields, type UpdateRoutineAction } from '@byok-sdk/protocol';
-import { canonical, concludeOccurrence, hash, type ExecutionTemplate, type HostOccurrenceRoutineDefinition, type HostOccurrenceRun, type LedgerState,
+import { canonical, concludeOccurrence, hash, occurrenceIntentKey, occurrenceOfIntentKey, type ExecutionTemplate, type HostOccurrenceRoutineDefinition, type HostOccurrenceRun, type LedgerState,
   type NextOccurrence, type Routine } from '@byok-sdk/example-host-execution-core';
 import { addTurn, json, type Authority, type CollaborationState, type Turn } from './model';
 import { SYSTEM_PROMPT } from './rules/schema';
@@ -17,8 +17,6 @@ export const BOT_ROUTINE = 'bot-routine';
 export const ROUTINE_WAIT_MS = 300_000;
 /** A delivery later than this after its planned time is a catch-up. */
 export const ROUTINE_LATE_AFTER_MS = 60_000;
-/** A routine Turn id is its K4 intent key: `occurrence:<occurrence key>`. */
-const ROUTINE_TURN = 'occurrence:';
 
 /** Fixed at creation. Owner and authority never change between versions, and a routine stays plain or sealed. */
 export type BotRoutineInput = { owner: string; authority: Authority; prompt: string }
@@ -183,12 +181,17 @@ export function sealedTemplate(routines: Iterable<Routine>, ref: SealedRoutineRe
 }
 /** The `bot-routine` occurrence hook. It writes the routine Turn in the occurrence commit. `sync` promotes it. */
 export function routineTurn(state: CollaborationState, run: HostOccurrenceRun): void {
-  const input = run.input as unknown as BotRoutineInput, id = `${ROUTINE_TURN}${run.occurrenceKey}`;
+  const input = run.input as unknown as BotRoutineInput, id = occurrenceIntentKey(run.occurrenceKey);
   // A sealed routine Turn names its routine version; the sync freezes that version's template, and the Host keeps no request.
   addTurn(state, { id, root: id, source: 'routine', botId: input.owner, hop: 0, authority: input.authority,
     ...('sealed' in input ? { request: '', sealedRoutine: { routineId: run.routineId, definitionVersion: run.definitionVersion } } : { request: input.prompt }) });
 }
-export function routineOccurrence(turn: Turn): string { return turn.id.slice(ROUTINE_TURN.length); }
+/** A routine Turn id is its K4 intent key, `occurrenceIntentKey(<occurrence key>)`. */
+export function routineOccurrence(turn: Pick<Turn, 'id'>): string {
+  const key = occurrenceOfIntentKey(turn.id);
+  if (key === undefined) throw new Error(`Routine Turn ${turn.id} names no occurrence`);
+  return key;
+}
 /**
  * A routine Turn that ends without an intent concludes its open occurrence.
  * Then a staged version can switch, and `compact` can remove the row.

@@ -3,7 +3,7 @@ import type { ByokCloudOptions, TenantId } from '@byok-sdk/cloud';
 import { canonical } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState } from '@byok-sdk/example-bot-collaboration/model';
 import { CommitConflict, revisionOf, type CommitResult } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { frozenIntent } from './intents';
+import { earlierIntent, frozenIntent } from './intents';
 import { storedKey } from './layout';
 import { acceptedReply, commitStored } from './retention';
 import type { Decision, HostedCollaborationStore, StorePorts } from './store';
@@ -25,7 +25,7 @@ export async function decideMessage(client: PoolClient, scope: string, state: Co
   input: AgentMessageInput, ports: StorePorts, channel: boolean): Promise<Decision<MessageDecision>> {
   const refuse = (reasonCode: string): Decision<MessageDecision> => ({ value: { outcome: 'refused', reasonCode }, outbox: [] });
   const frozen = await frozenIntent(client, scope, input.taskId);
-  if (!frozen) return refuse('unknown_task');
+  if (!frozen) return decideEarlier(client, scope, state, input);
   if (input.deviceId !== frozen.input.deviceId || canonical(input.payload.agentRef) !== canonical(frozen.input.payload.agentRef)
     || canonical(input.context) !== canonical(frozen.input.agentMessageContext)) return refuse('binding_mismatch');
   // One accepted message per task, as the K4 receipt. The command record keys one message, so it cannot see another one.
@@ -47,6 +47,23 @@ export async function decideMessage(client: PoolClient, scope: string, state: Co
   const value: MessageDecision = result.disposition.outcome === 'accepted' ? { outcome: 'accepted' }
     : { outcome: 'refused', reasonCode: result.disposition.reasonCode };
   return { value, outbox: result.revision === head + 1 ? result.outbox : [], now: base.now() };
+}
+
+/**
+ * A message for the task of an earlier generation of an imported intent (#975 D1), as K4 `consumeMessage` answers it from
+ * that generation's execution: the binding check, then its receipt (the K8 accepted reply of the task), else
+ * `stale_generation`. A task that no generation has is `unknown_task`. It writes nothing.
+ */
+async function decideEarlier(client: PoolClient, scope: string, state: CollaborationState, input: AgentMessageInput): Promise<Decision<MessageDecision>> {
+  const refuse = (reasonCode: string): Decision<MessageDecision> => ({ value: { outcome: 'refused', reasonCode }, outbox: [] });
+  const earlier = await earlierIntent(client, scope, input.taskId);
+  if (!earlier) return refuse('unknown_task');
+  if (input.deviceId !== earlier.input.deviceId || canonical(input.payload.agentRef) !== canonical(earlier.input.payload.agentRef)
+    || canonical(input.context) !== canonical(earlier.input.agentMessageContext)) return refuse('binding_mismatch');
+  const reply = await acceptedReply(client, storedKey(scope), state, input.taskId);
+  if (!reply) return refuse('stale_generation');
+  return reply.messageId === input.payload.messageId && reply.contentHash === input.payload.contentHash
+    ? { value: { outcome: 'accepted' }, outbox: [] } : refuse('message_conflict');
 }
 
 export interface MessageConsumerOptions {

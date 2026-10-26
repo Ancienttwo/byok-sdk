@@ -1,7 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
-import { agentKey, canonical, fifoHeads, hash, isSealed, promoteOccurrence, queuedExpiry, RetiredIntentIdentityError, SealedDispatchUnavailableError,
+import { agentKey, canonical, fifoHeads, frozenInput, hash, isSealed, promoteOccurrence, queuedExpiry, RetiredIntentIdentityError, SealedDispatchUnavailableError,
   submitFrozen, taskId,
-  type Conclusion, type ExecutionTemplate, type FrozenExecutionInput, type FrozenSubmitPort, type IntentExecution } from '@byok-sdk/example-host-execution-core';
+  type Conclusion, type RetryPolicy, type ExecutionTemplate, type FrozenExecutionInput, type FrozenSubmitPort, type IntentExecution, type Json } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';
@@ -26,8 +26,15 @@ export interface IntentFreeze<E extends IntentExecution = IntentExecution> {
 export interface RoutineTimes { retryUntil?: number; conclusion?: Conclusion }
 
 /**
- * Saves one intent with its frozen input and its stable task id, `taskId(key, 0)`. The caller holds the scope lock.
- * A second freeze of the same Turn with the same identity changes nothing; another identity throws, as in K4 `enqueue`.
+ * The retry policy of H's own intents: one attempt. K4 opens a new generation only while `attempts < maxAttempts` (K4
+ * `core.ts` reconcile), and `validateRetry` accepts `maxAttempts: 1` with no delays, so K4 reads it as "never retry".
+ */
+const ONE_ATTEMPT: RetryPolicy = { maxAttempts: 1, delaysMs: [], retryFailures: false };
+
+/**
+ * Saves one intent of generation 0 with its frozen input and its stable task id, `taskId(key, 0)`. The caller holds the
+ * scope lock. A second freeze of the same Turn with the same identity changes nothing and returns the stored input, whose
+ * task id is the stored row's (an imported row may be of a later generation, #975); another identity throws, as in K4 `enqueue`.
  * The handler is part of the identity, so a Turn never takes over a Host intent row, and a Host intent never a Turn's.
  * A Turn whose intent compaction retired throws `RetiredIntentIdentityError`, as K4 `enqueue` refuses a retired key (#793 S8).
  */
@@ -41,24 +48,25 @@ export async function freezeIntent<E extends IntentExecution>(client: PoolClient
     throw new Error('A sealed execution must be a routine template occurrence');
   }
   const scopeKey = storedKey(scope), key = storedKey(freeze.key);
-  const input = { ...structuredClone(freeze.execution), taskId: taskId(freeze.key, 0) };
-  const prior = await client.query<{ source: string; handler: string | null; input: string; wait_until: string }>(
-    'SELECT source, handler, input::text AS input, wait_until::text FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
+  const input = frozenInput(freeze.execution, taskId(freeze.key, 0)) as unknown as E & { taskId: string };
+  const prior = await client.query<{ source: string; handler: string | null; task_id: string; input: string; wait_until: string }>(
+    'SELECT source, handler, task_id, input::text AS input, wait_until::text FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
   if (prior.rows[0]) {
-    const row = prior.rows[0];
-    if (row.source !== freeze.source || row.handler !== (freeze.handler ?? null) || canonical(JSON.parse(row.input)) !== canonical(input)
-      || Number(row.wait_until) !== freeze.waitUntil) {
+    const row = prior.rows[0], stored = JSON.parse(row.input) as E & { taskId: string };
+    if (row.source !== freeze.source || row.handler !== (freeze.handler ?? null)
+      || canonical(stored) !== canonical(frozenInput(freeze.execution, row.task_id) as unknown as Json) || Number(row.wait_until) !== freeze.waitUntil) {
       throw new Error('Intent identity conflict');
     }
-    return input;
+    return stored;
   }
   if ((await retiredIntents(client, scopeKey, [freeze.key])).size) throw new RetiredIntentIdentityError();
   // A new intent can create execution, so its device must have an active H binding (#793 D2e).
   await activeBinding(client, scopeKey, freeze.execution.deviceId);
-  await client.query(`INSERT INTO intent (scope, key, task_id, ordinal, agent, source, handler, input, wait_until, submission, retry_until, conclusion)
-    SELECT $1, $2, $3, coalesce(max(ordinal) + 1, 0), $4, $5, $10, $6::json, $7, 'reserved', $8, $9 FROM intent WHERE scope = $1`,
+  await client.query(`INSERT INTO intent (scope, key, task_id, generation, ordinal, agent, source, handler, input, retry, wait_until, submission,
+      retry_until, conclusion)
+    SELECT $1, $2, $3, 0, coalesce(max(ordinal) + 1, 0), $4, $5, $10, $6::json, $11::json, $7, 'reserved', $8, $9 FROM intent WHERE scope = $1`,
   [scopeKey, key, input.taskId, agentKey(scope, freeze.execution), freeze.source, JSON.stringify(input), freeze.waitUntil,
-    routine.retryUntil ?? null, routine.conclusion ?? null, freeze.handler ?? null]);
+    routine.retryUntil ?? null, routine.conclusion ?? null, freeze.handler ?? null, JSON.stringify(ONE_ATTEMPT)]);
   return input;
 }
 
@@ -68,6 +76,25 @@ export async function frozenIntent(client: PoolClient, scope: string, task: stri
     [storedKey(scope), task]);
   const row = found.rows[0];
   return row && { turnId: JSON.parse(row.key) as string, input: row.input };
+}
+
+/** The frozen input of the current task of intent `key`: the K4 `intent(key)` that L reads. */
+export async function currentIntent(client: PoolClient, scope: string, key: string): Promise<{ turnId: string; input: FrozenExecutionInput } | undefined> {
+  const found = await client.query<{ input: FrozenExecutionInput }>('SELECT input FROM intent WHERE scope = $1 AND key = $2', [storedKey(scope), storedKey(key)]);
+  return found.rows[0] && { turnId: key, input: found.rows[0].input };
+}
+
+/**
+ * The frozen input of task `task` of an earlier generation of an imported intent (#975 D1): the intent's input with that
+ * task id, as K4 `frozenInput` builds each generation's input.
+ */
+export async function earlierIntent(client: PoolClient, scope: string, task: string): Promise<{ turnId: string; input: FrozenExecutionInput } | undefined> {
+  const found = await client.query<{ key: string; input: FrozenExecutionInput }>(`SELECT e.key, i.input FROM intent_execution e
+    JOIN intent i ON i.scope = e.scope AND i.key = e.key WHERE e.scope = $1 AND e.task_id = $2`, [storedKey(scope), task]);
+  const row = found.rows[0];
+  if (!row) return undefined;
+  const { taskId: _current, ...execution } = row.input;
+  return { turnId: JSON.parse(row.key) as string, input: frozenInput(execution as IntentExecution, task) };
 }
 
 type IntentFact = NonNullable<ReturnType<SyncFacts['intent']>>;
@@ -80,18 +107,21 @@ type IntentFact = NonNullable<ReturnType<SyncFacts['intent']>>;
 async function loadIntentFacts(client: PoolClient, scope: string, turnIds: readonly string[]) {
   const found = await client.query<{ key: string; task_id: string; conclusion: IntentFact['conclusion'] | null;
     cancel_reason: IntentFact['cancelReason'] | null; started: boolean; terminal_type: string | null; decline_code: string | null;
-    offered_to: string | null }>(
+    offered_to: string | null; earlier_started: boolean }>(
     `SELECT key, task_id, conclusion, cancel_reason, started, terminal->'envelope'->>'type' AS terminal_type,
       terminal->'envelope'->'payload'->>'code' AS decline_code,
       CASE WHEN conclusion IS NULL AND submission = 'delivered' AND NOT started AND attempt->>'status' = 'offered'
-        THEN input->>'deviceId' END AS offered_to
+        THEN input->>'deviceId' END AS offered_to,
+      EXISTS (SELECT 1 FROM intent_execution e WHERE e.scope = intent.scope AND e.key = intent.key
+        AND (e.started OR e.terminal->'envelope'->>'type' <> 'task.decline')) AS earlier_started
       FROM intent WHERE scope = $1 AND key = ANY($2::text[])`,
     [storedKey(scope), turnIds.map(storedKey)]);
   const facts = new Map(found.rows.map(row => [row.key, { taskId: row.task_id, ...(row.conclusion ? { conclusion: row.conclusion } : {}),
     ...(row.cancel_reason ? { cancelReason: row.cancel_reason } : {}) } satisfies IntentFact]));
   return { intent: (turnId: string) => facts.get(storedKey(turnId)), started: new Set(found.rows.filter(row => row.started).map(row => row.key)),
     terminals: new Map(found.rows.flatMap(row => row.terminal_type === null ? [] : [[row.key, { type: row.terminal_type, code: row.decline_code }] as const])),
-    offered: new Map(found.rows.flatMap(row => row.offered_to === null ? [] : [[row.key, row.offered_to] as const])) };
+    offered: new Map(found.rows.flatMap(row => row.offered_to === null ? [] : [[row.key, row.offered_to] as const])),
+    earlierStarted: new Set(found.rows.filter(row => row.earlier_started).map(row => row.key)) };
 }
 /**
  * The intent facts that a command reads (K8 `CommandPorts.intents`), as L reads its K4 intents in the commit transaction.
@@ -173,17 +203,17 @@ export async function deliverCancels(client: PoolClient, scope: string, state: C
 
 /**
  * The K4 facts that K8 `settleDelegations` (#793 D2f-5) and `observeDevices` (#793 S11) read, from the intent rows of these
- * Turns, as K8 `intentFacts` reads them from L's ledger. H keeps generation 0 only, so "any generation" is this row: it
- * started when the reconciliation saw a claim (`started`) or it has a terminal that is not a decline. The caller holds the
- * scope lock.
+ * Turns, as K8 `intentFacts` reads them from L's ledger: a Turn started when any generation of its intent did, the current
+ * row or an earlier one that an import moved (`intent_execution`, #975). A generation started when the reconciliation saw a
+ * claim (`started`) or it has a terminal that is not a decline. The caller holds the scope lock.
  */
 export async function settleFacts(client: PoolClient, scope: string, turnIds: readonly string[]): Promise<SettleFacts> {
-  const { intent, started, terminals, offered } = await loadIntentFacts(client, scope, turnIds);
+  const { intent, started, terminals, offered, earlierStarted } = await loadIntentFacts(client, scope, turnIds);
   return {
     intent,
     started: turnId => {
       const terminal = terminals.get(storedKey(turnId));
-      return started.has(storedKey(turnId)) || terminal !== undefined && terminal.type !== 'task.decline';
+      return started.has(storedKey(turnId)) || terminal !== undefined && terminal.type !== 'task.decline' || earlierStarted.has(storedKey(turnId));
     },
     declineCode: turnId => {
       const terminal = terminals.get(storedKey(turnId));
@@ -261,10 +291,11 @@ export class HostedSubmitter {
   async run(): Promise<SubmitPass> {
     // The NOT EXISTS head filter must match K4 fifoHeads, which the claim checks again under the scope lock.
     // A scope of a store version this code does not support is left out before the limit: its rows cannot be
-    // claimed or written, so they must not fill a pass ahead of the healthy scopes.
+    // claimed or written, so they must not fill a pass ahead of the healthy scopes. So is an exported scope, and one with an
+    // uncommitted import (#975).
     const due = await inSchema(this.pool, this.schema, client => client.query<{ scope: string; key: string }>(
       `SELECT i.scope, i.key FROM intent i JOIN scope s ON s.scope = i.scope
-        WHERE s.state_version = ANY($3::integer[]) AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
+        WHERE s.state_version = ANY($3::integer[]) AND s.switch_export IS NULL AND s.switch_import IS NULL AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
         AND i.next_at <= $1 AND NOT EXISTS (SELECT 1 FROM intent o WHERE o.scope = i.scope AND o.agent = i.agent
           AND o.conclusion IS NULL AND o.ordinal < i.ordinal)
         ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [this.now(), this.options.batch ?? 100, [...SUPPORTED_STORE_VERSIONS]]), true);
@@ -355,8 +386,9 @@ export class HostedSubmitter {
         // K4 `begin`: a sealed row that was never tried fails before any SDK call when the port has no sealed lane, so it
         // does not hold its agent's queue until `wait_until`. A tried row may have reached the SDK, so it keeps its resubmit.
         if (isSealed(row.input) && !this.options.port(JSON.parse(scopeKey) as string).submitSealed) {
-          await client.query('UPDATE intent SET conclusion = $3, last_error = $4 WHERE scope = $1 AND key = $2',
-            [scopeKey, key, 'failed', new SealedDispatchUnavailableError().message]);
+          // K4 `begin` records the error's code as `preparationError` (#975 D6-2); `last_error` is the submit diagnostic.
+          await client.query('UPDATE intent SET conclusion = $3, preparation_error = $4 WHERE scope = $1 AND key = $2',
+            [scopeKey, key, 'failed', new SealedDispatchUnavailableError().code]);
           await switchDueVersions(client, scopeKey, now);
           return 'concluded';
         }
