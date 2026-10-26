@@ -289,9 +289,11 @@ if (submission.ok) {
   model. `custom` gets no defaults unless the policy's `custom_defaults` sets
   them.
 - Choosing a representable entry sets `model_source: 'catalog'` (or `'host'`
-  for a policy override). The thinking level becomes
+  for a policy override). The thinking level is `off` when that is the
+  model's only level (a non-reasoning model, for one). Otherwise it becomes
   `PI_DEFAULT_THINKING_LEVEL`, generated from the pinned pi-coding-agent,
-  when the model supports it; otherwise the user picks one. Any other model is
+  when the model supports it, and the user picks one when it does not. Any
+  other model is
   `manual`: the user supplies `pi_model`, checked by `PiModelConfigSchema`.
 - Catalog and policy entries apply only at the vendor's own base URL: the
   pinned Pi fills undeclared `compat` keys from the endpoint URL. There, a

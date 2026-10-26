@@ -229,9 +229,11 @@ and makes no network request.
   each `representable` (with input, reasoning and thinking levels) or
   `unrepresentable` (with its blocking paths).
 - `PI_DEFAULT_THINKING_LEVEL` is generated from the pinned
-  `@earendil-works/pi-coding-agent`; a client test fails on drift. Selecting a
-  model sets this level only when the model supports it. Otherwise the level
-  stays unset and required.
+  `@earendil-works/pi-coding-agent`; a client test fails on drift. When `off`
+  is a selected model's only level, as for a non-reasoning model, the level is
+  `off`, which the schema requires. Otherwise selecting a model sets the
+  default level only when the model supports it, and leaves the level unset
+  and required when it does not. A stored profile keeps its stored level.
 - `createModelRouteDraft`, `applyModelRouteChange`, `modelRouteView`,
   `validateModelRoute` and `modelRouteSubmission` take a draft and a context
   (catalog, stored public profile state, Host policy). Errors are field codes

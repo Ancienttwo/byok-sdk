@@ -12,7 +12,8 @@
   policy entries apply only at the vendor's own base URL, because the pinned
   Pi fills undeclared `compat` keys from the endpoint URL.
   `PI_DEFAULT_THINKING_LEVEL` (`medium`) is generated from the pinned
-  pi-coding-agent; a model without that level needs an explicit level.
+  pi-coding-agent. A model whose only level is `off` gets `off`; another
+  model without the default level needs an explicit level.
   `providerSecretReusable` reuses a stored key only while the profile ref,
   kind, adapter, auth mode and normalized base URL are unchanged. JSON fixture
   vectors cover the functions for Hosts in other languages.
