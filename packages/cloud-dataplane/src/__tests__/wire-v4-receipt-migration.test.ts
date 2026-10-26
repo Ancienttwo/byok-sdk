@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
@@ -5,12 +6,15 @@ import {
   WireV4LegacyTaskListMismatchError,
   wireV3LegacyOfferReceiptKeys,
 } from '@byok-sdk/cloud';
-import { decodeEnvelope } from '@byok-sdk/protocol';
+import { tenantId } from '@byok-sdk/core';
+import { sealContent } from '@byok-sdk/core/sealed-payload';
+import { createEnvelope, decodeEnvelope } from '@byok-sdk/protocol';
 import type { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
 import { migrate } from '../migrate';
 import { migratePostgresToWireV4, preflightPostgresWireV4Migration } from '../wire-v4-receipt-migration';
-import { createDataplaneScope, SKIP_DATAPLANE } from './support/dataplane';
+import { createDataplaneScope, createObjectStorageScope, SKIP_DATAPLANE } from './support/dataplane';
+import { AGENT_REF, composeRedactionHost, pairDevice, uploadObject } from './support/redaction-flow';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const v3Lines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
@@ -20,6 +24,10 @@ const AGENT = { agentId: 'agent-1', profileRevision: 'rev-1' };
 const agentOffer = JSON.stringify({ deviceId: 'device-1', type: 'task.offer_for_agent', payload: { instruction: 'x', agentRef: AGENT } });
 const AT = '2026-10-01T00:00:00.000Z';
 const LEGACY = { tenantId: 'tenant-a', taskId: 'legacy-1', deviceId: 'device-1', type: 'task.offer' };
+const REDACTION = {
+  redactedAt: '2026-10-02T00:00:00.000Z',
+  counts: { receiptsRedacted: 3, admissionsRedacted: 1, outboxRedacted: 1, ephemeralRowsDeleted: 2, objectsDeleted: 1 },
+};
 
 /** Every table that holds data of a store-wide snapshot the tests compare. */
 const TABLES = [
@@ -37,11 +45,11 @@ async function receipt(pool: Pool, tenant: string, key: string, body: string): P
   await pool.query('INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at) VALUES ($1, $2, $3, $4)', [tenant, key, body, AT]);
 }
 
-async function task(pool: Pool, tenant: string, taskId: string, agent?: typeof AGENT): Promise<void> {
+async function task(pool: Pool, tenant: string, taskId: string, agent?: typeof AGENT, deviceId = 'device-1'): Promise<void> {
   await pool.query(
     `INSERT INTO task (tenant_id, task_id, device_id, status, updated_at, agent_id, agent_profile_revision)
-     VALUES ($1, $2, 'device-1', 'complete', $3, $4, $5)`,
-    [tenant, taskId, AT, agent?.agentId ?? null, agent?.profileRevision ?? null],
+     VALUES ($1, $2, $3, 'complete', $4, $5, $6)`,
+    [tenant, taskId, deviceId, AT, agent?.agentId ?? null, agent?.profileRevision ?? null],
   );
 }
 
@@ -95,8 +103,8 @@ async function seedLegacyTask(pool: Pool): Promise<void> {
      VALUES ($1, 'task.terminal', $2, 1, $3, 2, 'inline', '{}', $4)`,
     [tenant, taskId, hash, AT],
   );
-  // A redaction audit receipt holds no wire bytes and is kept.
-  await receipt(pool, tenant, `task-redaction:${taskId}`, '{"audit":true}');
+  // The audit receipt a redaction of this task wrote. It goes with the task.
+  await receipt(pool, tenant, `task-redaction:${taskId}`, JSON.stringify(REDACTION));
 }
 
 async function withStore(run: (pool: Pool) => Promise<void>): Promise<void> {
@@ -121,7 +129,10 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres wire v3 -> v4 migration (#925)', () =>
 
       const preflight = await preflightPostgresWireV4Migration(pool);
       expect(preflight).toEqual({ legacyTasks: [LEGACY], unmappable: [] });
-      expect(await migratePostgresToWireV4(pool, preflight.legacyTasks)).toEqual({ migrated: 2, unchanged: 1, deletedTasks: 1 });
+      expect(await migratePostgresToWireV4(pool, preflight.legacyTasks)).toEqual({
+        migrated: 2, unchanged: 1, deletedTasks: 1,
+        deletedRedactionReceipts: [{ tenantId: 'tenant-a', taskId: 'legacy-1', ...REDACTION }],
+      });
 
       const after = await snapshot(pool);
       expect((after.task as { task_id: string }[]).map((row) => row.task_id)).toEqual(['agent-1']);
@@ -132,11 +143,11 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres wire v3 -> v4 migration (#925)', () =>
       expect((after.outbox as { message_id: string }[]).map((row) => row.message_id)).toEqual(['m-agent-1-2']);
       const receipts = after.device_request_receipts as { tenant_id: string; key: string; body: string }[];
       expect(receipts.map((row) => `${row.tenant_id}/${row.key}`).sort()).toEqual([
-        'tenant-a/task-offer:agent-offer', 'tenant-a/task-redaction:legacy-1', 'tenant-a/task:agent-1:terminal', 'tenant-b/task:agent-1:terminal',
+        'tenant-a/task-offer:agent-offer', 'tenant-a/task:agent-1:terminal', 'tenant-b/task:agent-1:terminal',
       ]);
       for (const row of receipts.filter((r) => r.key.endsWith(':terminal'))) expect(decodeEnvelope(row.body)).toMatchObject({ v: 4 });
       expect(await preflightPostgresWireV4Migration(pool)).toEqual({ legacyTasks: [], unmappable: [] });
-      expect(await migratePostgresToWireV4(pool, [])).toEqual({ migrated: 0, unchanged: 3, deletedTasks: 0 });
+      expect(await migratePostgresToWireV4(pool, [])).toEqual({ migrated: 0, unchanged: 3, deletedTasks: 0, deletedRedactionReceipts: [] });
     });
   });
 
@@ -152,7 +163,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres wire v3 -> v4 migration (#925)', () =>
     });
   });
 
-  it('changes nothing and lists every unmappable row: receipts, approvals without an id, undelivered v3 mailbox rows', async () => {
+  it('changes nothing and lists every unmappable row: receipts, approvals without an id, pending v3 mailbox rows', async () => {
     await withStore(async (pool) => {
       await seedLegacyTask(pool);
       await task(pool, 'tenant-a', 'agent-1', AGENT);
@@ -166,7 +177,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres wire v3 -> v4 migration (#925)', () =>
       await outbox(pool, 'tenant-a', 3, 'agent-1', 'pending');
       // A legacy task's pending row is deleted with the task, not refused.
       await outbox(pool, 'tenant-a', 4, LEGACY.taskId, 'pending');
-      // replayDeadLetter can still send an expired row.
+      // A v3 dead letter stays as evidence: replayDeadLetter refuses its bytes under v4.
       await outbox(pool, 'tenant-a', 5, 'agent-1', 'expired');
       await outbox(pool, 'tenant-a', 6, 'agent-1', 'pending', 4);
       const before = await snapshot(pool);
@@ -175,8 +186,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres wire v3 -> v4 migration (#925)', () =>
       const unmappable = [
         { kind: 'receipt', tenantId: 'tenant-a', key: 'task-offer:bad', receiptKind: 'offer', refusal: 'invalid_under_v4', type: 'task.offer_for_agent' },
         { kind: 'approval', tenantId: 'tenant-a', taskId: 'agent-1', refusal: 'approval_id_missing' },
-        { kind: 'mailbox', tenantId: 'tenant-a', deviceId: 'device-1', seq: 3, state: 'pending', refusal: 'wire_version_unsupported' },
-        { kind: 'mailbox', tenantId: 'tenant-a', deviceId: 'device-1', seq: 5, state: 'expired', refusal: 'wire_version_unsupported' },
+        { kind: 'mailbox', tenantId: 'tenant-a', deviceId: 'device-1', seq: 3, refusal: 'wire_version_unsupported' },
       ];
       expect(preflight).toEqual({ legacyTasks: [LEGACY], unmappable });
       const failure = await migratePostgresToWireV4(pool, preflight.legacyTasks).catch((error: unknown) => error);
@@ -185,4 +195,65 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres wire v3 -> v4 migration (#925)', () =>
       expect(await snapshot(pool)).toEqual(before);
     });
   });
+
+  it('frees the id of a deleted redacted legacy task: a new Agent task with that id keeps its sealed artifact reference', async () => {
+    const scope = await createDataplaneScope();
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const host = await composeRedactionHost(scope.pool, await createObjectStorageScope());
+      const tenant = tenantId('tenant-reuse');
+      const device = await pairDevice(host, tenant, ['sealed-payload-v1']);
+      const taskId = `reused-${randomUUID()}`;
+      await task(scope.pool, tenant, taskId, undefined, device.deviceId);
+      const keys = await wireV3LegacyOfferReceiptKeys(tenant, taskId, device.deviceId);
+      await receipt(scope.pool, tenant, keys.offer, JSON.stringify({ deviceId: device.deviceId, type: 'task.offer', payload: { instruction: 'legacy' } }));
+      await receipt(scope.pool, tenant, `task-redaction:${taskId}`, JSON.stringify(REDACTION));
+
+      const legacy = { tenantId: tenant, taskId, deviceId: device.deviceId, type: 'task.offer' };
+      expect(await preflightPostgresWireV4Migration(scope.pool)).toEqual({ legacyTasks: [legacy], unmappable: [] });
+      expect((await migratePostgresToWireV4(scope.pool, [legacy])).deletedRedactionReceipts)
+        .toEqual([{ tenantId: tenant, taskId, ...REDACTION }]);
+
+      const sealing = { scopeId: 'scope-reuse', epoch: 1, categories: ['task-output'] } as const;
+      await host.cloud.enqueueSealedAgentOffer(tenant, device.deviceId, {
+        taskId,
+        payload: { instruction: 'make a file', runtime: 'pi', agentRef: AGENT_REF, sessionRef: 'session-reuse', sealing } as never,
+      });
+      expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.offer_for_agent_sealed', taskId]]);
+      const content = await sealContent({
+        scopeKey: new Uint8Array(32).fill(7),
+        scope: { id: sealing.scopeId, epoch: sealing.epoch },
+        chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+        sender: 'A'.repeat(43),
+        category: 'task-output',
+        binding: {
+          tenantId: tenant, family: 'task.artifact', direction: 'daemon-to-server', identity: { taskId },
+          deviceId: device.deviceId, agentRef: { ...AGENT_REF }, categories: [...sealing.categories], notAfter: null,
+        },
+        // Above the inline limit, so the member names its ciphertext blob.
+        plaintext: { content: 'x'.repeat(300 * 1024) },
+        maxContentLength: 2 * 1024 * 1024,
+      });
+      const blob = await uploadObject(device, content.ciphertext, 'application/octet-stream');
+      for (const envelope of [
+        createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF }, { taskId }),
+        createEnvelope('task.started', {}, { taskId }),
+        createEnvelope('task.artifact_sealed', {
+          artifactId: randomUUID(), name: 'file.txt', contentType: 'text/plain',
+          sealed: { ...content.header, ciphertextRef: blob.ref },
+        } as never, { taskId }),
+      ]) {
+        const sent = await device.send(envelope);
+        expect(sent, JSON.stringify(sent.body)).toMatchObject({ status: 200, body: { accepted: 1 } });
+      }
+
+      const held = await scope.pool.query(
+        "SELECT hash FROM object_reference WHERE tenant_id = $1 AND ref_kind = 'sealed-task' AND ref_id = $2",
+        [tenant, taskId],
+      );
+      expect(held.rows).toEqual([{ hash: `sha256:${blob.hex}` }]);
+    } finally {
+      await scope.dispose();
+    }
+  }, 120_000);
 });

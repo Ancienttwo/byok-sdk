@@ -98,7 +98,7 @@ export type {
   AgentMemoryProjectionStore,
 } from './agent-memory-projection';
 
-export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
+export { TASK_REDACTION_MAX_TASKS, taskRedactionReceiptKey } from './task-redaction';
 export type {
   TaskRedactionCodec,
   TaskRedactionCounts,

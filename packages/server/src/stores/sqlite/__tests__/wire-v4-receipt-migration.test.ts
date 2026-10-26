@@ -132,7 +132,7 @@ describe.skipIf(!isSqliteAvailable())('SQLite wire v3 -> v4 migration (#925)', (
     const before = snapshot(path);
     const unmappable = [
       { kind: 'receipt', tenantId: 'tenant-a', key: 'task-offer:bad', receiptKind: 'offer', refusal: 'invalid_under_v4', type: 'task.offer_for_agent' },
-      { kind: 'mailbox', tenantId: 'tenant-a', deviceId: 'device-1', seq: 3, state: 'pending', refusal: 'wire_version_unsupported' },
+      { kind: 'mailbox', tenantId: 'tenant-a', deviceId: 'device-1', seq: 3, refusal: 'wire_version_unsupported' },
     ];
 
     expect(await preflightSqliteWireV4Migration(path)).toEqual({ legacyTasks: [LEGACY], unmappable });

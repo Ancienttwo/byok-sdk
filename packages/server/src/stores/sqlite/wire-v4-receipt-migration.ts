@@ -144,7 +144,6 @@ async function scan(db: DatabaseSync): Promise<Scan> {
       tenantId: row.tenant_id,
       deviceId: row.device_id,
       seq: row.seq,
-      state: 'pending',
       refusal: 'wire_version_unsupported',
     });
   });

@@ -14,7 +14,9 @@ import {
   migrateWireV3Receipt,
   wireV3LegacyOfferReceiptKeys,
   wireV3LegacyOfferType,
+  taskRedactionReceiptKey,
   wireV4ReceiptKind,
+  type TaskRedactionCounts,
   type WireV3LegacyTask,
   type WireV4MigrationPreflight,
   type WireV4ReceiptMigrationResult,
@@ -23,6 +25,23 @@ import {
 import type { Pool, PoolClient } from 'pg';
 
 const PAGE_SIZE = 500;
+
+/** The redaction audit receipt of a deleted legacy task, as the redaction store recorded it. */
+export interface WireV4DeletedRedactionReceipt {
+  readonly tenantId: string;
+  readonly taskId: string;
+  readonly redactedAt: string;
+  readonly counts: TaskRedactionCounts;
+}
+
+export interface PostgresWireV4MigrationResult extends WireV4ReceiptMigrationResult {
+  /**
+   * The redaction audit receipt of every deleted legacy task that was
+   * redacted. The migration deletes the receipt with the task, so the
+   * operator keeps this list as the audit record.
+   */
+  readonly deletedRedactionReceipts: readonly WireV4DeletedRedactionReceipt[];
+}
 
 interface LegacyTaskRow extends WireV3LegacyTask {
   readonly ownerDeviceId: string | null;
@@ -57,16 +76,20 @@ export async function preflightPostgresWireV4Migration(pool: Pool): Promise<Wire
 export async function migratePostgresToWireV4(
   pool: Pool,
   confirmedLegacyTasks: readonly WireV3LegacyTask[],
-): Promise<WireV4ReceiptMigrationResult> {
+): Promise<PostgresWireV4MigrationResult> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE');
     const found = await scan(client);
     assertWireV4MigrationConfirmed(publicPreflight(found), confirmedLegacyTasks);
-    for (const task of found.legacyTasks) await deleteLegacyTask(client, task);
+    const deletedRedactionReceipts: WireV4DeletedRedactionReceipt[] = [];
+    for (const task of found.legacyTasks) {
+      const redaction = await deleteLegacyTask(client, task);
+      if (redaction !== undefined) deletedRedactionReceipts.push(redaction);
+    }
     const { migrated, unchanged } = await reencodeReceipts(client);
     await client.query('COMMIT');
-    return { migrated, unchanged, deletedTasks: found.legacyTasks.length };
+    return { migrated, unchanged, deletedTasks: found.legacyTasks.length, deletedRedactionReceipts };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -109,14 +132,13 @@ async function scan(client: PoolClient): Promise<Scan> {
     if (legacyTaskIds.has(`${row.tenant_id}\u0000${row.task_id}`) || !hasUnnamedApproval(row.entries)) continue;
     unmappable.push({ kind: 'approval', tenantId: row.tenant_id, taskId: row.task_id, refusal: 'approval_id_missing' });
   }
-  await eachUndeliveredV3Row(client, (row) => {
+  await eachPendingV3Row(client, (row) => {
     if (legacyTaskIds.has(`${row.tenant_id}\u0000${String(envelopeTaskId(row.body))}`)) return;
     unmappable.push({
       kind: 'mailbox',
       tenantId: row.tenant_id,
       deviceId: row.device_id,
       seq: Number(row.seq),
-      state: row.state,
       refusal: 'wire_version_unsupported',
     });
   });
@@ -127,21 +149,22 @@ interface OutboxRow {
   readonly tenant_id: string;
   readonly device_id: string;
   readonly seq: string;
-  readonly state: 'pending' | 'expired';
   readonly body: string;
 }
 
 /**
- * Pending rows a device has yet to receive, and expired dead letters that
- * `replayDeadLetter` can still send, whose bytes are not wire v4. Acked rows
- * are never sent again.
+ * Pending rows a device has yet to receive whose bytes are not wire v4: a v4
+ * daemon fails to decode them and its cursor stops. Acked rows are never sent
+ * again. An expired dead letter stays as evidence: `replayDeadLetter` decodes
+ * it under the current protocol and refuses v3 bytes, and
+ * `discardDeadLetter` drops it.
  */
-async function eachUndeliveredV3Row(client: PoolClient, visit: (row: OutboxRow) => void): Promise<void> {
+async function eachPendingV3Row(client: PoolClient, visit: (row: OutboxRow) => void): Promise<void> {
   let after = { tenantId: '', deviceId: '', seq: '0' };
   for (;;) {
     const page = await client.query<OutboxRow>(
-      `SELECT tenant_id, device_id, seq::text AS seq, state, body FROM outbox
-        WHERE state IN ('pending', 'expired') AND (tenant_id, device_id, seq) > ($1, $2, $3::bigint)
+      `SELECT tenant_id, device_id, seq::text AS seq, body FROM outbox
+        WHERE state = 'pending' AND (tenant_id, device_id, seq) > ($1, $2, $3::bigint)
         ORDER BY tenant_id, device_id, seq LIMIT $4`,
       [after.tenantId, after.deviceId, after.seq, PAGE_SIZE],
     );
@@ -235,19 +258,27 @@ async function reencodeReceipts(client: PoolClient): Promise<{ migrated: number;
 }
 
 /**
- * Deletes every row a legacy task owns. The redaction audit receipt
- * (`task-redaction:<taskId>`) and memory-projection metering receipts are
- * kept: they hold no wire bytes. Object bytes are left to orphan GC once
- * their references are gone.
+ * Deletes every row a legacy task owns and returns its redaction audit
+ * receipt, if it had one. Inbound reads that receipt as "this taskId was
+ * redacted" and releases a new sealed artifact reference at once, so it goes
+ * with the task: a new Agent task may reuse the id. Memory-projection metering
+ * receipts are kept; they are keyed by Agent and epoch and no reader looks
+ * them up by taskId. Object bytes are left to orphan GC once their references
+ * are gone.
  */
-async function deleteLegacyTask(client: PoolClient, task: LegacyTaskRow): Promise<void> {
+async function deleteLegacyTask(client: PoolClient, task: LegacyTaskRow): Promise<WireV4DeletedRedactionReceipt | undefined> {
   const tenant = task.tenantId;
   const devices = task.ownerDeviceId === null || task.ownerDeviceId === task.deviceId
     ? [task.deviceId]
     : [task.deviceId, task.ownerDeviceId];
+  const redactionKey = taskRedactionReceiptKey(task.taskId);
+  const redaction = await client.query<{ body: string }>(
+    'SELECT body FROM device_request_receipts WHERE tenant_id = $1 AND key = $2',
+    [tenant, redactionKey],
+  );
   await client.query('DELETE FROM device_request_receipts WHERE tenant_id = $1 AND key = ANY($2::text[])', [
     tenant,
-    [...task.receiptKeys, ...devices.map((device) => `agent-message-offer:${device}:${task.taskId}`)],
+    [...task.receiptKeys, redactionKey, ...devices.map((device) => `agent-message-offer:${device}:${task.taskId}`)],
   ]);
   // An envelope names its task in a compact top-level `task_id`: the text filter
   // narrows the scan and the parse confirms each match, as task redaction does.
@@ -274,6 +305,29 @@ async function deleteLegacyTask(client: PoolClient, task: LegacyTaskRow): Promis
   ]);
   // `agent_message_admission` rows follow by ON DELETE CASCADE.
   await client.query('DELETE FROM task WHERE tenant_id = $1 AND task_id = $2', [tenant, task.taskId]);
+  const body = redaction.rows[0]?.body;
+  return body === undefined ? undefined : { tenantId: tenant, taskId: task.taskId, ...parseRedactionReceipt(tenant, task.taskId, body) };
+}
+
+const REDACTION_COUNT_FIELDS = ['receiptsRedacted', 'admissionsRedacted', 'outboxRedacted', 'ephemeralRowsDeleted', 'objectsDeleted'] as const;
+
+/** The `{ redactedAt, counts }` body the Postgres redaction store writes. Anything else fails the migration. */
+function parseRedactionReceipt(tenant: string, taskId: string, body: string): { redactedAt: string; counts: TaskRedactionCounts } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    parsed = undefined;
+  }
+  const { redactedAt, counts } = (parsed ?? {}) as { redactedAt?: unknown; counts?: Record<string, unknown> };
+  if (typeof redactedAt !== 'string' || counts === null || typeof counts !== 'object'
+    || REDACTION_COUNT_FIELDS.some((field) => typeof counts[field] !== 'number')) {
+    throw new Error(`redaction receipt ${tenant}/${taskRedactionReceiptKey(taskId)} is not a redaction audit record`);
+  }
+  return {
+    redactedAt,
+    counts: Object.fromEntries(REDACTION_COUNT_FIELDS.map((field) => [field, counts[field]])) as unknown as TaskRedactionCounts,
+  };
 }
 
 /** Manifest row first, then the reference: the lock order of `addReference`. */

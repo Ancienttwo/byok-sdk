@@ -113,15 +113,14 @@ export type WireV4UnmappableRow =
   /** An approval request or resolution recorded without the approvalId v4 requires. */
   | { readonly kind: 'approval'; readonly tenantId: string; readonly taskId: string; readonly refusal: 'approval_id_missing' }
   /**
-   * A mailbox row of a non-legacy task that a v4 device would still receive
-   * as older wire bytes: pending, or an expired dead letter a store can replay.
+   * A pending mailbox row of a non-legacy task in older wire bytes. A v4
+   * device would fail to decode it and stop its cursor there.
    */
   | {
       readonly kind: 'mailbox';
       readonly tenantId: string;
       readonly deviceId: string;
       readonly seq: number;
-      readonly state: 'pending' | 'expired';
       readonly refusal: 'wire_version_unsupported';
     };
 
@@ -200,7 +199,7 @@ function describe(row: WireV4UnmappableRow): string {
     case 'approval':
       return `${row.tenantId}/approvals/${row.taskId} (${row.refusal})`;
     case 'mailbox':
-      return `${row.tenantId}/mailbox/${row.deviceId}/${row.seq} (${row.state}: ${row.refusal})`;
+      return `${row.tenantId}/mailbox/${row.deviceId}/${row.seq} (pending: ${row.refusal})`;
   }
 }
 
