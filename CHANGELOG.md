@@ -82,6 +82,13 @@
   - The protocol test alias `byok-protocol-previous` pins 0.30.2, the last v3
     release, as the rejection oracle. `byok-protocol-floor` (0.27.0) and
     `published-compat.test.ts` are removed until a v4 release is published.
+- **Breaking (examples; #925)** — byok-mcp-server submits each task as a
+  fresh Agent execution of the key's AgentRef. A `tasks.dispatch` key without
+  an AgentRef fails authentication with `invalid_input`; revoke it and issue
+  a new key with one. An Agent home has one writer, so a device runs one task
+  of a key at a time, whatever the key's `runningTasks` quota allows. The
+  basic example submits fresh executions and decides approvals with
+  `ByokServer.tasks.approve` and `reject`.
 - **Feature (server; #925)** — `ByokServer.tasks.approve(taskId, opts?)` and
   `tasks.reject(taskId, reason?, opts?)` decide a pending approval by taskId,
   so a task that `executions.submit` created can be approved without a

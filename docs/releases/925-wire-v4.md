@@ -47,6 +47,10 @@ reader and no capability negotiation between the two majors.
 - `Daemon.approve` and `Daemon.reject` take `{ approvalId }`.
 - Runtime adapters take `RuntimeTaskInput` from `@byok-sdk/client`. The wire
   type `TaskOfferPayload` is removed.
+- byok-mcp-server (example) runs every task as the key's Agent. A
+  `tasks.dispatch` key without an AgentRef fails authentication with
+  `invalid_input`; revoke it and issue a new key with one. A device runs one
+  task of a key at a time, whatever the key's `runningTasks` quota allows.
 
 ## Stored v3 state
 
