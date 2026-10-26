@@ -405,7 +405,7 @@ export function selectImpact(paths, context = {}) {
       continue;
     }
     if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts'
-      || path === 'examples/basic/quickstart-smoke.test.ts') {
+      || path === 'examples/basic/quickstart-smoke.test.ts' || path === 'examples/basic/server.ts') {
       dirs.add('examples/basic'); continue;
     }
     // The usage notes of the clarification and goal/btw examples.

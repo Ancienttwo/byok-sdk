@@ -136,6 +136,18 @@ export interface ByokServer {
         /** Request cancellation through the kernel without a process-owned TaskHandle. */
         cancel(taskId: string, reason?: string): Promise<void>;
         /**
+         * Approve the task's pending approval without a process-owned TaskHandle,
+         * such as a task `executions.submit` created. The same decision and
+         * refusals as {@link TaskHandle.approve}.
+         */
+        approve(taskId: string, opts?: {
+            approvalId?: string;
+        }): Promise<void>;
+        /** Reject the task's pending approval; the same decision and refusals as {@link TaskHandle.reject}. */
+        reject(taskId: string, reason?: string, opts?: {
+            approvalId?: string;
+        }): Promise<void>;
+        /**
          * One bounded page, keyset-paged by task id. Paged rather than "all of
          * them" because the underlying store is: an unbounded `list()` would have
          * to walk every page internally and hand back a snapshot that was never
@@ -688,6 +700,20 @@ export interface TaskHandleDeps {
     /** The read-back this handle's `result()` answers with. */
     readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
 }
+type ApprovalDeps = Pick<TaskHandleDeps, 'tenant' | 'cloud' | 'relay'>;
+/**
+ * The host's approval decision, shared by {@link TaskHandle.approve} and
+ * `ByokServer.tasks.approve`. Cloud atomically records it in the one approval
+ * timeline before this notification is enqueued; the relay remains a
+ * notification projection, never a second writer for that authority.
+ */
+export declare function approvePendingApproval(deps: ApprovalDeps, taskId: string, opts?: {
+    approvalId?: string;
+}): Promise<void>;
+/** The rejection counterpart of {@link approvePendingApproval}. */
+export declare function rejectPendingApproval(deps: ApprovalDeps, taskId: string, reason?: string, opts?: {
+    approvalId?: string;
+}): Promise<void>;
 /**
  * One in-flight task's control surface.
  *
@@ -699,6 +725,7 @@ export interface TaskHandleDeps {
  * cached here.
  */
 export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHandle;
+export {};
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclinePayload, TaskFailure, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';

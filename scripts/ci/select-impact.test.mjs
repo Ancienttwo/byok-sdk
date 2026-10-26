@@ -392,7 +392,9 @@ test('#794 D3: a direct Worker example path selects only that example and the da
 test('wire v4 (#925) reviewed paths select only their owners', () => {
   assert.deepEqual(selectImpact(['examples/packaging/launcher.ts']).families, ['packageability-smoke']);
   assert.ok(selectImpact(['examples/packaging/launcher.ts']).dirs.includes('examples/packaging'));
-  assert.ok(selectImpact(['examples/basic/quickstart-smoke.test.ts']).dirs.includes('examples/basic'));
+  for (const path of ['examples/basic/quickstart-smoke.test.ts', 'examples/basic/server.ts']) {
+    assert.deepEqual(selectImpact([path]).dirs, ['examples/basic'], path);
+  }
   for (const path of ['scripts/integration/salesko-recurring.test.ts', 'packages/client/scripts/fixtures/packed-cli-mcp-codex.mjs']) {
     assert.ok(selectImpact([path]).dirs.includes('packages/client'), path);
   }
