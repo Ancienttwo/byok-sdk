@@ -425,18 +425,19 @@ export class HostedCollaborationStore {
     return this.transaction(async client => {
       const rows = [];
       for (const query of [
-        'SELECT state_version, frame::text, due_at::text FROM scope WHERE scope = $1',
+        'SELECT state_version, frame::text, due_at::text, switch_export::text FROM scope WHERE scope = $1',
         'SELECT kind, key, ordinal::text, body::text FROM entity WHERE scope = $1 ORDER BY kind, key',
         'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, entry.position',
         'SELECT key, ordinal::text, evidence, result::text, root FROM command WHERE scope = $1 ORDER BY key',
         'SELECT key, ordinal::text, kind, body::text FROM outbox WHERE scope = $1 ORDER BY key',
         `SELECT key, task_id, ordinal::text, agent, source, input::text, wait_until::text, submission, tries, next_at::text, last_error,
-          cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text, retry_until::text FROM intent WHERE scope = $1 ORDER BY key`,
+          cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text, retry_until::text, retry::text, preparation_error
+          FROM intent WHERE scope = $1 ORDER BY key`,
         'SELECT device, ordinal::text, mode, mode_revision::text, revoked_at::text FROM device_binding WHERE scope = $1 ORDER BY device',
         'SELECT kind, identity, expires_at::text FROM retired_identity WHERE scope = $1 ORDER BY kind, identity',
         'SELECT namespace, id, body::text, expires_at::text FROM archived_row WHERE scope = $1 ORDER BY namespace, id',
-        `SELECT id, ordinal::text, definition::text, pending::text, lifecycle, status, next_at::text, calendar_errors::text FROM routine
-          WHERE scope = $1 ORDER BY id`,
+        `SELECT id, ordinal::text, definition::text, pending::text, lifecycle, status, next_at::text, calendar_errors::text,
+          schedule_retry_at::text, schedule_retry_count, last_error::text FROM routine WHERE scope = $1 ORDER BY id`,
         `SELECT key, ordinal::text, routine_id, definition_version, trigger_kind, planned_at::text, recorded_at::text, next_at::text,
           execution_superseded, conclusion FROM occurrence WHERE scope = $1 ORDER BY key`,
       ]) rows.push((await client.query({ text: query, values: [storedKey(scope)], rowMode: 'array' })).rows);

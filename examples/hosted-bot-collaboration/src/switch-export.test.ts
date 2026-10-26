@@ -11,6 +11,8 @@ import type { InboundMessage } from '@byok-sdk/example-bot-collaboration/channel
 import { DEVICE_SWITCHING } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import { seedCollaboration, SYNC_OPTIONS, VECTOR_NOW } from '@byok-sdk/example-bot-collaboration/test-support';
 import { HostedDueScheduler } from './due';
+import { HostedCommandEntry, type EntryCaller } from './entry';
+import { HostedReplyChecker } from './replies';
 import { freezeIntent, HostedSubmitter } from './intents';
 import { storedKey } from './layout';
 import { hostedMessageConsumer, type AgentMessageInput } from './messages';
@@ -117,6 +119,35 @@ async function exported(scope: string): Promise<SwitchExport> {
   await store().beginSwitch(scope, 'device', 'L', 1);
   await flushProjections();
   return store().exportScope(scope, [{ deviceId: 'device', expectedRevision: 2 }], clock);
+}
+/** The authenticated command entry over the store, for any caller. */
+const entry = () => new HostedCommandEntry<EntryCaller>(store(), { authenticate: async caller => caller, owner: async () => 'owner',
+  sync: async (scope, now) => store().sync(scope, { ...SYNC, now }), now: clock });
+/**
+ * A scope where the Main Bot delegated to Bot `b` and `b`'s Turn succeeded with no reply, so the delegation's reply check
+ * is due: work that is all concluded, with a check the reply checker still runs.
+ */
+async function replyPending(): Promise<string> {
+  const scope = `tenant:${randomUUID()}`;
+  await store().seed(scope, state => {
+    seedCollaboration(state);
+    Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+    state.team.bots.b = { ...state.team.bots.main!, id: 'b', name: 'B', role: 'Reviewer', mainBot: false, execution: template('device', 'b') };
+  });
+  await store().bindDevice(scope, 'device');
+  const result = await store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'input', botId: 'main', key: 'r1', request: 'Ask b',
+    sender: 'owner' } }, clock);
+  const root = result.disposition.outcome === 'accepted' ? result.disposition.value as string : '';
+  await store().sync(scope, SYNC);
+  await claimed(scope, root);
+  expect(await store().finish(scope, root, evidence(root, { delegate: [{ to: 'b', request: 'Check' }] }), clock)).toBe('succeeded');
+  await store().sync(scope, SYNC);
+  const delegated = hash([taskId(root, 0), 'delegate', 0]);
+  await claimed(scope, delegated);
+  expect(await store().finish(scope, delegated, evidence(delegated), clock)).toBe('succeeded');
+  await store().sync(scope, SYNC);
+  expect(Object.values((await store().read(scope)).delegations)).toEqual([expect.objectContaining({ status: 'reply_pending' })]);
+  return scope;
 }
 /** A Bot scope with only the seed, `t1` settled, bound to H. */
 async function plain(): Promise<string> {
@@ -272,17 +303,33 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
       ['a home claim', scope => store().claimHome(scope, 1, clock, 1000, 1000), 'exported'],
       ['an outbox deferral', scope => store().deferOutbox(scope, ['card', 'c1'], clock, 1000), 'exported'],
       ['a device revoke', scope => store().revokeDevice(scope, 'device', NOW), 'exported'],
+      ['a bind of a new device', scope => store().bindDevice(scope, 'device-3'), 'exported'],
+      ['a Host intent on a device that hosts no Bot', scope => store().enqueueHostIntent(scope, { key: 'h3', source: 'user', execution: template('device-2'),
+        waitUntil: NOW + 60_000 }, 'job', clock), 'exported'],
+      ['the command entry', scope => entry().cancelTurn({ scope, principal: { kind: 'human', id: 'owner' } }, 't1'), 'exported'],
       ['a drain', scope => store().drainDevice(scope, 'device', 2, {}, clock), 'exported'],
       ['an audit line', scope => store().audit(scope, 'line', clock), 'exported'],
       ['a seed', scope => store().seed(scope, () => {}), 'exported'],
     ];
     it.each(entries)('%s', async (_name, run, refusal) => {
       const scope = await plain();
+      await store().bindDevice(scope, 'device-2');
+      // An expired command record, which a retention pass would delete.
+      await query(`INSERT INTO ${table('archived_row')} (scope, namespace, id, body, expires_at) VALUES ($1, 'commands', '"old"', '{}', 1)`, [storedKey(scope)]);
       await store().enqueueHostIntent(scope, { key: 'h1', source: 'user', execution: template('device'), waitUntil: NOW + 60_000 }, 'job', clock);
       await query(`UPDATE ${table('intent')} SET conclusion = 'cancelled', cancel_reason = 'cancelled' WHERE scope = $1`, [storedKey(scope)]);
       await pendingHome(scope);
       const { manifest: { digest } } = await exported(scope), kept = await store().dump(scope);
       await expect(run(scope, digest)).rejects.toEqual(refusal === 'exported' ? exportedError(digest) : switching);
+      expect(await store().dump(scope)).toBe(kept);
+    });
+
+    it('refuses the reply checker\'s settle of a due check after its SDK read, and writes nothing', async () => {
+      const scope = await replyPending();
+      const { manifest: { digest } } = await exported(scope), kept = await store().dump(scope), reads: string[] = [];
+      const checker = new HostedReplyChecker(store(), { port: () => ({ agentMessage: async taskId => { reads.push(taskId); return {} as never; } }), now: clock });
+      await expect(checker.check(scope, NOW + 86_400_000)).rejects.toEqual(exportedError(digest));
+      expect(reads).toHaveLength(1);
       expect(await store().dump(scope)).toBe(kept);
     });
 
