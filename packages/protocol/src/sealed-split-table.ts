@@ -97,8 +97,6 @@ const sealedOffer = (plainType: MessageType, digests: SealedSplitEntry['digests'
  * takes up to 2 MiB instead of the plaintext 64 KB (decision 12b).
  */
 export const SEALED_SPLIT_TABLE = Object.freeze({
-  'task.offer_sealed': sealedOffer('task.offer', OFFER_DIGESTS),
-  'task.offer_with_toolsets_sealed': sealedOffer('task.offer_with_toolsets', OFFER_DIGESTS),
   'task.offer_for_agent_sealed': sealedOffer('task.offer_for_agent', AGENT_OFFER_DIGESTS),
   'task.offer_for_agent_with_egress_sealed': sealedOffer('task.offer_for_agent_with_egress', EGRESS_OFFER_DIGESTS),
   'task.offer_for_agent_with_egress_fresh_sealed': sealedOffer('task.offer_for_agent_with_egress_fresh', EGRESS_OFFER_DIGESTS),

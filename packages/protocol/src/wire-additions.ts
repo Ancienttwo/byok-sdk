@@ -2,7 +2,7 @@
  * The one table of receiver-capability gates and wire additions
  * (docs/protocol.md "Freeze rule").
  *
- * A v3 change takes exactly one of three paths: a version bump, a gated
+ * A v4 change takes exactly one of three paths: a version bump, a gated
  * addition, or a strip-safe addition. Envelope and HTTP rows have explicit
  * kinds. The last two are declared here.
  *
@@ -19,11 +19,11 @@
  * strip-safe rows and the v2 `result-document` gate are gone. The device
  * gates kept below name capabilities a daemon advertises only when it is
  * configured for them (Agent home, egress, input preparation, provisioning,
- * memory intents and so on): they gate on the receiver's configuration. The
- * server-advertised `approval_resolved` gate is kept as the daemon's sending
- * condition for `task.approval_resolved`. The first stable v3 decoder is
- * 0.27.0. Cross-release checks use its actual registry tarball
- * (`src/__tests__/published-compat.test.ts`).
+ * memory intents and so on): they gate on the receiver's configuration.
+ *
+ * v4 baseline: every v4 server reads `task.approval_resolved`, so its
+ * `approval_resolved` gate is gone. No v4 release has been published yet, so
+ * no published decoder proves these rows across releases.
  *
  * Senders derive their admission flags from {@link requiredReceiverCapabilities}
  * and nowhere else, so a gate cannot exist in one place and be missing in
@@ -100,8 +100,6 @@ const SEALED_DECLINE_CODE = (value: string): WireAddition =>
 
 const PLAIN_ROWS: readonly WireAddition[] = [
   // Server to daemon: offers.
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer', field: 'harnessId', capability: 'custom-harness', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_with_toolsets', field: 'harnessId', capability: 'custom-harness', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent', capability: 'agent-home-contract', advertisedBy: 'device' },
   ...AGENT_OFFER_FIELDS('task.offer_for_agent'),
   { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent', field: 'agentMemory', capability: 'agent-memory-selection', advertisedBy: 'device' },
@@ -150,7 +148,6 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   { kind: 'envelope', rule: 'strip-safe', surface: 'task.progress', field: 'events[].mcp' },
   // Daemon to server.
   { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.approval_resolved', capability: 'approval_resolved', advertisedBy: 'server' },
   { kind: 'envelope', rule: 'gated', surface: 'task.fail', field: 'failure', capability: 'runtime-failure-class', advertisedBy: 'server' },
 ];
 

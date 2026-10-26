@@ -1,6 +1,6 @@
 export * from './constants';
 export { MAILBOX_READ_AHEAD_MAX_SEQS, MAILBOX_READ_AHEAD_CAPABILITY } from './version';
-export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY, AGENT_HOME_READERS_CAPABILITY } from './version';
+export { PROTOCOL_VERSION, CAPABILITY_FLAGS, AGENT_HOME_READERS_CAPABILITY } from './version';
 export type { CapabilityFlag } from './version';
 export { WIRE_ADDITIONS, requiredReceiverCapabilities } from './wire-additions';
 export type { WireAddition } from './wire-additions';
@@ -338,9 +338,7 @@ export {
   RequiredToolsetsSchema,
   CONFIGURED_TOOLSETS_MAX_ITEMS,
   ConnHelloPayloadSchema,
-  ConnAckPayloadSchema,
   TaskOfferPayloadSchema,
-  TaskOfferWithToolsetsPayloadSchema,
   AgentHomeAccessSchema,
   AgentMemorySelectionSchema,
   TaskOfferForAgentPayloadSchema,
@@ -399,15 +397,11 @@ export type {
   DispatchSelection,
   ToolsetId,
   ConnHelloPayload,
-  ConnAckPayload,
   TaskOfferPayload,
-  TaskOfferWithToolsetsPayload,
   TaskOfferForAgentPayload,
   TaskOfferForAgentWithEgressPayload,
   TaskOfferForAgentWithEgressFreshPayload,
   TaskOfferPreparedPayload,
-  TaskOfferSealedPayload,
-  TaskOfferWithToolsetsSealedPayload,
   TaskOfferForAgentSealedPayload,
   TaskOfferForAgentWithEgressSealedPayload,
   TaskOfferForAgentWithEgressFreshSealedPayload,

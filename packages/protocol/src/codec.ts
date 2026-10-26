@@ -61,7 +61,7 @@ export function encodeEnvelope(env: Envelope): string {
 
 // ---------------------------------------------------------------------------
 // createEnvelope — finding F1: `taskId`/`seq` used to be uniformly optional
-// regardless of `type`, so e.g. `createEnvelope('task.offer', payload)` (no
+// regardless of `type`, so e.g. `createEnvelope('task.offer_for_agent', payload)` (no
 // `taskId`, no `seq`) type-checked cleanly and only failed much later, at
 // runtime, wherever the resulting envelope happened to get decoded — often
 // on the *other* side of the wire, several hops from the actual mistake.
@@ -82,9 +82,6 @@ export function encodeEnvelope(env: Envelope): string {
 
 interface EnvelopeShapeOptions {
   'conn.hello': { taskId?: string; seq?: number };
-  'conn.ack': { taskId?: string; seq: number };
-  'task.offer': { taskId: string; seq: number };
-  'task.offer_with_toolsets': { taskId: string; seq: number };
   'task.offer_for_agent': { taskId: string; seq: number };
   'task.offer_for_agent_with_egress': { taskId: string; seq: number };
   'task.offer_for_agent_with_egress_fresh': { taskId: string; seq: number };
@@ -115,8 +112,6 @@ interface EnvelopeShapeOptions {
   'task.fail': { taskId: string; seq?: number };
   'task.cancelled': { taskId: string; seq?: number };
   'task.approval_resolved': { taskId: string; seq?: number };
-  'task.offer_sealed': { taskId: string; seq: number };
-  'task.offer_with_toolsets_sealed': { taskId: string; seq: number };
   'task.offer_for_agent_sealed': { taskId: string; seq: number };
   'task.offer_for_agent_with_egress_sealed': { taskId: string; seq: number };
   'task.offer_for_agent_with_egress_fresh_sealed': { taskId: string; seq: number };

@@ -14,9 +14,9 @@ import {
 } from '../index';
 
 describe('malformed payload rejection', () => {
-  it.each([0, -1, 1, 2, 4, 99])('rejects unsupported wire major %i before either decode or HTTP batch admission', (v) => {
-    const supported = createEnvelope('task.offer', {
-      instruction: 'same task contract',
+  it.each([0, -1, 1, 2, 3, 5, 99])('rejects unsupported wire major %i before either decode or HTTP batch admission', (v) => {
+    const supported = createEnvelope('task.cancel', {
+      reason: 'same task contract',
     }, { taskId: 'version-gate', seq: 1 });
     const unsupported = { ...supported, v };
     expect(() => parseMessage(unsupported)).toThrow(EnvelopeValidationError);
@@ -28,7 +28,7 @@ describe('malformed payload rejection', () => {
 
   it('rejects task.steer with wrong payload field type', () => {
     const raw = {
-      v: 3,
+      v: 4,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.steer',
@@ -41,26 +41,26 @@ describe('malformed payload rejection', () => {
 
   it('rejects an envelope with a non-uuid id', () => {
     const raw = {
-      v: 3,
+      v: 4,
       id: 'not-a-uuid',
       ts: new Date().toISOString(),
       type: 'task.approve',
       task_id: 'task-1',
       seq: 1,
-      payload: {},
+      payload: { approvalId: 'approval-1' },
     };
     expect(() => parseMessage(raw)).toThrow(EnvelopeValidationError);
   });
 
   it('rejects an envelope with a non-ISO-8601 timestamp', () => {
     const raw = {
-      v: 3,
+      v: 4,
       id: '11111111-1111-4111-8111-111111111111',
       ts: 'yesterday',
       type: 'task.approve',
       task_id: 'task-1',
       seq: 1,
-      payload: {},
+      payload: { approvalId: 'approval-1' },
     };
     expect(() => parseMessage(raw)).toThrow(EnvelopeValidationError);
   });
@@ -71,13 +71,13 @@ describe('malformed payload rejection', () => {
 
   it('EnvelopeValidationError carries the zod issues for diagnostics', () => {
     const raw = {
-      v: 3,
+      v: 4,
       id: 'not-a-uuid',
       ts: new Date().toISOString(),
       type: 'task.approve',
       task_id: 'task-1',
       seq: 1,
-      payload: {},
+      payload: { approvalId: 'approval-1' },
     };
     try {
       parseMessage(raw);
@@ -93,7 +93,7 @@ describe('malformed payload rejection', () => {
 
 describe('unknown-field tolerance (forward-compat)', () => {
   it('tolerates an unknown top-level envelope field', () => {
-    const envelope = createEnvelope('task.approve', {}, { taskId: 'task-1', seq: 1 });
+    const envelope = createEnvelope('task.approve', { approvalId: 'approval-1' }, { taskId: 'task-1', seq: 1 });
     const raw = { ...envelope, fromTheFuture: 'ignore me' };
     const decoded = parseMessage(raw);
     expect(decoded).toEqual(envelope);
@@ -101,7 +101,7 @@ describe('unknown-field tolerance (forward-compat)', () => {
   });
 
   it('tolerates an unknown field inside a known payload', () => {
-    const envelope = createEnvelope('task.reject', { reason: 'no' }, { taskId: 'task-1', seq: 1 });
+    const envelope = createEnvelope('task.reject', { reason: 'no', approvalId: 'approval-1' }, { taskId: 'task-1', seq: 1 });
     const raw = { ...envelope, payload: { ...envelope.payload, futureField: 123 } };
     const decoded = parseMessage(raw);
     expect(decoded).toEqual(envelope);
@@ -112,7 +112,7 @@ describe('unknown-field tolerance (forward-compat)', () => {
 describe('unknown message type handling', () => {
   it('throws UnknownMessageTypeError (not EnvelopeValidationError) for an unrecognized type', () => {
     const raw = {
-      v: 3,
+      v: 4,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.teleport', // does not exist (yet)
@@ -133,7 +133,7 @@ describe('unknown message type handling', () => {
 
   it('is distinguishable so a daemon can skip-and-continue instead of crashing', () => {
     const line = encodeEnvelope(
-      createEnvelope('task.approve', {}, { taskId: 'task-1', seq: 1 }),
+      createEnvelope('task.approve', { approvalId: 'approval-1' }, { taskId: 'task-1', seq: 1 }),
     );
     const futureLine = line.replace('"task.approve"', '"task.some_new_v2_message"');
 
@@ -152,11 +152,11 @@ describe('unknown message type handling', () => {
   });
 
   it('missing/non-string type is also treated as unknown, not a hard parse error', () => {
-    expect(() => parseMessage({ v: 3, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString() })).toThrow(
+    expect(() => parseMessage({ v: 4, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString() })).toThrow(
       UnknownMessageTypeError,
     );
     expect(() =>
-      parseMessage({ v: 3, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString(), type: 42 }),
+      parseMessage({ v: 4, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString(), type: 42 }),
     ).toThrow(UnknownMessageTypeError);
   });
 });

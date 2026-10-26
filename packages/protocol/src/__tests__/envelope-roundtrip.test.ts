@@ -63,48 +63,14 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
-  it('conn.ack', () => {
-    const type = 'conn.ack' as const;
-    testedTypes.push(type);
+  it('task.offer_for_agent (blobRef instruction)', () => {
+    const type = 'task.offer_for_agent' as const;
     roundTrip(
       type,
       createEnvelope(
         type,
         {
-          protocolVersion: 1,
-          capabilities: ['steer', 'interactive-approval'],
-          serverTime: new Date().toISOString(),
-        },
-        { seq: 1 },
-      ),
-    );
-  });
-
-  it('task.offer (string instruction)', () => {
-    const type = 'task.offer' as const;
-    testedTypes.push(type);
-    roundTrip(
-      type,
-      createEnvelope(
-        type,
-        {
-          instruction: 'refactor the widget module',
-          runtime: 'claude',
-          workspaceHint: '/home/user/project',
-          limits: { maxDurationMs: 60_000, maxTokens: 100_000 },
-        },
-        { taskId: 'task-1', seq: 1 },
-      ),
-    );
-  });
-
-  it('task.offer (blobRef instruction)', () => {
-    const type = 'task.offer' as const;
-    roundTrip(
-      type,
-      createEnvelope(
-        type,
-        {
+          agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
           instruction: {
             blobRef: {
               blobId: 'blob-1',
@@ -115,23 +81,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           },
         },
         { taskId: 'task-2', seq: 2 },
-      ),
-    );
-  });
-
-  it('task.offer_with_toolsets', () => {
-    const type = 'task.offer_with_toolsets' as const;
-    testedTypes.push(type);
-    roundTrip(
-      type,
-      createEnvelope(
-        type,
-        {
-          instruction: 'find qualified leads',
-          runtime: 'claude',
-          requiredToolsets: ['salesko'],
-        },
-        { taskId: 'task-toolset-1', seq: 3 },
       ),
     );
   });
@@ -424,7 +373,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
   it('task.approve', () => {
     const type = 'task.approve' as const;
     testedTypes.push(type);
-    roundTrip(type, createEnvelope(type, {}, { taskId: 'task-1', seq: 1 }));
+    roundTrip(type, createEnvelope(type, { approvalId: 'approval-1' }, { taskId: 'task-1', seq: 1 }));
   });
 
   it('task.reject', () => {
@@ -432,7 +381,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     testedTypes.push(type);
     roundTrip(
       type,
-      createEnvelope(type, { reason: 'budget exceeded' }, { taskId: 'task-1', seq: 1 }),
+      createEnvelope(type, { reason: 'budget exceeded', approvalId: 'approval-1' }, { taskId: 'task-1', seq: 1 }),
     );
   });
 
@@ -552,7 +501,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     testedTypes.push(type);
     roundTrip(
       type,
-      createEnvelope(type, { summary: 'about to run rm -rf build/' }, { taskId: 'task-1' }),
+      createEnvelope(type, { summary: 'about to run rm -rf build/', approvalId: 'approval-1' }, { taskId: 'task-1' }),
     );
   });
 
@@ -640,7 +589,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
 
   // #654: each sealed type round-trips its first golden line, which carries
   // real ciphertext under a fixed test scope key.
-  const goldenLines = readFileSync(new URL('./golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
+  const goldenLines = readFileSync(new URL('./golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
     .trimEnd().split('\n').map((raw) => JSON.parse(raw) as Envelope);
   it.each(Object.keys(SEALED_SPLIT_TABLE) as Array<keyof typeof SEALED_SPLIT_TABLE>)('%s', (type) => {
     testedTypes.push(type);
@@ -657,7 +606,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
 describe('createEnvelope defaults', () => {
   it('fills v, id, ts when not supplied', () => {
     const envelope = createEnvelope('task.steer', { text: 'hi' }, { taskId: 'task-1', seq: 1 });
-    expect(envelope.v).toBe(3);
+    expect(envelope.v).toBe(4);
     expect(envelope.id).toMatch(UUID_RE);
     expect(() => new Date(envelope.ts).toISOString()).not.toThrow();
     expect(Number.isNaN(new Date(envelope.ts).getTime())).toBe(false);
@@ -667,7 +616,7 @@ describe('createEnvelope defaults', () => {
     const envelope = createEnvelope(
       'task.steer',
       { text: 'hi' },
-      { v: 3, id: '11111111-1111-4111-8111-111111111111', ts: '2026-07-16T00:00:00.000Z', taskId: 'task-1', seq: 7 },
+      { v: 4, id: '11111111-1111-4111-8111-111111111111', ts: '2026-07-16T00:00:00.000Z', taskId: 'task-1', seq: 7 },
     );
     expect(envelope.id).toBe('11111111-1111-4111-8111-111111111111');
     expect(envelope.ts).toBe('2026-07-16T00:00:00.000Z');

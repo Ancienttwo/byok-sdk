@@ -32,12 +32,6 @@ function minimalPayload(type: MessageType): unknown {
   switch (type) {
     case 'conn.hello':
       return { protocolVersions: [1], capabilities: [], deviceId: 'device-1', productId: 'acme-agent' };
-    case 'conn.ack':
-      return { protocolVersion: 1, capabilities: [], serverTime: new Date().toISOString() };
-    case 'task.offer':
-      return { instruction: 'do it' };
-    case 'task.offer_with_toolsets':
-      return { instruction: 'find leads', requiredToolsets: ['salesko'] };
     case 'task.offer_for_agent':
       return { instruction: 'run for agent', agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } };
     case 'task.offer_for_agent_with_egress':
@@ -201,9 +195,9 @@ function minimalPayload(type: MessageType): unknown {
     case 'e2ee.key_package.available':
       return { scopeId: 'scope-1', epoch: 1 };
     case 'task.approve':
-      return {};
+      return { approvalId: 'approval-1' };
     case 'task.reject':
-      return {};
+      return { approvalId: 'approval-1' };
     case 'task.cancel':
       return {};
     case 'task.steer':
@@ -219,7 +213,7 @@ function minimalPayload(type: MessageType): unknown {
     case 'task.artifact':
       return { name: 'a.txt', contentType: 'text/plain' };
     case 'task.await_approval':
-      return { summary: 'about to do a thing' };
+      return { summary: 'about to do a thing', approvalId: 'approval-1' };
     case 'task.complete':
       return { summary: 'done', sessionRef: 'sess-1' };
     case 'task.fail':
@@ -296,7 +290,7 @@ describe('SERVER_TO_DAEMON_TYPES / isServerToDaemonType agree, and partition MES
 /**
  * Finding F1 (createEnvelope type-unsound): before this fix, `taskId`/`seq`
  * were uniformly optional on `createEnvelope`'s `opts` regardless of `type`
- * — a call site missing a required field (e.g. `createEnvelope('task.offer',
+ * — a call site missing a required field (e.g. `createEnvelope('task.offer_for_agent',
  * payload)` with no `taskId`/`seq` at all) type-checked cleanly and only
  * surfaced as a runtime `EnvelopeValidationError` wherever the malformed
  * envelope happened to get decoded, often on the *other* side of the wire.
@@ -318,20 +312,20 @@ describe('createEnvelope: taskId/seq requiredness (finding F1)', () => {
    * the project's typecheck script rather than by anything vitest runs.
    */
   function typeOnlyRejectedShapes(): void {
-    // @ts-expect-error task.offer requires both taskId and seq — opts omitted entirely
-    createEnvelope('task.offer', { instruction: 'x' });
-    // @ts-expect-error task.offer requires taskId
-    createEnvelope('task.offer', { instruction: 'x' }, { seq: 1 });
-    // @ts-expect-error task.offer requires seq (server->daemon type)
-    createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-1' });
+    // @ts-expect-error task.offer_for_agent requires both taskId and seq — opts omitted entirely
+    createEnvelope('task.offer_for_agent', { instruction: 'x', agentRef: { agentId: 'a', profileRevision: 'r' } });
+    // @ts-expect-error task.offer_for_agent requires taskId
+    createEnvelope('task.offer_for_agent', { instruction: 'x', agentRef: { agentId: 'a', profileRevision: 'r' } }, { seq: 1 });
+    // @ts-expect-error task.offer_for_agent requires seq (server->daemon type)
+    createEnvelope('task.offer_for_agent', { instruction: 'x', agentRef: { agentId: 'a', profileRevision: 'r' } }, { taskId: 'task-1' });
     // @ts-expect-error task.claim requires taskId — every task.* type routes by it, daemon->server or not
     createEnvelope('task.claim', { deviceId: 'device-1' });
     // @ts-expect-error task.approve requires seq (server->daemon type), even though taskId alone would be enough for most task.* types
-    createEnvelope('task.approve', {}, { taskId: 'task-1' });
-    // @ts-expect-error conn.ack requires seq (server->daemon type)
-    createEnvelope('conn.ack', { protocolVersion: 1, capabilities: [], serverTime: new Date().toISOString() });
-    // @ts-expect-error conn.ack's taskId/seq shape doesn't accept a plain seq-less object either
-    createEnvelope('conn.ack', { protocolVersion: 1, capabilities: [], serverTime: new Date().toISOString() }, {});
+    createEnvelope('task.approve', { approvalId: 'approval-1' }, { taskId: 'task-1' });
+    // @ts-expect-error provider.provisioning.available requires seq (server->daemon type)
+    createEnvelope('provider.provisioning.available', { requestId: '00000000-0000-4000-8000-000000000026' });
+    // @ts-expect-error provider.provisioning.available's seq shape doesn't accept a plain seq-less object either
+    createEnvelope('provider.provisioning.available', { requestId: '00000000-0000-4000-8000-000000000026' }, {});
   }
 
   it('rejects under-specified call sites at compile time (see the @ts-expect-error assertions above this test)', () => {
@@ -343,13 +337,13 @@ describe('createEnvelope: taskId/seq requiredness (finding F1)', () => {
   it('still refuses to hand back a malformed envelope at runtime if a caller bypasses the type system (e.g. `as any`)', () => {
     expect(() =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      createEnvelope('task.offer', { instruction: 'x' }, {} as any),
+      createEnvelope('task.offer_for_agent', { instruction: 'x', agentRef: { agentId: 'a', profileRevision: 'r' } }, {} as any),
     ).toThrow(EnvelopeValidationError);
 
     expect(() =>
       createEnvelope(
-        'conn.ack',
-        { protocolVersion: 1, capabilities: [], serverTime: new Date().toISOString() },
+        'provider.provisioning.available',
+        { requestId: '00000000-0000-4000-8000-000000000026' },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         {} as any,
       ),
@@ -359,8 +353,8 @@ describe('createEnvelope: taskId/seq requiredness (finding F1)', () => {
   it('compiles and constructs cleanly for every message type using exactly the fields its own direction requires', () => {
     expect(() => {
       createEnvelope('conn.hello', { protocolVersions: [1], capabilities: [], deviceId: 'd', productId: 'p' }); // no opts at all
-      createEnvelope('conn.ack', { protocolVersion: 1, capabilities: [], serverTime: new Date().toISOString() }, { seq: 1 });
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 't', seq: 1 });
+      createEnvelope('provider.provisioning.available', { requestId: '00000000-0000-4000-8000-000000000026' }, { seq: 1 });
+      createEnvelope('task.offer_for_agent', { instruction: 'x', agentRef: { agentId: 'a', profileRevision: 'r' } }, { taskId: 't', seq: 1 });
       createEnvelope('task.claim', { deviceId: 'd' }, { taskId: 't' }); // seq optional, may be omitted
       createEnvelope('task.claim', { deviceId: 'd' }, { taskId: 't', seq: 1 }); // seq optional, may also be supplied
     }).not.toThrow();

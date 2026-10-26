@@ -220,14 +220,6 @@ export const ConnHelloPayloadSchema = z.object({
 });
 export type ConnHelloPayload = z.infer<typeof ConnHelloPayloadSchema>;
 
-/** server -> daemon: handshake acknowledgement. */
-export const ConnAckPayloadSchema = z.object({
-  protocolVersion: z.number().int(),
-  capabilities: z.array(z.string()),
-  serverTime: z.iso.datetime({ offset: true }),
-});
-export type ConnAckPayload = z.infer<typeof ConnAckPayloadSchema>;
-
 // ---------------------------------------------------------------------------
 // server -> daemon: task.*
 //
@@ -307,10 +299,11 @@ export type DispatchSelection = z.infer<typeof DispatchSelectionSchema>;
 const NO_SEALED_MEMBER = { sealed: z.never().optional(), sealing: z.never().optional() };
 
 /**
- * server -> daemon: offer a task for a device to claim.
+ * The offer fields a runtime adapter receives when a session starts. Every
+ * offer message type carries them; this shape is not itself a message type.
  *
- * `taskId` used to be duplicated here; it is now carried only by the
- * envelope's `task_id` (M1 gap #7 — single source of truth for routing).
+ * `taskId` is carried only by the envelope's `task_id` (M1 gap #7 — single
+ * source of truth for routing).
  */
 export const TaskOfferPayloadSchema = z.object({
   ...NO_SEALED_MEMBER,
@@ -335,20 +328,6 @@ export const RequiredToolsetsSchema = z
   .min(1)
   .max(16)
   .superRefine((ids, ctx) => rejectDuplicateToolsets(ids, ctx, 'required'));
-
-/**
- * Additive v1 offer variant for tasks whose semantics require local MCP
- * tools. This is a distinct message type rather than an optional field on
- * `task.offer`, so an older daemon can never strip an unknown optional control
- * field and run the task without its required tools. An unknown type is not
- * silently skipped either: on long-poll it freezes the cursor, so the enqueue
- * capability gate is the real compatibility boundary. The whole payload is
- * strict because every field here affects execution authority.
- */
-export const TaskOfferWithToolsetsPayloadSchema = TaskOfferPayloadSchema.extend({
-  requiredToolsets: RequiredToolsetsSchema,
-}).strict();
-export type TaskOfferWithToolsetsPayload = z.infer<typeof TaskOfferWithToolsetsPayloadSchema>;
 
 /**
  * How an Agent Attempt uses its Agent home. `memory-reader` runs the Attempt
@@ -735,7 +714,7 @@ const InputPreparationBlobContextSchema = z
  * Server -> daemon: one task-free, exact-device remote input preparation.
  *
  * Distinct message type rather than an optional field on an existing one, for
- * the same N/N-1 reason `task.offer_with_toolsets` is: an optional field could be
+ * the same N/N-1 reason the Agent offers are: an optional field could be
  * legally STRIPPED by a daemon that predates this contract, which would then
  * answer as though a preparation it never performed had somehow been handled.
  * An unknown type (`parseMessage` -> `UnknownMessageTypeError`) is not skipped
@@ -787,18 +766,15 @@ export type AgentInputPreparationPayload = z.infer<typeof AgentInputPreparationP
  * `task.fail`/`task.cancelled` if resuming turns out to be impossible) — no
  * new ack message type is introduced. See docs/protocol.md "Approval flow".
  *
- * `approvalId` (M5, additive-minor — docs/protocol.md §5.3): OPTIONAL target
- * identity for the SPECIFIC pending approval this decision resolves, rather
- * than "whichever one is currently pending" (the pre-M5 behavior, and still
- * what happens when this field is absent — a legacy server that never
- * learned an id, or one talking to a legacy daemon). When present, the
- * daemon compares it against its own currently-dispatched approval id
- * (`ActiveTask.pendingApprovalId`, `packages/client`'s `task-runner.ts`) and
- * treats a mismatch as a stale, audit-only no-op instead of resolving
- * whatever happens to be pending right now — see `TaskRunner.handleApprove`.
+ * `approvalId` (required since v4): the SPECIFIC pending approval this
+ * decision resolves. The daemon compares it against its own
+ * currently-dispatched approval id (`ActiveTask.pendingApprovalId`,
+ * `packages/client`'s `task-runner.ts`) and treats a mismatch as a stale,
+ * audit-only no-op, so a late decision never lands on the task's next
+ * approval — see `TaskRunner.handleApprove`.
  */
 export const TaskApprovePayloadSchema = z.object({
-  approvalId: z.string().optional(),
+  approvalId: z.string().min(1),
 });
 export type TaskApprovePayload = z.infer<typeof TaskApprovePayloadSchema>;
 
@@ -810,13 +786,13 @@ export type TaskApprovePayload = z.infer<typeof TaskApprovePayloadSchema>;
  * message just tells the daemon to stop, and the daemon reports the outcome
  * via its existing `task.fail` terminal message.
  *
- * `approvalId` (M5, additive-minor — docs/protocol.md §5.3): same optional
- * targeting semantics as `TaskApprovePayloadSchema.approvalId` above, applied
- * to the reject path (`TaskRunner.handleReject`).
+ * `approvalId` (required since v4): same targeting as
+ * `TaskApprovePayloadSchema.approvalId` above, applied to the reject path
+ * (`TaskRunner.handleReject`).
  */
 export const TaskRejectPayloadSchema = z.object({
   reason: z.string().optional(),
-  approvalId: z.string().optional(),
+  approvalId: z.string().min(1),
 });
 export type TaskRejectPayload = z.infer<typeof TaskRejectPayloadSchema>;
 
@@ -976,23 +952,15 @@ export type TaskArtifactPayload = z.infer<typeof TaskArtifactPayloadSchema>;
 /**
  * daemon -> server: task is blocked on an out-of-band approval.
  *
- * `approvalId` (M5, additive-minor — docs/protocol.md §5.3): the daemon's own
- * locally-generated identity for THIS SPECIFIC pending approval
- * (`ApprovalRegistry`, `packages/client`'s `approvals.ts`) — included
- * unconditionally by an M5+ daemon, regardless of whether the connected
- * server has advertised the `approval-targeting` capability flag
- * (`version.ts`; see that flag's own doc comment for why no emission gating
- * is needed here — it's a tolerant `z.object()` field, so an older server
- * simply ignores it). Optional purely for wire tolerance with a pre-M5
- * daemon build that never set it at all: a server that never learns an id
- * for a task's current approval can't target a later `approve`/`reject`
- * decision and falls back to resolving "whichever approval is currently
- * pending" — the same behavior every server had before this field existed.
+ * `approvalId` (required since v4): the daemon's own locally-generated
+ * identity for THIS SPECIFIC pending approval (`ApprovalRegistry`,
+ * `packages/client`'s `approvals.ts`). The server echoes it on the
+ * `task.approve`/`task.reject` that decides this approval.
  */
 export const TaskAwaitApprovalPayloadSchema = z.object({
   ...NO_SEALED_MEMBER,
   summary: z.string(),
-  approvalId: z.string().optional(),
+  approvalId: z.string().min(1),
 });
 export type TaskAwaitApprovalPayload = z.infer<typeof TaskAwaitApprovalPayloadSchema>;
 
@@ -1350,21 +1318,9 @@ export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
  * a fail-closed `requestApproval` timeout, or a fail-closed eviction/finish
  * rejection (see `packages/client`'s `task-runner.ts`/`approvals.ts`) —
  * *without* a wire `task.approve`/`task.reject` ever having been exchanged
- * for it. This is the additive-minor answer to a gap the M4 Phase 3 approval
- * work left open (see the "Deferred additive candidate" note this schema
- * resolves, `docs/protocol.md`): today the server only learns of a local
- * resolution IMPLICITLY, after the fact, once the daemon's next
- * `task.progress`/`task.artifact`/`task.complete` proves the task already
- * moved on (the `relay.onTaskActivity` hook in
- * `packages/server/src/index.ts`) — a window in which a SaaS-side
- * `TaskHandle.approve()`/`.reject()` can independently decide (and win) the
- * server's own authoritative record before that evidence ever arrives. This
- * message lets the daemon report the local resolution explicitly and
- * immediately, narrowing that window from "until the next progress message"
- * down to ordinary network latency; the implicit-inference path stays as-is,
- * unconditionally, as the compatibility fallback for an old server that
- * never advertises the `approval_resolved` capability flag (`version.ts`) or
- * an old daemon that predates this message entirely.
+ * for it. Baseline since v4: the daemon reports every local resolution, and
+ * this report is the server's only source for one; the server does not infer
+ * a resolution from later task activity.
  *
  * Observability-class tolerance applies (not control/security — see the
  * freeze rule's asymmetry, `docs/protocol.md`): this is a daemon reporting
@@ -1375,10 +1331,8 @@ export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
  * non-control payload in this file.
  *
  * `resolvedBy` is a single-value enum (`'local'`) rather than a bare string:
- * deliberately future-proof (a later wave could add e.g. `'operator-cli'` as
- * a DISTINCT value without a version bump — a new enum member is additive,
- * same as a new message type or capability flag), while still being a closed,
- * typed shape today rather than an open string a typo could silently widen.
+ * a later wave could add a DISTINCT value as a gated addition, while the
+ * shape stays closed and typed today.
  */
 export const TaskApprovalResolvedPayloadSchema = z.object({
   approvalId: z.string(),
@@ -1409,16 +1363,6 @@ const SEALED_OFFER_FIELDS = {
   sealing: TaskSealingSchema,
   sealed: SealedTaskInputSchema.optional(),
 };
-
-/** server -> daemon: `task.offer` of a sealed task. */
-export const TaskOfferSealedPayloadSchema = TaskOfferPayloadSchema.extend(SEALED_OFFER_FIELDS).strict().superRefine(sealedOfferRule);
-export type TaskOfferSealedPayload = z.infer<typeof TaskOfferSealedPayloadSchema>;
-
-/** server -> daemon: `task.offer_with_toolsets` of a sealed task. */
-export const TaskOfferWithToolsetsSealedPayloadSchema = TaskOfferWithToolsetsPayloadSchema.extend(SEALED_OFFER_FIELDS)
-  .strict()
-  .superRefine(sealedOfferRule);
-export type TaskOfferWithToolsetsSealedPayload = z.infer<typeof TaskOfferWithToolsetsSealedPayloadSchema>;
 
 /** server -> daemon: `task.offer_for_agent` of a sealed task. */
 export const TaskOfferForAgentSealedPayloadSchema = TaskOfferForAgentPayloadSchema.extend(SEALED_OFFER_FIELDS)
@@ -1523,14 +1467,10 @@ export type TaskAwaitApprovalSealedPayload = z.infer<typeof TaskAwaitApprovalSea
  * the published `.d.ts` small. Every new entry follows this rule.
  */
 const TASK_OFFER_PAYLOAD_SCHEMAS = {
-  'task.offer': TaskOfferPayloadSchema as typeof TaskOfferPayloadSchema,
-  'task.offer_with_toolsets': TaskOfferWithToolsetsPayloadSchema as typeof TaskOfferWithToolsetsPayloadSchema,
   'task.offer_for_agent': TaskOfferForAgentPayloadSchema as typeof TaskOfferForAgentPayloadSchema,
   'task.offer_for_agent_with_egress': TaskOfferForAgentWithEgressPayloadSchema as typeof TaskOfferForAgentWithEgressPayloadSchema,
   'task.offer_for_agent_with_egress_fresh': TaskOfferForAgentWithEgressFreshPayloadSchema as typeof TaskOfferForAgentWithEgressFreshPayloadSchema,
   'task.offer_prepared': TaskOfferPreparedPayloadSchema as typeof TaskOfferPreparedPayloadSchema,
-  'task.offer_sealed': TaskOfferSealedPayloadSchema as typeof TaskOfferSealedPayloadSchema,
-  'task.offer_with_toolsets_sealed': TaskOfferWithToolsetsSealedPayloadSchema as typeof TaskOfferWithToolsetsSealedPayloadSchema,
   'task.offer_for_agent_sealed': TaskOfferForAgentSealedPayloadSchema as typeof TaskOfferForAgentSealedPayloadSchema,
   'task.offer_for_agent_with_egress_sealed': TaskOfferForAgentWithEgressSealedPayloadSchema as typeof TaskOfferForAgentWithEgressSealedPayloadSchema,
   'task.offer_for_agent_with_egress_fresh_sealed': TaskOfferForAgentWithEgressFreshSealedPayloadSchema as typeof TaskOfferForAgentWithEgressFreshSealedPayloadSchema,
@@ -1548,7 +1488,6 @@ export function isTaskOfferType(type: string): type is TaskOfferType {
 
 export const MESSAGE_PAYLOAD_SCHEMAS = {
   'conn.hello': ConnHelloPayloadSchema as typeof ConnHelloPayloadSchema,
-  'conn.ack': ConnAckPayloadSchema as typeof ConnAckPayloadSchema,
   ...TASK_OFFER_PAYLOAD_SCHEMAS,
   'agent.egress.reliable': AgentEgressReliablePayloadSchema as typeof AgentEgressReliablePayloadSchema,
   'agent.egress.ack': AgentEgressAckPayloadSchema as typeof AgentEgressAckPayloadSchema,
@@ -1596,9 +1535,6 @@ export const MESSAGE_TYPES = Object.keys(MESSAGE_PAYLOAD_SCHEMAS) as MessageType
  * redelivery cursor).
  */
 export const SERVER_TO_DAEMON_TYPES = [
-  'conn.ack',
-  'task.offer',
-  'task.offer_with_toolsets',
   'task.offer_for_agent',
   'task.offer_for_agent_with_egress',
   'task.offer_for_agent_with_egress_fresh',
@@ -1614,8 +1550,6 @@ export const SERVER_TO_DAEMON_TYPES = [
   'task.reject',
   'task.cancel',
   'task.steer',
-  'task.offer_sealed',
-  'task.offer_with_toolsets_sealed',
   'task.offer_for_agent_sealed',
   'task.offer_for_agent_with_egress_sealed',
   'task.offer_for_agent_with_egress_fresh_sealed',
