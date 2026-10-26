@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AGENT_RESULT_DIRECTORY, AgentResultStore, AgentResultStoreError, agentResultDigest } from '../daemon/agent-result-store';
+import { AGENT_RESULT_DIRECTORY, AgentResultStore, AgentResultStoreError, agentResultDigest, pruneAgentResults } from '../daemon/agent-result-store';
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))));
@@ -67,5 +67,159 @@ describe('AgentResultStore', () => {
     await fs.writeFile(full, JSON.stringify({ ...record, outcome: { a: 99 } }));
     await expect(store.get('task-1')).rejects.toBeInstanceOf(AgentResultStoreError);
     await expect(store.get('task-1')).rejects.toMatchObject({ code: 'result_record_invalid' });
+  });
+});
+
+describe('pruneAgentResults', () => {
+  const NOW = Date.parse('2026-10-14T00:00:00.000Z');
+  const DAY = 86_400_000;
+  const name = (n: number): string => `result-${n.toString(16).padStart(64, '0')}.json`;
+  async function file(dir: string, entry: string, ageMs: number, content = '{}'): Promise<string> {
+    const target = path.join(dir, entry);
+    await fs.writeFile(target, content);
+    const when = new Date(NOW - ageMs);
+    await fs.utimes(target, when, when);
+    return target;
+  }
+  async function prune(dir: string, input: { readonly maxAgeMs?: number; readonly maxRetained?: number; readonly allow?: number } = {}): Promise<string[]> {
+    const removed: string[] = [];
+    await pruneAgentResults({
+      resultsRoot: dir, entries: await fs.opendir(dir), nowMs: NOW, maxAgeMs: input.maxAgeMs ?? 7 * DAY,
+      ...(input.maxRetained === undefined ? {} : { maxRetained: input.maxRetained }),
+      remove: async (target) => {
+        if (removed.length >= (input.allow ?? Number.MAX_SAFE_INTEGER)) return false;
+        await fs.rm(target);
+        removed.push(path.basename(target));
+        return true;
+      },
+    });
+    return removed.sort();
+  }
+
+  it('removes records and crashed-stage temps at the TTL without parsing them, and keeps younger ones', async () => {
+    const dir = await home();
+    await file(dir, name(1), 7 * DAY + 1000, '{malformed');
+    await file(dir, `${name(2)}.123-4.tmp`, 8 * DAY);
+    await file(dir, name(3), 7 * DAY - 1000);
+    await file(dir, `${name(4)}.123-5.tmp`, DAY);
+    expect(await prune(dir)).toEqual([name(1), `${name(2)}.123-4.tmp`].sort());
+    expect((await fs.readdir(dir)).sort()).toEqual([name(3), `${name(4)}.123-5.tmp`].sort());
+  });
+
+  it('removes the oldest records beyond the retained count; temps do not count', async () => {
+    const dir = await home();
+    for (let index = 0; index < 5; index++) await file(dir, name(index), (5 - index) * 1000);
+    await file(dir, `${name(9)}.123-4.tmp`, 10_000);
+    expect(await prune(dir, { maxRetained: 3 })).toEqual([name(0), name(1)]);
+    expect(await fs.readdir(dir)).toHaveLength(4);
+  });
+
+  it('a zero TTL removes every record', async () => {
+    const dir = await home();
+    await file(dir, name(1), 1000);
+    await file(dir, name(2), 2000);
+    expect(await prune(dir, { maxAgeMs: 0 })).toEqual([name(1), name(2)]);
+  });
+
+  it('leaves other names, directories and symbolic links alone', async () => {
+    const dir = await home();
+    await file(dir, 'notes.json', 30 * DAY);
+    await file(dir, `result-${'a'.repeat(63)}.json`, 30 * DAY);
+    await fs.mkdir(path.join(dir, name(1)));
+    const outside = await file(await home(), 'outside.json', 30 * DAY);
+    await fs.symlink(outside, path.join(dir, name(2)));
+    expect(await prune(dir, { maxAgeMs: 0, maxRetained: 0 })).toEqual([]);
+    expect(await fs.readdir(dir)).toHaveLength(4);
+  });
+
+  it('removes expired files while listing, so a budget shared with the listing still drains a backlog', async () => {
+    const dir = await home();
+    for (let index = 0; index < 20; index++) await file(dir, name(index), 30 * DAY);
+    // One budget for listing steps and removals, as the per-home retention budget is.
+    let units = 10;
+    const spend = (): boolean => units-- > 0;
+    const listed: string[] = [], removed: string[] = [];
+    async function* limited(): AsyncGenerator<import('node:fs').Dirent> {
+      for await (const entry of await fs.opendir(dir)) {
+        if (!spend()) return;
+        listed.push(entry.name);
+        yield entry;
+      }
+    }
+    await pruneAgentResults({
+      resultsRoot: dir, entries: limited(), nowMs: NOW, maxAgeMs: 7 * DAY,
+      remove: async (target) => {
+        if (!spend()) return false;
+        await fs.rm(target);
+        removed.push(path.basename(target));
+        return true;
+      },
+    });
+    expect(listed).toHaveLength(5);
+    expect(removed).toEqual(listed);
+    expect(await fs.readdir(dir)).toHaveLength(15);
+  });
+
+  // Passes like the retention producer runs them: a directory cursor that
+  // survives an exhausted pass, and one budget for listing steps and removals.
+  function budgetedPasses(dir: string, unitsPerPass: number) {
+    let cursor: import('node:fs').Dir | undefined;
+    const removed: string[] = [];
+    return {
+      removed,
+      async pass(): Promise<void> {
+        let units = unitsPerPass;
+        const spend = (): boolean => units-- > 0;
+        async function* listing(): AsyncGenerator<import('node:fs').Dirent> {
+          cursor ??= await fs.opendir(dir);
+          while (spend()) {
+            const entry = await cursor.read();
+            if (entry === null) { await cursor.close(); cursor = undefined; return; }
+            yield entry;
+          }
+        }
+        await pruneAgentResults({
+          resultsRoot: dir, entries: listing(), nowMs: NOW, maxAgeMs: 7 * DAY, maxRetained: 5,
+          remove: async (target) => {
+            if (!spend()) return false;
+            await fs.rm(target);
+            removed.push(path.basename(target));
+            return true;
+          },
+        });
+      },
+    };
+  }
+
+  it('converges on the newest records over passes that each list only part of the home', async () => {
+    const dir = await home();
+    const records = Array.from({ length: 30 }, (_, index) => name(index));
+    // name(29) is the newest.
+    for (const [index, entry] of records.entries()) await file(dir, entry, (30 - index) * 1000);
+    const newest = records.slice(-5);
+    const passes = budgetedPasses(dir, 8);
+    for (let pass = 0; pass < 200 && (await fs.readdir(dir)).length > 5; pass++) await passes.pass();
+    expect((await fs.readdir(dir)).sort()).toEqual(newest);
+    expect(passes.removed.filter((entry) => newest.includes(entry))).toEqual([]);
+    expect(passes.removed).toHaveLength(25);
+  });
+
+  it('still removes beyond the bound when a pass runs out of budget and the next lists only the suffix', async () => {
+    const dir = await home();
+    const records = Array.from({ length: 12 }, (_, index) => name(index));
+    for (const [index, entry] of records.entries()) await file(dir, entry, (12 - index) * 1000);
+    const newest = records.slice(-5);
+    const passes = budgetedPasses(dir, 8);
+    await passes.pass();
+    await passes.pass();
+    expect(passes.removed.length).toBeGreaterThan(0);
+    expect(passes.removed.filter((entry) => newest.includes(entry))).toEqual([]);
+  });
+
+  it('stops at the first removal its caller refuses', async () => {
+    const dir = await home();
+    for (let index = 0; index < 4; index++) await file(dir, name(index), 30 * DAY);
+    expect(await prune(dir, { allow: 1 })).toHaveLength(1);
+    expect(await fs.readdir(dir)).toHaveLength(3);
   });
 });

@@ -322,7 +322,7 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
           budget: { pressureState: 'hard-pressure', budgetBytes: 1024 * 1024 * 1024 },
           freeBytes: 50 * 1024 * 1024,
         });
-        expect(status.storage.classes).toHaveLength(22);
+        expect(status.storage.classes).toHaveLength(23);
         expect(status.storage.lastSweep).toMatchObject({ trigger: 'pressure' });
         expect(status.queueWatermarks).toEqual([]);
         expect(formatLiveStatusLines(status).some(line => line.startsWith('live-storage:'))).toBe(true);

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Breaking (client)** — `ExpiringClassId` and `RetentionClassId` gain
+  `'agent-result'`, so an exhaustive switch over them no longer compiles
+  until it handles the new class (#1009). `ClassUsage.truncated` is now
+  required. `storage.retention.ttlMs['agent-result']` defaults to 7 days and
+  accepts any integer from 0.
+- **Fixed (client)** — staged `submit_result` records under an Agent home's
+  `.byok/results/` no longer accumulate forever (#1009). Once the home is
+  idle, retention removes records and crashed-stage temps at least
+  `ttlMs['agent-result']` old, then the oldest records beyond 256 per home,
+  also under storage pressure. A usage measurement that passes its entry
+  limit stops and reports lower bounds with `truncated: true`; it no longer
+  latches emergency or fails startup. Real I/O, root
+  identity, journal usage and free-space errors still fail closed.
 - **Feature (cloud, cloud-dataplane, server)** — `TaskAttempt`
   (`ByokCloud.readTaskAttempt`) records four write-once phase instants:
   `offeredAt`, `claimedAt`, `firstOutputAt` and `terminalAt` (#980). Each is written by the store operation that makes

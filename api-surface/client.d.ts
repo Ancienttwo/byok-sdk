@@ -8024,6 +8024,7 @@ export declare function resolveStorageConfig(storeDir: string, input?: StorageCo
     maxDeletionsPerPass: number;
     maxPassDurationMs: number;
     ttlMs: Readonly<{
+        "agent-result": number;
         "confirmed-journal": number;
         "daemon-temp": number;
         "durable-replica": number;
@@ -8062,7 +8063,7 @@ export declare class StoragePressure {
     assertAckCriticalAllowed(): void;
 }
 // ==== @byok-sdk/client dist/daemon/retention/registry.d.ts ====
-export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'home-temp', 'skill-pack-old'];
+export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old'];
 export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'terminal-evidence', 'agent-content', 'byok-authority', 'agent-home-lease', 'workspace', 'retired-namespace', 'pi-session-dir', 'skill-pack-current', 'store-authority'];
 export type ExpiringClassId = typeof EXPIRING_CLASS_IDS[number];
 export type ProtectedClassId = typeof PROTECTED_CLASS_IDS[number];
@@ -8072,6 +8073,8 @@ export interface ClassUsage {
     readonly classId: RetentionClassId;
     readonly protected: boolean;
     readonly measured: boolean;
+    /** The usage walk hit its entry limit before covering this class: `bytes` and `entries` are lower bounds. */
+    readonly truncated: boolean;
     readonly bytes: number;
     readonly entries: number;
     readonly oldestAgeMs: number | null;

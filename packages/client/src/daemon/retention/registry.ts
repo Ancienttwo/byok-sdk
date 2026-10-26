@@ -1,6 +1,6 @@
 export const EXPIRING_CLASS_IDS = [
   'exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation',
-  'confirmed-journal', 'reader-run', 'home-temp', 'skill-pack-old',
+  'confirmed-journal', 'reader-run', 'agent-result', 'home-temp', 'skill-pack-old',
 ] as const;
 export const PROTECTED_CLASS_IDS = [
   'journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'terminal-evidence',
@@ -16,6 +16,8 @@ export interface ClassUsage {
   readonly classId: RetentionClassId;
   readonly protected: boolean;
   readonly measured: boolean;
+  /** The usage walk hit its entry limit before covering this class: `bytes` and `entries` are lower bounds. */
+  readonly truncated: boolean;
   readonly bytes: number;
   readonly entries: number;
   readonly oldestAgeMs: number | null;

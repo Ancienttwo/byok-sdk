@@ -237,7 +237,12 @@ the `docs/spec.md` section "Explicit internal result projection under Agent egre
 The record has `outcome`, `contentHash`, `byteCount`, `receiptId`, and `createdAt`.
 A record exists only after a valid submission.
 A rejected submission stores nothing.
-A record therefore proves one valid call, and no record proves no valid call.
+A record therefore proves one valid call.
+Retention removes records once the Agent home is idle:
+those at least `storage.retention.ttlMs['agent-result']` old (7 days by default)
+and then the oldest beyond 256 per home.
+So no record proves no valid call only when the harness reads it after the terminal and within that window.
+Do not set that TTL to 0 for a measurement run.
 The first valid submission is final.
 The store refuses a later, different outcome.
 A valid but wrong first call cannot be corrected.
