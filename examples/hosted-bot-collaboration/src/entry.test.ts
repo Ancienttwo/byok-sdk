@@ -32,7 +32,7 @@ async function scoped(bound = true, coalesce = false) {
   if (bound) await store().bindDevice(scope, 'device');
   const entry = new HostedCommandEntry<EntryCaller | undefined | 'throw'>(target, {
     authenticate: async credential => { if (credential === 'throw') throw new Error('session store down'); return credential; },
-    owner: () => 'owner',
+    owner: async () => 'owner',
     sync: async (at, now) => { synced.push(at); return target.sync(at, { ...SYNC_OPTIONS, now, history: undefined }); },
     now: () => VECTOR_NOW,
   });

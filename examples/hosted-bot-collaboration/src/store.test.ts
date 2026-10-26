@@ -130,7 +130,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
     it('builds the command ports from the Host config of the commit\'s scope: a snapshot Bot runs on that scope\'s device', async () => {
       const devices = new Map<string, string>();
       const perScope = new HostedCollaborationStore(opened!.pool, store().schema,
-        { host: scope => ({ models: { default: template(devices.get(scope)!, 'main') }, readOnlyToolsets: [] }) });
+        { host: async scope => ({ models: { default: template(devices.get(scope)!, 'main') }, readOnlyToolsets: [] }) });
       const snapshot: Command = { kind: 'team_snapshot', snapshot: { revision: 2, bots: [
         { id: 'main', name: 'main', role: 'Team owner', persona: '', model: 'default', mainBot: true },
         { id: 'b2', name: 'b2', role: 'Helper', persona: '', model: 'default', mainBot: false }] } };
