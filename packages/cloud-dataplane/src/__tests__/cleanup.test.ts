@@ -52,8 +52,8 @@ function replayableOffer(seed: number) {
   return (seq: number) => {
     const body = encodeEnvelope(
       createEnvelope(
-        'task.offer',
-        { instruction: `cleanup offer ${seed}` },
+        'task.offer_for_agent',
+        { instruction: `cleanup offer ${seed}`, agentRef: { agentId: `agent-cleanup-${seed}`, profileRevision: 'rev-1' } },
         {
           id: `00000000-0000-4000-8000-${String(seed).padStart(12, '0')}`,
           ts: '2026-01-01T00:00:00.000Z',
