@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { canonical, hash, occurrenceRun, taskId, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
+import { canonical, hash, occurrenceRun, time, type Conclusion, type ExecutionTemplate, type FrozenInput, type HostJobHandler,
   type HostJobRun, type HostJobRoutineDefinition, type IntentInput, type Json, type Routine } from '@byok-sdk/example-host-execution-core';
 import { botRoutines, endable, owned, resealDefinition, routineTurn, sealedDefinition, sealedTemplate, updateDefinition, type BotRoutineInput,
   type SealedRoutineAction } from '@byok-sdk/example-bot-collaboration/routines';
@@ -16,7 +16,7 @@ import { revisionOf, type CommitRequest, type CommitResult, type OutboxIntent } 
 import { activeBinding, beginSwitch, refusesHomeWrites, switchFence, bindDevice, deviceRefusals, endSwitch, openSwitch, revokeDevice, DeviceSwitchRefusedError, type DeviceBinding } from './binding';
 import { acknowledgedTurnIds, decideCompaction, type IntentCompaction, type IntentCompactionInput } from './compaction';
 import { DDL, STORE_VERSION, SUPPORTED_STORE_VERSIONS } from './ddl';
-import { cancelIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
+import { cancelIntent, currentIntent, deliverCancels, freezeIntent, frozenIntent, intentConclusions, seatFacts, settleFacts, syncFacts, writeSyncStep } from './intents';
 import { decideMessage, messageCommandId, type AgentMessageInput, type MessageDecision } from './messages';
 import { decideFinish, type HostedIntentHandler, type IntentOutcomeError, type TaskEvidence } from './reconcile';
 import { archivedRow, commitStored, decideRetention } from './retention';
@@ -29,8 +29,9 @@ import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, 
 import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, refuseRoute, rememberInbound, resendUnknown,
   revokePush } from '@byok-sdk/example-bot-collaboration/delivery-routing';
 import { assemble, entryGroup, idOf, split, storedKey, type EntityKind, type EntryKind, type Split } from './layout';
-import { sealSwitchExport, type SwitchExport } from '@byok-sdk/example-bot-collaboration/migration';
-import { exportMarkOf, hostedSwitchContent, SwitchExportedError, type SwitchExportMark } from './switch';
+import { sealSwitchExport, SwitchExportError, verifySwitchExport, type SwitchExport } from '@byok-sdk/example-bot-collaboration/migration';
+import { exportMarkOf, hostedSwitchContent, importMarkOf, SwitchExportedError, SwitchImportedError, writeSwitchRows, type SwitchExportMark,
+  type SwitchImportMark, type SwitchReceipt } from './switch';
 
 /** A stored scope row of a store version that this code does not support. Nothing was written. */
 export class HostedStoreVersionError extends Error {
@@ -425,21 +426,23 @@ export class HostedCollaborationStore {
     return this.transaction(async client => {
       const rows = [];
       for (const query of [
-        'SELECT state_version, frame::text, due_at::text, switch_export::text FROM scope WHERE scope = $1',
+        'SELECT state_version, frame::text, due_at::text, switch_export::text, switch_import::text FROM scope WHERE scope = $1',
         'SELECT kind, key, ordinal::text, body::text FROM entity WHERE scope = $1 ORDER BY kind, key',
         'SELECT kind, owner, position::text, body::text FROM entry WHERE scope = $1 ORDER BY kind, owner, entry.position',
         'SELECT key, ordinal::text, evidence, result::text, root FROM command WHERE scope = $1 ORDER BY key',
         'SELECT key, ordinal::text, kind, body::text FROM outbox WHERE scope = $1 ORDER BY key',
         `SELECT key, task_id, ordinal::text, agent, source, input::text, wait_until::text, submission, tries, next_at::text, last_error,
-          cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text, retry_until::text, retry::text, preparation_error
-          FROM intent WHERE scope = $1 ORDER BY key`,
+          cancel_reason, conclusion, started, attempt::text, terminal::text, reconcile_at::text, retry_until::text, retry::text, preparation_error,
+          generation, memory_blocked::text FROM intent WHERE scope = $1 ORDER BY key`,
+        `SELECT key, generation, task_id, submission, started, attempt::text, terminal::text FROM intent_execution WHERE scope = $1
+          ORDER BY key, generation`,
         'SELECT device, ordinal::text, mode, mode_revision::text, revoked_at::text FROM device_binding WHERE scope = $1 ORDER BY device',
         'SELECT kind, identity, expires_at::text FROM retired_identity WHERE scope = $1 ORDER BY kind, identity',
         'SELECT namespace, id, body::text, expires_at::text FROM archived_row WHERE scope = $1 ORDER BY namespace, id',
         `SELECT id, ordinal::text, definition::text, pending::text, lifecycle, status, next_at::text, calendar_errors::text,
           schedule_retry_at::text, schedule_retry_count, last_error::text FROM routine WHERE scope = $1 ORDER BY id`,
         `SELECT key, ordinal::text, routine_id, definition_version, trigger_kind, planned_at::text, recorded_at::text, next_at::text,
-          execution_superseded, conclusion FROM occurrence WHERE scope = $1 ORDER BY key`,
+          execution_superseded, conclusion, slot_replay_count FROM occurrence WHERE scope = $1 ORDER BY key`,
       ]) rows.push((await client.query({ text: query, values: [storedKey(scope)], rowMode: 'array' })).rows);
       return JSON.stringify(rows);
     }, true);
@@ -729,7 +732,8 @@ export class HostedCollaborationStore {
       const checks: DueReplyCheck[] = [];
       for (const d of Object.values((await this.snapshot(client, storedKey(scope))).delegations)) {
         if (!replyCheckDue(d, now)) continue;
-        const frozen = await frozenIntent(client, scope, taskId(d.chainTurnIds.at(-1)!, 0));
+        // The chain end's current task, as L reads `core.intent(key).taskId`: an imported intent may be of a later generation (#975).
+        const frozen = await currentIntent(client, scope, d.chainTurnIds.at(-1)!);
         checks.push({ delegationId: d.id, fence: { ...(d.checks === undefined ? {} : { checks: d.checks }), nextCheckAt: d.nextCheckAt! },
           ...(frozen ? { task: { taskId: frozen.input.taskId, deviceId: frozen.input.deviceId, agentRef: frozen.input.payload.agentRef } } : {}) });
       }
@@ -1021,19 +1025,19 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * Opens the owner switch of a device toward `target` (§4.1, #957): the durable freeze, on the expected mode revision. It
-   * raises the revision and returns the row read back in the same transaction. From its commit, every write that can create
-   * execution for the device throws `DeviceSwitchingError`, and the sync holds the Turns of its Bots. A device with no row
-   * (the default mode L, revision 0) starts its switch to H here; `bindDevice` is only for a device that pairs with H first.
+   * Opens the owner switch of a device away from H to `target` L (§4.1, #957): the durable freeze, on the expected mode
+   * revision. It raises the revision and returns the row read back in the same transaction. From its commit, every write
+   * that can create execution for the device throws `DeviceSwitchingError`, and the sync holds the Turns of its Bots. H
+   * becomes the owner of an L domain only through `importScope` and `commitImport` (#975).
    */
-  beginSwitch(scope: string, deviceId: string, target: 'L' | 'H', expectedRevision: number): Promise<DeviceBinding> {
+  beginSwitch(scope: string, deviceId: string, target: 'L', expectedRevision: number): Promise<DeviceBinding> {
     return this.change(scope, undefined, async (_state, _publish, client) =>
       ({ value: await beginSwitch(client, storedKey(scope), deviceId, target, expectedRevision), outbox: [] }));
   }
 
   /**
    * The drain of a device that H is switching away from (#957): its open work, and with `cancel` the cancel of each item
-   * first. It refuses with `not_owner` for a switch toward H, whose old owner L drains its own work. Open work is the
+   * first. Open work is the
    * open intent rows that run on the device, and for the Bots on the device the Turns that are not concluded (held, queued,
    * routine, delegation chain and seat Turns), the open input batches and the Agent home writes to the device that were
    * sent and have no terminal readback. A home write that was never sent, and a room seat that has no Turn yet, are state,
@@ -1048,11 +1052,7 @@ export class HostedCollaborationStore {
     const key = storedKey(scope), failed: Array<{ id: string; error: unknown }> = [];
     // Every transaction of the drain checks the open switch on its revision under the scope lock, so a drain that an abort
     // or a commit overtook stops with the switch refusal (`not_switching`) and cancels nothing more.
-    const owned = async (client: PoolClient) => {
-      if ((await openSwitch(client, key, deviceId, expectedRevision)).mode !== 'H') {
-        throw new DeviceSwitchRefusedError(deviceId, 'not_owner', `H is not the old owner of the switch of device ${deviceId}: L drains it`);
-      }
-    };
+    const owned = async (client: PoolClient) => { await openSwitch(client, key, deviceId, expectedRevision); };
     const work = await this.change(scope, undefined, async (state, _publish, client) => {
       await owned(client);
       return { value: await openWork(client, key, state, deviceId), outbox: [] };
@@ -1094,8 +1094,13 @@ export class HostedCollaborationStore {
       const state = await this.snapshot(client, key);
       for (const { deviceId, expectedRevision } of devices) await this.awayFromH(client, key, state, deviceId, expectedRevision);
       const exportedAt = clock();
-      const document = sealSwitchExport(await hostedSwitchContent(client, scope, state, { source: 'H', domain: scope, exportedAt,
-        devices: devices.map(({ deviceId, expectedRevision }) => ({ deviceId, frozenRevision: expectedRevision })) }));
+      const content = await hostedSwitchContent(client, scope, state, { source: 'H', domain: scope, exportedAt,
+        devices: devices.map(({ deviceId, expectedRevision }) => ({ deviceId, frozenRevision: expectedRevision })) });
+      // A pending Host job would run while the export waits for its commit.
+      if (content.outbox.length) {
+        throw new SwitchExportError('open_work', `Switch export source: Host job ${content.outbox[0]!.occurrenceKey} is pending; let it run first`);
+      }
+      const document = sealSwitchExport(content);
       const mark: SwitchExportMark = { digest: document.manifest.digest, exportedAt, devices: document.devices.map(device => ({ ...device })) };
       await client.query('UPDATE scope SET switch_export = $2::json WHERE scope = $1', [key, JSON.stringify(mark)]);
       return document;
@@ -1103,10 +1108,10 @@ export class HostedCollaborationStore {
   }
 
   /**
-   * Commits the open switch of a device on its frozen revision (#957): the target becomes the owner mode, the revision rises,
-   * and the freeze ends. Toward H, the caller commits after L's commit.
+   * Commits the open switch of a device away from H on its frozen revision (#957): L becomes the owner mode, the revision
+   * rises, and the freeze ends.
    *
-   * Away from H, the new owner imported and verified the export first (#975): `receipt` must be the digest of this scope's
+   * The new owner imported and verified the export first (#975): `receipt` must be the digest of this scope's
    * export, and `deviceId` at `expectedRevision` one of its devices. Every device of the export then moves to L in this one
    * transaction, each on its frozen revision and only with no open work, whatever its age (§4.1 gives no timeout path),
    * so a domain is never split between the owners. The scope is sealed again under the export's header and must give the
@@ -1117,13 +1122,6 @@ export class HostedCollaborationStore {
     const key = storedKey(scope);
     return this.change(scope, undefined, async (state, _publish, client) => {
       const mark = await this.exportMark(client, key);
-      // H checks its own open work only as the old owner. Toward H, the old owner is L: L's drain and L's commit come first,
-      // and H's held Turns of the device are the work that runs after this commit.
-      if ((await openSwitch(client, key, deviceId, expectedRevision)).mode !== 'H') {
-        // An exported scope takes no new owner device: the domain moved with its export.
-        if (mark) throw new SwitchExportedError(mark.digest);
-        return { value: await endSwitch(client, key, deviceId, expectedRevision, 'commit'), outbox: [] };
-      }
       // The device checks first, so a device that is not ready refuses the same way with or without an export.
       await this.awayFromH(client, key, state, deviceId, expectedRevision);
       if (!mark) throw new Error('This scope has not been exported for a switch');
@@ -1158,17 +1156,94 @@ export class HostedCollaborationStore {
     });
   }
 
-  /** Takes the scope lock as a switch step (#975), which the switch fence lets commit, and reads the export mark. */
+  /**
+   * Step 2 of a switch to H (#975): writes an L export into the new scope `scope` and verifies it in the same transaction.
+   * The document must verify and come from L, and `scope` must have no row yet (a switch to H opens a new scope). Each
+   * device of the export gets a row in mode L at revision 1, owned by the old owner, and the scope gets the import record
+   * `scope.switch_import`. Before the transaction commits, the scope is read back with `hostedSwitchContent` under the
+   * document's header and must seal to the document's digest; otherwise it throws `SwitchExportError` with `manifest` and
+   * writes nothing. From the import until `commitImport`, no transaction that locks the scope commits
+   * (`SwitchImportedError`), and every scan leaves it out, so no work runs on it. Returns the receipt the old owner commits
+   * away on. `clock` gives the settle time of a concluded Host job's outbox row.
+   */
+  async importScope(scope: string, document: SwitchExport, clock: () => number): Promise<SwitchReceipt> {
+    const manifest = verifySwitchExport(document);
+    if (document.source !== 'L') throw new SwitchExportError('invalid', `An H owner imports only an L export, not one from ${document.source}`);
+    const key = storedKey(scope), devices = document.devices.map(device => device.deviceId);
+    return this.transaction(async client => {
+      const created = await client.query('INSERT INTO scope (scope, state_version, frame) VALUES ($1, $2, $3::json) ON CONFLICT (scope) DO NOTHING',
+        [key, STORE_VERSION, EMPTY_FRAME]);
+      if (!created.rowCount) throw new Error(`A switch import needs a new scope: ${scope} exists`);
+      const now = clock();
+      await this.decideIn(client, key, undefined, async (state, _publish, locked) => {
+        await lockScope(locked, key, 'switch');
+        // The document's state in its own key order, which the frame keeps and the digest covers.
+        for (const field of Object.keys(state)) delete (state as unknown as Record<string, unknown>)[field];
+        Object.assign(state, structuredClone(document.collaboration));
+        await writeSwitchRows(locked, scope, document, now);
+        return { value: undefined, outbox: [], now };
+      });
+      const mark: SwitchImportMark = { digest: manifest.digest, devices };
+      await client.query('UPDATE scope SET switch_import = $2::json WHERE scope = $1', [key, JSON.stringify(mark)]);
+      const back = sealSwitchExport(await hostedSwitchContent(client, scope, await this.snapshot(client, key),
+        { source: document.source, domain: document.domain, devices: document.devices, exportedAt: document.exportedAt })).manifest.digest;
+      if (back !== manifest.digest) throw new SwitchExportError('manifest', `The imported scope reads back as ${back}, not ${manifest.digest}`);
+      return { digest: manifest.digest, devices };
+    }, false);
+  }
+
+  /**
+   * Step 4 of a switch to H, after the old owner committed away on the receipt: H owns each device of the import, at
+   * revision 2, and the import record is deleted, so work runs on the scope from then on. Only the import of this digest
+   * commits, and only while each of its devices is as the import wrote it.
+   */
+  commitImport(scope: string, digest: string): Promise<void> {
+    const key = storedKey(scope);
+    // Through the state transaction, so the scope's due time is written for the owned devices (a held Turn is due at once).
+    return this.change(scope, undefined, async (_state, _publish, client) => {
+      const record = await this.importMark(client, key);
+      if (record.digest !== digest) throw new Error(`The switch import is ${record.digest}, not ${digest}`);
+      for (const id of record.devices) {
+        const moved = await client.query(`UPDATE device_binding SET mode = 'H', mode_revision = 2 WHERE scope = $1 AND device = $2 AND mode = 'L'
+          AND mode_revision = 1 AND switching IS NULL AND revoked_at IS NULL`, [key, storedKey(id)]);
+        if (!moved.rowCount) throw new Error(`Device ${id} is not an imported device`);
+      }
+      await client.query('UPDATE scope SET switch_import = NULL WHERE scope = $1', [key]);
+      return { value: undefined, outbox: [] };
+    });
+  }
+
+  /**
+   * Deletes an import that was not committed, when the switch does not go ahead: every row of the scope and the scope row,
+   * in one transaction. A committed scope has no import record, so it is refused. No work ran on the import.
+   */
+  discardImport(scope: string): Promise<void> {
+    const key = storedKey(scope);
+    return this.transaction(async client => {
+      await this.importMark(client, key);
+      for (const table of ['intent_execution', 'occurrence', 'routine', 'intent', 'outbox', 'entity', 'entry', 'command', 'device_binding',
+        'retired_identity', 'archived_row', 'scope']) await client.query(`DELETE FROM ${table} WHERE scope = $1`, [key]);
+    }, false);
+  }
+
+  /**
+   * Takes the scope lock as a switch step (#975), which the switch fence lets commit, and reads the export mark. A scope with
+   * an uncommitted import takes no switch away: it throws `SwitchImportedError`.
+   */
   private async exportMark(client: PoolClient, key: string): Promise<SwitchExportMark | undefined> {
-    await lockScope(client, key, 'switch');
-    const found = await client.query<{ mark: unknown }>('SELECT switch_export AS mark FROM scope WHERE scope = $1', [key]);
-    return found.rows[0]?.mark == null ? undefined : exportMarkOf(found.rows[0].mark);
+    const { exported, imported } = await switchRecords(client, key);
+    if (imported) throw new SwitchImportedError(imported.digest);
+    return exported;
+  }
+  /** Takes the scope lock as a switch step (#975) and reads the import record. Throws when the scope holds none. */
+  private async importMark(client: PoolClient, key: string): Promise<SwitchImportMark> {
+    const { imported } = await switchRecords(client, key);
+    if (!imported) throw new Error('This scope holds no switch import record');
+    return imported;
   }
   /** A device whose open switch away from H, at its frozen revision, has no open work left. Throws `DeviceSwitchRefusedError`. */
   private async awayFromH(client: PoolClient, key: string, state: CollaborationState, deviceId: string, expectedRevision: number): Promise<void> {
-    if ((await openSwitch(client, key, deviceId, expectedRevision)).mode !== 'H') {
-      throw new DeviceSwitchRefusedError(deviceId, 'not_owner', `H is not the old owner of the switch of device ${deviceId}`);
-    }
+    await openSwitch(client, key, deviceId, expectedRevision);
     const work = await openWork(client, key, state, deviceId);
     if (Object.values(work).some(items => items.length)) {
       throw new DeviceSwitchRefusedError(deviceId, 'open_work', `Device ${deviceId} still has open work: ${JSON.stringify(work)}`);
@@ -1544,7 +1619,7 @@ export async function inSchema<T>(pool: Pool, schema: string, work: (client: Poo
     await client.query(`SET LOCAL search_path TO "${schema}"`);
     if (!readOnly) locks.set(client, { scopes: new Set(), switchStep: false });
     const value = await work(client);
-    if (!readOnly) await refuseExported(client, locks.get(client)!);
+    if (!readOnly) await refuseSwitched(client, locks.get(client)!);
     await client.query('COMMIT');
     return value;
   } catch (error) {
@@ -1560,15 +1635,27 @@ export async function inSchema<T>(pool: Pool, schema: string, work: (client: Poo
 /** The scopes that each open write transaction of `inSchema` locked, and whether it is a switch step (#975). */
 const locks = new WeakMap<PoolClient, { scopes: Set<string>; switchStep: boolean }>();
 /**
- * The switch fence (#975): a transaction that locked an exported scope does not commit, so H writes nothing to it. It runs
- * right before the commit, so the work's own refusals come first, as each L write refuses after its own (K8 `writeLedger`).
- * Only the switch steps (`lockScope` with `'switch'`) pass: the export, the commit away and the abort.
+ * The switch fence (#975): a transaction that locked an exported scope, or one with an uncommitted import, does not
+ * commit, so H writes nothing to it. It runs right before the commit, so the work's own refusals come first, as each L
+ * write refuses after its own (K8 `writeLedger`). Only the switch steps (`lockScope` with `'switch'`) pass: the export,
+ * the commit away and the abort, and the import, its commit and its discard.
  */
-async function refuseExported(client: PoolClient, lock: { scopes: Set<string>; switchStep: boolean }): Promise<void> {
+async function refuseSwitched(client: PoolClient, lock: { scopes: Set<string>; switchStep: boolean }): Promise<void> {
   if (!lock.scopes.size || lock.switchStep) return;
-  const found = await client.query<{ mark: unknown }>('SELECT switch_export AS mark FROM scope WHERE scope = ANY($1::text[]) AND switch_export IS NOT NULL LIMIT 1',
-    [[...lock.scopes]]);
-  if (found.rows[0]) throw new SwitchExportedError(exportMarkOf(found.rows[0].mark).digest);
+  const found = await client.query<{ exported: unknown; imported: unknown }>(`SELECT switch_export AS exported, switch_import AS imported FROM scope
+    WHERE scope = ANY($1::text[]) AND (switch_export IS NOT NULL OR switch_import IS NOT NULL) LIMIT 1`, [[...lock.scopes]]);
+  const row = found.rows[0];
+  if (row?.exported != null) throw new SwitchExportedError(exportMarkOf(row.exported).digest);
+  if (row?.imported != null) throw new SwitchImportedError(importMarkOf(row.imported).digest);
+}
+
+/** Takes the scope lock as a switch step (#975) and reads the scope's export mark and import record. */
+async function switchRecords(client: PoolClient, key: string): Promise<{ exported?: SwitchExportMark; imported?: SwitchImportMark }> {
+  await lockScope(client, key, 'switch');
+  const row = (await client.query<{ exported: unknown; imported: unknown }>(
+    'SELECT switch_export AS exported, switch_import AS imported FROM scope WHERE scope = $1', [key])).rows[0]!;
+  return { ...(row.exported == null ? {} : { exported: exportMarkOf(row.exported) }),
+    ...(row.imported == null ? {} : { imported: importMarkOf(row.imported) }) };
 }
 
 /**
