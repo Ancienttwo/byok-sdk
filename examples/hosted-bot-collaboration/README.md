@@ -756,8 +756,8 @@ message consumer tests (`messages.test.ts`, `retention.test.ts`) build `hostedMe
   No path assumes one atomic commit across the two (see Database). A scope row of an unknown store version is refused.
 - **Host config.** `host(scope)` resolves to the scope's model templates (each with the user's own device) and read-only
   toolsets, as L's `models` and `readOnlyToolsets`. Every store over one schema must be built with the same `host`. It
-  returns a Promise, so a product reads the one scope's record when it is asked; each store method awaits it once,
-  before its rule code runs.
+  returns a Promise, so a product reads the one scope's record when it is asked. Each store method awaits it once and
+  never while it holds a connection, so the product may read it from the store's own pool.
 - **Object storage.** The SDK stores need an S3-compatible endpoint: `objectStorage` with `endpoint`, `bucket`,
   `accessKeyId`, `secretAccessKey`, `region` and a `signingClock`, passed to `createPostgresCoreStores` and
   `createPostgresCloudStores`. H stores no objects itself.

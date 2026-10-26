@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { hash } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
 import type { Command } from '@byok-sdk/example-bot-collaboration/rules/commands';
 import type { CommandRecord, CommitRequest } from '@byok-sdk/example-bot-collaboration/rules/commit';
-import { commitVectors, seedCollaboration, type CommitSubject, type SeedTeam } from '@byok-sdk/example-bot-collaboration/test-support';
+import { commitVectors, seedCollaboration, SYNC_OPTIONS, type CommitSubject, type SeedTeam } from '@byok-sdk/example-bot-collaboration/test-support';
 import { CallbackCommandError, HostedCollaborationStore, HostedStoreVersionError } from './store';
-import { memorySubject, VECTOR_ROUTINES, vectorClock } from './memory-subject.test-support';
+import { memorySubject, testHostConfig, VECTOR_ROUTINES, vectorClock } from './memory-subject.test-support';
 import { openStore, POSTGRES_URL } from './postgres.test-support';
 
 let opened: Awaited<ReturnType<typeof openStore>> | undefined;
@@ -142,6 +144,27 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
       }
     });
   });
+
+  it('never waits on the Host config while it holds a connection: each call settles on a one-connection pool that the config reads (#794 H3)', async () => {
+    const pool = new pg.Pool({ connectionString: POSTGRES_URL, max: 1 });
+    try {
+      const narrow = new HostedCollaborationStore(pool, store().schema, { host: async () => { await pool.query('SELECT 1'); return testHostConfig(); },
+        hostIntents: { job: () => {} } });
+      const h = await hosted();
+      // A call that holds the pool's only connection while it awaits the config never settles.
+      const settles = (call: () => Promise<unknown>) => Promise.race([call().then(() => 'settled', () => 'settled'),
+        new Promise(resolve => { setTimeout(() => resolve('stuck'), 5_000); })]);
+      const evidence = { terminal: { envelope: { task_id: 'task-x', type: 'task.complete', payload: {} } } as unknown as DeviceTerminal,
+        attempt: { taskId: 'task-x' } as unknown as TaskAttempt };
+      const message = { tenant: h.scope, taskId: 'task-x', deviceId: 'device', payload: { messageId: 'm1', contentHash: 'h1' } } as never;
+      expect(await settles(() => narrow.commit(h.scope, { scope: h.scope, commandId: randomUUID(), command: input('k1') }, vectorClock))).toBe('settled');
+      expect(await settles(() => narrow.sync(h.scope, { ...SYNC_OPTIONS, now: vectorClock(), history: undefined }))).toBe('settled');
+      expect(await settles(() => narrow.enqueueHostIntent(h.scope, { key: 't1', source: 'user', execution: template('device', 'main'),
+        waitUntil: vectorClock() + 60_000 }, 'job', vectorClock))).toBe('settled');
+      expect(await settles(() => narrow.consume(h.scope, message, vectorClock))).toBe('settled');
+      expect(await settles(() => narrow.finish(h.scope, 'absent', evidence, vectorClock))).toBe('settled');
+    } finally { await pool.end(); }
+  }, 30_000);
 
   it('refuses a scope row of an unknown store version under the lock, and writes nothing', async () => {
     const h = await hosted();

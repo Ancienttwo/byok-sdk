@@ -85,7 +85,8 @@ export interface InboundIdentity { owner: string; self?: Record<string, readonly
 export interface HostedStoreOptions {
   /**
    * The Host config of a scope: its model templates and read-only toolsets (#793 S9). Every port and sync reads it. A store
-   * method awaits it once, before its rule code runs, so a product reads the one scope's record when it is asked.
+   * method awaits it once, and never while it holds a connection, so a product may read the one scope's record when it is
+   * asked, from the store's own pool too.
    */
   host: (scope: string) => Promise<HostConfig>;
   /** The Host has a channel: a K4 callback queues its channel deliveries, as L does with `channel` set. */
@@ -635,11 +636,16 @@ export class HostedCollaborationStore {
    * command. A scope with no row has no task, so it is refused with nothing written. A throw writes nothing and leaves the
    * SDK admission pending.
    */
-  consume(scope: string, input: AgentMessageInput, clock: () => number): Promise<MessageDecision> {
+  async consume(scope: string, input: AgentMessageInput, clock: () => number): Promise<MessageDecision> {
     const key = storedKey(scope);
+    const refused: MessageDecision = { outcome: 'refused', reasonCode: 'unknown_task' };
+    const exists = (client: PoolClient) => client.query('SELECT 1 FROM scope WHERE scope = $1', [key]).then(found => found.rows.length > 0);
+    // The scope check runs alone first, so a scope that H does not have reads no Host config, and the config is read with no
+    // connection held. The check in the transaction is the one that decides.
+    if (!await this.transaction(exists, true)) return refused;
+    const config = await this.host(scope);
     return this.transaction(async client => {
-      if (!(await client.query('SELECT 1 FROM scope WHERE scope = $1', [key])).rows[0]) return { outcome: 'refused', reasonCode: 'unknown_task' };
-      const config = await this.host(scope);
+      if (!await exists(client)) return refused;
       return this.decideIn(client, key, messageCommandId(input), (state, publish) => decideMessage(client, scope, state, input,
         this.ports(config, state, publish, clock), this.channel));
     }, false);
@@ -650,13 +656,11 @@ export class HostedCollaborationStore {
    * projections and the intent's conclusion commit together, under the scope lock. Returns the conclusion that it wrote,
    * or nothing when the intent already had one. A throw writes nothing.
    */
-  finish(scope: string, turnId: string, evidence: TaskEvidence, clock: () => number): Promise<Conclusion | undefined> {
-    return this.transaction(async client => {
-      const config = await this.host(scope);
-      return this.decideIn(client, storedKey(scope), evidence.terminal.envelope.task_id,
-        (state, publish) => decideFinish(client, scope, turnId, state, evidence, this.ports(config, state, publish, clock), this.channel,
-          this.hostIntents));
-    }, false);
+  async finish(scope: string, turnId: string, evidence: TaskEvidence, clock: () => number): Promise<Conclusion | undefined> {
+    const config = await this.host(scope);
+    return this.transaction(client => this.decideIn(client, storedKey(scope), evidence.terminal.envelope.task_id,
+      (state, publish) => decideFinish(client, scope, turnId, state, evidence, this.ports(config, state, publish, clock), this.channel,
+        this.hostIntents)), false);
   }
 
   /**
