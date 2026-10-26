@@ -388,3 +388,19 @@ test('#794 D3: a direct Worker example path selects only that example and the da
   }
   assert.throws(() => selectImpact(['examples/hosted-bot-collaboration-worker/wrangler.json']), /reviewed CI mapping required/i);
 });
+
+test('wire v4 (#925) reviewed paths select only their owners', () => {
+  assert.deepEqual(selectImpact(['examples/packaging/launcher.ts']).families, ['packageability-smoke']);
+  assert.ok(selectImpact(['examples/packaging/launcher.ts']).dirs.includes('examples/packaging'));
+  assert.ok(selectImpact(['examples/basic/quickstart-smoke.test.ts']).dirs.includes('examples/basic'));
+  for (const path of ['scripts/integration/salesko-recurring.test.ts', 'packages/client/scripts/fixtures/packed-cli-mcp-codex.mjs']) {
+    assert.ok(selectImpact([path]).dirs.includes('packages/client'), path);
+  }
+  assert.ok(selectImpact(['packages/client/scripts/fixtures/packed-cli-mcp-codex.mjs']).families.includes('npm-release-pack'));
+  for (const path of ['templates/service/README.md', 'examples/byok-mcp-server/docs/hermes.md']) {
+    assert.deepEqual(selectImpact([path]), { dirs: [], files: [path], families: [], reason: 'docs-only' }, path);
+  }
+  for (const path of ['templates/service/notes.md', 'examples/byok-mcp-server/docs/nested/hermes.md', 'scripts/integration/other.test.ts']) {
+    assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
+  }
+});

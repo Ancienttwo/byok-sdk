@@ -395,18 +395,25 @@ export function selectImpact(paths, context = {}) {
     if (path === 'examples/packaging/sqlite-fixture.ts' || path === 'examples/packaging/sqlite-smoke.mjs') {
       dirs.add('examples/packaging'); families.add('packageability-smoke'); continue;
     }
+    // Both packaging recipes compile this launcher; the packageability smoke runs it.
+    if (path === 'examples/packaging/launcher.ts') {
+      dirs.add('examples/packaging'); families.add('packageability-smoke'); continue;
+    }
     if (path === 'examples/basic/goal-btw.test-support.ts') {
       // Shared runtime fixture is imported directly across these example suites.
       for (const dir of ['examples/basic', 'examples/host-execution-core', 'examples/bot-collaboration']) dirs.add(dir);
       continue;
     }
-    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts') {
+    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts'
+      || path === 'examples/basic/quickstart-smoke.test.ts') {
       dirs.add('examples/basic'); continue;
     }
     // The usage notes of the clarification and goal/btw examples.
     if (path === 'examples/basic/clarification-usage.md' || path === 'examples/basic/goal-btw-usage.md') { dirs.add('examples/basic'); continue; }
     // The Salesko recovery integration fixture runs the client daemon; no CI job runs scripts/integration.
-    if (path === 'scripts/integration/fixtures/salesko-recurring-daemon.ts') { dirs.add('packages/client'); continue; }
+    if (path === 'scripts/integration/fixtures/salesko-recurring-daemon.ts' || path === 'scripts/integration/salesko-recurring.test.ts') {
+      dirs.add('packages/client'); continue;
+    }
     if (path === 'api-surface/entries.json') {
       for (const dir of changedApiOwners(context)) {
         if (!workspaceGraph[dir]) requireMapping(path);
@@ -427,7 +434,9 @@ export function selectImpact(paths, context = {}) {
     // The generated Pi defaults: keys source, and the client drift test re-renders them.
     if (path === 'packages/keys/src/pi-runtime-defaults.generated.ts') { dirs.add('packages/keys'); dirs.add('packages/client'); continue; }
     // pack-and-smoke.mjs runs it against the packed client.
-    if (path === 'packages/client/scripts/packed-cli-mcp-smoke.mjs') { dirs.add('packages/client'); families.add('npm-release-pack'); continue; }
+    if (path === 'packages/client/scripts/packed-cli-mcp-smoke.mjs' || path === 'packages/client/scripts/fixtures/packed-cli-mcp-codex.mjs') {
+      dirs.add('packages/client'); families.add('npm-release-pack'); continue;
+    }
     if (path === 'packages/client/scripts/packed-agent-memory-helper-smoke.mjs'
       || path === 'scripts/release/agent-memory-helper-source.test.mjs') {
       dirs.add('packages/client'); families.add('npm-release-pack'); continue;
@@ -465,7 +474,9 @@ export function selectImpact(paths, context = {}) {
     }
     if (path === 'examples/host-execution-core/VALIDATION.md'
       || path === 'examples/bot-collaboration/VALIDATION.md'
-      || path === 'examples/host-execution-core/PLAN-612.md') continue;
+      || path === 'examples/host-execution-core/PLAN-612.md'
+      || path === 'templates/service/README.md'
+      || /^examples\/byok-mcp-server\/docs\/[a-z0-9-]+\.md$/.test(path)) continue;
 
     if (path === 'scripts/ci/run-windows-bot-tests.mjs') {
       families.add('adapter-lifecycle-smoke'); continue;

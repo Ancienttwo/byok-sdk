@@ -8,7 +8,7 @@ import test from 'node:test';
 import { selectImpact, knownFamilies, reviewedScripts } from './select-impact.mjs';
 import { planCi } from './plan-ci.mjs';
 import { requireCiPlan } from './require-ci-plan.mjs';
-import { publicManifests, PI_LOCK, PI_PACKAGES } from './reviewed-content.mjs';
+import { publicManifests, PI_LOCK, PI_PACKAGES, PROTOCOL_ORACLE_LOCK } from './reviewed-content.mjs';
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'ci-reviewed-content-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -797,5 +797,40 @@ test('keys model-route subpath admits the exact addition only', t => {
   // The modules split from provider-profile.ts and secret-store.ts keep their Windows custody family.
   for (const path of ['packages/keys/src/provider-profile-binding.ts', 'packages/keys/src/secret-value.ts']) {
     assert.ok(selectImpact([path]).families.includes('adapter-lifecycle-smoke'), path);
+  }
+});
+
+test('reviewed protocol oracle move admits only the exact edges and both lock rows (#925)', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-protocol-oracle-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const write = (path, value) => { mkdirSync(dirname(join(cwd, path)), { recursive: true }); writeFileSync(join(cwd, path), JSON.stringify(value)); };
+  const url = version => `https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-${version}.tgz`;
+  const edges = moved => moved ? { 'byok-protocol-previous': url('0.30.2') } : { 'byok-protocol-floor': url('0.27.0'), 'byok-protocol-previous': url('0.26.1') };
+  const rows = moved => moved
+    ? { 'byok-protocol-previous': PROTOCOL_ORACLE_LOCK.previous.to }
+    : { 'byok-protocol-floor': PROTOCOL_ORACLE_LOCK.floor, 'byok-protocol-previous': PROTOCOL_ORACLE_LOCK.previous.from };
+  const state = moved => ({
+    protocol: { name: '@byok-sdk/protocol', version: '0.30.2', dependencies: { zod: '^4.4.3' }, devDependencies: edges(moved) },
+    lock: { lockfileVersion: 1, workspaces: { '': { name: 'workspace' },
+      'packages/protocol': { name: '@byok-sdk/protocol', version: '0.30.2', dependencies: { zod: '^4.4.3' }, devDependencies: edges(moved) } },
+    packages: { ...rows(moved), zod: ['zod@4.4.3'] } },
+  });
+  const apply = ({ protocol, lock }) => { write('packages/protocol/package.json', protocol); write('bun.lock', lock); };
+  apply(state(false));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('init'); git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'baseline');
+  const context = { cwd, base: git('rev-parse', 'HEAD').trim() };
+  apply(state(true));
+  assert.ok(selectImpact(['bun.lock', 'packages/protocol/package.json'], context).dirs.includes('packages/protocol'));
+  const moved = mutate => { const s = state(true); mutate(s); return s; };
+  for (const [reason, candidate, path, pattern] of [
+    ['floor kept', moved(s => { s.protocol.devDependencies['byok-protocol-floor'] = url('0.27.0'); }), 'packages/protocol/package.json', /changes more than/],
+    ['other oracle version', moved(s => { s.protocol.devDependencies['byok-protocol-previous'] = url('0.30.1'); }), 'packages/protocol/package.json', /changes more than/],
+    ['another integrity', moved(s => { s.lock.packages['byok-protocol-previous'] = [...PROTOCOL_ORACLE_LOCK.previous.to.slice(0, 2), 'sha512-other']; }), 'bun.lock', /protocol oracle edges and both lock rows together/],
+    ['floor row kept', moved(s => { s.lock.packages['byok-protocol-floor'] = PROTOCOL_ORACLE_LOCK.floor; }), 'bun.lock', /protocol oracle edges and both lock rows together/],
+    ['rows move without the edges', (s => { s.lock.packages = { ...rows(true), zod: ['zod@4.4.3'] }; return s; })(state(false)), 'bun.lock', /bun\.lock changes more than/],
+  ]) {
+    apply(candidate);
+    assert.throws(() => selectImpact([path], context), pattern, reason);
   }
 });

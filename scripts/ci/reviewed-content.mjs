@@ -26,6 +26,28 @@ function revertUndiciMove(before, after, field) {
   return true;
 }
 
+// #925 wire v4: the protocol compatibility oracle moves to 0.30.2, the last
+// v3 release, and the 0.27.0 floor alias goes. Only these exact edges and
+// their two lock rows are admitted.
+const PROTOCOL_ORACLE_URL = version => `https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-${version}.tgz`;
+const PROTOCOL_ORACLE = Object.freeze({ previous: { from: PROTOCOL_ORACLE_URL('0.26.1'), to: PROTOCOL_ORACLE_URL('0.30.2') }, floor: PROTOCOL_ORACLE_URL('0.27.0') });
+export const PROTOCOL_ORACLE_LOCK = Object.freeze({
+  previous: {
+    from: [`@byok-sdk/protocol@${PROTOCOL_ORACLE.previous.from}`, { dependencies: { zod: '^4.4.3' } }, 'sha512-eUucLQqUNWtOn43Iv+8ZYiWzpf+yd8+M/wNIGWJdVQKOODyXBknxWDd/7Mmp/TPKfkl5BH0hfZ6Jl1xwx9NMXg=='],
+    to: [`@byok-sdk/protocol@${PROTOCOL_ORACLE.previous.to}`, { dependencies: { '@cfworker/json-schema': '4.1.1', zod: '^4.4.3' } }, 'sha512-K3efRUJqxXo0F/reaZQU0LyOn3AsUwwh7zP4xkMda7J/NwfnRjPHX3EyWdVhFn504z21QqLWKwac2Tw/Rk5VZQ=='],
+  },
+  floor: [`@byok-sdk/protocol@${PROTOCOL_ORACLE.floor}`, { dependencies: { '@cfworker/json-schema': '4.1.1', zod: '^4.4.3' } }, 'sha512-fJvgAq/C1RKlb7QL+4yrrZvKP/Gn9ltw+kO0b0BFaBycHZmViid6hlOl0yMOHRHIusHMU1cudaiUqaC+uAfCZA=='],
+});
+// Restore the reviewed old edges, so that the deep comparison still sees every other change.
+function revertProtocolOracleMove(before, after) {
+  const from = before?.devDependencies, to = after?.devDependencies;
+  if (from?.['byok-protocol-previous'] !== PROTOCOL_ORACLE.previous.from || to?.['byok-protocol-previous'] !== PROTOCOL_ORACLE.previous.to
+    || from?.['byok-protocol-floor'] !== PROTOCOL_ORACLE.floor || to?.['byok-protocol-floor'] !== undefined) return false;
+  to['byok-protocol-previous'] = PROTOCOL_ORACLE.previous.from;
+  to['byok-protocol-floor'] = PROTOCOL_ORACLE.floor;
+  return true;
+}
+
 // The Pi 1.4.0 ruling (docs/spec.md) moves the nine official Pi packages from
 // exactly 1.3.0 to exactly 1.4.0 together: the root overrides, the client and
 // cloud-do dependencies (with byok.piRuntimePin) and bun.lock. PI_LOCK holds the
@@ -214,6 +236,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
   if (path === 'bun.lock') {
     for (const example of PRIVATE_HOSTED) admitHostedLock(before, after, cwd, example);
     const piMoved = [];
+    let oracleMoved = false;
     for (const [dir, record] of Object.entries(before.workspaces)) {
       if (dir === '') continue;
       const current = after.workspaces?.[dir];
@@ -245,6 +268,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
       }
       const undiciField = UNDICI_FIELDS[dir];
       if (undiciField && manifest[undiciField]?.undici === UNDICI_MOVE.to && revertUndiciMove(record, current, undiciField)) qualify.push(dir);
+      if (dir === 'packages/protocol' && manifest.devDependencies?.['byok-protocol-previous'] === PROTOCOL_ORACLE.previous.to
+        && revertProtocolOracleMove(record, current)) oracleMoved = true;
       const piField = PI_FIELDS[dir];
       if (piField && manifest[piField]?.['@earendil-works/pi-ai'] === PI_MOVE.to && revertPiMove(record, current, piField)) piMoved.push(dir);
       delete record.version; delete current.version;
@@ -256,6 +281,18 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
         throw new Error('Reviewed CI mapping required: bun.lock must move both undici pins and the resolved undici entry together');
       }
       after.packages.undici = before.packages.undici;
+    }
+    // The workspace edges and both lock rows move together, or nothing moves.
+    if (oracleMoved) {
+      if (!isDeepStrictEqual(before.packages?.['byok-protocol-previous'], PROTOCOL_ORACLE_LOCK.previous.from)
+        || !isDeepStrictEqual(after.packages?.['byok-protocol-previous'], PROTOCOL_ORACLE_LOCK.previous.to)
+        || !isDeepStrictEqual(before.packages?.['byok-protocol-floor'], PROTOCOL_ORACLE_LOCK.floor)
+        || after.packages?.['byok-protocol-floor'] !== undefined) {
+        throw new Error('Reviewed CI mapping required: bun.lock must move the protocol oracle edges and both lock rows together');
+      }
+      after.packages['byok-protocol-previous'] = before.packages['byok-protocol-previous'];
+      after.packages['byok-protocol-floor'] = before.packages['byok-protocol-floor'];
+      qualify.push('packages/protocol');
     }
     // Every Pi pin, the overrides and the reviewed rows move together, or nothing moves.
     if (piMoved.length) {
@@ -381,6 +418,7 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd() } = {}) 
     }
     const dir = path.slice(0, -'/package.json'.length);
     if (UNDICI_FIELDS[dir] && revertUndiciMove(before, after, UNDICI_FIELDS[dir])) qualify.push(dir);
+    if (dir === 'packages/protocol' && revertProtocolOracleMove(before, after)) qualify.push(dir);
     if (PI_FIELDS[dir] && revertPiMove(before, after, PI_FIELDS[dir])) {
       qualify.push(dir);
       if (dir === 'packages/client') {
