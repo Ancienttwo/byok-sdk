@@ -89,6 +89,11 @@ function decodeLedger(home: HomeSnapshot): { records: readonly AgentMemoryIntent
   }
 }
 
+interface MemoryState {
+  readonly exists: boolean;
+  readonly revision: string;
+}
+
 function result(id: InvariantId, details: string[]): InvariantResult {
   return { id, status: details.length === 0 ? 'held' : 'violated', details };
 }
@@ -169,20 +174,28 @@ export function checkCut(snapshot: DeviceSnapshot, journal: readonly JournalEntr
         i5.push(`${home.agentId}/${path}: ${file.size} bytes, ${file.revision} is no body the Host issued`);
       }
       if (records === undefined) continue;
-      // The states each record leaves possible, in ledger (append) order.
-      // A terminal records the file right after its CAS, or as observed.
-      let allowed = new Set([EMPTY_REVISION]);
+      // The states each record leaves possible, in ledger (append) order, as
+      // existence and revision together: a delete leaves no file and an empty
+      // replace an empty one, both at EMPTY_REVISION, as
+      // agentMemoryIntentAppliedConsistent() tells them apart. Before any
+      // record the file is missing or the home skeleton's empty file. The CAS
+      // compares revisions only, so an applying record matches either. A
+      // terminal records the file right after its CAS, or as observed.
+      let allowed: MemoryState[] = [{ exists: false, revision: EMPTY_REVISION }, { exists: true, revision: EMPTY_REVISION }];
       for (const record of records) {
         if (record.path !== path) continue;
         const detail = record.detail;
         if (record.state === 'applying') {
-          if (allowed.has(record.baseRevision)) allowed.add(record.targetRevision ?? EMPTY_REVISION);
+          if (allowed.some((state) => state.revision === record.baseRevision)) {
+            allowed.push({ exists: record.operation === 'replace', revision: record.targetRevision ?? EMPTY_REVISION });
+          }
         } else if (detail !== null && !('code' in detail)) {
-          allowed = new Set([detail.revision]);
+          allowed = [{ exists: detail.exists, revision: detail.revision }];
         }
       }
-      if (!allowed.has(file.revision)) {
-        i4.push(`${home.agentId}/${path}: ${file.exists ? `${file.size} bytes ${file.revision}` : 'missing'}, ledger allows ${[...allowed].join(' | ')}`);
+      if (!allowed.some((state) => state.exists === file.exists && state.revision === file.revision)) {
+        const states = allowed.map((state) => (state.exists ? `file ${state.revision}` : 'missing'));
+        i4.push(`${home.agentId}/${path}: ${file.exists ? `${file.size} bytes ${file.revision}` : 'missing'}, ledger allows ${states.join(' | ')}`);
       }
     }
   }
