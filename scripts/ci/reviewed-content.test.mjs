@@ -649,6 +649,36 @@ test('#975 slice 2: the K8 manifest admits the migration entry only on top of th
   }
 });
 
+test('#975 slice 5: the K8 manifest admits the switch entry only on top of the entries up to the migration entry', t => {
+  const f = fixture(t);
+  const dir = 'examples/bot-collaboration', path = `${dir}/package.json`;
+  const migrated = {
+    './rules/commands': './src/rules/commands.ts', './rules/commit': './src/rules/commit.ts', './model': './src/model.ts',
+    './coalesce': './src/coalesce.ts', './team': './src/team.ts', './test-support': './src/commit-vectors.test-support.ts',
+    './retention': './src/retention.ts', './retention-vectors': './src/retention-vectors.test-support.ts',
+    './routines': './src/routines.ts', './routine-vectors': './src/routine-vectors.test-support.ts',
+    './channel': './src/channel.ts', './delivery': './src/delivery.ts', './delivery-routing': './src/delivery-routing.ts',
+    './delivery-vectors': './src/delivery-vectors.test-support.ts', './migration': './src/migration.ts',
+  };
+  const manifest = { name: '@byok-sdk/example-bot-collaboration', private: true, version: '0.0.1', exports: migrated };
+  f.write(path, manifest);
+  const git = (...args) => execFileSync('git', args, { cwd: f.cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'K8 with the entries up to the migration entry');
+  f.base = git('rev-parse', 'HEAD').trim();
+  const sw = { './switch': './src/switch.ts' };
+  f.write(path, { ...manifest, exports: { ...migrated, ...sw } });
+  assert.deepEqual(selectImpact([path], f).dirs.filter(name => name === dir), [dir]);
+  const { './migration': _migration, ...withoutMigration } = migrated;
+  for (const [candidate, reason] of [
+    [{ ...manifest, exports: { ...migrated, ...sw, './host': './src/host.ts' } }, 'another entry'],
+    [{ ...manifest, exports: { ...migrated, './switch': './src/host.ts' } }, 'the entry retargeted to another file'],
+    [{ ...manifest, exports: { ...withoutMigration, ...sw } }, 'the switch entry without the migration entry'],
+  ]) {
+    f.write(path, candidate);
+    assert.throws(() => selectImpact([path], f), /more than/, reason);
+  }
+});
+
 test('#658: the K8 cloud edge is admitted only as a workspace spec', t => {
   const f = fixture(t);
   const path = 'examples/bot-collaboration/package.json';
