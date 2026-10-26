@@ -25,7 +25,9 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres 0030 and the attempts stored before it
          VALUES ($1, 'old', 'device-1', 'offered', '2026-01-01T00:00:00.000Z')`,
         [TENANT],
       );
-      await expect(migrate(scope.pool, DEPLOY_SQL)).resolves.toMatchObject({ applied: ['0030_task_attempt_phase_times.sql'] });
+      // Add only 0030, so later migrations do not change what this run applies.
+      await copyFile(join(DEPLOY_SQL, '0030_task_attempt_phase_times.sql'), join(before, '0030_task_attempt_phase_times.sql'));
+      await expect(migrate(scope.pool, before)).resolves.toMatchObject({ applied: ['0030_task_attempt_phase_times.sql'] });
 
       const clock = createMutableClock(new Date('2026-10-27T00:00:00.000Z'));
       const store = new PostgresTaskAttemptStore(scope.pool, clock);
