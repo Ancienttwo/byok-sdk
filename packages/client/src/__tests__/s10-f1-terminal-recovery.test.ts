@@ -105,8 +105,15 @@ async function activeFixture(unsent: boolean, overrides: Partial<TaskRunnerDeps>
 function cancel(runner: TaskRunner, reason = 'first cancellation') {
   return runner.handleEnvelope(createEnvelope('task.cancel', { reason }, { taskId: TASK, seq: 2 }));
 }
-function reject(runner: TaskRunner) {
-  return runner.handleEnvelope(createEnvelope('task.reject', { reason: 'first rejection' }, { taskId: TASK, seq: 3 }));
+/** A reject names the approval it decides, so the task first asks for one. */
+async function reject(h: { runner: TaskRunner; sent: Envelope[] }) {
+  void h.runner.requestApproval(TASK, 'gate');
+  const request = await vi.waitFor(() => {
+    const envelope = h.sent.find(e => e.type === 'task.await_approval');
+    if (envelope?.type !== 'task.await_approval') throw new Error('no approval request yet');
+    return envelope;
+  });
+  return h.runner.handleEnvelope(createEnvelope('task.reject', { reason: 'first rejection', approvalId: request.payload.approvalId }, { taskId: TASK, seq: 3 }));
 }
 function terminals(sent: Envelope[]) {
   return sent.filter(e => ['task.cancelled', 'task.fail', 'task.complete'].includes(e.type));
@@ -134,7 +141,7 @@ describe('S10-F1 active terminal revocation recovery', () => {
     const originalRevoke = AgentMessageOutbox.prototype.revoke;
     const revoke = vi.spyOn(AgentMessageOutbox.prototype, 'revoke').mockRejectedValueOnce(new Error('transient revoke failure'));
     try {
-      await expect(cause === 'cancelled' ? cancel(h.runner) : reject(h.runner)).rejects.toThrow('transient revoke failure');
+      await expect(cause === 'cancelled' ? cancel(h.runner) : reject(h)).rejects.toThrow('transient revoke failure');
       expect(revoke).toHaveBeenCalledTimes(1);
       expect(terminals(h.sent)).toHaveLength(0);
       expect(h.runner.activeTaskCount, JSON.stringify(h.sent)).toBe(1);
@@ -169,7 +176,7 @@ it.each(['cancelled', 'failed'] as const)('S10-F1 shares one failed and one reco
     .mockImplementationOnce(async () => { entered.resolve(); await first.promise; throw new Error('first revoke failed'); })
     .mockImplementationOnce(async function (this: AgentMessageOutbox, taskId) { retried.resolve(); await retry.promise; return original.call(this, taskId); });
   try {
-    const selected = cause === 'cancelled' ? cancel(h.runner) : reject(h.runner);
+    const selected = cause === 'cancelled' ? cancel(h.runner) : reject(h);
     await entered.promise;
     const waiting = Promise.allSettled([selected, cancel(h.runner, 'competing cancel'), h.runner.shutdownActiveTasks('competing shutdown')]);
     first.resolve();

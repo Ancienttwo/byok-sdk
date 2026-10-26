@@ -10,6 +10,7 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
+import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
@@ -38,6 +39,8 @@ function wholeMessageAdapter(): StubRuntimeAdapter {
   return adapter;
 }
 
+const INSTRUCTION = 'reply with exactly: CONSOLIDATED';
+
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
 async function makeRunner(
@@ -62,7 +65,7 @@ async function makeRunner(
 
 async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'claude' | 'codex'): Promise<void> {
   await runner.handleEnvelope(
-    createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'reply with exactly: CONSOLIDATED', runtime }, { taskId, seq: 1 }),
+    createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: INSTRUCTION, runtime }, { taskId, seq: 1 }),
   );
 }
 
@@ -104,7 +107,7 @@ describe('TaskRunner task.complete.finalMessage (#322)', () => {
       await startTask(runner, 'claude-split-reply', 'claude');
 
       const payload = await completion(sent, 'claude-split-reply');
-      expect(payload.finalMessage).toMatch(/^reply-1:.*CONSOLIDATED$/);
+      expect(payload.finalMessage).toBe(`reply-1:${prependAgentMemoryGuidance(INSTRUCTION)}`);
       expect(payload.summary).toBe(payload.finalMessage);
     } finally {
       vi.unstubAllEnvs();
@@ -124,7 +127,7 @@ describe('TaskRunner task.complete.finalMessage (#322)', () => {
       await startTask(runner, `claude-partial-${copies}`, 'claude');
 
       const payload = await completion(sent, `claude-partial-${copies}`);
-      expect(payload.finalMessage).toMatch(/^reply-1:.*CONSOLIDATED$/);
+      expect(payload.finalMessage).toBe(`reply-1:${prependAgentMemoryGuidance(INSTRUCTION)}`);
       expect(payload.summary).toBe(payload.finalMessage!.repeat(copies));
       expect(JSON.stringify(sent)).not.toContain('message_draft_delta');
     } finally {

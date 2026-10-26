@@ -201,7 +201,8 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
     // configured limit.
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(sent.some((e) => e.type === 'task.complete' && e.task_id === 'task-ok')).toBe(true);
+    // The Agent home finish does real filesystem work before the terminal.
+    await vi.waitFor(() => expect(sent.some((e) => e.type === 'task.complete' && e.task_id === 'task-ok')).toBe(true));
     await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
 
     await vi.advanceTimersByTimeAsync(5000);

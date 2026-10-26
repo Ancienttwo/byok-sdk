@@ -43,7 +43,7 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   };
   await post(createEnvelope('task.claim', { deviceId: device.deviceId, runtime: 'pi' }, { taskId: b.taskId }));
   await post(createEnvelope('task.started', {}, { taskId: b.taskId }));
-  await post(createEnvelope('task.await_approval', { summary: 'approve B' }, { taskId: b.taskId }));
+  await post(createEnvelope('task.await_approval', { summary: 'approve B', approvalId: 'approval-b' }, { taskId: b.taskId }));
   await cloud.cloud.approveTask(cloud.tenant, b.taskId);
   await cloud.cancelTask(a.taskId, 'cancel A before its handler completes');
   // Cloud now filters the first offer, but page one still contains B.

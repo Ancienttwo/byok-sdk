@@ -104,7 +104,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
       type: 'task.offer_for_agent',
       task_id: 'good-task',
       seq: 3,
-      payload: { instruction: 'do it' },
+      payload: { agentRef: { agentId: 'agent-long-poll', profileRevision: 'rev-1' }, instruction: 'do it' },
     };
 
     // Every poll returns the SAME [bad, valid] batch — matches the server's

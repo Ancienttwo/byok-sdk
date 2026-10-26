@@ -1,4 +1,3 @@
-import { testAgentHomeConfig } from './fixtures/test-agent';
 import { formatStartErrorReason } from '../bin/commands/start';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -28,7 +27,6 @@ describe('bin/config: loadConfig', () => {
       productId: 'acme',
       serverUrl: 'http://new.example',
       workspaceRoot: '/ws',
-      agentHome: testAgentHomeConfig(),
       localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE,
     });
   });
@@ -43,7 +41,6 @@ describe('bin/config: loadConfig', () => {
         productId: 'acme',
         serverUrl: 'http://example',
         workspaceRoot: '/ws',
-        agentHome: testAgentHomeConfig(),
         authRequestDeadlineMs: 250,
       }),
     );
@@ -61,7 +58,6 @@ describe('bin/config: loadConfig', () => {
         productId: 'acme',
         serverUrl: 'http://example',
         workspaceRoot: '/ws',
-        agentHome: testAgentHomeConfig(),
         localAgentRelease: { version: '9.9.9' },
       }),
     );
@@ -73,7 +69,6 @@ describe('bin/config: loadConfig', () => {
       productId: 'acme',
       serverUrl: 'http://example',
       workspaceRoot: '/ws',
-      agentHome: testAgentHomeConfig(),
       localAgentRelease: { version: '9.9.9' },
     } as never)).toThrow(/localAgentRelease.*distribution/i);
   });
@@ -113,7 +108,6 @@ describe('bin/config: loadConfig', () => {
         [() => loadConfig(configPath), `config at "${configPath}" is not valid JSON`],
         [() => loadConfig(path.join(dir, 'missing.json')), `could not read config at "${path.join(dir, 'missing.json')}"; check the path and read permissions`],
         [() => loadConfig(undefined, { productName: sentinel }), 'config is missing required field "productId"'],
-        [() => loadConfig(undefined, { ...base, workspaceRoot: undefined }), 'config is missing required field "workspaceRoot"'],
         [() => loadConfig(undefined, { ...base, localAgentRelease: { version: sentinel } } as never), 'config field "localAgentRelease" is distribution-owned and must not be supplied'],
         [() => loadConfig(undefined, { ...base, gitWorkspace: sentinel } as never), 'gitWorkspace must be an object'],
         [() => loadConfig(undefined, { ...base, gitWorkspace: { mode: sentinel } } as never), 'gitWorkspace.mode must be local-checkpoints'],

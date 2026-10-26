@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DaemonObserver, MAX_TRACKED_TASKS, type DaemonEvent } from '../daemon/observer';
-import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { StubRuntimeAdapter, type StubSession } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -433,7 +433,7 @@ describe('daemon local observability (DaemonObserver)', () => {
         observer.subscribe((e) => events.push(e));
 
         observer.noteApprovalDispatched('task-a', 'appr-1');
-        { const queued = createEnvelope('task.await_approval', { summary: 'Bash: rm -rf /tmp' }, { taskId: 'task-a' }); observer.captureOutboundApproval(queued); observer.handleOutboundEnvelope(queued); }
+        { const queued = createEnvelope('task.await_approval', { summary: 'Bash: rm -rf /tmp', approvalId: 'appr-1' }, { taskId: 'task-a' }); observer.captureOutboundApproval(queued); observer.handleOutboundEnvelope(queued); }
 
         const awaiting = events.find((e) => e.kind === 'awaiting-approval');
         if (awaiting?.kind !== 'awaiting-approval') throw new Error('unreachable');
@@ -446,8 +446,8 @@ describe('daemon local observability (DaemonObserver)', () => {
         observer.subscribe((e) => events.push(e));
 
         observer.noteApprovalDispatched('task-a', 'appr-1');
-        { const queued = createEnvelope('task.await_approval', { summary: 'first' }, { taskId: 'task-a' }); observer.captureOutboundApproval(queued); observer.handleOutboundEnvelope(queued); }
-        { const queued = createEnvelope('task.await_approval', { summary: 'second' }, { taskId: 'task-a' }); observer.captureOutboundApproval(queued); observer.handleOutboundEnvelope(queued); }
+        { const queued = createEnvelope('task.await_approval', { summary: 'first', approvalId: 'appr-1' }, { taskId: 'task-a' }); observer.captureOutboundApproval(queued); observer.handleOutboundEnvelope(queued); }
+        { const queued = createEnvelope('task.await_approval', { summary: 'second', approvalId: 'appr-2' }, { taskId: 'task-a' }); observer.captureOutboundApproval(queued); observer.handleOutboundEnvelope(queued); }
 
         const awaitingEvents = events.filter((e) => e.kind === 'awaiting-approval');
         expect(awaitingEvents).toHaveLength(2);
@@ -464,7 +464,7 @@ describe('daemon local observability (DaemonObserver)', () => {
         observer.subscribe((e) => events.push(e));
 
         observer.noteApprovalDispatched('task-other', 'appr-other');
-        { const queued = createEnvelope('task.await_approval', { summary: 'x' }, { taskId: 'task-b' }); observer.captureOutboundApproval(queued); observer.handleOutboundEnvelope(queued); }
+        { const queued = createEnvelope('task.await_approval', { summary: 'x', approvalId: 'appr-b' }, { taskId: 'task-b' }); observer.captureOutboundApproval(queued); observer.handleOutboundEnvelope(queued); }
 
         const awaiting = events.find((e) => e.kind === 'awaiting-approval');
         if (awaiting?.kind !== 'awaiting-approval') throw new Error('unreachable');
@@ -474,6 +474,14 @@ describe('daemon local observability (DaemonObserver)', () => {
   });
 
   describe('approve()/reject() — local wiring onto the same code path a server-sent task.approve/task.reject drives', () => {
+    /** Has the stub session ask for an approval and returns the id the daemon sent. */
+    async function awaitApproval(session: StubSession, taskId: string): Promise<string> {
+      session.emit({ type: 'needs_approval', summary: 'needs a human' });
+      const request = await server.waitFor((e) => e.type === 'task.await_approval' && e.task_id === taskId);
+      if (request.type !== 'task.await_approval') throw new Error('unreachable');
+      return request.payload.approvalId;
+    }
+
     it('approve() resolves approval(true) on the active session via runner.handleEnvelope', async () => {
       const adapter = new StubRuntimeAdapter();
       const { daemon: d } = await setupDaemon(adapter);
@@ -488,8 +496,9 @@ describe('daemon local observability (DaemonObserver)', () => {
       await server.waitFor((e) => e.type === 'task.started');
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
       const [session] = adapter.sessions;
+      const approvalId = await awaitApproval(session!, 'task-approve-local-1');
 
-      await d.approve('task-approve-local-1');
+      await d.approve('task-approve-local-1', { approvalId });
 
       expect(session?.resolveApprovalCalls).toEqual([{ approved: true }]);
     });
@@ -508,8 +517,9 @@ describe('daemon local observability (DaemonObserver)', () => {
       await server.waitFor((e) => e.type === 'task.started');
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
       const [session] = adapter.sessions;
+      const approvalId = await awaitApproval(session!, 'task-reject-local-1');
 
-      await d.reject('task-reject-local-1', 'not allowed locally');
+      await d.reject('task-reject-local-1', { approvalId, reason: 'not allowed locally' });
 
       expect(session?.resolveApprovalCalls).toEqual([{ approved: false, reason: 'not allowed locally' }]);
       const fail = await server.waitFor((e) => e.type === 'task.fail' && e.task_id === 'task-reject-local-1');
@@ -519,7 +529,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     it('approve() on an unknown/inactive taskId is a safe no-op', async () => {
       const adapter = new StubRuntimeAdapter();
       const { daemon: d } = await setupDaemon(adapter);
-      await expect(d.approve('no-such-task')).resolves.toBeUndefined();
+      await expect(d.approve('no-such-task', { approvalId: 'no-such-approval' })).resolves.toBeUndefined();
     });
 
     it('approve()/reject() before start() throw a clear precondition error', async () => {
@@ -529,8 +539,8 @@ describe('daemon local observability (DaemonObserver)', () => {
         {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product-observer-not-started', serverUrl: server.url, workspaceRoot, storeDir },
         [new StubRuntimeAdapter()],
       );
-      await expect(daemon.approve('task-x')).rejects.toThrow(/not started/i);
-      await expect(daemon.reject('task-x')).rejects.toThrow(/not started/i);
+      await expect(daemon.approve('task-x', { approvalId: 'approval-x' })).rejects.toThrow(/not started/i);
+      await expect(daemon.reject('task-x', { approvalId: 'approval-x' })).rejects.toThrow(/not started/i);
     });
   });
 });
@@ -540,8 +550,8 @@ it('freezes approval identity at queue time across delayed settlement and a newe
   const observer = new DaemonObserver();
   const events: DaemonEvent[] = [];
   observer.subscribe((event) => events.push(event));
-  const first = createEnvelope('task.await_approval', { summary: 'first' }, { taskId: 'task' });
-  const second = createEnvelope('task.await_approval', { summary: 'second' }, { taskId: 'task' });
+  const first = createEnvelope('task.await_approval', { summary: 'first', approvalId: 'approval-first' }, { taskId: 'task' });
+  const second = createEnvelope('task.await_approval', { summary: 'second', approvalId: 'approval-second' }, { taskId: 'task' });
   observer.noteApprovalDispatched('task', 'approval-first'); observer.captureOutboundApproval(first);
   observer.noteApprovalDispatched('task', 'approval-second'); observer.captureOutboundApproval(second);
   expect(events).toEqual([]);

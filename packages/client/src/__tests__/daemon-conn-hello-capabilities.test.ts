@@ -174,17 +174,12 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
 });
 
 /**
- * C2 (cross-model review, P2): `computeCapabilities` (`create-daemon.ts`)
- * used to emit only `steer`/`blob-upload` on `conn.hello.capabilities` — the
- * CONNECTION-level flags, distinct from the per-runtime
- * `conn.hello.runtimes[].capabilities` matrix the describe block above
- * covers. This daemon has unconditionally included `approvalId` on
- * `task.await_approval`/`task.approve`/`task.reject` since M5, but never
- * advertised the `approval-targeting` flag saying so, so the server's own
- * `targeted` marking (`ConnectionHub.approveTask`/`rejectTask`,
- * `packages/server/src/hub.ts`) always treated every daemon as legacy.
+ * `conn.hello.capabilities` carries the CONNECTION-level flags, distinct from
+ * the per-runtime `conn.hello.runtimes[].capabilities` matrix the describe
+ * block above covers. Wire v4 has no approval flag: every approval request
+ * and decision names its approval.
  */
-describe('conn.hello.capabilities (C2: approval-targeting)', () => {
+describe('conn.hello.capabilities', () => {
   let server: TestServer;
   let daemon: Daemon | undefined;
 
@@ -197,7 +192,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     await server.close();
   });
 
-  it('advertises approval-targeting unconditionally, alongside the pre-existing steer/blob-upload flags', async () => {
+  it('advertises exactly the connection flags, with no approval flag', async () => {
     const pi = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }) });
 
     const workspaceRoot = await tmpDir('byok-conn-hello-capflags-workspace-');
@@ -212,11 +207,9 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     const hello = await server.waitFor((e) => e.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
 
-    expect(hello.payload.capabilities).toContain('approval-targeting');
-    expect(hello.payload.capabilities).toContain('dispatch-selection');
-    // Unconditional, exactly like `blob-upload` — not gated on any
-    // adapter's own `capabilities()` the way `steer` is.
-    expect(hello.payload.capabilities).toContain('blob-upload');
+    // `blob-upload` is unconditional, not gated on any adapter's own
+    // `capabilities()` the way `steer` is.
+    expect(hello.payload.capabilities).toEqual(['steer', 'blob-upload', 'terminal-projection-selection', 'dispatch-selection', 'toolset-selection', 'custom-harness']);
   });
 
   it('withholds dispatch-selection when a custom built-in-id adapter has not opted into exact target semantics', async () => {

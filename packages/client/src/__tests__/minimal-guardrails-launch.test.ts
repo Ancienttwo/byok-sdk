@@ -17,6 +17,7 @@ import { observationOf } from './fixtures/mcp-observation';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 
 /**
  * Minimal guardrails: no PermissionPolicy reaches a runtime. Each bundled
@@ -240,7 +241,7 @@ describe('daemon admission', () => {
     await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'task-no-policy');
     expect(server.received.some((envelope) => envelope.type === 'task.decline')).toBe(false);
     expect(adapter.startCalls).toHaveLength(1);
-    expect(adapter.startCalls[0]?.task.instruction).toBe('no policy');
+    expect(adapter.startCalls[0]?.task.instruction).toBe(prependAgentMemoryGuidance('no policy'));
     expect(adapter.startCalls[0]?.task).not.toHaveProperty('policy');
   });
 });

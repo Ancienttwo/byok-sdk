@@ -772,33 +772,6 @@ describe('TaskRunner host toolset context nonce injection', () => {
     await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
   });
 
-  it('mints no nonce at all for a non-Agent toolset task', async () => {
-    // `byok-task-assertion-v1` REQUIRES the frozen offer's AgentRef, so an
-    // offer that has none gets no task lane rather than a weaker assertion.
-    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE, false);
-    const sent: Envelope[] = [];
-    const runner = await agentRunner(adapter, sent, twoToolsets);
-
-    await runner.handleEnvelope(
-      createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(), 
-          instruction: 'legacy toolset task',
-          runtime: 'pi',
-          requiredToolsets: ['salesko.read.v1'],
-        },
-        { taskId: 'task-no-agent', seq: 1 },
-      ),
-    );
-
-    expect(adapter.startCalls[0]?.ctx.mcpServers).toEqual({
-      saleskoread: { command: '/opt/salesko/read', args: ['--stdio'] },
-    });
-
-    adapter.sessions[0]?.emit({ type: 'turn_end' });
-    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
-  });
-
   itWithMemoryMcp('never injects the host toolset nonce into an SDK-reserved server', async () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE, false);
     const sent: Envelope[] = [];

@@ -168,7 +168,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     const storeDir = await tmpDir('byok-start-store-sentinel-');
     const config = {
       storage: { scratchRoot: testScratchRoot() },
-      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-sentinel', serverUrl: server.url, workspaceRoot, storeDir,
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-sentinel', serverUrl: server.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(),
     };
     daemon = createDaemonWithAdapters(config, [adapter]);
     await daemon.pair('pairing-code');
