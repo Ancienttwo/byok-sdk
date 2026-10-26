@@ -71,6 +71,14 @@ export function migrateWireV3Receipt(kind: WireV4ReceiptKind, body: string): Wir
   return { outcome: 'migrated', body: JSON.stringify({ ...(JSON.parse(body) as object), type: v4Type }) };
 }
 
+/** What a store runner did when no receipt was refused. */
+export interface WireV4ReceiptMigrationResult {
+  /** Receipts rewritten to v4 bytes. */
+  readonly migrated: number;
+  /** Offer and terminal receipts already readable under v4. */
+  readonly unchanged: number;
+}
+
 /** One receipt a store could not migrate. */
 export interface WireV4ReceiptRefusal {
   readonly tenantId: string;

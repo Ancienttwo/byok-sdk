@@ -96,4 +96,3 @@ export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-
 // One-shot wire v3 -> v4 receipt migration (#925), operator-invoked. Shipped in
 // 0.31.x only; the next minor removes it.
 export { migratePostgresReceiptsToWireV4 } from './wire-v4-receipt-migration';
-export type { WireV4ReceiptMigrationResult } from './wire-v4-receipt-migration';

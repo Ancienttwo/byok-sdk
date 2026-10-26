@@ -7,18 +7,12 @@ import {
   WireV4ReceiptMigrationError,
   migrateWireV3Receipt,
   wireV4ReceiptKind,
+  type WireV4ReceiptMigrationResult,
   type WireV4ReceiptRefusal,
 } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
 
 const PAGE_SIZE = 500;
-
-export interface WireV4ReceiptMigrationResult {
-  /** Receipts rewritten to v4 bytes. */
-  readonly migrated: number;
-  /** Offer and terminal receipts already readable under v4. */
-  readonly unchanged: number;
-}
 
 interface ReceiptRow {
   readonly tenant_id: string;
