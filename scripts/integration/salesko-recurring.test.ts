@@ -163,7 +163,7 @@ for (const disposal of ['delayed', 'failed'] as const) test(`Salesko + installed
   adapter.prepare = async input => { preparations++; return prepare(input); };
   const productId = 'salesko-lifecycle-fixture';
   const daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-lifecycle-test' }, productName: 'lifecycle fixture', productId,
-    serverUrl: baseUrl, workspaceRoot: join(localRoot, 'workspace'), storeDir: join(localRoot, 'store'),
+    serverUrl: baseUrl, storeDir: join(localRoot, 'store'),
     agentHome: { hostStorageRoot: join(localRoot, 'home') }, agentEgress: { policy: C.PrivateAgentEgressPolicy },
     // Stub declares no tools/list observation and never executes these projections.
     mcpToolsets: { 'salesko.read.v1': { mcpServers: { read: { command: '/bin/false' } } },
@@ -335,7 +335,7 @@ for (const ending of ['cancel', 'fail'] as const) test(`Salesko + installed Task
     { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true }, false);
   const productId = 'salesko-accepted-ending-fixture';
   const daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-ending-test' }, productName: 'ending fixture', productId,
-    serverUrl: baseUrl, workspaceRoot: join(localRoot, 'workspace'), storeDir: join(localRoot, 'store'),
+    serverUrl: baseUrl, storeDir: join(localRoot, 'store'),
     agentHome: { hostStorageRoot: join(localRoot, 'home') }, agentEgress: { policy: C.PrivateAgentEgressPolicy },
     mcpToolsets: { 'salesko.read.v1': { mcpServers: { read: { command: '/bin/false' } } },
       'salesko.propose.v1': { mcpServers: { propose: { command: '/bin/false' } } } },
@@ -618,7 +618,7 @@ for (const cut of ['before_host_commit', 'after_host_commit', 'held', 'refused']
       const { archiveAgentTerminalMessages } = await installed('@byok-sdk/client');
       const archiveDirectory = join(localRoot, 'message-audit');
       const archived = await archiveAgentTerminalMessages({ productName: 'recovery fixture', productId, serverUrl: baseUrl,
-        workspaceRoot: join(localRoot, 'workspace'), storeDir: join(localRoot, 'store'),
+        storeDir: join(localRoot, 'store'),
         agentHome: { hostStorageRoot: join(localRoot, 'home') },
       }, { confirmed: true, expectedTenantId: tenant, expectedDeviceId: first.deviceId, agentRef: binding.agentRef, archiveDirectory });
       if (cut === 'held') {
@@ -742,7 +742,7 @@ test('Salesko observes first held reply after consumer configuration loss', asyn
     { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true }, false);
   const productId = 'held-observation-fixture';
   const daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-held-test' }, productName: 'held fixture', productId,
-    serverUrl: baseUrl, workspaceRoot: join(localRoot, 'workspace'), storeDir: join(localRoot, 'store'),
+    serverUrl: baseUrl, storeDir: join(localRoot, 'store'),
     agentHome: { hostStorageRoot: join(localRoot, 'home') }, agentEgress: { policy: C.PrivateAgentEgressPolicy },
     mcpToolsets: { 'salesko.read.v1': { mcpServers: { read: { command: '/bin/false' } } },
       'salesko.propose.v1': { mcpServers: { propose: { command: '/bin/false' } } } },
