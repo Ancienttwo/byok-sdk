@@ -40,7 +40,7 @@ All nine public packages move together. Pin each one to exactly 0.30.2.
 | Release field | Value |
 | --- | --- |
 | Git tag | `v0.30.2` |
-| Release commit SHA | The exact merged `main` SHA of the 0.30.2 release preparation, recorded after merge |
+| Release commit SHA | The exact `main` SHA that the 0.30.2 release dispatch validates, recorded at release |
 
 The install command for each install set is in the README
 [install sets](../../README.md#install-sets) section. That block is checked
