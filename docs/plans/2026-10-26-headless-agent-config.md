@@ -215,7 +215,7 @@ RAFT 把 agent 的创建和编辑表单拆成四层：
 | 选 custom | `adapter`、`auth_mode`、`base_url` 清空并设为必填。SDK 不给默认值；Host 想要默认值时通过 policy 显式传入（D5） |
 | 改 `adapter` | `auth_mode` 的可选项按 profile 规则收窄：anthropic 只有 `x_api_key`，`openai_compatible` 不能用 `x_api_key`。当前值不再合法时重置 |
 | `auth_mode` 设为 `none` | secret 字段隐藏，`secret` 设为 `none` |
-| 选一个 `representable` 的 catalog model | `model_source = catalog`，`pi_model` 取自 catalog。thinking level 的可选项是该模型支持的级别：支持 Pi 默认级别时取默认值，否则置空并设为必填（D4） |
+| 选一个 `representable` 的 catalog model | `model_source = catalog`，`pi_model` 取自 catalog。thinking level 的可选项是该模型支持的级别：只有 `off` 一个级别时取 `off`；支持 Pi 默认级别时取默认值；否则置空并设为必填（D4。`off` 这一条是 owner 2026-10-26 的细化，见 §14.2） |
 | 选 `unrepresentable` 或不在 catalog 里的 model | `model_source = manual`，`pi_model` 必填，按 `PiModelConfigSchema` 校验。视图列出不可表达的字段路径，Host 可以展示原因 |
 | 改 `base_url` | 重新判断 secret 身份（§5.6）。catalog 条目是否适用见 D6 |
 | 选 Host policy 提供的条目 | `model_source = host`，`pi_model` 取自 policy，仍要通过 `PiModelConfigSchema` |
@@ -357,7 +357,7 @@ RAFT 把 agent 的创建和编辑表单拆成四层：
 | D1 | 是否接受边界调整：SDK 提供 headless 配置逻辑，Host 仍然渲染 | 接受。只改 `docs/security.md` 和 keys README 的措辞，三条理由不变 |
 | D2 | 新入口是否保证能在浏览器加载 | 保证。成本是入口预算、拆出 `node:crypto` 和约束测试。AiphaBee 可以先用设备往返，不需要打包步骤 |
 | D3 | 入口预算 | 实现时实测，按 #398 的规则取实测值 × 1.1，由 owner 批准。入口直接包含 catalog 表（源码约 157 KB；`pi-catalog` 入口预算 173,028 B） |
-| D4 | 默认 thinking level | 从 pinned Pi 生成 `PI_DEFAULT_THINKING_LEVEL`。模型不支持默认级别时要求显式选择，SDK 不自造默认值 |
+| D4 | 默认 thinking level | 从 pinned Pi 生成 `PI_DEFAULT_THINKING_LEVEL`。模型不支持默认级别时要求显式选择，SDK 不自造默认值。owner 2026-10-26 细化：模型只有 `off` 一个级别时直接取 `off`，这个值由 schema 唯一确定（§14.2） |
 | D5 | custom vendor 的默认值 | 不给默认值。Host 需要时通过 policy 显式传入 |
 | D6 | catalog 条目是否只在 `base_url` 等于 vendor 的 catalog 值时适用 | AiphaBee 预设注释说 Pi 会按 endpoint URL 推导额外的兼容设置。实现切片先对 pinned Pi 核实，再写成规则 |
 | D7 | §6 的前置切片何时做 | 和第一阶段并行，不阻塞 API。验收时记录可表达覆盖率 |
@@ -415,22 +415,28 @@ S1 和 S2 并行，各自一个 worktree、一个 draft PR。
 | 切片 | PR | 状态 |
 | --- | --- | --- |
 | S1 | [#987](https://github.com/Ancienttwo/byok-sdk/pull/987) | draft。两轮只读验收审阅都通过 |
-| S2 | [#988](https://github.com/Ancienttwo/byok-sdk/pull/988) | draft。两轮审阅共提出 6 个问题，都已修复，并用复现脚本在合并后的产物上确认 |
+| S2 | [#988](https://github.com/Ancienttwo/byok-sdk/pull/988) | draft。两轮审阅共提出 6 个问题，都已修复，并用复现脚本在合并后的产物上确认。之后按 owner 的决定加了 off-only 规则（`e1df526e`，见 14.2） |
 
-两个 PR 在 `0d1d71e6` 上合并后（S1 `6079ce72`，S2 `3b9c1437`；之后两边只改了文字）跑过这些检查，都通过：build、生成文件检查、keys 与 client 的 typecheck、keys 全量测试、client 的 Pi 测试、依赖 keys 的 cloud-do 和两个 example、CI 脚本测试、version-authority。api-surface 只剩三个预算超标，超出的部分正好是两个 PR 各自增量的和，按下面第 3 步处理。
+两个 PR 在 `0d1d71e6` 上合并后（S1 `6079ce72`，S2 `3b9c1437`）跑过这些检查，都通过：build、生成文件检查、keys 与 client 的 typecheck、keys 全量测试、client 的 Pi 测试、依赖 keys 的 cloud-do 和两个 example、CI 脚本测试、version-authority。
+
+之后 S1 只改了文字。S2 的 `e1df526e` 只改 `model-route.ts` 和它的测试，keys 包以外没有代码 import 这个入口。在 S1 `00e88719` 加 S2 `5754525a` 的合并上重跑了 build、生成文件检查、keys 的 typecheck、keys 全量测试（906 个通过，12 个跳过）和 version-authority，都通过。
+
+两次合并的 api-surface 都只剩三个预算超标，超出的部分正好是两个 PR 各自增量的和，按下面第 3 步处理。
 
 合入顺序：
 
 1. 0.30.2 的版本准备 PR 合入。
 2. #987 转为 ready 后合入。
-3. #988 先 merge `origin/main`，运行 `bun run check:api-surface -- --update`，再按合并后的实测值 × 1.1 重新提出 `@byok-sdk/keys`、`@byok-sdk/keys/model-route`、`bin:byok-pi-provider-launcher` 三个预算，同步 README 的入口表，然后合入。按集成实测的 289,135 B、353,435 B、216,134 B 估算，三个预算约为 318,049 B、388,779 B、237,748 B，最终以合并时的实测为准。
+3. #988 先 merge `origin/main`，运行 `bun run check:api-surface -- --update`，再按合并后的实测值 × 1.1 重新提出 `@byok-sdk/keys`、`@byok-sdk/keys/model-route`、`bin:byok-pi-provider-launcher` 三个预算，同步 README 的入口表，然后合入。按集成实测的 289,135 B、353,529 B、216,134 B 估算，三个预算约为 318,049 B、388,882 B、237,748 B，最终以合并时的实测为准。
 
 ### 14.2 owner 的决定
 
 | 事项 | 决定 |
 | --- | --- |
 | D3 预算取值 | 取实测值 × 1.1，向上取整。`@byok-sdk/keys/pi-catalog` 维持 354,516 B（322,287 B × 1.1） |
-| model-route 入口体积 | 接受入口带整张 catalog 表：合并后 353,435 B，gzip 后 22,110 B。0.31.0 不拆分。D3 里“源码约 157 KB”是按 S1 之前的 178 条可表达条目估的，S1 之后是 752 条 |
+| model-route 入口体积 | 接受入口带整张 catalog 表：决定时合并实测 353,435 B，gzip 后 22,110 B；加入 off-only 规则后为 353,529 B。0.31.0 不拆分。D3 里“源码约 157 KB”是按 S1 之前的 178 条可表达条目估的，S1 之后是 752 条 |
+| 只支持 `off` 的模型（#988） | 自动取 `off`，用户不必再选（D4 的细化）。实现在 `e1df526e`，文档在 `5754525a`。重新选择 model 时按新模型重算级别。修改手填的 `pi_model` 时，沿用“当前级别仍被支持就保留”的规则，所以自动填的 `off` 也会保留。752 条可表达条目里有 158 条只支持 `off`，在合并后的源码上逐条走过一遍，都能通过设备端的 profile 解析 |
+| #988 的其余待决项 | 新错误码 `invalid_value`、新 key 的 2560 字节上限、同一 model id 出现在多个 api 下时不给 `api` 就报 `not_a_choice`、`policy.models` 也约束手填的 model：都接受现状。Pi provider 的命名 0.31.0 不改，等 cerebras 和 xai 两处核实后再议 |
 
 ### 14.3 D6 核实结果
 
@@ -458,14 +464,7 @@ S1 和 S2 并行，各自一个 worktree、一个 draft PR。
 ### 14.5 还没做的
 
 - 合入和发布：14.1 的三步，都由 owner 操作。
-- #988 里待 owner 决定的事项：
-  - 只支持 off 的模型是否要求用户显式选择；
-  - 新错误码 `invalid_value`；
-  - 新 key 的 2560 字节上限；
-  - 同一 model id 出现在多个 api 下时如何处理；
-  - `policy.models` 是否也约束手填的 model；
-  - Pi provider 的命名。
-- 两处运行时差异还没核实：cerebras 的溢出识别和 xai 的 include。
+- 两处运行时差异还没核实：cerebras 的溢出识别和 xai 的 include。核实后再决定 Pi provider 的命名。
 - S3：AiphaBee 采用。0.31.0 发布后在下游仓库单独开 PR，按 §11 验收。
 - §13 列的后续工作（provider 模型发现、runtime 可选状态、第二阶段）还没有开 issue。
 - 实施中发现的既有缺口，只报告，没有修：
