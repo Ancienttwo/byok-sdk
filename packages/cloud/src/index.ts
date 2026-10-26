@@ -427,6 +427,8 @@ export type {
 } from './maintenance';
 export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
 export type { ReceiptRetentionClass } from './receipt-retention';
+export { WireV4ReceiptMigrationError, migrateWireV3Receipt, wireV4ReceiptKind } from './wire-v4-receipt-migration';
+export type { WireV4ReceiptKind, WireV4ReceiptMigration, WireV4ReceiptRefusal } from './wire-v4-receipt-migration';
 export type { ReceiptCollectExpiredInput } from './stores/ports';
 export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
 export { createInProcessMailboxWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS } from './stores/in-memory/mailbox-wake';
