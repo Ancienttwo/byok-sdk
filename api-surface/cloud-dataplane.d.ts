@@ -117,6 +117,7 @@ export type { PostgresTenantErasureCompositionOptions, PostgresTenantErasureOpti
 export { createPostgresMailboxWake } from './mailbox-wake';
 export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake';
 export { migratePostgresToWireV4, preflightPostgresWireV4Migration } from './wire-v4-receipt-migration';
+export type { PostgresWireV4MigrationResult, WireV4DeletedRedactionReceipt } from './wire-v4-receipt-migration';
 // ==== @byok-sdk/cloud-dataplane dist/mailbox-wake.d.ts ====
 import { type MailboxWake } from '@byok-sdk/cloud';
 export interface PostgresMailboxWakeOptions {
@@ -1676,8 +1677,23 @@ export declare class PostgresTruthCommitter implements TruthCommitter {
  * transaction, or not at all. It ships in 0.31.x only; 0.32.0 removes it
  * (#1017).
  */
-import { type WireV3LegacyTask, type WireV4MigrationPreflight, type WireV4ReceiptMigrationResult } from '@byok-sdk/cloud';
+import { type TaskRedactionCounts, type WireV3LegacyTask, type WireV4MigrationPreflight, type WireV4ReceiptMigrationResult } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
+/** The redaction audit receipt of a deleted legacy task, as the redaction store recorded it. */
+export interface WireV4DeletedRedactionReceipt {
+    readonly tenantId: string;
+    readonly taskId: string;
+    readonly redactedAt: string;
+    readonly counts: TaskRedactionCounts;
+}
+export interface PostgresWireV4MigrationResult extends WireV4ReceiptMigrationResult {
+    /**
+     * The redaction audit receipt of every deleted legacy task that was
+     * redacted. The migration deletes the receipt with the task, so the
+     * operator keeps this list as the audit record.
+     */
+    readonly deletedRedactionReceipts: readonly WireV4DeletedRedactionReceipt[];
+}
 /** Lists the legacy tasks and every unmappable row. Changes nothing. */
 export declare function preflightPostgresWireV4Migration(pool: Pool): Promise<WireV4MigrationPreflight>;
 /**
@@ -1687,4 +1703,4 @@ export declare function preflightPostgresWireV4Migration(pool: Pool): Promise<Wi
  * receipts, in one transaction. Otherwise it throws and changes nothing.
  * Writers must be stopped while it runs.
  */
-export declare function migratePostgresToWireV4(pool: Pool, confirmedLegacyTasks: readonly WireV3LegacyTask[]): Promise<WireV4ReceiptMigrationResult>;
+export declare function migratePostgresToWireV4(pool: Pool, confirmedLegacyTasks: readonly WireV3LegacyTask[]): Promise<PostgresWireV4MigrationResult>;

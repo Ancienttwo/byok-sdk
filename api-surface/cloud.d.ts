@@ -3107,7 +3107,7 @@ export { ByokCloudError, CLOUD_ERROR_CODES, TaskOfferAppendRefusedError, isCloud
 export type { CloudErrorCode } from './errors';
 export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore, } from './stores/in-memory/agent-memory-projection';
 export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionStore, } from './agent-memory-projection';
-export { TASK_REDACTION_MAX_TASKS } from './task-redaction';
+export { TASK_REDACTION_MAX_TASKS, taskRedactionReceiptKey } from './task-redaction';
 export type { TaskRedactionCodec, TaskRedactionCounts, TaskRedactionRefusal, TaskRedactionResult, TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult, } from './task-redaction';
 export { parseRecordedWriteResult } from './e2ee-member';
 export type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeProofRequest, E2eeProvenWrite, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow, E2eeScopeShred, } from './e2ee-member';
@@ -5381,15 +5381,14 @@ export type WireV4UnmappableRow = {
     readonly refusal: 'approval_id_missing';
 }
 /**
- * A mailbox row of a non-legacy task that a v4 device would still receive
- * as older wire bytes: pending, or an expired dead letter a store can replay.
+ * A pending mailbox row of a non-legacy task in older wire bytes. A v4
+ * device would fail to decode it and stop its cursor there.
  */
  | {
     readonly kind: 'mailbox';
     readonly tenantId: string;
     readonly deviceId: string;
     readonly seq: number;
-    readonly state: 'pending' | 'expired';
     readonly refusal: 'wire_version_unsupported';
 };
 /** The read-only result an operator reviews before the migration changes anything. */
