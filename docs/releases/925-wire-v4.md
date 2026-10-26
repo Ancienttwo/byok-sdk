@@ -28,10 +28,14 @@ reader and no capability negotiation between the two majors.
 - `ByokServer.dispatch` resumes an Agent session and needs `agentRef` and
   `sessionRef`. Start fresh work with `executions.submit`. `executions.submit`
   returns no `TaskHandle`; read the task with `tasks.get`, cancel it with
-  `tasks.cancel`. `TaskHandle.approve`, `reject` and `steer` exist only on a
-  dispatched resume. A Host that approved or steered a fresh task through the
-  removed legacy `dispatch` must now resume the session with `dispatch` to
-  get a handle, or let the device resolve the approval locally.
+  `tasks.cancel`, and decide its pending approval with `tasks.approve` or
+  `tasks.reject` (the same path and refusals as `TaskHandle.approve` and
+  `reject`). Steering needs a `TaskHandle`, which only a dispatched resume
+  returns.
+- `dispatch` refusals come from the Agent lane: an unknown or revoked device
+  is `agent_capability_missing` (was `device_not_found`), and an existing
+  taskId is `agent_task_already_exists` (was `coordination_input_invalid`).
+  Update any Host code that matches on the old codes.
 - The daemon runs Agent offers only. Configure `DaemonConfig.agentHome`; a
   daemon without one declines every offer. `DaemonConfig.strictAgentOnly` is
   removed and raises `DaemonConfigFieldRemovedError`.

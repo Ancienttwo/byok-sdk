@@ -45,7 +45,12 @@
     untouched.
   - `ByokServer.dispatch` takes only `AgentResumeDispatchInput` (`agentRef`
     and `sessionRef`); `LegacyDispatchInput` is removed. Fresh work uses
-    `executions.submit`.
+    `executions.submit`. Two `dispatch` refusal codes change, because the
+    Agent lane answers them: an unknown or revoked device is
+    `agent_capability_missing` (was `device_not_found`), and a taskId that
+    already exists is `agent_task_already_exists` (was
+    `coordination_input_invalid`). A Host that matches on the old codes must
+    match the new ones.
   - One-shot wire v4 migration of stored state, in two steps per store. The
     read-only preflight (`preflightPostgresWireV4Migration(pool)` in
     `@byok-sdk/cloud-dataplane`, `preflightSqliteWireV4Migration(path)` in
@@ -69,6 +74,13 @@
   - The protocol test alias `byok-protocol-previous` pins 0.30.2, the last v3
     release, as the rejection oracle. `byok-protocol-floor` (0.27.0) and
     `published-compat.test.ts` are removed until a v4 release is published.
+- **Feature (server; #925)** — `ByokServer.tasks.approve(taskId, opts?)` and
+  `tasks.reject(taskId, reason?, opts?)` decide a pending approval by taskId,
+  so a task that `executions.submit` created can be approved without a
+  `TaskHandle`. They take the same `opts.approvalId` as `TaskHandle.approve`
+  and `reject`, share their one code path over `ByokCloud.approveTask` and
+  `rejectTask`, and refuse the same way: `task_not_found`,
+  `task_not_awaiting_approval` or `StaleApprovalError`.
 - **Feature (cloud, cloud-dataplane, server)** — `TaskAttempt`
   (`ByokCloud.readTaskAttempt`) records four write-once phase instants:
   `offeredAt`, `claimedAt`, `firstOutputAt` and `terminalAt` (#980). Each is written by the store operation that makes
