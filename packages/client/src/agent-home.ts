@@ -592,12 +592,19 @@ export function stableAgentHomeOwnerId(storeDir: string, productId: string): str
   return `store-product:${createHash('sha256').update(identity).digest('hex')}`;
 }
 
+// Fail closed: the SDK cannot tell a crash leftover from a live writer.
+function corruptLeaseMarker(lockPath: string, problem: string): AgentHomeLeaseCorruptError {
+  return new AgentHomeLeaseCorruptError(
+    `Agent home lease marker ${lockPath} ${problem}. Confirm that no process uses this Agent home, then delete this lease marker file and retry.`,
+  );
+}
+
 function parseLeaseMarker(value: string, lockPath: string): StoredLeaseMarker {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
   } catch {
-    throw new AgentHomeLeaseCorruptError(`Agent home lease marker ${lockPath} is corrupt`);
+    throw corruptLeaseMarker(lockPath, 'is corrupt');
   }
   if (
     typeof parsed !== 'object' || parsed === null ||
@@ -607,13 +614,13 @@ function parseLeaseMarker(value: string, lockPath: string): StoredLeaseMarker {
     typeof (parsed as { canonicalHome?: unknown }).canonicalHome !== 'string' ||
     !path.isAbsolute((parsed as { canonicalHome: string }).canonicalHome)
   ) {
-    throw new AgentHomeLeaseCorruptError(`Agent home lease marker ${lockPath} has an invalid shape`);
+    throw corruptLeaseMarker(lockPath, 'has an invalid shape');
   }
   let agentRef: AgentRef;
   try {
     agentRef = validateAgentRef((parsed as { agentRef?: unknown }).agentRef);
   } catch {
-    throw new AgentHomeLeaseCorruptError(`Agent home lease marker ${lockPath} has an invalid AgentRef`);
+    throw corruptLeaseMarker(lockPath, 'has an invalid AgentRef');
   }
   const marker = parsed as Omit<StoredLeaseMarker, 'agentRef'>;
   return { ...marker, agentRef, canonicalHome: path.resolve(marker.canonicalHome) };

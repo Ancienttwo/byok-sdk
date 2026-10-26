@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.30.2 — source candidate
+## 0.30.2 — 2026-10-26 (published)
 
 0.30.2 is a PATCH release under a one-release exception to the pre-1.0
 policy, as 0.30.1 was. The owner chose 0.30.2 instead of 0.31.0 (issues #978
@@ -15,9 +15,14 @@ declares `e2ee.member.kem-epoch`, so the Host upgrades first. Migration 0029,
 and the first 0.30.2 open of a SQLite store, refuse a member chain that
 already holds a `rotate` entry. The examples changes of #793 S9, #794 H3 and
 #975 slice 5b are also breaking for a Host that copies the hosted
-collaboration example. The envelope wire stays v3. This candidate is not
-published. See the [release notes](docs/releases/v0.30.2.md) for scope, what
-is not in 0.30.2 and the known limits, and the
+collaboration example. The envelope wire stays v3. The npm registry lists
+all nine public packages at 0.30.2. The registry publication times fall on
+2026-10-26 (UTC). The registry read on 2026-10-26 at 13:36 UTC reports
+0.30.2 as `latest` for all nine. The tag `v0.30.2` and its GitHub Release
+point to `b1469e5a`. This release does not say that 0.30.2, or a Host on
+it, is ready for production; the product loop gate (#977) is evaluated
+after release. See the [release notes](docs/releases/v0.30.2.md) for scope,
+what is not in 0.30.2 and the known limits, and the
 [Host upgrade checklist](docs/releases/host-upgrade-0.30.2.md) for the
 upgrade steps. All nine public manifests and their lock records move to
 0.30.2.
@@ -519,6 +524,11 @@ upgrade steps. All nine public manifests and their lock records move to
   links now fails at its first acquire, with an error that names the
   directory (#605). Examples are FAT32, exFAT, and some network or FUSE
   filesystems. Before this change, acquire did not need hard links.
+- **Changed (client)** — `AgentHomeLeaseCorruptError` for an Agent home lease
+  marker now says how to recover (#605): confirm that no process uses this
+  Agent home, then delete the lease marker file and retry. A crash before
+  0.30.2 could leave an empty marker. Such a marker is still refused; the SDK
+  does not delete or reclaim it on restart.
 - **Feature (examples)** — K8 gains the owner switch format (#975 slice 2):
   the `./migration` entry, also exported from the K8 root. `SwitchExport`
   version 1 holds one whole coordination domain (an L tenant or an H scope) in
@@ -623,7 +633,7 @@ upgrade steps. All nine public manifests and their lock records move to
   start of any generation of an imported intent, as K8 `intentFacts`. No
   SDK or wire change.
 
-## 0.30.1 — 2026-10-24 (published)
+## 0.30.1 — 2026-10-24 (published; superseded by 0.30.2)
 
 0.30.1 is a PATCH release under a one-release exception to the pre-1.0
 policy. On 2026-10-24 the owner chose 0.30.x instead of 0.31.0 (issue #872),
@@ -635,9 +645,9 @@ SQLite migration of #909 means that a migrated store cannot go back to Pi
 1.3.0. The examples changes of #882 and #884 are also breaking for a Host
 that copies the K8 example. The npm registry lists all nine public packages
 at 0.30.1. The registry publication times fall on 2026-10-24 (UTC). The
-registry read on 2026-10-24 at 19:19 UTC reports 0.30.1 as `latest` for all
-nine. The tag `v0.30.1` and its GitHub Release point to
-`142acbe2`. A 0.30.1 daemon paired as an E2EE member advertises
+registry read on 2026-10-24 at 19:19 UTC reported 0.30.1 as `latest` for all
+nine. The read on 2026-10-26 at 13:36 UTC reports 0.30.2 as `latest`. The
+tag `v0.30.1` and its GitHub Release point to `142acbe2`. A 0.30.1 daemon paired as an E2EE member advertises
 `sealed-payload-v1` while its member is verified and the deployment declares
 `e2ee.member`. See the [release notes](docs/releases/v0.30.1.md) for scope,
 the release rule of `sealed-payload-v1`, the upgrade notes and the
@@ -1061,7 +1071,7 @@ of #783, #784, #831 and #834. The examples changes of #820, #823 and #852 are
 also breaking for a Host that copies the K8 example. The npm registry lists
 all nine public packages at 0.30.0. The registry publication times fall on
 2026-10-24 (UTC). The registry read on 2026-10-24 at 07:39 UTC reported
-0.30.0 as `latest` for all nine. The read on 2026-10-24 at 19:19 UTC reports
+0.30.0 as `latest` for all nine. The read on 2026-10-24 at 19:19 UTC reported
 0.30.1 as `latest`. The tag `v0.30.0` and its GitHub Release point to
 `6b779cff`. A default 0.30.0 daemon does not advertise `sealed-payload-v1`.
 See the [release notes](docs/releases/v0.30.0.md) for scope, the release rule

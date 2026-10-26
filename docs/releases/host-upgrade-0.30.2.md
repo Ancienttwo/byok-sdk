@@ -8,8 +8,8 @@ sections, and links to them. When the two disagree, the CHANGELOG wins.
 This page is an upgrade checklist. It does not say that 0.30.2, or a Host on
 it, is ready for production. The product loop gate is #977.
 
-0.30.2 is not published. The release preparation record is
-[`docs/releases/v0.30.2.md`](v0.30.2.md).
+0.30.2 is published on npm `latest` for all nine packages. The release
+record is [`docs/releases/v0.30.2.md`](v0.30.2.md).
 
 ## Version policy
 
@@ -40,7 +40,7 @@ All nine public packages move together. Pin each one to exactly 0.30.2.
 | Release field | Value |
 | --- | --- |
 | Git tag | `v0.30.2` |
-| Release commit SHA | The exact merged `main` SHA of the 0.30.2 release preparation, recorded after merge |
+| Release commit SHA | `b1469e5a236e99736c9a63b75fe845f102f81dc0` |
 
 The install command for each install set is in the README
 [install sets](../../README.md#install-sets) section. That block is checked
