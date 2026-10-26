@@ -543,8 +543,10 @@
   exports the encodings a switch derives again and calls them itself:
   `routineWakeKey`, `occurrenceIntentKey`, `isOccurrenceIntentKey`,
   `occurrenceOfIntentKey`, `frozenInput`, and also `validateRetry`. K4
-  `loadForSwitch(dump, verify)` checks the read-back before it commits. No SDK,
-  wire or SQL change.
+  `loadForSwitch(dump, verify)` checks the read-back before it commits. The
+  root ledger functions also refuse a ledger with an uncommitted import, and the
+  format refuses a routine Turn whose id is not an occurrence intent key
+  (`invalid`). No SDK, wire or SQL change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

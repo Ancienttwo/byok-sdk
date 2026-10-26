@@ -430,8 +430,9 @@ const COLLABORATION_KEYS = ['version', 'team', 'turns', 'budgets', 'delegations'
 const COLLABORATION_OPTIONAL = ['inputs', 'inputBatches', 'channel', 'revision', 'commands', 'cardCalls'];
 
 /**
- * The live state of a drained domain: no owner record of the source, every live Bot on a device of the export, no Turn or
- * input batch left open, no Agent home write that may have reached a device, and no card call in flight.
+ * The live state of a drained domain: no owner record of the source, each routine Turn keyed by its occurrence's intent
+ * key, every live Bot on a device of the export, no Turn or input batch left open, no Agent home write that may have
+ * reached a device, and no card call in flight.
  */
 function checkCollaboration(content: SwitchContent): void {
   const state = content.collaboration;
@@ -445,7 +446,11 @@ function checkCollaboration(content: SwitchContent): void {
     && Array.isArray(state.team.homeOperations) && object(state.turns) && optional(state.inputBatches, object) && optional(state.cardCalls, object),
   'collaboration state');
   for (const bot of Object.values(state.team.bots)) ensure(object(bot) && object(bot.execution) && text(bot.execution.deviceId), 'bot');
-  for (const turn of Object.values(state.turns)) ensure(object(turn), 'turn');
+  for (const turn of Object.values(state.turns)) {
+    ensure(object(turn), 'turn');
+    // A routine Turn's id is its occurrence's intent key, which K8 reads the occurrence from (`routineOccurrence`).
+    if (turn.source === 'routine') ensure(typeof turn.id === 'string' && isOccurrenceIntentKey(turn.id), `routine Turn ${String(turn.id)} names no occurrence`);
+  }
   for (const batch of Object.values(state.inputBatches ?? {})) ensure(object(batch), 'input batch');
   for (const op of state.team.homeOperations) ensure(object(op), 'home operation');
   const devices = new Set(content.devices.map(device => device.deviceId));

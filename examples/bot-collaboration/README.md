@@ -1065,9 +1065,11 @@ synchronous step: it dumps the ledger (K4 `dumpForSwitch`), checks it, seals it
 
 From the mark on, also after a restart, this Host writes nothing to the
 ledger. Each K8 write refuses with `SwitchExportedError` (`code:
-'switch_exported'`) after the write's own refusals, so a command on a frozen
-or H-owned device still gets its device refusal. That holds for the root
-entries a product calls directly too: `commitInLedger`, `retainInLedger`,
+'switch_exported'`) after the write runs, so a new command on a frozen or
+H-owned device still gets its device refusal. A refusal the write raises first
+also comes before the export's: a replayed command id (also on a frozen
+device), an id conflict, `stale_revision` and `RetentionRefused`. Each refusal
+writes nothing. That holds for the root entries a product calls directly too: `commitInLedger`, `retainInLedger`,
 `callCardsInLedger` (before the connector runs) and `syncTurnInLedger`. The
 passes and the timer run nothing, the K4 hooks and the routine lifecycle and
 update entries refuse, and the compact veto (`botCompactVeto`) refuses every
@@ -1105,9 +1107,10 @@ a new tenant), and with no `BotCollaboration` on it:
    `discard`). It first marks the import as being discarded, so a commit
    refuses it from then on.
 
-A `BotCollaboration` refuses to open a ledger with an import record, so no work
-runs on an import before its commit, and a committed tenant has no record to
-discard. The import writes each derived value from the format: `agent` for the
+A `BotCollaboration` refuses to open a ledger with an import record, and the
+root entries (`commitInLedger`, `retainInLedger`, `callCardsInLedger`,
+`syncTurnInLedger`) refuse it the same way before they run. So no work runs on
+an import before its commit, and a committed tenant has no record to discard. The import writes each derived value from the format: `agent` for the
 new tenant, the task ids and inputs of every generation, `applied`, slots, wake
 keys, intent ids, `attempts` and the Host intent handlers. A concluded intent
 gets K4's cursors of a new row (`phase: 'settled'`, `notBefore: 0`). Routines

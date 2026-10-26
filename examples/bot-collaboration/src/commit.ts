@@ -9,7 +9,7 @@ import { cardCallDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, refuseRetired, r
 import type { CommandRecord, CommitRequest, CommitResult } from './rules/commit';
 import { botDeviceRefusal } from './topology';
 import { retainRoots, type RetentionInput, type RetentionLimits, type RetentionResult } from './retention';
-import { refuseExported } from './switch';
+import { refuseExported, refuseImported } from './switch';
 
 // The L store of the commit contract (#739 D1): one K4 ledger transaction holds the state change,
 // the command record and the outbox rows. K4 deduplicates terminals and messages, so L records no callback.
@@ -19,11 +19,14 @@ export { CommitConflict, revisionOf, type CommitRequest, type CommitResult, type
 export type { Command, CommandPorts } from './rules/commands';
 
 /**
- * One K8 write to an L ledger in one ledger transaction. It refuses while the domain is exported for a switch (#975), after
- * the work's own refusals, so a command on a frozen or H-owned device still gets its device refusal.
+ * One K8 write to an L ledger in one ledger transaction (#975). It refuses a ledger that holds an uncommitted switch import
+ * before the work runs. It refuses while the domain is exported after the work, so a new command on a frozen or H-owned
+ * device still gets its device refusal. A refusal the work raises first (a replayed command id, an id conflict,
+ * `stale_revision`, `RetentionRefused`) also comes before the export's; each refusal rolls the transaction back.
  */
 export function writeLedger<T>(ledger: Pick<HostLedger, 'transaction'>, apply: (state: LedgerState, rows: ApplicationRows) => T): T {
   return ledger.transaction((s, rows) => {
+    refuseImported(stateOf(s.application));
     const result = apply(s, rows);
     refuseExported(stateOf(s.application));
     return result;
@@ -62,9 +65,10 @@ export function syncTurnInLedger(ledger: HostLedger, s: LedgerState, rows: Appli
     // #957: a Turn whose Bot's device is frozen for a switch, or owned by H, is held and never frozen into an intent.
     deviceRefusal: botId => botDeviceRefusal(stateOf(s.application), botId),
   };
+  refuseImported(stateOf(s.application));
   const step = syncTurn(stateOf(s.application), turn, facts, options, (key, value) => project(s, key, value));
   const more = applyStep();
-  // The caller's transaction rolls the step back on an exported domain (#975).
+  // The caller's transaction rolls the step back on an uncommitted import or an exported domain (#975).
   refuseExported(stateOf(s.application));
   return more;
   function applyStep(): boolean {

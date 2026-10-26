@@ -304,8 +304,8 @@ export class BotCollaboration {
   private models(): Record<string, ExecutionTemplate> { return this.options.models ?? { default: this.options.execution }; }
   snapshot(): CollaborationState { return stateOf(this.ledger.snapshot().application); }
   /**
-   * Every K8 write of this Host, except the switch steps (#975). It refuses while the domain is exported, after the work's
-   * own refusals, so a command on a frozen or H-owned device still gets its device refusal.
+   * Every K8 write of this Host, except the switch steps (#975). It refuses while the domain is exported, after the work,
+   * so a new command on a frozen or H-owned device still gets its device refusal (`writeLedger` lists the others).
    */
   private write<T>(apply: (state: LedgerState, rows: ApplicationRows) => T): T { return writeLedger(this.ledger, apply); }
   private exclusive<T>(work: () => Promise<T>): Promise<T> {

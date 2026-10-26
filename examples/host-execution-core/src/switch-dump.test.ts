@@ -265,3 +265,19 @@ it('checks the read-back inside the load transaction, and leaves the tenant empt
   expect(refused.dumpForSwitch()).toEqual(dump);
 });
 
+
+it('hands the check the rows read back from the database, not the dump it was given', () => {
+  const source = open(file(), 'source');
+  populate(source);
+  const dump = source.dumpForSwitch();
+  // The database orders each list by its key, so a dump given in reverse order reads back sorted.
+  const reversed = { ...structuredClone(dump), tombstones: [...dump.tombstones].reverse(), rows: [...dump.rows].reverse() };
+  expect(reversed.rows).not.toEqual(dump.rows);
+  const target = twin();
+  let seen: LedgerDump | undefined;
+  target.loadForSwitch(reversed, readBack => { seen = readBack; });
+  expect(seen).not.toBe(reversed);
+  expect(seen!.rows).toEqual(dump.rows);
+  expect(seen!.tombstones).toEqual(dump.tombstones);
+  expect(seen).toEqual(target.dumpForSwitch());
+});
