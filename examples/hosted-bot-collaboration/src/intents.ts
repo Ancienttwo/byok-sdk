@@ -1,7 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 import { agentKey, canonical, fifoHeads, frozenInput, hash, isSealed, promoteOccurrence, queuedExpiry, RetiredIntentIdentityError, SealedDispatchUnavailableError,
   submitFrozen, taskId,
-  type Conclusion, type RetryPolicy, type ExecutionTemplate, type FrozenExecutionInput, type FrozenSubmitPort, type IntentExecution } from '@byok-sdk/example-host-execution-core';
+  type Conclusion, type RetryPolicy, type ExecutionTemplate, type FrozenExecutionInput, type FrozenSubmitPort, type IntentExecution, type Json } from '@byok-sdk/example-host-execution-core';
 import type { CollaborationState, Turn } from '@byok-sdk/example-bot-collaboration/model';
 import { concludeRoutineTurn, routineOccurrence } from '@byok-sdk/example-bot-collaboration/routines';
 import type { IntentConclusions } from '@byok-sdk/example-bot-collaboration/delivery-routing';
@@ -32,8 +32,9 @@ export interface RoutineTimes { retryUntil?: number; conclusion?: Conclusion }
 const ONE_ATTEMPT: RetryPolicy = { maxAttempts: 1, delaysMs: [], retryFailures: false };
 
 /**
- * Saves one intent with its frozen input and its stable task id, `taskId(key, 0)`. The caller holds the scope lock.
- * A second freeze of the same Turn with the same identity changes nothing; another identity throws, as in K4 `enqueue`.
+ * Saves one intent of generation 0 with its frozen input and its stable task id, `taskId(key, 0)`. The caller holds the
+ * scope lock. A second freeze of the same Turn with the same identity changes nothing and returns the stored input, whose
+ * task id is the stored row's (an imported row may be of a later generation, #975); another identity throws, as in K4 `enqueue`.
  * The handler is part of the identity, so a Turn never takes over a Host intent row, and a Host intent never a Turn's.
  * A Turn whose intent compaction retired throws `RetiredIntentIdentityError`, as K4 `enqueue` refuses a retired key (#793 S8).
  */
@@ -48,21 +49,22 @@ export async function freezeIntent<E extends IntentExecution>(client: PoolClient
   }
   const scopeKey = storedKey(scope), key = storedKey(freeze.key);
   const input = frozenInput(freeze.execution, taskId(freeze.key, 0)) as unknown as E & { taskId: string };
-  const prior = await client.query<{ source: string; handler: string | null; input: string; wait_until: string }>(
-    'SELECT source, handler, input::text AS input, wait_until::text FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
+  const prior = await client.query<{ source: string; handler: string | null; task_id: string; input: string; wait_until: string }>(
+    'SELECT source, handler, task_id, input::text AS input, wait_until::text FROM intent WHERE scope = $1 AND key = $2', [scopeKey, key]);
   if (prior.rows[0]) {
-    const row = prior.rows[0];
-    if (row.source !== freeze.source || row.handler !== (freeze.handler ?? null) || canonical(JSON.parse(row.input)) !== canonical(input)
-      || Number(row.wait_until) !== freeze.waitUntil) {
+    const row = prior.rows[0], stored = JSON.parse(row.input) as E & { taskId: string };
+    if (row.source !== freeze.source || row.handler !== (freeze.handler ?? null)
+      || canonical(stored) !== canonical(frozenInput(freeze.execution, row.task_id) as unknown as Json) || Number(row.wait_until) !== freeze.waitUntil) {
       throw new Error('Intent identity conflict');
     }
-    return input;
+    return stored;
   }
   if ((await retiredIntents(client, scopeKey, [freeze.key])).size) throw new RetiredIntentIdentityError();
   // A new intent can create execution, so its device must have an active H binding (#793 D2e).
   await activeBinding(client, scopeKey, freeze.execution.deviceId);
-  await client.query(`INSERT INTO intent (scope, key, task_id, ordinal, agent, source, handler, input, retry, wait_until, submission, retry_until, conclusion)
-    SELECT $1, $2, $3, coalesce(max(ordinal) + 1, 0), $4, $5, $10, $6::json, $11::json, $7, 'reserved', $8, $9 FROM intent WHERE scope = $1`,
+  await client.query(`INSERT INTO intent (scope, key, task_id, generation, ordinal, agent, source, handler, input, retry, wait_until, submission,
+      retry_until, conclusion)
+    SELECT $1, $2, $3, 0, coalesce(max(ordinal) + 1, 0), $4, $5, $10, $6::json, $11::json, $7, 'reserved', $8, $9 FROM intent WHERE scope = $1`,
   [scopeKey, key, input.taskId, agentKey(scope, freeze.execution), freeze.source, JSON.stringify(input), freeze.waitUntil,
     routine.retryUntil ?? null, routine.conclusion ?? null, freeze.handler ?? null, JSON.stringify(ONE_ATTEMPT)]);
   return input;
@@ -74,6 +76,25 @@ export async function frozenIntent(client: PoolClient, scope: string, task: stri
     [storedKey(scope), task]);
   const row = found.rows[0];
   return row && { turnId: JSON.parse(row.key) as string, input: row.input };
+}
+
+/** The frozen input of the current task of intent `key`: the K4 `intent(key)` that L reads. */
+export async function currentIntent(client: PoolClient, scope: string, key: string): Promise<{ turnId: string; input: FrozenExecutionInput } | undefined> {
+  const found = await client.query<{ input: FrozenExecutionInput }>('SELECT input FROM intent WHERE scope = $1 AND key = $2', [storedKey(scope), storedKey(key)]);
+  return found.rows[0] && { turnId: key, input: found.rows[0].input };
+}
+
+/**
+ * The frozen input of task `task` of an earlier generation of an imported intent (#975 D1): the intent's input with that
+ * task id, as K4 `frozenInput` builds each generation's input.
+ */
+export async function earlierIntent(client: PoolClient, scope: string, task: string): Promise<{ turnId: string; input: FrozenExecutionInput } | undefined> {
+  const found = await client.query<{ key: string; input: FrozenExecutionInput }>(`SELECT e.key, i.input FROM intent_execution e
+    JOIN intent i ON i.scope = e.scope AND i.key = e.key WHERE e.scope = $1 AND e.task_id = $2`, [storedKey(scope), task]);
+  const row = found.rows[0];
+  if (!row) return undefined;
+  const { taskId: _current, ...execution } = row.input;
+  return { turnId: JSON.parse(row.key) as string, input: frozenInput(execution as IntentExecution, task) };
 }
 
 type IntentFact = NonNullable<ReturnType<SyncFacts['intent']>>;
@@ -267,10 +288,11 @@ export class HostedSubmitter {
   async run(): Promise<SubmitPass> {
     // The NOT EXISTS head filter must match K4 fifoHeads, which the claim checks again under the scope lock.
     // A scope of a store version this code does not support is left out before the limit: its rows cannot be
-    // claimed or written, so they must not fill a pass ahead of the healthy scopes. So is an exported scope (#975).
+    // claimed or written, so they must not fill a pass ahead of the healthy scopes. So is an exported scope, and one with an
+    // uncommitted import (#975).
     const due = await inSchema(this.pool, this.schema, client => client.query<{ scope: string; key: string }>(
       `SELECT i.scope, i.key FROM intent i JOIN scope s ON s.scope = i.scope
-        WHERE s.state_version = ANY($3::integer[]) AND s.switch_export IS NULL AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
+        WHERE s.state_version = ANY($3::integer[]) AND s.switch_export IS NULL AND s.switch_import IS NULL AND i.conclusion IS NULL AND i.submission <> 'delivered' AND i.cancel_reason IS NULL
         AND i.next_at <= $1 AND NOT EXISTS (SELECT 1 FROM intent o WHERE o.scope = i.scope AND o.agent = i.agent
           AND o.conclusion IS NULL AND o.ordinal < i.ordinal)
         ORDER BY i.next_at, i.scope, i.ordinal LIMIT $2`, [this.now(), this.options.batch ?? 100, [...SUPPORTED_STORE_VERSIONS]]), true);

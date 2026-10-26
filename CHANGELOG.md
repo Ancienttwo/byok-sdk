@@ -572,6 +572,23 @@
   `schedule_retry_count` and `last_error`, which H's K4 routine calls now
   keep. H is unreleased, so there is no migration. K8 exports `./switch`.
   No SDK or wire change.
+- **Feature (examples)** — H runs the new-owner side of the owner switch
+  (#975 slice 5b). `importScope(scope, document, clock)` writes an L export
+  into a new scope and reads it back to the export's digest in the same
+  Postgres transaction; a mismatch writes nothing. It returns the receipt
+  the old owner commits away on. Until `commitImport(scope, digest)` no
+  work runs on the scope (`SwitchImportedError`, after the work's own
+  refusals) and the scans leave it out; `discardImport(scope)` deletes an
+  uncommitted import. An imported intent keeps its earlier generations, and
+  a message for an earlier task gets its receipt or `stale_generation`, as
+  in K4. Breaking for H callers: H's switch toward H goes, so
+  `beginSwitch` takes only target `'L'` and H becomes an owner only by
+  import; `DeviceSwitchRefusedError` loses `not_owner`. H DDL: intent
+  `generation` (no default; H's own rows write 0) with the task id CHECK on
+  it, `memory_blocked`, the table `intent_execution`, occurrence
+  `slot_replay_count`, `scope.switch_import`, and `device_binding.switching`
+  only `'L'`. H is unreleased, so there is no migration. No SDK or wire
+  change.
 
 ## 0.30.1 — 2026-10-24 (published)
 

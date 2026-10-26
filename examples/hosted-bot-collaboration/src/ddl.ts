@@ -31,7 +31,12 @@ CREATE TABLE IF NOT EXISTS scope (
   -- The owner switch export of the scope (#975): { digest, exportedAt, devices }, from the export on, also after the
   -- commit away, so the scope keeps the exported state. While it is set, no transaction that locks the scope commits,
   -- except the switch steps. NULL: not exported.
-  switch_export  json
+  switch_export  json,
+  -- The owner switch import of the scope (#975): { digest, devices }, from the import until commitImport. While it is set,
+  -- no transaction that locks the scope commits, except the switch steps, so no work runs on an uncommitted import.
+  -- NULL: no import, or a committed one.
+  switch_import  json,
+  CHECK (switch_export IS NULL OR switch_import IS NULL)
 );
 CREATE INDEX IF NOT EXISTS scope_due ON scope (due_at, scope) WHERE due_at IS NOT NULL;
 CREATE TABLE IF NOT EXISTS entity (
@@ -93,8 +98,11 @@ CREATE TABLE IF NOT EXISTS intent (
   scope          text    NOT NULL REFERENCES scope (scope),
   -- JSON.stringify(turn id), or of the Host intent key: one intent per key.
   key            text    NOT NULL,
-  -- K4 taskId(turn id, 0). It is never updated.
+  -- K4 taskId(key, generation), the task of the current generation. It is never updated.
   task_id        text    NOT NULL,
+  -- K4 Intent.generation. H never retries (#793 D2d), so its own rows are generation 0. An imported row keeps its
+  -- source generation (#975 D1), with the earlier ones in intent_execution.
+  generation     integer NOT NULL CHECK (generation >= 0),
   -- The FIFO order, the K4 sequence.
   ordinal        bigint  NOT NULL CHECK (ordinal >= 0),
   -- K4 agentKey(scope, execution): one FIFO for each scope, device and Agent.
@@ -123,6 +131,9 @@ CREATE TABLE IF NOT EXISTS intent (
   last_error     text,
   -- K4 Intent.preparationError: the code of the failure before any SDK call, as a sealed row with no sealed lane.
   preparation_error text,
+  -- K4 Intent.memoryBlocked: { resume, reason }. H runs no Agent memory, so only an import writes it (#975 D3). NULL:
+  -- not blocked.
+  memory_blocked json,
   cancel_reason  text    CHECK (cancel_reason IN ('expired', 'cancelled')),
   conclusion     text    CHECK (conclusion IN ('succeeded', 'failed', 'declined', 'cancelled', 'expired', 'superseded')),
   -- K4 Execution.started: the SDK attempt has claimedRuntime or ownerDeviceId.
@@ -133,8 +144,8 @@ CREATE TABLE IF NOT EXISTS intent (
   -- The earliest time of the next readback (readDeviceTerminal, readTaskAttempt).
   reconcile_at   bigint  NOT NULL DEFAULT 0 CHECK (reconcile_at >= 0),
   CONSTRAINT intent_input_task CHECK ((input ->> 'taskId') = task_id),
-  -- Pins task_id to K4 taskId(turn id, 0) = sha256(canonical([turn id, 0])); key is JSON.stringify(turn id).
-  CONSTRAINT intent_stable_task CHECK (task_id = encode(sha256(convert_to('[' || key || ',0]', 'UTF8')), 'hex')),
+  -- Pins task_id to K4 taskId(key, generation) = sha256(canonical([key, generation])); key is JSON.stringify(key).
+  CONSTRAINT intent_stable_task CHECK (task_id = encode(sha256(convert_to('[' || key || ',' || generation || ']', 'UTF8')), 'hex')),
   PRIMARY KEY (scope, key),
   UNIQUE (scope, task_id),
   UNIQUE (scope, ordinal)
@@ -145,6 +156,24 @@ CREATE INDEX IF NOT EXISTS intent_unsettled ON intent (scope, agent, ordinal) WH
 CREATE INDEX IF NOT EXISTS intent_due ON intent (next_at) WHERE conclusion IS NULL AND submission <> 'delivered' AND cancel_reason IS NULL;
 -- The paged reconciliation scan: every tried row that has no conclusion, across scopes (#793 D2d).
 CREATE INDEX IF NOT EXISTS intent_reconcile ON intent (reconcile_at, scope, key) WHERE conclusion IS NULL AND submission <> 'reserved';
+-- The K4 execution facts of the earlier generations 0 to generation - 1 of an intent (#975 D1). H opens no generation
+-- itself, so only an import writes these rows. The message receipt of each is the K8 accepted reply of its task id, as
+-- for the current generation. Intent compaction deletes them with the intent.
+CREATE TABLE IF NOT EXISTS intent_execution (
+  scope       text    NOT NULL,
+  key         text    NOT NULL,
+  generation  integer NOT NULL CHECK (generation >= 0),
+  -- K4 taskId(key, generation): a message for an earlier task is looked up by it.
+  task_id     text    NOT NULL,
+  submission  text    NOT NULL CHECK (submission IN ('uncertain', 'delivered')),
+  started     boolean NOT NULL,
+  attempt     json    NOT NULL,
+  terminal    json    NOT NULL,
+  CONSTRAINT intent_execution_task CHECK (task_id = encode(sha256(convert_to('[' || key || ',' || generation || ']', 'UTF8')), 'hex')),
+  PRIMARY KEY (scope, key, generation),
+  UNIQUE (scope, task_id),
+  FOREIGN KEY (scope, key) REFERENCES intent (scope, key)
+);
 CREATE TABLE IF NOT EXISTS device_binding (
   scope          text    NOT NULL REFERENCES scope (scope),
   -- JSON.stringify(device id).
@@ -156,8 +185,9 @@ CREATE TABLE IF NOT EXISTS device_binding (
   mode_revision  bigint  NOT NULL CHECK (mode_revision >= 1),
   -- Set once by revoke, in the same write that raises mode_revision. The row is kept as the tombstone.
   revoked_at     bigint  CHECK (revoked_at >= 0),
-  -- The target mode while an owner switch is open (§4.1, #957): the old owner is frozen. NULL when no switch is open.
-  switching      text    CHECK (switching IN ('L', 'H')),
+  -- The target mode while an owner switch away from H is open (§4.1, #957): H is frozen. NULL when no switch is open. H
+  -- becomes the owner only through an import (#975), so no row switches toward H.
+  switching      text    CHECK (switching = 'L'),
   CHECK (switching IS NULL OR switching <> mode),
   PRIMARY KEY (scope, device),
   UNIQUE (scope, ordinal)
@@ -207,6 +237,9 @@ CREATE TABLE IF NOT EXISTS occurrence (
   job                  json,
   -- Only for an occurrence that the Host concludes with no intent. A promoted occurrence reads its intent's conclusion.
   conclusion           text    CHECK (conclusion IN ('succeeded', 'failed', 'declined', 'cancelled', 'expired', 'superseded')),
+  -- K4 Occurrence.slotReplayCount: the redelivered wakes of its slot. H records each slot once, so only an import writes
+  -- it (#975 D5). NULL: no replay.
+  slot_replay_count    integer CHECK (slot_replay_count >= 1),
   PRIMARY KEY (scope, key),
   UNIQUE (scope, ordinal),
   -- The replay guard of one slot, in place of the K4 \`slots\` map (K4 routines.ts:125, :180).

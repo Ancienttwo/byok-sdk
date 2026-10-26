@@ -50,7 +50,11 @@ export async function decideCompaction(client: PoolClient, scopeKey: string, sta
     if (row.source === 'routine') throw new Error('H does not compact routine intents');
     if (row.conclusion === null) throw new Error('Only settled intents can be compacted');
   }
-  for (const turnId of present) await client.query('DELETE FROM intent WHERE scope = $1 AND key = $2', [scopeKey, storedKey(turnId)]);
+  // K4 compacts an intent with the execution of every generation (`ledger.ts` compact), so its earlier ones go with it (#975 D1).
+  for (const turnId of present) {
+    await client.query('DELETE FROM intent_execution WHERE scope = $1 AND key = $2', [scopeKey, storedKey(turnId)]);
+    await client.query('DELETE FROM intent WHERE scope = $1 AND key = $2', [scopeKey, storedKey(turnId)]);
+  }
   await retire(client, scopeKey, 'intent', present.map(intentIdentity));
   return { compactedIntents: present.length, alreadyCompactedIntents: turnIds.length - present.length };
 }

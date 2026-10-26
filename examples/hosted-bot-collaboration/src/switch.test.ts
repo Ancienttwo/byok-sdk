@@ -82,7 +82,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
   it('steps through freeze, commit and abort on the expected revision, and refuses every other step with nothing written', async () => {
     const scope = await bound();
     await expect(store().beginSwitch(scope, 'device', 'L', 0)).rejects.toEqual(refused('stale_revision'));
-    await expect(store().beginSwitch(scope, 'device', 'H', 1)).rejects.toEqual(refused('same_mode'));
+    // A device with no row is in the default mode L, so it has no switch to L.
+    await expect(store().beginSwitch(scope, 'other', 'L', 0)).rejects.toEqual(refused('same_mode'));
     await expect(store().commitSwitch(scope, 'device', 1, 'none')).rejects.toEqual(refused('not_switching'));
     expect(await binding(scope)).toEqual({ mode: 'H', mode_revision: '1', switching: null });
     expect(await store().beginSwitch(scope, 'device', 'L', 1)).toEqual({ mode: 'H', revision: 2, switching: 'L', revoked: false });
@@ -92,27 +93,10 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     await expect(store().abortSwitch(scope, 'device', 3)).rejects.toEqual(refused('stale_revision'));
     expect(await store().dump(scope)).toBe(frozen);
     expect(await store().commitSwitch(scope, 'device', 2, await receipt(scope, 2))).toEqual({ mode: 'L', revision: 3, revoked: false });
-    // The device is L's now, never bound again. The exported scope takes no other switch: a domain comes back to H by an
-    // import into a new scope (#975).
+    // The device is L's now, never bound again, and it has no switch to L. A domain comes back to H by an import into a new
+    // scope (#975).
     await expect(store().bindDevice(scope, 'device')).rejects.toEqual(modeRefusal);
-    await expect(store().beginSwitch(scope, 'device', 'H', 3)).rejects.toEqual(exportedRefusal);
-  });
-
-  it('switches a device with no row, in the default mode L at revision 0, to H, and then its work freezes', async () => {
-    const scope = `tenant:${randomUUID()}`;
-    await store().seed(scope, state => {
-      seedCollaboration(state);
-      Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
-      queued(state, 'q1');
-    });
-    await expect(store().beginSwitch(scope, 'device', 'L', 0)).rejects.toEqual(refused('same_mode'));
-    await expect(store().beginSwitch(scope, 'device', 'H', 1)).rejects.toEqual(refused('stale_revision'));
-    expect(await store().beginSwitch(scope, 'device', 'H', 0)).toEqual({ mode: 'L', revision: 1, switching: 'H', revoked: false });
-    // H is the new owner here: L drains its own work, and H's queued Turn of the device is the work that runs after.
-    await expect(store().drainDevice(scope, 'device', 1, { cancel: true }, clock)).rejects.toEqual(refused('not_owner'));
-    expect(await store().commitSwitch(scope, 'device', 1, 'none')).toEqual({ mode: 'H', revision: 2, revoked: false });
-    await store().sync(scope, SYNC);
-    expect((await intents(scope)).map(row => row.key)).toEqual(['q1']);
+    await expect(store().beginSwitch(scope, 'device', 'L', 3)).rejects.toEqual(refused('same_mode'));
   });
 
   it('ends an open switch with a revoke, so the device is never left frozen', async () => {
@@ -307,38 +291,6 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     expect((await store().drainDevice(scope, 'device', 2, {}, clock)).open.homes).toEqual([]);
     // It moves with the state, so it does not hold the commit.
     expect(await store().commitSwitch(scope, 'device', 2, await receipt(scope, 2))).toEqual({ mode: 'L', revision: 3, revoked: false });
-  });
-
-  it('backs off home flushes during a switch from L to H, and flushes them after its commit', async () => {
-    const scope = `tenant:${randomUUID()}`, calls = { reads: [] as string[] };
-    await store().seed(scope, state => {
-      seedCollaboration(state);
-      Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
-    });
-    const sequence = await pendingHome(scope);
-    await store().beginSwitch(scope, 'device', 'H', 0);
-    await homeSender(calls).run();
-    expect(calls.reads).toEqual([]);
-    await backedOff(scope, sequence);
-    await store().commitSwitch(scope, 'device', 1, 'none');
-    // The row waits the backoff of its fenced try, then flushes.
-    await homeSender(calls, VECTOR_NOW + 5_000, 'applied').run();
-    expect(calls.reads).toEqual([`r-${sequence}`]);
-  });
-
-  it('sends no home write to a device whose row names mode L with no open switch', async () => {
-    const scope = `tenant:${randomUUID()}`, calls = { reads: [] as string[] };
-    await store().seed(scope, state => {
-      seedCollaboration(state);
-      Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
-    });
-    // An aborted switch toward H leaves the device's row in mode L, on a scope that was never exported.
-    await store().beginSwitch(scope, 'device', 'H', 0);
-    expect(await store().abortSwitch(scope, 'device', 1)).toEqual({ mode: 'L', revision: 2, revoked: false });
-    const sequence = await pendingHome(scope);
-    await homeSender(calls).run();
-    expect(calls.reads).toEqual([]);
-    await backedOff(scope, sequence);
   });
 
   it('stops a drain that an abort overtook: no cancel after the abort, and the drain refuses', async () => {

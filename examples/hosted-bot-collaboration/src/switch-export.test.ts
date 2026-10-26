@@ -4,8 +4,8 @@ import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, occurrenceIntentKey, taskId, type FrozenSubmitPort, type Json,
   type RoutineDefinition } from '@byok-sdk/example-host-execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { commitImport, importForSwitch } from '@byok-sdk/example-bot-collaboration/switch';
-import { verifySwitchExport, type SwitchExport } from '@byok-sdk/example-bot-collaboration/migration';
+import { commitImport, importForSwitch, sealLedger } from '@byok-sdk/example-bot-collaboration/switch';
+import { sealSwitchExport, verifySwitchExport, type IntentRecord, type SwitchContent, type SwitchExport } from '@byok-sdk/example-bot-collaboration/migration';
 import { routineCalendar } from '@byok-sdk/example-bot-collaboration/routines';
 import type { InboundMessage } from '@byok-sdk/example-bot-collaboration/channel';
 import { DEVICE_SWITCHING } from '@byok-sdk/example-bot-collaboration/rules/commands';
@@ -160,6 +160,40 @@ async function plain(): Promise<string> {
   return scope;
 }
 
+const owner: InboundMessage = { channel: 'fake', platformMessageId: 'in1', conversation: { kind: 'direct', id: 'main' },
+  sender: { id: 'owner', kind: 'human' }, text: 'Do it', mentions: [] };
+/** Each store entry that writes, and the refusal it gives on an exported scope with its device frozen away from H. */
+const entries: Array<[string, (scope: string, digest: string) => Promise<unknown>, 'exported' | 'switching']> = [
+  ['a command that adds no execution', scope => store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_turn', turnId: 't1' } }, clock), 'exported'],
+  ['a command that adds execution on the frozen device', scope => store().commit(scope, { scope, commandId: randomUUID(),
+    command: { kind: 'input', botId: 'main', key: 'k', request: 'Work', sender: 'owner' } }, clock, { requireBinding: true }), 'switching'],
+  ['the inbound channel entry', scope => store().receive(scope, owner, IDENTITY, clock), 'switching'],
+  ['a Host intent on the frozen device', scope => store().enqueueHostIntent(scope, { key: 'h2', source: 'user', execution: template('device'),
+    waitUntil: NOW + 60_000 }, 'job', clock), 'switching'],
+  ['an Agent message', async scope => consumer().consume(await message(scope, 't1', 'm9')), 'exported'],
+  ['a terminal', scope => store().finish(scope, 'h1', evidence('h1'), clock), 'exported'],
+  ['the sync', scope => store().sync(scope, SYNC), 'exported'],
+  ['the routine upkeep', scope => store().planRoutines(scope, NOW, 'pass'), 'exported'],
+  ['a Host job routine', scope => store().addHostJobRoutine(scope, { id: 'job-1', version: 1, timeZone: 'UTC', rule: schedule, waitMs: 60_000,
+    lateAfterMs: 60_000, hostJob: { type: 'job', input: {} } } as never, NOW), 'exported'],
+  ['retention', scope => store().retain(scope, { acknowledgedRoots: [], now: NOW, retentionMs: MIN_TOMBSTONE_RETENTION_MS }, { contextTurnLimit: 1 }), 'exported'],
+  ['intent compaction', scope => store().compactIntents(scope, { acknowledgedTurnIds: ['h1'] }), 'exported'],
+  ['a device observation', scope => store().observeDevices(scope, new Map([['device', true]]), clock), 'exported'],
+  ['a reply check', scope => store().settleReplyCheck(scope, 'none', { nextCheckAt: 0 }, { kind: 'none' } as never, clock), 'exported'],
+  ['a card claim', scope => store().claimCard(scope, 'c1', clock, 1000), 'exported'],
+  ['a home claim', scope => store().claimHome(scope, 1, clock, 1000, 1000), 'exported'],
+  ['an outbox deferral', scope => store().deferOutbox(scope, ['card', 'c1'], clock, 1000), 'exported'],
+  ['a device revoke', scope => store().revokeDevice(scope, 'device', NOW), 'exported'],
+  ['a bind of a new device', scope => store().bindDevice(scope, 'device-3'), 'exported'],
+  ['a switch of another H device', scope => store().beginSwitch(scope, 'device-2', 'L', 1), 'exported'],
+  ['a Host intent on a device that hosts no Bot', scope => store().enqueueHostIntent(scope, { key: 'h3', source: 'user', execution: template('device-2'),
+    waitUntil: NOW + 60_000 }, 'job', clock), 'exported'],
+  ['the command entry', scope => entry().cancelTurn({ scope, principal: { kind: 'human', id: 'owner' } }, 't1'), 'exported'],
+  ['a drain', scope => store().drainDevice(scope, 'device', 2, {}, clock), 'exported'],
+  ['an audit line', scope => store().audit(scope, 'line', clock), 'exported'],
+  ['a seed', scope => store().seed(scope, () => {}), 'exported'],
+];
+
 describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#975)', () => {
   // One schema for each test, because the scans cover the whole schema.
   beforeEach(async () => {
@@ -277,13 +311,6 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
     await expect(store().abortSwitch(scope, 'device', 3)).rejects.toMatchObject({ reason: 'not_switching' });
   });
 
-  it('takes no new owner device on an exported scope: a switch toward H that opened before the export does not commit', async () => {
-    const scope = await plain();
-    expect(await store().beginSwitch(scope, 'device-2', 'H', 0)).toMatchObject({ mode: 'L', switching: 'H', revision: 1 });
-    const document = await exported(scope);
-    await expect(store().commitSwitch(scope, 'device-2', 1, document.manifest.digest)).rejects.toEqual(exportedError(document.manifest.digest));
-  });
-
   it('ends the export with an abort of its device: the fence lifts and the scope takes work again', async () => {
     const scope = await plain(), document = await exported(scope);
     const input = { kind: 'input' as const, botId: 'main', key: 'k', request: 'Work', sender: 'owner' as const };
@@ -297,38 +324,6 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
   });
 
   describe('every write path refuses an exported scope after its own refusals, and nothing is written', () => {
-    const owner: InboundMessage = { channel: 'fake', platformMessageId: 'in1', conversation: { kind: 'direct', id: 'main' },
-      sender: { id: 'owner', kind: 'human' }, text: 'Do it', mentions: [] };
-    /** Each store entry, and the refusal it gives on an exported scope with its device frozen away from H. */
-    const entries: Array<[string, (scope: string, digest: string) => Promise<unknown>, 'exported' | 'switching']> = [
-      ['a command that adds no execution', scope => store().commit(scope, { scope, commandId: randomUUID(), command: { kind: 'cancel_turn', turnId: 't1' } }, clock), 'exported'],
-      ['a command that adds execution on the frozen device', scope => store().commit(scope, { scope, commandId: randomUUID(),
-        command: { kind: 'input', botId: 'main', key: 'k', request: 'Work', sender: 'owner' } }, clock, { requireBinding: true }), 'switching'],
-      ['the inbound channel entry', scope => store().receive(scope, owner, IDENTITY, clock), 'switching'],
-      ['a Host intent on the frozen device', scope => store().enqueueHostIntent(scope, { key: 'h2', source: 'user', execution: template('device'),
-        waitUntil: NOW + 60_000 }, 'job', clock), 'switching'],
-      ['an Agent message', async scope => consumer().consume(await message(scope, 't1', 'm9')), 'exported'],
-      ['a terminal', scope => store().finish(scope, 'h1', evidence('h1'), clock), 'exported'],
-      ['the sync', scope => store().sync(scope, SYNC), 'exported'],
-      ['the routine upkeep', scope => store().planRoutines(scope, NOW, 'pass'), 'exported'],
-      ['a Host job routine', scope => store().addHostJobRoutine(scope, { id: 'job-1', version: 1, timeZone: 'UTC', rule: schedule, waitMs: 60_000,
-        lateAfterMs: 60_000, hostJob: { type: 'job', input: {} } } as never, NOW), 'exported'],
-      ['retention', scope => store().retain(scope, { acknowledgedRoots: [], now: NOW, retentionMs: MIN_TOMBSTONE_RETENTION_MS }, { contextTurnLimit: 1 }), 'exported'],
-      ['intent compaction', scope => store().compactIntents(scope, { acknowledgedTurnIds: ['h1'] }), 'exported'],
-      ['a device observation', scope => store().observeDevices(scope, new Map([['device', true]]), clock), 'exported'],
-      ['a reply check', scope => store().settleReplyCheck(scope, 'none', { nextCheckAt: 0 }, { kind: 'none' } as never, clock), 'exported'],
-      ['a card claim', scope => store().claimCard(scope, 'c1', clock, 1000), 'exported'],
-      ['a home claim', scope => store().claimHome(scope, 1, clock, 1000, 1000), 'exported'],
-      ['an outbox deferral', scope => store().deferOutbox(scope, ['card', 'c1'], clock, 1000), 'exported'],
-      ['a device revoke', scope => store().revokeDevice(scope, 'device', NOW), 'exported'],
-      ['a bind of a new device', scope => store().bindDevice(scope, 'device-3'), 'exported'],
-      ['a Host intent on a device that hosts no Bot', scope => store().enqueueHostIntent(scope, { key: 'h3', source: 'user', execution: template('device-2'),
-        waitUntil: NOW + 60_000 }, 'job', clock), 'exported'],
-      ['the command entry', scope => entry().cancelTurn({ scope, principal: { kind: 'human', id: 'owner' } }, 't1'), 'exported'],
-      ['a drain', scope => store().drainDevice(scope, 'device', 2, {}, clock), 'exported'],
-      ['an audit line', scope => store().audit(scope, 'line', clock), 'exported'],
-      ['a seed', scope => store().seed(scope, () => {}), 'exported'],
-    ];
     it.each(entries)('%s', async (_name, run, refusal) => {
       const scope = await plain();
       await store().bindDevice(scope, 'device-2');
@@ -488,5 +483,286 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
     try {
       await expect(lockScope(client, storedKey('tenant:none'))).rejects.toThrow('A scope lock needs a write transaction of inSchema');
     } finally { client.release(); }
+  });
+});
+
+const importedError = (digest: string) => expect.objectContaining({ name: 'SwitchImportedError', code: 'switch_imported', digest });
+/**
+ * H exports `scope`, a new L tenant imports and commits it, and the L ledger is sealed as the L export of the domain. L's own
+ * freeze and drain are not run: the ledger holds the drained domain that H moved, and is sealed as it stands.
+ */
+async function throughL(scope: string): Promise<{ fromH: SwitchExport; fromL: SwitchExport }> {
+  const fromH = await exported(scope);
+  const ledger = new HostLedger(':memory:', `l:${randomUUID()}`);
+  try {
+    const receipt = importForSwitch(ledger, fromH);
+    await store().commitSwitch(scope, 'device', 2, receipt.digest);
+    commitImport(ledger, receipt.digest);
+    return { fromH, fromL: sealLedger(ledger, { source: 'L', domain: ledger.tenant, exportedAt: NOW + 1,
+      devices: fromH.devices.map(device => ({ deviceId: device.deviceId, frozenRevision: 3 })) }) };
+  } finally { ledger.close(); }
+}
+/** The document sealed again after `change` edits its content. */
+function resealed(document: SwitchExport, change: (content: SwitchContent) => void): SwitchExport {
+  const { manifest: _manifest, ...content } = structuredClone(document);
+  change(content);
+  return sealSwitchExport(content);
+}
+/**
+ * Moves an intent record to `generation`, as K4 would after a retry of each earlier one: each earlier generation was
+ * delivered and ended, and the receipt of generation 0 stays with it. The current generation has no receipt.
+ */
+function retried(row: IntentRecord, generation: number): void {
+  const { taskId: _current, ...execution } = row.input as Record<string, Json>;
+  const ended = { submission: 'delivered' as const, started: true, attempt: { status: 'completed' }, terminal: { type: 'task.complete' } };
+  row.earlierExecutions = Array.from({ length: generation }, (_, earlier) => ({ ...ended,
+    ...(earlier === 0 && row.messageReceipt ? { messageReceipt: row.messageReceipt } : {}) }));
+  delete row.messageReceipt;
+  Object.assign(row, { ...ended, generation, taskId: taskId(row.key, generation), retry: { maxAttempts: generation + 1, delaysMs: Array(generation).fill(0),
+    retryFailures: true } });
+  row.input = { ...execution, taskId: row.taskId };
+}
+/** An Agent message for the task of `generation` of intent `key` of `scope`, bound as that task's input. */
+async function generationMessage(scope: string, key: string, generation: number, messageId: string, deviceId?: string): Promise<AgentMessageInput> {
+  const input = await message(scope, key, messageId);
+  return { ...input, taskId: taskId(key, generation), ...(deviceId ? { deviceId } : {}) };
+}
+const bindingRows = (scope: string) => query<{ device: string; mode: string; mode_revision: string }>(`SELECT device, mode, mode_revision::text
+  FROM ${table('device_binding')} WHERE scope = $1 ORDER BY device`, [storedKey(scope)]);
+
+describe.skipIf(POSTGRES_URL === undefined)('H switch import on real Postgres (#975)', () => {
+  beforeEach(async () => {
+    opened = await openStore();
+    hosted = new HostedCollaborationStore(opened.pool, opened.store.schema, { host: TEST_HOST, hostIntents: { job: () => {} },
+      hostJobs: { job: async () => ({ summary: {} }) } });
+    await hosted.migrate();
+  });
+  afterEach(async () => { await opened?.close(); });
+
+  it('moves a domain H to L to a new H scope: the import reads back to the digest, and every section is the one that left H', async () => {
+    const { scope } = await populated();
+    const { fromH, fromL } = await throughL(scope);
+    const target = `tenant:${randomUUID()}`;
+    expect(await store().importScope(target, fromL, clock)).toEqual({ digest: fromL.manifest.digest, devices: ['device'] });
+    expect(await bindingRows(target)).toEqual([{ device: '"device"', mode: 'L', mode_revision: '1' }]);
+    // The unsent home write gets its home row again, which the source does not move.
+    expect((await query<{ kind: string }>(`SELECT kind FROM ${table('outbox')} WHERE scope = $1 AND settled_at IS NULL`, [storedKey(target)]))
+      .map(row => row.kind)).toEqual(['home']);
+    await store().commitImport(target, fromL.manifest.digest);
+    expect(await bindingRows(target)).toEqual([{ device: '"device"', mode: 'H', mode_revision: '2' }]);
+    await store().beginSwitch(target, 'device', 'L', 2);
+    await flushProjections();
+    const again = await store().exportScope(target, [{ deviceId: 'device', expectedRevision: 3 }], clock);
+    expect(again.manifest.digests).toEqual(fromH.manifest.digests);
+    expect(again.manifest.digests).toEqual(fromL.manifest.digests);
+    // L to H to L: a new L tenant reads H's export back to its digest.
+    const ledger = new HostLedger(':memory:', `l:${randomUUID()}`);
+    try {
+      expect(importForSwitch(ledger, again)).toEqual({ digest: again.manifest.digest, devices: ['device'] });
+    } finally { ledger.close(); }
+  });
+
+  it('runs the device\'s work once the import is committed: a new Turn freezes its intent, and the moved home write is sent', async () => {
+    const { scope } = await populated();
+    const { fromL } = await throughL(scope);
+    const target = `tenant:${randomUUID()}`, calls = { reads: [] as string[], enqueued: [] as string[] };
+    await store().importScope(target, fromL, clock);
+    const homes = () => ({ read: async (request: { payload: { requestId: string } }) => { calls.reads.push(request.payload.requestId); return undefined as never; },
+      enqueue: async (request: { payload: { requestId: string } }) => { calls.enqueued.push(request.payload.requestId); } });
+    const sender = () => new HostedOutboxSender(opened!.pool, store(), { projections: { deliver: async () => {} }, homes: homes as never, now: clock });
+    await sender().run();
+    expect(calls).toEqual({ reads: [], enqueued: [] });
+    await store().commitImport(target, fromL.manifest.digest);
+    await sender().run();
+    const [sequence] = fromL.collaboration.team.homeOperations.map(op => op.sequence);
+    expect(calls).toEqual({ reads: [`r-${sequence}`], enqueued: [`r-${sequence}`] });
+    const result = await store().commit(target, { scope: target, commandId: randomUUID(), command: { kind: 'input', botId: 'main', key: 'after', request: 'Work',
+      sender: 'owner' } }, clock, { requireBinding: true });
+    const turnId = result.disposition.outcome === 'accepted' ? result.disposition.value as string : '';
+    await store().sync(target, SYNC);
+    expect(await query(`SELECT generation, submission FROM ${table('intent')} WHERE scope = $1 AND key = $2`, [storedKey(target), storedKey(turnId)]))
+      .toEqual([{ generation: 0, submission: 'reserved' }]);
+  });
+
+  it('keeps earlier generations, a memory block and a slot replay count, and answers a message of an earlier task from it', async () => {
+    const { scope } = await populated();
+    const { fromL } = await throughL(scope);
+    const routineTurn = fromL.intents.find(row => row.source === 'routine')!.key;
+    const document = resealed(fromL, content => {
+      retried(content.intents.find(row => row.key === routineTurn)!, 1);
+      const host = content.intents.find(row => row.key === 'h1')!;
+      retried(host, 2);
+      delete host.cancelReason;
+      Object.assign(host, { conclusion: 'failed', memoryBlocked: { resume: 'queued', reason: 'memory unavailable' } });
+      content.occurrences[0]!.slotReplayCount = 2;
+    });
+    const target = `tenant:${randomUUID()}`;
+    await store().importScope(target, document, clock);
+    expect(await query(`SELECT key, generation, task_id FROM ${table('intent_execution')} WHERE scope = $1 ORDER BY key, generation`, [storedKey(target)]))
+      .toEqual([{ key: '"h1"', generation: 0, task_id: taskId('h1', 0) }, { key: '"h1"', generation: 1, task_id: taskId('h1', 1) },
+        { key: JSON.stringify(routineTurn), generation: 0, task_id: taskId(routineTurn, 0) }]);
+    await store().commitImport(target, document.manifest.digest);
+    const kept = await store().dump(target);
+    // A replay of the Host intent's freeze finds the imported row of generation 2 and changes nothing, as K4 enqueue does.
+    expect(await store().enqueueHostIntent(target, { key: 'h1', source: 'user', execution: template('device'), waitUntil: NOW + 60_000 }, 'job', clock))
+      .toEqual({ key: 'h1', taskId: taskId('h1', 2), conclusion: 'failed' });
+    expect(await store().dump(target)).toBe(kept);
+    // K4's order for an earlier task: the binding, its receipt (the accepted reply of that task), else stale_generation.
+    expect(await consumer().consume(await generationMessage(target, routineTurn, 0, 'm2'))).toEqual({ outcome: 'accepted' });
+    expect(await consumer().consume(await generationMessage(target, routineTurn, 0, 'm3'))).toEqual({ outcome: 'refused', reasonCode: 'message_conflict' });
+    expect(await consumer().consume(await generationMessage(target, 'h1', 1, 'm4'))).toEqual({ outcome: 'refused', reasonCode: 'stale_generation' });
+    expect(await consumer().consume(await generationMessage(target, 'h1', 0, 'm4', 'device-2')))
+      .toEqual({ outcome: 'refused', reasonCode: 'binding_mismatch' });
+    expect(await consumer().consume(await generationMessage(target, 'h1', 3, 'm4'))).toEqual({ outcome: 'refused', reasonCode: 'unknown_task' });
+    expect(await store().dump(target)).toBe(kept);
+    await store().beginSwitch(target, 'device', 'L', 2);
+    await flushProjections();
+    expect((await store().exportScope(target, [{ deviceId: 'device', expectedRevision: 3 }], clock)).manifest.digests).toEqual(document.manifest.digests);
+    // Compaction deletes an intent with the execution of every generation, as K4 does.
+    await store().abortSwitch(target, 'device', 3);
+    expect(await store().compactIntents(target, { acknowledgedTurnIds: ['h1'] })).toMatchObject({ compactedIntents: 1 });
+    expect(await query(`SELECT key FROM ${table('intent_execution')} WHERE scope = $1`, [storedKey(target)])).toEqual([{ key: JSON.stringify(routineTurn) }]);
+  });
+
+  it('reads the reply of a delegation chain end from its current task, which an import may put in a later generation', async () => {
+    const scope = await replyPending();
+    const { fromL } = await throughL(scope);
+    const chainEnd = fromL.intents.find(row => row.source === 'bot')!.key;
+    const document = resealed(fromL, content => retried(content.intents.find(row => row.key === chainEnd)!, 1));
+    const target = `tenant:${randomUUID()}`;
+    await store().importScope(target, document, clock);
+    await store().commitImport(target, document.manifest.digest);
+    expect((await store().replyChecks(target, NOW + 86_400_000 * 30)).map(check => check.task?.taskId)).toEqual([taskId(chainEnd, 1)]);
+  });
+
+  it('carries a pending Host job, which runs once the import is committed', async () => {
+    hosted = new HostedCollaborationStore(opened!.pool, opened!.store.schema, { host: TEST_HOST, hostJobs: { job: async () => ({ summary: { ran: true } }) } });
+    const scope = await plain(), slot = routineCalendar({ rule: schedule, timeZone: 'UTC' } as unknown as RoutineDefinition, NOW - 1)!;
+    await store().addHostJobRoutine(scope, { id: 'watch', version: 1, timeZone: 'UTC', rule: schedule as never, waitMs: 60_000, lateAfterMs: 60_000,
+      hostJob: { type: 'job', input: null } }, NOW);
+    await new HostedRoutineScheduler(opened!.pool, store(), { now: () => slot }).run();
+    await new HostedOutboxSender(opened!.pool, store(), { projections: { deliver: async () => {} }, now: () => slot }).run();
+    const { fromL } = await throughL(scope);
+    // The same domain with its Host job not run yet, as an L export carries it.
+    const document = resealed(fromL, content => {
+      const occurrence = content.occurrences[0]!;
+      delete occurrence.conclusion;
+      occurrence.job = { attempts: 1 };
+      content.outbox = [{ kind: 'host-job', occurrenceKey: occurrence.key }];
+    });
+    const target = `tenant:${randomUUID()}`;
+    await store().importScope(target, document, clock);
+    const jobs = () => query(`SELECT tries, settled_at FROM ${table('outbox')} WHERE scope = $1 AND kind = 'host_job'`, [storedKey(target)]);
+    expect(await jobs()).toEqual([{ tries: 1, settled_at: null }]);
+    const sender = () => new HostedOutboxSender(opened!.pool, store(), { projections: { deliver: async () => {} }, now: () => slot + 86_400_000 });
+    expect(await sender().run()).toEqual({ steps: 0, failed: [] });
+    await store().commitImport(target, document.manifest.digest);
+    expect(await sender().run()).toMatchObject({ failed: [] });
+    expect(await jobs()).toEqual([{ tries: 2, settled_at: String(slot + 86_400_000) }]);
+    expect(await query(`SELECT job, conclusion FROM ${table('occurrence')} WHERE scope = $1`, [storedKey(target)]))
+      .toEqual([{ job: { summary: { ran: true } }, conclusion: 'succeeded' }]);
+  });
+
+  it('writes nothing when the scope does not read back to the digest', async () => {
+    const scope = await plain();
+    const { fromL } = await throughL(scope);
+    // A row that the database stores other than written: its tombstone gets an expiry.
+    await query(`CREATE FUNCTION ${table('shift_expiry')}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.expires_at := 1; RETURN NEW; END $$`);
+    await query(`CREATE TRIGGER shift_expiry BEFORE INSERT ON ${table('retired_identity')} FOR EACH ROW EXECUTE FUNCTION ${table('shift_expiry')}()`);
+    const target = `tenant:${randomUUID()}`, document = resealed(fromL, content => {
+      content.tombstones.push({ kind: 'row', digest: hash(['turns', 'gone']) });
+    });
+    await expect(store().importScope(target, document, clock)).rejects.toMatchObject({ name: 'SwitchExportError', reason: 'manifest' });
+    for (const name of ['scope', 'entity', 'intent', 'device_binding', 'retired_identity', 'outbox']) {
+      expect(await query(`SELECT 1 FROM ${table(name)} WHERE scope = $1`, [storedKey(target)])).toEqual([]);
+    }
+  });
+
+  it('refuses a document from H, an existing scope and a document that does not verify, and writes nothing', async () => {
+    const scope = await plain();
+    const { fromH, fromL } = await throughL(scope);
+    const target = `tenant:${randomUUID()}`;
+    await expect(store().importScope(target, fromH, clock)).rejects.toMatchObject({ name: 'SwitchExportError', reason: 'invalid' });
+    await expect(store().importScope(target, { ...fromL, exportedAt: fromL.exportedAt + 1 }, clock)).rejects.toMatchObject({ reason: 'manifest' });
+    await expect(store().importScope(scope, fromL, clock)).rejects.toThrow(`A switch import needs a new scope: ${scope} exists`);
+    expect(await query(`SELECT 1 FROM ${table('scope')} WHERE scope = $1`, [storedKey(target)])).toEqual([]);
+  });
+
+  it('commits only the import of its digest, once, and discards only an uncommitted one', async () => {
+    const scope = await plain();
+    const { fromL } = await throughL(scope);
+    const target = `tenant:${randomUUID()}`, other = `tenant:${randomUUID()}`, { digest } = fromL.manifest;
+    await store().importScope(target, fromL, clock);
+    await store().importScope(other, fromL, clock);
+    await expect(store().commitImport(target, 'other')).rejects.toThrow(`The switch import is ${digest}, not other`);
+    // An imported scope takes no switch away before its commit.
+    await expect(store().exportScope(target, [{ deviceId: 'device', expectedRevision: 1 }], clock)).rejects.toEqual(importedError(digest));
+    await expect(store().abortSwitch(target, 'device', 1)).rejects.toEqual(importedError(digest));
+    await store().commitImport(target, digest);
+    await expect(store().commitImport(target, digest)).rejects.toThrow('This scope holds no switch import record');
+    await expect(store().discardImport(target)).rejects.toThrow('This scope holds no switch import record');
+    await store().discardImport(other);
+    for (const name of ['scope', 'entity', 'entry', 'command', 'intent', 'intent_execution', 'device_binding', 'routine', 'occurrence', 'outbox',
+      'retired_identity', 'archived_row']) {
+      expect(await query(`SELECT 1 FROM ${table(name)} WHERE scope = $1`, [storedKey(other)])).toEqual([]);
+    }
+    await expect(store().commitImport(other, digest)).rejects.toThrow('This scope holds no switch import record');
+  });
+
+  describe('every write path refuses an uncommitted import after its own refusals, and nothing is written', () => {
+    /** The refusals that come first: each device of the import is in mode L, owned by the old owner until the commit. */
+    const mode = expect.objectContaining({ name: 'DeviceBindingError', reason: 'mode', deviceId: 'device' });
+    const own: Record<string, unknown> = {
+      'a command that adds execution on the frozen device': mode,
+      'the inbound channel entry': mode,
+      'a Host intent on the frozen device': mode,
+      // The import binds only the export's devices.
+      'a Host intent on a device that hosts no Bot': expect.objectContaining({ name: 'DeviceBindingError', reason: 'unbound', deviceId: 'device-2' }),
+      'a drain': expect.objectContaining({ name: 'DeviceSwitchRefusedError', reason: 'not_switching' }),
+      'a switch of another H device': expect.objectContaining({ name: 'DeviceSwitchRefusedError', reason: 'same_mode', deviceId: 'device-2' }),
+    };
+    it.each(entries)('%s', async (name, run) => {
+      const scope = await plain();
+      await store().bindDevice(scope, 'device-2');
+      await query(`INSERT INTO ${table('archived_row')} (scope, namespace, id, body, expires_at) VALUES ($1, 'commands', '"old"', '{}', 1)`, [storedKey(scope)]);
+      await store().enqueueHostIntent(scope, { key: 'h1', source: 'user', execution: template('device'), waitUntil: NOW + 60_000 }, 'job', clock);
+      await query(`UPDATE ${table('intent')} SET conclusion = 'cancelled', cancel_reason = 'cancelled' WHERE scope = $1`, [storedKey(scope)]);
+      await pendingHome(scope);
+      const { fromL } = await throughL(scope), target = `tenant:${randomUUID()}`, { digest } = fromL.manifest;
+      await store().importScope(target, fromL, clock);
+      const kept = await store().dump(target);
+      await expect(run(target, digest)).rejects.toEqual(own[name] ?? importedError(digest));
+      expect(await store().dump(target)).toBe(kept);
+    });
+  });
+
+  it('leaves an uncommitted import out of every scan: due, routine, submit, reconciliation and outbox', async () => {
+    const { scope } = await populated();
+    const { fromL } = await throughL(scope);
+    const target = `tenant:${randomUUID()}`;
+    await store().importScope(target, fromL, clock);
+    await query(`UPDATE ${table('scope')} SET due_at = 0 WHERE scope = $1`, [storedKey(target)]);
+    await query(`UPDATE ${table('routine')} SET next_at = 0 WHERE scope = $1`, [storedKey(target)]);
+    await query(`UPDATE ${table('outbox')} SET next_at = 0 WHERE scope = $1`, [storedKey(target)]);
+    const reopened = await query<{ submission: string }>(`WITH ranked AS (SELECT key, row_number() OVER (ORDER BY ordinal) AS rank FROM ${table('intent')} WHERE scope = $1)
+      UPDATE ${table('intent')} i SET conclusion = NULL, cancel_reason = NULL, next_at = 0, reconcile_at = 0,
+        submission = CASE WHEN r.rank = 1 THEN 'reserved' ELSE 'delivered' END
+      FROM ranked r WHERE i.scope = $1 AND i.key = r.key AND r.rank <= 2 RETURNING i.submission`, [storedKey(target)]);
+    expect(reopened.map(row => row.submission).sort()).toEqual(['delivered', 'reserved']);
+    const kept = await store().dump(target), later = NOW + 86_400_000;
+    const sync = vi.fn(async () => ({ dueAt: null }));
+    expect(await new HostedDueScheduler(opened!.pool, store(), { sync, now: () => later }).run()).toEqual({ synced: 0, stalled: [], failed: [] });
+    expect(await new HostedRoutineScheduler(opened!.pool, store(), { now: () => later }).run()).toEqual({ fired: 0, fenced: [], failed: [] });
+    expect(await new HostedRoutineScheduler(opened!.pool, store(), { now: () => later }).start()).toEqual([]);
+    const port = { submit: vi.fn(), offer: vi.fn() };
+    expect(await new HostedSubmitter(opened!.pool, store().schema, { port: () => port as unknown as FrozenSubmitPort, now: () => later }).run())
+      .toEqual({ tried: 0, failed: [] });
+    const tasks = { attempt: vi.fn(), deviceTerminal: vi.fn(), cancel: vi.fn(), offer: vi.fn() } satisfies HostedTaskPort;
+    expect(await new HostedReconciler(opened!.pool, store().schema, store(), { port: () => tasks, now: () => later }).run()).toEqual({ concluded: 0, failed: [] });
+    const deliver = vi.fn(async () => {}), homes = { read: vi.fn(), enqueue: vi.fn() };
+    expect(await new HostedOutboxSender(opened!.pool, store(), { projections: { deliver }, homes: () => homes, now: () => later }).run())
+      .toEqual({ steps: 0, failed: [] });
+    for (const call of [sync, port.submit, ...Object.values(tasks), deliver, homes.read, homes.enqueue]) expect(call).not.toHaveBeenCalled();
+    expect(await store().dump(target)).toBe(kept);
   });
 });

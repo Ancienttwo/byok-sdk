@@ -81,10 +81,11 @@ export class HostedReconciler {
 
   /** One pass over the due rows. A row that throws gets its next readback later, and the pass goes on. */
   async run(): Promise<ReconcilePass> {
-    // A scope of a store version this code does not support, or an exported one, is left out before the limit, as in the submit scan.
+    // A scope of a store version this code does not support, or an exported one or one with an uncommitted import, is left out before the
+    // limit, as in the submit scan.
     const due = await inSchema(this.pool, this.schema, client => client.query<{ scope: string; key: string }>(
       `SELECT i.scope, i.key FROM intent i JOIN scope s ON s.scope = i.scope
-        WHERE s.state_version = ANY($3::integer[]) AND s.switch_export IS NULL AND i.conclusion IS NULL AND i.submission <> 'reserved' AND i.reconcile_at <= $1
+        WHERE s.state_version = ANY($3::integer[]) AND s.switch_export IS NULL AND s.switch_import IS NULL AND i.conclusion IS NULL AND i.submission <> 'reserved' AND i.reconcile_at <= $1
         ORDER BY i.reconcile_at, i.scope, i.key LIMIT $2`, [this.now(), this.options.batch ?? 100, [...SUPPORTED_STORE_VERSIONS]]), true);
     const pass: ReconcilePass = { concluded: 0, failed: [] }, changed = new Set<string>();
     for (const row of due.rows) {
