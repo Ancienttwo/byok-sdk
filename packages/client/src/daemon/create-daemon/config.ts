@@ -40,6 +40,9 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   if (Object.hasOwn(config, 'hostedJournal') || Object.hasOwn(overrides, 'hostedJournal')) {
     throw new DaemonConfigFieldRemovedError('hostedJournal', 'DaemonConfig.hostedJournal was removed: every daemon journals; tune it under storage.journal and inject a journal as overrides.journal');
   }
+  if (Object.hasOwn(config, 'strictAgentOnly')) {
+    throw new DaemonConfigFieldRemovedError('strictAgentOnly', 'DaemonConfig.strictAgentOnly was removed: since wire v4 every offer is an Agent offer, so every daemon runs Agent offers only');
+  }
   if (Object.hasOwn(config, 'resultDocument')) {
     throw new DaemonConfigFieldRemovedError('resultDocument', 'DaemonConfig.resultDocument was removed: a result-document offer carries its frozen schema and the runtime submits the outcome through the SDK-reserved submit_result tool');
   }
@@ -158,11 +161,8 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   if (config.agentEgress !== undefined && config.agentHome === undefined) {
     throw new Error('DaemonConfig.agentEgress requires DaemonConfig.agentHome for the per-Agent local spool');
   }
-  if (config.strictAgentOnly === true && config.agentHome === undefined) {
-    throw new Error('DaemonConfig.strictAgentOnly requires DaemonConfig.agentHome');
-  }
-  if (config.strictAgentOnly !== true && (typeof config.workspaceRoot !== 'string' || config.workspaceRoot === '')) {
-    throw new Error('DaemonConfig.workspaceRoot is required unless DaemonConfig.strictAgentOnly is true');
+  if (config.gitWorkspace !== undefined && (typeof config.workspaceRoot !== 'string' || config.workspaceRoot === '')) {
+    throw new Error('DaemonConfig.gitWorkspace requires DaemonConfig.workspaceRoot');
   }
   // WP0: same up-front discipline as `maxTaskOutputBytes` above. A cap that
   // governs how many writers may share one Agent home is a correctness

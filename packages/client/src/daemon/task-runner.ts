@@ -25,7 +25,6 @@ import {
   type TaskOfferForAgentWithEgressPayload,
   type TaskOfferForAgentWithEgressFreshPayload,
   type TaskOfferPreparedPayload,
-  type TaskOfferWithToolsetsPayload,
   requiredReceiverCapabilities,
 } from '@byok-sdk/protocol';
 import {
@@ -332,12 +331,10 @@ export interface TaskRunnerDeps {
     /** `toolsetId` -> definition revision, from one registry read per call. */
     readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
   };
-  /** Parent of legacy `workspaceRoot/<taskId>` workspaces. Required unless `strictAgentOnly` is true. */
+  /** Parent of Git workspace mode's `workspaceRoot/<taskId>` workspaces. */
   workspaceRoot?: string;
-  /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
+  /** Agent offer authority. Absent, every offer is declined. */
   agentHome?: AgentHomeManager;
-  /** Local authority: legacy offers are declined after journal/dedup/cancel precedence. */
-  strictAgentOnly?: boolean;
   /**
    * How many `memory-reader` Attempts may run concurrently in ONE canonical
    * Agent home — see `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`'s
@@ -479,9 +476,8 @@ export interface TaskRunnerDeps {
    */
   maxInlineEventBytes?: number;
   /**
-   * M4 (additive-minor, `task.approval_resolved`): the capabilities advertised
-   * by the CURRENT transport's server (`conn.ack` on WS, the latest successful
-   * events response on long-poll) — read fresh at call time (mirrors
+   * The capabilities advertised by the server on the latest successful
+   * long-poll events response — read fresh at call time (mirrors
    * `getCursor`/`getToken`'s own
    * "read fresh, not captured once" convention elsewhere in this codebase),
    * since the capability is learned asynchronously, after this `TaskRunner`
@@ -489,7 +485,7 @@ export interface TaskRunnerDeps {
    * before `connection` exists). `create-daemon.ts` wires this to
    * `ConnectionManager.getServerCapabilities`. Optional, and treated as "no
    * capabilities" when absent, so a minimal test harness that doesn't care
-   * about this gate isn't forced to supply one — see `sendApprovalResolved`.
+   * about these gates isn't forced to supply one.
    */
   getServerCapabilities?: () => readonly string[];
   /**
@@ -620,8 +616,6 @@ export type AdmissionGuardDecision =
 
 
 type AcceptedOfferPayload =
-  | TaskOfferPayload
-  | TaskOfferWithToolsetsPayload
   | TaskOfferForAgentPayload
   | TaskOfferForAgentWithEgressPayload
   | TaskOfferForAgentWithEgressFreshPayload
@@ -861,9 +855,6 @@ export class TaskRunner {
   private stoppingOffers = false;
 
   constructor(private readonly deps: TaskRunnerDeps) {
-    if (deps.strictAgentOnly !== true && (typeof deps.workspaceRoot !== 'string' || deps.workspaceRoot === '')) {
-      throw new Error('TaskRunnerDeps.workspaceRoot is required unless strictAgentOnly is true');
-    }
     this.startupOwnership = new StartupOwnership({
       isOfferInFlight: taskId => this.inFlightOffers.has(taskId),
       allowRetry: () => !this.stoppingOffers,
@@ -1158,23 +1149,17 @@ export class TaskRunner {
 
   async handleEnvelope(envelope: Envelope): Promise<void> {
     switch (envelope.type) {
-      case 'task.offer':
-        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, false));
-        return;
-      case 'task.offer_with_toolsets':
-        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, false));
-        return;
       case 'task.offer_for_agent':
-        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload));
         return;
       case 'task.offer_for_agent_with_egress':
-        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload));
         return;
       case 'task.offer_for_agent_with_egress_fresh':
-        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload));
         return;
       case 'task.offer_prepared':
-        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload));
         return;
       case 'task.cancel':
         await this.handleCancel(envelope.task_id, envelope.payload.reason);
@@ -1199,8 +1184,6 @@ export class TaskRunner {
       // #654: a sealed offer that cannot be opened is declined, not dropped,
       // so the task does not wait for a timeout; a sealed steer that cannot
       // be opened is dropped.
-      case 'task.offer_sealed':
-      case 'task.offer_with_toolsets_sealed':
       case 'task.offer_for_agent_sealed':
       case 'task.offer_for_agent_with_egress_sealed':
       case 'task.offer_for_agent_with_egress_fresh_sealed':
@@ -1223,16 +1206,12 @@ export class TaskRunner {
     }
   }
 
-  private handleOffer(
-    taskId: string,
-    payload: AcceptedOfferPayload,
-    strictAgentOffer: boolean,
-  ): Promise<void> {
-    return handleOffer.call(this, taskId, payload, strictAgentOffer);
+  private handleOffer(taskId: string, payload: AcceptedOfferPayload): Promise<void> {
+    return handleOffer.call(this, taskId, payload);
   }
 
-  private admitOffer(phase: OfferPhaseContext, strictAgentOffer: boolean): true | undefined {
-    return admitOffer.call(this, phase, strictAgentOffer);
+  private admitOffer(phase: OfferPhaseContext): true | undefined {
+    return admitOffer.call(this, phase);
   }
 
   private reserveOfferHome(
@@ -1649,14 +1628,10 @@ export class TaskRunner {
   }
 
   /**
-   * M4 (additive-minor, `task.approval_resolved` — see `messages.ts`'s own
-   * doc comment on `TaskApprovalResolvedPayloadSchema` for the full wire
-   * rationale): report a LOCALLY-resolved approval to the server
-   * immediately, gated on the negotiated `approval_resolved` capability
-   * (`deps.getServerCapabilities` — an old server that never advertises it
-   * never receives this message; the daemon then falls back to the
-   * pre-existing implicit-resume inference, unconditionally, exactly as
-   * before this message existed — the N/N-1 compatibility path).
+   * Report a LOCALLY-resolved approval to the server immediately (see
+   * `messages.ts`'s doc comment on `TaskApprovalResolvedPayloadSchema`).
+   * Baseline since wire v4: every server reads it, and it is the server's
+   * only source for a local resolution.
    *
    * Ordering (verified by `task-runner-approval-resolved.test.ts`): this is
    * called, and therefore `deps.send` pushes this envelope onto the outbox,
@@ -1669,9 +1644,7 @@ export class TaskRunner {
    * ahead of it with no extra bookkeeping needed here.
    */
   private sendApprovalResolved(taskId: string, approvalId: string, decision: ApprovalDecision): void {
-    const capabilities = this.deps.getServerCapabilities?.() ?? [];
     const payload = { approvalId, decision, resolvedBy: 'local', at: new Date().toISOString() } as const;
-    if (!requiredReceiverCapabilities('task.approval_resolved', payload).every((flag) => capabilities.includes(flag))) return;
     this.deps.send(createEnvelope('task.approval_resolved', payload, { taskId }));
   }
 
@@ -1767,7 +1740,7 @@ export class TaskRunner {
    * couldn't resume for some real reason) still fails the task exactly as
    * before.
    */
-  private handleApprove(taskId: string, approvalId: string | undefined): Promise<void> {
+  private handleApprove(taskId: string, approvalId: string): Promise<void> {
     return handleApprove.call(this, taskId, approvalId);
   }
 
@@ -1794,7 +1767,7 @@ export class TaskRunner {
    * daemon must still conform to that regardless of whether telling the
    * session about it succeeded.
    */
-  private handleReject(taskId: string, reason: string | undefined, approvalId: string | undefined): Promise<void> {
+  private handleReject(taskId: string, reason: string | undefined, approvalId: string): Promise<void> {
     return handleReject.call(this, taskId, reason, approvalId);
   }
 

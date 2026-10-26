@@ -18,16 +18,16 @@ import type { DaemonScope } from './scope';
  * redelivery cursor value, and `TaskRunner` itself only ever reads
  * `task_id`/`payload` off an approve/reject envelope, never `seq`.
  */
-export async function approve(daemonScope: DaemonScope, taskId: string): Promise<void> {
+export async function approve(daemonScope: DaemonScope, taskId: string, opts: { approvalId: string }): Promise<void> {
   const { daemonState } = daemonScope;
   if (!daemonState.runner) throw new Error('daemon is not started; call start() first');
-  await daemonState.runner.handleEnvelope(createEnvelope('task.approve', {}, { taskId, seq: 0 }));
+  await daemonState.runner.handleEnvelope(createEnvelope('task.approve', { approvalId: opts.approvalId }, { taskId, seq: 0 }));
 }
 
-export async function reject(daemonScope: DaemonScope, taskId: string, reason?: string): Promise<void> {
+export async function reject(daemonScope: DaemonScope, taskId: string, opts: { approvalId: string; reason?: string }): Promise<void> {
   const { daemonState } = daemonScope;
   if (!daemonState.runner) throw new Error('daemon is not started; call start() first');
-  await daemonState.runner.handleEnvelope(createEnvelope('task.reject', { reason }, { taskId, seq: 0 }));
+  await daemonState.runner.handleEnvelope(createEnvelope('task.reject', { approvalId: opts.approvalId, reason: opts.reason }, { taskId, seq: 0 }));
 }
 
 export function subscribe(daemonScope: DaemonScope, listener: DaemonEventListener): Unsubscribe {

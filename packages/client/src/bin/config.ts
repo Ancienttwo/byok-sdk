@@ -74,10 +74,6 @@ export function loadConfig(configPath: string | undefined, overrides: Partial<Cl
       throw new ConfigError(`config is missing required field "${field}"`);
     }
   }
-  // A strict Agent daemon never uses workspaceRoot (DaemonConfig.workspaceRoot).
-  if (merged.strictAgentOnly !== true && !merged.workspaceRoot) {
-    throw new ConfigError('config is missing required field "workspaceRoot"');
-  }
   return { ...merged, localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE } as DaemonConfig;
 }
 

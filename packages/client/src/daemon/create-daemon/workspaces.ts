@@ -39,7 +39,7 @@ export function composeDaemonWorkspaces(input: Pick<DaemonInputs & DaemonStoreSc
   // Construction performs only non-mutating path/config validation. The real
   // writable preflight runs after daemon ownership below and before transport
   // or capability publication, so relocation can exclude it race-free.
-  if (config.strictAgentOnly === true) agentHomeManager?.preflightSync();
+  agentHomeManager?.preflightSync();
   const agentContentReadPolicies = resolveContentReadPolicies(egressPolicy, config.agentEgress?.contentRead);
   // Before authenticated enrollment is loaded, egress is deliberately unable
   // to persist or acknowledge tenant-scoped records. startUnderLease replaces
@@ -47,8 +47,7 @@ export function composeDaemonWorkspaces(input: Pick<DaemonInputs & DaemonStoreSc
   const initialAgentEgress = new AgentEgressController({
     policy: egressPolicy,
   });
-  // Git workspace mode excludes agentHome, so it is never strict and the
-  // validation above has already required workspaceRoot.
+  // resolveDaemonConfig requires workspaceRoot for Git workspace mode.
   const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot!, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
   const gitWorkspaceStore = config.gitWorkspace ? overrides.gitWorkspace?.store ?? new GitWorkspaceStore(storeDir) : undefined;
   return {

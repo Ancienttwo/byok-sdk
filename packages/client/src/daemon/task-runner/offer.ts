@@ -28,11 +28,10 @@ export async function handleOffer(
   this: TaskRunner,
   taskId: string,
   payload: AcceptedOfferPayload,
-  strictAgentOffer: boolean,
 ): Promise<void> {
   // Finding P2, Fix 2c (redelivered offer for an already-active/finished
   // task): checked first, ahead of everything below — a redelivered
-  // `task.offer` for a taskId this device already claimed/started, or
+  // offer for a taskId this device already claimed/started, or
   // already finished, can never be "the first time" for it, so there is
   // nothing left to decide. Without this, the stalled-cursor long-poll
   // re-pull (see `ConnectionManager.dedupWatermark`) redelivering this
@@ -43,7 +42,7 @@ export async function handleOffer(
     return;
   }
 
-  const request = readOfferRequest.call(this, taskId, payload, strictAgentOffer);
+  const request = readOfferRequest.call(this, taskId, payload);
   if (request === undefined) return;
   const {
     agentRef, decline, sessionRef, homeAccess, readerAttempt, homeBusyCode, preparation, agentMemory,
@@ -147,7 +146,7 @@ export async function handleOffer(
     taskId, decline, admissionWithdrawn, admissionSignal: blobAbort.signal, releaseReservation, reserveHome,
   };
   try {
-    if (this['admitOffer'](phase, strictAgentOffer) === undefined) return;
+    if (this['admitOffer'](phase) === undefined) return;
 
     if (agentRef !== undefined) {
       if (await this['reserveOfferHome'](phase, agentRef, readerAttempt, sessionRef, homeAccess) === undefined) return;
@@ -247,24 +246,22 @@ export async function handleOffer(
   }
 }
 
-function readOfferRequest(this: TaskRunner, taskId: string, payload: AcceptedOfferPayload, strictAgentOffer: boolean) {
+function readOfferRequest(this: TaskRunner, taskId: string, payload: AcceptedOfferPayload) {
   let agentRef: AgentRef | undefined;
-  if (strictAgentOffer) {
-    try {
-      agentRef = offeredAgentRef(payload);
-    } catch (error) {
-      this['decline'](taskId, `invalid AgentRef: ${errorMessage(error)}`, false);
-      return;
-    }
-    if (agentRef === undefined || this['deps'].agentHome === undefined || this['deps'].agentSessionHandoffs === undefined) {
-      this['decline'](
-        taskId,
-        'Agent offer requires the SDK-owned agent-home-contract layout and handoff store',
-        false,
-        agentRef,
-      );
-      return;
-    }
+  try {
+    agentRef = offeredAgentRef(payload);
+  } catch (error) {
+    this['decline'](taskId, `invalid AgentRef: ${errorMessage(error)}`, false);
+    return;
+  }
+  if (agentRef === undefined || this['deps'].agentHome === undefined || this['deps'].agentSessionHandoffs === undefined) {
+    this['decline'](
+      taskId,
+      'Agent offer requires the SDK-owned agent-home-contract layout and handoff store',
+      false,
+      agentRef,
+    );
+    return;
   }
   const decline = (reason: string, retryable: boolean, code?: TaskDeclinePayload['code']): void => {
     this['decline'](taskId, reason, retryable, agentRef, code);

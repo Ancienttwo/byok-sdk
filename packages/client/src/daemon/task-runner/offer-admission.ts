@@ -8,7 +8,7 @@ import { settledOrWithdrawn, outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 
-export function admitOffer(this: TaskRunner, phase: OfferPhaseContext, strictAgentOffer: boolean): true | undefined {
+export function admitOffer(this: TaskRunner, phase: OfferPhaseContext): true | undefined {
   const { taskId, decline } = phase;
   // Finding F4, checkpoint 1 ("before claim where possible -> decline
   // path"): a task.cancel already arrived for this exact taskId before
@@ -20,16 +20,6 @@ export function admitOffer(this: TaskRunner, phase: OfferPhaseContext, strictAge
     const reason = this['pendingCancelled'].get(taskId);
     this['pendingCancelled'].delete(taskId);
     decline(reason ? `cancelled before claim: ${reason}` : 'cancelled before claim', false);
-    return undefined;
-  }
-
-  // Gate A strict local authority: journal receive precedes this runner,
-  // and dedup plus pre-cancel above retain their established precedence.
-  // This is deliberately before admission, adapter preparation, workspace
-  // materialization, claim, start, or any terminal receipt bookkeeping.
-  if (this['deps'].strictAgentOnly === true && !strictAgentOffer) {
-    this['addStrictDeclinedTaskId'](taskId);
-    decline('strict Agent-only daemon refuses legacy task offers', false);
     return undefined;
   }
   return true;
@@ -46,7 +36,7 @@ export async function reserveOfferHome(
   const { taskId, decline, admissionWithdrawn, admissionSignal, reserveHome } = phase;
   // WP0 (canonical Agent home single writer): execution is serialized per
   // canonical Agent home. Placed exactly here — after the receive, dedup,
-  // pre-cancel and strict-Agent-only precedence above, before adapter
+  // and pre-cancel precedence above, before adapter
   // preparation, the workspace, the claim, or any process side effect —
   // so a duplicate or pre-cancelled offer returns above without ever
   // consuming a slot, and a busy home costs the offer nothing beyond this
@@ -216,7 +206,7 @@ export async function handleSealedOffer(this: TaskRunner, envelope: Envelope): P
       this['declineSealedOffer'](taskId, agentRef, opened.code);
       return;
     }
-    await this['handleOffer'](taskId, opened.offer.payload as AcceptedOfferPayload, opened.offer.type.startsWith('task.offer_for_agent'));
+    await this['handleOffer'](taskId, opened.offer.payload as AcceptedOfferPayload);
   } finally {
     this['sealedOpening'].delete(taskId);
   }

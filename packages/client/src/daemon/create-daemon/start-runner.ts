@@ -32,7 +32,6 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     runtimePreference: config.runtimePreference,
     ...(config.workspaceRoot === undefined ? {} : { workspaceRoot: config.workspaceRoot }),
     ...(agentHomeManager === undefined ? {} : { agentHome: agentHomeManager }),
-    ...(config.strictAgentOnly === true ? { strictAgentOnly: true } : {}),
     // Already validated up front — see `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`.
     maxConcurrentReaderAttemptsPerAgentHome: agentHomeReaderLimit,
     scratchRoot,

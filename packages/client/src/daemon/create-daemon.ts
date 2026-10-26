@@ -126,10 +126,9 @@ export interface DaemonConfig {
    */
   machineId?: () => Promise<string | undefined>;
   /**
-   * Parent directory of each legacy offer's `workspaceRoot/<taskId>`
-   * workspace, and of Git workspace mode. Required unless `strictAgentOnly`
-   * is true: a strict Agent daemon refuses every legacy offer and runs each
-   * Agent offer in its SDK-owned home, so it never reads this path.
+   * Parent directory of Git workspace mode's `workspaceRoot/<taskId>`
+   * workspaces. Required with `gitWorkspace`. An Agent offer runs in its
+   * SDK-owned home and never reads this path.
    */
   workspaceRoot?: string;
   /**
@@ -158,11 +157,6 @@ export interface DaemonConfig {
    * must also call `runSdkReservedHelperCommand()` before its own CLI parser.
    */
   sdkHelperHost?: SdkHelperHostConfig;
-  /**
-   * Refuse legacy task offers locally. This is an additive capability only
-   * after the SDK-owned Agent home has passed construction-time preflight.
-   */
-  strictAgentOnly?: boolean;
   /**
    * How many `homeAccess: 'memory-reader'` Attempts this daemon lets run
    * CONCURRENTLY in one canonical Agent home, across every lane and every
@@ -665,11 +659,13 @@ export interface Daemon {
    * exactly as an honest, doing-nothing-magic implementation should. Ready
    * for the day a runtime adapter implements real interactive approval, with
    * no further changes needed here. A no-op (resolves immediately) for a
-   * `taskId` this daemon doesn't currently have active.
+   * `taskId` this daemon doesn't currently have active. `approvalId` names
+   * the pending approval, as a wire v4 decision does; a different id is a
+   * stale decision and changes nothing.
    */
-  approve(taskId: string): Promise<void>;
+  approve(taskId: string, opts: { approvalId: string }): Promise<void>;
   /** M3-2a: same as {@link approve} but rejects — see that method's doc comment. */
-  reject(taskId: string, reason?: string): Promise<void>;
+  reject(taskId: string, opts: { approvalId: string; reason?: string }): Promise<void>;
 }
 
 /** Custom adapter composition. Available custom descriptors are published through
