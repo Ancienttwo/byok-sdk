@@ -18,7 +18,8 @@
     "./channel": "./src/channel.ts",
     "./delivery": "./src/delivery.ts",
     "./delivery-routing": "./src/delivery-routing.ts",
-    "./delivery-vectors": "./src/delivery-vectors.test-support.ts"
+    "./delivery-vectors": "./src/delivery-vectors.test-support.ts",
+    "./migration": "./src/migration.ts"
   },
   "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": {
