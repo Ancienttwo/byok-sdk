@@ -383,7 +383,7 @@
           "model_api": "openai-completions",
           "model_source": "catalog",
           "pi_model": null,
-          "thinking_level": null,
+          "thinking_level": "off",
           "capabilities": [],
           "secret": "none"
         },
@@ -519,16 +519,14 @@
               "field": "thinking_level",
               "visible": true,
               "required": true,
-              "value": null,
+              "value": "off",
               "choices": [
                 {
                   "value": "off",
                   "label": null
                 }
               ],
-              "error": {
-                "code": "required"
-              }
+              "error": null
             },
             {
               "field": "capabilities",
@@ -568,9 +566,6 @@
             "display_name": {
               "code": "required"
             },
-            "thinking_level": {
-              "code": "required"
-            },
             "secret": {
               "code": "secret_required"
             }
@@ -591,7 +586,7 @@
         "model_api": "openai-completions",
         "model_source": "catalog",
         "pi_model": null,
-        "thinking_level": null,
+        "thinking_level": "off",
         "capabilities": [],
         "secret": "none"
       },

@@ -472,11 +472,13 @@ function modelAllowed(draft: ModelRouteDraft, model: string, policy: ModelRouteP
 }
 
 /**
- * Pi's own default level when the model supports it; otherwise no level, so
- * the user chooses one. `keep` retains a current level the model supports.
+ * `off` when it is the model's only level, as the schema then requires; Pi's
+ * own default level when the model supports it; otherwise no level, so the
+ * user chooses one. `keep` retains a current level the model supports.
  */
 function withDefaultThinking(draft: ModelRouteDraft, levels: readonly PiThinkingLevel[], keep: boolean): ModelRouteDraft {
   if (keep && draft.thinking_level !== null && levels.includes(draft.thinking_level)) return draft;
+  if (levels.length === 1 && levels[0] === 'off') return { ...draft, thinking_level: 'off' };
   return { ...draft, thinking_level: levels.includes(PI_DEFAULT_THINKING_LEVEL) ? PI_DEFAULT_THINKING_LEVEL : null };
 }
 

@@ -168,13 +168,62 @@ describe('linkage', () => {
   it("selects Pi's default level only when the model supports it", () => {
     const supported = named(context, { field: 'provider_kind', value: 'groq' }, { field: 'model', value: 'openai/gpt-oss-120b' });
     expect(supported).toMatchObject({ model_source: 'catalog', model_api: 'openai-completions', thinking_level: PI_DEFAULT_THINKING_LEVEL });
-    const offOnly = applyModelRouteChange(supported, { field: 'model', value: 'llama-3.3-70b-versatile' }, context);
-    expect(offOnly.thinking_level).toBeNull();
-    expect(field(offOnly, context, 'thinking_level')).toMatchObject({
-      visible: true, required: true, choices: [{ value: 'off', label: null }], error: { code: 'required' },
+    const withoutDefault = applyModelRouteChange(supported, { field: 'model', value: 'qwen/qwen3.6-27b' }, context);
+    expect(withoutDefault.thinking_level).toBeNull();
+    expect(field(withoutDefault, context, 'thinking_level')).toMatchObject({
+      visible: true, required: true, choices: [{ value: 'off', label: null }, { value: 'high', label: null }], error: { code: 'required' },
     });
+    const unsupported = applyModelRouteChange(withoutDefault, { field: 'thinking_level', value: 'medium' }, context);
+    expect(validateModelRoute(unsupported, context).thinking_level).toEqual({ code: 'thinking_level_unsupported' });
+  });
+
+  it('sets off when off is the only level, and the device accepts it', () => {
+    const offOnly = named(context,
+      { field: 'provider_kind', value: 'groq' },
+      { field: 'model', value: 'llama-3.3-70b-versatile' },
+      { field: 'secret', value: { replace: 'k' } });
+    expect(offOnly.thinking_level).toBe('off');
+    expect(validateModelRoute(offOnly, context)).toEqual({});
+    expect(persisted(offOnly, context).profile.pi_model).toMatchObject({ reasoning: false, thinkingLevel: 'off' });
     const unsupported = applyModelRouteChange(offOnly, { field: 'thinking_level', value: 'high' }, context);
     expect(validateModelRoute(unsupported, context).thinking_level).toEqual({ code: 'thinking_level_unsupported' });
+  });
+
+  it('sets off for a reasoning model whose map leaves only off', () => {
+    const map = { off: 'none', minimal: null, low: null, medium: null, high: null, xhigh: null, max: null };
+    const catalog: PiModelCatalogTable = { groq: { 'openai-completions': {
+      'off-mapped': { config: { ...SYNTHETIC_CONFIG, thinkingLevelMap: map }, input: ['text'] },
+    } } };
+    const synthetic: ModelRouteContext = { catalog, stored: null, policy: {} };
+    const draft = named(synthetic,
+      { field: 'provider_kind', value: 'groq' },
+      { field: 'model', value: 'off-mapped' },
+      { field: 'secret', value: { replace: 'k' } });
+    expect(draft.thinking_level).toBe('off');
+    expect(persisted(draft, synthetic).profile.pi_model).toMatchObject({ reasoning: true, thinkingLevel: 'off' });
+  });
+
+  it('recomputes the level when switching between off-only and multi-level models', () => {
+    const pick = (draft: ModelRouteDraft, model: string) => applyModelRouteChange(draft, { field: 'model', value: model }, context);
+    const offOnly = named(context, { field: 'provider_kind', value: 'groq' }, { field: 'model', value: 'llama-3.3-70b-versatile' });
+    expect(offOnly.thinking_level).toBe('off');
+    const multi = pick(offOnly, 'openai/gpt-oss-120b');
+    expect(multi.thinking_level).toBe(PI_DEFAULT_THINKING_LEVEL);
+    expect(pick(multi, 'llama-3.3-70b-versatile').thinking_level).toBe('off');
+    const noDefault = pick(offOnly, 'qwen/qwen3.6-27b');
+    expect(noDefault.thinking_level).toBeNull();
+    expect(validateModelRoute(noDefault, context).thinking_level).toEqual({ code: 'required' });
+  });
+
+  it('sets off for an off-only manual pi_model and keeps a supported level when the config changes', () => {
+    const manual = named(context,
+      { field: 'provider_kind', value: 'groq' },
+      { field: 'base_url', value: 'https://gw.example.com/v1' },
+      { field: 'model', value: 'house' },
+      { field: 'pi_model', value: { ...SYNTHETIC_CONFIG, reasoning: false } });
+    expect(manual.thinking_level).toBe('off');
+    const reasoning = applyModelRouteChange(manual, { field: 'pi_model', value: SYNTHETIC_CONFIG }, context);
+    expect(reasoning.thinking_level).toBe('off');
   });
 
   it('sends an unrepresentable or unknown model to manual pi_model', () => {
