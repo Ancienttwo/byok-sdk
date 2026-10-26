@@ -175,7 +175,9 @@ const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
   ['api/openai-completions.js', 'const cacheControlFormat = provider === "openrouter" && model.id.startsWith("anthropic/") ? "anthropic" : undefined;', 'differs',
     'no URL branch; every OpenRouter anthropic/* completions entry is unrepresentable (keys pi-model-catalog.test.ts guards each row)'],
   ['api/openai-responses-shared.js', 'if (!allowedToolCallProviders.has(model.provider))', 'differs',
-    'a provider outside {openai, openai-codex, opencode} flattens callId|itemId tool call ids; affects the representable openai rows'],
+    'only when replaying history from another model or provider id (transformMessages normalizes tool call ids only when '
+    + '!isSameModel): a provider outside {openai, openai-codex, opencode} then flattens callId|itemId into one call_id, '
+    + 'used alike by the call and its output; same-model turns match built-in openai'],
   ['api/openai-responses.js', 'return (model.provider === "openai" &&', 'unreachable', 'ChatGPT sign-in needs provider "openai" and a non-sk- key; a byok id is never "openai"'],
   ['api/openai-responses.js', 'return model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai") ? "openrouter" : "openai";', 'url', 'openrouter base_url contains openrouter.ai'],
   ['api/openai-responses.js', 'const errorMessage = formatProviderError(normalizeProviderError(error), `${model.provider === "openai" ? "OpenAI" : model.provider} API error`);', 'differs',
