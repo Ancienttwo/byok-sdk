@@ -11,8 +11,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H intent table checks on real Postg
 
   async function insert(scope: string, id: string, task: string, inputTask: string, ordinal: number, source = 'user') {
     const { pool, store } = opened!;
-    await pool.query(`INSERT INTO "${store.schema}".intent (scope, key, task_id, ordinal, agent, source, input, wait_until, submission)
-      VALUES ($1, $2, $3, $4, 'agent', $6, $5::json, 1, 'reserved')`,
+    await pool.query(`INSERT INTO "${store.schema}".intent (scope, key, task_id, ordinal, agent, source, input, retry, wait_until, submission)
+      VALUES ($1, $2, $3, $4, 'agent', $6, $5::json, '{"maxAttempts":1,"delaysMs":[],"retryFailures":false}', 1, 'reserved')`,
     [JSON.stringify(scope), JSON.stringify(id), task, ordinal, JSON.stringify({ taskId: inputTask }), source]);
   }
 
