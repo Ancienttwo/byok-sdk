@@ -130,11 +130,9 @@ export interface WireV4MigrationPreflight {
   readonly unmappable: readonly WireV4UnmappableRow[];
 }
 
-const REMOVED_OFFER_TYPES: ReadonlySet<string> = new Set(
-  Object.entries(WIRE_V3_TO_V4_TYPES)
-    .filter(([type, v4Type]) => v4Type === null && type.startsWith('task.offer'))
-    .map(([type]) => type),
-);
+const REMOVED_OFFER_TYPES: readonly string[] = Object.entries(WIRE_V3_TO_V4_TYPES)
+  .filter(([type, v4Type]) => v4Type === null && type.startsWith('task.offer'))
+  .map(([type]) => type);
 
 /**
  * The removed offer type an offer receipt holds, or `undefined`. A redaction
@@ -148,7 +146,7 @@ export function wireV3LegacyOfferType(body: string): string | undefined {
     return undefined;
   }
   const type = stored !== null && typeof stored === 'object' ? (stored as { type?: unknown }).type : undefined;
-  return typeof type === 'string' && REMOVED_OFFER_TYPES.has(type) ? type : undefined;
+  return typeof type === 'string' && REMOVED_OFFER_TYPES.includes(type) ? type : undefined;
 }
 
 /**
@@ -231,12 +229,11 @@ export function assertWireV4MigrationConfirmed(
   confirmedLegacyTasks: readonly WireV3LegacyTask[],
 ): void {
   if (preflight.unmappable.length > 0) throw new ReceiptMigrationUnmappableError(preflight.unmappable);
-  const found = new Set(preflight.legacyTasks.map(legacyTaskId));
-  const confirmed = new Set(confirmedLegacyTasks.map(legacyTaskId));
+  const found = preflight.legacyTasks.map(legacyTaskId).sort();
+  const confirmed = confirmedLegacyTasks.map(legacyTaskId).sort();
   if (
-    confirmed.size !== confirmedLegacyTasks.length ||
-    found.size !== confirmed.size ||
-    [...found].some((id) => !confirmed.has(id))
+    found.length !== confirmed.length ||
+    confirmed.some((id, index) => id !== found[index] || id === confirmed[index - 1])
   ) {
     throw new WireV4LegacyTaskListMismatchError(preflight.legacyTasks, confirmedLegacyTasks);
   }
