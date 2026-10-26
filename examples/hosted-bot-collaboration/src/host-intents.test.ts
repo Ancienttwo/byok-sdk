@@ -229,7 +229,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H Host intents on real Postgres (#9
     /** The owner entry of `store`, with the reconciler's settle and the K8 sync composed, as a deployment composes them. */
     const entry = (store: HostedCollaborationStore, settle = true) => new HostedCommandEntry<{ scope: string; id: string }>(store, {
       authenticate: async ({ scope, id }) => ({ scope, principal: { id, kind: 'human' } }),
-      owner: () => 'owner',
+      owner: async () => 'owner',
       sync: (scope, now) => store.sync(scope, { ...SYNC_OPTIONS, history: undefined, now }),
       ...(settle ? { failStuckIntent: (scope: string, key: string) => reconciler(store).failStuckIntent(scope, key) } : {}),
     });

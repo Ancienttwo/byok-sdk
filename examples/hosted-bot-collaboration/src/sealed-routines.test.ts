@@ -134,7 +134,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H sealed Bot routines on real Postg
 
   it('takes both as owner commands of the entry: a non-owner is refused with nothing written, and an owner write syncs', async () => {
     const scope = await scoped(false), synced: string[] = [];
-    const entry = new HostedCommandEntry<EntryCaller>(store(), { authenticate: async credential => credential, owner: () => 'owner',
+    const entry = new HostedCommandEntry<EntryCaller>(store(), { authenticate: async credential => credential, owner: async () => 'owner',
       sync: async (at, now) => { synced.push(at); return store().sync(at, { ...SYNC_OPTIONS, now, history: undefined }); }, now: () => NOW });
     const as = (id: string): EntryCaller => ({ scope, principal: { id, kind: 'human' } });
     await expect(entry.createSealedRoutine(as('mallory'), 'main', action(1, v1))).rejects.toMatchObject({ code: 'not_owner' });

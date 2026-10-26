@@ -31,7 +31,7 @@ import { EntryRefusedError, HostedCollaborationStore, HostedCommandEntry, Hosted
   HostedReplyChecker, HostedRoutineScheduler, HostedSubmitter, hostedMessageConsumer, UnauthenticatedError, type HostedSyncOptions,
   type HostedTaskPort } from '@byok-sdk/example-hosted-bot-collaboration/src/index';
 import { releaseAfterBody } from './body-lifetime';
-import { readHostScopes, sha256Hex, type HostScope } from './host-scopes';
+import { readHostScope, readHostScopeByToken, sha256Hex, type HostScope } from './host-scopes';
 
 // The Workers runtime surface this Worker touches, written out because the example typechecks against Node types only.
 interface ExecutionContext { waitUntil(promise: Promise<unknown>): void }
@@ -116,7 +116,10 @@ const scopeOf = (tenant: TenantId): string => String(tenant);
 interface Host {
   readonly cloud: ByokCloud;
   readonly store: HostedCollaborationStore;
-  readonly scopes: ReadonlyMap<string, HostScope>;
+  /** The product row of a scope, read once per invocation, or nothing for an unknown scope. */
+  scope(scope: string): Promise<HostScope | undefined>;
+  /** The product row whose owner session token hashes to `sha256`, or nothing. */
+  scopeByToken(sha256: string): Promise<HostScope | undefined>;
   passes(): Promise<PassReport>;
   syncScope(scope: string, now: number): Promise<unknown>;
   close(): Promise<void>;
@@ -132,14 +135,26 @@ async function compose(env: Env, notify: () => void): Promise<Host> {
   hostPool.on('error', error => { console.error('[h-worker] idle H pool client error', error); });
   const close = async () => { await Promise.all([sdkPool.end(), hostPool.end()]); };
   try {
-    const scopes = await readHostScopes(hostPool, env.HOST_SCHEMA);
-    const config = (scope: string): HostScope => {
-      const found = scopes.get(scope);
-      if (!found) throw new Error(`Unknown scope ${scope}`);
+    // Only the scopes that this invocation touches are read, each once.
+    const rows = new Map<string, Promise<HostScope | undefined>>();
+    const scope = (key: string): Promise<HostScope | undefined> => {
+      let row = rows.get(key);
+      if (!row) {
+        row = readHostScope(hostPool, env.HOST_SCHEMA, key);
+        rows.set(key, row);
+        // A failed read is not kept, so a later call reads again.
+        row.catch(() => { rows.delete(key); });
+      }
+      return row;
+    };
+    const scopeByToken = (sha256: string) => readHostScopeByToken(hostPool, env.HOST_SCHEMA, sha256);
+    const config = async (key: string): Promise<HostScope> => {
+      const found = await scope(key);
+      if (!found) throw new Error(`Unknown scope ${key}`);
       return found;
     };
     const windowMs = milliseconds(env.H_COALESCE_WINDOW_MS, 'H_COALESCE_WINDOW_MS');
-    const store = new HostedCollaborationStore(hostPool, env.H_SCHEMA, { host: scope => config(scope).config,
+    const store = new HostedCollaborationStore(hostPool, env.H_SCHEMA, { host: async key => (await config(key)).config,
       ...(windowMs === undefined ? {} : { coalesce: { ...COALESCE_DEFAULTS, windowMs } }) });
     const objectStorage = { endpoint: env.BYOK_S3_ENDPOINT, bucket: env.BYOK_S3_BUCKET, accessKeyId: env.BYOK_S3_ACCESS_KEY_ID,
       secretAccessKey: env.BYOK_S3_SECRET_ACCESS_KEY, region: env.BYOK_S3_REGION, signingClock: clock };
@@ -159,29 +174,29 @@ async function compose(env: Env, notify: () => void): Promise<Host> {
         return decision;
       } } });
 
-    const taskPort = (scope: string): FrozenSubmitPort & HostedTaskPort => {
-      config(scope);
-      const tenant = tenantOf(scope);
+    const taskPort = (key: string): FrozenSubmitPort & HostedTaskPort => {
+      // Each SDK call first checks that the scope is the product's.
+      const known = async () => { await config(key); return tenantOf(key); };
       return {
         submit: async input => {
-          const result = await cloud.submitAgentExecution(tenant, input);
+          const result = await cloud.submitAgentExecution(await known(), input);
           await hang(env, 'hang-after-submit', input.taskId);
           return result;
         },
         // The sealed lane (#953): a sealed routine occurrence goes here, never to `submit`.
         submitSealed: async input => {
-          const result = await cloud.submitSealedAgentExecution(tenant, input);
+          const result = await cloud.submitSealedAgentExecution(await known(), input);
           await hang(env, 'hang-after-submit', input.taskId);
           return result;
         },
-        offer: id => cloud.readTaskOffer(tenant, id),
-        attempt: id => cloud.readTaskAttempt(tenant, id),
+        offer: async id => cloud.readTaskOffer(await known(), id),
+        attempt: async id => cloud.readTaskAttempt(await known(), id),
         deviceTerminal: async id => {
-          const terminal = await cloud.readDeviceTerminal(tenant, id);
+          const terminal = await cloud.readDeviceTerminal(await known(), id);
           if (terminal) await hang(env, 'hang-after-terminal-read', id);
           return terminal;
         },
-        cancel: (id, reason) => cloud.cancelTask(tenant, id, reason),
+        cancel: async (id, reason) => cloud.cancelTask(await known(), id, reason),
       };
     };
     const checker = new HostedReplyChecker(store, { port: scope => ({
@@ -224,7 +239,7 @@ async function compose(env: Env, notify: () => void): Promise<Host> {
         due: { synced: duePass.synced, stalled: duePass.stalled, failed: failures(duePass.failed) },
         submit: { tried: submit.tried, failed: failures(submit.failed), synced: submitSynced } };
     };
-    return { cloud, store, scopes, passes, syncScope, close };
+    return { cloud, store, scope, scopeByToken, passes, syncScope, close };
   } catch (error) {
     await close();
     throw error;
@@ -348,7 +363,7 @@ async function serveHost(request: Request, env: Env, ctx: ExecutionContext, rout
     const { scope, item } = await request.json() as { scope: string; item: Parameters<ByokCloud['createBoardItem']>[1] };
     const host = await compose(env, () => {});
     try {
-      if (!host.scopes.has(scope)) return new Response('unknown scope\n', { status: 404 });
+      if (!await host.scope(scope)) return new Response('unknown scope\n', { status: 404 });
       return Response.json(await host.cloud.createBoardItem(tenantOf(scope), item));
     } finally { await host.close(); }
   }
@@ -356,7 +371,7 @@ async function serveHost(request: Request, env: Env, ctx: ExecutionContext, rout
     const { scope } = await request.json() as { scope: string };
     const host = await compose(env, () => {});
     try {
-      if (!host.scopes.has(scope)) return new Response('unknown scope\n', { status: 404 });
+      if (!await host.scope(scope)) return new Response('unknown scope\n', { status: 404 });
       return Response.json(await host.cloud.createPairingCode(tenantOf(scope), { productId: PRODUCT_ID }));
     } finally { await host.close(); }
   }
@@ -377,11 +392,14 @@ async function serveOwner(request: Request, env: Env, ctx: ExecutionContext, rou
     const entry = new HostedCommandEntry<string | undefined>(host.store, {
       authenticate: async token => {
         if (token === undefined) return undefined;
-        const hashed = await sha256Hex(token);
-        const found = [...host.scopes.values()].find(scope => scope.ownerTokenSha256 === hashed);
+        const found = await host.scopeByToken(await sha256Hex(token));
         return found && { scope: found.scope, principal: found.owner };
       },
-      owner: scope => host.scopes.get(scope)!.owner.id,
+      owner: async scope => {
+        const found = await host.scope(scope);
+        if (!found) throw new Error(`Unknown scope ${scope}`);
+        return found.owner.id;
+      },
       sync: host.syncScope,
     });
     try {

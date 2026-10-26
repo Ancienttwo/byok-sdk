@@ -207,6 +207,8 @@ export const familyOwners = Object.freeze({
     /^scripts\/release\/agent-memory-helper-source\.test\.mjs$/,
     /^packages\/client\/src\/(?:agent-memory\/|agent-home|daemon\/(?:agent-memory|prepared-agent-memory|resolve-agent-memory))/,
     /^packages\/client\/src\/__tests__\/(?:agent-memory|agent-home-directory-barrier|daemon-conn-hello-capabilities)[^/]*$/,
+    // #605 W5: the power-cut harness modules live in their own directory.
+    /^packages\/client\/src\/__tests__\/agent-memory-powercut\//,
   ],
   'execution-recovery-native': [
     /^packages\/client\/src\/daemon\/journal\//,

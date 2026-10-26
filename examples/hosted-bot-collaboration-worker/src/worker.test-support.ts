@@ -73,7 +73,7 @@ export async function openSubstrate(): Promise<Substrate> {
   const sdkPool = createByokPool({ connectionString, max: 2 });
   const pool = new pg.Pool({ connectionString, max: 4 });
   const configs = new Map<string, HostConfig>(), entitled = new Set<string>();
-  const store = new HostedCollaborationStore(pool, hSchema, { host: scope => configs.get(scope)! });
+  const store = new HostedCollaborationStore(pool, hSchema, { host: async scope => configs.get(scope)! });
   try {
     await migrate(sdkPool, migrationsDir());
     await store.migrate();

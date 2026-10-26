@@ -237,6 +237,12 @@ test('the removed Windows memory workflow selects the families that run its chec
   assert.deepEqual(selectImpact(['.github/workflows/agent-memory-windows.yml']).families, ['agent-memory-helper', 'agent-memory-helper-non-darwin']);
 });
 
+test('the W5 power-cut harness selects the helper job that runs it (#605)', () => {
+  for (const path of ['packages/client/src/__tests__/agent-memory-powercut.test.ts', 'packages/client/src/__tests__/agent-memory-powercut/drivers.ts']) {
+    assert.ok(selectImpact([path]).families.includes('agent-memory-helper'), path);
+  }
+});
+
 test('unknown, broad policy/dependency inputs and malformed paths fail closed', () => {
   for (const path of ['bun.lock', 'package.json', 'packages/client/package.json', 'api-surface/entries.json', '.github/workflows/unreviewed.yml', 'packages/new/src/index.ts', 'packages/client/vendor/new.js', 'scripts/release/pg-migrate-smoke.mjs', 'other/a.md', '../README.md', './README.md', '/README.md', 'docs//a.md', 'docs/../README.md', 'docs/a\nb.md', 'docs\\a.md', '', null]) {
     assert.throws(() => selectImpact([path]), /reviewed CI mapping required|requires exact CI_BASE/i, String(path));
