@@ -22,6 +22,10 @@ reader and no capability negotiation between the two majors.
   and the task keeps awaiting approval.
 - The `strict-agent-only` and `approval_resolved` capability flags and the
   approval-targeting flag are removed.
+- An Agent offer with `harnessId` needs the device's `custom-harness` flag,
+  as the removed offers did; a declared harness inventory alone is no longer
+  enough. Bundled daemons always advertise the flag. A third-party daemon
+  that declares harnesses without it has such offers refused.
 
 ## Host and daemon API
 
@@ -108,9 +112,11 @@ A row is unmappable when it is:
   up an id;
 - a pending mailbox row of a non-legacy task whose bytes are not v4. A v4
   daemon fails to decode it and its cursor stops there. Acked rows are never
-  sent again and stay until retention removes them. An expired dead letter
-  also stays: `replayDeadLetter` decodes it under v4 and refuses its v3
-  bytes with `cleanup_invalid_input`, and `discardDeadLetter` drops it.
+  sent again and stay until retention removes them. An expired row also
+  stays. On Postgres it is a dead letter: `replayDeadLetter` decodes it
+  under v4 and refuses its v3 bytes with `cleanup_invalid_input`, and
+  `discardDeadLetter` drops it. On SQLite nothing removes it (see
+  "Expired v3 mailbox rows on SQLite" below).
 
 Deleting a legacy task removes its offer, delivered and terminal receipts,
 its mailbox rows, its Agent message admission, its `sealed-task` object
@@ -175,6 +181,20 @@ These paths read a row back by messageId:
 After the upgrade steps above, such a retry follows only a Host request
 that lost its response before the stop, or a daemon that stopped between
 acking a mailbox row and clearing its local spool.
+
+### Expired v3 mailbox rows on SQLite
+
+Retention removes only acked rows. An expired row (a pending row its device
+never received in time) stays: the SQLite store never deletes one and has no
+`discardDeadLetter`. The two read-backs by messageId do not check a row's
+state, so a v3 expired row keeps failing with an envelope decoding error for
+as long as it exists. For example, a task cancelled while its device was
+offline leaves an expired v3 `task.cancel` row; after the upgrade every
+`tasks.cancel` retry for that task fails to decode, permanently. An offer,
+approval decision or steer retried with the messageId of an expired row
+fails the same way. Postgres avoids this through upgrade step 3, which
+replays or discards each dead letter first; SQLite has no such step, and
+these messageIds stay unusable.
 
 ## Compatibility evidence
 

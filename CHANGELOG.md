@@ -86,7 +86,10 @@
     `assertWireV4MigrationConfirmed` and the types and errors above). All of
     it ships in 0.31.x only; 0.32.0 removes it (#1017).
   - `harnessId` on every Agent offer is gated on the device's `custom-harness`
-    capability, the gate the removed offers carried.
+    capability, the gate the removed offers carried. Before, an Agent offer
+    with `harnessId` needed only the device's declared harness inventory.
+    Bundled daemons always advertise the flag; a third-party daemon that
+    declares harnesses without it has such offers refused.
   - The protocol test alias `byok-protocol-previous` pins 0.30.2, the last v3
     release, as the rejection oracle. `byok-protocol-floor` (0.27.0) and
     `published-compat.test.ts` are removed until a v4 release is published.

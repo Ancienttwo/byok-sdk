@@ -156,7 +156,9 @@ first registered v4 release.
 v4 starts from the v3 table minus the server `approval_resolved` gate (every
 v4 server reads `task.approval_resolved`) and minus the rows of the removed
 offers (`harnessId` on `task.offer` and `task.offer_with_toolsets`, gated on
-`custom-harness`). The v3 reset already made the v2
+`custom-harness`), plus the same `harnessId` gate on every Agent offer type:
+an Agent offer naming a harness now also needs the device's `custom-harness`
+flag. The v3 reset already made the v2
 strip-safe rows and the v2 `result-document` gate baseline. `WIRE_ADDITIONS`
 keeps the `gated` rows, most of which name device capabilities a daemon
 advertises only when it is configured for the surface (Agent home, readers,
