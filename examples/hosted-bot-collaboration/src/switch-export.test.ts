@@ -344,6 +344,12 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
       await query(`UPDATE ${table('scope')} SET due_at = 0 WHERE scope = $1`, [storedKey(scope)]);
       await query(`UPDATE ${table('routine')} SET next_at = 0 WHERE scope = $1`, [storedKey(scope)]);
       await query(`UPDATE ${table('outbox')} SET next_at = 0 WHERE scope = $1`, [storedKey(scope)]);
+      // Reopen the first intent for the submit scan and the second for the reconciliation scan.
+      const reopened = await query<{ submission: string }>(`WITH ranked AS (SELECT key, row_number() OVER (ORDER BY ordinal) AS rank FROM ${table('intent')} WHERE scope = $1)
+        UPDATE ${table('intent')} i SET conclusion = NULL, cancel_reason = NULL, next_at = 0, reconcile_at = 0,
+          submission = CASE WHEN r.rank = 1 THEN 'reserved' ELSE 'delivered' END
+        FROM ranked r WHERE i.scope = $1 AND i.key = r.key AND r.rank <= 2 RETURNING i.submission`, [storedKey(scope)]);
+      expect(reopened.map(row => row.submission).sort()).toEqual(['delivered', 'reserved']);
       const kept = await store().dump(scope), later = NOW + 86_400_000;
       const sync = vi.fn(async () => ({ dueAt: null }));
       expect(await new HostedDueScheduler(opened!.pool, store(), { sync, now: () => later }).run()).toEqual({ synced: 0, stalled: [], failed: [] });
@@ -352,9 +358,11 @@ describe.skipIf(POSTGRES_URL === undefined)('H switch export on real Postgres (#
       expect(await new HostedRoutineScheduler(opened!.pool, store(), { now: () => later }).start()).toEqual([]);
       const port: FrozenSubmitPort = { submit: vi.fn(), offer: vi.fn() } as unknown as FrozenSubmitPort;
       expect(await new HostedSubmitter(opened!.pool, store().schema, { port: () => port, now: () => later }).run()).toEqual({ tried: 0, failed: [] });
-      const tasks = { readDeviceTerminal: vi.fn(), readTaskAttempt: vi.fn() } as unknown as HostedTaskPort;
+      expect(port.submit).not.toHaveBeenCalled();
+      const tasks = { attempt: vi.fn(), deviceTerminal: vi.fn(), cancel: vi.fn(), offer: vi.fn() } satisfies HostedTaskPort;
       expect(await new HostedReconciler(opened!.pool, store().schema, store(), { port: () => tasks, now: () => later }).run())
         .toEqual({ concluded: 0, failed: [] });
+      for (const read of Object.values(tasks)) expect(read).not.toHaveBeenCalled();
       const deliver = vi.fn(async () => {});
       expect(await new HostedOutboxSender(opened!.pool, store(), { projections: { deliver }, now: () => later }).run()).toEqual({ steps: 0, failed: [] });
       expect(await store().dump(scope)).toBe(kept);

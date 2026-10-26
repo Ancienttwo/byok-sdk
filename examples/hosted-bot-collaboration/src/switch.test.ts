@@ -291,10 +291,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     expect((await operation(scope, first)).status).toBe('applied');
     expect((await store().drainDevice(scope, 'device', 2, {}, clock)).open.homes).toEqual([]);
     await store().commitSwitch(scope, 'device', 2, await receipt(scope, 2));
-    // After the commit to L, home writes are L's: the exported scope takes no new one (#975), and H sends nothing.
+    // After the commit to L, home writes are L's: the exported scope takes no new one (#975).
     await expect(pendingHome(scope)).rejects.toEqual(exportedRefusal);
-    await homeSender(calls, VECTOR_NOW + 30_000, 'applied').run();
-    expect(calls.reads).toHaveLength(3);
   });
 
   it('sends no home write that a frozen device never got, and leaves it out of the drain', async () => {
@@ -326,6 +324,21 @@ describe.skipIf(POSTGRES_URL === undefined)('H owner switch on real Postgres (#9
     // The row waits the backoff of its fenced try, then flushes.
     await homeSender(calls, VECTOR_NOW + 5_000, 'applied').run();
     expect(calls.reads).toEqual([`r-${sequence}`]);
+  });
+
+  it('sends no home write to a device whose row names mode L with no open switch', async () => {
+    const scope = `tenant:${randomUUID()}`, calls = { reads: [] as string[] };
+    await store().seed(scope, state => {
+      seedCollaboration(state);
+      Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
+    });
+    // An aborted switch toward H leaves the device's row in mode L, on a scope that was never exported.
+    await store().beginSwitch(scope, 'device', 'H', 0);
+    expect(await store().abortSwitch(scope, 'device', 1)).toEqual({ mode: 'L', revision: 2, revoked: false });
+    const sequence = await pendingHome(scope);
+    await homeSender(calls).run();
+    expect(calls.reads).toEqual([]);
+    await backedOff(scope, sequence);
   });
 
   it('stops a drain that an abort overtook: no cancel after the abort, and the drain refuses', async () => {
