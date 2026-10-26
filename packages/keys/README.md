@@ -306,8 +306,11 @@ if (submission.ok) {
     requests differ; the effect on xAI is not verified. grok-4.5 and later
     cannot be set to `off`.
   - cerebras body-less overflow detection.
-  - the Responses tool-call id, which is kept only for `openai`, `openai-codex`
-    and `opencode`. Other providers flatten `callId|itemId`.
+  - the Responses tool-call id, only when replaying history from another model
+    or provider id (a model change, or a changed `profile_ref`). Then pi-ai
+    flattens `callId|itemId` into one call id, on both the call and its output,
+    for every provider except `openai`, `openai-codex` and `opencode`. Turns
+    with the same model match the built-in openai requests.
   - the error message prefix.
 
   The client's pinned catalog drift test keeps a review list of these

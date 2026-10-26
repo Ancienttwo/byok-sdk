@@ -250,7 +250,9 @@ and makes no network request.
   xai `reasoning.encrypted_content` include (`api/openai-responses.js:308`),
   cerebras body-less overflow detection (`utils/overflow.js:146`), the
   Responses tool-call id kept only for `OPENAI_TOOL_CALL_PROVIDERS`
-  (`api/openai-responses.js:15`, `api/openai-responses-shared.js:104`) and
+  (`api/openai-responses.js:15`, `api/openai-responses-shared.js:104`), which
+  applies only when replaying history from another model or provider id
+  (`api/transform-messages.js:87`, `:120`), and
   the error message prefix (`api/openai-responses.js:182`). The pinned catalog
   drift test in `@byok-sdk/client` keeps a review list of these branches, so a
   pi-ai upgrade reviews them again.
