@@ -160,6 +160,62 @@ describe('pruneAgentResults', () => {
     expect(await fs.readdir(dir)).toHaveLength(15);
   });
 
+  // Passes like the retention producer runs them: a directory cursor that
+  // survives an exhausted pass, and one budget for listing steps and removals.
+  function budgetedPasses(dir: string, unitsPerPass: number) {
+    let cursor: import('node:fs').Dir | undefined;
+    const removed: string[] = [];
+    return {
+      removed,
+      async pass(): Promise<void> {
+        let units = unitsPerPass;
+        const spend = (): boolean => units-- > 0;
+        async function* listing(): AsyncGenerator<import('node:fs').Dirent> {
+          cursor ??= await fs.opendir(dir);
+          while (spend()) {
+            const entry = await cursor.read();
+            if (entry === null) { await cursor.close(); cursor = undefined; return; }
+            yield entry;
+          }
+        }
+        await pruneAgentResults({
+          resultsRoot: dir, entries: listing(), nowMs: NOW, maxAgeMs: 7 * DAY, maxRetained: 5,
+          remove: async (target) => {
+            if (!spend()) return false;
+            await fs.rm(target);
+            removed.push(path.basename(target));
+            return true;
+          },
+        });
+      },
+    };
+  }
+
+  it('converges on the newest records over passes that each list only part of the home', async () => {
+    const dir = await home();
+    const records = Array.from({ length: 30 }, (_, index) => name(index));
+    // name(29) is the newest.
+    for (const [index, entry] of records.entries()) await file(dir, entry, (30 - index) * 1000);
+    const newest = records.slice(-5);
+    const passes = budgetedPasses(dir, 8);
+    for (let pass = 0; pass < 200 && (await fs.readdir(dir)).length > 5; pass++) await passes.pass();
+    expect((await fs.readdir(dir)).sort()).toEqual(newest);
+    expect(passes.removed.filter((entry) => newest.includes(entry))).toEqual([]);
+    expect(passes.removed).toHaveLength(25);
+  });
+
+  it('still removes beyond the bound when a pass runs out of budget and the next lists only the suffix', async () => {
+    const dir = await home();
+    const records = Array.from({ length: 12 }, (_, index) => name(index));
+    for (const [index, entry] of records.entries()) await file(dir, entry, (12 - index) * 1000);
+    const newest = records.slice(-5);
+    const passes = budgetedPasses(dir, 8);
+    await passes.pass();
+    await passes.pass();
+    expect(passes.removed.length).toBeGreaterThan(0);
+    expect(passes.removed.filter((entry) => newest.includes(entry))).toEqual([]);
+  });
+
   it('stops at the first removal its caller refuses', async () => {
     const dir = await home();
     for (let index = 0; index < 4; index++) await file(dir, name(index), 30 * DAY);

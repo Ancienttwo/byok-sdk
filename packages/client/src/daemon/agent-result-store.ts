@@ -196,7 +196,7 @@ export class AgentResultStore {
  * has a reader left; age and count only bound the local audit window.
  *
  * - Records and temps whose mtime is at least `maxAgeMs` old are removed.
- * - Then, while more than `maxRetained` records remain, the oldest is removed.
+ * - Beyond `maxRetained` unexpired records, the oldest is removed.
  *   Temps do not count toward `maxRetained`.
  *
  * Content is never parsed, so a malformed record expires like any other.
@@ -204,9 +204,14 @@ export class AgentResultStore {
  * written once, so its mtime is its creation time. Removal stops at the first
  * `remove` that returns false.
  *
- * Expired files are removed while the directory is listed: listing and
- * removal share one budget, so a backlog larger than one pass can list still
- * drains on every pass. Only unexpired records wait for the count step.
+ * Both removals happen while the directory is listed, because listing and
+ * removal share one budget and a large home can take several passes to list.
+ * The listed unexpired records are kept as a set of at most `maxRetained`,
+ * ordered by mtime; once it would exceed that, its oldest is removed at once.
+ * That record already has `maxRetained` newer records in the listed part
+ * alone, so it is never among the home's newest `maxRetained`. Partial
+ * listings across passes therefore converge on them without saving state,
+ * and a complete listing removes exactly the records beyond them.
  */
 export async function pruneAgentResults(input: {
   readonly resultsRoot: string;
@@ -216,6 +221,8 @@ export async function pruneAgentResults(input: {
   readonly maxRetained?: number;
   readonly remove: (file: string) => Promise<boolean>;
 }): Promise<void> {
+  const maxRetained = input.maxRetained ?? AGENT_RESULT_MAX_RETAINED;
+  // Ascending by mtime, at most `maxRetained` once the oldest is removed.
   const kept: { readonly file: string; readonly mtimeMs: number }[] = [];
   for await (const entry of input.entries) {
     const record = AGENT_RESULT_RECORD_NAME.test(entry.name);
@@ -223,11 +230,10 @@ export async function pruneAgentResults(input: {
     const file = path.join(input.resultsRoot, entry.name);
     const stat = await fs.lstat(file);
     if (!stat.isFile()) continue;
-    if (input.nowMs - stat.mtimeMs >= input.maxAgeMs) { if (!await input.remove(file)) return; }
-    else if (record) kept.push({ file, mtimeMs: stat.mtimeMs });
-  }
-  kept.sort((left, right) => left.mtimeMs - right.mtimeMs);
-  for (let index = 0; index < kept.length - (input.maxRetained ?? AGENT_RESULT_MAX_RETAINED); index++) {
-    if (!await input.remove(kept[index]!.file)) return;
+    if (input.nowMs - stat.mtimeMs >= input.maxAgeMs) { if (!await input.remove(file)) return; continue; }
+    if (!record) continue;
+    const at = kept.findIndex((other) => other.mtimeMs > stat.mtimeMs);
+    kept.splice(at === -1 ? kept.length : at, 0, { file, mtimeMs: stat.mtimeMs });
+    if (kept.length > maxRetained && !await input.remove(kept.shift()!.file)) return;
   }
 }
