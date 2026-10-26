@@ -27,7 +27,7 @@ const files = readdirSync(dir).filter((name) => name.endsWith('.json')).sort();
 
 describe('model-route fixture vectors', () => {
   it('has the fixture files', () => {
-    expect(files).toEqual(['host-policy.json', 'stored-secret.json', 'vendor-and-model.json']);
+    expect(files).toEqual(['host-policy.json', 'stored-capabilities.json', 'stored-secret.json', 'vendor-and-model.json']);
   });
 
   for (const file of files) {
