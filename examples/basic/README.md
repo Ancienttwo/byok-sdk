@@ -51,7 +51,8 @@ cat > /tmp/byok-example-config.json <<'EOF'
   "productId": "byok-example-basic",
   "serverUrl": "http://localhost:8787",
   "storeDir": "/tmp/byok-example-store",
-  "agentHome": { "hostStorageRoot": "/tmp/byok-example-home" }
+  "agentHome": { "hostStorageRoot": "/tmp/byok-example-home" },
+  "agentEgress": {}
 }
 EOF
 
@@ -85,8 +86,14 @@ see `server.ts`); a mismatch is rejected by authenticated HTTP admission.
    runtimes the connected daemon detected and reported (the chips under
    **Connected machines** are the same report). A runtime whose credentials
    were not found is marked "(no credentials detected)", and **Dispatch** is
-   disabled while no machine is connected. The progress feed streams live via
-   SSE; approve/cancel buttons call the task's `TaskHandle` directly.
+   disabled while no machine is connected. The server submits the task with
+   `byok.executions.submit` as the example's one Agent (`byok-example`), so a
+   machine runs one of its tasks at a time; a second waits for the Agent home
+   and is declined. The feed streams the task's state transitions via SSE, and
+   the approve/reject/cancel buttons call `byok.tasks.approve`, `reject` and
+   `cancel` by taskId. `"agentEgress": {}` gives the daemon the default egress
+   policy, which is the one the server sends; the daemon declines an offer
+   whose policy differs.
 
 ## Persistent storage
 

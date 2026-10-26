@@ -7,15 +7,16 @@
 // starts it unmodified to prove the README loop works with those defaults.
 // Do not shorten the hold to hide a readiness problem.
 //
-// The loop: pair -> list machines -> dispatch a task -> stream progress ->
+// The loop: pair -> list machines -> submit a task -> stream its state ->
 // show the result -> approve/cancel. See README.md for how to run it.
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { createByokServer, type DispatchInput, type TaskHandle } from '@byok-sdk/server';
+import { createByokServer, type AgentExecutionInput, type ServerTaskEvent } from '@byok-sdk/server';
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -37,6 +38,21 @@ const PRODUCT_ID = process.env.BYOK_EXAMPLE_PRODUCT_ID ?? 'byok-example-basic';
 // is whatever that machine reports in `GET /api/machines`, and the page builds
 // its runtime list from that report.
 const KNOWN_RUNTIMES = new Set(['pi', 'claude', 'codex']);
+type Runtime = AgentExecutionInput['payload']['runtime'];
+
+// Every task runs as one Agent in the daemon's Agent home. This demo has one
+// Agent, so a device runs one of its tasks at a time; a second is declined
+// while the first holds the home.
+const EXAMPLE_AGENT = { agentId: 'byok-example', profileRevision: '1' } as const;
+// The daemon declines an offer whose egress policy differs from its own. This
+// is `@byok-sdk/client`'s default, which a daemon configured with
+// `"agentEgress": {}` uses.
+const EGRESS_POLICY: AgentExecutionInput['payload']['egressPolicy'] = {
+  policyRevision: 'default-v1',
+  activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 256 * 1024 },
+  reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4 * 1024 * 1024, maxPendingBytesPerTenant: 16 * 1024 * 1024 },
+  transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
+};
 
 const storageMode = process.env.BYOK_STORE ?? 'memory';
 if (storageMode !== 'memory' && storageMode !== 'sqlite') {
@@ -53,22 +69,12 @@ const byok = createByokServer({
       : { kind: 'memory' },
 });
 
-// `createByokServer`'s public surface only exposes read-only task snapshots
-// (`tasks.get`/`tasks.list`) — the live `TaskHandle` (events/approve/reject/
-// cancel/steer) is handed back exactly once, by `dispatch()`. An embedder
-// that wants to act on a task again later (a second HTTP request) has to
-// keep its own map from taskId -> handle; this is that map.
-const handles = new Map<string, TaskHandle>();
-
 // `TaskSnapshot` no longer carries `instruction`/`runtime`: the
 // coordination kernel stores a task's OUTCOME, not the host's input, so
 // re-reading them off a snapshot would mean the kernel keeping a second copy
 // of this demo's own form fields. Correct ownership is here — the dispatcher
 // already has them — so the list view joins them back in by taskId.
-const dispatched = new Map<
-  string,
-  { instruction: string; runtime?: DispatchInput['runtime'] }
->();
+const dispatched = new Map<string, { instruction: string; runtime?: Runtime }>();
 
 const publicDir = path.join(exampleDir, 'public');
 const indexHtml = await readFile(path.join(publicDir, 'index.html'), 'utf8');
@@ -126,28 +132,27 @@ app.post('/api/tasks', async (c) => {
   if (body.sessionRef !== undefined && typeof body.sessionRef !== 'string') {
     return c.json({ error: 'sessionRef must be a string' }, 400);
   }
-
-  const input: DispatchInput = {
-    deviceId: body.deviceId,
-    instruction: body.instruction,
-    runtime: body.runtime as DispatchInput['runtime'],
-    // Optional follow-up-turn pass-through: a caller that already has a
-    // prior task's reported `sessionRef` (see GET /api/tasks/:taskId) can
-    // carry it into a new dispatch so the runtime adapter resumes that same
-    // runtime session (e.g. pi's own `--session`) instead of starting a
-    // fresh one. `DispatchInput.sessionRef` already exists at the SDK level
-    // (packages/server/src/types.ts) — this demo just didn't expose it yet.
-    sessionRef: body.sessionRef as string | undefined,
-  };
+  const instruction = body.instruction;
+  const deviceId = body.deviceId;
+  const runtime = body.runtime as Runtime;
 
   try {
-    const handle = await byok.dispatch(input);
-    handles.set(handle.taskId, handle);
-    dispatched.set(handle.taskId, {
-      instruction: input.instruction,
-      ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
-    });
-    return c.json({ taskId: handle.taskId });
+    let taskId: string;
+    if (typeof body.sessionRef === 'string') {
+      // A follow-up turn: a caller that has a prior task's reported
+      // `sessionRef` (see GET /api/tasks/:taskId) resumes that runtime session.
+      ({ taskId } = await byok.dispatch({ deviceId, instruction, runtime, agentRef: EXAMPLE_AGENT, sessionRef: body.sessionRef }));
+    } else {
+      // A fresh task. The Host owns the taskId and keeps the input until the
+      // submission returns; this demo keeps both only in memory.
+      ({ taskId } = await byok.executions.submit({
+        taskId: randomUUID(),
+        deviceId,
+        payload: { instruction, runtime, agentRef: EXAMPLE_AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+      }));
+    }
+    dispatched.set(taskId, { instruction, ...(runtime === undefined ? {} : { runtime }) });
+    return c.json({ taskId });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 409);
   }
@@ -166,30 +171,52 @@ app.get('/api/blobs/:blobId/url', async (c) => {
     : c.json({ downloadUrl });
 });
 
-app.get('/api/tasks/:taskId/events', (c) => {
-  const handle = handles.get(c.req.param('taskId'));
-  if (!handle) return c.json({ error: 'unknown taskId' }, 404);
+const TERMINAL = new Set(['Complete', 'Failed', 'Cancelled']);
 
+// A task that `executions.submit` created has no TaskHandle, so its stream is
+// built from the server-wide event feed: each state transition, and the
+// pending approval when the task waits for one. Subscribing before the
+// snapshot read means no transition falls between the two.
+app.get('/api/tasks/:taskId/events', async (c) => {
+  const taskId = c.req.param('taskId');
+  const feed = byok.events.subscribe()[Symbol.asyncIterator]();
+  const snapshot = await byok.tasks.get(taskId);
+  if (!snapshot) {
+    await feed.return?.();
+    return c.json({ error: 'unknown taskId' }, 404);
+  }
   return streamSSE(c, async (stream) => {
-    for await (const event of handle.events()) {
-      if (stream.aborted) break;
-      await stream.writeSSE({ data: JSON.stringify(event) });
+    const send = async (state: ServerTaskEvent & { kind: 'state' }): Promise<boolean> => {
+      await stream.writeSSE({ data: JSON.stringify(state) });
+      if (state.state === 'AwaitApproval') {
+        const pendingApprovalId = (await byok.tasks.get(taskId))?.pendingApprovalId;
+        const approval: ServerTaskEvent = { kind: 'await_approval', summary: `approval ${pendingApprovalId ?? '(unknown)'} is pending` };
+        await stream.writeSSE({ data: JSON.stringify(approval) });
+      }
+      return TERMINAL.has(state.state);
+    };
+    try {
+      if (await send({ kind: 'state', state: snapshot.state, at: snapshot.updatedAt })) return;
+      for (let next = await feed.next(); !next.done && !stream.aborted; next = await feed.next()) {
+        const event = next.value;
+        if (event.kind !== 'task.state' || event.taskId !== taskId) continue;
+        if (await send({ kind: 'state', state: event.state, at: event.at })) return;
+      }
+    } finally {
+      await feed.return?.();
     }
   });
 });
 
-// M5 (approval targeting): an optional `approvalId` in the request body
-// targets one specific pending approval rather than "whichever one is
-// currently pending" (the untargeted default when omitted, unchanged from
-// pre-M5) — see `TaskHandle.approve`'s own doc comment (`@byok-sdk/server`'s
-// `types.ts`). A caller that already knows the approvalId it's acting on
-// (e.g. an operator UI rendering `TaskSnapshot.pendingApprovalId`, or
-// reacting to a `task.await_approval` ServerTaskEvent) passes it through
-// here so a stale decision against a since-superseded approval throws
-// `StaleApprovalError` instead of silently resolving the WRONG one.
+// An optional `approvalId` in the request body targets one specific pending
+// approval rather than "whichever one is currently pending" (the default when
+// omitted). A caller that already knows the approvalId it acts on (e.g. an
+// operator UI rendering `TaskSnapshot.pendingApprovalId`) passes it through so
+// a decision against a since-superseded approval throws `StaleApprovalError`
+// instead of resolving the wrong one. `byok.tasks.approve` decides by taskId,
+// so it works for a task `executions.submit` created.
 app.post('/api/tasks/:taskId/approve', async (c) => {
-  const handle = handles.get(c.req.param('taskId'));
-  if (!handle) return c.json({ error: 'unknown taskId' }, 404);
+  const taskId = c.req.param('taskId');
   let approvalId: string | undefined;
   try {
     approvalId = (await c.req.json())?.approvalId;
@@ -198,27 +225,21 @@ app.post('/api/tasks/:taskId/approve', async (c) => {
     // currently pending), same as pre-M5.
   }
   try {
-    await handle.approve(approvalId !== undefined ? { approvalId } : undefined);
+    await byok.tasks.approve(taskId, approvalId !== undefined ? { approvalId } : undefined);
     return c.json({ ok: true });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 409);
   }
 });
 
-// M4 Phase 3: the approvals-panel counterpart to /approve above — mirrors it
-// exactly (same handle lookup, same optional-reason-body parsing /cancel
-// already uses, same 404/409 error shape). Calls TaskHandle.reject()
-// in-process, the SAME way /approve calls TaskHandle.approve(). Approval is
-// deliberately NOT an SDK-level HTTP route at all (see http.ts's own M4
-// Phase 3 note): the SDK's wire-facing routes are bearer-authed with a
-// DEVICE's access token, and any validly-paired device approving/rejecting
-// ANY task is a footgun, not a feature. `ConnectionHub.approveTask`/
-// `rejectTask` (called here via `TaskHandle`) is the supported entry point —
-// an embedder builds its own operator-facing surface (own auth, own routes)
-// on top of it, exactly like this file does.
+// The approvals-panel counterpart to /approve above, with the same optional
+// targeting. Approval is deliberately not an SDK-level HTTP route: the SDK's
+// wire-facing routes are bearer-authed with a DEVICE's access token, and any
+// paired device deciding any task's approval is a footgun. An embedder builds
+// its own operator-facing surface (own auth, own routes) on `byok.tasks`,
+// exactly like this file does.
 app.post('/api/tasks/:taskId/reject', async (c) => {
-  const handle = handles.get(c.req.param('taskId'));
-  if (!handle) return c.json({ error: 'unknown taskId' }, 404);
+  const taskId = c.req.param('taskId');
   let reason: string | undefined;
   let approvalId: string | undefined;
   try {
@@ -231,7 +252,7 @@ app.post('/api/tasks/:taskId/reject', async (c) => {
     // no body / not JSON — reject with no reason, untargeted
   }
   try {
-    await handle.reject(reason, approvalId !== undefined ? { approvalId } : undefined);
+    await byok.tasks.reject(taskId, reason, approvalId !== undefined ? { approvalId } : undefined);
     return c.json({ ok: true });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 409);
@@ -239,8 +260,7 @@ app.post('/api/tasks/:taskId/reject', async (c) => {
 });
 
 app.post('/api/tasks/:taskId/cancel', async (c) => {
-  const handle = handles.get(c.req.param('taskId'));
-  if (!handle) return c.json({ error: 'unknown taskId' }, 404);
+  const taskId = c.req.param('taskId');
   let reason: string | undefined;
   try {
     reason = (await c.req.json())?.reason;
@@ -248,7 +268,7 @@ app.post('/api/tasks/:taskId/cancel', async (c) => {
     // no body / not JSON — cancel with no reason
   }
   try {
-    await handle.cancel(reason);
+    await byok.tasks.cancel(taskId, reason);
     return c.json({ ok: true });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 409);

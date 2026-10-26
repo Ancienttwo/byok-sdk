@@ -90,6 +90,8 @@ describe('examples/basic quickstart with default settings', () => {
       productId: PRODUCT_ID,
       serverUrl: server.url,
       storeDir: path.join(root, 'store'),
+      agentHome: { hostStorageRoot: path.join(root, 'home') },
+      agentEgress: {},
     }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
 
     // Step 1 of the README: the page's "Create pairing code" button.
