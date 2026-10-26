@@ -14,7 +14,7 @@
     `strict-agent-only` flag (`STRICT_AGENT_ONLY_CAPABILITY`, also removed
     from `@byok-sdk/server`). The daemon declines every offer when it has no
     Agent home. `DaemonConfig.strictAgentOnly` is removed and raises
-    `DaemonConfigFieldRemovedError`; `workspaceRoot` is no longer required.
+    `DaemonConfigFieldRemovedError`.
     Runtime adapters take the client-owned `RuntimeTaskInput` (exported from
     `@byok-sdk/client`) instead of the removed wire `TaskOfferPayload`.
   - `approvalId` is required on `task.await_approval`, `task.approve` and
@@ -27,16 +27,43 @@
     `task.approval_resolved_implicit` server event and the `targeted` field of
     `task.approval_resolved` events are removed, and activity while a task
     awaits approval leaves it awaiting approval.
+  - Git workspace mode and the daemon's task workspace root are removed
+    (ADR-034): every task runs in its Agent home. `DaemonConfig.gitWorkspace`,
+    `DaemonOverrides.gitWorkspace` and `DaemonConfig.workspaceRoot` raise
+    `DaemonConfigFieldRemovedError`; delete them from daemon configs.
+    `@byok-sdk/client` no longer exports `GitWorkspaceManager`,
+    `GitWorkspaceError`, `isGitWorkspaceConfig`,
+    `prependGitWorkspaceGuidance`, `GitWorkspaceStore`, `GitWorkspaceConfig`,
+    `GitWorkspaceObservation`, `GitWorkspaceLease`, `GitWorkspaceOptions`,
+    `GitErrorCategory`, `GitWorkspaceLedger`, `GitWorkspaceLedgerRecord` or
+    `GitWorkspacePhase`. `RuntimeOperationManifest.workspace` loses
+    `workspaceId` and `baseline`. The `byok-agent workspaces` command, the
+    `git-workspace` daemon event and audit record, the doctor `workspace`
+    check and the support bundle's `workspace` field are removed; an older
+    audit log's `git-workspace` lines are skipped as an unknown kind. The
+    daemon leaves `<storeDir>/git-workspaces.json` and old task directories
+    untouched.
   - `ByokServer.dispatch` takes only `AgentResumeDispatchInput` (`agentRef`
     and `sessionRef`); `LegacyDispatchInput` is removed. Fresh work uses
     `executions.submit`.
-  - `@byok-sdk/protocol` adds the one-shot `WIRE_V3_TO_V4_TYPES`,
-    `wireV4TypeOf` and `migrateWireV3Envelope`; `@byok-sdk/cloud` adds
-    `wireV4ReceiptKind`, `migrateWireV3Receipt` and
-    `WireV4ReceiptMigrationError`; `@byok-sdk/cloud-dataplane` adds
-    `migratePostgresReceiptsToWireV4` and `@byok-sdk/server` adds
-    `migrateSqliteReceiptsToWireV4`. They ship in 0.31.x only; 0.32.0 removes
-    them (#1017).
+  - One-shot wire v4 migration of stored state, in two steps per store. The
+    read-only preflight (`preflightPostgresWireV4Migration(pool)` in
+    `@byok-sdk/cloud-dataplane`, `preflightSqliteWireV4Migration(path)` in
+    `@byok-sdk/server`) lists the legacy tasks (offered on a removed offer
+    type) and every row with no v4 form. The migration
+    (`migratePostgresToWireV4(pool, confirmedLegacyTasks)`,
+    `migrateSqliteToWireV4(path, confirmedLegacyTasks)`) takes the confirmed
+    list back and, in one transaction, deletes every row of those tasks and
+    re-encodes the remaining offer and terminal receipts. It changes nothing
+    and throws `ReceiptMigrationUnmappableError` when a receipt has no v4
+    form, an approval was recorded without an id, or a v3 mailbox row of
+    another task could still reach a device; and
+    `WireV4LegacyTaskListMismatchError` when the confirmed list differs from
+    the store's. `@byok-sdk/protocol` adds `WIRE_V3_TO_V4_TYPES`,
+    `wireV4TypeOf` and `migrateWireV3Envelope`; `@byok-sdk/cloud` adds the
+    store-independent half (`migrateWireV3Receipt`, `wireV4ReceiptKind`,
+    `assertWireV4MigrationConfirmed` and the types and errors above). All of
+    it ships in 0.31.x only; 0.32.0 removes it (#1017).
   - `harnessId` on every Agent offer is gated on the device's `custom-harness`
     capability, the gate the removed offers carried.
   - The protocol test alias `byok-protocol-previous` pins 0.30.2, the last v3

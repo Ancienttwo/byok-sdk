@@ -380,8 +380,8 @@ and the hosted cloud advertise the flag and project the field as
 Stored v3 envelopes do not decode under v4, so a store that keeps receipts
 across the cut runs a one-shot migration. The operator runs it once, after
 draining mailboxes and ending executions (see the status note above), and
-before the v4 server starts. It ships in 0.31.x only; the next minor removes
-it.
+before the v4 server starts. It ships in 0.31.x only; 0.32.0 removes it
+(#1017).
 
 `@byok-sdk/protocol` exports the envelope half
 (`packages/protocol/src/wire-v4-migration.ts`):
@@ -399,7 +399,7 @@ it.
   for example a `task.await_approval`, `task.approve` or `task.reject` without
   `approvalId`).
 
-`@byok-sdk/cloud` exports the receipt half
+`@byok-sdk/cloud` exports the store-independent half
 (`packages/cloud/src/wire-v4-receipt-migration.ts`):
 
 - `wireV4ReceiptKind(key)` names the two migrated receipt families: `offer`
@@ -413,14 +413,29 @@ it.
   its bytes when v4 keeps its type and its payload parses under v4 unchanged.
   An offer receipt of a removed offer type is refused
   (`type_without_v4_form`).
-- `WireV4ReceiptMigrationError` (code `wire_v4_receipt_migration_refused`)
-  lists every refused receipt. If any receipt is refused, the run fails and
-  changes no receipt.
+- A legacy task (`WireV3LegacyTask`: `tenantId`, `taskId`, `deviceId`,
+  `type`) is a task offered on a removed offer type, so it has no AgentRef.
+  `wireV3LegacyOfferType(body)` and `wireV3LegacyOfferReceiptKeys(...)` find
+  its offer receipts. It is deleted, not mapped.
+- `WireV4UnmappableRow` is a row with no v4 form: a refused `receipt`, an
+  `approval` recorded without `approvalId`, or a `mailbox` row of a
+  non-legacy task that a v4 device could still receive in older bytes.
+- `assertWireV4MigrationConfirmed(preflight, confirmedLegacyTasks)` throws
+  `ReceiptMigrationUnmappableError` (code `wire_v4_migration_unmappable`)
+  when any row is unmappable, and `WireV4LegacyTaskListMismatchError` (code
+  `wire_v4_legacy_task_list_mismatch`) when the confirmed list is not exactly
+  the store's legacy tasks.
 
-`migratePostgresReceiptsToWireV4(pool)` (`@byok-sdk/cloud-dataplane`) runs the
-migration over the hosted `device_request_receipts` table in one transaction;
-`migrateSqliteReceiptsToWireV4(path)` (`@byok-sdk/server`) runs it over a
-stopped embedded store.
+Each store runs it in two steps. The read-only preflight
+(`preflightPostgresWireV4Migration(pool)` in `@byok-sdk/cloud-dataplane`,
+`preflightSqliteWireV4Migration(path)` in `@byok-sdk/server`) returns
+`{ legacyTasks, unmappable }`. The migration
+(`migratePostgresToWireV4(pool, confirmedLegacyTasks)`,
+`migrateSqliteToWireV4(path, confirmedLegacyTasks)`) takes the operator's
+confirmed list back and, in one transaction, deletes every row those tasks
+own and re-encodes the remaining offer and terminal receipts, or throws and
+changes nothing. See [the wire v4 upgrade note](releases/925-wire-v4.md) for
+what each store deletes and the upgrade order.
 
 ## 1. Envelope
 
@@ -3099,7 +3114,7 @@ closing this out.
 v2 removed `PermissionPolicy` (`permission.ts`): there is no offered mode,
 `allowTools`/`denyTools`, `network` or `workspaceRoot` any more
 ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)). Sessions run
-YOLO in the user-specified workspace. Each local agent applies its own
+YOLO in the Agent home (since wire v4, the only task cwd). Each local agent applies its own
 guardrails and the user's own configuration: Claude `~/.claude`, Codex
 `config.toml` (sandbox per `DaemonConfig.codexSandbox`), Pi agentDir and
 extensions.

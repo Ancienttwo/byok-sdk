@@ -583,10 +583,13 @@ and composite primary key are validated on open. Capacity exhaustion is an
 error; deleting identity fences is not a quota strategy.
 
 Offer and terminal receipts hold wire bytes, and a wire v4 build reads only v4
-bytes. A store written by a v3 build needs the one-shot receipt migration
-(`migrateWireV3Receipt`, 0.31.x only) after draining and before a v4 server
-starts. `migrateSqliteReceiptsToWireV4(path)` (`@byok-sdk/server`) runs it on a
-stopped embedded store. See
+bytes. A store written by a v3 build needs the one-shot wire v4 migration
+(0.31.x only; 0.32.0 removes it, #1017) after draining and before a v4 server
+starts. On a stopped embedded store, `preflightSqliteWireV4Migration(path)`
+(`@byok-sdk/server`) lists the legacy tasks (offered on a removed offer type)
+and every row with no v4 form; `migrateSqliteToWireV4(path, confirmedLegacyTasks)`
+takes the confirmed list back, deletes those tasks' rows and re-encodes the
+rest in one transaction, or changes nothing. See
 [the wire v4 upgrade note](releases/925-wire-v4.md).
 
 ### Bot turn outcome fragments and routine time points
@@ -1527,7 +1530,7 @@ that read. A process whose parent exited before the read is re-parented to init
 and is not ended. For example, Claude and Pi run each shell command in a session
 of its own, so a background job (`cmd &`) outlives `close()` and
 `daemon.stop()`. OAR has the same limit. TaskRunner records
-the semantic terminal once, but retains its active entry and Git workspace
+the semantic terminal once, but retains its active entry and Agent home
 lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without
 publishing a second `task.complete`, `task.fail`, or `task.cancelled`.
@@ -2583,8 +2586,8 @@ path. The hook alone decides whether and how to write a product file such as
 sync semantics. Credentials
 remain in an OS credential store; only non-secret references/configured state
 may be projected. Since wire v4 every offer is an Agent offer, and the Agent
-home is the only workspace authority for one; `workspaceRoot/<taskId>` is never
-a fallback. Migration is an explicitly enabled one-shot cutover with no dual
+home is the only workspace authority for one; no other directory is a
+fallback. Migration is an explicitly enabled one-shot cutover with no dual
 read, dual write, or implicit adoption of task workspaces.
 
 See [host local storage](host-local-storage-layout.md) for the responsibility

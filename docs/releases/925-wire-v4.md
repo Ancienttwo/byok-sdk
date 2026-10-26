@@ -34,13 +34,17 @@ reader and no capability negotiation between the two majors.
   get a handle, or let the device resolve the approval locally.
 - The daemon runs Agent offers only. Configure `DaemonConfig.agentHome`; a
   daemon without one declines every offer. `DaemonConfig.strictAgentOnly` is
-  removed and raises `DaemonConfigFieldRemovedError`. `workspaceRoot` is no
-  longer required.
+  removed and raises `DaemonConfigFieldRemovedError`.
+- Git workspace mode is removed. `DaemonConfig.gitWorkspace`,
+  `DaemonOverrides.gitWorkspace` and `DaemonConfig.workspaceRoot` raise
+  `DaemonConfigFieldRemovedError`; delete them from the daemon config. The
+  `byok-agent workspaces` command is gone. The daemon leaves
+  `<storeDir>/git-workspaces.json` and old task directories untouched.
 - `Daemon.approve` and `Daemon.reject` take `{ approvalId }`.
 - Runtime adapters take `RuntimeTaskInput` from `@byok-sdk/client`. The wire
   type `TaskOfferPayload` is removed.
 
-## Stored v3 receipts
+## Stored v3 state
 
 The kernel keeps two receipt families that hold wire bytes and never expire:
 offer receipts (`task-offer:<messageId>`, `{ deviceId, type, payload }`) and
@@ -49,33 +53,80 @@ reads only v4 bytes. Unmigrated receipts break task readback: `tasks.get`,
 `tasks.list`, `tasks.offer` and `tasks.deviceTerminal` read them through the
 offer and terminal projections.
 
-The one-shot migration maps every receipt with one table,
-`WIRE_V3_TO_V4_TYPES` (`@byok-sdk/protocol`).
-`migrateWireV3Receipt(kind, body)` (`@byok-sdk/cloud`) returns `unchanged`,
-`migrated` (a terminal is re-encoded with the v4 `encodeEnvelope`, so its
-bytes and hash change) or `refused`. A run that refuses any receipt changes
-nothing and throws `WireV4ReceiptMigrationError`, which lists each refused
-receipt. An offer receipt of a removed offer type cannot be migrated.
-`migratePostgresReceiptsToWireV4(pool)` (`@byok-sdk/cloud-dataplane`) runs it
-over `device_request_receipts` in one transaction.
-`migrateSqliteReceiptsToWireV4(path)` (`@byok-sdk/server`) runs it over a
-stopped embedded store's `request_receipt` table; it takes the file's exclusive
-ownership, so it fails while a server owns the file. The migration ships in
-0.31.x only and is removed in the next minor.
+A task offered on a removed offer type is a legacy task. It has no
+AgentRef and no v4 form, so the migration deletes it instead of mapping it.
+Every other receipt is mapped with one table, `WIRE_V3_TO_V4_TYPES`
+(`@byok-sdk/protocol`): `migrateWireV3Receipt(kind, body)`
+(`@byok-sdk/cloud`) returns `unchanged`, `migrated` (a terminal is re-encoded
+with the v4 `encodeEnvelope`, so its bytes and hash change) or `refused`.
+
+The migration runs in two steps. Each store has its own pair:
+
+| Store | Preflight | Migration |
+| --- | --- | --- |
+| Postgres (`@byok-sdk/cloud-dataplane`) | `preflightPostgresWireV4Migration(pool)` | `migratePostgresToWireV4(pool, confirmedLegacyTasks)` |
+| SQLite (`@byok-sdk/server`) | `preflightSqliteWireV4Migration(path)` | `migrateSqliteToWireV4(path, confirmedLegacyTasks)` |
+
+1. The preflight is read-only. It returns `{ legacyTasks, unmappable }`:
+   each legacy task as `{ tenantId, taskId, deviceId, type }` (`type` is
+   `null` when the offer receipt was never recorded), and every row the
+   migration cannot carry into v4.
+2. The operator reviews the list and passes `legacyTasks` back unchanged.
+   In one transaction the migration deletes every row those tasks own, then
+   re-encodes the remaining offer and terminal receipts. It returns
+   `{ migrated, unchanged, deletedTasks }`.
+
+The migration fails and changes nothing when:
+
+- the confirmed list is missing or differs from what the store holds:
+  `WireV4LegacyTaskListMismatchError` (code
+  `wire_v4_legacy_task_list_mismatch`);
+- any row is unmappable: `ReceiptMigrationUnmappableError` (code
+  `wire_v4_migration_unmappable`), whose `unmappable` lists each row.
+
+A row is unmappable when it is:
+
+- an offer or terminal receipt with no v4 form;
+- on Postgres, an approval timeline entry without the `approvalId` v4
+  requires (SQLite keeps the timeline in memory). The migration never makes
+  up an id;
+- a mailbox row of a non-legacy task whose bytes are not v4 and that a v4
+  device could still receive: a pending row on either store, or on Postgres
+  an expired dead letter, which `replayDeadLetter` can still send. SQLite has
+  no dead-letter replay. Acked rows are never sent again and stay.
+
+Deleting a legacy task removes its offer, delivered and terminal receipts,
+its mailbox rows, its Agent message admission, its `sealed-task` object
+reference and its task attempt. On Postgres it also removes the approval and
+activity tails, the message draft, the terminal truth object reference and
+the `task.terminal` attested record. Object bytes are left to orphan GC. The
+`task-redaction:<taskId>` audit receipt and the memory-projection metering
+receipts hold no wire bytes and stay.
+
+The SQLite pair takes the file's exclusive ownership, so it fails while a
+server owns the file. Both pairs ship in 0.31.x only; 0.32.0 removes them
+(#1017).
 
 ## Coordinated upgrade
 
 1. On the old SDK, stop submitting new work. Let pending server mailbox
    entries be processed and acknowledged; settle in-flight executions and
    confirm every daemon pending terminal.
-2. Stop writers and keep a backup of the existing state.
-3. Run the receipt migration against the stopped store. If it refuses, the
-   store is unchanged; decide what to do with the listed receipts before
-   running it again.
-4. Start the v4 embedded server or hosted cloud, then v4 daemon clients. A
+2. Let every approval recorded without an id expire: wait
+   `DEFAULT_APPROVAL_TIMELINE_TTL_MS` (10 minutes) and let maintenance
+   collect the tail.
+3. On Postgres, settle each v3 dead letter while v3 devices still run:
+   replay it with `PostgresCloudCleanup.replayDeadLetter` if the device must
+   still get it, then delete it with `discardDeadLetter`. A replay leaves the
+   original expired row in place.
+4. Stop writers and keep a backup of the existing state.
+5. Run the preflight, review the legacy tasks and unmappable rows, then run
+   the migration with the confirmed list. If it fails, the store is
+   unchanged; resolve the listed rows and start again from the preflight.
+6. Start the v4 embedded server or hosted cloud, then v4 daemon clients. A
    Topology L application upgrades both sides together.
 
-Pending v3 mailbox rows still stop startup with the existing wire-major
+Pending v3 mailbox rows also stop startup with the existing wire-major
 fences (`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`,
 `POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`,
 `DaemonJournalProtocolUnsupportedError`). These checks do not rewrite or

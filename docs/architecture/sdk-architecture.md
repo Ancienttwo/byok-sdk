@@ -69,7 +69,7 @@ flowchart LR
     PiLauncher(["byok-pi-provider-launcher<br/>credential custody"]):::isolated
     Claude(["Claude Code CLI"]):::runtime
     Codex(["Codex CLI"]):::runtime
-    Workspace[("Task workspace<br/>可选 Git checkpoints")]:::store
+    Workspace[("Agent home<br/>task cwd")]:::store
     Agent --> IPC
     Agent --> Runtime
     Runtime --> Pi
@@ -102,7 +102,7 @@ flowchart LR
 | --- | --- | --- |
 | SaaS embed | `createByokServer(options)` | 生成 Hono app、long-poll/device HTTP surface、dispatch/task/device/event/stats façade API |
 | 本机 library | `createDaemon()` / `createDaemonWithAdapters()` | 配对、连接、任务执行、observer、service lifecycle |
-| 本机 CLI | `byok-agent` | pair/start/status/runtimes/tasks/workspaces/unpair/approval/service commands |
+| 本机 CLI | `byok-agent` | pair/start/status/runtimes/tasks/unpair/approval/service commands |
 | Wire contract | `@byok-sdk/protocol` public index | envelope、typed messages、HTTP schema、状态机、capability flags |
 | Key custody | `ProviderRegistry` | profile 与 secret 分库存储，构造 OpenAI-compatible / Anthropic client |
 
@@ -164,7 +164,7 @@ flowchart LR
 | --- | ---: | ---: | --- |
 | protocol | 11 / 1,389 | 9 / 2,246 | 小而冻结；跨端契约变化风险最高 |
 | server | 16 / 4,926 | 26 / 6,638 | façade 只组合 cloud kernel、embedded stores 与 bounded live relay |
-| client | 75 / 21,313 | 101 / 23,655 | 最大模块；runtime、IPC、service、Git、transport 与 S6 local truth path 都在此包 |
+| client | 75 / 21,313 | 101 / 23,655 | 最大模块；runtime、IPC、service、transport 与 S6 local truth path 都在此包 |
 | keys | 18 / 2,718 | 15 / 2,958 | 独立 key-custody 安全模型 |
 | core | 23 / 3,467 | 5 / 1,019 | S2 契约层；InMemory 参考实现，consumer 是 `cloud` 与 `client`；共享 conformance 已移到独立 package |
 | cloud | 42 / 5,045 | 10 / 3,003 | async domain kernel + stateless hosted surface；device/board/truth handlers + InMemory 组合，消费 `core` 与 `protocol` |
@@ -505,7 +505,6 @@ flowchart TB
   subgraph Local["Local state and OS integration"]
     direction LR
     Stores[("device / cursor / session stores")]:::local
-    Git[("Git workspace + private ledger")]:::local
     IPC[("Unix socket / named pipe")]:::local
     Service(["launchd / systemd / WinSW"]):::local
     Secure(["secure dir + atomic write"]):::utility
@@ -528,10 +527,8 @@ flowchart TB
   Runner --> Grok
   Auth --> Stores
   Conn --> Stores
-  Runner --> Git
   Control --> IPC
   Stores --> Secure
-  Git --> Secure
 
   style Entry fill:none,stroke:#60a5fa,stroke-width:2px,color:#60a5fa
   style Core fill:none,stroke:#a78bfa,stroke-width:2px,color:#a78bfa
@@ -551,7 +548,6 @@ Library exports 分成六组：
 | adapter contract | `RuntimeAdapter`、`RuntimeAdapterDescriptor`、`PreparedRuntimeOperation`、`RuntimeOperationManifest`、`RuntimeOperationStartInput`、`Session`、`RuntimeCapabilities`、`RuntimeExecutionFailure` 及其 closed phase/category/retry types、`RuntimeDisposalFailure` 及 stage、`PolicyUnsupportedError` |
 | bundled adapters | `PiAdapter`、`ClaudeAdapter`、`CodexAdapter`、`HermesAdapter` 与 `GrokAdapter`（后两者是 custom harness，Host 显式加入）与 options |
 | observability | `DaemonObserver`、event/task projection types |
-| Git workspace | `GitWorkspaceManager`、`GitWorkspaceStore`、ledger/lease/observation types |
 | OS integration | service lifecycle factories/generators、`ensureSecureDir`、Windows DACL error |
 
 0.4.0 的 adapter seam 只有一条：adapter 把静态事实放在 frozen
@@ -581,7 +577,7 @@ field validation 跨 entry 识别，不依赖会分裂 constructor identity 的
 独立 process group 启动并按 group TERM→KILL，Windows 用 `taskkill /T /F`；
 只有 root stdio close、process tree 不再存在且 task-scoped cleanup 完成后才
 resolve。`TaskRunner` 先冻结一次 semantic terminal，但在 close 成功前继续
-持有 active entry 与 Git writer lease。typed disposal rejection 只进入本机
+持有 active entry 与 Agent home writer lease。typed disposal rejection 只进入本机
 `runtime-disposal-failed` observer/audit，不重写 wire terminal；后续 shutdown
 可重试同一 ownership barrier。
 
@@ -590,7 +586,7 @@ resolve。`TaskRunner` 先冻结一次 semantic terminal，但在 close 成功�
 | 类别 | 命令 |
 | --- | --- |
 | identity/runtime | `pair`、`unpair`、`status`、`runtimes` |
-| task/operator | `tasks`、`workspaces`、`approvals`、`approve`、`reject` |
+| task/operator | `tasks`、`approvals`、`approve`、`reject` |
 | daemon | `start` |
 | OS service | `install`、`uninstall`、`service-start`、`service-stop`、`service-status` |
 
@@ -616,8 +612,7 @@ adapter-only build/import surface。
 | `approvals.ts` | bounded pending approval registry、first resolution wins |
 | `control-server.ts` / `control-protocol.ts` | HMAC mutual auth、local RPC、endpoint/token derivation |
 | `observer.ts` | local task/connection/runtime event projection；为 CLI follow 提供数据 |
-| `store.ts` / `cursor-store.ts` / `session-workspace-store.ts` | device identity/token、redelivery cursor、sessionRef→workspace mapping |
-| `git-workspace.ts` / `git-workspace-store.ts` | optional local checkpoints、one-writer lease、private recovery ledger |
+| `store.ts` / `cursor-store.ts` / `agent-session-handoff-store.ts` | device identity/token、redelivery cursor、Agent session handoff |
 | `blob-client.ts` | signed URL 方式上传/下载 instruction/artifact |
 | `capabilities-client.ts` / `presence-publisher.ts` | 读取并校验 hosted capability declaration（ADR-010，fail-closed）；仅在声明含 `presence.hints` 时发 `online` 心跳，停机停发（见 §12.3 daemon presence producer） |
 | `device-proof-signer.ts` / `truth-memory-client.ts` | 显式 tenant/product/key proof、metadata-only manifest、本地 selector、selected fetch/rehash/filter 与 truth write |
@@ -664,7 +659,7 @@ flowchart LR
 
   Config(["validate config + URL"]):::gate
   Secure(["secure storeDir"]):::gate
-  Local(["load identity / stores<br/>optional Git preflight"]):::stage
+  Local(["load identity / stores"]):::stage
   Control(["start control socket"]):::stage
   Detect(["detect allowed runtimes"]):::stage
   Runner(["create TaskRunner"]):::stage
@@ -674,7 +669,7 @@ flowchart LR
   Config --> Secure --> Local --> Control --> Detect --> Runner --> Connect --> Ack
 ```
 
-统一 graceful shutdown 顺序是：停止接收新 offer → 发布每个 active task 的单一 terminal → 等待 quiescent runtime disposal（成功后才释放 task/Git ownership）→ bounded drain outbox → stop connection/auth → close control socket。disposal rejection 保持 mutation barrier 未闭合并阻止 daemon-owner lease 提前释放。取消、shutdown RPC 与 library `stop()` 共用同一条序列，避免三套不同清理语义。
+统一 graceful shutdown 顺序是：停止接收新 offer → 发布每个 active task 的单一 terminal → 等待 quiescent runtime disposal（成功后才释放 task/Agent home ownership）→ bounded drain outbox → stop connection/auth → close control socket。disposal rejection 保持 mutation barrier 未闭合并阻止 daemon-owner lease 提前释放。取消、shutdown RPC 与 library `stop()` 共用同一条序列，避免三套不同清理语义。
 
 ## 5. Local control plane 与 approval
 
@@ -689,7 +684,7 @@ RPC 面据实是 6 个方法（`packages/client/src/daemon/create-daemon.ts:979-
 | unary | `status`、`approvals.list`、`approvals.resolve`、`approvals.request`、`shutdown` |
 | stream | `tasks.subscribe` |
 
-没有 `workspaces` 方法——`bin/commands/workspaces.ts` 直接读本机 ledger，不经 control client；也没有独立的 `unpair` 方法，`bin/commands/unpair.ts` 复用 `shutdown` RPC 再清理本地身份。POSIX 依赖 0700/0600；Windows 通过 `icacls` 设置 restrictive DACL，失败抛 `SecureDirHardeningError`，不会继续写入未保护的 device/control secrets。
+没有独立的 `unpair` 方法，`bin/commands/unpair.ts` 复用 `shutdown` RPC 再清理本地身份。POSIX 依赖 0700/0600；Windows 通过 `icacls` 设置 restrictive DACL，失败抛 `SecureDirHardeningError`，不会继续写入未保护的 device/control secrets。
 
 ### 5.2 共享审批 seam 与 Claude interrupt
 
@@ -703,42 +698,9 @@ request_id 匹配 ACK，不依赖事件消费者。成功 ACK 保留会话，1 �
 走既有 owned-process disposal。实际 result 仍是回合事实，TaskRunner 继续
 拥有取消后的 product terminal 权威。
 
-## 6. Local Git checkpoint workspace
+## 6. Local Git checkpoint workspace（wire v4 已删除）
 
-wire v4 下的状态：配置仍被接受，但没有 task 会在 Git workspace 里运行。`gitWorkspace` 与 `agentHome` 互斥，没有 Agent home 的 daemon decline 每个 offer，所以启用 Git workspace 的 daemon decline 全部工作。Git checkpoint 是接入 Agent home 还是删除，仍待裁定（ADR-034）。下文按已实现的代码描述该 workspace 契约。
-
-该功能默认关闭；唯一启用形状是：
-
-```ts
-{ gitWorkspace: { mode: 'local-checkpoints' } }
-```
-
-```mermaid
-flowchart TB
-  classDef stage fill:#5b21b6,stroke:#ddd6fe,stroke-width:2px,color:#fff
-  classDef store fill:#9a3412,stroke:#fed7aa,stroke-width:2px,color:#fff
-  classDef gate fill:#b91c1c,stroke:#fecaca,stroke-width:2px,color:#fff
-  classDef done fill:#047857,stroke:#a7f3d0,stroke-width:2px,color:#fff
-
-  Offer(["offer（v3 runtime-only offer）"]):::stage
-  Preflight{{"Git mode enabled and preflight healthy?"}}:::gate
-  Plain(["plain workspaceRoot/taskId"]):::stage
-  Lease(["canonical workspace + session lease"]):::gate
-  Init(["fresh directory: git init"]):::stage
-  Observe(["bounded HEAD/status/rev-list observation"]):::stage
-  Ledger[("git-workspaces.json<br/>atomic private ledger")]:::store
-  Run(["runtime gets checkpoint guidance"]):::stage
-  Preserve(["failure/cancel/shutdown:<br/>observe, mark recovery, preserve files"]):::done
-
-  Offer --> Preflight
-  Preflight -->|"disabled"| Plain --> Run
-  Preflight -->|"enabled"| Lease
-  Lease -->|"busy or incompatible"| Reject(["decline before claim"]):::gate
-  Lease -->|"acquired"| Init --> Observe --> Ledger --> Run
-  Run --> Preserve --> Ledger
-```
-
-Git 只记录 code state，不改变 wire task state。daemon 不自动 commit、不改 identity、不执行 network Git、不 reset/stash/clean/rebase/merge/切分支，也不删除 workspace。重启只把遗留 `preparing/active` 记录标成 `interrupted`；它不会伪造协议恢复。operator view 默认隐藏路径，只有 `workspaces --show-paths` 才显示。
+wire v4（#925）执行了 ADR-034 的 gitWorkspace 一项：每个 offer 都在 SDK 拥有的 Agent home 里运行，Git workspace 模式与 `workspaceRoot/<taskId>` 目录一并删除。`DaemonConfig.gitWorkspace`、`DaemonOverrides.gitWorkspace` 与 `DaemonConfig.workspaceRoot` 抛 `DaemonConfigFieldRemovedError`；`byok-agent workspaces`、`git-workspace` daemon event 与 audit record、doctor 的 `workspace` 检查都已删除。旧 daemon 留下的 `<storeDir>/git-workspaces.json` 与 task 目录保持原样，由 operator 手动处理。
 
 ## 7. `@byok-sdk/keys`：独立 provider credential plane
 
@@ -993,9 +955,9 @@ flowchart TB
 | control socket | mutual HMAC、endpoint permission/DACL、method pre-auth unreachable | 同一 user 且能读 token 的恶意进程 |
 | audit/observer | 只记录 task id、event type、tool/runtime name、counts/sizes | 保存完整 tool input/output 作为审计证据 |
 | resource limits | max duration、max output bytes、bounded queues/collections、shutdown deadlines | cgroup/rlimit；恶意 child 一定会响应 interrupt |
-| workspace | daemon-owned path、optional one-writer Git lease | runtime 无法访问 workspace 之外的路径 |
+| workspace | SDK 组合的 Agent home、单写者 lease | runtime 无法访问 Agent home 之外的路径 |
 
-`limits.maxTokens` 当前不能由任一 bundled adapter 精确执行，因此必须在 pre-claim fail-closed，而不是估算。`workspaceRoot` 是 convention，不应被 UI 描述成 sandbox。
+`limits.maxTokens` 当前不能由任一 bundled adapter 精确执行，因此必须在 pre-claim fail-closed，而不是估算。Agent home 是 cwd convention，不应被 UI 描述成 sandbox。
 
 ### 9.1 Credential isolation 的具体承诺
 
@@ -1065,7 +1027,7 @@ SDK 只交付 npm library 与 reference recipes。host product 拥有 binary sig
 CI 验证层次：
 
 1. Node 24.22.1 基线与 Node 26 forward-compatibility leg：build → typecheck → test；build 必须先跑，因为 workspace exports 指向 `dist`。
-2. Windows Git workspace/store/security tests，含特殊字符路径。
+2. Windows store/security tests，含特殊字符路径（job 仍名为 `windows-git-workspace`，Git 测试已随 wire v4 删除）。
 3. Bun/SEA packageability smoke。
 4. WinSW real service install/start/stop/uninstall smoke。
 5. macOS/Linux/Windows control socket smoke。
@@ -1206,7 +1168,7 @@ stateDiagram-v2
 #### wire execution 规则（当前已实现，此处只重申跨层约束）
 
 - claim 与 start 分离；`decline` 保留 retryable 语义；terminal 不可逆。
-- workspace / Git 状态不得触发 wire transition。
+- workspace 状态不得触发 wire transition。
 - server 与 cloud 都不得依据 presence 合成 execution state。
 - hosted mailbox 只运输 envelope，**不是** execution-state authority。
 
@@ -1551,7 +1513,7 @@ tenant/device/task/session/runtime/exact `AgentRef` 与 canonical home，model �
 传这些 identity/root。文件面仅允许 `MEMORY.md` 和经校验的
 `notes/**/*.md`，用 sha256 revision CAS、atomic replace/delete、fsync
 与 metadata-only local audit；路径逃逸、symlink、`.byok`、secret-like
-名称与 stale revision 全部 fail closed。Ordinary task 和 Git-only task 不
+名称与 stale revision 全部 fail closed。Ordinary task 不
 注入该 MCP，hosted content-read 对 `MEMORY.md` 的 deny 保持不变。
 Linux 保留 `/proc/self/fd` + `O_NOFOLLOW` 的 native descriptor backend。
 macOS 可由 product host 显式提供 absolute-path、exact-version 的外部 Go
@@ -2064,7 +2026,7 @@ S7-a 落 operational health/crash authority；S7-b 已把它与 runtime/control/
 6. terminal truth immutable；TTL hint 不能覆盖 truth。
 7. memory conflict 不由 cloud 语义 merge。
 8. board claim/status 使用 CAS；不做 silent last-write-wins。
-9. workspace/Git state 不驱动 protocol task transition。
+9. workspace state 不驱动 protocol task transition。
 10. runtime adapter 拒绝它无法执行的 offer 字段，不丢弃也不近似；offer 不再携带 permission policy（ADR-037）。
 11. 每个 daemon 的 mailbox ack authority 都是本机 SQLite journal（或同等 contract），不能退回未证明 durable 的普通文件，也没有不带 journal 的模式。（S3b 实现；#924 起对每个 daemon 生效，不降级）
 12. `committedBytes + reservedBytes` 不得超过有效 entitlement；所有直接上传先做 reservation。
@@ -2209,7 +2171,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-031 | AgentHome / SessionState / Workspace 三分；mutable Workspace 单写者、同 Session Run 串行；backend 只有 plain-directory 与 git-worktree | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`）；ADR-037 保留 Agent-home 单写者 lease，cwd = 用户指定 workspace 或 Agent home；v2 `workspaceRef` 未实现（protocol 无此字段） |
 | ADR-032 | `@byok-sdk/server` 折叠为 cloud domain kernel 的 embedded façade，删除独立协调状态机与旧 transport | Accepted，Supersedes ADR-004（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-033 | `local-first-v1` 为默认数据 policy profile，contentful 进 `shared-observability-v1`；结果事务权威是 `SessionResultCommitter` | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
-| ADR-034 | legacy `task.offer*` / `strictAgentOnly` / 旧 gitWorkspace authority / ambient 选设备在一次 v2 cutover 中删除，无双读双写 | Accepted，Supersedes ADR-002（详见 `adr-2026-09-03-domain-model-and-authority.md`）；legacy offer 与 `strictAgentOnly` 的删除由 wire v4（#925）执行，gitWorkspace authority 一项仍待裁定 |
+| ADR-034 | legacy `task.offer*` / `strictAgentOnly` / 旧 gitWorkspace authority / ambient 选设备在一次 v2 cutover 中删除，无双读双写 | Accepted，Supersedes ADR-002（详见 `adr-2026-09-03-domain-model-and-authority.md`）；legacy offer、`strictAgentOnly` 与 gitWorkspace authority 的删除由 wire v4（#925）执行 |
 | ADR-035 | 保留 `@byok-sdk/server` 的 self-hosted Node/Hono deployment boundary；无独立能力的 `byok-sdk` umbrella 在另行批准的 breaking cutover 中退出，public artifacts 由 10 降为 9 | Accepted；implemented in 0.21.0（umbrella 删除，同 release `@byok-sdk/testkit` 转 private，public artifacts 实际由 11 降为 9；详见 `adr-2026-09-05-public-package-topology.md`） |
 | ADR-036 | 云端 Generic Agent：Bot 模式每次唤醒 = 新执行（方案 A）；云端模型 key 只由平台持有、BYOK 永远只在本地（每请求 key / 信封加密托管作废）；云端不支持官方 CLI / Keychain / 本地文件 / stdio MCP；云端工具 / 作业调用基于 Durable Objects；byok-sdk 拥有云端 backend，Aiphabee 为首个消费方；Aiphabee chat Workflow 直接替换（无并行 / flag / shadow）；DO 同时承载工具与长作业且保持最简；云端只读数据工具与 skill 加载器 `replay:'safe'`（冻结清单），本地全 unsafe | Accepted（2026-10-03，decided by Aimpact）；`@byok-sdk/cloud-do` 自 0.24.0 起发布，其余切片的落地情况本表未核实；D7 对真相层的约束由 ADR-038 修订（详见 `adr-2026-10-03-cloud-generic-agent.md`） |
 | ADR-037 | 最小 guardrail：删除 `PermissionPolicy`（protocol v2）、MCP readonly/grants、strict MCP、env allowlist 与 key 剥离、egress sanitizer、trusted launch cwd、attestation 与 custody；session 在用户指定 workspace 中以 YOLO 运行，继承用户 agent 配置；SDK 只保留自有不变量 | Accepted（owner 2026-10-07）；implemented in slices 1–5（详见 `adr-2026-10-07-minimal-guardrails.md`） |
@@ -2219,7 +2181,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 
 - wire v2 随 ADR-037 落地（`PROTOCOL_VERSION = 2`，`packages/protocol/src/version.ts`）；ADR-034 设想的那次 cutover 没有发生。2026-10-16 注：K7（#468）随后把 wire 升到 v3（`PROTOCOL_VERSION = 3`）。
 - 2026-10-27 注：wire v4（#925，`PROTOCOL_VERSION = 4`）执行了 ADR-034 的 offer 删除项：`task.offer`、`task.offer_with_toolsets` 及其 sealed 类型从 protocol 删除，每个 offer 都绑定 Agent；`strict-agent-only` flag 删除，`DaemonConfig.strictAgentOnly` 抛 `DaemonConfigFieldRemovedError`；`ByokServer.dispatch` 只接受 `AgentResumeDispatchInput`。同一 cut 删除了 pre-M5 审批路径（`approvalId` 必填、`task.approval_resolved` 成为 baseline、server 不再推断隐式解决）。
-- ADR-034 的 Git workspace authority 一项仍未裁定：`gitWorkspace` 代码与配置仍在 `packages/client/src/daemon/`，只是与 `agentHome` 互斥，而没有 Agent home 的 daemon decline 每个 offer。
+- 同一 cut 执行了 ADR-034 的 Git workspace authority 一项：Git workspace 模式、`SessionWorkspaceStore` 与 `DaemonConfig.workspaceRoot` 删除，`gitWorkspace` 与 `workspaceRoot` 抛 `DaemonConfigFieldRemovedError`。
 - ADR-028/029/030/033 看不到对应实现：`FeatureRegistry`、`SessionResultCommitter`、`local-first-v1`、`leaseEpoch` 在 `packages/` 源码中没有命中；ADR-028 的 `session.mode` 也没有出现在 protocol 中。
 - `Accepted` 不等于已实现。是否继续执行这些删除与实现，由 owner 决定。
 

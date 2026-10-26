@@ -321,14 +321,12 @@ flowchart TB
   Home["Agent home<br/>hostStorageRoot/agents/<br/>&lt;agentId&gt;/"]:::fs
   Runs[".byok/runs/&lt;taskId&gt;/<br/>memory-reader 的 cwd"]:::fs
   Exec["tmp/exec/&lt;token&gt;/<br/>每次执行一个 token"]:::fs
-  WS["workspaceRoot/&lt;taskId&gt;/<br/>Git workspace 模式<br/>wire v4 下无 task 运行"]:::fs
 
   Product -->|"路径键"| Store
   Product -->|"service 名"| Cred
   Agent -->|"路径键"| Home
   Task --> Runs
   Task --> Exec
-  Task --> WS
   Store -.->|"包含"| Exec
   Home -.->|"包含"| Runs
 ```
@@ -343,8 +341,6 @@ storeDir 的内容（Agent home 的布局见 [`host-local-storage-layout.md`](..
   control.sock  control.token      控制通道与 HMAC 密钥
   mutex.sock  daemon-owner.json    单 daemon 所有权
   owned-processes/                 POSIX 进程组台账
-  session-workspaces.json          sessionRef 到 workspace 的映射
-  git-workspaces.json              Git checkpoint 私有台账
   skill-packs/<name>/<hash>/       skill pack 安装根，默认在 storeDir
   tmp/exec/<token>/sdk/            SDK 写给 runtime 的配置，释放即删
   tmp/exec/<token>/runtime/        子进程的 TMPDIR，由 retention 清理
@@ -367,7 +363,7 @@ flowchart LR
 
   subgraph SRC["daemon 准备的来源"]
     direction TB
-    Cwd["工作目录<br/>Agent home（writer）<br/>.byok/runs/&lt;taskId&gt;（reader）<br/>workspaceRoot/&lt;taskId&gt;（Git workspace 模式，wire v4 下无 task 运行）"]:::src
+    Cwd["工作目录<br/>Agent home（writer）<br/>.byok/runs/&lt;taskId&gt;（reader）"]:::src
     Tmp["tmp/exec/&lt;token&gt;/runtime"]:::src
     Mcp["本任务的 MCP server 列表<br/>Host toolsets 与保留 helper"]:::src
     Sdk["tmp/exec/&lt;token&gt;/sdk<br/>0600 配置文件<br/>mcp-config.json<br/>rpc-launch.json"]:::src
