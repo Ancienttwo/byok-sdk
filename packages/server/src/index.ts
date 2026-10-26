@@ -125,7 +125,7 @@ export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from 
 export type { SqliteSchemaErrorCode } from './sqlite-support';
 // One-shot wire v3 -> v4 receipt migration (#925), operator-invoked. Shipped in
 // 0.31.x only; the next minor removes it.
-export { migrateSqliteReceiptsToWireV4 } from './stores/sqlite/wire-v4-receipt-migration';
+export { migrateSqliteToWireV4, preflightSqliteWireV4Migration } from './stores/sqlite/wire-v4-receipt-migration';
 export type { RateLimiterOptions } from './rate-limiter';
 export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 
