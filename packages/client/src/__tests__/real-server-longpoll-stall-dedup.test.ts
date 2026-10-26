@@ -1,3 +1,4 @@
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
@@ -6,7 +7,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
+import { dispatchResumedAgentTask, startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -64,7 +65,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     const retryDelayMs = 100;
 
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs, idleDelayMs: 20 },
@@ -78,10 +79,8 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({ deviceId: record.deviceId, instruction: 'run over long-poll' });
+    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
-    const session = adapter.sessions[0]!;
 
     session.steerErrorPersistent = new Error('persistently failing steer handler');
     await handle.steer('keep retrying');
@@ -130,7 +129,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     }) as typeof fetch);
 
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs, idleDelayMs: 20 },
@@ -146,10 +145,9 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
 
     // Task A: stalls the cursor via a persistently-failing steer, so every
     // subsequent long-poll cycle re-pulls the whole post-cursor backlog.
-    const handleA = await real.byok.dispatch({ deviceId: record.deviceId, instruction: 'task A (stalls the cursor)' });
+    const { handle: handleA, session: sessionA } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, instruction: 'task A (stalls the cursor)' });
     await waitForTaskEvent(handleA, (e) => e.kind === 'state' && e.state === 'Running');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
-    const sessionA = adapter.sessions[0]!;
+    const startsThroughA = adapter.startCalls.length;
     sessionA.steerErrorPersistent = new Error('keep task A stalled');
     await handleA.steer('stall it');
     await vi.waitFor(() => expect(sessionA.steerAttempts).toBeGreaterThanOrEqual(1));
@@ -158,13 +156,25 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     // than the frozen cursor) rides along on every re-pull too. Block its
     // adapter.start() so the first attempt is genuinely still in flight
     // while further redeliveries of the SAME offer arrive. The shared
-    // `adapter` already carries task A's own startCall/session (1 each) at
-    // this point, so task B's first (and, post-fix, only) attempt brings
-    // the running total to 2 — that's the count to synchronize on, not 1.
+    // `adapter` already carries task A's seed and task A's own startCalls at
+    // this point, so task B's first (and, post-fix, only) attempt adds one
+    // — that's the count to synchronize on. Task B is a fresh execution: it
+    // needs no handle.
     const releaseB = adapter.blockStart();
-    const handleB = await real.byok.dispatch({ deviceId: record.deviceId, instruction: 'task B (redelivered while in flight)' });
-    taskBId = handleB.taskId;
-    await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(2));
+    const taskB = 'task-b-redelivered';
+    taskBId = taskB;
+    await real.byok.executions.submit({
+      taskId: taskB,
+      deviceId: record.deviceId,
+      payload: {
+        instruction: 'task B (redelivered while in flight)',
+        runtime: 'pi',
+        agentRef: { agentId: 'agent-task-b', profileRevision: 'rev-1' },
+        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        terminalProjection: { mode: 'none' },
+      },
+    });
+    await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(startsThroughA + 1));
 
     // Let several stalled re-poll cycles land while B's start() is blocked —
     // long enough for a pre-fix build to have piled up multiple queued
@@ -179,23 +189,27 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     releaseB();
     sessionA.steerErrorPersistent = undefined; // let A recover too, for clean teardown
 
-    await waitForTaskEvent(handleB, (e) => e.kind === 'state' && e.state === 'Running');
+    await vi.waitFor(async () => expect((await real.byok.tasks.get(taskB))?.state).toBe('Running'), { timeout: 5_000, interval: 20 });
     // Give any (buggy, pre-fix) queued duplicate handleOffer calls a chance
     // to actually run through the now-unblocked adapter.start() gate before
     // asserting the count is done growing.
     await new Promise((resolve) => setTimeout(resolve, 5 * retryDelayMs));
 
-    // Exactly 2 total: task A's own start, plus task B's — never a third
-    // (duplicate) call from a redelivered offer racing in behind the first.
-    expect(adapter.startCalls).toHaveLength(2);
-    expect(adapter.sessions).toHaveLength(2);
+    // Exactly one start for task B — never a second (duplicate) call from a
+    // redelivered offer racing in behind the first.
+    expect(adapter.startCalls).toHaveLength(startsThroughA + 1);
+    expect(adapter.sessions).toHaveLength(startsThroughA + 1);
 
-    // Task B's (the second, and only its own) session is not orphaned — it
+    // Task B's (the last, and only its own) session is not orphaned — it
     // still drives task B to Complete normally.
-    const sessionB = adapter.sessions[1]!;
+    const sessionB = adapter.sessions[startsThroughA]!;
     sessionB.emit({ type: 'progress', text: 'B finished cleanly' });
     sessionB.emit({ type: 'turn_end' });
-    const resultB = await handleB.result();
+    const resultB = await vi.waitFor(async () => {
+      const result = (await real.byok.tasks.get(taskB))?.result;
+      if (result === undefined) throw new Error('task B has no result yet');
+      return result;
+    }, { timeout: 5_000, interval: 20 });
     expect(resultB.state).toBe('Complete');
     expect(resultB.summary).toBe('B finished cleanly');
   }, 15000);
@@ -211,7 +225,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     const retryDelayMs = 30;
 
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs, idleDelayMs: 20 },
@@ -225,10 +239,8 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({ deviceId: record.deviceId, instruction: 'run over long-poll' });
+    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
-    const session = adapter.sessions[0]!;
 
     // First attempt throws once (stalls the cursor); the retry would
     // succeed, but is held open (blockSteer) so a test can deterministically
