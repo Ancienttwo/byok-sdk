@@ -303,11 +303,19 @@ if (submission.ok) {
   In pi-ai 1.4.0 they are:
   - openrouter `anthropic/*` `cacheControlFormat`. No representable entry is
     affected.
-  - the xai `reasoning.encrypted_content` include. At `off` (effort `none`),
-    pinned Pi adds it to a built-in grok-4.3 request and byok does not, so the
-    requests differ; the effect on xAI is not verified. grok-4.5 and later
-    cannot be set to `off`.
-  - cerebras body-less overflow detection.
+  - the xai `reasoning.encrypted_content` include. Only grok-4.3 at `off`
+    (effort `none`) differs: pinned Pi adds it to a built-in request and byok
+    does not. Every other level sends the same request, and grok-4.5 and
+    later cannot be set to `off`. AWS Bedrock's grok-4.3 model card says
+    `none` turns reasoning off, so no reasoning is replayed; xAI does not
+    document a `store: false` replay of a reasoning item without
+    `encrypted_content`. Not checked against the xAI API.
+  - cerebras body-less overflow detection. Only a 400 with an empty body
+    differs. The pinned `openai` 7.19.0 keeps an error body that has no
+    `error` key, and the overflow body Cerebras is reported to send
+    (`context_length_exceeded`) matches pi-ai's generic overflow patterns
+    under any provider id, so both ids compact and retry. No empty-body 400
+    overflow has been captured.
   - the Responses tool-call id, only when replaying history from another model
     or provider id (a model change, or a changed `profile_ref`). Then pi-ai
     flattens `callId|itemId` into one call id, on both the call and its output,

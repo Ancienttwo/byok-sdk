@@ -249,9 +249,10 @@ and makes no network request.
   provider id are outside that promise, because the projected provider id is
   `byok-sdk-<profile_ref>`. In pi-ai 1.4.0 these are `cacheControlFormat` for
   openrouter `anthropic/*` models (`api/openai-completions.js:1269`), the
-  xai `reasoning.encrypted_content` include (`api/openai-responses.js:308`),
-  cerebras body-less overflow detection (`utils/overflow.js:146`), the
-  Responses tool-call id kept only for `OPENAI_TOOL_CALL_PROVIDERS`
+  xai `reasoning.encrypted_content` include, which differs only for grok-4.3
+  at `off` (`api/openai-responses.js:308`), cerebras body-less overflow
+  detection, which differs only for a 400 with an empty body
+  (`utils/overflow.js:146`), the Responses tool-call id kept only for `OPENAI_TOOL_CALL_PROVIDERS`
   (`api/openai-responses.js:15`, `api/openai-responses-shared.js:104`), which
   applies only when replaying history from another model or provider id
   (`api/transform-messages.js:87`, `:120`), and
