@@ -26,9 +26,11 @@ type IntentRow = OccurrenceRow & { intent_key: string; ordinal: string; agent: s
 const OCCURRENCE_COLUMNS = `o.key, o.routine_id, o.definition_version, o.trigger_kind, o.planned_at::text, o.recorded_at::text, o.next_at::text,
   o.execution_superseded, o.job`;
 // The intent key of an occurrence: JSON.stringify(`occurrence:${key}`). A K4 occurrence key is hex, so JSON adds no escapes.
-const INTENT_OF = `'"occurrence:' || (o.key::json #>> '{}') || '"'`;
+// Both fragments restate K4 `occurrenceIntentKey` and `occurrenceOfIntentKey` in SQL, so the join uses the primary keys;
+// `routines.test.ts` compares them with the K4 functions.
+export const INTENT_OF = `'"occurrence:' || (o.key::json #>> '{}') || '"'`;
 // The occurrence key of a routine intent, so the join uses the occurrence primary key: 'occurrence:' is 11 characters.
-const OCCURRENCE_OF = `'"' || substr(i.key::json #>> '{}', 12) || '"'`;
+export const OCCURRENCE_OF = `'"' || substr(i.key::json #>> '{}', 12) || '"'`;
 /** The outbox key of the Host job row of occurrence `occurrenceKey` (#793 S14). */
 export const hostJobRowKey = (occurrenceKey: string) => JSON.stringify(['host_job', occurrenceKey]);
 
