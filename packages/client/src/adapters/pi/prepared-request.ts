@@ -216,12 +216,15 @@ function projectTool(tool: InputPreparationToolV1): Tool {
   if (typeof tool.name !== 'string' || tool.name.trim().length === 0 || typeof tool.description !== 'string') {
     refuse('prepared_transcript_invalid', 'a prepared tool needs a non-empty name and a string description');
   }
-  // Object schemas may define their properties entirely inside union branches.
-  // Preserve that schema verbatim; only validate properties when supplied.
+  // Retain the full-object tool contract. A root union can define its fields
+  // in every branch instead of at the root; never fill in or flatten them.
   const parameters = tool.parameters as Record<string, unknown> | null;
+  const objectProperties = (value: unknown): boolean => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const branchProperties = parameters !== null && typeof parameters === 'object'
+    && Array.isArray(parameters.oneOf) && parameters.oneOf.length > 0
+    && parameters.oneOf.every(branch => objectProperties(branch) && objectProperties(branch.properties));
   if (parameters === null || typeof parameters !== 'object' || Array.isArray(parameters) || parameters.type !== 'object'
-    || (Object.hasOwn(parameters, 'properties')
-      && (parameters.properties === null || typeof parameters.properties !== 'object' || Array.isArray(parameters.properties)))) {
+    || (Object.hasOwn(parameters, 'properties') ? !objectProperties(parameters.properties) : !branchProperties)) {
     refuse('prepared_transcript_invalid', `tool ${JSON.stringify(tool.name)} needs a full object parameter schema`);
   }
   const sampling = (tool as { constrainedSampling?: unknown }).constrainedSampling;

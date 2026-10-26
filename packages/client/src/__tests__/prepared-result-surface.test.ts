@@ -77,7 +77,9 @@ describe('a prepared SummaryJob is a one-tool submit_result record', () => {
     } as never)).toThrow('needs a full object parameter schema');
   });
 
-  it.each([null, [], { type: 'string' }, { oneOf: [{ type: 'object' }] }])('rejects a non-object tool root: %j', parameters => {
+  it.each([null, [], { type: 'string' }, { oneOf: [{ type: 'object' }] },
+    { type: 'object' }, { type: 'object', oneOf: [] }, { type: 'object', oneOf: [null] },
+    { type: 'object', oneOf: [{ type: 'object' }] }])('rejects a non-object tool root: %j', parameters => {
     expect(() => buildPreparedTranscriptMessages({ systemPrompt: '',
       tools: [{ name: 'tool', description: '', parameters }],
       messages: [{ role: 'user', content: 'test', timestamp: 1 }],
