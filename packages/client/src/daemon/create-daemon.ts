@@ -635,7 +635,8 @@ export interface Daemon {
   /**
    * M3-2a: locally resolve a task currently paused on `needs_approval` —
    * drives the exact same code path a server-sent `task.approve` does
-   * (`TaskRunner.handleApprove`), invoked directly instead of over the wire.
+   * (`TaskRunner.handleApprove`), invoked directly instead of over the wire,
+   * then reports the decision to the server as `task.approval_resolved`.
    * Honest-but-currently-unexercised: none of the three bundled adapters
    * (pi/claude/codex) ever actually pauses for approval — each one's
    * `resolveApproval` throws unconditionally (see `toRuntimeInfoCapabilities`'s

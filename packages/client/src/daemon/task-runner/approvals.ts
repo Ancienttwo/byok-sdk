@@ -131,7 +131,7 @@ export function clearPendingApproval(this: TaskRunner, pendingId: string | undef
   }
 }
 
-export async function handleApprove(this: TaskRunner, taskId: string, approvalId: string): Promise<void> {
+export async function handleApprove(this: TaskRunner, taskId: string, approvalId: string, decidedBy: ApprovalOrigin): Promise<void> {
   const active = this['tasks'].get(taskId);
   if (!active) return;
   // M5 (approval targeting, docs/protocol.md): checked FIRST, before ever
@@ -173,9 +173,12 @@ export async function handleApprove(this: TaskRunner, taskId: string, approvalId
   }
   // Acceptance finding 1: see `clearPendingApproval`'s own doc comment.
   this['clearPendingApproval'](resolvedId, 'approve', undefined);
+  // The registry resolves every decision on this path as 'wire', which
+  // reports nothing; a local decision is new to the server.
+  if (decidedBy === 'local') this['sendApprovalResolved'](taskId, resolvedId, 'approve');
 }
 
-export async function handleReject(this: TaskRunner, taskId: string, reason: string | undefined, approvalId: string): Promise<void> {
+export async function handleReject(this: TaskRunner, taskId: string, reason: string | undefined, approvalId: string, decidedBy: ApprovalOrigin): Promise<void> {
   const active = this['tasks'].get(taskId);
   if (!active) return;
   if (active.semanticTerminal !== undefined || active.finalizationStarted) {
@@ -219,6 +222,7 @@ export async function handleReject(this: TaskRunner, taskId: string, reason: str
   // back to a server that already knows this decision (it sent this
   // task.reject itself) if this hadn't already cleared it as 'wire' here.
   this['clearPendingApproval'](resolvedId, 'reject', reason);
+  if (decidedBy === 'local') this['sendApprovalResolved'](taskId, resolvedId, 'reject');
   await this['settleSemanticTerminal'](active, async () => {
     await this['interruptBounded'](active);
     // As with cancel, the server has already closed its progress stream.

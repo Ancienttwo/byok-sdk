@@ -1710,8 +1710,8 @@ export class TaskRunner {
    * couldn't resume for some real reason) still fails the task exactly as
    * before.
    */
-  private handleApprove(taskId: string, approvalId: string): Promise<void> {
-    return handleApprove.call(this, taskId, approvalId);
+  private handleApprove(taskId: string, approvalId: string, decidedBy: ApprovalOrigin = 'wire'): Promise<void> {
+    return handleApprove.call(this, taskId, approvalId, decidedBy);
   }
 
   /**
@@ -1737,8 +1737,20 @@ export class TaskRunner {
    * daemon must still conform to that regardless of whether telling the
    * session about it succeeded.
    */
-  private handleReject(taskId: string, reason: string | undefined, approvalId: string): Promise<void> {
-    return handleReject.call(this, taskId, reason, approvalId);
+  private handleReject(taskId: string, reason: string | undefined, approvalId: string, decidedBy: ApprovalOrigin = 'wire'): Promise<void> {
+    return handleReject.call(this, taskId, reason, approvalId, decidedBy);
+  }
+
+  /**
+   * `Daemon.approve`/`reject`: decide the pending approval on this device
+   * through the same path as a wire decision, then report it to the server
+   * as `task.approval_resolved`, which is how a v4 server learns of a local
+   * decision. A stale `approvalId` changes and reports nothing.
+   */
+  resolveApprovalLocally(taskId: string, approvalId: string, decision: ApprovalDecision, reason?: string): Promise<void> {
+    return decision === 'approve'
+      ? this.handleApprove(taskId, approvalId, 'local')
+      : this.handleReject(taskId, reason, approvalId, 'local');
   }
 
   /**

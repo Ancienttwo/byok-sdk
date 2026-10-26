@@ -22,7 +22,8 @@
     `Daemon.approve(taskId, { approvalId })` and
     `Daemon.reject(taskId, { approvalId, reason? })` require it.
     `task.approval_resolved` is baseline: the daemon reports every approval it
-    resolves locally, and the `approval_resolved` server flag is gone. The
+    resolves locally, including a `Daemon.approve` or `Daemon.reject`
+    decision, and the `approval_resolved` server flag is gone. The
     server no longer infers a resolution from later task activity: the
     `task.approval_resolved_implicit` server event and the `targeted` field of
     `task.approval_resolved` events are removed, and activity while a task

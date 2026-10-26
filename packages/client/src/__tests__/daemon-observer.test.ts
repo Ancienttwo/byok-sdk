@@ -477,7 +477,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       return request.payload.approvalId;
     }
 
-    it('approve() resolves approval(true) on the active session via runner.handleEnvelope', async () => {
+    it('approve() resolves approval(true) on the active session and reports the local decision to the server', async () => {
       const adapter = new StubRuntimeAdapter();
       const { daemon: d } = await setupDaemon(adapter);
 
@@ -496,6 +496,36 @@ describe('daemon local observability (DaemonObserver)', () => {
       await d.approve('task-approve-local-1', { approvalId });
 
       expect(session?.resolveApprovalCalls).toEqual([{ approved: true }]);
+      // Wire v4: the server learns of a local decision only from this report.
+      const resolved = await server.waitFor((e) => e.type === 'task.approval_resolved' && e.task_id === 'task-approve-local-1');
+      expect(resolved.payload).toMatchObject({ approvalId, decision: 'approve', resolvedBy: 'local' });
+    });
+
+    it('approve() with a stale approvalId resolves and reports nothing', async () => {
+      const adapter = new StubRuntimeAdapter();
+      const { daemon: d } = await setupDaemon(adapter);
+
+      server.send(
+        createEnvelope(
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'needs a human' },
+          { taskId: 'task-approve-local-stale', seq: server.nextSeq() },
+        ),
+      );
+      await server.waitFor((e) => e.type === 'task.started');
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      const [session] = adapter.sessions;
+      const approvalId = await awaitApproval(session!, 'task-approve-local-stale');
+
+      await d.approve('task-approve-local-stale', { approvalId: 'not-the-pending-approval' });
+      expect(session?.resolveApprovalCalls).toEqual([]);
+      await d.approve('task-approve-local-stale', { approvalId });
+
+      // Reports keep their send order, so a report of the stale decision would arrive first.
+      await server.waitFor((e) => e.type === 'task.approval_resolved' && e.task_id === 'task-approve-local-stale');
+      expect(server.received.filter((e) => e.type === 'task.approval_resolved').map((e) => e.payload)).toEqual([
+        expect.objectContaining({ approvalId, decision: 'approve' }),
+      ]);
     });
 
     it('reject() resolves approval(false, reason) and reports task.fail', async () => {
@@ -517,6 +547,8 @@ describe('daemon local observability (DaemonObserver)', () => {
       await d.reject('task-reject-local-1', { approvalId, reason: 'not allowed locally' });
 
       expect(session?.resolveApprovalCalls).toEqual([{ approved: false, reason: 'not allowed locally' }]);
+      const resolved = await server.waitFor((e) => e.type === 'task.approval_resolved' && e.task_id === 'task-reject-local-1');
+      expect(resolved.payload).toMatchObject({ approvalId, decision: 'reject', resolvedBy: 'local' });
       const fail = await server.waitFor((e) => e.type === 'task.fail' && e.task_id === 'task-reject-local-1');
       expect(fail.payload).toMatchObject({ reason: 'not allowed locally', retryable: false });
     });

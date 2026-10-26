@@ -4790,7 +4790,8 @@ export interface Daemon {
     /**
      * M3-2a: locally resolve a task currently paused on `needs_approval` —
      * drives the exact same code path a server-sent `task.approve` does
-     * (`TaskRunner.handleApprove`), invoked directly instead of over the wire.
+     * (`TaskRunner.handleApprove`), invoked directly instead of over the wire,
+     * then reports the decision to the server as `task.approval_resolved`.
      * Honest-but-currently-unexercised: none of the three bundled adapters
      * (pi/claude/codex) ever actually pauses for approval — each one's
      * `resolveApproval` throws unconditionally (see `toRuntimeInfoCapabilities`'s
@@ -9658,6 +9659,13 @@ export declare class TaskRunner {
      * session about it succeeded.
      */
     private handleReject;
+    /**
+     * `Daemon.approve`/`reject`: decide the pending approval on this device
+     * through the same path as a wire decision, then report it to the server
+     * as `task.approval_resolved`, which is how a v4 server learns of a local
+     * decision. A stale `approvalId` changes and reports nothing.
+     */
+    resolveApprovalLocally(taskId: string, approvalId: string, decision: ApprovalDecision, reason?: string): Promise<void>;
     /**
      * Opens a sealed offer, then runs the plaintext offer through every check of
      * {@link handleOffer}. A server without `sealed-payload-v1` gets a plaintext

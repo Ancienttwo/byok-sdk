@@ -45,7 +45,8 @@ reader and no capability negotiation between the two majors.
   `byok-agent workspaces` command is gone, and the `workspace` retention
   class leaves `ProtectedClassId` and `RetentionClassId`. The daemon leaves
   `<storeDir>/git-workspaces.json` and old task directories untouched.
-- `Daemon.approve` and `Daemon.reject` take `{ approvalId }`.
+- `Daemon.approve` and `Daemon.reject` take `{ approvalId }` and report the
+  decision to the server as `task.approval_resolved`.
 - Runtime adapters take `RuntimeTaskInput` from `@byok-sdk/client`. The wire
   type `TaskOfferPayload` is removed.
 - byok-mcp-server (example) runs every task as the key's Agent. A
