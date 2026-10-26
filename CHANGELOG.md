@@ -11,6 +11,10 @@
   codes and the submission, and the Host renders the page. Catalog and Host
   policy entries apply only at the vendor's own base URL, because the pinned
   Pi fills undeclared `compat` keys from the endpoint URL.
+  A Host entry is offered only when its config passes `PiModelConfigSchema`,
+  projects the api it is listed under and meets the vendor adapter's profile
+  rules; `modelRouteContext` throws on a repeated Host entry or one whose
+  model id a profile cannot hold.
   `PI_DEFAULT_THINKING_LEVEL` (`medium`) is generated from the pinned
   pi-coding-agent. A model whose only level is `off` gets `off`; another
   model without the default level needs an explicit level.

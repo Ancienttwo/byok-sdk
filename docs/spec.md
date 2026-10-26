@@ -260,12 +260,17 @@ and makes no network request.
   drift test in `@byok-sdk/client` keeps a review list of these branches, so a
   pi-ai upgrade reviews them again.
 - The `custom` kind has no adapter, auth mode or base URL of its own; a Host
-  passes defaults in its policy. A Host entry is marked `host`. It must pass
-  `PiModelConfigSchema`, and its config must project the api it is listed
-  under; otherwise it is offered as unrepresentable. A policy that lists one
-  vendor, api and model twice throws. A vendor whose models the policy lists
-  admits only those model ids, whatever the source, so validation does not
-  depend on the order of edits.
+  passes defaults in its policy. A Host entry is marked `host`. It is offered
+  as representable only when `PiModelConfigSchema` accepts its config, the
+  config projects the api it is listed under, and the profile rules of the
+  vendor's adapter accept it (`providerProfileRouteIssues`, the same rules a
+  submission meets); otherwise it is offered as unrepresentable, and selecting
+  it falls back to manual. A policy that lists one vendor, api and model
+  twice, or a Host entry whose model id a profile cannot hold (empty after
+  trimming, over 160 characters, or containing NUL, CR or LF), is a Host
+  programming error, and `modelRouteContext` throws. A vendor whose models the
+  policy lists admits only those model ids, whatever the source, so validation
+  does not depend on the order of edits.
 - Every function maps a change value of the wrong type to a field code; a
   change naming no field throws.
 - A stored key is reused only while `profile_ref`, `provider_kind`, `adapter`,
