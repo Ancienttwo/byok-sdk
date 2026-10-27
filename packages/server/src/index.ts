@@ -573,7 +573,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
             taskId,
             payload: {
               ...common,
-              sessionRef,
+              session: { mode: 'resume', sessionRef },
               agentRef,
               egressPolicy,
               ...(terminalProjection === undefined ? {} : { terminalProjection }),
@@ -590,7 +590,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
           payload: {
             ...common,
             agentRef,
-            sessionRef,
+            session: { mode: 'resume', sessionRef },
             ...(terminalProjection === undefined ? {} : { terminalProjection }),
             ...(homeAccess === undefined ? {} : { homeAccess }),
             ...(agentMemory === undefined ? {} : { agentMemory }),

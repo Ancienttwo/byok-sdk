@@ -205,10 +205,10 @@ interface DispatchInputBase {
 
 /**
  * Agent resume dispatch: an explicit durable Agent identity plus the exact
- * session being resumed, via task.offer_for_agent (or its egress variant). A
- * fresh Agent execution is not a dispatch; it has the single authority
- * `executions.submit`. The wire keeps `sessionRef` optional; the Host API does
- * not, and the runtime refuses its absence regardless of the static type.
+ * session being resumed, sent as a `task.offer` with `session.mode: 'resume'`.
+ * A fresh Agent execution is not a dispatch; it has the single authority
+ * `executions.submit`. The runtime refuses a missing `sessionRef` regardless of
+ * the static type.
  */
 export interface AgentResumeDispatchInput extends DispatchInputBase {
   agentRef: AgentRef;
