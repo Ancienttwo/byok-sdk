@@ -360,7 +360,7 @@ async function runTrial(host: Host, options: RunCellOptions, planned: PlannedTri
     await host.server.executions.submit({
       taskId, deviceId: host.deviceId,
       payload: {
-        instruction: entry.instruction, ...(options.runtime === 'grok' ? { harnessId: 'grok' } : { runtime: options.runtime }), agentRef: { agentId, profileRevision: '1' }, agentMemory: 'none',
+        session: { mode: 'fresh' }, instruction: entry.instruction, ...(options.runtime === 'grok' ? { harnessId: 'grok' } : { runtime: options.runtime }), agentRef: { agentId, profileRevision: '1' }, agentMemory: 'none',
         ...(options.dispatchSelection ? { dispatchSelection: options.dispatchSelection } : {}),
         terminalProjection: { mode: 'result-document', contract: `${CORPUS_REVISION}.${planned.caseId.toLowerCase()}`, schema: entry.schema as never },
         egressPolicy: EGRESS_POLICY,

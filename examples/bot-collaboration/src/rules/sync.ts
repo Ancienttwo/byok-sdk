@@ -1,4 +1,4 @@
-import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, type AgentRef, type ResultSchema, type TaskOfferForAgentWithEgressFreshSealedPayload,
+import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, type AgentRef, type ResultSchema, type TaskOfferSealedPayload,
   type TaskSealing } from '@byok-sdk/protocol';
 import { json, type SealedRoutineRef, type Turn } from './turn';
 import { BOT_REPLY_MAX_BYTES, type IntentFacts, type Publish } from './delegation';
@@ -31,7 +31,7 @@ export interface FreezeExecution {
  */
 export interface SealedRoutineTemplate {
   sealing: TaskSealing;
-  template: NonNullable<TaskOfferForAgentWithEgressFreshSealedPayload['sealed']>;
+  template: NonNullable<TaskOfferSealedPayload['sealed']>;
   agentRef: AgentRef;
   notAfter: string;
 }
