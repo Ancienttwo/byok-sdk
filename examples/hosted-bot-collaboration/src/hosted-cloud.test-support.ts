@@ -77,7 +77,8 @@ export async function openHostedCloud(options: HostedCloudOptions = {}) {
     await core.quota.writeEntitlement(tenant, { version: 1n, hardLimitBytes: 1_000_000_000n, maxObjectBytes: 100_000_000n,
       maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'test' });
 
-    const http = serve({ fetch: request => cloud.fetch(request), port: 0, hostname: '127.0.0.1' });
+    // The R2 store signs with aws4fetch, which accepts only the global Request class, so the server must not replace it.
+    const http = serve({ fetch: request => cloud.fetch(request), port: 0, hostname: '127.0.0.1', overrideGlobalObjects: false });
     close.unshift(() => new Promise<void>((resolve, reject) => {
       http.close(error => error ? reject(error) : resolve()); if ('closeAllConnections' in http) http.closeAllConnections();
     }));
