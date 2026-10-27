@@ -13,13 +13,12 @@ export class ZeroHitSession extends BotStubSession {
   get workspaceDir(): string { return this.start.manifest.cwd!; }
   // The base stub takes no text, so the override keeps that arity and reads the text the daemon passes.
   override async steer(...texts: string[]): Promise<void> { this.steers.push(...texts); }
-  override async resolveApproval(): Promise<void> { /* the session continues when the test emits its next event */ }
 }
 
 export class ZeroHitAdapter extends BotStubAdapter {
   override readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'pi', supportsDispatchSelection: true, requiresMcpToolsetToolObservation: true,
-    capabilities: { steer: true, resume: false, mcpToolsets: true, approvalInteractive: false },
+    capabilities: { steer: true, resume: false, mcpToolsets: true, approvalInteractive: true },
   });
   override readonly sessions = new Map<string, ZeroHitSession>();
   override async prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {

@@ -130,7 +130,6 @@ class FakeSession implements Session {
   async steer(): Promise<void> {}
   async followUp(): Promise<void> {}
   async interrupt(): Promise<void> {}
-  async resolveApproval(): Promise<void> {}
 
   close(): Promise<void> {
     if (this.closing) return this.closing;

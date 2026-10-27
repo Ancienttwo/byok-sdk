@@ -95,7 +95,7 @@ describe('a lost/failed long-poll POST is retried with the identical batch, exac
 
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 
-    session.emit({ type: 'needs_approval', summary: 'about to do the risky thing' });
+    void session.requestApproval('about to do the risky thing');
 
     // Must still reach AwaitApproval despite the first POST attempt failing
     // — proving the retry landed and was accepted, not silently dropped or
@@ -114,7 +114,7 @@ describe('a lost/failed long-poll POST is retried with the identical batch, exac
     globalThis.fetch = originalFetch;
 
     await handle.approve();
-    await vi.waitFor(() => expect(session.resolveApprovalCalls).toEqual([{ approved: true }]), { timeout: 5000 });
+    await vi.waitFor(() => expect(session.approvalResults).toEqual([{ approved: true }]), { timeout: 5000 });
 
     session.emit({ type: 'progress', text: 'finishing up' });
     session.emit({ type: 'turn_end' });

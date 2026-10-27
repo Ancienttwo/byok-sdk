@@ -152,7 +152,7 @@ async function child(stage, root) {
         agentRef: input.manifest.agentRef ?? null, sessionRef, offerId: offer.offerId, seq: offer.seq });
       return { sessionRef, events: (async function* () { yield { type: 'turn_end' }; })(),
         async close() {}, async interrupt() {}, async steer() { throw new Error('unsupported'); },
-        async followUp() { throw new Error('unsupported'); }, async resolveApproval() { throw new Error('unsupported'); } };
+        async followUp() { throw new Error('unsupported'); } };
     } } }; },
   };
   const daemonConfig = { productId: config.productId, productName: 'BYOK attribution probe',

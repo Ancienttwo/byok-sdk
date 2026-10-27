@@ -137,7 +137,6 @@ describe('AgentMessageDraftPublisher', () => {
   it.each<AgentEvent>([
     { type: 'tool_use', tool: 'read', input: {} },
     { type: 'tool_result', tool: 'read', output: 'done' },
-    { type: 'needs_approval', summary: 'continue' },
   ])('resets the closing text on $type', event => {
     vi.useFakeTimers();
     const { push, sent, publisher } = fixture();

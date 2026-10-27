@@ -230,6 +230,11 @@ export function settleSemanticTerminal(this: TaskRunner, active: ActiveTask, pre
     active.beingTornDown = true;
     active.semanticTerminal = { prepare };
     active.messageDraft?.stop();
+    // The batch timer must not fire while prepare awaits interrupt or I/O:
+    // after a cancel or reject the server has already ended the task (#1055).
+    // Progress owed before a terminal is flushed before this decision; the
+    // completion path flushes at turn_end in the event pump.
+    active.batcher.stop();
   }
   const terminal = active.semanticTerminal;
   const attempt = Promise.resolve().then(async () => {

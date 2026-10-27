@@ -780,9 +780,4 @@ class ClaudeSession implements Session {
     }
     await this.closeAttempt;
   }
-
-  /** The legacy remote boolean approval lane remains unsupported, even with local native interactions. */
-  async resolveApproval(_approved: boolean, _reason?: string): Promise<void> {
-    throw new PolicyUnsupportedError('claude adapter does not support interactive approval');
-  }
 }

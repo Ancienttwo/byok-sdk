@@ -4,12 +4,7 @@ import type { DaemonScope } from './scope';
 
 /** The daemon's local operations: approvals, observation and MCP toolset reloads (#926). */
 
-/**
- * M3-2a: local approve/reject — see the `Daemon` interface's own doc
- * comments on {@link Daemon.approve}/{@link Daemon.reject} for the full
- * rationale (honest-but-currently-unexercised; every bundled adapter's
- * `resolveApproval` throws unconditionally today).
- */
+/** Local approve/reject — see {@link Daemon.approve}/{@link Daemon.reject}. */
 export async function approve(daemonScope: DaemonScope, taskId: string, opts: { approvalId: string }): Promise<void> {
   const { daemonState } = daemonScope;
   if (!daemonState.runner) throw new Error('daemon is not started; call start() first');
