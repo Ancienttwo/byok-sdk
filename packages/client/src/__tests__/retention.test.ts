@@ -443,6 +443,7 @@ it('session ledgers expire by last append; task evidence, task-suffixed names, d
  for(const name of removed)expect(await exists(path.join(root,name))).toBe(false);
  for(const name of [`pi-${ledgerHex('b')}.jsonl`,`pi-task-${ledgerHex('d')}.jsonl`,`x-task-${ledgerHex('e')}.jsonl`,'notes.txt',`dir-${ledgerHex('1')}.jsonl`])expect(await exists(path.join(root,name))).toBe(true);
  expect(await fs.readFile(outside,'utf8')).toBe('keep');
+ if(process.platform!=='win32')expect((await fs.lstat(path.join(root,`link-${ledgerHex('2')}.jsonl`))).isSymbolicLink()).toBe(true);
  expect(report.deleted).toBe(3);expect(report.bytesReclaimed).toBe(removed.reduce((sum,name)=>sum+(name.startsWith('corrupt')?9:`{"entry":"${name}"}\n`.length),0));
  // These fixtures are not valid handoff records, so reader-run reports them; session-ledger never parses them.
  expect(f.failures.filter(failure=>failure.startsWith('session-ledger:'))).toEqual([]);

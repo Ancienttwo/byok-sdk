@@ -2172,11 +2172,16 @@ Claim, decline, and every terminal message echo exact AgentRef. Resume requires
 exact agentId, profileRevision, sessionRef, runtime and canonical cwd; mismatch
 fails closed. A session's ledger is kept at least until its last append
 (each Attempt's start and terminal) is `storage.retention.ttlMs['session-ledger']`
-old (default 30 days), and the session stays resumable while the ledger
-exists. Once the home is idle, retention removes an expired ledger; after
-that a resume is a non-retryable decline that says the handoff does not
-exist on this device, and `agent.content.read` with that sessionRef is
-denied as `identity-mismatch`. Within one daemon process, a canonical Agent home runs at most
+old (default 30 days). A writer session stays resumable while its ledger
+exists; a reader session also needs its run directory, which reader-run
+retention removes after 7 days (below). Once the home is idle, retention
+removes an expired ledger. After that, a resume of that session is a
+non-retryable decline that says the handoff does not exist on this device,
+`agent.content.read` with that sessionRef is denied as `identity-mismatch`,
+and `Daemon.publishReliableAgentEgress` for that session fails with the same
+does-not-exist error. With `ttlMs['session-ledger']: 0`, every sweep of an
+idle home removes all of its session ledgers, so none of those sessions can
+be resumed. Within one daemon process, a canonical Agent home runs at most
 one writer Attempt and at most `maxConcurrentReaderAttemptsPerAgentHome`
 reader Attempts (default four), counted apart, across every lane and every
 session. An Agent offer without `homeAccess` is the writer and runs in the

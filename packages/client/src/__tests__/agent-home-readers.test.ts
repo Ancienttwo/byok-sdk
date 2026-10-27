@@ -1,5 +1,6 @@
 import { testScratchRoot, testScratchOwner } from "./fixtures/execution-scratch";
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -440,19 +441,27 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     const sessionRef = harness.pi.sessions[0]!.sessionRef;
     await complete(harness, 0, 'kept-writer');
     await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the writer to release');
+    // Control: a second session in the same home, aged the same but never resumed.
+    offer('stale-writer', 'ledger-c');
+    await claimed('stale-writer');
+    const staleRef = harness.pi.sessions[1]!.sessionRef;
+    await complete(harness, 1, 'stale-writer');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the second writer to release');
     const ledgers = path.join(await harness.home('ledger-c'), '.byok', 'runtime-sessions');
+    const ledgerName = (ref: string): string => `pi-${createHash('sha256').update(ref, 'utf8').digest('hex')}.jsonl`;
     const expired = new Date(Date.now() - 31 * DAY_MS);
     for (const name of await fs.readdir(ledgers)) await fs.utimes(path.join(ledgers, name), expired, expired);
 
     offer('kept-writer-resume', 'ledger-c', { sessionRef });
     await claimed('kept-writer-resume');
-    await complete(harness, 1, 'kept-writer-resume');
+    await complete(harness, 2, 'kept-writer-resume');
     await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the resume to release');
     retention.sweep()!();
     await waitUntil(() => harness.daemon.status().storage.lastSweep?.trigger === 'periodic', 'a retention pass');
     const kept = (await fs.readdir(ledgers)).filter((name) => !name.includes('-task-'));
-    expect(kept).toHaveLength(1);
+    expect(kept).toEqual([ledgerName(sessionRef)]);
     expect(Date.now() - (await fs.stat(path.join(ledgers, kept[0]!))).mtimeMs).toBeLessThan(DAY_MS);
+    expect(kept).not.toContain(ledgerName(staleRef));
   });
 
   it('declines a reader session resumed as a writer, without retry', async () => {
