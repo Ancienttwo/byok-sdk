@@ -2,7 +2,7 @@
 // HTML/JS demo UI (no frontend build step: the page is served as a static file
 // with an inline <script>).
 //
-// Copy this file as is. It passes no `longPollHoldMs` or other transport
+// Copy this file, with task-events-route.ts, as is. It passes no `longPollHoldMs` or other transport
 // override, so it runs with the SDK defaults, and `quickstart-smoke.test.ts`
 // starts it unmodified to prove the README loop works with those defaults.
 // Do not shorten the hold to hide a readiness problem.

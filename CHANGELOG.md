@@ -118,15 +118,16 @@
   task whose feed was reclaimed or ended before this instance started). A
   live task that this instance did not dispatch, such as one still running
   after a SQLite restart, is followed from the moment of the call, without
-  earlier events. The `await_approval` event gains `approvalId`, which
-  `tasks.approve(taskId, { approvalId })` takes. A reader that falls behind
-  the feed's buffer gets one `events_truncated` marker per gap it fell into,
-  decided from where it resumes.
+  earlier events.
 - **Breaking (server; #1022)** — `TaskHandle.events()` reads the same feed as
   `tasks.events`. Its first `next()` now reads the task's snapshot once, and a
   read after the terminal feed is reclaimed throws `TaskEventsUnavailableError`
   (`feed_expired`) where it used to complete empty. A read after `close()`
-  still completes empty.
+  still completes empty. The `await_approval` member of `ServerTaskEvent`
+  requires `approvalId`, which `tasks.approve(taskId, { approvalId })` takes;
+  code that constructs one must supply it. A reader that falls behind the
+  feed's buffer gets one `events_truncated` marker for each gap it falls into,
+  decided from where it resumes, where it used to get at most one.
 - **Breaking (client)** — `ExpiringClassId` and `RetentionClassId` gain
   `'agent-result'`, so an exhaustive switch over them no longer compiles
   until it handles the new class (#1009). `ClassUsage.truncated` is now
