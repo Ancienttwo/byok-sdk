@@ -351,9 +351,7 @@ export class TaskEventsUnavailableError extends Error {
   readonly reason: 'cursor_unknown' | 'feed_expired';
 
   constructor(taskId: string, reason: 'cursor_unknown' | 'feed_expired') {
-    super(reason === 'cursor_unknown'
-      ? `cannot read events of task ${taskId}: the cursor names no position in this server's feed`
-      : `cannot read events of task ${taskId}: the task is terminal and its event feed is no longer retained`);
+    super(`events of task ${taskId} unavailable: ${reason}`);
     this.name = 'TaskEventsUnavailableError';
     this.taskId = taskId;
     this.reason = reason;

@@ -12,7 +12,14 @@
  * overflow the OLDEST entries are dropped. A subscriber whose next wanted entry
  * was dropped receives the caller-supplied `truncationMarker` once for that gap,
  * so a reader can tell a complete feed from a clipped one instead of silently
- * seeing a gap.
+ * seeing a gap. The marker is not a buffered entry: each subscriber derives it
+ * from its own position, so all retained capacity remains available to real
+ * events, and it takes the position just before the oldest retained entry.
+ *
+ * `isPosition` accepts exactly the positions the queue handed out. `subscribe`
+ * yields the values only, from the beginning. Both iterators' `return()` also
+ * releases a pending `next()`. Members carry no block docs because comments on
+ * class members ship in the bundle, which has an exact size budget.
  *
  * Framework-agnostic on purpose (no Node/WS/Hono types here) so it can be
  * unit-tested and reused regardless of transport.
@@ -57,7 +64,6 @@ export class AsyncEventQueue<T> {
     this.truncationMarker = options.truncationMarker;
   }
 
-  /** True when `sequence` names a position this queue has handed out (pushed, or a marker's). */
   isPosition(sequence: number): boolean {
     return Number.isSafeInteger(sequence) && sequence >= 0 && sequence < this.nextSequence;
   }
@@ -75,11 +81,6 @@ export class AsyncEventQueue<T> {
     this.wake();
   }
 
-  /**
-   * Drop the oldest entries back down to the bound. The marker is not a
-   * buffered entry: each subscriber derives it from its own position, so all
-   * retained capacity remains available to real events.
-   */
   private enforceBound(): void {
     const limit = this.maxBuffered;
     if (limit === undefined || this.buffer.length <= limit) return;
@@ -92,7 +93,6 @@ export class AsyncEventQueue<T> {
     for (const resolve of waiters) resolve();
   }
 
-  /** The values only, from the beginning of the queue. */
   subscribe(): AsyncIterable<T> {
     const queue = this;
     return {
@@ -112,11 +112,6 @@ export class AsyncEventQueue<T> {
     };
   }
 
-  /**
-   * Async-iterate the entries after `after` (a position {@link isPosition}
-   * accepts), or from the beginning of the queue, waiting for new pushes until
-   * closed. `return()` also releases a pending `next()`.
-   */
   entries(after?: number): AsyncIterable<QueueEntry<T>> {
     const queue = this;
     return {

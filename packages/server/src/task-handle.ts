@@ -150,14 +150,16 @@ export async function* readTaskEvents(
     relay.detach(taskId, feed);
     throw new TaskEventsUnavailableError(taskId, 'feed_expired');
   }
-  const entries = relay.subscribe(taskId, feed, options.after)[Symbol.asyncIterator]();
+  const entries = relay.entries(taskId, feed, options.after)[Symbol.asyncIterator]();
   // The queue's own return() also releases a pending next(), which this
   // generator's return() could not do while it is suspended in one.
   const stop = () => { void entries.return?.(); };
   signal?.addEventListener('abort', stop, { once: true });
   try {
     if (signal?.aborted) return;
-    for (let next = await entries.next(); !next.done; next = await entries.next()) yield next.value;
+    for (let next = await entries.next(); !next.done; next = await entries.next()) {
+      yield { cursor: `${feed.feedId}.${next.value.sequence}`, event: next.value.value };
+    }
   } finally {
     signal?.removeEventListener('abort', stop);
     await entries.return?.();
