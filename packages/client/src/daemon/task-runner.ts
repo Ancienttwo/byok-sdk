@@ -1302,7 +1302,7 @@ export class TaskRunner {
   private withHostToolsetContext(
     servers: Readonly<Record<string, McpStdioServerConfig>>,
     taskId: string,
-    agentRef: AgentRef | undefined,
+    agentRef: AgentRef,
     toolsetIdByServer: ReadonlyMap<string, string>,
   ): Readonly<Record<string, McpStdioServerConfig>> {
     return withHostToolsetContext.call(this, servers, taskId, agentRef, toolsetIdByServer);

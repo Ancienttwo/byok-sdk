@@ -396,7 +396,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 
 | Import / command | Purpose | Third-party dependencies | Zod | Budget |
 | --- | --- | --- | --- | ---: |
-| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2357735 B |
+| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2304426 B |
 | `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 419739 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 74349 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 171848 B |
@@ -413,7 +413,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/cloud-dataplane` | Postgres stores and Node operations | `@cfworker/json-schema`, `@nodable/entities`, `anynum`, `aws4fetch`, `fast-xml-builder`, `fast-xml-parser`, `hono`, `is-unsafe`, `path-expression-matcher`, `pg`, `pg-connection-string`, `pg-int8`, `pg-pool`, `pg-protocol`, `pg-types`, `postgres-array`, `postgres-bytea`, `postgres-date`, `postgres-interval`, `strnum`, `xml-naming`, `xtend`, `zod` | allowed | 893390 B |
 | `@byok-sdk/cloud-dataplane/package.json` | Package metadata | — | forbidden | 1941 B |
 | `@byok-sdk/cloud-dataplane/runtime` | Worker online stores; pg requires nodejs_compat | `@cfworker/json-schema`, `@nodable/entities`, `anynum`, `aws4fetch`, `fast-xml-builder`, `fast-xml-parser`, `hono`, `is-unsafe`, `path-expression-matcher`, `pg`, `pg-connection-string`, `pg-int8`, `pg-pool`, `pg-protocol`, `pg-types`, `postgres-array`, `postgres-bytea`, `postgres-date`, `postgres-interval`, `strnum`, `xml-naming`, `xtend`, `zod` | allowed | 848441 B |
-| `@byok-sdk/cloud-do` | Durable Object session runtime | `@earendil-works/chord`, `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, `@earendil-works/pi-telemetry`, `typebox` | forbidden | 196394 B |
+| `@byok-sdk/cloud-do` | Durable Object session runtime | `@earendil-works/chord`, `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, `@earendil-works/pi-telemetry`, `typebox` | forbidden | 175227 B |
 | `@byok-sdk/cloud-do/package.json` | Package metadata | — | forbidden | 1752 B |
 | `@byok-sdk/cloud/package.json` | Package metadata | — | forbidden | 1400 B |
 | `@byok-sdk/core` | Shared contracts and validation | `zod` | allowed | 126523 B |
@@ -430,7 +430,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1609 B |
 | `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 641769 B |
 | `@byok-sdk/ui-runtime/package.json` | Package metadata | — | forbidden | 1337 B |
-| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2293164 B |
+| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2232941 B |
 | `bin:byok-agent-memory-mcp` | Agent memory MCP helper | — | forbidden | 51028 B |
 | `bin:byok-agent-message-mcp` | Agent message MCP helper | — | forbidden | 51033 B |
 | `bin:byok-agent-result-mcp` | Task-bound structured outcome MCP helper | — | forbidden | 52457 B |

@@ -212,8 +212,8 @@ it('a daemon runs a jittered retention timer and reports path-free classes in st
  const config={localAgentRelease:{version:'0.0.0-test'},productName:'Retention',productId:'retention',serverUrl:server.url,storeDir:testScratchRoot(),storage:{scratchRoot:testScratchRoot()}};
  const daemon=createDaemonWithAdapters(config,[new StubRuntimeAdapter()],{retention:{timers:{setTimeout:(h,ms)=>{handler=h;delays.push(ms);return 'timer';},clearTimeout:()=>{}}}});
  cleanups.push(()=>daemon.stop());await daemon.pair('pairing-code');await daemon.start();expect(delays[0]).toBeGreaterThanOrEqual(675_000);expect(delays[0]).toBeLessThanOrEqual(1_125_000);
- expect(daemon.status().storage.classes).toHaveLength(22);handler!();await vi.waitFor(()=>expect(daemon.status().storage.lastSweep?.trigger).toBe('periodic'));
- const bundle=await createSupportBundle(config,config.storeDir);expect(bundle.storage.classes).toHaveLength(22);expect(bundle.storage.lastSweep?.trigger).toBe('periodic');
+ expect(daemon.status().storage.classes).toHaveLength(23);handler!();await vi.waitFor(()=>expect(daemon.status().storage.lastSweep?.trigger).toBe('periodic'));
+ const bundle=await createSupportBundle(config,config.storeDir);expect(bundle.storage.classes).toHaveLength(23);expect(bundle.storage.lastSweep?.trigger).toBe('periodic');
  expect(JSON.stringify(bundle.storage)).not.toContain(config.storeDir);expect(JSON.stringify(bundle.storage)).not.toContain(config.storage.scratchRoot);
 });
 it('uses newly measured pressure for maintenance even when the timer fired as periodic',async()=>{
@@ -417,4 +417,64 @@ it('a large expired runtime backlog leaves pass budget for agent-result in the s
  expect(report.truncated).toBe(true);expect(await exists(record)).toBe(false);
  expect((await fs.readdir(s.runtimeDir)).length).toBeGreaterThan(0);
  expect(f.failures).toEqual([]);
+});
+const ledgerHex=(c:string)=>c.repeat(64);
+async function sessionLedgers(directory:string,files:Record<string,string>){
+ const root=path.join(directory,'.byok','runtime-sessions');await fs.mkdir(root,{recursive:true});
+ for(const [name,when] of Object.entries(files)){const file=path.join(root,name);await fs.writeFile(file,`{"entry":"${name}"}\n`);await stamp(file,when);}
+ return root;
+}
+const EXPIRED='2026-09-01T00:00:00Z',FRESH='2026-10-13T00:00:00Z';
+it('session ledgers expire by last append; task evidence, task-suffixed names, directories and symlinks stay',async()=>{
+ const {home,binding,directory}=await idleHome();await binding.lease.release();
+ const root=await sessionLedgers(directory,{[`pi-${ledgerHex('a')}.jsonl`]:EXPIRED,[`pi-${ledgerHex('b')}.jsonl`]:FRESH,[`my-task-runner-${ledgerHex('c')}.jsonl`]:EXPIRED,
+  [`pi-task-${ledgerHex('d')}.jsonl`]:EXPIRED,[`x-task-${ledgerHex('e')}.jsonl`]:EXPIRED,['notes.txt']:EXPIRED});
+ await fs.writeFile(path.join(root,`corrupt-${ledgerHex('f')}.jsonl`),'{not json');await stamp(path.join(root,`corrupt-${ledgerHex('f')}.jsonl`),EXPIRED);
+ await fs.mkdir(path.join(root,`dir-${ledgerHex('1')}.jsonl`));
+ const outside=path.join(testScratchRoot(),'outside.jsonl');await fs.writeFile(outside,'keep');
+ if(process.platform!=='win32')await fs.symlink(outside,path.join(root,`link-${ledgerHex('2')}.jsonl`));
+ const f=await fixture({home});
+ expect(f.registry.classes.find(entry=>entry.id==='session-ledger')!.authority).toEqual(expect.objectContaining({owner:'sdk',scope:'agent-home',ttlMs:30*DAY}));
+ expect(f.registry.classes.find(entry=>entry.id==='session-ledger')!.authority).not.toHaveProperty('maxEntries');
+ const report=await f.sweeper.runPass('periodic');
+ expect(usage(f,'session-ledger')).toMatchObject({measured:true,entries:4});
+ expect(usage(f,'terminal-evidence')).toMatchObject({entries:2});
+ const removed=[`pi-${ledgerHex('a')}.jsonl`,`my-task-runner-${ledgerHex('c')}.jsonl`,`corrupt-${ledgerHex('f')}.jsonl`];
+ for(const name of removed)expect(await exists(path.join(root,name))).toBe(false);
+ for(const name of [`pi-${ledgerHex('b')}.jsonl`,`pi-task-${ledgerHex('d')}.jsonl`,`x-task-${ledgerHex('e')}.jsonl`,'notes.txt',`dir-${ledgerHex('1')}.jsonl`])expect(await exists(path.join(root,name))).toBe(true);
+ expect(await fs.readFile(outside,'utf8')).toBe('keep');
+ if(process.platform!=='win32')expect((await fs.lstat(path.join(root,`link-${ledgerHex('2')}.jsonl`))).isSymbolicLink()).toBe(true);
+ expect(report.deleted).toBe(3);expect(report.bytesReclaimed).toBe(removed.reduce((sum,name)=>sum+(name.startsWith('corrupt')?9:`{"entry":"${name}"}\n`.length),0));
+ // These fixtures are not valid handoff records, so reader-run reports them; session-ledger never parses them.
+ expect(f.failures.filter(failure=>failure.startsWith('session-ledger:'))).toEqual([]);
+});
+it('session ledgers wait while the home is busy and keep expiring under pressure',async()=>{
+ const busy=await idleHome(),ledger=`pi-${ledgerHex('a')}.jsonl`;
+ const busyRoot=await sessionLedgers(busy.directory,{[ledger]:EXPIRED});
+ const f=await fixture({home:busy.home});await f.sweeper.runPass('periodic');expect(await exists(path.join(busyRoot,ledger))).toBe(true);
+ const idle=await idleHome();await idle.binding.lease.release();const idleRoot=await sessionLedgers(idle.directory,{[ledger]:EXPIRED});
+ const g=await fixture({home:idle.home,budget:{maxStoreBytes:1_000_000_000,minFreeBytes:100_000,ackCriticalReserveBytes:10_000},freeBytes:150_000});
+ await g.sweeper.runPass('periodic');expect(g.pressure.state).toBe('pressure');expect(await exists(path.join(idleRoot,ledger))).toBe(false);
+});
+it('session ledgers sweep last: earlier classes spend the pass first and a large ledger directory drains across passes',async()=>{
+ const {home,binding,directory,results}=await idleHome();await binding.lease.release();await fs.mkdir(results,{recursive:true});
+ const record=path.join(results,resultName(0));await fs.writeFile(record,'{}');await old(record);
+ const names=Array.from({length:5},(_,index)=>`pi-${index.toString(16).repeat(64)}.jsonl`);
+ const root=await sessionLedgers(directory,Object.fromEntries(names.map(name=>[name,EXPIRED])));
+ const f=await fixture({home,max:1});
+ await f.sweeper.runPass('periodic');expect(await exists(record)).toBe(false);expect(await fs.readdir(root)).toHaveLength(5);
+ for(let pass=0;pass<10&&(await fs.readdir(root)).length>0;pass++)await f.sweeper.runPass('periodic');
+ expect(await fs.readdir(root)).toEqual([]);expect(f.failures.filter(failure=>failure.startsWith('session-ledger:'))).toEqual([]);
+});
+it('removing an expired corrupt ledger lets reader-run retention run again in that home',async()=>{
+ const {home,binding,directory}=await idleHome();await binding.lease.release();
+ const root=await sessionLedgers(directory,{});const corrupt=path.join(root,`pi-${ledgerHex('a')}.jsonl`);await fs.writeFile(corrupt,'{not json');await stamp(corrupt,EXPIRED);
+ const f=await fixture({home});
+ await f.sweeper.runPass('periodic');expect(f.failures).toContain('reader-run:sweep_failed');expect(await exists(corrupt)).toBe(false);
+ const before=f.failures.length;await f.sweeper.runPass('periodic');expect(f.failures.slice(before)).toEqual([]);
+});
+it('session-ledger TTL defaults to thirty days and accepts any non-negative integer',()=>{
+ const store=testScratchRoot();expect(resolveStorageConfig(store).ttlMs['session-ledger']).toBe(30*DAY);
+ expect(resolveStorageConfig(store,{retention:{ttlMs:{'session-ledger':0}}}).ttlMs['session-ledger']).toBe(0);
+ for(const value of [-1,1.5])expect(()=>resolveStorageConfig(store,{retention:{ttlMs:{'session-ledger':value}}})).toThrow('DaemonConfig.storage.retention.ttlMs.session-ledger is invalid');
 });

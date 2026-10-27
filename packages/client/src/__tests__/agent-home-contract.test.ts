@@ -16,6 +16,7 @@ import {
   validateAgentRef,
 } from '../agent-home';
 import { AgentSessionHandoffStore, AgentSessionHandoffMismatchError } from '../daemon/agent-session-handoff-store';
+import { isAgentSessionLedgerName } from '../daemon/retention/session-ledgers';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentReliableSpool } from '../daemon/agent-egress-spool';
@@ -384,6 +385,51 @@ describe('SDK-owned Agent home contract', () => {
     const [evidenceFile] = await fs.readdir(evidenceDir);
     await fs.writeFile(path.join(evidenceDir, evidenceFile!), '{broken', 'utf8');
     await expect(restarted.get(identity)).rejects.toThrow(/not valid JSON/);
+  });
+
+  it('names every session ledger so retention recognizes it, and never a task terminal file', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const agentRef = ref('names', 'profile-1');
+    const binding = await manager.prepare(agentRef);
+    const store = new AgentSessionHandoffStore();
+    const cwd = binding.resolution.canonicalHome;
+    const runtimes = ['pi', 'claude', 'codex', 'my-harness', 'harness.v2', 'my_harness', 'Custom Harness/2', 'x'.repeat(80), 'my-task-runner', 'custom-task'];
+    for (const [index, runtimeId] of runtimes.entries()) {
+      await store.record({ agentRef, sessionRef: `session-${index}`, runtimeId, cwd, taskId: `task-${index}`, leaseId: binding.lease.leaseId });
+      await store.recordTaskTerminal({ agentRef, taskId: `failed-${index}`, runtimeId, cwd, leaseId: binding.lease.leaseId, terminalReason: 'start failed' });
+    }
+    await binding.lease.release();
+    const evidenceDir = path.join(cwd, '.byok', 'runtime-sessions');
+    const names = await fs.readdir(evidenceDir);
+    const kinds = await Promise.all(names.map(async (name) => ({
+      name, terminal: (await fs.readFile(path.join(evidenceDir, name), 'utf8')).includes('"kind":"task-terminal"'),
+    })));
+    const ledgers = kinds.filter((entry) => !entry.terminal).map((entry) => entry.name);
+    const terminals = kinds.filter((entry) => entry.terminal).map((entry) => entry.name);
+    expect(ledgers).toHaveLength(runtimes.length);
+    expect(terminals).toHaveLength(runtimes.length);
+    for (const name of terminals) expect(isAgentSessionLedgerName(name)).toBe(false);
+    // A runtime id ending in `-task` makes a ledger name that reads as terminal evidence, so retention keeps it.
+    for (const name of ledgers) expect(isAgentSessionLedgerName(name)).toBe(!name.startsWith('custom-task-'));
+    expect(ledgers.filter((name) => name.startsWith('custom-task-'))).toHaveLength(1);
+  });
+
+  it('names a missing session ledger as missing, and keeps the mismatch text for a ledger that exists', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const binding = await manager.prepare(ref('one', 'profile-7'));
+    const store = new AgentSessionHandoffStore();
+    const identity = { agentRef: ref('one', 'profile-7'), sessionRef: 'session-1', runtimeId: 'pi', cwd: binding.resolution.canonicalHome } as const;
+    await store.record({ ...identity, taskId: 'task-1', leaseId: binding.lease.leaseId });
+    await binding.lease.release();
+    const missing = /^Agent session handoff session-1 does not exist on this device: it was never recorded here, or retention removed it$/;
+    await expect(store.requireMatch({ ...identity, agentRef: ref('one', 'profile-8') })).rejects.toThrow(/session-1 does not match AgentRef/);
+    const evidenceDir = path.join(identity.cwd, '.byok', 'runtime-sessions');
+    for (const file of await fs.readdir(evidenceDir)) await fs.rm(path.join(evidenceDir, file));
+    await expect(store.requireMatch(identity)).rejects.toThrow(missing);
+    await expect(store.requireMatch(identity)).rejects.toBeInstanceOf(AgentSessionHandoffMismatchError);
+    await expect(store.readerSessionCwd({ agentRef: identity.agentRef, sessionRef: 'session-1', runtimeId: 'pi', home: identity.cwd })).rejects.toThrow(missing);
   });
 
   it('seals exact AgentRef, canonical cwd and lease in an immutable runtime manifest', () => {

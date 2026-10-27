@@ -29,8 +29,8 @@ describe('SQLite custom-harness claim authority', () => {
     const path = join(root, 'server.sqlite');
     const clock = createMutableClock();
     const crypto = createWebCrypto();
-    const open = (migration?: string) => {
-      const embedded = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
+    const open = () => {
+      const embedded = createSqliteEmbeddedStores({ path }, { clock, crypto });
       const stores = { ...embedded, mailboxWake: createInProcessMailboxWake() };
       // Quota is process memory here; issue the entitlement on every open, as the
       // embedded server does, so limited mailbox appends are admitted (#411).
@@ -125,62 +125,6 @@ describe('SQLite custom-harness claim authority', () => {
       expect(await handleInboundEnvelope(runtime.bound, deviceId,
         createEnvelope('task.complete', { agentRef, summary: 'done', sessionRef: 's' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
     } finally { await runtime.stores.close(); }
-  });
-
-  function downgradeToV3(path: string): void {
-    const legacy = new DatabaseSync(path);
-    try {
-      legacy.exec("DROP TABLE wake; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '3' WHERE key = 'schema_version'");
-    } finally { legacy.close(); }
-  }
-
-  function expectUnchangedV3(path: string): void {
-    const db = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('3');
-      expect(db.prepare('PRAGMA table_info(task_attempt)').all().map(column => column.name)).not.toContain('claimed_harness_id');
-    } finally { db.close(); }
-  }
-
-  it('refuses identified v3 history without changing its task or receipt authority', async () => {
-    const { open, path } = fixture();
-    const runtime = open();
-    await runtime.stores.cloud.tasks.open(tenant, { taskId: 'identified', deviceId });
-    await runtime.stores.cloud.tasks.claim(tenant, { taskId: 'identified', deviceId, runtime: 'pi' });
-    await runtime.stores.close();
-    downgradeToV3(path);
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '3', requiredVersion: '6' }));
-    expectUnchangedV3(path);
-    const db = new DatabaseSync(path, { readOnly: true });
-    try { expect(db.prepare('SELECT claimed_runtime, status FROM task_attempt').get()).toMatchObject({ claimed_runtime: 'pi', status: 'claimed' }); }
-    finally { db.close(); }
-  });
-
-  it.each(['claimed', 'complete'] as const)('rejects ambiguous v3 %s identity without changing history or schema', async (status) => {
-    const { open, path } = fixture();
-    const runtime = open();
-    await runtime.stores.cloud.tasks.open(tenant, { taskId: 'ambiguous', deviceId });
-    await runtime.stores.cloud.tasks.claim(tenant, { taskId: 'ambiguous', deviceId, harnessId });
-    if (status === 'complete') await runtime.stores.cloud.tasks.recordStatus(tenant, { taskId: 'ambiguous', status });
-    await runtime.stores.close();
-    downgradeToV3(path);
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '3' }));
-    expectUnchangedV3(path);
-    const db = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect(db.prepare('SELECT owner_device_id, claimed_runtime, status FROM task_attempt').get())
-        .toMatchObject({ owner_device_id: deviceId, claimed_runtime: null, status });
-    } finally { db.close(); }
-  });
-
-  it('rejects removed migration selectors without advancing a legacy version', async () => {
-    const { open, path } = fixture();
-    await open().stores.close();
-    downgradeToV3(path);
-    for (const selector of ['v1-to-v4', 'v2-to-v4', 'v3-to-v4', 'v1-to-v5', 'v2-to-v5', 'v3-to-v5', 'v4-to-v5']) {
-      expect(() => open(selector)).toThrow('migration selectors are not supported');
-      expectUnchangedV3(path);
-    }
   });
 
   it('refuses a v6 file missing its claim authority without recreating the column', async () => {

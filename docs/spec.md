@@ -1233,26 +1233,10 @@ on every remote completion, by not advertising the input-preparation capability
 (so the cloud refuses to enqueue onto it), and by carrying no prepared-offer
 lane (so a prepared `task.offer` that reaches it is declined, naming the
 missing flag). Nothing is migrated, read
-forward or deleted automatically. **Operator step:** stop the daemon, run
-`byok-agent retire-input-preparation` (or, from a host installer or branded
-host CLI, the library `retireInputPreparation({ productId, storeDir }, { mode:
-'preview' })`; the CLI only renders that one implementation) to list the namespace (record counts per
-record schema version, pinned records, artifact files and unparseable lines;
-it writes nothing), then `byok-agent retire-input-preparation --yes` (`{
-mode: 'execute', confirmed: true }`), and
-start the daemon again. `--yes` refuses, typed and with zero writes, while the
-daemon control socket is reachable or the store owner lease is held, and when
-any record line does not parse, sits at the current or an unknown record
-schema version, or when any record holds a live pin (its last line in the log,
-keyed by `recordId` exactly as replay folds it, carries a pin). Otherwise it moves the whole
-`<storeDir>/input-preparation/` directory, unchanged, into
-`<storeDir>/input-preparation-retired/<timestamp>-v<versions>/` beside a
-`manifest.json` (counts per version, sha256 and size of `records.jsonl` and of
-every artifact file). The log is read structurally for its `recordId`, `version`
-and `pin` fields only, never replayed; nothing is deleted or converted, and Agent home
-and Agent memory are not touched. An absent or empty namespace is a no-op. The
-lane comes back empty under the current record schema version, and the
-retired records stay available for audit.
+forward or deleted automatically. **Operator step:** stop the daemon, move
+the whole `<storeDir>/input-preparation/` directory aside (it holds only records
+this build refuses; keep it if it is needed for audit), and start the daemon
+again. The lane comes back empty under the current record schema version.
 
 `ready` answers exactly one question: CAN THIS PREPARATION BE CONSUMED. It is
 not Host budget admission. The device performs no budget arithmetic anywhere on
@@ -1314,9 +1298,7 @@ prepared Executions, required message dispositions and old mailbox entries befor
 upgrading cloud and device together. Recreate preparations using the Host-owned
 systemPrompt, official identity and explicit memory selection. The capability is
 `agent-input-preparation-v8`; wire and record versions both advance to 8, with no dual token/read. Older records
-are refused; the bounded operator action that retires them is
-`byok-agent retire-input-preparation --yes` (library `retireInputPreparation`),
-run against the stopped daemon
+are refused; the operator moves the old namespace aside with the daemon stopped,
 after the drain (see the operator step above). The fourteen admission comparisons retain their roles; the compiler,
 envelope and identity values being compared change. A skipped drain needs explicit
 operator handling of the old entries; upgrading alone does not repair them.
@@ -1328,7 +1310,7 @@ operator handling of the old entries; upgrading alone does not repair them.
 The local record is version 10. The prepared tool binding and surface digests
 are version 3 and the Pi MCP fingerprint is version 2, so a record prepared
 before this change declines with `preparation_tool_binding_digest_mismatch`.
-Apply the same drain, paired upgrade and `retire-input-preparation` steps as for
+Apply the same drain, paired upgrade and operator steps as for
 the v8 cut, then recreate the preparations.
 
 The evidence has four parts, and each is read off a recorded fact rather than
@@ -2218,7 +2200,18 @@ Agent dispatch requires an explicit device and its durable authenticated
 `agent-home-contract` declaration before task creation or mailbox enqueue.
 Claim, decline, and every terminal message echo exact AgentRef. Resume requires
 exact agentId, profileRevision, sessionRef, runtime and canonical cwd; mismatch
-fails closed. Within one daemon process, a canonical Agent home runs at most
+fails closed. A session's ledger is kept at least until its last append
+(each Attempt's start and terminal) is `storage.retention.ttlMs['session-ledger']`
+old (default 30 days). A writer session stays resumable while its ledger
+exists; a reader session also needs its run directory, which reader-run
+retention removes after 7 days (below). Once the home is idle, retention
+removes an expired ledger. After that, a resume of that session is a
+non-retryable decline that says the handoff does not exist on this device,
+`agent.content.read` with that sessionRef is denied as `identity-mismatch`,
+and `Daemon.publishReliableAgentEgress` for that session fails with the same
+does-not-exist error. With `ttlMs['session-ledger']: 0`, every sweep of an
+idle home removes all of its session ledgers, so none of those sessions can
+be resumed. Within one daemon process, a canonical Agent home runs at most
 one writer Attempt and at most `maxConcurrentReaderAttemptsPerAgentHome`
 reader Attempts (default four), counted apart, across every lane and every
 session. An Agent offer without `homeAccess` is the writer and runs in the
@@ -2244,7 +2237,8 @@ is a non-retryable decline, and a missing run directory is a non-retryable
 decline that names the session. Run directories stay after the terminal;
 unified startup/periodic retention, under the same base home lease, removes
 the oldest beyond 32 per home and those older than 7 days, never an active one, and keeps one that a reader
-handoff updated within 7 days. The SDK does not make memory read-only: each
+handoff updated within 7 days. The session ledgers themselves expire under
+the `session-ledger` class above; `-task-` terminal evidence stays. The SDK does not make memory read-only: each
 reader terminal carries `agentHomeMemoryChange` (`unchanged`,
 `reader-attributed`, `unattributed` when a writer overlapped, or `unmeasured`)
 with the changed paths. A task-free projection still needs the base lease, so
@@ -2666,7 +2660,7 @@ The authority for each datum is explicit:
 | --- | --- | --- |
 | Fresh `sessionRef` | The runtime session actually started by the selected adapter | Runtime mints it after fresh `start()`; no server/client preseed |
 | Session handoff | SDK-owned canonical Agent-home `.byok/runtime-sessions/` | SDK records exact AgentRef/profile/runtime/cwd/session and fsyncs it before exposing the session |
-| Resume `sessionRef` | Existing exact handoff | A resume offer (`session.mode: 'resume'`) is exact-resume-only; missing/stale/cross-Agent/profile/runtime/cwd evidence fails closed |
+| Resume `sessionRef` | Existing exact handoff | A resume offer (`session.mode: 'resume'`) is exact-resume-only; missing/stale/cross-Agent/profile/runtime/cwd evidence fails closed, including a ledger retention removed after `ttlMs['session-ledger']` |
 | Egress policy and fresh capability | Host-selected typed policy plus durable device declaration | Cloud/server admit only the exact declared capability; presence is not authority |
 | Reliable egress identity | The handoff read by the public publisher | Publisher proves exact AgentRef/task/runtime/cwd/session handoff before durable append/send; cloud receipt and ack do not mint a session |
 

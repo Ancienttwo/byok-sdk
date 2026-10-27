@@ -56,7 +56,7 @@ describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
     expect(await h.substrate.store.dump(h.home)).toBe(stored);
     expect(await h.intent(turnId)).toMatchObject({ tries: 1, conclusion: 'succeeded' });
     expect((await h.commands()).filter(id => id === task)).toHaveLength(1);
-    expect(await h.mailbox(task)).toEqual(['task.offer']);
+    expect(await h.mailbox(task)).toEqual([{ type: 'task.offer', session: 'fresh', egress: true }]);
     expect(h.device.started.filter(entry => entry.taskId === task)).toHaveLength(1);
     // Every notification of this instance (the input, the device's claim and terminal) ran two passes.
     const notified = worker.lines(NOTIFIED).map(line => line.slice(line.indexOf(NOTIFIED) + NOTIFIED.length).trim());
@@ -72,13 +72,13 @@ describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
     await worker.waitForOutput(`[h-fault] hang-after-submit ${task}`);
     await worker.kill();
     // The SDK holds the offer; the Host never wrote the delivery.
-    expect(await h.mailbox(task)).toEqual(['task.offer']);
+    expect(await h.mailbox(task)).toEqual([{ type: 'task.offer', session: 'fresh', egress: true }]);
     expect(await h.intent(turnId)).toMatchObject({ tries: 1, conclusion: null });
     expect((await h.intent(turnId))?.submission).not.toBe('delivered');
     worker = await h.restart();
     // The new try waits out the dead try's lease, then the K4 frozen submit reads the offer back instead of submitting.
     await until(async () => (await worker.passes(), (await h.intent(turnId))?.submission === 'delivered' || undefined));
-    expect(await h.mailbox(task)).toEqual(['task.offer']);
+    expect(await h.mailbox(task)).toEqual([{ type: 'task.offer', session: 'fresh', egress: true }]);
     await h.device.waitForStart(task);
     await h.device.finish(task, {});
     await until(async () => (await worker.passes(), (await h.turn(turnId))?.status === 'succeeded' || undefined));

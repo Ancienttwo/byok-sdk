@@ -69,17 +69,15 @@ describe('SQLite durable device authority', () => {
     } finally { await stores.close(); }
   });
 
-  it('refuses even an unused v1 file without creating device authority', async () => {
+  it.each(['1', '2', '3', '4', '5'])('refuses a schema %s database at open and leaves it unchanged', async (version) => {
     const path = database(); await open(path).close();
-    const legacy = new DatabaseSync(path);
-    legacy.exec("DROP TABLE wake; DROP TABLE request_receipt; DROP TABLE device_directory; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '1' WHERE key = 'schema_version'");
-    legacy.close();
-    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '1', requiredVersion: '6' }));
+    const old = new DatabaseSync(path);
+    old.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(version); old.close();
+    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '6' }));
+    expect(() => open(path)).toThrow('start on a new database');
     const read = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect(read.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('1');
-      expect(read.prepare("SELECT name FROM sqlite_master WHERE name = 'device_directory'").get()).toBeUndefined();
-    } finally { read.close(); }
+    expect(read.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe(version);
+    read.close();
   });
 
   it('rejects unknown versions and malformed old databases without marking them migrated', async () => {
@@ -92,29 +90,6 @@ describe('SQLite durable device authority', () => {
     expect(read.prepare("SELECT name FROM sqlite_master WHERE name = 'device_directory'").get()).toBeUndefined();
     read.exec("UPDATE byok_sqlite_meta SET value = '999' WHERE key = 'schema_version'"); read.close();
     expect(() => open(path)).toThrow('999');
-  });
-
-  it('refuses a legacy file with missing coordination columns', async () => {
-    const path = database(); await open(path).close();
-    const legacy = new DatabaseSync(path);
-    legacy.exec("DROP TABLE wake; DROP TABLE request_receipt; DROP TABLE device_directory; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '1' WHERE key = 'schema_version'; ALTER TABLE task_attempt RENAME COLUMN device_id TO broken_device_id");
-    legacy.close();
-    expect(() => open(path)).toThrow();
-    const read = new DatabaseSync(path, { readOnly: true });
-    expect(read.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('1');
-    read.close();
-  });
-
-  it('does not create a missing authority in a legacy file with conflicting indexes', async () => {
-    const path = database(); await open(path).close();
-    const legacy = new DatabaseSync(path);
-    legacy.exec("DROP TABLE wake; DROP TABLE request_receipt; DROP TABLE device_directory; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '1' WHERE key = 'schema_version'; CREATE INDEX device_directory_machine ON task_attempt (device_id)");
-    legacy.close();
-    expect(() => open(path)).toThrow();
-    const read = new DatabaseSync(path, { readOnly: true });
-    expect(read.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('1');
-    expect(read.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'device_directory'").get()).toBeUndefined();
-    read.close();
   });
 
   it('rejects corrupt capability authority instead of inferring a declaration', async () => {

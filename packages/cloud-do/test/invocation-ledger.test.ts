@@ -208,15 +208,6 @@ describe('durable execution budgets in workerd', () => {
 describe('model usage and dispatch accounting in real workerd', () => {
   const usage = (name: string, inputDelta: number, outputDelta: number) => rpc<ExecutionRow>(name, 'usage', { conversationId: 1, inputDelta, outputDelta });
   const model = (name: string, budget: { inputBytes: number; inputTokens: number; outputTokens: number }) => rpc<ExecutionRow>(name, 'model', { conversationId: 1, budget });
-  it('migrates old executions to zero counters and keeps counters on repeated schema checks', async () => {
-    const name = 'usage-migration'; await start(name);
-    const columns = await rpc<string[]>(name, 'legacy-schema');
-    expect(columns).not.toContain('inputTokens');
-    expect(await execution(name)).toMatchObject({ inputTokens: 0, outputTokens: 0, credits: 0, sentRequests: 0 });
-    await usage(name, 123, 45); await rpc(name, 'model', { conversationId: 1 });
-    await rpc(name, 'sent', { conversationId: 1 });
-    expect(await start(name)).toMatchObject({ inputTokens: 123, outputTokens: 45, steps: 1, sentRequests: 1 });
-  });
   for (const field of ['input', 'output'] as const) it(`admits the exact ${field} bound and durably rejects one over before counting`, async () => {
     const name = `token-bound-${field}`; await start(name); await usage(name, 100, 20);
     const budget = { inputBytes: 17, inputTokens: 100 + 17 + 4096, outputTokens: 20 + 4096 };

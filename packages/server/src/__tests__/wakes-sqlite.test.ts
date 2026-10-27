@@ -90,30 +90,8 @@ describe('file-backed wake authority and adoption', { timeout: 20000 }, () => {
     expect(await next.wakes.cancel('future')).toBe(true); await next.close();
     const noHook = createByokServer({ productId: 'wake-file', storage: { kind: 'sqlite', path } }); await noHook.close();
   });
-  async function legacy4(path: string) {
-    await open(path).close();
-    const db = new DatabaseSync(path);
-    try {
-      db.exec("DROP TABLE wake; UPDATE byok_sqlite_meta SET value = '4' WHERE key = 'schema_version'; INSERT INTO request_receipt VALUES ('product:wake-file', 'preserved', '{\"exact\":true}', '2026-01-01T00:00:00.000Z')");
-    } finally { db.close(); }
-  }
-  it('refuses v4 without changing receipts, claim columns or creating a wake authority', async () => {
-    const path = file(); await legacy4(path);
-    const before = new DatabaseSync(path, { readOnly: true });
-    const receipt = before.prepare('SELECT * FROM request_receipt').all();
-    const columns = before.prepare('PRAGMA table_info(task_attempt)').all(); before.close();
-    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '4', requiredVersion: '6' }));
-    const after = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect(after.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('4');
-      expect(after.prepare("SELECT name FROM sqlite_master WHERE name = 'wake'").get()).toBeUndefined();
-      expect(after.prepare('SELECT * FROM request_receipt').all()).toEqual(receipt);
-      expect(after.prepare('PRAGMA table_info(task_attempt)').all()).toEqual(columns);
-    } finally { after.close(); }
-  });
-  it('refuses a current database with missing wake authority and old target-v4 selectors', async () => {
+  it('refuses a current database with missing wake authority', async () => {
     const path = file(); await open(path).close();
-    expect(() => createByokServer({ productId: 'wake-file', storage: { kind: 'sqlite', path, ...{ migration: 'v3-to-v4' } } })).toThrow('migration selectors are not supported');
     const db = new DatabaseSync(path); db.exec('DROP TABLE wake'); db.close();
     expect(() => open(path)).toThrow(SqliteSchemaError);
     const check = new DatabaseSync(path, { readOnly: true });

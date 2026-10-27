@@ -17,7 +17,7 @@ export interface OfferActivationInput
     Pick<OfferWorkspace, 'appliedAgentHomeProjection' | 'readerMemoryBaseline'>,
     Pick<OfferManifest, 'preparedObservation'>,
     Pick<OfferWorkspace, 'workspaceDir'> {
-  readonly agentBinding: OfferHeld['agentBinding'];
+  readonly agentBinding: OfferWorkspace['agentBinding'];
   readonly blobAbort: AbortController;
   readonly payload: AcceptedOfferPayload;
   readonly session: Session;
@@ -37,22 +37,20 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     workspaceDir, blobAbort, payload, session, messageRequirement, terminalProjection,
   } = input;
   try {
-  if (agentBinding !== undefined) {
-    try {
-      await agentBinding.lease.bindSession(session.sessionRef);
-    } catch (error) {
-      await this['failClaimedAgent'](
-        taskId,
-        `Agent session execution lease could not bind the runtime session: ${outboundErrorMessage(error)}`,
-        false,
-        {
-          binding: agentBinding,
-          runtimeId: pick.descriptor.id,
-          sessionRef: session.sessionRef,
-        },
-      );
-      return;
-    }
+  try {
+    await agentBinding.lease.bindSession(session.sessionRef);
+  } catch (error) {
+    await this['failClaimedAgent'](
+      taskId,
+      `Agent session execution lease could not bind the runtime session: ${outboundErrorMessage(error)}`,
+      false,
+      {
+        binding: agentBinding,
+        runtimeId: pick.descriptor.id,
+        sessionRef: session.sessionRef,
+      },
+    );
+    return;
   }
 
   let active!: ActiveTask;
@@ -64,19 +62,17 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     session,
     scratch,
     workspaceDir,
-    ...(agentBinding === undefined ? {} : {
-      agentBinding,
-      agentRef: agentBinding.resolution.agentRef,
-      agentHandoff: {
-        sessionRef: session.sessionRef,
-        runtimeId: pick.descriptor.id,
-        home: agentBinding.resolution.canonicalHome,
-        cwd: workspaceDir,
-        ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
-      },
-      ...(appliedAgentHomeProjection === undefined ? {} : { appliedAgentHomeProjection }),
-      ...(readerMemoryBaseline === undefined ? {} : { readerMemoryBaseline }),
-    }),
+    agentBinding,
+    agentRef: agentBinding.resolution.agentRef,
+    agentHandoff: {
+      sessionRef: session.sessionRef,
+      runtimeId: pick.descriptor.id,
+      home: agentBinding.resolution.canonicalHome,
+      cwd: workspaceDir,
+      ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
+    },
+    ...(appliedAgentHomeProjection === undefined ? {} : { appliedAgentHomeProjection }),
+    ...(readerMemoryBaseline === undefined ? {} : { readerMemoryBaseline }),
     summaryParts: [],
     finalTextParts: [],
     batcher: new ProgressBatcher(
@@ -106,7 +102,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     ...(terminalProjection?.mode !== 'result-document' ? {} : { resultStore: this['resultContextByTask'].get(taskId)?.store }),
   };
   // #654 D9: a task with sealing streams no draft (design §6.1, §10.4).
-  if (active.messageRequirement !== undefined && active.agentRef !== undefined
+  if (active.messageRequirement !== undefined
     && pick.descriptor.capabilities.messageDraft === true
     && this['deps'].getServerCapabilities?.().includes('agent-message-draft')
     && this['deps'].sealedTasks?.isSealed(taskId) !== true) {
@@ -124,33 +120,30 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   // intentionally awaited and fsynced before task.started; an Agent
   // runtime session that has no durable exact-match receipt must never be
   // advertised as resumable.
-  if (agentBinding !== undefined) {
-    const binding = agentBinding;
-    try {
-      await this['deps'].agentHome!.mutateExecution(binding, () =>
-        this['deps'].agentSessionHandoffs!.record({
-          agentRef: binding.resolution.agentRef,
-          taskId,
-          sessionRef: session.sessionRef,
-          runtimeId: pick.descriptor.id,
-          home: binding.resolution.canonicalHome,
-          cwd: workspaceDir,
-          ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
-          leaseId: binding.lease.leaseId,
-        }));
-    } catch (error) {
-      await this['failClaimedAgent'](
+  try {
+    await this['deps'].agentHome!.mutateExecution(agentBinding, () =>
+      this['deps'].agentSessionHandoffs!.record({
+        agentRef: agentBinding.resolution.agentRef,
         taskId,
-        `Agent session handoff could not be durably written before start: ${outboundErrorMessage(error)}`,
-        false,
-        {
-          binding: agentBinding,
-          runtimeId: pick.descriptor.id,
-          sessionRef: session.sessionRef,
-        },
-      );
-      return;
-    }
+        sessionRef: session.sessionRef,
+        runtimeId: pick.descriptor.id,
+        home: agentBinding.resolution.canonicalHome,
+        cwd: workspaceDir,
+        ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
+        leaseId: agentBinding.lease.leaseId,
+      }));
+  } catch (error) {
+    await this['failClaimedAgent'](
+      taskId,
+      `Agent session handoff could not be durably written before start: ${outboundErrorMessage(error)}`,
+      false,
+      {
+        binding: agentBinding,
+        runtimeId: pick.descriptor.id,
+        sessionRef: session.sessionRef,
+      },
+    );
+    return;
   }
   const activatedMessageRecord = active.messageOutbox === undefined
     ? undefined
@@ -211,8 +204,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   } catch (error) {
     if (this['tasks'].has(taskId)) throw error;
     const reason = `runtime activation failed: ${outboundErrorMessage(error)}`;
-    if (agentBinding === undefined) await this['fail'](taskId, reason, false);
-    else await this['failClaimedAgent'](taskId, reason, false, {
+    await this['failClaimedAgent'](taskId, reason, false, {
       binding: agentBinding, runtimeId: pick.descriptor.id, sessionRef: session.sessionRef,
     });
   }

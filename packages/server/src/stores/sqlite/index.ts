@@ -210,10 +210,7 @@ class SqliteCoordinator {
   #closing = false;
   #closePromise: Promise<void> | undefined;
 
-  constructor(
-    path: string,
-    wake?: WakeConsumer,
-  ) {
+  constructor(path: string, wake?: WakeConsumer) {
     this.db = openSqliteDatabase(path);
     let foundVersion: string | undefined;
     const schemaError = (code: SqliteSchemaErrorCode, message: string, options?: ErrorOptions) =>
@@ -227,8 +224,7 @@ class SqliteCoordinator {
       }
     };
     try {
-      // openSqliteDatabase holds EXCLUSIVE ownership before this schema
-      // transaction. Existing authority is validated before routes are exposed.
+      // openSqliteDatabase holds EXCLUSIVE ownership before this schema transaction.
       this.db.exec('BEGIN IMMEDIATE');
       try {
         const hasMetadata = this.db
@@ -239,7 +235,8 @@ class SqliteCoordinator {
             .get() as { value: string } | undefined;
           foundVersion = version?.value;
           if (version?.value !== SQLITE_SCHEMA_VERSION) {
-            throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; this build requires ${SQLITE_SCHEMA_VERSION}. Preserve the database and use a new state path and enrollment; no migration is supported.`);
+            throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
+              `this build requires ${SQLITE_SCHEMA_VERSION}. An older file is not adopted: start on a new database. A newer file needs a newer build.`);
           }
           for (const projection of [
             'tenant_id, device_id, next_seq, delivered_seq, acked_seq, updated_at FROM mailbox_cursor',

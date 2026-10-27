@@ -540,7 +540,7 @@ Library exports 分成六组：
 
 | 组 | 主要 public API |
 | --- | --- |
-| daemon | `createDaemon`、`createDaemonWithAdapters`、`Daemon*`、credential-blind `readDeviceEnrollmentStatus` / `readDeviceEnrollmentIdentity` / `DeviceEnrollment*`、按 operation allowlist 限定的 `createStoredDeviceProofSigner`（不外泄私钥）、`retireInputPreparation`、`BlobClient`；`AuthManager`、secret-bearing local record/store、`StoredDeviceProofSigner` 均为 package-internal |
+| daemon | `createDaemon`、`createDaemonWithAdapters`、`Daemon*`、credential-blind `readDeviceEnrollmentStatus` / `readDeviceEnrollmentIdentity` / `DeviceEnrollment*`、按 operation allowlist 限定的 `createStoredDeviceProofSigner`（不外泄私钥）、`BlobClient`；`AuthManager`、secret-bearing local record/store、`StoredDeviceProofSigner` 均为 package-internal |
 | adapter contract | `RuntimeAdapter`、`RuntimeAdapterDescriptor`、`PreparedRuntimeOperation`、`RuntimeOperationManifest`、`RuntimeOperationStartInput`、`Session`、`RuntimeCapabilities`、`RuntimeExecutionFailure` 及其 closed phase/category/retry types、`RuntimeDisposalFailure` 及 stage、`PolicyUnsupportedError` |
 | bundled adapters | `PiAdapter`、`ClaudeAdapter`、`CodexAdapter`、`HermesAdapter` 与 `GrokAdapter`（后两者是 custom harness，Host 显式加入）与 options |
 | observability | `DaemonObserver`、event/task projection types |
@@ -1594,15 +1594,15 @@ compaction hook。本节只陈述 `codex/agent-memory-phase2` 的 source 与本�
 | 状态 | 条件 | 行为 |
 | --- | --- | --- |
 | normal | 低于 soft watermark | 全部 expiring 类别；journal passive checkpoint + 最多 64 页 incremental vacuum 每小时 |
-| pressure | 达到 80% budget，或低于 soft free minimum | 只清 SDK residue、daemon temp、到期 runtime、已终态且可锁定 replica、过期 input preparation、空闲 home 的 result 记录；compaction 每 5 分钟 |
+| pressure | 达到 80% budget，或低于 soft free minimum | 只清 SDK residue、daemon temp、到期 runtime、已终态且可锁定 replica、过期 input preparation、空闲 home 的 result 记录与过期 session ledger；compaction 每 5 分钟 |
 | hard-pressure | 达到 90% budget，或低于 hard free minimum | 同上；新 offer retryable decline，仍允许 terminal/truth flush、导出与恢复 |
 | emergency | ack-critical failure latch 或低于 reserve | 拒绝 ack；保留 recovery evidence；有效的 normal 水位测量才能解除 latch |
 
 每轮先测量水位，再做到期 checkpoint，再按 registry 顺序清理。一次测量最多走 65 536 个条目，root 顺序为 store、scratch、skill、Agent home、workspace、Pi sessionDir。超限时停止：没走完的 root 下的类标 `truncated`，bytes/entries 为下界，完全没走到的类同时 `measured: false`。压力按下界 used bytes 与完整的 free bytes 计算，截断本身不 latch emergency、不让启动失败，无错误的截断测量也能解除 latch。I/O、root identity、journal usage、free space 出错仍 fail closed。启动 SDK secrets 清理是 publication 前置条件：删除数量/耗时上限若使扫描不完整，启动失败，不能带残留继续接受 offer。其他类别限制每轮 256 次删除、8192 次检查与 10 秒软期限，目录 cursor 跨轮 round-robin；阻塞的单次 OS I/O 不可抢占。stop 取消 timer，等待进行中的 pass，再关闭 journal。
 
-`ExpiringClassId` 有 sweep；`ProtectedClassId` 只有 measure，不能表达删除。自动 journal prune 只查超过默认 30 天、已确认且无 recovery marker 的 task，事务再次验证后一起删除 envelope/transition/idempotency/terminal。旧 candidate/report APIs 与三张无生产者的 GC 表已删除，打开数据库时 drop。压力下不 prune journal，不清 reader/home/skill revision；`agent-result` 不在此列，压力下照常清，否则条目积压的设备在压力下排不空。
+`ExpiringClassId` 有 sweep；`ProtectedClassId` 只有 measure，不能表达删除。自动 journal prune 只查超过默认 30 天、已确认且无 recovery marker 的 task，事务再次验证后一起删除 envelope/transition/idempotency/terminal。旧 candidate/report APIs 与三张无生产者的 GC 表已删除，打开数据库时 drop。压力下不 prune journal，不清 reader/home/skill revision；`agent-result` 与 `session-ledger` 不在此列，压力下照常清过期条目，否则条目积压的设备在压力下排不空。
 
-Agent content、`.byok` 权威记录、lease、terminal evidence、workspace、retired namespace、Host Pi sessionDir、当前 skill revision、quarantine 与 owned-process ledger 永不自动删除。例外是 `.byok/runs/` 与 `.byok/results/`：result 记录只被持有该 home execution lease 的同一 live task 读，home 空闲时按 mtime 删超过 7 天（`ttlMs['agent-result']`）的，再删每 home 超过 256 条的最旧记录，损坏记录与崩溃残留 `.tmp` 一样按 mtime 删。home 维护拿同一 base lease 和 agents-root gate，每个 home 临界区最多 250ms 软期限；不生成 profile authority，不缩短 1 小时 home-temp mtime TTL。未知/非法 lease marker 拒绝该 home 并释放 gate。
+Agent content、`.byok` 权威记录、lease、terminal evidence、workspace、retired namespace、Host Pi sessionDir、当前 skill revision、quarantine 与 owned-process ledger 永不自动删除。例外是 `.byok/runs/`、`.byok/results/` 与 `.byok/runtime-sessions/` 下的 session ledger（`-task-` 终态证据除外）。session ledger 每次 append 都在 execution lease 下，home 空闲时按 mtime（最后一次 append）删超过 30 天（`ttlMs['session-ledger']`）的，不解析内容，不设条数上限，在 `EXPIRING_CLASS_IDS` 里排最后。result 记录只被持有该 home execution lease 的同一 live task 读，home 空闲时按 mtime 删超过 7 天（`ttlMs['agent-result']`）的，再删每 home 超过 256 条的最旧记录，损坏记录与崩溃残留 `.tmp` 一样按 mtime 删。home 维护拿同一 base lease 和 agents-root gate，每个 home 临界区最多 250ms 软期限；不生成 profile authority，不缩短 1 小时 home-temp mtime TTL。未知/非法 lease marker 拒绝该 home 并释放 gate。
 
 status 的 storage 始终存在，含每类 bytes/entries/oldestAgeMs/protected/measured/truncated、measuredAt 与 lastSweep。physical 文件只计一次；confirmed-journal 行计 logical entries，bytes 为 0，DB footprint 属于 protected journal。测量失败保留上一次明确时间，不能把未知 scope 的 0 说成已测量。observer 只记录 closed class/trigger 和计数；support bundle 使用同一 projection，offline 显式 unmeasured。
 

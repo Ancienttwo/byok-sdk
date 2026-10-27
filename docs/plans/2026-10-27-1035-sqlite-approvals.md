@@ -1,6 +1,7 @@
 # #1035 SQLite approval timeline persistence
 
-Status: implementation authorized. Baseline: `5d0e37020d2fe71f82b73a3287dbbbdfbe4ba42b`.
+Status: implemented; integration acceptance pending. Design baseline: `5d0e37020d2fe71f82b73a3287dbbbdfbe4ba42b`.
+Integration baseline: `05d8318457623c0f735f891c1ecf81b59c247696`.
 
 ## Scope and owner decisions
 
@@ -47,8 +48,9 @@ resolution outcomes and tenant isolation. A duplicate does not extend TTL.
 
 New schema is v6. New files create the approval table with the other authorities;
 existing v6 files must already contain its valid schema. Versions 1–5 and unknown
-versions are refused without adoption. Remove legacy migration selectors and
-their implementation in the same change. Existing files are neither deleted nor
+versions are refused without adoption. Main already removed legacy migration
+selectors and their implementation in #1037; preserve that removal and reject
+a supplied obsolete selector at the SQLite composition boundary. Existing files are neither deleted nor
 rewritten; operators preserve them and explicitly choose a new path/enrollment.
 
 On reopen, `expiresAt` and revision are unchanged. A request still within TTL
@@ -71,9 +73,10 @@ is introduced. This is reopen durability, not new power-loss evidence.
    collection, tenant isolation and both host decisions across reopen.
 4. Add a facade regression: approval arrives before reopen; get/stats/state seed
    still show it afterwards; resolving it updates the same durable authority.
-5. Update README/spec/storage API docs and the API snapshot for removal of the
-   migration option. Record every changed existing test expectation as a schema
-   contract change, never as a relaxation of approval behavior.
+5. Update README/spec/storage API docs and the API snapshot for persistence and
+   schema v6. Keep main's removal of the migration API and obsolete adoption
+   suites. Existing schema assertions change only from v5 to v6, including
+   refusal of v5 files; approval behavior is not relaxed.
 6. Run build, typecheck, test, check:api-surface and check:version-authority.
    Review test changes independently before a PR is considered ready.
 

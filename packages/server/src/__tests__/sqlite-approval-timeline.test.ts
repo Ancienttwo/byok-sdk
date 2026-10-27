@@ -127,6 +127,14 @@ describe('SQLite approval timeline persistence', () => {
     } finally { inspect.close(); }
   });
 
+  it('rejects a removed migration option without opening or changing the file', async () => {
+    const { path, clock, open, close } = fixture();
+    const first = open(); await first.cloud.approvals.append(tenant, request); await close(first);
+    expect(() => createSqliteEmbeddedStores({ path, ...{ migration: 'v4-to-v5' } }, { clock, crypto: createWebCrypto() }))
+      .toThrow('migration selectors are not supported');
+    expect((await open().cloud.approvals.read(tenant, 'task'))?.entries[0]?.event).toEqual(request.event);
+  });
+
   it('refuses missing approval authority without recreating it', async () => {
     const { path, open, close } = fixture(); await close(open());
     const db = new DatabaseSync(path); db.exec('DROP TABLE approval_timeline_tail'); db.close();

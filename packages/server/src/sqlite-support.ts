@@ -59,11 +59,12 @@ export class SqliteUnavailableError extends Error {
 /**
  * Why a SQLite file was refused at open, so a host can tell the user what to do
  * without parsing the message:
- * - `SQLITE_SCHEMA_UNSUPPORTED`: the stored version is not this build's and no
- *   matching `migration` selector was given (an older file needs one; a newer
- *   file needs a newer build).
- * - `SQLITE_MIGRATION_REFUSED`: the selected migration would lose durable
- *   authority; preserve the file for reconciliation.
+ * - `SQLITE_SCHEMA_UNSUPPORTED`: the stored version is not this build's. An
+ *   older file is not adopted (start on a new database); a newer file needs a
+ *   newer build.
+ * - `SQLITE_MIGRATION_REFUSED`: opening the file would need durable authority
+ *   it does not hold (member chain rotate entries from before the KEM floor);
+ *   preserve the file for reconciliation.
  * - `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox rows do not use
  *   the current wire major. Drain with the previous SDK before upgrading.
  * - `SQLITE_SCHEMA_INVALID`: the file contradicts its declared BYOK schema or

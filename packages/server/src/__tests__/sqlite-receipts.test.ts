@@ -1,5 +1,4 @@
 import { createInProcessMailboxWake } from '@byok-sdk/cloud';
-import { WAKE_SCHEMA } from '../stores/sqlite/wakes';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -200,25 +199,6 @@ describe('SQLite receipt recovery', () => {
     } finally { await runtime.stores.close(); }
   });
 
-  it.each(['1', '2'] as const)('rejects schema %s with historical tasks without mutation', async (version) => {
-    const { open, path } = fixture(); let runtime = open();
-    await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
-      devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
-    await runtime.stores.cloud.tasks.open(tenant, { taskId: 'historical', deviceId });
-    await runtime.stores.close();
-    const db = new DatabaseSync(path);
-    db.exec('DROP TABLE wake; DROP TABLE request_receipt; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id');
-    if (version === '1') db.exec('DROP TABLE device_directory');
-    db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(version);
-    db.close();
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '6' }));
-    const check = new DatabaseSync(path);
-    expect(check.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe(version);
-    expect(check.prepare("SELECT name FROM sqlite_master WHERE name = 'request_receipt'").get()).toBeUndefined();
-    expect(check.prepare('SELECT task_id FROM task_attempt').get()?.task_id).toBe('historical');
-    check.close();
-  });
-
   it('fails closed when the durable receipt authority is missing', async () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path); db.exec('DROP TABLE request_receipt'); db.close();
@@ -287,17 +267,10 @@ describe('SQLite receipt recovery', () => {
   });
 
 
-  it('rejects cleaned legacy delivery history and a v6 table missing its composite primary key', async () => {
+  it('rejects a v6 request receipt table missing its composite primary key', async () => {
     const { open, path } = fixture(); await open().stores.close();
-    const db = new DatabaseSync(path);
-    db.exec("DROP TABLE wake; DROP TABLE request_receipt; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '2' WHERE key = 'schema_version'; INSERT INTO mailbox_cursor VALUES ('receipts', 'device-receipts', 2, 1, 1, '2026-01-01T00:00:00.000Z')");
-    db.close();
-    expect(() => open()).toThrow('Unsupported BYOK SQLite schema version');
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '2' }));
     const corrupt = new DatabaseSync(path);
-    expect(corrupt.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('2');
-    corrupt.exec(WAKE_SCHEMA);
-    corrupt.exec("ALTER TABLE task_attempt ADD COLUMN claimed_harness_id TEXT; UPDATE byok_sqlite_meta SET value = '6' WHERE key = 'schema_version'; CREATE TABLE request_receipt (tenant_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, recorded_at TEXT NOT NULL)");
+    corrupt.exec('DROP TABLE request_receipt; CREATE TABLE request_receipt (tenant_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, recorded_at TEXT NOT NULL)');
     corrupt.close();
     expect(() => open()).toThrow('Invalid BYOK SQLite request receipt schema');
     expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '6' }));

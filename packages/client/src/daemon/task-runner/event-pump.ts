@@ -309,7 +309,7 @@ async function pumpTurnEnd(this: TaskRunner, active: ActiveTask, event: Extract<
     const outbox = active.messageOutbox;
     let refusalReason: string | undefined;
     try {
-      if (outbox === undefined || active.agentRef === undefined) {
+      if (outbox === undefined) {
         refusalReason = 'required Agent message lane is unavailable for this task';
         throw new Error(refusalReason);
       }

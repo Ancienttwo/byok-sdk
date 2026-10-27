@@ -448,6 +448,7 @@ in an old process's memory cannot be recovered.
 Open failures use `SqliteSchemaError` with `foundVersion` and `requiredVersion`:
 
 - `SQLITE_SCHEMA_UNSUPPORTED`: unsupported schema or removed migration option.
+- `SQLITE_MIGRATION_REFUSED`: member chain rotate entries predate the KEM floor; preserve the file.
 - `SQLITE_SCHEMA_INVALID`: a required authority is missing or malformed.
 - `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox bytes are not wire v4.
 
