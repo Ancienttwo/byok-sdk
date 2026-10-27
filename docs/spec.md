@@ -561,25 +561,12 @@ before open because their WAL paths cannot share recovery authority.
 `close()` is the only server shutdown API; the synchronous `stop()` is removed.
 The upgrade must stop all older owners and external SQLite connections before
 starting this owner, with no parallel sibling-lock path. Schema and wire formats
-were unchanged by the owner-lock refactor; see the schema adoption below and the server README for migration.
+were unchanged by the owner-lock refactor.
 
 Schema v5 retains nullable claimed harness identity in the ownership CAS and
-adds the server-local wake table. Stop every writer and take a consistent backup
-before explicit adoption. `v1-to-v5` / `v2-to-v5` reject any task, message,
-agent-admission or advanced cursor history: old in-memory receipt facts cannot be
-fabricated. Eligible v1 adds an empty device directory; v2 retains devices.
-`v3-to-v5` preserves receipts, unclaimed offers and identified built-in claims,
-but rejects every owned row without a claimed runtime, including terminal rows:
-lost custom-harness identity cannot be distinguished from legacy identity-free
-built-in claims. No actual adapter identity is inferred from an offer or mutable
-inventory. Those older rows get a null harness identity. `v4-to-v5` only adds
-wake authority and its indexes; existing device, receipt, mailbox and task rows
-are untouched. A pre-v5 file already containing wake authority is rejected.
-Tables and version advance atomically; failure preserves the old database.
-Never delete history to pass these checks. Target-v4 selectors are deleted and
-replaced with target-v5 selectors, without compatibility aliases. Callers must
-update one-shot migration configuration. Old builds refuse schema 5; rollback
-requires restoring the backup taken before adoption.
+adds the server-local wake table. There is no adoption of an older file: a
+schema 1–4 database is refused at open (`SQLITE_SCHEMA_UNSUPPORTED`), unchanged,
+and v5 starts on a new database. Old builds refuse schema 5.
 Receipts use tenant/key first-write-wins and have no TTL/deletion path; mailbox
 retention cannot remove the delivered/immutable/terminal facts. Receipt columns
 and composite primary key are validated on open. Capacity exhaustion is an

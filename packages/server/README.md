@@ -428,65 +428,26 @@ with its next delivery number. There is no persisted delivering state, hosted
 timer, cron parser or parallel legacy path. Real sleep timing is not proven by
 fake timers.
 
-## SQLite schema adoption
+## SQLite schema
 
 The current schema is v5. It retains write-once `claimedHarnessId`, stored
-atomically with task ownership, and includes the embedded wake table. Stop
-**all** writers and take a consistent SQLite backup (including WAL state or
-using SQLite's backup facility) before explicit adoption. An already-open old
-writer is not stopped by the version fence.
-
-- `v1-to-v5` and `v2-to-v5` require no task, mailbox-message, agent-admission or
-  advanced cursor history: old in-memory receipts cannot be recovered from task
-  status or fabricated from a retry payload. A pristine poll cursor is allowed.
-- `v3-to-v5` preserves receipts, unclaimed offers and claims with an identified
-  built-in runtime. It rejects any owned task with no `claimed_runtime`, including
-  terminal tasks: a lost custom-harness identity cannot be distinguished from an
-  identity-free legacy built-in claim. Neither the requested offer nor current
-  device inventory proves the actual claiming adapter. Existing rows receive a
-  null harness identity; migration never invents one.
-
-- `v4-to-v5` only creates the wake table and indexes; all existing rows stay
-  unchanged. Pre-v5 files already containing a wake table are refused.
-
-Preserve rejected databases for separate reconciliation; do not delete history,
-reset cursors or edit version markers to make adoption pass.
+atomically with task ownership, and includes the embedded wake table. An older
+file (schema 1–4) is not adopted: it is refused at open, unchanged, and v5
+starts on a new database. Older builds cannot reopen v5.
 
 Schema refusals at open are a `SqliteSchemaError` with `foundVersion` and
 `requiredVersion`, so a host can check the file at startup and branch on `code`:
 
-- `SQLITE_SCHEMA_UNSUPPORTED`: the file needs an explicit `migration` selector
-  (older version) or a newer build (newer version).
-- `SQLITE_MIGRATION_REFUSED`: the selected migration would lose history;
-  preserve the file.
+- `SQLITE_SCHEMA_UNSUPPORTED`: the file is older (start on a new database) or
+  newer (needs a newer build).
+- `SQLITE_MIGRATION_REFUSED`: the file holds member chain rotate entries from
+  before the KEM floor; preserve the file.
 - `SQLITE_SCHEMA_INVALID`: the file contradicts its declared schema or is not a
   BYOK database.
 - `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: a pending mailbox row is not a wire v4
   envelope (for example a v3 offer left undrained). Nothing is rewritten or
   deleted; drain it with the previous compatible SDK before upgrading, or use a
   new state directory and enrollment.
-
-```ts
-const server = createByokServer({
-  productId,
-  tokenSigner,
-  storage: { kind: 'sqlite', path, migration: 'v4-to-v5' },
-});
-await server.close();
-```
-
-Remove `migration` from normal startup. Every source gains an empty wake table;
-v1–v3 adoption also adds the nullable harness column,
-adds receipts for v1/v2 and an empty device directory for v1, and updates the marker
-atomically; any failure rolls back. Existing v2/v3 devices and artifacts remain.
-V1 enrollment was in-memory and needs explicit pairing. Unknown versions, missing
-authorities and malformed receipt columns/primary key fail closed. Broader
-validation of legacy table constraints is a separate tracked concern.
-
-Older builds cannot reopen v5. Restore of a backup requires a separate recovery
-procedure because it can lose newer state or restore old grants. The migration
-selectors above are operator-invoked adoption steps, not alternate runtime
-storage paths.
 
 ## Persistent host request identity
 
