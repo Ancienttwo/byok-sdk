@@ -19,7 +19,8 @@ const v3Terminal = readFileSync(new URL('../../../../../protocol/src/__tests__/g
   .trimEnd().split('\n')
   .find((line) => (JSON.parse(line) as { type: string }).type === 'task.complete')!;
 const AGENT = { agentId: 'agent-1', profileRevision: 'rev-1' };
-const agentOffer = JSON.stringify({ deviceId: 'device-1', type: 'task.offer_for_agent', payload: { instruction: 'x', agentRef: AGENT } });
+// The stored v3 bytes: the v3 type name and `sessionRef`, not a v4 envelope.
+const agentOffer = JSON.stringify({ deviceId: 'device-1', type: 'task.offer_for_agent', payload: { instruction: 'x', agentRef: AGENT, sessionRef: 'session-1' } });
 const AT = '2026-10-01T00:00:00.000Z';
 const LEGACY = { tenantId: 'tenant-a', taskId: 'legacy-1', deviceId: 'device-1', type: 'task.offer' };
 const TABLES = ['task_attempt', 'request_receipt', 'mailbox_message', 'agent_message_admission', 'object_manifest', 'object_reference'] as const;
@@ -88,7 +89,8 @@ describe.skipIf(!isSqliteAvailable())('SQLite wire v3 -> v4 migration (#925)', (
 
     const preflight = await preflightSqliteWireV4Migration(path);
     expect(preflight).toEqual({ legacyTasks: [LEGACY], unmappable: [] });
-    expect(await migrateSqliteToWireV4(path, preflight.legacyTasks)).toEqual({ migrated: 2, unchanged: 1, deletedTasks: 1 });
+    // B2: migrated 2 / unchanged 1 -> migrated 3 / unchanged 0: a v3 `task.offer_for_agent` receipt is renamed to `task.offer` and gains `session`, so it is migrated, not unchanged
+    expect(await migrateSqliteToWireV4(path, preflight.legacyTasks)).toEqual({ migrated: 3, unchanged: 0, deletedTasks: 1 });
 
     const after = snapshot(path);
     expect((after.task_attempt as { task_id: string }[]).map((row) => row.task_id)).toEqual(['agent-1']);
@@ -101,6 +103,11 @@ describe.skipIf(!isSqliteAvailable())('SQLite wire v3 -> v4 migration (#925)', (
       'tenant-a/task-offer:agent-offer', 'tenant-a/task:agent-1:terminal', 'tenant-b/task:agent-1:terminal',
     ]);
     for (const row of receipts.filter((r) => r.key.endsWith(':terminal'))) expect(decodeEnvelope(row.body)).toMatchObject({ v: 4 });
+    expect(JSON.parse(receipts.find((row) => row.key === 'task-offer:agent-offer')!.body)).toEqual({
+      deviceId: 'device-1',
+      type: 'task.offer',
+      payload: { instruction: 'x', agentRef: AGENT, session: { mode: 'resume', sessionRef: 'session-1' } },
+    });
     expect(await preflightSqliteWireV4Migration(path)).toEqual({ legacyTasks: [], unmappable: [] });
     expect(await migrateSqliteToWireV4(path, [])).toEqual({ migrated: 0, unchanged: 3, deletedTasks: 0 });
   });
@@ -121,6 +128,8 @@ describe.skipIf(!isSqliteAvailable())('SQLite wire v3 -> v4 migration (#925)', (
     await seedLegacyTask(path);
     write(path, (db) => {
       receipt(db, 'tenant-a', 'task-offer:bad', JSON.stringify({ deviceId: 'device-1', type: 'task.offer_for_agent', payload: { instruction: 'x' } }));
+      // v3 `task.offer_for_agent` without `sessionRef` has no v4 form: a missing reference never means fresh.
+      receipt(db, 'tenant-a', 'task-offer:no-session', JSON.stringify({ deviceId: 'device-1', type: 'task.offer_for_agent', payload: { instruction: 'x', agentRef: AGENT } }));
       mailbox(db, 'tenant-a', 2, 'agent-1');
       mailbox(db, 'tenant-a', 3, 'agent-1', 'pending');
       // A legacy task's pending row is deleted with the task, not refused.
@@ -132,6 +141,7 @@ describe.skipIf(!isSqliteAvailable())('SQLite wire v3 -> v4 migration (#925)', (
     const before = snapshot(path);
     const unmappable = [
       { kind: 'receipt', tenantId: 'tenant-a', key: 'task-offer:bad', receiptKind: 'offer', refusal: 'invalid_under_v4', type: 'task.offer_for_agent' },
+      { kind: 'receipt', tenantId: 'tenant-a', key: 'task-offer:no-session', receiptKind: 'offer', refusal: 'invalid_under_v4', type: 'task.offer_for_agent' },
       { kind: 'mailbox', tenantId: 'tenant-a', deviceId: 'device-1', seq: 3, refusal: 'wire_version_unsupported' },
     ];
 
