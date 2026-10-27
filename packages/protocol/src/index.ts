@@ -357,6 +357,7 @@ export {
   TaskRejectPayloadSchema,
   TaskCancelPayloadSchema,
   TaskSteerPayloadSchema,
+  TaskSteerSealedPayloadSchema,
   TaskClaimPayloadSchema,
   TaskStartedPayloadSchema,
   TaskDeclinePayloadSchema,

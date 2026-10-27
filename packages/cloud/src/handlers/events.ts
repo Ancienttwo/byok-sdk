@@ -1,5 +1,4 @@
 import {
-  isTaskOfferType,
   MAILBOX_READ_AHEAD_CAPABILITY,
   MAILBOX_READ_AHEAD_MAX_SEQS,
   RUNTIME_FAILURE_CLASS_CAPABILITY,
@@ -171,13 +170,13 @@ export function eventsHandler(deps: EventsRouteDeps) {
           // task-opening type is registered, and the symptom is a CANCELLED offer
           // still being delivered.
           const offeredTaskIds = decoded.flatMap((event) =>
-            isTaskOfferType(event.type) && event.task_id !== undefined ? [event.task_id] : [],
+            event.type === 'task.offer' && event.task_id !== undefined ? [event.task_id] : [],
           );
           const attemptsByTaskId = Object.fromEntries(
             (await stores.tasks.getMany(offeredTaskIds)).map((attempt) => [attempt.taskId, attempt]),
           );
           const events = decoded.filter((event) => {
-            if (!isTaskOfferType(event.type)) return true;
+            if (event.type !== 'task.offer') return true;
             return event.task_id === undefined || attemptsByTaskId[event.task_id]?.cancellation === undefined;
           });
           if (events.length === 0 && page.hasMore) {
