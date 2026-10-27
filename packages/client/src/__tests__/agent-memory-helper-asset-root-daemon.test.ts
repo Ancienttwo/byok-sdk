@@ -22,6 +22,7 @@ const sha = (value: string) => `sha256:${createHash('sha256').update(value).dige
 const intents = process.platform === 'darwin';
 
 it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMemoryHelperBuild())('uses the copied root for daemon volume probe, intent and task MCP with real helper I/O', async () => {
+  const t0 = performance.now(); const tick = (label: string) => console.log(`[1023-timing] ${label} +${Math.round(performance.now() - t0)}ms`);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-assets-daemon-'));
   const assetRoot = path.join(root, 'assets');
   const server = await TestServer.start();
@@ -47,6 +48,7 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
       agentMemoryIntents: {
         fetch: async request => ({ disposition: request.reservation === 'none' ? 'deferred' : 'release', intent }),
         complete: async completion => {
+          tick('complete-called');
           completions.push(completion);
           return { tenantId: 'tenant', deviceId, intentId: intent.intentId, disposition: 'recorded', completion, recordedAt: new Date().toISOString() };
         },
@@ -59,6 +61,7 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
     intent = { intentId: identity.intentId, agentRef, path: identity.path, operation: identity.operation,
       baseRevision: identity.baseRevision, targetRevision: identity.targetRevision, approvalRef: identity.approvalRef,
       operationDigest: await agentMemoryIntentOperationDigest(identity), content: 'intent from copied assets' };
+    tick('before-start');
     await daemon.start();
     const hello = await server.waitFor(event => event.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
@@ -66,10 +69,14 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
       expect(hello.payload.capabilities).toContain('agent-memory-intent.v1');
       expect(open.mock.calls.some(([input]) => input.canonicalHome === path.join(root, 'homes'))).toBe(true);
       const notice = createEnvelope('agent.memory.intent.available', { intentId: intent.intentId, agentRef }, { seq: server.nextSeq() });
+      tick('hello+probe-done');
       server.pushLongPollEvent(notice);
-      await vi.waitFor(() => expect(completions).toHaveLength(1));
+      tick('pushed');
+      await vi.waitFor(() => expect(completions).toHaveLength(1), { timeout: 8000 });
+      tick('completion-seen');
       expect(completions[0]!.outcome).toBe('applied');
-      await vi.waitFor(async () => expect(await new CursorStore(path.join(root, 'store')).load(server.url, deviceId)).toBe(notice.seq));
+      await vi.waitFor(async () => expect(await new CursorStore(path.join(root, 'store')).load(server.url, deviceId)).toBe(notice.seq), { timeout: 8000 });
+      tick('cursor-seen');
     } else {
       // No B: no volume probe and no capability.
       expect(hello.payload.capabilities).not.toContain('agent-memory-intent.v1');
