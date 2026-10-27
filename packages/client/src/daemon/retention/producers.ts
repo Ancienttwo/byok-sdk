@@ -1,7 +1,7 @@
 import { promises as fs, type Dir, type Dirent, type Stats } from 'node:fs';
 import path from 'node:path';
 import type { AgentHomeManager } from '../../agent-home';
-import { AGENT_HOME_READER_RUN_MAX_RETAINED, pruneReaderRuns } from '../../agent-home-readers';
+import { AGENT_HOME_READER_RUN_MAX_RETAINED } from '../../agent-home-readers';
 import { acquireReplicaLock, resetReplica } from '../../adapters/pi-durable/replica';
 import { atomicWriteFile } from '../../util/atomic-write';
 import { AGENT_RESULT_DIRECTORY, AGENT_RESULT_MAX_RETAINED, AGENT_RESULT_RECORD_NAME, AGENT_RESULT_TEMP_NAME, pruneAgentResults } from '../agent-result-store';
@@ -13,7 +13,9 @@ import { readInstalledSkillPack, skillPacksRoot } from '../skill-pack-installer'
 import type { ResolvedStorageConfig } from './config';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry';
 import type { ScratchRoot } from './scratch';
-import { PASS_INSPECTIONS } from './runtime-accounting';
+import { classBudget } from './runtime-accounting';
+import { TreeCleanup } from './tree-cleanup';
+import { selectReaderRuns } from '../../agent-home-reader-retention';
 import { RuntimeCleanup } from './runtime-cleanup';
 import { isAgentSessionLedgerName, pruneSessionLedgers } from './session-ledgers';
 import { existingDirectory, measureTree, removeOwnedPath } from './usage';
@@ -75,23 +77,51 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     if (present === undefined) return;
     budget.removed(await removeOwnedPath(root, target, budget.now));
   }
+  const pendingTrees = new Map<string, { collector: TreeCleanup }>();
+  async function reclaimTree(root: string, target: string, eligible: () => Promise<boolean>, budget: SweepBudget, available = budget.available): Promise<boolean> {
+    let pending = pendingTrees.get(target);
+    if (pending === undefined) {
+      const collector = await TreeCleanup.create(target);
+      if (collector === undefined) return true;
+      pending = { collector };
+      pendingTrees.set(target, pending);
+    }
+    if (!await eligible()) return false;
+    if (!await pending.collector.resume(root, eligible, budget, available)) return false;
+    pendingTrees.delete(target); return true;
+  }
+  let pendingSdk: string | undefined;
   async function sweepExecSdk(budget: SweepBudget): Promise<void> {
+    async function reclaim(directory: string): Promise<boolean> {
+      const eligible = async (): Promise<boolean> => !scratch.isLive(path.basename(directory));
+      if (!await eligible()) { pendingTrees.delete(path.join(directory, 'sdk')); return true; }
+      if (!await reclaimTree(execRoot, path.join(directory, 'sdk'), eligible, budget)) return false;
+      if (budget.trigger === 'startup' && await releasedAt(directory) === undefined) {
+        await atomicWriteFile(path.join(directory, 'released'), budget.now.toISOString(), { mode: 0o600, fsync: true });
+      }
+      return true;
+    }
+    if (pendingSdk !== undefined) {
+      if (!await reclaim(pendingSdk)) {
+        if (budget.trigger === 'startup') throw new Error('retention_startup_incomplete');
+        return;
+      }
+      pendingSdk = undefined;
+    }
     for await (const entry of entries('exec-sdk', execRoot, budget)) {
       if (!TOKEN.test(entry.name) || !entry.isDirectory() || scratch.isLive(entry.name)) continue;
       const directory = path.join(execRoot, entry.name);
-      await remove(execRoot, path.join(directory, 'sdk'), budget);
-      if (budget.trigger === 'startup' && await releasedAt(directory) === undefined) {
-        await atomicWriteFile(path.join(directory, 'released'), budget.now.toISOString(), { mode: 0o600, fsync: true });
+      if (!await reclaim(directory)) {
+        pendingSdk = directory;
+        if (budget.trigger === 'startup') throw new Error('retention_startup_incomplete');
+        return;
       }
     }
   }
 
   let runtimeCleanup: { collector: RuntimeCleanup; released: number } | undefined;
   async function sweepRuntime(budget: SweepBudget): Promise<void> {
-    // Leaf cleanup spends one inspection per entry, so a large expired backlog takes at most half of a
-    // pass and the classes after exec-runtime still get budget. Bytes stay keyed to the pass budget.
-    let inspections = 0;
-    const available = (): boolean => { if (inspections++ >= PASS_INSPECTIONS / 2) { budget.truncate(); return false; } return budget.available(); };
+    const available = budget.available;
     async function resume(): Promise<boolean> {
       const pending = runtimeCleanup!;
       const eligible = async (): Promise<boolean> => !scratch.isLive(path.basename(pending.collector.target))
@@ -113,11 +143,20 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       if (!await resume()) return;
     }
   }
+  let pendingDaemon: string | undefined;
   async function sweepDaemon(budget: SweepBudget): Promise<void> {
+    async function reclaim(target: string): Promise<boolean> {
+      const mtimeMs = (await fs.lstat(target)).mtimeMs;
+      return reclaimTree(daemonRoot, target, async () => budget.now.getTime() - mtimeMs >= config.ttlMs['daemon-temp'], budget);
+    }
+    if (pendingDaemon !== undefined) {
+      if (!await reclaim(pendingDaemon)) return;
+      pendingDaemon = undefined;
+    }
     for await (const entry of entries('daemon-temp', daemonRoot, budget)) {
       if (!entry.isDirectory() || !/^(?:diag|credential|prepare)-[A-Za-z0-9]{6}$/u.test(entry.name)) continue;
       const target = path.join(daemonRoot, entry.name), stat = await fs.lstat(target);
-      if (budget.now.getTime() - stat.mtimeMs >= config.ttlMs['daemon-temp']) await remove(daemonRoot, target, budget);
+      if (budget.now.getTime() - stat.mtimeMs >= config.ttlMs['daemon-temp'] && !await reclaim(target)) { pendingDaemon = target; return; }
     }
   }
   async function sweepReplicas(budget: SweepBudget): Promise<void> {
@@ -173,13 +212,18 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         if (id === 'reader-run') {
           const referenced = await options.handoffs!.readerRunReferences(home, homeBudget.available);
           if (referenced === undefined) return; // Incomplete reference authority protects the entire home.
-          const bytes = new Map<string, number>();
-          await pruneReaderRuns({ runsRoot: path.join(home, '.byok', 'runs'), active: new Set(),
-            referenced, nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['reader-run'],
-            maxDeletions: budget.remaining(), canRemove: homeBudget.available, entries: entries('reader-run', path.join(home, '.byok', 'runs'), homeBudget),
-            beforeRemove: async directory => { bytes.set(directory, (await measureTree(directory, budget.now)).bytes); },
-            afterRemove: directory => budget.removed(bytes.get(directory)!),
+          const runsRoot = path.join(home, '.byok', 'runs');
+          const candidates = selectReaderRuns({ runsRoot, active: new Set(), referenced,
+            nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['reader-run'],
+            entries: entries('reader-run', runsRoot, homeBudget),
+            pending: [...pendingTrees.keys()],
           });
+          for await (const { dir } of candidates) {
+            if (!homeBudget.available()) break;
+            // Candidate policy is recomputed under each new idle lease. The original mtime
+            // survives our partial unlinks; otherwise they would restart the run's TTL.
+            await reclaimTree(runsRoot, dir, async () => true, budget, homeBudget.available);
+          }
         } else if (id === 'agent-result') {
           const results = path.join(home, AGENT_RESULT_DIRECTORY);
           await pruneAgentResults({ resultsRoot: results, entries: entries('agent-result', results, homeBudget),
@@ -362,7 +406,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
   }
   let lastCompactionMs: number | undefined;
   const registry = new RetentionRegistry([
-    ...EXPIRING_CLASS_IDS.map(id => ({ id, authority: authority(id), measure: () => measure(id), sweep: async (budget: SweepBudget) => { measurement = undefined; await sweep[id](budget); } })),
+    ...EXPIRING_CLASS_IDS.map(id => ({ id, authority: authority(id), measure: () => measure(id), sweep: async (budget: SweepBudget) => { measurement = undefined; await sweep[id](classBudget(id, budget)); } })),
     ...PROTECTED_CLASS_IDS.map(id => ({ id, authority: authority(id), measure: () => measure(id) })),
   ], async () => { await Promise.all([...cursors.values()].map(cursor => cursor.close())); cursors.clear(); measurement = undefined; },
     () => { measurement = undefined; }, async (budget, underPressure) => {
