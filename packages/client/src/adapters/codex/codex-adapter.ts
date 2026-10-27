@@ -162,14 +162,13 @@ export class CodexAdapter implements RuntimeAdapter {
       }
       let authPresent = false;
       try {
-        const auth = await execFileAsync(command, [...args, 'login', 'status'], {
+        await execFileAsync(command, [...args, 'login', 'status'], {
           timeout: DETECT_TIMEOUT_MS,
           killSignal: 'SIGKILL',
           env: buildRuntimeEnv({ ambient: process.env }),
         });
-        authPresent = /logged in (using|with)/i.test(
-          auth.stdout + '\n' + auth.stderr,
-        );
+        // Codex reports configured credentials with exit 0; its display text is not a contract.
+        authPresent = true;
       } catch {}
       return {
         kind: 'available',
