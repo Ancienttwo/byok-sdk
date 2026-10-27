@@ -1,6 +1,17 @@
 // `GET /api/tasks/:taskId/events`: one task's event feed as server-sent events.
 // Each entry's cursor is the SSE `id`, so a browser `EventSource` that
 // reconnects sends it back as `Last-Event-ID` and the feed resumes after it.
+//
+// Two known limits, because `tasks.events` has no "from now" position:
+// - A new stream (no `Last-Event-ID`) for a task this server instance did not
+//   dispatch, such as one still running after a SQLite restart, gets only the
+//   events that happen from then on. It sends no current state first, so it
+//   stays silent until the task's next event. The bundled page opens a stream
+//   only right after it dispatches a task.
+// - When the cursor is unknown but this instance's feed already holds events
+//   (a forged cursor, or a second reader reattached the task after a restart),
+//   the fallback sends the current state and then replays the retained feed,
+//   so older states and lines can repeat before the stream reaches now.
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { TaskEventsUnavailableError, type ByokServer } from '@byok-sdk/server';
@@ -29,6 +40,13 @@ export function taskEventsRoute(byok: { tasks: Pick<ByokServer['tasks'], 'get' |
         const snapshot = await byok.tasks.get(taskId);
         if (snapshot !== undefined) {
           await stream.writeSSE({ data: JSON.stringify({ kind: 'state', state: snapshot.state, at: snapshot.updatedAt }) });
+          // The page shows its approval panel on an `await_approval` event, which
+          // a feed that cannot resume will not replay. The snapshot carries the
+          // pending approval's id, not its summary.
+          if (snapshot.state === 'AwaitApproval' && snapshot.pendingApprovalId !== undefined) {
+            const approvalId = snapshot.pendingApprovalId;
+            await stream.writeSSE({ data: JSON.stringify({ kind: 'await_approval', summary: `approval ${approvalId} is pending`, approvalId }) });
+          }
         }
         if (error.reason === 'cursor_unknown') await follow();
       }

@@ -89,6 +89,16 @@ describe('GET /api/tasks/:taskId/events', () => {
     expect(calls).toEqual(['feed-a.3', undefined]);
   });
 
+  it('sends the pending approval with the current state when the fallback finds the task waiting', async () => {
+    const waiting = { ...SNAPSHOT, state: 'AwaitApproval', pendingApprovalId: 'appr-7' } as TaskSnapshot;
+    const { tasks } = scripted(waiting, [new TaskEventsUnavailableError('task-1', 'cursor_unknown'), []]);
+    const response = await app(tasks).request('/api/tasks/task-1/events', { headers: { 'Last-Event-ID': 'feed-a.3' } });
+    expect(await messages(response)).toEqual([
+      { event: { kind: 'state', state: 'AwaitApproval', at: SNAPSHOT.updatedAt } },
+      { event: { kind: 'await_approval', summary: 'approval appr-7 is pending', approvalId: 'appr-7' } },
+    ]);
+  });
+
   it('sends only the current state when a finished task has no feed left', async () => {
     const complete = { ...SNAPSHOT, state: 'Complete' } as TaskSnapshot;
     const { tasks, calls } = scripted(complete, [new TaskEventsUnavailableError('task-1', 'feed_expired')]);
