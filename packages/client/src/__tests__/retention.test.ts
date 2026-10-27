@@ -1,3 +1,4 @@
+import { runtimeReclaimedBytes } from '../daemon/retention/runtime-accounting';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../daemon/path-mutation-gate';
 import { projectSkillPack } from '../daemon/skill-pack-installer';
 import { promises as fs } from 'node:fs';
@@ -320,21 +321,21 @@ it('accounts partial runtime bytes and resumes after registry restart without co
  await s.release();f.advance(DAY);
  const marker=path.join(path.dirname(s.runtimeDir),'released'),released=await fs.readFile(marker,'utf8');
  let deleted=0,bytes=0,steps=0;
- const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1-deleted,removed:n=>{deleted++;bytes+=n;},reclaimed:n=>{bytes+=n;},truncate:()=>{}};
+ const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1-deleted,removed:n=>{deleted++;bytes+=n;},truncate:()=>{}};
  await f.registry.sweep('exec-runtime',budget);
- expect(deleted).toBe(0);expect(bytes).toBeGreaterThan(0);expect(bytes).toBeLessThan(36);
+ expect(deleted).toBe(0);expect(runtimeReclaimedBytes.get(budget)).toBeGreaterThan(0);expect(runtimeReclaimedBytes.get(budget)).toBeLessThan(36);
  expect(await fs.readFile(marker,'utf8')).toBe(released);
  await f.registry.close();
  const restart=createRetentionRegistry({storeDir:f.store,scratch:f.scratch,config:f.config,clock:f.clock,journal:()=>undefined,identity:()=>identity,preparation:()=>undefined});
  cleanups.push(()=>restart.close());
  for(let pass=0;pass<20&&deleted===0;pass++){steps=0;await restart.sweep('exec-runtime',budget);}
- expect(deleted).toBe(1);expect(bytes).toBe(36+Buffer.byteLength(released));expect(await exists(path.dirname(s.runtimeDir))).toBe(false);
+ expect(deleted).toBe(1);expect(bytes+(runtimeReclaimedBytes.get(budget)??0)).toBe(36+Buffer.byteLength(released));expect(await exists(path.dirname(s.runtimeDir))).toBe(false);
 });
 it('rechecks release eligibility before resuming a partial runtime cleanup',async()=>{
  const f=await fixture(),s=await f.scratch.create();
  for(let i=0;i<12;i++)await fs.writeFile(path.join(s.runtimeDir,`file-${i}`),'abc');
  await s.release();f.advance(DAY);
- let steps=0;const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1,removed:()=>{},reclaimed:()=>{},truncate:()=>{}};
+ let steps=0;const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1,removed:()=>{},truncate:()=>{}};
  await f.registry.sweep('exec-runtime',budget);
  const remaining=await fs.readdir(s.runtimeDir);
  await fs.writeFile(path.join(path.dirname(s.runtimeDir),'released'),f.clock().toISOString());

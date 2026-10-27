@@ -1,3 +1,4 @@
+import { runtimeReclaimedBytes } from './runtime-accounting';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { SweepBudget } from './registry';
@@ -37,7 +38,7 @@ export class RuntimeCleanup {
       if (entry !== null) {
         const file = path.join(this.current, entry.name), stat = await fs.lstat(file);
         if (stat.isDirectory() && !stat.isSymbolicLink()) { this.current = file; continue; }
-        await fs.unlink(file); budget.reclaimed(stat.size);
+        await fs.unlink(file); runtimeReclaimedBytes.set(budget, (runtimeReclaimedBytes.get(budget) ?? 0) + stat.size);
       } else if (this.current !== this.target) {
         await fs.rmdir(this.current); this.current = path.dirname(this.current);
       } else {
