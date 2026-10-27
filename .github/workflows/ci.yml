@@ -541,6 +541,9 @@ jobs:
             platform: macOS
           - os: ubuntu-latest
             platform: Linux
+          # #978: taskkill /F instead of SIGKILL; Windows Credential Manager custody.
+          - os: windows-latest
+            platform: Windows
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -555,7 +558,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools perl procps
-      - name: Exercise actual native SIGKILL and original terminal recovery
+      - name: Exercise actual native hard kill (SIGKILL, taskkill /F on Windows) and original terminal recovery
         env:
           BYOK_REQUIRE_SQLITE: '1'
         shell: bash
@@ -564,6 +567,7 @@ jobs:
           case "$RUNNER_OS" in
             macOS) test "$(uname -s)" = Darwin ;;
             Linux) test "$(uname -s)" = Linux ;;
+            Windows) [[ "$(uname -s)" == MINGW* ]] ;;
             *) exit 1 ;;
           esac
           evidence_dir="$GITHUB_WORKSPACE/artifacts/execution-recovery"
@@ -573,6 +577,10 @@ jobs:
           node --version >> "$evidence_dir/recovery-source.txt"
           bun --version >> "$evidence_dir/recovery-source.txt"
           recovery_command=(bun run --cwd packages/client test -- src/__tests__/execution-recovery-kill.test.ts src/__tests__/journal-sqlite.test.ts)
+          # On Windows the kill suite runs only its taskkill /F case.
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            recovery_command=(bun run --cwd packages/client test -- src/__tests__/execution-recovery-kill.test.ts)
+          fi
           if [[ "$RUNNER_OS" == Linux ]]; then
             credential_root="$(mktemp -d /tmp/byok-recovery-credentials.XXXXXX)"
             trap 'rm -rf -- "$credential_root"' EXIT
