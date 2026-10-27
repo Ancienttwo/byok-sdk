@@ -23,26 +23,27 @@ function template(tenant: string, instruction = 'Check the watchlist.') {
     routineRef, agentRef, instruction });
 }
 async function sealedInput(taskId: string, deviceId: string, tenant = 'tenant-k4'): Promise<SealedAgentExecutionInput> {
-  return { taskId, deviceId, payload: { runtime: 'pi', agentRef, egressPolicy, terminalProjection, sealing, sealed: await template(tenant), routineRef } };
+  return { taskId, deviceId, payload: { runtime: 'pi', session: { mode: 'fresh' }, agentRef, egressPolicy, terminalProjection, sealing, sealed: await template(tenant), routineRef } };
 }
 function plain(input: SealedAgentExecutionInput): FrozenInput {
   const { sealing: _, sealed: __, routineRef: ___, ...payload } = input.payload;
   return { ...input, payload: { ...payload, instruction: 'Check the watchlist.' } };
 }
-function readback(input: SealedAgentExecutionInput | FrozenInput, delivered: boolean, type = frozenOfferType(input)): FrozenOffer {
+function readback(input: SealedAgentExecutionInput | FrozenInput, delivered: boolean, type = frozenOfferType()): FrozenOffer {
   return { taskId: input.taskId, deviceId: input.deviceId, messageId: 'message-1', type, payload: structuredClone(input.payload), recordedAt: '1',
     delivered } as FrozenOffer;
 }
 
 describe('a sealed frozen input (#953)', () => {
-  it('reads back only the offer type of its own lane', async () => {
+  it('reads back only the offer of its own lane', async () => {
     const sealed = await sealedInput('task-1', 'device-1'), open = plain(sealed);
-    expect(frozenOfferType(sealed)).toBe('task.offer_for_agent_with_egress_fresh_sealed');
-    expect(frozenOfferType(open)).toBe('task.offer_for_agent_with_egress_fresh');
+    // B2: the type of each lane -> 'task.offer' for both, because the plain and the sealed lane now share one wire type
+    expect(frozenOfferType()).toBe('task.offer');
     expect(sameFrozenOffer(readback(sealed, true), sealed)).toBe(true);
     // A plain offer recorded for a sealed input, or the reverse, is never the frozen input.
-    expect(sameFrozenOffer(readback(sealed, true, 'task.offer_for_agent_with_egress_fresh'), sealed)).toBe(false);
-    expect(sameFrozenOffer(readback(open, true, 'task.offer_for_agent_with_egress_fresh_sealed'), open)).toBe(false);
+    // B2: a readback of the other lane's type -> a readback of the other lane's payload, because the lanes no longer differ by type
+    expect(sameFrozenOffer(readback(open, true), sealed)).toBe(false);
+    expect(sameFrozenOffer(readback(sealed, true), open)).toBe(false);
     expect(sameFrozenOffer({ ...readback(sealed, true), payload: open.payload } as FrozenOffer, sealed)).toBe(false);
   });
 
@@ -104,7 +105,7 @@ describe('a sealed frozen input on the cloud (#953)', () => {
     const { deviceId } = await paired.json() as { deviceId: string };
     const probe = await sealedInput('probe', deviceId);
     await stores.devices.recordCapabilities(tenant, { deviceId,
-      capabilities: requiredReceiverCapabilities('task.offer_for_agent_with_egress_fresh_sealed', probe.payload as never) });
+      capabilities: requiredReceiverCapabilities('task.offer', probe.payload as never) });
     const port: FrozenSubmitPort = {
       submit: input => cloud.submitAgentExecution(tenant, input),
       submitSealed: input => cloud.submitSealedAgentExecution(tenant, input),
@@ -123,7 +124,7 @@ describe('a sealed frozen input on the cloud (#953)', () => {
     expect(submitSealed).toHaveBeenCalledTimes(2);
     for (const input of [first, second]) {
       const offer = await cloud.readTaskOffer(tenant, input.taskId);
-      expect(offer?.type).toBe('task.offer_for_agent_with_egress_fresh_sealed');
+      expect(offer?.type).toBe('task.offer');
       expect(sameFrozenOffer(offer!, input)).toBe(true);
       expect(offer!.payload).toMatchObject({ routineRef, sealed: first.payload.sealed });
     }
