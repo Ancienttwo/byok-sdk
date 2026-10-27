@@ -437,7 +437,8 @@ export interface CodexAdapterOptions {
      * opens, the adapter reads Codex's effective configuration for the task cwd
      * (`config/read`), sets `enabled = false` on every other `mcp_servers`
      * entry, and turns off the `apps` (connectors) and `plugins` features for
-     * the thread. The thread then has no plugins at all, not only no plugin
+     * the thread. Plugin exclusion also applies at app-server launch, before
+     * startup plugin sync. The thread then has no plugins at all, not only no plugin
      * MCP servers. After the open it reads the thread's MCP server status
      * back, and the start fails if any other server is not disabled, or if a
      * user server has the name of a task or SDK server. The user's
