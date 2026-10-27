@@ -574,7 +574,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     // A known id lets the relay exist before enqueue can make the offer
     // observable. Inbound claim/terminal traffic racing append is buffered by
-    // that provisional relay state and reconciled once the offer succeeds.
+    // the dispatching relay feed and delivered once the offer succeeds.
     const taskId = input.taskId ?? globalThis.crypto.randomUUID();
     relay.provision(taskId);
     let enqueued: EnqueuedOffer;

@@ -178,7 +178,7 @@ async function* followTaskEvents(
     relay.detach(taskId, feed);
     throw taskNotFound(taskId);
   }
-  if (TERMINAL_STATES.has(state) && !feed.dispatched && !feed.terminalSettled) {
+  if (TERMINAL_STATES.has(state) && feed.phase !== 'dispatched' && !feed.terminalSettled) {
     relay.detach(taskId, feed);
     throw new TaskEventsUnavailableError(taskId, 'feed_expired');
   }

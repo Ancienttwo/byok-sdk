@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isCloudError } from '@byok-sdk/cloud';
+import { tenantId } from '@byok-sdk/core';
 import { createEnvelope, type Envelope, type TaskState } from '@byok-sdk/protocol';
 import { TaskEventRelay } from '../relay';
 import { readTaskEvents } from '../task-handle';
@@ -411,6 +412,53 @@ describe('ByokServer.tasks.events after a SQLite restart, when the task is submi
       await instance.close();
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('TaskEventRelay dispatch phases', () => {
+  const started = (taskId: string) => ({
+    tenantId: tenantId(PRODUCT_ID), deviceId: 'device-a', outcome: 'accepted' as const,
+    envelope: createEnvelope('task.started', {}, { taskId }),
+  });
+
+  async function states(relay: TaskEventRelay, taskId: string, count: number): Promise<unknown[]> {
+    const reader = relay.entries(taskId, relay.feed(taskId)!)[Symbol.asyncIterator]();
+    const values: unknown[] = [];
+    for (let i = 0; i < count; i += 1) values.push((await reader.next()).value?.value);
+    return values;
+  }
+
+  it('puts Offered first when the device reports during a dispatch over an attached feed (#1033)', async () => {
+    const relay = new TaskEventRelay({});
+    const attached = relay.attach('resubmitted');
+    relay.provision('resubmitted');
+    relay.onInboundCommitted(started('resubmitted'));
+    relay.noteDispatched('resubmitted', '2026-10-27T00:00:00.000Z');
+    expect(relay.feed('resubmitted')).toBe(attached);
+    expect(await states(relay, 'resubmitted', 2)).toMatchObject([{ state: 'Offered' }, { state: 'Running' }]);
+    relay.stop();
+  });
+
+  it('returns an attached feed to its readers with what it buffered when the dispatch is refused', async () => {
+    const relay = new TaskEventRelay({});
+    const attached = relay.attach('refused');
+    relay.provision('refused');
+    relay.onInboundCommitted(started('refused'));
+    relay.abort('refused');
+    expect(relay.feed('refused')).toBe(attached);
+    expect(await states(relay, 'refused', 1)).toMatchObject([{ state: 'Running' }]);
+    relay.onInboundCommitted(started('refused'));
+    expect(await states(relay, 'refused', 2)).toMatchObject([{ state: 'Running' }, { state: 'Running' }]);
+    relay.stop();
+  });
+
+  it('holds a Host transition made while a dispatch is in flight until Offered', async () => {
+    const relay = new TaskEventRelay({});
+    relay.provision('cancelled-early');
+    relay.noteHostTransition('cancelled-early', 'Cancelled', '2026-10-27T00:00:01.000Z');
+    relay.noteDispatched('cancelled-early', '2026-10-27T00:00:00.000Z');
+    expect(await states(relay, 'cancelled-early', 2)).toMatchObject([{ state: 'Offered' }, { state: 'Cancelled' }]);
+    relay.stop();
   });
 });
 
