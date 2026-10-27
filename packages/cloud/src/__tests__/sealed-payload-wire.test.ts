@@ -559,7 +559,8 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
   // Each lane line with sealed input, with the ciphertextRef member of the large corpus line of its type.
   const byReference = (Object.keys(lanes) as Variant[]).map((variant) => {
     const line = laneLines.find((candidate) => candidate.variant === variant && candidate.payload.sealed !== undefined)!;
-    const large = laneLines.find((candidate) => candidate.variant === variant && (candidate.payload.sealed as Json | undefined)?.ciphertextRef !== undefined)!;
+    const large = corpus.find((candidate) => candidate.type === 'task.offer' && candidate.payload.sealing !== undefined
+      && variantOf(candidate.payload) === variant && (candidate.payload.sealed as Json | undefined)?.ciphertextRef !== undefined)!;
     return { ...line, payload: { ...line.payload, sealed: large.payload.sealed } };
   });
 

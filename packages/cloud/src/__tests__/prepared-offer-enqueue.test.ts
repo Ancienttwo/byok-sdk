@@ -19,7 +19,7 @@ import { TENANT_A, createHarness } from './support/harness';
  */
 
 const EGRESS_POLICY = { policyRevision: 'default-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } } as const;
-const CAPABILITIES = [AGENT_HOME_CONTRACT_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, 'toolset-selection'];
+const CAPABILITIES = [AGENT_HOME_CONTRACT_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, 'toolset-selection', 'agent-memory-selection'];
 const AGENT_REF = { agentId: 'agent-prepared-1', profileRevision: 'profile-r1' } as const;
 
 function preparedPayload() {
