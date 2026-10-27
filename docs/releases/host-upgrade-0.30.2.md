@@ -74,8 +74,9 @@ AiphaBee's `packages/byok-host/package.json`, at AiphaBee commit `78e80de3`,
 already pins `client`, `core`, `keys`, `protocol` and `server` to exactly
 0.30.2. Its upgrade PR 378 and the [reported macOS smoke](https://github.com/Ancienttwo/byok-sdk/issues/978#issuecomment-6417463835)
 are downstream evidence, not proof of a complete walkthrough here. That
-report leaves the installed-device backup/restore rehearsal and Windows
-forced-kill check open. This playbook changes no downstream package.
+report leaves the installed-device backup/restore rehearsal open; step 6
+records the Windows forced-kill result. This playbook changes no downstream
+package.
 
 The private `examples/` code is not part of this upgrade scope. Its breaking
 changes in the CHANGELOG apply only to code that copies those examples.
@@ -343,7 +344,12 @@ on any failed gate; a package pin alone does not establish acceptance.
    `task.fail` reason `daemon shutting down: operator` and `retryable: true`
    (`packages/client/src/daemon/task-runner/lifecycle.ts`), so the restart
    has no task to recover. Verify that the interrupted task's runtime did
-   not start again. Use a harmless test runtime and isolated stores for the
+   not start again. On Windows, 0.30.2 fails this step when the daemon's
+   store path is an alias, such as an 8.3 short name: the second start exits
+   with `retention_root_identity_invalid` and no terminal is sent
+   ([#1030](https://github.com/Ancienttwo/byok-sdk/issues/1030); fixed in
+   0.31.0). On a store path that is not an alias, the recorded Windows
+   evidence decides the result. Use a harmless test runtime and isolated stores for the
    forced kill. This embedded L flow does not test sealing: `createByokServer`
    does not declare E2EE. A Host enabling sealing separately verifies the
    capability checks above and a sealed round-trip including the plaintext
@@ -423,7 +429,8 @@ does not prove that a restored existing store upgrades.
 - [ ] **[unverified]** Host/daemon capability alignment and the applicable
   sealed acceptance checks passed.
 - [ ] **[unverified]** Topology L completion and forced-kill recovery passed
-  on the target platforms, including Windows when supported.
+  on the target platforms. On Windows, 0.30.2 fails the forced kill on an
+  aliased store path (#1030, fixed in 0.31.0).
 
 These boxes are not filled by documentation tests. The downstream macOS
 report above is attributed evidence only; this documentation change has not
