@@ -421,3 +421,10 @@ test('scripts/vitest/tmp-root.mjs selects every workspace that uses it and every
   assert.match(readFileSync(new URL('scripts/ci/run-targeted.mjs', root), 'utf8'), /extraTests\.push\('scripts\/vitest\/tmp-root\.test\.mjs'\)/);
   assert.throws(() => selectImpact(['scripts/vitest/other.mjs']), /reviewed CI mapping required/i);
 });
+
+// #1030: only the Windows client job exercises the 8.3, letter-case and junction branches of the path fold.
+test('the configured path fold selects the client suite and the Windows client job', () => {
+  // dataplane comes from cloud-dataplane depending on the client.
+  assert.deepEqual(selectImpact(['packages/client/src/util/fold-name-aliases.ts']).families, ['dataplane', 'windows-client']);
+  assert.ok(selectImpact(['packages/client/src/util/fold-name-aliases.ts']).dirs.includes('packages/client'));
+});
