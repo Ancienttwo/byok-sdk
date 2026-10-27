@@ -227,7 +227,7 @@ export const familyOwners = Object.freeze({
   ],
   'windows-client': [
     /^packages\/client\/src\/daemon\/(?:auth-manager|daemon-lifecycle|daemon-owner|daemon-record)\.ts$/,
-    /^packages\/client\/src\/(?:util\/(?:secure-dir|atomic-write)\.ts|diagnostics\/|bin\/commands\/)/,
+    /^packages\/client\/src\/(?:util\/(?:secure-dir|atomic-write|fold-name-aliases)\.ts|diagnostics\/|bin\/commands\/)/,
     /^packages\/client\/src\/__tests__\/(?:secure-dir|diagnostics|support-bundle|daemon-auth|daemon-stop-shutdown-parity)[^/]*$/,
     // #738: the Agent-home file write crash test, its child process and the code it qualifies.
     /^packages\/client\/src\/(?:agent-home\.ts|__tests__\/(?:fixtures\/)?agent-home-write-file[^/]*)$/,
@@ -319,6 +319,12 @@ function oarSnapshotListed(path, { base, cwd = process.cwd() } = {}) {
   return manifest.format === 'byok.vendor-source' && manifest.package === '@botiverse/oar'
     && Array.isArray(manifest.files) && manifest.files.some(row => row.path === match[2]);
 }
+// #1030: the workspaces whose vitest.config.ts uses scripts/vitest/tmp-root.mjs.
+export const vitestTmpRootConsumers = Object.freeze([
+  'examples/basic', 'examples/bot-collaboration', 'examples/byok-mcp-server', 'examples/codex-interaction-host',
+  'examples/host-execution-core', 'examples/hosted-bot-collaboration', 'examples/hosted-bot-collaboration-worker',
+  'packages/client', 'packages/cloud-dataplane', 'packages/cloud-do', 'packages/keys', 'packages/server',
+]);
 const rootDocs = new Set(['README.md', 'CHANGELOG.md', 'AGENTS.md', 'CLAUDE.md', 'packages/AGENTS.md', 'packages/CLAUDE.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md']);
 // #605 W5: w5-runner-probe.yml is workflow_dispatch only and reads no repo
 // file, so like release.yml it selects only the CI script checks.
@@ -514,6 +520,16 @@ export function selectImpact(paths, context = {}) {
     if (path === '.github/workflows/agent-memory-windows.yml') {
       families.add('agent-memory-helper'); families.add('agent-memory-helper-non-darwin'); continue;
     }
+    // #1030: the shared vitest globalSetup. A change reruns every consumer's
+    // suite and each family with a windows-latest vitest leg, the only legs that
+    // run its win32 branch. run-targeted.mjs runs its own test for either path.
+    if (path === 'scripts/vitest/tmp-root.mjs') {
+      for (const dir of vitestTmpRootConsumers) dirs.add(dir);
+      for (const id of ['adapter-lifecycle-smoke', 'agent-memory-helper', 'hermes-real-windows', 'ipc-smoke', 'npm-release-pack',
+        'packageability-smoke', 'windows-client']) families.add(id);
+      continue;
+    }
+    if (path === 'scripts/vitest/tmp-root.test.mjs') { scripts = true; continue; }
     if (rootCi.has(path) || /^scripts\/ci\/[a-z0-9-]+(?:\.test)?\.mjs$/.test(path)) { scripts = true; continue; }
     const golden = /^api-surface\/([a-z-]+)\.d\.ts$/.exec(path);
     if (golden) {

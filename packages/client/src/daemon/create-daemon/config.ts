@@ -13,6 +13,7 @@ import { MIN_MAX_INLINE_EVENT_BYTES, DEFAULT_MAX_INLINE_EVENT_BYTES } from '../e
 import { validateProgressBatcherOptions } from '../progress-batcher';
 import type { DaemonStatus } from '../create-daemon';
 import type { DaemonInputs } from './scope';
+import { foldNameAliases } from '../../util/fold-name-aliases';
 
 /**
  * The first stage of `buildDaemonWithAdapters` (#926): validates
@@ -124,6 +125,9 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   if (suppliedJournal !== undefined && (typeof suppliedJournal.listPrunableConfirmedTasks !== 'function' || typeof suppliedJournal.pruneConfirmedJournalTask !== 'function')) throw new LocalStorageConfigError('config', 'requires the journal confirmed-retention ports');
   const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
   validatePiByokLauncherConfig(config.piByokLauncher);
+  // The launcher writes sessions here and retention sweeps it; both use this spelling.
+  const piByokLauncher = config.piByokLauncher === undefined ? undefined
+    : Object.freeze({ ...config.piByokLauncher, sessionDir: foldNameAliases(config.piByokLauncher.sessionDir) });
   if (config.durablePi !== undefined && typeof config.durablePi !== 'boolean') throw new Error('durablePi must be boolean');
   if (config.durablePi === true && (!config.agentHome || !config.piByokLauncher)) throw new Error('durablePi requires Agent home and Pi custody launcher');
   if (config.durablePi === true && process.platform === 'win32') throw new Error('durablePi is unavailable on Windows until parent-death Job Object recovery is validated');
@@ -185,7 +189,7 @@ export function resolveDaemonConfig(input: Pick<DaemonInputs, 'overrides' | 'con
   }
   return {
     agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin,
-    agentMemoryDescribeBin, agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry,
+    agentMemoryDescribeBin, agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, piByokLauncher,
   };
 }
 

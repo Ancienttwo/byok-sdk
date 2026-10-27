@@ -738,10 +738,21 @@ export function buildDaemonWithAdapters(
   overrides: DaemonOverrides = {},
   assertionProbe?: AssertionIssueProbe,
 ): Daemon {
+  return buildDaemon(config, () => adapters, overrides, assertionProbe);
+}
+
+/** `buildAdapters` receives the resolved Pi launcher, so default adapters and retention share one sessionDir. */
+function buildDaemon(
+  config: DaemonConfig,
+  buildAdapters: (piByokLauncher: DaemonConfig['piByokLauncher']) => RuntimeAdapter[],
+  overrides: DaemonOverrides,
+  assertionProbe: AssertionIssueProbe | undefined,
+): Daemon {
   const {
     agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin,
-    agentMemoryDescribeBin, agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry,
+    agentMemoryDescribeBin, agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, piByokLauncher,
   } = resolveDaemonConfig({ overrides, config });
+  const adapters = buildAdapters(piByokLauncher);
   const {
     agentHomeReaderLimit, egressPolicy, egressBatcherOptions, presenceCadence, deviceAssertionAudiences,
     deviceAssertionTtlMs, storeDir, storageConfig, retentionClock, scratchRoot, storagePressure,
@@ -759,7 +770,7 @@ export function buildDaemonWithAdapters(
     journal: () => daemonState.journal, identity: () => daemonState.retentionIdentity, preparation: () => daemonState.inputPreparationService,
     ...(agentHomeManager === undefined ? {} : { home: agentHomeManager }),
     ...(agentSessionHandoffs === undefined ? {} : { handoffs: agentSessionHandoffs }),
-    ...(config.piByokLauncher?.sessionDir === undefined ? {} : { piSessionDir: config.piByokLauncher.sessionDir }),
+    ...(piByokLauncher === undefined ? {} : { piSessionDir: piByokLauncher.sessionDir }),
   });
   const retentionSweeper = new RetentionSweeper({
     config: storageConfig, registry: retentionRegistry, pressure: storagePressure, clock: retentionClock,
@@ -880,7 +891,7 @@ export function buildDaemonWithAdapters(
   };
 
   const daemonScope: DaemonScope = {
-    config, adapters, overrides, assertionProbe, agentMemoryMcpEnabled,
+    config, adapters, overrides, assertionProbe, agentMemoryMcpEnabled, piByokLauncher,
     resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin, agentMemoryDescribeBin,
     agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, agentHomeReaderLimit, egressPolicy,
     egressBatcherOptions, presenceCadence, deviceAssertionAudiences, deviceAssertionTtlMs, storeDir,
@@ -949,5 +960,5 @@ export function buildDaemonWithAdapters(
  */
 export function createDaemon(config: DaemonConfig, overrides: DaemonOverrides = {}): Daemon {
   if (config.codexSandbox !== undefined) assertCodexSandboxSetting(config.codexSandbox, 'DaemonConfig.codexSandbox');
-  return buildDaemonWithAdapters(config, buildDefaultAdapters(config), overrides);
+  return buildDaemon(config, (piByokLauncher) => buildDefaultAdapters(config, piByokLauncher), overrides, undefined);
 }

@@ -128,6 +128,12 @@ describe('bin/config: resolveStoreDir', () => {
   it('falls back to DeviceStore.defaultDir(productId) — the exact same resolution create-daemon.ts uses internally', () => {
     expect(resolveStoreDir({ productId: 'acme' })).toBe(DeviceStore.defaultDir('acme'));
   });
+
+  it('resolves a relative storeDir exactly as DeviceStore.resolveDir does (#1030)', () => {
+    const relative = path.join(`byok-bin-config-missing-${process.pid}-${Date.now()}`, 'store');
+    expect(resolveStoreDir({ storeDir: relative, productId: 'acme' })).toBe(path.resolve(relative));
+    expect(resolveStoreDir({ storeDir: relative, productId: 'acme' })).toBe(DeviceStore.resolveDir('acme', relative));
+  });
 });
 
 describe('bin/config: arg helpers', () => {
