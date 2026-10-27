@@ -361,27 +361,23 @@ auth, task, cancellation, mailbox, or terminal state machine: those semantics
 belong to `@byok-sdk/cloud` and its injected stores.
 
 The default composition is in-memory. `BYOK_STORE=sqlite` selects the explicit
-SQLite composition for eight durable interfaces sharing one database and
+SQLite composition for durable interfaces sharing one database and
 transaction coordinator: device directory, request receipts, task attempts,
-cancellation, mailbox, object manifests, blob metadata/grants, and blob bytes.
+cancellation, mailbox, object manifests, blob metadata/grants, blob bytes, and bounded approval timelines.
 Pairing and authentication share the device directory. Request receipts use a
 tenant/key primary key and atomic first-write-wins INSERT; immutable rows have
 no deletion/TTL path and outlive mailbox retention. Disk capacity is the first
 scaling limit; deleting receipts is not an admission strategy. Unredeemed pairing
 codes, nonces, presence and other ports remain in-memory.
 
-Schema v5 fences old writers and adds nullable harness identity to the atomic
-claim and every task read model. Explicit `v1-to-v5`/`v2-to-v5` adoption requires
-all writers stopped and a consistent backup. It rejects existing task/message/
-agent-admission or advanced cursor history because prior receipt authority was
-in-memory and cannot be reconstructed. Eligible v1 adoption adds an empty device
-directory; v2 preserves enrollment. `v3-to-v5` retains receipts, unclaimed offers
-and identified built-in claims, but rejects owned rows with no claimed runtime:
-legacy identity-free claims and lost custom identities are indistinguishable.
-Migration never derives actual claim identity from requested offers or current
-inventory. All DDL and version changes commit atomically. Target-v4 selectors
-are replaced, not reinterpreted. The server-local wake table is added for every
-source; `v4-to-v5` adds only that table and its indexes, preserving existing rows. See `packages/server/README.md`.
+Schema v6 persists the bounded approval timeline through the existing approvals
+port. Requests and decisions retain their absolute expiry and revision across
+reopen. The SQLite transaction coordinator serializes conditional host resolution
+against the exact pending source/revision; readers project from this one store.
+New files create the table atomically. Existing v6 files must have valid approval
+authority; older schema versions fail closed without migration or mutation.
+Operators preserve old files and explicitly choose a new state path/enrollment.
+See `packages/server/README.md`.
 SQLite restores durable records, not process-owned promises, subscriptions or
 provider processes. The façade accepts a pre-persisted caller taskId with an
 explicit deviceId. `tasks.offer` projects `cloud.readTaskOffer` from immutable

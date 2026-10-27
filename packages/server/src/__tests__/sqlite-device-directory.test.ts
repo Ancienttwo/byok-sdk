@@ -21,8 +21,8 @@ describe('SQLite durable device authority', () => {
     const root = mkdtempSync(join(tmpdir(), 'byok-device-directory-')); roots.push(root);
     return join(root, 'server.sqlite');
   }
-  const open = (path: string, migration?: 'v1-to-v5') => createSqliteEmbeddedStores(
-    { path, ...(migration === undefined ? {} : { migration }) },
+  const open = (path: string) => createSqliteEmbeddedStores(
+    { path },
     { clock: createMutableClock(), crypto: createWebCrypto() },
   );
 
@@ -69,49 +69,48 @@ describe('SQLite durable device authority', () => {
     } finally { await stores.close(); }
   });
 
-  it('requires explicit atomic adoption of an unused v1 database', async () => {
-    const path = database(); const seed = open(path);
-    await seed.close();
+  it('refuses even an unused v1 file without creating device authority', async () => {
+    const path = database(); await open(path).close();
     const legacy = new DatabaseSync(path);
-    legacy.exec("DROP TABLE wake; DROP TABLE request_receipt; DROP TABLE device_directory; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '1' WHERE key = 'schema_version'"); legacy.close();
-    expect(() => open(path)).toThrow("migration: 'v1-to-v5'");
-    const migrated = open(path, 'v1-to-v5');
-    try {
-      await expect(migrated.cloud.devices.list(tenant)).resolves.toEqual([]);
-    } finally { await migrated.close(); }
+    legacy.exec("DROP TABLE wake; DROP TABLE request_receipt; DROP TABLE device_directory; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '1' WHERE key = 'schema_version'");
+    legacy.close();
+    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '1', requiredVersion: '6' }));
     const read = new DatabaseSync(path, { readOnly: true });
-    expect(read.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('5'); read.close();
+    try {
+      expect(read.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('1');
+      expect(read.prepare("SELECT name FROM sqlite_master WHERE name = 'device_directory'").get()).toBeUndefined();
+    } finally { read.close(); }
   });
 
   it('rejects unknown versions and malformed old databases without marking them migrated', async () => {
     const path = database(); await open(path).close();
     const legacy = new DatabaseSync(path);
     legacy.exec("DROP TABLE wake; DROP TABLE request_receipt; DROP TABLE device_directory; DROP TABLE task_attempt; UPDATE byok_sqlite_meta SET value = '1' WHERE key = 'schema_version'"); legacy.close();
-    expect(() => open(path, 'v1-to-v5')).toThrow();
+    expect(() => open(path)).toThrow();
     const read = new DatabaseSync(path);
     expect(read.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('1');
     expect(read.prepare("SELECT name FROM sqlite_master WHERE name = 'device_directory'").get()).toBeUndefined();
     read.exec("UPDATE byok_sqlite_meta SET value = '999' WHERE key = 'schema_version'"); read.close();
-    expect(() => open(path, 'v1-to-v5')).toThrow('999');
+    expect(() => open(path)).toThrow('999');
   });
 
-  it('refuses adoption when an existing coordination column is missing', async () => {
+  it('refuses a legacy file with missing coordination columns', async () => {
     const path = database(); await open(path).close();
     const legacy = new DatabaseSync(path);
     legacy.exec("DROP TABLE wake; DROP TABLE request_receipt; DROP TABLE device_directory; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '1' WHERE key = 'schema_version'; ALTER TABLE task_attempt RENAME COLUMN device_id TO broken_device_id");
     legacy.close();
-    expect(() => open(path, 'v1-to-v5')).toThrow();
+    expect(() => open(path)).toThrow();
     const read = new DatabaseSync(path, { readOnly: true });
     expect(read.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('1');
     read.close();
   });
 
-  it('rolls back the new table when adoption fails before the version commit', async () => {
+  it('does not create a missing authority in a legacy file with conflicting indexes', async () => {
     const path = database(); await open(path).close();
     const legacy = new DatabaseSync(path);
     legacy.exec("DROP TABLE wake; DROP TABLE request_receipt; DROP TABLE device_directory; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '1' WHERE key = 'schema_version'; CREATE INDEX device_directory_machine ON task_attempt (device_id)");
     legacy.close();
-    expect(() => open(path, 'v1-to-v5')).toThrow();
+    expect(() => open(path)).toThrow();
     const read = new DatabaseSync(path, { readOnly: true });
     expect(read.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('1');
     expect(read.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'device_directory'").get()).toBeUndefined();

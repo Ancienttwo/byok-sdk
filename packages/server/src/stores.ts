@@ -117,11 +117,7 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
   const sqlite =
     options.storage?.kind === 'sqlite'
       ? createSqliteEmbeddedStores(
-          {
-            path: options.storage.path,
-            ...(options.storage.migration === undefined ? {} : { migration: options.storage.migration }),
-            ...(options.storage.urlTtlMs === undefined ? {} : { urlTtlMs: options.storage.urlTtlMs }),
-          },
+          options.storage,
           { clock, crypto, ...(options.wake === undefined ? {} : { wake: options.wake }) },
         )
       : undefined;
