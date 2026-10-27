@@ -102,3 +102,6 @@ Integrated main `bab299384` at candidate `4b6a37191`. Build and root typecheck p
 ## 与 helper grants / S1 的整合计量
 
 在已冻结的 #1064–#1067 候选之上，startup exclusion 的四个入口增量仍各为 53 B，保持协调席位 wB:p4 已批准的精确增量。实际 cap：client 1848545、adapters 332093、testing 317579、byok-agent 1793187 B。README 与 entry facts 按该组合构建再生，没有额外余量。完整 #1060 仍保持 open。
+
+
+恢复 main `4159f13a1` 后重新构建：本候选 client = 1848565 B，byok-agent = 1793207 B，均只叠加 #1071 已代签的 20 B；adapters/testing 保持前表值。该组合不增加已签增量之外的余量，README/facts 再次从构建生成。
