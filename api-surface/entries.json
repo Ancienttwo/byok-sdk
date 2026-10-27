@@ -1142,12 +1142,12 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 88241,
+          "line": 88251,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host-sealed.js",
-          "line": 95763,
+          "line": 95828,
           "rule": "opaque import()"
         },
         {

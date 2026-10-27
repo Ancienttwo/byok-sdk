@@ -505,7 +505,7 @@ export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './uti
 export type { EnsureSecureDirOptions } from './util/secure-dir';
 
 export { PiAdapter } from './adapters/pi/pi-adapter';
-export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter';
+export type { PiAdapterOptions, PiByokLauncherConfig, PiBuiltinToolName, PiAgentExtensionName } from './adapters/pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
 export { copyPiRuntimeAssets } from './adapters/pi/runtime-assets';
 export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/pi/runtime-assets';

@@ -49,6 +49,8 @@ import {
   withoutProviderCredentials,
 } from '../provider-credential-environment';
 import { probePiAuthPresent } from './auth-presence';
+import { hasPiAgentToolRestrictions, INHERITED_PI_AGENT_TOOL_POLICY, parsePiAgentToolPolicy, type PiAgentToolPolicy, type PiBuiltinToolName, type PiAgentExtensionName } from './agent-tool-policy';
+export type { PiBuiltinToolName, PiAgentExtensionName } from './agent-tool-policy';
 
 async function disposePiStartup(rpc: PiRpcClient | undefined, scratch: ExecutionScratch, cause?: unknown): Promise<void> {
   const retry = async (): Promise<void> => {
@@ -81,6 +83,12 @@ function errorMessage(err: unknown): string {
 
 /** Pi launch options; execution scratch and replica authority come from start input. */
 export interface PiAdapterOptions {
+  /** Agent tasks only: select native tools; [] disables them. Default inherit. Does not confine file paths. */
+  agentBuiltinTools?: 'inherit' | readonly PiBuiltinToolName[];
+  /** Agent tasks only: exclude user resources/settings while retaining Pi model/auth stores. Default inherit. */
+  agentUserContext?: 'inherit' | 'excluded';
+  /** Agent tasks only: select SDK web/subagent/todo extensions; MCP remains independently admitted. Default inherit. */
+  agentExtensions?: 'inherit' | readonly PiAgentExtensionName[];
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
   /** Opt-in ordinary, lease-bound durable worker. */
@@ -191,6 +199,7 @@ export function validatePiByokLauncherConfig(
 }
 
 export class PiAdapter implements RuntimeAdapter {
+  private readonly agentToolPolicy: PiAgentToolPolicy;
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'pi',
     supportsDispatchSelection: true,
@@ -218,6 +227,11 @@ export class PiAdapter implements RuntimeAdapter {
   });
 
   constructor(private readonly options: PiAdapterOptions = {}) {
+    this.agentToolPolicy = parsePiAgentToolPolicy({
+      builtinTools: options.agentBuiltinTools === undefined ? 'inherit' : options.agentBuiltinTools,
+      userContext: options.agentUserContext === undefined ? 'inherit' : options.agentUserContext,
+      extensions: options.agentExtensions === undefined ? 'inherit' : options.agentExtensions,
+    });
     if (options.durablePi !== undefined && typeof options.durablePi !== 'boolean') throw new Error('PiAdapterOptions.durablePi must be boolean; pass replicaRoot through durableContext');
     // T0 verified the RPC lanes only. The durable worker's own frames and
     // respawn path are unverified, so it declares no trajectory evidence.
@@ -411,6 +425,10 @@ export class PiAdapter implements RuntimeAdapter {
           if (runtimeLaunch.scratch !== startInput.scratch) throw authorityFailure('Pi start scratch differs from runtime launch');
           if (runtimeLaunch.kind !== (this.options.durablePi === true ? 'pi-durable' : startInput.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc')) throw authorityFailure('Pi start lane differs from runtime launch');
           if (runtimeLaunch.sessionCwd !== startInput.manifest.cwd) throw authorityFailure('Pi runtime session cwd differs from manifest');
+          const agentToolPolicy = startInput.manifest.agentRef === undefined ? INHERITED_PI_AGENT_TOOL_POLICY : this.agentToolPolicy;
+          if (hasPiAgentToolRestrictions(agentToolPolicy) && runtimeLaunch.kind !== 'pi-rpc') {
+            throw authorityFailure('Pi Agent tool policy is supported only by the ordinary RPC lane');
+          }
           parsePiMcpEnvironment(startInput.mcpEnv);
           const mcpEnv = startInput.mcpEnv!; // Preserve the daemon admission object through serialization.
           const manifestSelection = startInput.manifest.dispatchSelection;
@@ -509,12 +527,13 @@ export class PiAdapter implements RuntimeAdapter {
             // What is written is the START observation, already compared
             // above with the one this operation was admitted with.
             const serialized = serializePiHostConfig({
-              format: 'byok.pi.rpc-launch', version: 5,
+              format: 'byok.pi.rpc-launch', version: 6,
               // Digest-bound, as in the prepared lane: under `keys-profile`
               // the host takes the provider key over the launcher's private
               // IPC channel and refuses to start without it.
               credentialSource: runtimeLaunch.credentialSource,
               cwd: runtimeLaunch.sessionCwd,
+              agentToolPolicy,
               mcp: {
                 mcpEnv,
                 mcpServers: taskMcpServers,
