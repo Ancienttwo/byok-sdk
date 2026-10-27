@@ -4,8 +4,7 @@
  *
  * Two tasks of the same shape run on the device: a sealed one, whose texts carry the sealed canary, and its plaintext
  * twin, whose texts carry the plain canary. Each goes through the offer, a steer, progress, an approval request, an
- * artifact and the result return (summary, final message and result document). The closing reply is large, so the
- * sealed terminal goes above the inline frame and names its ciphertext object. The device name carries the plain
+ * artifact and the result return (summary, final message and result document). The device name carries the plain
  * canary too. Then the test reads every column of every row in every tenant table (the S0 scanner, which takes its
  * table list from the tenant erasure query), every object in the bucket and the console output of the run.
  *
@@ -16,7 +15,9 @@
  *    `docs/security.md`.
  * 3. The member opens the ciphertext that the Host read interfaces return and gets the sealed canary back, and the
  *    device received the sealed instruction and steer in plaintext. A store that dropped the content fails here.
- *    The terminal's ciphertext object is read from the bucket, because no Host method returns object bytes.
+ *
+ * Every sealed member stays inline: on this composition the R2 store cannot sign an object request until #1039 is
+ * fixed, so a sealed output above the inline frame is not run yet.
  */
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -26,7 +27,7 @@ import { format } from 'node:util';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { AgentRef } from '@byok-sdk/cloud';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { createObjectStorageScope, type ObjectStorageScope } from '../../../packages/cloud-dataplane/src/__tests__/support/dataplane';
+import { createObjectStorageScope } from '../../../packages/cloud-dataplane/src/__tests__/support/dataplane';
 import { canaryNeedles, objectLocation, readObjects, record, scanPostgres, type Hits, type Needle }
   from '../../../packages/cloud-dataplane/src/__tests__/support/plaintext-scan';
 import { waitForTaskCleanup } from '../../basic/goal-btw.test-support';
@@ -47,8 +48,6 @@ const P_CORE = `byok654plain${randomUUID().replaceAll('-', '')}`;
 /** The tail makes the JSON-escaped form of a text differ from its UTF-8 form. */
 const tail = ' "quoted" back\\slash ✓';
 const S = `${S_CORE}${tail}`;
-/** Filler of a large closing reply. */
-const FILLER = '.'.repeat(140_000);
 const P = `${P_CORE}${tail}`;
 
 /** The first backticked cell of each row between the sealed inventory markers in `docs/security.md`. */
@@ -61,23 +60,14 @@ async function documentedCiphertext(): Promise<string[]> {
 }
 
 /**
- * A wire `sealed` member as its header, its ciphertext bytes and a needle of the ciphertext. An inline member's needle
- * is a slice of its base64url text, which a JSON column keeps as it is. A member by reference names an object, and
- * its needle is a slice of the object's bytes.
+ * A wire `sealed` member as its header, its inline ciphertext bytes and a needle of the ciphertext: a slice of its
+ * base64url text, which a JSON column keeps as it is.
  */
-async function ciphertextOf(storage: ObjectStorageScope, tenant: string, sealed: unknown): Promise<SealedMember & { readonly needle: Needle }> {
-  const { ciphertext, ciphertextRef, ...header } = sealed as { ciphertext?: string; ciphertextRef?: { contentHash: string } } & Record<string, unknown>;
-  if (ciphertext !== undefined) {
-    const slice = ciphertext.slice(8, 72);
-    return { header, ciphertext: Buffer.from(ciphertext, 'base64url'), needle: { form: 'ciphertext', text: slice, bytes: Buffer.from(slice, 'utf8') } };
-  }
-  // ByokCloud has no method that returns object bytes (#654 Q10), so the test reads the ciphertext from the bucket.
-  const key = `tenants/${tenant}/objects/sha256/${ciphertextRef!.contentHash.slice('sha256:'.length)}`;
-  const object = await storage.client.fetch(`${storage.config.endpoint}/${storage.bucket}/${key}`);
-  if (!object.ok) throw new Error(`GET ${key} failed: HTTP ${object.status}`);
-  const bytes = Buffer.from(await object.arrayBuffer());
-  const slice = bytes.subarray(16, 64);
-  return { header, ciphertext: bytes, needle: { form: 'ciphertext', text: slice.toString('base64url'), bytes: slice } };
+function ciphertextOf(sealed: unknown): SealedMember & { readonly needle: Needle } {
+  const { ciphertext, ...header } = sealed as { ciphertext?: string } & Record<string, unknown>;
+  if (ciphertext === undefined) throw new Error('the sealed member has no inline ciphertext');
+  const slice = ciphertext.slice(8, 72);
+  return { header, ciphertext: Buffer.from(ciphertext, 'base64url'), needle: { form: 'ciphertext', text: slice, bytes: Buffer.from(slice, 'utf8') } };
 }
 
 let host: HostedCloud | undefined;
@@ -133,10 +123,7 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('the sealed zero-hit run on the hosted SDK (#
       await cloud.approveTask(tenant, taskId, { approvalId });
       await writeFile(path.join(session.workspaceDir, 'notes.txt'), `Artifact ${text}`);
       session.emit({ type: 'artifact', name: 'notes.txt', contentType: 'text/plain' });
-      // The closing reply is the progress text after the last tool interaction. Two large parts make the sealed
-      // task.complete larger than the inline frame, so the device uploads its ciphertext and the terminal names it.
-      session.emit({ type: 'progress', text: `Summary ${text} ${FILLER}` });
-      session.emit({ type: 'progress', text: `More ${text} ${FILLER}` });
+      session.emit({ type: 'progress', text: `Summary ${text}` });
       await session.finish({ text: `Document ${text}` });
       await vi.waitFor(async () => expect(await port.deviceTerminal(taskId)).toBeDefined(), BUDGET);
       await waitForTaskCleanup(host!.daemon, session);
@@ -154,34 +141,31 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('the sealed zero-hit run on the hosted SDK (#
     const { taskId, agentRef } = sealedRun;
     const terminal = (await cloud.readDeviceTerminal(tenant, taskId))!.envelope;
     expect(terminal.type).toBe('task.complete');
-    const sealedOf = (sealed: unknown) => ciphertextOf(storage, tenant, sealed);
-    // The large closing reply put the sealed terminal above the inline frame, so it names its ciphertext object.
-    expect((terminal.payload as { sealed: { ciphertextRef?: unknown } }).sealed.ciphertextRef).toBeDefined();
-    const terminalMember = await sealedOf((terminal.payload as { sealed: unknown }).sealed);
+    const terminalMember = ciphertextOf((terminal.payload as { sealed: unknown }).sealed);
     expect(JSON.stringify(await member!.open('task.complete', { taskId }, deviceId, agentRef, terminalMember))).toContain(S_CORE);
     const batches = ((await cloud.readActivity(tenant, taskId))?.entries ?? []).filter((entry) => 'sealed' in entry);
     expect(batches.length).toBeGreaterThan(0);
-    const activityMembers = await Promise.all(batches.map(async (batch) => ({ seq: (batch as { batchSeq: number }).batchSeq,
-      member: await sealedOf((batch as { sealed: unknown }).sealed) })));
+    const activityMembers = batches.map((batch) => ({ seq: (batch as { batchSeq: number }).batchSeq,
+      member: ciphertextOf((batch as { sealed: unknown }).sealed) }));
     const progress = await Promise.all(activityMembers.map(({ seq, member: sealed }) => member!.open('task.progress', { taskId, seq }, deviceId, agentRef, sealed)));
     expect(JSON.stringify(progress)).toContain(S_CORE);
     const requested = (await cloud.readApprovalTimeline(tenant, taskId))!.entries.map((entry) => entry.event)
       .filter((event): event is typeof event & { approvalId: string; sealed: unknown } => event.type === 'approval_requested' && 'sealed' in event);
     expect(requested).toHaveLength(1);
-    const approvalMember = await sealedOf(requested[0]!.sealed);
+    const approvalMember = ciphertextOf(requested[0]!.sealed);
     expect(JSON.stringify(await member!.open('task.await_approval', { taskId, approvalId: requested[0]!.approvalId }, deviceId, agentRef,
       approvalMember))).toContain(S_CORE);
     const offer = await cloud.readTaskOffer(tenant, taskId);
     const steerOutbox = await host.pool.query<{ body: string }>(`SELECT body::text AS body FROM outbox WHERE body::text LIKE '%"task.steer"%'
       AND body::text LIKE $1`, [`%${taskId}%`]);
     expect(steerOutbox.rows).toHaveLength(1);
-    const steerMember = await sealedOf((JSON.parse(steerOutbox.rows[0]!.body) as { payload: { sealed: unknown } }).payload.sealed);
+    const steerMember = ciphertextOf((JSON.parse(steerOutbox.rows[0]!.body) as { payload: { sealed: unknown } }).payload.sealed);
 
     // The scan.
     const sealedHits: Hits = new Map(), plainHits: Hits = new Map(), ciphertextHits: Hits = new Map();
     const sealedNeedles = canaryNeedles(S_CORE, S), plainNeedles = canaryNeedles(P_CORE, P);
     const ciphertextNeedles = [
-      await sealedOf((offer as unknown as { payload: { sealed: unknown } }).payload.sealed), steerMember, terminalMember, approvalMember,
+      ciphertextOf((offer as unknown as { payload: { sealed: unknown } }).payload.sealed), steerMember, terminalMember, approvalMember,
       ...activityMembers.map(({ member: sealed }) => sealed),
     ].map((sealed) => sealed.needle);
     const tables = await scanPostgres(host.pool, [...sealedNeedles], sealedHits);
