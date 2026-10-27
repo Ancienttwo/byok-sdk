@@ -3,8 +3,8 @@
 // build. AiphaBee's kill9-smoke.ts on the public API: pair a daemon child with
 // a hanging runtime, submit one task, hard-kill the daemon after the runtime
 // starts (taskkill /F on Windows), restart it and read the device terminal.
-// Run from a directory whose node_modules holds @byok-sdk/client and
-// @byok-sdk/server.
+// Run from a directory whose node_modules holds @byok-sdk/client,
+// @byok-sdk/server and @byok-sdk/protocol.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -14,7 +14,8 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { deserialize, serialize } from 'node:v8';
 import { createDaemonWithAdapters } from '@byok-sdk/client';
-import * as byokServer from '@byok-sdk/server';
+import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
+import { createByokServer, createHmacTokenSigner } from '@byok-sdk/server';
 
 const PRODUCT_ID = 'byok-978-taskkill-smoke';
 const AGENT_REF = { agentId: 'bot_taskkill', profileRevision: '1' };
@@ -26,10 +27,8 @@ const EGRESS_POLICY = {
   transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
 };
 const TERMINAL_TYPES = new Set(['task.complete', 'task.fail', 'task.cancelled']);
-const { createByokServer, createHmacTokenSigner } = byokServer;
-// Wire v4 removed DaemonConfig.workspaceRoot, which 0.30.2 requires; only
-// builds with wire v4 export its SQLite migration.
-const WIRE_V4 = 'migrateSqliteToWireV4' in byokServer;
+// Wire v4 removed DaemonConfig.workspaceRoot, which 0.30.2 (wire v3) requires.
+const WIRE_V4 = PROTOCOL_VERSION >= 4;
 
 function fileCredentials(path) {
   const load = () => (existsSync(path) ? deserialize(readFileSync(path)) : undefined);
