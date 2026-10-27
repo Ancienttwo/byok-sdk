@@ -98,3 +98,28 @@ it('directory classes leave the remainder of one shared pass for single-file ret
   expect(await fs.lstat(result).then(() => true, () => false)).toBe(false);
   expect(runtimeReclaimedBytes.get(b.value)).toBeGreaterThan(0);
 });
+it('reads complete reference authority beyond the deletion share before collecting an unreferenced run', async () => {
+  const f = await fixture();
+  const unreferenced = path.join(f.home, '.byok/runs/unreferenced');
+  const referenced = path.join(f.home, '.byok/runs/referenced');
+  await populate(unreferenced, 2048); await populate(referenced, 1);
+  const handoffs = new AgentSessionHandoffStore();
+  // Real ledgers through the production writer, including a recent reader reference.
+  for (let index = 0; index < 1025; index++) {
+    await handoffs.record({ agentRef: { agentId: 'agent', profileRevision: '1' },
+      taskId: `writer-${index}`, sessionRef: `session-${index}`, runtimeId: 'test',
+      cwd: f.home, leaseId: `lease-${index}` });
+  }
+  await handoffs.record({ agentRef: { agentId: 'agent', profileRevision: '1' },
+    taskId: 'referenced', sessionRef: 'reader-session', runtimeId: 'test', home: f.home,
+    cwd: referenced, homeAccess: 'memory-reader', leaseId: 'reader-lease' });
+  expect((await fs.readdir(path.join(f.home, '.byok/runtime-sessions'))).length).toBe(1026);
+  let progressed = false;
+  for (let pass = 0; pass < 6 && !progressed; pass++) {
+    const b = budget(); await f.registry.sweep('reader-run', b.value);
+    progressed = await count(unreferenced) < 2048;
+    expect(await count(referenced)).toBe(1);
+    expect(b.tally.inspections).toBeLessThanOrEqual(8192);
+  }
+  expect(progressed).toBe(true);
+}, 60_000);

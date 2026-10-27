@@ -13,7 +13,7 @@ import { readInstalledSkillPack, skillPacksRoot } from '../skill-pack-installer'
 import type { ResolvedStorageConfig } from './config';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry';
 import type { ScratchRoot } from './scratch';
-import { classBudget } from './runtime-accounting';
+import { authorityBudget, classBudget } from './runtime-accounting';
 import { TreeCleanup } from './tree-cleanup';
 import { selectReaderRuns } from '../../agent-home-reader-retention';
 import { RuntimeCleanup } from './runtime-cleanup';
@@ -210,7 +210,11 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         const deadline = performance.now() + 250;
         const homeBudget: SweepBudget = { ...budget, available: () => { if (performance.now() >= deadline) { budget.truncate(); return false; } return budget.available(); } };
         if (id === 'reader-run') {
-          const referenced = await options.handoffs!.readerRunReferences(home, homeBudget.available);
+          const authority = authorityBudget(budget);
+          const referenced = await options.handoffs!.readerRunReferences(home, () => {
+            if (performance.now() >= deadline) { budget.truncate(); return false; }
+            return authority.available();
+          });
           if (referenced === undefined) return; // Incomplete reference authority protects the entire home.
           const runsRoot = path.join(home, '.byok', 'runs');
           const candidates = selectReaderRuns({ runsRoot, active: new Set(), referenced,
