@@ -4,7 +4,7 @@ import {
 } from '@byok-sdk/protocol';
 import type { AgentEgressRecord, AgentEgressStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 
 interface AgentEgressRow {
   readonly tenant_id: string;
@@ -61,7 +61,7 @@ function toRecord(row: AgentEgressRow): AgentEgressRecord {
 /** Postgres implementation of the immutable reliable Agent egress receipt fact. */
 export class PostgresAgentEgressStore implements AgentEgressStore {
   constructor(
-    private readonly pool: Pool,
+    private readonly pool: ByokPool,
     private readonly clock: Clock,
   ) {}
 

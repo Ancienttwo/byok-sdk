@@ -27,6 +27,8 @@ import type {
   TaskRedactionTaskResult,
 } from '@byok-sdk/cloud';
 import type { Pool, PoolClient } from 'pg';
+import type { ByokPool } from '../pool';
+import { assertByokPool } from '../pool-brand';
 import { settleDeletedObject } from './core/object-gc';
 import { BEGIN_OUTBOX_WRITE } from './core/outbox-writer';
 import { R2ObjectMaintenanceStore, type R2ObjectMaintenance } from './r2-blobs';
@@ -37,7 +39,7 @@ const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['complete', 'failed', 'c
 const EPHEMERAL_TABLES = ['activity_tail', 'approval_timeline_tail', 'agent_message_draft'] as const;
 
 export interface PostgresTaskRedactionStoreOptions {
-  readonly pool: Pool;
+  readonly pool: ByokPool;
   readonly clock: Clock;
   /** The bucket the blob composition writes to. */
   readonly objectStorage: PostgresObjectStorageOptions;
@@ -70,6 +72,7 @@ export class PostgresTaskRedactionStore implements TaskRedactionStore {
   readonly #objects: Pick<R2ObjectMaintenance, 'deleteObject'>;
 
   constructor(options: PostgresTaskRedactionStoreOptions) {
+    assertByokPool(options.pool, 'PostgresTaskRedactionStore');
     this.#pool = options.pool;
     this.#clock = options.clock;
     this.#objects = new R2ObjectMaintenanceStore(options.objectStorage);

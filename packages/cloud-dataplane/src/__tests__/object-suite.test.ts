@@ -759,4 +759,32 @@ describe.skipIf(SKIP_DATAPLANE)(`object suite [postgres + seaweedfs]${SKIP_DATAP
       { fetch: injector.fetch, retryDelayMs: 1 },
     );
   });
+
+  it('signs every request after a host replaces the global Request class (#1039)', async () => {
+    // `@hono/node-server`'s `serve()` installs a subclass of the native
+    // Request as the global one, by default. A native `clone()` is then not an
+    // instance of the global class, which is what aws4fetch checks.
+    const NativeRequest = globalThis.Request;
+    class HostRequest extends NativeRequest {}
+    Object.defineProperty(globalThis, 'Request', { value: HostRequest, configurable: true, writable: true });
+    try {
+      await withObjects(async ({ blobs, objects, storage }) => {
+        const item = await content('signed under a host Request class', 'application/octet-stream');
+        const reservation = reservationFor(TENANT_A, item);
+        const grant = await blobs.createUpload(TENANT_A, reservation);
+        expect((await putViaGrant(grant.uploadUrl, item)).status).toBe(200);
+
+        await finalizeObserved(blobs, objects, TENANT_A, grant.blobId, reservation);
+        const downloadUrl = await blobs.getDownloadUrl(TENANT_A, grant.blobId);
+        expect((await globalThis.fetch(downloadUrl as string)).status).toBe(200);
+
+        const maintenance = new R2ObjectMaintenanceStore(storage.config);
+        const page = await maintenance.listTenantObjects(TENANT_A);
+        expect(page.objects).toHaveLength(1);
+        expect(await maintenance.deleteObject(TENANT_A, item.hash)).toBe('deleted');
+      });
+    } finally {
+      Object.defineProperty(globalThis, 'Request', { value: NativeRequest, configurable: true, writable: true });
+    }
+  });
 });
