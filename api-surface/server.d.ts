@@ -824,17 +824,18 @@ type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState'>;
  * One task's event feed from the relay, shared by `ByokServer.tasks.events`
  * and {@link TaskHandle.events}. Every refusal is thrown by the first `next()`,
  * before any entry; once entries flow, the read only ends (terminal, `signal`,
- * server close).
+ * `return()`, server close).
  *
- * Liveness is judged by the projection `tasks.get` answers with, never by the
- * attempt status: an accepted host cancellation is terminal there at once
- * while the attempt still reads `cancel_requested`, and a feed attached on that
- * basis would wait for a device message that may never come.
+ * `return()` also releases a pending `next()`, as the relay queue's own
+ * iterator does. An async generator cannot: it queues `return()` behind the
+ * outstanding `next()`, so a reader stopping an idle feed would hang. Here
+ * `return()` aborts the read's own signal first, which wakes the queue.
+ * `project` shapes each entry: `TaskHandle.events()` yields the event alone.
  */
-export declare function readTaskEvents(deps: EventDeps, taskId: string, options?: {
+export declare function readTaskEvents<T = TaskEventEntry>(deps: EventDeps, taskId: string, options?: {
     after?: string;
     signal?: AbortSignal;
-}): AsyncGenerator<TaskEventEntry, void, undefined>;
+}, project?: (entry: TaskEventEntry) => T): AsyncIterable<T>;
 /**
  * The host's approval decision, shared by {@link TaskHandle.approve} and
  * `ByokServer.tasks.approve`. Cloud atomically records it in the one approval
