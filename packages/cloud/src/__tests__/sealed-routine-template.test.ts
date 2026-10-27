@@ -17,7 +17,7 @@ import { SEALING, inlineMember, sealTemplate } from './support/sealed';
 type RoutineRef = { routineId: string; definitionVersion: number; notAfter: string };
 type Payload = Record<string, unknown> & { routineRef: RoutineRef; agentRef: { agentId: string; profileRevision: string }; sealed: object };
 
-const TYPE = 'task.offer_for_agent_with_egress_fresh_sealed';
+const TYPE = 'task.offer';
 const CONTEXT = { destinationBinding: 'conversation/654/routine/1' };
 const routineLines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()

@@ -21,7 +21,7 @@ export const ActivityAppendRequestSchema = z.object({
   dropped: z.number().int().nonnegative(),
 });
 
-/** One `task.progress_sealed` batch: its events stay in `sealed` (#654 12e). */
+/** One sealed `task.progress` batch: its events stay in `sealed` (#654 12e). */
 const SealedActivityAppendRequestSchema = z.object({
   taskId: ActivityTaskIdSchema,
   sourceEnvelopeId: SourceEnvelopeIdSchema,

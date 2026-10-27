@@ -169,6 +169,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
       taskId: 'task-hello-gate',
       deviceId: record.deviceId,
       payload: {
+        session: { mode: 'fresh' },
         instruction: 'admitted right after open',
         runtime: 'pi',
         agentRef: { agentId: 'agent-hello-gate', profileRevision: 'profile-1' },
@@ -296,6 +297,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
         taskId,
         deviceId: record.deviceId,
         payload: {
+          session: { mode: 'fresh' },
           instruction: 'run in the durable Agent home over long-poll',
           runtime: 'pi',
           agentRef: { agentId: 'agent-longpoll', profileRevision: 'profile-1' },

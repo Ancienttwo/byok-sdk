@@ -77,12 +77,9 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
   // daemon -> server, so there is no cursor to satisfy on this leg.
   envelopeShape('conn.hello', OPTIONAL_TASK_ID, OPTIONAL_SEQ),
 
-  // task.* server -> daemon: task_id required (routing key) + seq required
-  // (per-device redelivery cursor).
-  envelopeShape('task.offer_for_agent', REQUIRED_TASK_ID, REQUIRED_SEQ),
-  envelopeShape('task.offer_for_agent_with_egress', REQUIRED_TASK_ID, REQUIRED_SEQ),
-  envelopeShape('task.offer_for_agent_with_egress_fresh', REQUIRED_TASK_ID, REQUIRED_SEQ),
-  envelopeShape('task.offer_prepared', REQUIRED_TASK_ID, REQUIRED_SEQ),
+  // server -> daemon: seq required (per-device redelivery cursor); task.*
+  // also requires task_id (routing key).
+  envelopeShape('task.offer', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('agent.egress.ack', OPTIONAL_TASK_ID, REQUIRED_SEQ),
   envelopeShape('agent.message.disposition', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('agent.content.read', OPTIONAL_TASK_ID, REQUIRED_SEQ),
@@ -94,10 +91,11 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
   envelopeShape('task.reject', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.cancel', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.steer', REQUIRED_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('e2ee.key_package.available', FORBIDDEN_TASK_ID, REQUIRED_SEQ),
 
-  // task.* daemon -> server: task_id required (routing key); envelope-level
-  // seq is not required in this direction in M1 (no daemon->server
-  // redelivery cursor yet — see docs/protocol.md).
+  // daemon -> server: task.* requires task_id (routing key); envelope-level
+  // seq is not required in this direction (no daemon->server redelivery
+  // cursor — see docs/protocol.md).
   envelopeShape('task.claim', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('task.started', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('task.decline', REQUIRED_TASK_ID, OPTIONAL_SEQ),
@@ -112,23 +110,6 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
   envelopeShape('agent.message.draft', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('agent.message.publish', REQUIRED_TASK_ID, OPTIONAL_SEQ),
   envelopeShape('agent.content.receipt', OPTIONAL_TASK_ID, OPTIONAL_SEQ),
-
-  // Sealed payload v1 (#654). Appended last, so every released branch keeps
-  // its position in the union.
-  envelopeShape('task.offer_for_agent_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
-  envelopeShape('task.offer_for_agent_with_egress_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
-  envelopeShape('task.offer_for_agent_with_egress_fresh_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
-  envelopeShape('task.steer_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
-  envelopeShape('task.complete_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
-  envelopeShape('task.fail_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
-  envelopeShape('task.decline_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
-  envelopeShape('task.cancelled_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
-  envelopeShape('task.progress_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
-  envelopeShape('task.artifact_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
-  envelopeShape('task.await_approval_sealed', REQUIRED_TASK_ID, OPTIONAL_SEQ),
-
-  // E2EE key package notice (#654 E2c-3), appended for the same reason.
-  envelopeShape('e2ee.key_package.available', FORBIDDEN_TASK_ID, REQUIRED_SEQ),
 ]);
 
 export type Envelope = z.infer<typeof EnvelopeSchema>;

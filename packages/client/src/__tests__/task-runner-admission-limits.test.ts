@@ -1,3 +1,4 @@
+import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
@@ -48,7 +49,7 @@ describe('task.offer admission gates (M5 batch-3)', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-admission',
         serverUrl: server.url,
-        agentHome: testAgentHomeConfig(),
+        agentHome: testAgentHomeConfig(), agentEgress: FRESH_DAEMON_EGRESS,
         storeDir,
         ...configOverrides,
       },
@@ -65,8 +66,8 @@ describe('task.offer admission gates (M5 batch-3)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxTokens: 4000 } },
+          'task.offer',
+          { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxTokens: 4000 }, ...FRESH_OFFER },
           { taskId: 'task-maxtokens-1', seq: server.nextSeq() },
         ),
       );
@@ -84,8 +85,8 @@ describe('task.offer admission gates (M5 batch-3)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 60_000 } },
+          'task.offer',
+          { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 60_000 }, ...FRESH_OFFER },
           { taskId: 'task-maxduration-1', seq: server.nextSeq() },
         ),
       );

@@ -92,7 +92,7 @@ describe('pending-mailbox wire-major fence (substrate-free)', () => {
   it('returns the full composition when every pending row is a current-major envelope', async () => {
     const { pool, queries } = recordingPool([
       { tenant_id: 't', device_id: 'd', seq_text: '1', body: cancelEnvelope(PROTOCOL_VERSION, 1) },
-      { tenant_id: 't', device_id: 'd', seq_text: '2', body: encodeEnvelope(createEnvelope('task.offer_for_agent', { instruction: 'x', agentRef: { agentId: 'agent-x', profileRevision: 'rev-1' } }, { taskId: 'task-x', seq: 2 })) },
+      { tenant_id: 't', device_id: 'd', seq_text: '2', body: encodeEnvelope(createEnvelope('task.offer', { instruction: 'x', agentRef: { agentId: 'agent-x', profileRevision: 'rev-1' }, session: { mode: 'resume', sessionRef: 'session-x' } }, { taskId: 'task-x', seq: 2 })) },
     ]);
     const stores = await compose(pool);
     expect(Object.keys(stores).sort()).toEqual([

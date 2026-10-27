@@ -8,7 +8,7 @@ import { validateInput, type IntentInput, type ExecutionTemplate } from './model
 
 function input(selection: Record<string, unknown>): IntentInput {
   return { key: 'message', source: 'user', waitUntil: 60_000, execution: { deviceId: 'device', payload: {
-    ...selection, instruction: 'Return result', agentRef: { agentId: 'main', profileRevision: '1' },
+    ...selection, session: { mode: 'fresh' }, instruction: 'Return result', agentRef: { agentId: 'main', profileRevision: '1' },
     egressPolicy: { policyRevision: 'v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 4096 },
       reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 16384 },
       transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
@@ -30,7 +30,7 @@ it.each([{ runtime: 'pi' }, { harnessId: 'grok' }])('preserves %j through enqueu
   let terminal: unknown;
   const offers = new Map<string, any>();
   const submit = vi.fn(async (execution: any) => {
-    offers.set(execution.taskId, { ...structuredClone(execution), type: 'task.offer_for_agent_with_egress_fresh', delivered: true });
+    offers.set(execution.taskId, { ...structuredClone(execution), type: 'task.offer', delivered: true });
   });
   const server = { executions: { submit }, tasks: {
     offer: async (id: string) => offers.get(id), deviceTerminal: async () => terminal,

@@ -121,7 +121,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       const url = input instanceof Request ? input.url : String(input);
       if (taskBId !== undefined && url.includes('/byok/events') && response.ok) {
         const body = await response.clone().json() as { events?: Array<{ type?: string; task_id?: string }> };
-        taskBOfferReads += body.events?.filter((event) => event.type?.startsWith('task.offer_for_agent') && event.task_id === taskBId).length ?? 0;
+        taskBOfferReads += body.events?.filter((event) => event.type === 'task.offer' && event.task_id === taskBId).length ?? 0;
       }
       return response;
     }) as typeof fetch);
@@ -168,6 +168,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
         instruction: 'task B (redelivered while in flight)',
         runtime: 'pi',
         agentRef: { agentId: 'agent-task-b', profileRevision: 'rev-1' },
+        session: { mode: 'fresh' },
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         terminalProjection: { mode: 'none' },
       },

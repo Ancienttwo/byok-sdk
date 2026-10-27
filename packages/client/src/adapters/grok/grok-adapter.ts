@@ -60,7 +60,7 @@ export interface GrokAdapterOptions {
    */
   compatInstructions?: 'inherit' | 'disabled';
   /**
-   * For an Agent task (`task.offer_for_agent`), `excluded` sets
+   * For an Agent task (`task.offer`), `excluded` sets
    * `GROK_CLAUDE_MCPS_ENABLED`, `GROK_CURSOR_MCPS_ENABLED` and
    * `GROK_MANAGED_MCPS_ENABLED` to `0` on the Grok agent process, then runs
    * `grok inspect --json` in the task cwd with the same environment. The

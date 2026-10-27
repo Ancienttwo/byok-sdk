@@ -24,7 +24,7 @@ const port = {
   submit: async (input: FrozenInput) => { submitted.set(input.taskId, input); return {}; },
   offer: async (task: string) => {
     const input = submitted.get(task);
-    return input && { taskId: task, deviceId: input.deviceId, type: 'task.offer_for_agent_with_egress_fresh', payload: input.payload, delivered: true };
+    return input && { taskId: task, deviceId: input.deviceId, type: 'task.offer', payload: input.payload, delivered: true };
   },
   deviceTerminal: async (task: string) => {
     if (!submitted.has(task) || paused || !documents.has(task)) return undefined;

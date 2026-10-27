@@ -80,7 +80,7 @@ const MAX_CONTENT_LENGTH = 0xffff_ffff;
 const CONTENT_MAC_PREFIX = 'byok-content-mac-v1\n';
 const CONTENT_MAC_PATTERN = /^hmac-sha256:[0-9a-f]{64}$/u;
 
-/** Dot-separated lowercase words, e.g. `task.offer_for_agent`. It can never hold the MAC's `\n` separator. */
+/** Dot-separated lowercase words, e.g. `task.offer`. It can never hold the MAC's `\n` separator. */
 const FAMILY_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u;
 const IDENTITY_FIELD_PATTERN = /^[a-z][A-Za-z0-9]*$/u;
 /** The one family that binds no device (design §6.3). */
@@ -191,7 +191,7 @@ function isCanonicalCategoryList(categories: readonly SealedCategory[]): boolean
  */
 export interface SealedBinding {
   readonly tenantId: string;
-  /** Message family, e.g. `task.offer_for_agent`, or `routine.template`. */
+  /** Message family, e.g. `task.offer`, or `routine.template`. */
   readonly family: string;
   readonly direction: SealedDirection;
   /** The write's identity: `{ taskId }`, `{ messageId }`, … or `{ routineId, definitionVersion }`. */

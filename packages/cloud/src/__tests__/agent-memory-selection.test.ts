@@ -36,15 +36,15 @@ type MemoryOffer = (harness: CloudHarness, deviceId: string, taskId: string) => 
 const memoryOffersWith = (agentMemory: AgentMemorySelection): ReadonlyArray<readonly [string, MemoryOffer]> => [
   ['enqueueAgentOffer', (harness, deviceId, taskId) => harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, {
     taskId,
-    payload: { instruction: 'plan only', agentRef: AGENT_REF, sessionRef: 'memory-session', agentMemory },
+    payload: { instruction: 'plan only', agentRef: AGENT_REF, session: { mode: 'resume', sessionRef: 'memory-session' }, agentMemory },
   })],
   ['enqueueAgentEgressOffer', (harness, deviceId, taskId) => harness.cloud.enqueueAgentEgressOffer(TENANT_A, deviceId, {
     taskId,
-    payload: { instruction: 'plan only', agentRef: AGENT_REF, sessionRef: 'memory-session', egressPolicy: POLICY, agentMemory },
+    payload: { instruction: 'plan only', agentRef: AGENT_REF, session: { mode: 'resume', sessionRef: 'memory-session' }, egressPolicy: POLICY, agentMemory },
   })],
   ['submitAgentExecution', (harness, deviceId, taskId) => harness.cloud.submitAgentExecution(TENANT_A, { deviceId,
     taskId,
-    payload: { instruction: 'plan only', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, egressPolicy: POLICY, agentMemory },
+    payload: { instruction: 'plan only', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: POLICY, agentMemory },
   })],
 ];
 const memoryOffers = memoryOffersWith('none');
@@ -87,9 +87,9 @@ describe('hosted per-task Agent memory selection (#614)', () => {
 
     await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, {
       taskId: 'memory-absent',
-      payload: { instruction: 'continue', agentRef: AGENT_REF, sessionRef: 'memory-session' },
+      payload: { instruction: 'continue', agentRef: AGENT_REF, session: { mode: 'resume', sessionRef: 'memory-session' } },
     });
-    expect(await mailboxTypes(harness, deviceId)).toEqual(['task.offer_for_agent']);
+    expect(await mailboxTypes(harness, deviceId)).toEqual(['task.offer']);
   });
 });
 

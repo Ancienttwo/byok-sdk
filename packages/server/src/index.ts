@@ -127,9 +127,6 @@ export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenS
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
 export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
 export type { SqliteSchemaErrorCode } from './sqlite-support';
-// One-shot wire v3 -> v4 receipt migration (#925), operator-invoked. Shipped in
-// 0.31.x only; the next minor removes it.
-export { migrateSqliteToWireV4, preflightSqliteWireV4Migration } from './stores/sqlite/wire-v4-receipt-migration';
 export type { RateLimiterOptions } from './rate-limiter';
 export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 
@@ -617,7 +614,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
             taskId,
             payload: {
               ...common,
-              sessionRef,
+              session: { mode: 'resume', sessionRef },
               agentRef,
               egressPolicy,
               ...(terminalProjection === undefined ? {} : { terminalProjection }),
@@ -634,7 +631,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
           payload: {
             ...common,
             agentRef,
-            sessionRef,
+            session: { mode: 'resume', sessionRef },
             ...(terminalProjection === undefined ? {} : { terminalProjection }),
             ...(homeAccess === undefined ? {} : { homeAccess }),
             ...(agentMemory === undefined ? {} : { agentMemory }),

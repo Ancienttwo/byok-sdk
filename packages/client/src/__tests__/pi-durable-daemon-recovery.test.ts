@@ -17,6 +17,8 @@ import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { resolveBunBin } from './support/test-bun-bin';
 import { TestServer } from './fixtures/test-server';
 import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { FRESH_OFFER } from './fixtures/fresh-offer';
 const BUN_BIN = resolveBunBin();
 const PROCESS_WAIT = { timeout: 5_000, interval: 50 };
 const SENTINEL = 'BYOK_KNIFE3_PROVIDER_SECRET_SENTINEL';
@@ -115,7 +117,7 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
   await new Promise<void>(resolve=>provider!.listen(0,'127.0.0.1',resolve)); const address=provider.address(); if (!address || typeof address==='string') throw new Error('missing provider port');
   const profilePath=path.join(root,'profile.json');
   await fs.writeFile(profilePath,JSON.stringify({controlDir:control,profile:{adapter:'openai_compatible',auth_mode:'bearer',base_url:`http://127.0.0.1:${address.port}/v1`,capabilities:[],created_at:'2026-10-02T00:00:00.000Z',updated_at:'2026-10-02T00:00:00.000Z',display_name:'Fixture',enabled:true,kind:'model',model:'probe',profile_ref:'probe',provider_kind:'custom',pi_model:{...PI_MODEL_FIXTURE,reasoning:false,thinkingLevel:'off'}}}));
-  server=await TestServer.start(); const config={clientEntry:index,launcherEntry:launcher,serverUrl:server.url,productId:`durable-restart-${randomUUID()}`,scratchRoot:testScratchRoot(),storeDir:path.join(root,'store'),homeRoot:path.join(root,'home'),profilePath,sessionDir:path.join(root,'sessions')};
+  server=await TestServer.start(); const config={clientEntry:index,launcherEntry:launcher,serverUrl:server.url,productId:`durable-restart-${randomUUID()}`,scratchRoot:testScratchRoot(),storeDir:path.join(root,'store'),homeRoot:path.join(root,'home'),egressPolicy:DEFAULT_AGENT_EGRESS_POLICY,profilePath,sessionDir:path.join(root,'sessions')};
   const configPath=path.join(root,'daemon.json'); await fs.writeFile(configPath,JSON.stringify(config));
   let enrollment:unknown;
   const start=async () => {
@@ -125,7 +127,7 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
     await vi.waitFor(()=>{if(child.exitCode!==null) throw new Error(logs.join(''));expect(stdout).toContain('"ready":true');},PROCESS_WAIT);return child;
   };
   const first=await start();
-  const offer=(taskId:string,instruction:string)=>createEnvelope('task.offer_for_agent',{instruction,runtime:'pi',agentRef:{agentId:'recovery-agent',profileRevision:'1'},dispatchSelection:{lane:'byok',runtimeId:'pi',providerId:'probe',modelId:'probe'}},{taskId,seq:server!.nextSeq()});
+  const offer=(taskId:string,instruction:string)=>createEnvelope('task.offer',{instruction,runtime:'pi',agentRef:{agentId:'recovery-agent',profileRevision:'1'},...FRESH_OFFER,dispatchSelection:{lane:'byok',runtimeId:'pi',providerId:'probe',modelId:'probe'}},{taskId,seq:server!.nextSeq()});
   server.send(offer('old-task','OLD_HOST_CONTEXT'));
   await waitEnvelope(event=>event.type==='task.started'&&event.task_id==='old-task',first);
   let oldLaunch:Record<string,any> | undefined;

@@ -1,3 +1,4 @@
+import { FRESH_OFFER } from './fixtures/fresh-offer';
 import { freshTestAgentRef } from './fixtures/test-agent';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -287,7 +288,7 @@ describe('S11-F1 authoritative preparation completion replay', () => {
     // Feed the production delivery/cursor path without starting a live transport.
     const delivery = connection as unknown as { deliver: (e: ReturnType<typeof createEnvelope>) => boolean; processingChain: Promise<void> };
     const envelope = createEnvelope('agent.input.preparation', h.request, { seq: 1 });
-    const tail = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'tail' }, { seq: 2, taskId: 'tail' });
+    const tail = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'tail', ...FRESH_OFFER }, { seq: 2, taskId: 'tail' });
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     delivery.deliver(envelope);
     await delivery.processingChain;

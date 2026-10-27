@@ -139,7 +139,7 @@ function fakePort() {
   return {
     port, cancels, attempts, terminals, during,
     deliver(input: FrozenInput, rest: Partial<TaskAttempt> = {}) {
-      offers.set(input.taskId, { taskId: input.taskId, deviceId: input.deviceId, type: 'task.offer_for_agent_with_egress_fresh',
+      offers.set(input.taskId, { taskId: input.taskId, deviceId: input.deviceId, type: 'task.offer',
         payload: structuredClone(input.payload), delivered: true, messageId: `offer-${input.taskId}` });
       attempts.set(input.taskId, { taskId: input.taskId, deviceId: input.deviceId, agentRef: input.payload.agentRef, status: 'offered',
         updatedAt: 'now', ...rest } as TaskAttempt);

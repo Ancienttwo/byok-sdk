@@ -108,7 +108,9 @@ export class AgentEgressController {
 
   /**
    * Coalesce to the latest value before TaskRunner builds a `task.progress`
-   * envelope. Events go to the Host as the runtime produced them.
+   * envelope. Events go to the Host as the runtime produced them. An `error`
+   * reports a failure, not a value a later event supersedes, so every accepted
+   * `error` is sent; the other events of the batch coalesce to their last.
    */
   projectLatestValue(input: AgentEgressProgressInput): readonly AgentEvent[] {
     // No Agent identity means this is the established legacy task lane. The
@@ -120,20 +122,26 @@ export class AgentEgressController {
     }
     if (this.options.tenantId === undefined) return Object.freeze([...input.events]);
 
-    let latest: AgentEvent | undefined;
-    for (const event of input.events) {
+    const accepted: number[] = [];
+    const errors = new Set<number>();
+    let latest = -1;
+    for (const [index, event] of input.events.entries()) {
       const offered = this.latest.offer({ agentRef: input.agentRef, tenantId: this.options.tenantId, event }, this.options.policy);
       if (!offered.accepted) {
         this.noteDrop('latest-value', offered.reason, input.agentRef);
         continue;
       }
-      if (offered.replaced) {
-        this.latestStatus.replaced += 1;
-        this.noteDrop('latest-value', 'coalesced', input.agentRef, false);
-      }
-      latest = offered.record.event;
+      accepted.push(index);
+      if (event.type === 'error') errors.add(index);
+      else latest = index;
     }
-    return latest === undefined ? [] : Object.freeze([latest]);
+    const sent = (index: number): boolean => index === latest || errors.has(index);
+    for (const index of accepted) {
+      if (sent(index)) continue;
+      this.latestStatus.replaced += 1;
+      this.noteDrop('latest-value', 'coalesced', input.agentRef, false);
+    }
+    return Object.freeze(input.events.filter((_event, index) => sent(index)));
   }
 
   async appendReliable(input: AgentEgressReliableInput): Promise<AgentEgressReliableAppendResult> {

@@ -188,7 +188,7 @@ describe('agent-home-contract reference server', () => {
     ).rejects.toThrow(/did not advertise toolset-selection capability/);
   });
 
-  it('sends task.offer_for_agent and persists the exact AgentRef', async () => {
+  it('sends a resume task.offer and persists the exact AgentRef', async () => {
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
@@ -197,9 +197,10 @@ describe('agent-home-contract reference server', () => {
 
     const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'agent work', agentRef, sessionRef: SESSION_REF });
     const envelope = await awaitEnvelope(daemon, (e) => e.task_id === handle.taskId);
-    expect(envelope.type).toBe('task.offer_for_agent');
-    if (envelope.type !== 'task.offer_for_agent') throw new Error('unreachable');
+    expect(envelope.type).toBe('task.offer');
+    if (envelope.type !== 'task.offer') throw new Error('unreachable');
     expect(envelope.payload.agentRef).toEqual(agentRef);
+    expect(envelope.payload.session).toEqual({ mode: 'resume', sessionRef: SESSION_REF });
     expect((await started.byok.tasks.get(handle.taskId))?.agentRef).toEqual(agentRef);
   });
 

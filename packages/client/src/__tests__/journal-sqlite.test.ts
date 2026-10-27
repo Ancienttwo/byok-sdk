@@ -40,7 +40,7 @@ import {
 const IDENTITY: JournalIdentity = { tenantId: 'tenant-a', productId: 'test-product', deviceId: 'dev_1' };
 
 function envelopeRecord(overrides: Partial<ReceivedEnvelopeRecord> = {}): ReceivedEnvelopeRecord {
-  const bytes = overrides.bytes ?? JSON.stringify({ v: 1, id: 'env-1', type: 'task.offer_for_agent', task_id: 'task-1' });
+  const bytes = overrides.bytes ?? JSON.stringify({ v: 1, id: 'env-1', type: 'task.offer', task_id: 'task-1' });
   return {
     identity: IDENTITY,
     envelopeId: 'env-1',
@@ -504,7 +504,7 @@ describe('SqliteLocalTaskJournal', () => {
         payloadHash: journalHash('canonical-terminal'), truthState: 'pending', attempt: 1,
         recordedAt: '2026-08-07T00:00:00.000Z',
       });
-      const secondBytes = JSON.stringify({ v: 1, id: 'env-2', type: 'task.offer_for_agent', task_id: 'task-2' });
+      const secondBytes = JSON.stringify({ v: 1, id: 'env-2', type: 'task.offer', task_id: 'task-2' });
       await journal.appendEnvelope(envelopeRecord({ taskId: 'task-2', envelopeId: 'env-2', seq: 2, bytes: secondBytes, bytesHash: journalHash(secondBytes) }));
       const wrongIdentity: JournalIdentity = { ...IDENTITY, deviceId: 'dev_other' };
 
@@ -762,7 +762,7 @@ describe('SqliteLocalTaskJournal', () => {
       const storeDir = await tmpStore();
       const journal = build(storeDir);
       for (let i = 0; i < 20; i += 1) {
-        const bytes = JSON.stringify({ v: 1, id: `env-${i}`, type: 'task.offer_for_agent', task_id: `task-${i}` });
+        const bytes = JSON.stringify({ v: 1, id: `env-${i}`, type: 'task.offer', task_id: `task-${i}` });
         await journal.appendEnvelope(envelopeRecord({ envelopeId: `env-${i}`, taskId: `task-${i}`, seq: i, bytes, bytesHash: journalHash(bytes) }));
       }
 

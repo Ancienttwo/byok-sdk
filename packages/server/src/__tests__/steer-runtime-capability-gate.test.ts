@@ -83,7 +83,7 @@ async function dispatchClaimedRunning(
 ): Promise<TaskHandle> {
   const handle = await h.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: h.daemon.deviceId, instruction });
   const offer = await nextEnvelope(h.daemon);
-  expect(offer.type).toBe('task.offer_for_agent');
+  expect(offer.type).toBe('task.offer');
   await claimAndStart(h.byok, h.daemon, handle, runtime, capabilities);
   return handle;
 }
@@ -133,7 +133,7 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
     const envelope = await nextEnvelope(harness.daemon);
     expect(envelope.type).toBe('task.steer');
     expect(envelope.task_id).toBe(handle.taskId);
-    if (envelope.type !== 'task.steer') throw new Error('unreachable');
+    if (envelope.type !== 'task.steer' || envelope.payload.sealed !== undefined) throw new Error('unreachable');
     expect(envelope.payload.text).toBe('keep going');
   });
 

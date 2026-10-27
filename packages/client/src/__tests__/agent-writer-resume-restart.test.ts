@@ -9,6 +9,8 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { FRESH_OFFER } from './fixtures/fresh-offer';
 
 // Replaces the removed daemon-session-resume.test.ts (#925). A writer
 // session's handoff lives in its Agent home, so a resume finds it after the
@@ -40,9 +42,10 @@ describe('Agent writer session resume across a daemon restart', () => {
     const config = {
       storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' },
       productName: 'Writer resume', productId: 'writer-resume', serverUrl: server.url, storeDir, agentHome: { hostStorageRoot },
+      agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     };
-    const offer = (taskId: string, sessionRef?: string) => server.send(createEnvelope('task.offer_for_agent', {
-      instruction: taskId, agentRef, runtime: 'pi', ...(sessionRef === undefined ? {} : { sessionRef }),
+    const offer = (taskId: string, sessionRef?: string) => server.send(createEnvelope('task.offer', {
+      instruction: taskId, agentRef, runtime: 'pi', ...(sessionRef === undefined ? FRESH_OFFER : { session: { mode: 'resume' as const, sessionRef } }),
     }, { taskId, seq: server.nextSeq() }));
 
     const first = new StubRuntimeAdapter('pi');

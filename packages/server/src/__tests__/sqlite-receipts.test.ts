@@ -12,12 +12,12 @@ import { handleInboundEnvelope } from '../../../cloud/src/inbound';
 import { tenantStoresFor } from '../../../cloud/src/tenant-stores';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 import { SqliteOwnershipError } from '../sqlite-support';
-import { TEST_AGENT_DISPATCH, TEST_AGENT_REF } from './test-support';
+import { TEST_AGENT_REF, TEST_SESSION_REF } from './test-support';
 
 const tenant = tenantId('receipts');
 const other = tenantId('other');
 const deviceId = 'device-receipts';
-const payload = { ...TEST_AGENT_DISPATCH, instruction: 'original', runtime: 'claude' } as const;
+const payload = { agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, instruction: 'original', runtime: 'claude' } as const;
 
 describe('SQLite receipt recovery', () => {
   const roots: string[] = [];
@@ -71,7 +71,7 @@ describe('SQLite receipt recovery', () => {
         'terminal-projection-selection', 'agent-egress-fresh-session',
       ] });
       const execution = AgentExecutionInputSchema.parse({ taskId, deviceId, payload: {
-        instruction: 'reply', runtime: 'codex', agentRef,
+        instruction: 'reply', runtime: 'codex', agentRef, session: { mode: 'fresh' },
         egressPolicy: { policyRevision: 'policy-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
           transfers: { workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] }, transcript: 'disabled', artifact: 'disabled' } },
@@ -345,7 +345,7 @@ describe('SQLite receipt recovery', () => {
       const enqueued = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { taskId, payload });
       const original = await runtime.cloud.readTaskOffer(tenant, taskId);
       expect(original).toMatchObject({ taskId, deviceId, messageId: enqueued.envelope.id, delivered: true,
-        type: 'task.offer_for_agent', payload });
+        type: 'task.offer', payload });
       expect(await runtime.cloud.readTaskOffer(other, taskId)).toBeUndefined();
       await runtime.stores.close();
       const db = new DatabaseSync(path, { readOnly: true });

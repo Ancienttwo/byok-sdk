@@ -162,7 +162,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
 
     expect(daemon.cursor()).toBe(0);
     const page = await daemon.next();
-    expect(page.map((envelope) => envelope.type)).toEqual(['task.offer_for_agent']);
+    expect(page.map((envelope) => envelope.type)).toEqual(['task.offer']);
     expect(page[0]?.task_id).toBe(handle.taskId);
     expect(daemon.cursor()).toBeGreaterThan(0);
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Offered');

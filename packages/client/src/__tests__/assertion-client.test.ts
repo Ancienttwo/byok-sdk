@@ -12,6 +12,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { requestDeviceAssertion, requestTaskAssertion } from '../daemon/assertion-client';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 import { TestServer } from './fixtures/test-server';
 
 /**
@@ -334,6 +335,7 @@ describe('requestTaskAssertion', () => {
       serverUrl: server.url,
       storeDir,
       agentHome: { hostStorageRoot },
+      agentEgress: FRESH_DAEMON_EGRESS,
       deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },
       mcpToolsets: { [TOOLSET]: { mcpServers: { [SERVER_NAME]: { command: '/opt/salesko/read' } } } },
     };
@@ -344,12 +346,13 @@ describe('requestTaskAssertion', () => {
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
+        'task.offer',
         {
           instruction: 'qualify the inbound lead',
           runtime: 'pi',
           agentRef: { agentId: 'salesko-agent', profileRevision: 'profile-rev-1' },
           requiredToolsets: [TOOLSET],
+          ...FRESH_OFFER,
         },
         { taskId: `${productId}-task`, seq: server.nextSeq() },
       ),

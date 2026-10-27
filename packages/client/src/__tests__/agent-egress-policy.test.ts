@@ -52,6 +52,34 @@ describe('Agent egress goes to the Host as is', () => {
     expect(controller.status().latestValue.dropped).toBe(0);
   });
 
+  it('sends every error of a batch and coalesces the other events to their last', () => {
+    const controller = new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY, tenantId: 'tenant-egress' });
+    const progress = { type: 'progress', text: 'writing the report' } as const;
+    const error = { type: 'error', message: 'artifact "../secret" escapes the workspace' } as const;
+    const artifact = { type: 'artifact', name: 'report.txt', contentType: 'text/plain' } as const;
+    expect(controller.projectLatestValue({ agentRef, taskId: 'task-error-kept', events: [progress, error, artifact] })).toEqual([error, artifact]);
+  });
+
+  it('counts as coalesced only the accepted events it does not send', () => {
+    const controller = new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY, tenantId: 'tenant-egress' });
+    const first = { type: 'error', message: 'first failure' } as const;
+    const second = { type: 'error', message: 'second failure' } as const;
+    expect(controller.projectLatestValue({ agentRef, taskId: 'task-two-errors', events: [first, second] })).toEqual([first, second]);
+    expect(controller.status().latestValue).toMatchObject({ replaced: 0, dropped: 0 });
+    const progress = { type: 'progress', text: 'step one' } as const;
+    const next = { type: 'progress', text: 'step two' } as const;
+    expect(controller.projectLatestValue({ agentRef, taskId: 'task-two-progress', events: [progress, first, next] })).toEqual([first, next]);
+    expect(controller.status().latestValue).toMatchObject({ replaced: 1, dropped: 0, lastDropReason: 'coalesced' });
+  });
+
+  it('drops an error over the event-byte bound like any other event', () => {
+    const policy = { ...DEFAULT_AGENT_EGRESS_POLICY, activity: { ...DEFAULT_AGENT_EGRESS_POLICY.activity, maxEventBytes: 64 } };
+    const controller = new AgentEgressController({ policy, tenantId: 'tenant-egress' });
+    const error = { type: 'error', message: 'x'.repeat(128) } as const;
+    expect(controller.projectLatestValue({ agentRef, taskId: 'task-error-bound', events: [error] })).toEqual([]);
+    expect(controller.status().latestValue).toMatchObject({ dropped: 1, lastDropReason: 'backpressure' });
+  });
+
   it('appends a contentful reliable payload to the spool unchanged', async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), 'byok-egress-as-is-'));
     roots.push(homeDir);

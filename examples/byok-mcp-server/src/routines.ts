@@ -109,7 +109,7 @@ export function createRoutineTools(options: RoutineToolOptions): ScopedTool[] {
     if (!key.agentRef) throw new Error('A routine grant has no AgentRef');
     const { schedule, task } = parsed.definition;
     return { id: reservation.routineId, version: 1, timeZone: schedule.tz, rule: schedule as unknown as Json,
-      execution: { deviceId, payload: { runtime: task.runtime, instruction: task.instruction, agentRef: key.agentRef,
+      execution: { deviceId, payload: { runtime: task.runtime, session: { mode: 'fresh' }, instruction: task.instruction, agentRef: key.agentRef,
         egressPolicy: options.egressPolicy, terminalProjection: parsed.terminalProjection,
         ...(task.toolsets ? { requiredToolsets: [...task.toolsets] } : {}) } },
       waitMs: options.waitMs, lateAfterMs: options.lateAfterMs };
@@ -132,7 +132,7 @@ export function createRoutineTools(options: RoutineToolOptions): ScopedTool[] {
     if (!last.intentId) throw new Error('MCP routine occurrence must have an Agent intent');
     const intent = state.intents[last.intentId]!;
     const envelope = state.executions[intent.taskId]?.terminal?.envelope;
-    const document = intent.conclusion === 'succeeded' && envelope?.type === 'task.complete' ? envelope.payload.document : undefined;
+    const document = intent.conclusion === 'succeeded' && envelope?.type === 'task.complete' && envelope.payload.sealed === undefined ? envelope.payload.document : undefined;
     return { plannedAt: iso(last.trigger.plannedAt), trigger: last.trigger.kind, taskId: intent.taskId, attempts: intent.attempts,
       ...(intent.conclusion === undefined ? {} : { conclusion: intent.conclusion }), ...(document === undefined ? {} : { document }) };
   }

@@ -1,3 +1,4 @@
+import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
@@ -40,7 +41,7 @@ async function makeRunner(
   sent: Envelope[],
   extra: Partial<TaskRunnerDeps> = {},
 ): Promise<TaskRunner> {
-  return new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  return new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-final-message',
@@ -55,14 +56,14 @@ async function makeRunner(
 
 async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'claude' | 'codex'): Promise<void> {
   await runner.handleEnvelope(
-    createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: INSTRUCTION, runtime }, { taskId, seq: 1 }),
+    createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: INSTRUCTION, runtime, ...FRESH_OFFER }, { taskId, seq: 1 }),
   );
 }
 
 async function completion(sent: Envelope[], taskId: string) {
   await vi.waitFor(() => expect(sent.some((item) => item.type === 'task.complete' && item.task_id === taskId)).toBe(true));
   const envelope = sent.find((item) => item.type === 'task.complete' && item.task_id === taskId);
-  if (envelope?.type !== 'task.complete') throw new Error(`missing task.complete for ${taskId}`);
+  if (envelope?.type !== 'task.complete' || envelope.payload.sealed !== undefined) throw new Error(`missing plaintext task.complete for ${taskId}`);
   return envelope.payload;
 }
 

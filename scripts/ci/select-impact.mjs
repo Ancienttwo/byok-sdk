@@ -286,6 +286,9 @@ export const reviewedScripts = Object.freeze({
     tests: ['scripts/release/pack-and-smoke.test.mjs', 'scripts/release/agent-memory-helper-source.test.mjs'],
     install: true, families: ['agent-memory-helper', 'dataplane', 'npm-release-pack', 'release-pack-migrate'],
   },
+  // pack-and-smoke.mjs copies this smoke next to the installed tarballs and
+  // runs it in every family job; #925 selects npm-release-pack alone.
+  'scripts/release/execution-submit-smoke.mjs': { tests: [], families: ['npm-release-pack'] },
   'scripts/release/pack-and-smoke.test.mjs': { tests: ['scripts/release/pack-and-smoke.test.mjs'], install: true },
   'scripts/release/publish.mjs': {
     tests: [
@@ -404,7 +407,8 @@ export function selectImpact(paths, context = {}) {
       for (const dir of ['examples/basic', 'examples/host-execution-core', 'examples/bot-collaboration']) dirs.add(dir);
       continue;
     }
-    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts'
+    if (path === 'examples/basic/clarification.ts' || path === 'examples/basic/clarification.test.ts'
+      || path === 'examples/basic/goal-btw.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts'
       || path === 'examples/basic/quickstart-smoke.test.ts' || path === 'examples/basic/server.ts'
       || path === 'examples/basic/task-events-route.ts' || path === 'examples/basic/task-events-route.test.ts') {
       dirs.add('examples/basic'); continue;
