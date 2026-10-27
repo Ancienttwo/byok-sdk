@@ -110,17 +110,11 @@ describe('blob client (protocol §7)', () => {
     await server.waitFor((event) => event.type === 'task.claim' && event.task_id === taskId, nativeWaitMs);
     expect(server.received.some((event) => event.type === 'task.decline' && event.task_id === taskId)).toBe(false);
     await server.waitFor((event) => event.type === 'task.started' && event.task_id === taskId, nativeWaitMs);
-    const progress = await server.waitFor(
-      (event) =>
-        event.type === 'task.progress' &&
-        event.task_id === taskId &&
-        (event.payload as { events: Array<{ type: string; text?: string }> }).events.some(
-          (item) => item.type === 'progress' && item.text === `reply-1:${prependAgentMemoryGuidance(resolvedInstruction)}`,
-        ),
-      nativeWaitMs,
-    );
-
-    expect(progress).toBeDefined();
+    // The fake runtime echoes its instruction. The Agent egress lane of a fresh offer may coalesce that
+    // progress batch away, so the terminal summary, which records the whole run's text, carries the echo.
+    const completed = await server.waitFor((event) => event.type === 'task.complete' && event.task_id === taskId, nativeWaitMs);
+    if (completed.type !== 'task.complete' || completed.payload.sealed !== undefined) throw new Error('expected a plaintext task.complete');
+    expect(completed.payload.summary).toContain(`reply-1:${prependAgentMemoryGuidance(resolvedInstruction)}`);
     expect(server.httpRequests.some((request) => request.method === 'GET' && request.pathname === '/byok/blobs/instr-blob-bundled-prepared/url')).toBe(true);
   });
 

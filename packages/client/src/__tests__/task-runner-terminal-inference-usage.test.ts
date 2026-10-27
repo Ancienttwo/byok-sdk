@@ -13,7 +13,7 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { testIngressBudget } from './fixtures/activity-ingress';
-import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
+import { FRESH_DAEMON_EGRESS, FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -175,6 +175,7 @@ describe('TaskRunner terminal inference usage projection', () => {
           productId: 'terminal-usage-composition-test',
           serverUrl: server.url,
           agentHome: testAgentHomeConfig(),
+          agentEgress: FRESH_DAEMON_EGRESS,
           storeDir: await tmpDir('byok-terminal-usage-daemon-store-'),
         },
         [adapter],
