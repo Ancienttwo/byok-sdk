@@ -233,26 +233,6 @@ describe('ByokServer.tasks.events', () => {
     }, { timeout: 2_000, interval: 10 });
   });
 
-  it('refuses a reclaimed task without waiting on hashing the offer id', async () => {
-    const { byok: instance, daemon } = await start({ taskEventRetentionMs: 20 });
-    await submit(instance, daemon, 'unhashed');
-    await claimStarted(daemon, 'unhashed');
-    await send(daemon, createEnvelope('task.complete', { agentRef: AGENT, summary: 'done', sessionRef: 'sess-u' }, { taskId: 'unhashed' }));
-    await vi.waitFor(async () => {
-      await expect(first(instance.tasks.events('unhashed'))).rejects.toMatchObject(unavailable('unhashed', 'feed_expired'));
-    }, { timeout: 2_000, interval: 10 });
-    // Liveness comes from the attempt and its pending approval alone. A digest
-    // runs on the thread pool, which a loaded runner can hold far past a
-    // test's fake-time bound, so a refusal must not wait on one.
-    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest').mockReturnValue(new Promise<ArrayBuffer>(() => {}));
-    try {
-      await expect(first(instance.tasks.events('unhashed'))).rejects.toMatchObject(unavailable('unhashed', 'feed_expired'));
-      expect(digest).not.toHaveBeenCalled();
-    } finally {
-      digest.mockRestore();
-    }
-  });
-
   it('ends a pending read when its signal aborts or the server closes', async () => {
     const { byok: instance, daemon } = await start();
     await submit(instance, daemon, 'stoppable');

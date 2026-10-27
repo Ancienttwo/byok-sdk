@@ -1,7 +1,7 @@
 import type { InboundCommitted, ByokCloudObserver } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
 import { AsyncEventQueue, type QueueEntry } from './event-queue';
-import type { ByokServerEvent, ServerTaskEvent } from './types';
+import { TaskEventsUnavailableError, type ByokServerEvent, type ServerTaskEvent } from './types';
 
 /** Per-task {@link ServerTaskEvent} retention before drop-oldest engages. */
 export const DEFAULT_TASK_EVENT_BUFFER_LIMIT = 1000;
@@ -17,31 +17,6 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
  * (`ByokServer.tasks.get`, `TaskHandle.result()`).
  */
 const TRUNCATION_MARKER: ServerTaskEvent = { kind: 'error', reason: 'events_truncated' };
-
-/**
- * Thrown by the first `next()` of `ByokServer.tasks.events` or
- * {@link TaskHandle.events}, before any entry, when the read cannot continue
- * from where the caller asked. Read the task's current facts with
- * `ByokServer.tasks.get` instead. It lives with the relay, which owns both
- * reasons: the feed a cursor names, and how long a terminal feed is retained.
- *
- * - `cursor_unknown`: `after` names no position in this instance's current
- *   feed of the task (a restart, another task's cursor, or a malformed one).
- * - `feed_expired`: the task is terminal and this instance retains no feed for
- *   it, because retention reclaimed it or the task ended before this instance
- *   started.
- */
-export class TaskEventsUnavailableError extends Error {
-  readonly taskId: string;
-  readonly reason: 'cursor_unknown' | 'feed_expired';
-
-  constructor(taskId: string, reason: 'cursor_unknown' | 'feed_expired') {
-    super(`events of task ${taskId} unavailable: ${reason}`);
-    this.name = 'TaskEventsUnavailableError';
-    this.taskId = taskId;
-    this.reason = reason;
-  }
-}
 
 /**
  * One task's delivery plumbing. A feed is provisional while its dispatch is

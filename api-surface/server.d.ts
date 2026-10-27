@@ -74,7 +74,7 @@ import { type AgentExecutionInput, type AgentMemoryIntentNoticeInput, type Enque
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, TaskEventEntry, TaskHandle, TaskSnapshot } from './types';
 export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskEventEntry, TaskHandle, TaskResult, TaskSnapshot, } from './types';
-export { TaskEventsUnavailableError } from './relay';
+export { TaskEventsUnavailableError } from './types';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
@@ -504,29 +504,11 @@ export declare function createCountingInboundRateLimiter(limiter: RateLimiter, o
 import type { InboundCommitted, ByokCloudObserver } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
 import { AsyncEventQueue, type QueueEntry } from './event-queue';
-import type { ByokServerEvent, ServerTaskEvent } from './types';
+import { type ByokServerEvent, type ServerTaskEvent } from './types';
 /** Per-task {@link ServerTaskEvent} retention before drop-oldest engages. */
 export declare const DEFAULT_TASK_EVENT_BUFFER_LIMIT = 1000;
 /** How long a terminal task's relay state is retained before reclamation, ms. */
 export declare const DEFAULT_TASK_EVENT_RETENTION_MS: number;
-/**
- * Thrown by the first `next()` of `ByokServer.tasks.events` or
- * {@link TaskHandle.events}, before any entry, when the read cannot continue
- * from where the caller asked. Read the task's current facts with
- * `ByokServer.tasks.get` instead. It lives with the relay, which owns both
- * reasons: the feed a cursor names, and how long a terminal feed is retained.
- *
- * - `cursor_unknown`: `after` names no position in this instance's current
- *   feed of the task (a restart, another task's cursor, or a malformed one).
- * - `feed_expired`: the task is terminal and this instance retains no feed for
- *   it, because retention reclaimed it or the task ended before this instance
- *   started.
- */
-export declare class TaskEventsUnavailableError extends Error {
-    readonly taskId: string;
-    readonly reason: 'cursor_unknown' | 'feed_expired';
-    constructor(taskId: string, reason: 'cursor_unknown' | 'feed_expired');
-}
 /**
  * One task's delivery plumbing. A feed is provisional while its dispatch is
  * in flight, dispatched once the offer is accepted, and neither when a host
@@ -788,8 +770,8 @@ export declare function migrateSqliteToWireV4(path: string, confirmedLegacyTasks
 // ==== @byok-sdk/server dist/task-handle.d.ts ====
 import { type ByokCloud, type SteerRejectionCode, type TenantId } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
-import { type TaskEventRelay } from './relay';
-import type { TaskEventEntry, TaskHandle, TaskResult } from './types';
+import type { TaskEventRelay } from './relay';
+import { type TaskEventEntry, type TaskHandle, type TaskResult } from './types';
 /**
  * Thrown by {@link TaskHandle.steer} when the kernel refuses the steer.
  *
@@ -1195,6 +1177,23 @@ export interface TaskEventEntry {
      */
     readonly cursor: string;
     readonly event: ServerTaskEvent;
+}
+/**
+ * Thrown by the first `next()` of `ByokServer.tasks.events` or
+ * {@link TaskHandle.events}, before any entry, when the read cannot continue
+ * from where the caller asked. Read the task's current facts with
+ * `ByokServer.tasks.get` instead.
+ *
+ * - `cursor_unknown`: `after` names no position in this instance's current
+ *   feed of the task (a restart, another task's cursor, or a malformed one).
+ * - `feed_expired`: the task is terminal and this instance retains no feed for
+ *   it, because retention reclaimed it or the task ended before this instance
+ *   started.
+ */
+export declare class TaskEventsUnavailableError extends Error {
+    readonly taskId: string;
+    readonly reason: 'cursor_unknown' | 'feed_expired';
+    constructor(taskId: string, reason: 'cursor_unknown' | 'feed_expired');
 }
 /** Handle returned by {@link ByokServer.dispatch} for one in-flight task. */
 export interface TaskHandle {
