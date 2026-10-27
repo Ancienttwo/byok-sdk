@@ -7,7 +7,7 @@ import {
   RuntimeInfoSchema,
   TaskApprovalResolvedPayloadSchema,
   TaskClaimPayloadSchema,
-  TaskOfferForAgentPayloadSchema,
+  TaskOfferPayloadSchema,
   createEnvelope,
   decodeEnvelope,
   parseMessage,
@@ -252,10 +252,11 @@ describe('task.claim.capabilities (additive-minor optional field)', () => {
 
 describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)', () => {
   it('an offer payload has no taskId field (the strict Agent offer refuses one)', () => {
-    const result = TaskOfferForAgentPayloadSchema.safeParse({
+    const result = TaskOfferPayloadSchema.safeParse({
       taskId: 'task-1', // M0 shape — payload-level duplicate, now meaningless
       instruction: 'do it',
-      agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' }, 
+      agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+      session: { mode: 'resume', sessionRef: 'session-1' },
     });
     expect(result.success).toBe(false);
   });
