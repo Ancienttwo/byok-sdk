@@ -48,9 +48,32 @@ describe('wire v3 -> v4 receipt migration (#925)', () => {
     }
   });
 
-  it('keeps an offer receipt whose type v4 keeps, and refuses a legacy offer type', () => {
-    expect(migrateWireV3Receipt('offer', offerReceipt('task.offer_for_agent', { instruction: 'x', agentRef: AGENT })))
-      .toEqual({ outcome: 'unchanged' });
+  // B2: unchanged -> migrated. Every v3 Agent offer type is renamed to task.offer, so no offer receipt keeps its bytes.
+  const OFFER_VARIANTS = [
+    ['resume', 'task.offer_for_agent', 'resume'],
+    ['resume with egress', 'task.offer_for_agent_with_egress', 'resume'],
+    ['fresh execution', 'task.offer_for_agent_with_egress_fresh', 'fresh'],
+    ['prepared', 'task.offer_prepared', 'fresh'],
+    ['sealed resume', 'task.offer_for_agent_sealed', 'resume'],
+    ['sealed egress', 'task.offer_for_agent_with_egress_sealed', 'resume'],
+    ['sealed execution', 'task.offer_for_agent_with_egress_fresh_sealed', 'fresh'],
+  ] as const;
+  const v3OfferPayload = (type: string) =>
+    (JSON.parse(v3Lines.find((line) => (JSON.parse(line) as { type: string }).type === type)!) as { payload: Record<string, unknown> }).payload;
+
+  it.each(OFFER_VARIANTS)('migrates a v3 %s offer receipt to task.offer with its session', (_variant, v3Type, mode) => {
+    const payload = v3OfferPayload(v3Type);
+    const migrated = migrateWireV3Receipt('offer', offerReceipt(v3Type, payload));
+    if (migrated.outcome !== 'migrated') throw new Error(`expected migrated, got ${JSON.stringify(migrated)}`);
+    const { sessionRef, ...rest } = payload;
+    expect(JSON.parse(migrated.body)).toEqual({
+      deviceId: 'device-1',
+      type: 'task.offer',
+      payload: { ...rest, session: mode === 'resume' ? { mode, sessionRef } : { mode } },
+    });
+  });
+
+  it('refuses a legacy offer type', () => {
     for (const type of ['task.offer', 'task.offer_with_toolsets', 'task.offer_sealed', 'task.offer_with_toolsets_sealed']) {
       expect(migrateWireV3Receipt('offer', offerReceipt(type, { instruction: 'x' }))).toEqual({
         outcome: 'refused', refusal: 'type_without_v4_form', type,
@@ -60,6 +83,10 @@ describe('wire v3 -> v4 receipt migration (#925)', () => {
 
   it('refuses an offer receipt whose payload v4 does not read exactly', () => {
     expect(migrateWireV3Receipt('offer', offerReceipt('task.offer_for_agent', { instruction: 'x' }))).toEqual({
+      outcome: 'refused', refusal: 'invalid_under_v4', type: 'task.offer_for_agent',
+    });
+    // A resume offer without its sessionRef is never read as fresh.
+    expect(migrateWireV3Receipt('offer', offerReceipt('task.offer_for_agent', { instruction: 'x', agentRef: AGENT }))).toEqual({
       outcome: 'refused', refusal: 'invalid_under_v4', type: 'task.offer_for_agent',
     });
     expect(migrateWireV3Receipt('offer', 'not json')).toEqual({ outcome: 'refused', refusal: 'not_wire_v3' });
