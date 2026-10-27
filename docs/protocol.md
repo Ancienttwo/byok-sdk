@@ -16,14 +16,25 @@ Only wire major `4` is currently supported. v4 completes the Agent-only
 cutover (ADR-034) and removes the approval paths kept for peers that predate
 approval ids:
 
-- Every offer is Agent-bound. v4 removes `conn.ack`, `task.offer`,
+- Every offer is Agent-bound, and there is one offer type. v4 removes
+  `conn.ack` and the v3 runtime-only offers (`task.offer`,
   `task.offer_with_toolsets` and their sealed twins `task.offer_sealed` and
-  `task.offer_with_toolsets_sealed`. The offers are `task.offer_for_agent`,
-  `task.offer_for_agent_with_egress`, `task.offer_for_agent_with_egress_fresh`,
-  their `_sealed` twins and `task.offer_prepared`. The `strict-agent-only`
-  capability flag is gone: every daemon runs Agent offers only, and a daemon
-  without an Agent home declines every offer. The server answers the handshake
-  in the long-poll response metadata (`EventsPollResponse`, §8.1).
+  `task.offer_with_toolsets_sealed`). The v3 Agent offers
+  (`task.offer_for_agent`, `task.offer_for_agent_with_egress`,
+  `task.offer_for_agent_with_egress_fresh`, `task.offer_prepared` and the three
+  `task.offer_for_agent*_sealed` twins) merge into one `task.offer`, which
+  reuses the name. Fresh versus resume is its required `session` (§1.3), a
+  prepared Execution is its `preparation` field (§2.0), and an egress offer
+  is its `egressPolicy` field (§2.1). The `strict-agent-only` capability flag
+  is gone: every daemon runs Agent offers only, and a daemon without an Agent
+  home declines every offer. The server answers the handshake in the
+  long-poll response metadata (`EventsPollResponse`, §8.1).
+- Sealed is a payload branch, not a message type. Every `*_sealed` type is
+  gone. A sealed offer is a `task.offer` that carries `sealing`; a sealed
+  steer or task output is the plaintext type (`task.steer`, `task.decline`,
+  `task.progress`, `task.artifact`, `task.await_approval`, `task.complete`,
+  `task.fail`, `task.cancelled`) with a `sealed` member (§2.5).
+- `EnvelopeSchema` has 28 branches, down from 47 in v3.
 - `approvalId` is required on `task.await_approval`, `task.approve` and
   `task.reject`, and a decision resolves only the approval it names (§5.3).
 - `task.approval_resolved` is baseline: the daemon sends it for every
@@ -131,16 +142,17 @@ unproven (see the evidence list below).
   (0.27.0 through 0.30.2) are byte-identical to what the last v3 release
   shipped and read-only. The current decoder rejects every v3 envelope line
   at the version boundary, and the v3 HTTP lines that carry envelopes too.
-  Rewriting only the version is not an upgrade: v4 removed message types and
-  made `approvalId` required.
+  Rewriting only the version is not an upgrade: v4 removed, merged and
+  renamed message types, moved the resume reference into `session`, and made
+  `approvalId` required.
 - **v4 self-consistency.** `golden/v4.envelopes.ndjson` and
   `golden/v4.http.ndjson` are append-only. The current decoder reads every
   line back to the committed JSON, and the current HTTP decoders read every
   literal body to its independently authored value (messages responses must
   account for their `batchLength`). The v4 corpus carries every message type,
-  every `WIRE_ADDITIONS` entry, a result-document offer with `schema` on each
-  Agent offer type, and an `approvalId` on every approval request and
-  decision. `golden/v4.releases.json` has no release and no `floor` until the
+  every `WIRE_ADDITIONS` entry, a result-document `task.offer` with `schema`
+  for each offer lane (resume, resume with `egressPolicy`, fresh, prepared),
+  and an `approvalId` on every approval request and decision. `golden/v4.releases.json` has no release and no `floor` until the
   first v4 release is registered. Each registered v4 entry pins both corpus
   prefixes, and the lines it covers are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
@@ -155,15 +167,58 @@ first registered v4 release.
 
 v4 starts from the v3 table minus the server `approval_resolved` gate (every
 v4 server reads `task.approval_resolved`) and minus the rows of the removed
-offers (`harnessId` on `task.offer` and `task.offer_with_toolsets`, gated on
-`custom-harness`), plus the same `harnessId` gate on every Agent offer type:
-an Agent offer naming a harness now also needs the device's `custom-harness`
-flag. The v3 reset already made the v2
-strip-safe rows and the v2 `result-document` gate baseline. `WIRE_ADDITIONS`
-keeps the `gated` rows, most of which name device capabilities a daemon
-advertises only when it is configured for the surface (Agent home, readers,
-egress, input preparation, provisioning, memory intents). Senders still take
-admission flags from `requiredReceiverCapabilities`.
+runtime-only offers (`harnessId` on the v3 `task.offer` and
+`task.offer_with_toolsets`, gated on `custom-harness`). The v3 Agent offer
+types are one `task.offer` in v4, so each gate a v3 type carried is a type,
+field or value row on `task.offer`:
+
+| `task.offer` carries | Device flag |
+| --- | --- |
+| (every offer) | `agent-home-contract` |
+| `dispatchSelection` | `dispatch-selection` |
+| `requiredToolsets` | `toolset-selection` |
+| `terminalProjection` | `terminal-projection-selection` |
+| `homeAccess` | `agent-home-readers` |
+| `harnessId` | `custom-harness` |
+| `agentMemory` | `agent-memory-selection` |
+| `agentMemory: 'read-if-admitted'` | `agent-memory-read-if-admitted` |
+| `agentMemory: 'read-write-if-admitted'` | `agent-memory-read-write-if-admitted` |
+| `egressPolicy` | `agent-egress-policy` and `agent-egress-reliable-ack` |
+| `messageEgress` | `agent-message-egress` |
+| `session.mode: 'fresh'` | `agent-egress-fresh-session` |
+| `preparation` | `agent-input-preparation-v9` |
+| `sealing` | `sealed-payload-v1` (generated from the split table, §2.5) |
+
+The sealed rows of `task.steer` and the task outputs are generated the same
+way (§2.5). Against the v3 table (0.30.2), admission differs in two places:
+
+- An Agent offer naming a harness also needs the device's `custom-harness`
+  flag. In v3 only the removed offers had that gate.
+- A prepared offer also needs `agent-memory-selection`, because it always
+  carries `agentMemory`; v3 had no such row on `task.offer_prepared`. A
+  daemon advertises the flag together with `agent-home-contract`
+  (`packages/client/src/daemon/create-daemon/support.ts:170`), and every
+  device that takes a prepared offer has an Agent home, so admission does not
+  change in practice.
+
+No flag became baseline in v4. The v3 reset already made the v2 strip-safe
+rows and the v2 `result-document` gate baseline. `WIRE_ADDITIONS` keeps the
+`gated` rows, most of which name device capabilities a daemon advertises only
+when it is configured for the surface (Agent home, readers, egress, input
+preparation, provisioning, memory intents). Senders still take admission
+flags from `requiredReceiverCapabilities`.
+
+Both `task.offer` branches are strict, and so is every nested control object
+in them, `limits` included. A daemon that does not know an offer field stops
+its cursor on it (§2.0) instead of stripping it. A daemon also checks the
+gates on its own side: before it opens a sealed offer or starts any work, it
+computes `requiredReceiverCapabilities('task.offer', payload)` on the wire
+payload and declines non-retryably when a flag is missing from its own
+`conn.hello`. The `reason` is `offer_capability_missing: this daemon does not
+advertise <flags>`. A task whose `sealing.categories` includes `task-output`
+is declined with the sealed code `sealed_key_unavailable` instead, because a
+decline for such a task must take a closed sealed-code form (§2.5)
+(`packages/client/src/daemon/task-runner/offer-admission.ts:202-216`).
 
 - Every recursive property path (array items, record values, each union
   branch) and every enum or literal value of each current payload schema
@@ -198,14 +253,17 @@ bump (see `docs/releases/README.md`).
 other sections that say a change landed with "no `PROTOCOL_VERSION` bump" or
 name the `v1.*` golden files, record additive changes made under v1. v2, v3
 and v4 kept every one of those shapes except the fields and message types the
-status notes above list as removed. There is no in-place "tighten it a little" allowance post-freeze the
+status notes above list as removed. These entries keep the v3 type names: in
+v4 the Agent offer types they name are one `task.offer`, with the resume
+reference moved into `session` and the gates listed above, and each
+`*_sealed` type is the sealed branch of its plaintext type. There is no in-place "tighten it a little" allowance post-freeze the
 way pre-freeze M0→M1 had (§10).
 
 **Scoped input-preparation cut:** the Owner-approved
 [prepared memory contract](researches/2026-09-28-prepared-agent-memory-contract.md)
 (superseded in part by [ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md); see [the spec](spec.md#prepared-operations))
 extends the earlier official-Pi exception to input-preparation v8. The strict
-preparation request, receipt binding and `task.offer_prepared` require explicit
+preparation request, receipt binding and the prepared offer require explicit
 `agentMemory: 'none' | 'read' | 'read-write'`. `INPUT_PREPARATION_WIRE_VERSION` and
 record schema were 8 at that cut; admission requires `agent-input-preparation-v8`. The outer
 envelope was then v1 (it is v4 now). Binding and observation digests use domain v2. This is a paired
@@ -360,7 +418,7 @@ paths name one shared field in `WIRE_ADDITIONS`. See the
 [Agent message draft lane](spec.md#agent-message-draft-lane).
 
 **Landed additive minor: `task.fail.failure` (#869).** `task.fail`, and so
-`task.fail_sealed`, gains an OPTIONAL strict `failure: { class, resetsAt? }`.
+its sealed branch, gains an OPTIONAL strict `failure: { class, resetsAt? }`.
 `class` is a closed `RuntimeFailureClass` value: the vendored OAR
 `FailureClass` (`auth`, `quota`, `rate_limited`, `billing`,
 `model_unavailable`, `input_too_large`, `invalid_request`, `overloaded`,
@@ -370,10 +428,10 @@ reported when the limit resets. Adapters classify from structured runtime
 fields only and never parse `reason`, which stays display text. `unknown`
 means the runtime gave no structured evidence; a failure the daemon makes
 itself is `unknown`. The field is gated on the server's new
-`runtime-failure-class` flag, because `task.fail_sealed` is strict: a daemon
+`runtime-failure-class` flag, because the sealed branch is strict: a daemon
 sends it only to a server that advertises the flag. Server flags are
 live-only, so a terminal built while the daemon had no connection carries no
-field. `failure` stays plaintext on `task.fail_sealed`. The reference server
+field. `failure` stays plaintext on a sealed `task.fail`. The reference server
 and the hosted cloud advertise the flag and project the field as
 `TaskResult.failure` and `TerminalResult.failure`.
 
@@ -391,15 +449,27 @@ before the v4 server starts. It ships in 0.31.x only; 0.32.0 removes it
 - `WIRE_V3_TO_V4_TYPES` maps every v3 message type to its v4 type, or to
   `null` when v4 does not carry it: `conn.ack`, `task.offer`,
   `task.offer_with_toolsets`, `task.offer_sealed` and
-  `task.offer_with_toolsets_sealed`. Every other v3 type keeps its name.
+  `task.offer_with_toolsets_sealed`. The four Agent offer types and their
+  three sealed twins map to `task.offer`. Each other `*_sealed` type maps to
+  its plaintext type, whose sealed branch its payload takes unchanged. Every
+  other v3 type keeps its name.
 - `wireV4TypeOf(v3Type)` returns the v4 type, or `undefined`.
+- `wireV4FormOf(v3Type, payload)` returns the v4 type and payload, before v4
+  validation, or `undefined` when v4 does not carry the type. A resume offer
+  (`task.offer_for_agent`, `task.offer_for_agent_with_egress` and their sealed
+  twins) turns `sessionRef` into `session: { mode: 'resume', sessionRef }`.
+  A fresh or prepared offer (`task.offer_for_agent_with_egress_fresh`, its
+  sealed twin and `task.offer_prepared`) gains `session: { mode: 'fresh' }`.
+  A `task.offer_for_agent` without `sessionRef` gets no `session`, so it fails
+  v4 validation: v4 has no fresh offer without `egressPolicy`, and a missing
+  reference never means fresh. Every other payload keeps its fields.
 - `migrateWireV3Envelope(body)` re-encodes one stored v3 envelope as canonical
-  v4, so its bytes and hash differ from the v3 body. It refuses with one of
-  three reasons: `not_wire_v3` (not JSON, not an envelope object, or not
-  `v: 3`), `type_without_v4_form` (a type that maps to `null` or is not
-  listed), or `invalid_under_v4` (the mapped envelope does not parse under v4;
-  for example a `task.await_approval`, `task.approve` or `task.reject` without
-  `approvalId`).
+  v4 through `wireV4FormOf`, so its bytes and hash differ from the v3 body. It
+  refuses with one of three reasons: `not_wire_v3` (not JSON, not an envelope
+  object, or not `v: 3`), `type_without_v4_form` (a type that maps to `null`
+  or is not listed), or `invalid_under_v4` (the mapped envelope does not parse
+  under v4; for example a `task.await_approval`, `task.approve` or
+  `task.reject` without `approvalId`).
 
 `@byok-sdk/cloud` exports the store-independent half
 (`packages/cloud/src/wire-v4-receipt-migration.ts`):
@@ -411,10 +481,23 @@ before the v4 server starts. It ships in 0.31.x only; 0.32.0 removes it
   new body, or `refused` with a refusal reason. A redaction tombstone is
   unchanged. A terminal receipt is a v3 envelope and goes through
   `migrateWireV3Envelope`; one that already decodes under v4 is unchanged. An
-  offer receipt (`{ deviceId, type, payload }`, without a wire version) keeps
-  its bytes when v4 keeps its type and its payload parses under v4 unchanged.
-  An offer receipt of a removed offer type is refused
+  offer receipt (`{ deviceId, type, payload }`, without a wire version) of a
+  v3 Agent offer type takes its v4 type and payload from `wireV4FormOf`. It is
+  refused (`invalid_under_v4`) when the v4 payload does not parse, or when
+  parsing would drop or change any of its content; for example a v3 resume
+  offer without `sessionRef`, or `limits` with a key the strict v4 `limits`
+  does not have. A stored `task.offer` whose payload carries an `agentRef` is
+  a v4 receipt: it is unchanged when it parses under v4 and refused
+  (`invalid_under_v4`) when it does not, so running the migration again
+  changes nothing it already migrated. A stored `task.offer` without an
+  AgentRef is the v3 runtime-only offer of a legacy task (below); it and an
+  offer receipt of another removed offer type are refused
   (`type_without_v4_form`).
+- A migrated sealed offer receipt keeps its ciphertext, whose AAD and content
+  MAC are bound to the v3 offer type name as the family. A v4 receiver opens a
+  sealed offer under family `task.offer` (§2.5), so re-opening such a
+  historical sealed offer fails. Nothing in the SDK opens a stored offer
+  again.
 - A legacy task (`WireV3LegacyTask`: `tenantId`, `taskId`, `deviceId`,
   `type`) is a task offered on a removed offer type, so it has no AgentRef.
   `wireV3LegacyOfferType(body)` and `wireV3LegacyOfferReceiptKeys(...)` find
@@ -448,7 +531,7 @@ Every wire message is a single-line NDJSON envelope:
   v: number;            // protocol version, currently 4
   id: string;            // uuid, unique per envelope
   ts: string;             // ISO-8601 datetime with offset
-  type: MessageType;       // e.g. "task.offer_for_agent"
+  type: MessageType;       // e.g. "task.offer"
   task_id?: string;         // routing key — see rule below
   session_ref?: string;      // opaque session continuation token
   seq?: number;                // per-device redelivery cursor — see rule below
@@ -510,33 +593,41 @@ handler completion, including `task.*`, `agent.egress.ack`,
 ### 1.3 `session_ref`
 
 The session reference is an opaque continuation token the daemon maps to a
-runtime session id (`claude --resume`, codex resume, pi session). An Agent
-offer carries it as the payload `sessionRef`: a follow-up Agent task resumes
-by carrying the same `sessionRef` in a new Agent offer, and the daemon admits
-it only when it matches the durable Agent-home handoff (§1.3.1). A fresh
-Agent execution carries no `sessionRef`. The embedded server's `dispatch()`
-only resumes, so it requires `agentRef` and `sessionRef`; a fresh execution
+runtime session id (`claude --resume`, codex resume, pi session). Every
+`task.offer` carries a required `session` (`SessionSelectionSchema`,
+`packages/protocol/src/messages.ts`):
+
+- `{ mode: 'resume', sessionRef }` resumes the named session. `sessionRef` is
+  1 to 512 characters. A follow-up Agent task resumes by carrying the same
+  `sessionRef` in a new offer, and the daemon admits it only when it matches
+  the durable Agent-home handoff (§1.3.1).
+- `{ mode: 'fresh' }` lets the selected runtime mint a new session after
+  start. A fresh offer must carry `egressPolicy` (§2.1), and it is gated on
+  the device's `agent-egress-fresh-session` flag.
+
+`session` is required so that an offer without a resume reference is never
+read as fresh. A prepared offer is always fresh (§2.0). The embedded server's
+`dispatch()` only resumes, so it requires `agentRef` and `sessionRef` and
+writes `session: { mode: 'resume', sessionRef }` itself; a fresh execution
 goes through `executions.submit` with a required egress policy (§2.1).
 
 #### 1.3.1 Strict Agent fresh versus resume authority
 
 The published `0.7.0` strict egress path exposed a fresh-session deadlock:
-`task.offer_for_agent_with_egress` requires `sessionRef`, while a fresh runtime
-cannot mint its native session until after `start()`. The client must reject a
-missing, preseeded, or invented Agent-home handoff, so task id or a server-side
-reservation cannot substitute for the runtime session.
+its egress offer required `sessionRef`, while a fresh runtime cannot mint its
+native session until after `start()`. The client must reject a missing,
+preseeded, or invented Agent-home handoff, so task id or a server-side
+reservation cannot substitute for the runtime session. The repair landed
+under v1 as a separate fresh offer type; v4 carries the same two facts as the
+two `session` modes of `task.offer`:
 
-The repair landed additively under frozen protocol v1 and keeps these wire
-facts distinct:
-
-- `task.offer_for_agent_with_egress` stays byte-compatible and
-  exact-resume-only. Its `sessionRef` must match the existing durable canonical
-  Agent-home handoff; missing, stale, cross-Agent/profile, runtime, or cwd
-  evidence fails closed and never becomes fresh execution.
-- `task.offer_for_agent_with_egress_fresh` is fresh-only and carries no
-  `sessionRef`. It is deliverable only to a device with the durable
-  `agent-egress-fresh-session` capability. An older daemon cannot receive this
-  additive message and cannot strip it into a task-only offer.
+- `session.mode: 'resume'` is exact-resume-only. Its `sessionRef` must match
+  the existing durable canonical Agent-home handoff; missing, stale,
+  cross-Agent/profile, runtime, or cwd evidence fails closed and never becomes
+  fresh execution.
+- `session.mode: 'fresh'` carries no `sessionRef`. It is deliverable only to a
+  device with the durable `agent-egress-fresh-session` capability, and a
+  daemon without the flag declines it (Freeze rule).
 
 The runtime, not cloud or task identity, owns a fresh native session. After the
 fresh offer is claimed, the daemon starts the selected runtime without resume
@@ -553,10 +644,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | Type | Dir | `task_id` | `seq` | Payload | Sent when |
 |---|---|---|---|---|---|
 | `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `configuredToolsets?`, `cursor?` | First message on an authenticated long-poll session (including after reconnect) |
-| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `homeAccess?` (additive — §2.2), `agentMemory?` (additive — §2.2; `read-if-admitted` needs `agent-memory-read-if-admitted`, `read-write-if-admitted` needs `agent-memory-read-write-if-admitted`), `runtime?`, `harnessId?`, `dispatchSelection?` (see below), `terminalProjection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
-| `task.offer_for_agent_with_egress` | S→D | **required** | **required** | All strict Agent fields plus required `sessionRef` and exact `egressPolicy` | An Agent dispatch targets a daemon that consumed the revisioned egress contract |
-| `task.offer_for_agent_with_egress_fresh` | S→D | **required** | **required** | All strict Agent fields plus exact `egressPolicy`, with no `sessionRef` | A fresh Agent dispatch targets a daemon advertising `agent-egress-fresh-session` |
-| `task.offer_prepared` | S→D | **required** | **required** | `agentRef`, `homeAccess?`, `agentMemory`, `egressPolicy`, `messageEgress?`, `preparation` (`reference`, `requestDigest`, `artifactDigest?`), `runtime?`, `dispatchSelection?`, `requiredToolsets?`, `terminalProjection?`, `limits?` — and deliberately NO `instruction` and NO `sessionRef` | An already-counted preparation is dispatched to the device that counted it |
+| `task.offer` | S→D | **required** | **required** | `agentRef`, `session` (§1.3), `instruction` (absent on a prepared offer; may move into `sealed`, §2.5), `preparation?` (§2.0), `agentMemory?` (§2.2), `homeAccess?` (§2.2), `requiredToolsets?`, `runtime?`, `harnessId?`, `dispatchSelection?` (see below), `terminalProjection?`, `limits?`, `egressPolicy?` (§2.1), `messageEgress?`; sealed branch also `sealing`, `sealed?`, `routineRef?` (§2.5) | An Agent dispatch, execution or prepared Execution targets a device that advertises every flag its fields need (Freeze rule) |
 | `agent.egress.ack` | S→D | optional | **required** | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
 | `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
 | `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
@@ -581,14 +669,38 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `agent.egress.reliable` | D→S | optional | optional | exact Agent/session/policy identity, stable `eventId`/`cursor`, payload hash and byte count | A locally fsynced reliable event is sent or retried |
 | `agent.content.receipt` | D→S | optional | optional | exact request/actor/Agent/session/runtime/cwd/policy/target/MIME/decode identity; allowed includes hash/size/BlobRef, denied includes zero bytes and typed reason | Local content policy and audit completed |
 
+`task.steer` and the seven task outputs (`task.decline`, `task.progress`,
+`task.artifact`, `task.await_approval`, `task.complete`, `task.fail`,
+`task.cancelled`) also have a sealed branch: the same type, with a `sealed`
+member in place of the fields it seals (§2.5). The payloads above are the
+plaintext branches.
+
+**`task.offer` rules.** The plaintext and the sealed branch share these
+cross-field rules (`offerRule`, `packages/protocol/src/messages.ts`):
+
+- A prepared offer (`preparation`) carries no `instruction`, has
+  `session.mode: 'fresh'`, carries an `egressPolicy`, and selects a prepared
+  `agentMemory` mode (`none`, `read` or `read-write`).
+- A plaintext offer that is not prepared carries an `instruction`. A sealed
+  offer carries it in `sealed` or in plaintext, as its `sealing` says (§2.5).
+- A fresh or prepared offer carries an `egressPolicy`.
+- `messageEgress` needs an `egressPolicy`.
+- `routineRef` appears only on a fresh sealed offer.
+
+Both branches are strict, and so is every nested control object, `limits`
+included. Each optional field is gated on a device flag; the Freeze rule
+lists the rows and the daemon's own check of them.
+
 ### 2.0 Prepared Executions
 
-`task.offer_prepared` is strict control data. In long-poll, unknown executable
-message types and unknown strict payload keys both freeze the cursor. Enqueue
-requires `agent-home-contract`, `agent-input-preparation-v9`, `agent-egress-policy`,
-`agent-egress-reliable-ack` and `agent-egress-fresh-session`; when `messageEgress` is
-present it also requires `agent-message-egress`. These gates run before allocating
-any task or mailbox row. The host-only `agentMessageContext` is recorded with the
+A prepared offer is a `task.offer` with `preparation`. It is strict control
+data. In long-poll, unknown executable message types and unknown strict payload
+keys both freeze the cursor. Enqueue requires `agent-home-contract`,
+`agent-input-preparation-v9`, `agent-memory-selection`, `agent-egress-policy`,
+`agent-egress-reliable-ack` and `agent-egress-fresh-session`; when
+`messageEgress` is present it also requires `agent-message-egress`. These
+gates run before allocating any task or mailbox row. A prepared offer is never
+sealed: the split table forbids `preparation` on the sealed branch (§2.5). The host-only `agentMessageContext` is recorded with the
 immutable message requirement and is never sent to the daemon.
 
 The v8 cut retains Host-owned `prompt.systemPrompt`, official closure identity and
@@ -624,9 +736,9 @@ A prepared session launches no native tool. Host MCP toolsets may be empty only 
 tools make the combined surface nonempty; with `agentMemory:'none'` they remain required.
 
 It carries no `instruction`: the user request is already inside the frozen
-envelope the referenced record retained. It carries no `sessionRef` either — a
-prepared Execution never resumes, because resuming binds the frozen request to a
-history nobody counted.
+envelope the referenced record retained. Its `session` is always
+`{ mode: 'fresh' }` — a prepared Execution never resumes, because resuming
+binds the frozen request to a history nobody counted.
 
 Nothing under `preparation` is authority. Every value is the Host re-presenting
 what the device's own receipt told it, and the device compares each one against
@@ -636,20 +748,20 @@ never reconciles, narrows or re-derives.
 
 ### 2.1 Agent egress and explicit content reads
 
-`task.offer_for_agent_with_egress` is a distinct message rather than an
-optional field on `task.offer_for_agent`. Server and hosted cloud require
-`agent-home-contract`, `agent-egress-policy`, and
-`agent-egress-reliable-ack` before allocating the task/mailbox row. An old
-daemon cannot strip the policy and continue with task-only semantics.
+An egress offer is a `task.offer` with `egressPolicy`. Server and hosted
+cloud require `agent-home-contract`, `agent-egress-policy`, and
+`agent-egress-reliable-ack` before allocating the task/mailbox row. The offer
+is strict, so a daemon that does not know the field cannot strip the policy
+and continue with task-only semantics.
 
-`task.offer_for_agent_with_egress_fresh` is a second additive message for the
-fresh case. Server and hosted cloud require the same Agent/egress declarations
-plus durable `agent-egress-fresh-session` before allocating its task/mailbox
-row. The fresh payload has no `sessionRef`; the runtime mints that value after
+A fresh offer (`session.mode: 'fresh'`) always carries `egressPolicy`. Server
+and hosted cloud require the same Agent/egress declarations plus durable
+`agent-egress-fresh-session` before allocating its task/mailbox row. The fresh
+`session` has no `sessionRef`; the runtime mints that value after
 claim/start, and the client must fsync the exact Agent-home handoff before
-`task.started` or any reliable egress. The existing message remains
-exact-resume-only and never falls back to this path when its handoff is absent
-or mismatched.
+`task.started` or any reliable egress. A resume offer stays
+exact-resume-only and never falls back to fresh when its handoff is absent or
+mismatched.
 
 Host-facing APIs mirror those two wire facts. Hosted cloud exposes
 `submitAgentExecution(tenant, input)`, and the reference server exposes
@@ -657,8 +769,18 @@ Host-facing APIs mirror those two wire facts. Hosted cloud exposes
 and persists taskId, exact deviceId, runtime, AgentRef, egressPolicy and
 terminalProjection; messageEgress is optional, with message context and consumer
 required only when selected. Existing egress resume dispatch rejects a missing
-sessionRef instead of selecting the fresh message. This control-plane refactor
-did not change the wire schema, envelope kinds or protocol version.
+sessionRef instead of sending a fresh offer.
+
+Each lane keeps its own Host method: `enqueueAgentOffer`,
+`enqueueAgentEgressOffer`, `enqueuePreparedOffer`, `submitAgentExecution` and
+their sealed counterparts `enqueueSealedAgentOffer`,
+`enqueueSealedAgentEgressOffer` and `submitSealedAgentExecution`. Every one
+sends a `task.offer`. The Host input payload is the wire payload: the Host
+writes `session` itself (`{ mode: 'resume', sessionRef }` on the resume lanes,
+`{ mode: 'fresh' }` on the execution and prepared lanes), and each lane
+refuses a payload whose `session` does not match it. The offer read back
+(`readTaskOffer`, `tasks.offer`) has `type: 'task.offer'` and a payload equal
+to the one the Host submitted.
 
 The policy has one exact `policyRevision`. Activity is `latest-value` with
 positive coalesce and event-byte bounds. The daemon sends Agent events as the
@@ -789,7 +911,7 @@ only on the runtime-only offers that v4 removed; no reader ever consumed it.
 An Agent Attempt's working directory follows from the Agent home and
 `homeAccess` below. See `docs/architecture/sdk-architecture.md` ADR-023.
 
-**`task.offer_for_agent` is the strict Agent-home path.** Its required
+**Every `task.offer` is the strict Agent-home path.** Its required
 `agentRef` contains a bounded single-segment `agentId` and bounded
 `profileRevision`; both are limited by UTF-8 byte length. The target device
 must have durably declared `agent-home-contract` before the server/cloud creates
@@ -1169,60 +1291,71 @@ Host stores only ciphertext for these categories. The design is
 wire rules. This section states the wire rules only. The Host stores, the
 daemon and the read interfaces come in later slices.
 
-**Sealed message types.** Each sealed message is a new message type. The
-plaintext types do not change.
+**Sealed branches.** Sealed is a branch of a message type's payload, not a
+message type. Each sealable type's payload schema is the union of a
+plaintext branch and a sealed branch. A marker field picks the branch:
+`sealing` on `task.offer`, `sealed` on every other sealable type. The
+plaintext branch declares both `sealed` and `sealing` never-present, so the
+marker alone decides, and the schema never strips a sealing policy or sealed
+content. In TypeScript, narrow with `payload.sealing !== undefined` on
+`task.offer` and `payload.sealed !== undefined` elsewhere, or call
+`isSealedPayload(type, payload)`. The `type` stays plaintext, so the Host
+moves the task lifecycle by `type` as before.
 
-| Sealed type | Plaintext type | Category | Identity | Moved into `sealed` | Dropped in v1 |
+| Type | Marker | Category | Identity | Moved into `sealed` | Dropped in v1 |
 | --- | --- | --- | --- | --- | --- |
-| `task.offer_for_agent_sealed` | `task.offer_for_agent` | `task-input` | | `instruction` | |
-| `task.offer_for_agent_with_egress_sealed` | `task.offer_for_agent_with_egress` | `task-input` | | `instruction` | |
-| `task.offer_for_agent_with_egress_fresh_sealed` | `task.offer_for_agent_with_egress_fresh` | `task-input` | | `instruction` | |
-| `task.steer_sealed` | `task.steer` | `task-input` | `steerId` | `text` | |
-| `task.complete_sealed` | `task.complete` | `task-output` | | `summary`, `finalMessage`, `document` | `artifactRefs`, `preparedObservation` |
-| `task.fail_sealed` | `task.fail` | `task-output` | | `reason` | `preparedObservation` |
-| `task.decline_sealed` | `task.decline` | `task-output` | | `reason` | |
-| `task.cancelled_sealed` | `task.cancelled` | `task-output` | | `reason` | |
-| `task.progress_sealed` | `task.progress` | `task-output` | `seq` | `events` | |
-| `task.artifact_sealed` | `task.artifact` | `task-output` | `artifactId` (UUID, required) | `inline` | `blobRef` |
-| `task.await_approval_sealed` | `task.await_approval` | `task-output` | `approvalId` (required) | `summary` | |
+| `task.offer` | `sealing` | `task-input` | | `instruction` | `preparation` |
+| `task.steer` | `sealed` | `task-input` | `steerId` | `text` | |
+| `task.complete` | `sealed` | `task-output` | | `summary`, `finalMessage`, `document` | `artifactRefs`, `preparedObservation` |
+| `task.fail` | `sealed` | `task-output` | | `reason` | `preparedObservation` |
+| `task.decline` | `sealed` | `task-output` | | `reason` | |
+| `task.cancelled` | `sealed` | `task-output` | | `reason` | |
+| `task.progress` | `sealed` | `task-output` | `seq` | `events` | |
+| `task.artifact` | `sealed` | `task-output` | `artifactId` (UUID, required) | `inline` | `blobRef` |
+| `task.await_approval` | `sealed` | `task-output` | `approvalId` (required) | `summary` | |
 
-A sealed type is its plaintext type without the moved and dropped fields, plus
-`sealed`. The receiver opens `sealed`, merges the opened object back, and
-validates the result as the plaintext type. The opened object carries only
-moved fields. The identity fields name the write in the AAD and the content
-MAC, after the envelope `task_id`. The AAD and the content MAC bind the
-plaintext type (`SEALED_SPLIT_TABLE[type].plainType`, for example
-`task.offer_for_agent`) as the family, not the sealed wire type. `steerId` and `artifactId` are new required
-fields of the sealed types only. Two artifacts of one task can share a `name`,
-so `name` is not the artifact identity. A sealed message carries no plaintext blob
-reference, because blob bytes have no sealing rule yet. `SEALED_SPLIT_TABLE`
-is the one authority for this table.
+A sealed branch is its plaintext branch without the moved and dropped fields,
+plus `sealed` (and, on `task.offer`, `sealing` and `routineRef`). The
+receiver opens `sealed`, merges the opened object back, and validates the
+result as the plaintext branch. The opened object carries only moved fields.
+The identity fields name the write in the AAD and the content MAC, after the
+envelope `task_id`. The AAD and the content MAC bind the wire `type` as the
+family: `task.offer` for a sealed offer, and the type itself for a steer or a
+task output. A sealed offer's `session`, `egressPolicy` and other plaintext
+fields are not part of the family; they are Host-written plaintext, as
+`sessionRef` already was in v3. `steerId` and `artifactId` are required
+fields of the sealed branches only. Two artifacts of one task can share a
+`name`, so `name` is not the artifact identity. A sealed branch carries no
+plaintext blob reference, because blob bytes have no sealing rule yet.
+`SEALED_SPLIT_TABLE` (`packages/protocol/src/sealed-split-table.ts`), keyed
+by the plaintext type, is the one authority for this table; its `marker`
+names the marker field.
 
-**Capability.** Each sealed type is gated as a whole on `sealed-payload-v1`
-(`WIRE_ADDITIONS`). The device advertises the flag for the offers and the
-steer. The server advertises it for the task output. A decoder that does not
-know a sealed type refuses it with `UnknownMessageTypeError`. A sealed type
-also takes every gate of its plaintext type, except the gates of the moved and
-dropped fields. For example, `task.offer_for_agent_sealed` also needs
-`agent-home-contract`, and `requiredToolsets` on it also needs
-`toolset-selection`. Sealing never removes a gate. A sealed task output that
-names its ciphertext blob (`sealed.ciphertextRef`) also needs the server flag
-`sealed-output-ciphertext-ref`. The split table marks `task.progress_sealed`
-and `task.await_approval_sealed` `inlineOnly`, so they have no such gate: they
-are always inline.
+**Capability.** The marker of each sealed branch is gated on
+`sealed-payload-v1` (`WIRE_ADDITIONS`, generated from the split table). The
+device advertises the flag for `task.offer` and `task.steer`. The server
+advertises it for the task outputs. A sealed branch shares every other row of
+its type, and a field it moves or drops is absent from it, so sealing never
+removes a gate the same fields would need: `requiredToolsets` on a sealed
+offer still needs `toolset-selection`. A sealed task output that names its
+ciphertext blob (`sealed.ciphertextRef`) also needs the server flag
+`sealed-output-ciphertext-ref`. The split table marks `task.progress` and
+`task.await_approval` `inlineOnly`, so their sealed branches have no such
+gate: they are always inline. A daemon that receives a sealed offer without
+advertising `sealed-payload-v1` declines it before opening it (Freeze rule).
 
-`task.offer_prepared`, input preparation, Agent
-messages, egress, drafts and memory projections are not sealed in v1.
+A prepared offer (`preparation`), input preparation, Agent messages, egress,
+drafts and memory projections are not sealed in v1. The split table forbids
+`preparation` on the sealed `task.offer` branch.
 
 **Sealing policy.** A sealed offer carries `sealing: { scopeId, epoch,
 categories }`. `categories` is a non-empty, ordered subset of `task-input` and
 `task-output`. The policy is frozen for the task. The offer carries `sealed`
 exactly when `categories` includes `task-input`. Then it carries no
 `instruction`, and `sealed.scope` is `{ id: scopeId, epoch }`. An offer that
-seals only `task-output` keeps its `instruction` in plaintext. It is still a
-sealed offer type, so a device without the flag never receives it. A
-plaintext type that has a sealed sibling refuses `sealing` and `sealed`, so
-the schema never strips a sealing policy or sealed content.
+seals only `task-output` keeps its `instruction` in plaintext and has no
+`sealed` member. Its `sealing` still puts it on the sealed branch, so a
+device without the flag never receives it.
 
 **Device rules (#654 E2d-3, E2d-4).** The daemon opens and seals with the scope keys
 of its own verified member (§2.6, §2.7). It advertises `sealed-payload-v1`
@@ -1305,12 +1438,13 @@ removes it again when the member is lost.
 - A key is fetched on its first miss, so a notice that came before the
   advertisement needs no redelivery.
 
-**Routine template.** A `task.offer_for_agent_with_egress_fresh_sealed` can
-carry a plaintext `routineRef: { routineId, definitionVersion, notAfter }`.
+**Routine template.** A sealed fresh `task.offer` (`session.mode: 'fresh'`,
+with `sealing`) can carry a plaintext
+`routineRef: { routineId, definitionVersion, notAfter }`.
 Its `sealed` member is then a routine template: the member sealed it once, as
 family `routine.template`, for every occurrence of one routine version (design
-§6.3). No other offer type takes `routineRef`, and the offer must seal
-`task-input`.
+§6.3). A resume offer and the plaintext branch refuse `routineRef`, and the
+offer must seal `task-input`.
 
 - The device rebuilds the template binding from the offer: identity
   `{ routineId, definitionVersion }`, no `deviceId`, the offer's `agentRef`
@@ -1382,7 +1516,7 @@ fields, plus `v`, `suite`, `category`, `scope`, `paddedLength` and
 `ciphertextRef`, `chainHead` and `sender` do not count. An equal projection
 is a duplicate, and the first ciphertext stays. A different projection fails
 with `coordination_input_invalid`. For an offer, the identity is the task id.
-For `task.steer_sealed`, it is the task id and the `steerId`: one `steerId`
+For a sealed `task.steer`, it is the task id and the `steerId`: one `steerId`
 names one steer row in the mailbox. A sender still seals once and retries
 with the same bytes. The projection keeps a retry safe when it did not.
 The Host check holds while the mailbox keeps the row. Mailbox retention
@@ -1399,10 +1533,10 @@ schema rejects every other value, an unknown `v` or `suite`, and every
 malformed field.
 
 **Digest fields (D16).** The split table gives each field of the plaintext
-type whose name contains `digest`, `hash` or `revision` one rule:
+branch whose name contains `digest`, `hash` or `revision` one rule:
 `ciphertext-sha256`, `keyed-mac`, `sealed` (moved with its parent), `plain`
 (not derived from sealed content) or `forbidden`. A schema test requires a
-rule for every such field, and checks the rule against the sealed type.
+rule for every such field, and checks the rule against the sealed branch.
 
 **Fail closed.** A receiver never falls back to plaintext. A device that
 refuses sealed task input declines non-retryably with one of the closed codes
@@ -1410,24 +1544,25 @@ refuses sealed task input declines non-retryably with one of the closed codes
 or `sealing_policy_mismatch` in `code`. These codes go only on the plaintext
 `task.decline`, and its `reason` is then the code itself. On the plaintext
 `task.decline`, each code is a value gate on the server flag.
-`task.decline_sealed` refuses them: a device that cannot open or use the
-scope key often cannot seal a reply either, so one outcome has one encoding.
+The sealed `task.decline` branch refuses them: a device that cannot open or
+use the scope key often cannot seal a reply either, so one outcome has one
+encoding.
 
 **Merge limits (decision 12b).** After the merge, the receiver validates the
-plaintext type, except that a moved field listed in the split table's `limits`
-takes that limit instead of the plaintext one. `task.artifact_sealed` lists
+plaintext branch, except that a moved field listed in the split table's `limits`
+takes that limit instead of the plaintext one. The sealed `task.artifact` lists
 `inline` at 2 MiB (the plaintext `task.artifact.inline` limit is 64 KB). The
 category limit of 2 MiB still bounds the whole opened content.
 
 **Host rule for task output.** The Host reads the frozen `sealing` of the
 task from its offer. When `categories` includes `task-output`, the device
 reports every output sealed. A plaintext output is legal only when each field
-that its sealed type moves or drops is absent or holds a closed code of
+that its sealed branch moves or drops is absent or holds a closed code of
 `SEALED_TASK_PLAIN_CODES`, by exact match:
 
 - `task.fail`: `reason` is `daemon_interrupted` or `sealed_key_unavailable`,
   and there is no `preparedObservation`. An interrupted task always reports
-  `daemon_interrupted` in plaintext with `recovery`, so `task.fail_sealed`
+  `daemon_interrupted` in plaintext with `recovery`, so a sealed `task.fail`
   never carries `recovery`.
 - `task.decline`: `reason` is one of the sealed decline codes, and equals
   `code`.
@@ -1438,22 +1573,22 @@ that its sealed type moves or drops is absent or holds a closed code of
 The Host refuses any other plaintext output with `sealed_output_required`.
 When the task did not seal `task-output`, it refuses every sealed output with
 `sealed_payload_unsupported`. A sealed terminal takes the status of its
-plaintext type, and the first terminal wins. `task.terminal_cause` keeps only
-a closed code: the `code` of a `task.decline_sealed`, or the code of a legal
+type, and the first terminal wins. `task.terminal_cause` keeps only
+a closed code: the `code` of a sealed `task.decline`, or the code of a legal
 plaintext terminal. `readDeviceTerminal` returns the sealed terminal with its
 sealed member. `readTaskResult` gives only its plaintext fields. The cloud
 does not store a sealed artifact.
 
-A `task.progress_sealed` batch is one activity tail entry. It has `sealed` in
+A sealed `task.progress` batch is one activity tail entry. It has `sealed` in
 place of `event`, and `eventIndex` 0, so the tail capacity counts it once. A
-`task.await_approval_sealed` is one approval timeline request with
+sealed `task.await_approval` is one approval timeline request with
 `approvalId` and `sealed`, and no `summary`. The Host resolves it by
 `approvalId`, the same as a plaintext request. A replay under the same source
 envelope is the same entry when its comparison projection (above) is the
-same. A sealed terminal or `task.artifact_sealed` carries `ciphertextRef`
+same. A sealed terminal or sealed `task.artifact` carries `ciphertextRef`
 above the inline limit, and the task holds its blob (above), so the
-plaintext limit of each is 2 MiB. `task.progress_sealed` and
-`task.await_approval_sealed` are inline only (`inlineOnly`): their tail rows
+plaintext limit of each is 2 MiB. A sealed `task.progress` and a sealed
+`task.await_approval` are inline only (`inlineOnly`): their tail rows
 expire, so the cloud refuses either one with `ciphertextRef`
 (`sealed_payload_unsupported`). The device uploads a ciphertext blob first.
 If the device sends the terminal more than one day after the upload, orphan
@@ -1476,7 +1611,7 @@ answer, or a non-2xx answer, of `POST /byok/messages` is not a refusal: the
 daemon sends the same bytes again.
 
 The cloud advertises `sealed-payload-v1` in `EventsPollResponse.capabilities`,
-because it accepts all seven sealed output types. It also advertises
+because it accepts the sealed branch of all seven task outputs. It also advertises
 `sealed-output-ciphertext-ref`, because it holds the blob of a sealed
 terminal or artifact. A device sends a sealed output by `ciphertextRef` only
 to a server that advertises this flag. Without it, the device keeps every
@@ -2580,8 +2715,12 @@ retains the last normalized runtime `usage` observation before the terminal
 signal for that task run. It must not add multiple events or derive totals.
 The Codex adapter maps its native `turn.completed.usage`; Claude maps its
 terminal `result.usage`; both place that event before their terminal signal.
-Pi's current RPC contract exposes no native usage fact, so it omits the
-optional block rather than fabricating a usage observation from runtime, device
+Pi reports one native usage observation per provider call, at each assistant
+`message_end`, with `inputTokens = input + cacheRead + cacheWrite` because
+Pi's own `input` already excludes both cache figures
+(`packages/client/src/adapters/pi/events.ts`). Pi's block therefore carries
+the last call's figures. A Pi run that reported no usage omits the optional
+block rather than fabricating a usage observation from runtime, device
 elapsed time, or `reportedAt`. Missing is unknown, not zero. When reported,
 device elapsed time and `reportedAt` are local observations, never provider
 invoice data.
@@ -2745,12 +2884,12 @@ that genuinely requires both an accepted message and a structured result keeps
 a typed, fail-closed path.
 
 **Only daemon → server `task.*` types are accepted here.** A `type` outside
-that set — a server → daemon type (`task.offer_for_agent`, `agent.egress.ack`, etc.) arriving
+that set — a server → daemon type (`task.offer`, `agent.egress.ack`, etc.) arriving
 inbound, or anything unrecognized — is rejected per-envelope: not dispatched
 to any handler, and not counted toward `accepted`. This never 400s the rest
 of the batch: a *structurally* invalid `Envelope` (fails schema validation
 outright) still 400s the whole request as before, but a *wrong-direction*
-type is schema-valid — a `task.offer_for_agent` is a well-formed envelope regardless
+type is schema-valid — a `task.offer` is a well-formed envelope regardless
 of which side sent it — and only fails this endpoint's semantic type-allow
 check, which is per-envelope. The batch itself is also capped at 256
 envelopes (`MessagesSendRequestSchema`); exceeding the cap 400s the whole
@@ -3025,7 +3164,7 @@ does not fix server/client**; that is M1-2/M1-3's job against this document.
 | # | Change | Was (M0) | Now (M1) |
 |---|---|---|---|
 | 1 | `envelope.task_id` requiredness | Optional for every type | **Required** for every `task.*` type; stays optional for `conn.*` |
-| 2 | `envelope.seq` requiredness | Always optional | **Required** for server→daemon types (then `conn.ack`, `task.offer`, `task.offer_with_toolsets`, `task.approve`, `task.reject`, `task.cancel`, `task.steer`; v4 removed the first three); stays optional for daemon→server types |
+| 2 | `envelope.seq` requiredness | Always optional | **Required** for server→daemon types (then `conn.ack`, `task.offer`, `task.offer_with_toolsets`, `task.approve`, `task.reject`, `task.cancel`, `task.steer`; v4 removed `conn.ack` and `task.offer_with_toolsets` and reuses the name `task.offer` for the one Agent offer); stays optional for daemon→server types |
 | 3 | `TaskOfferPayload.taskId` | Present (duplicated routing key) | **Removed** — envelope `task_id` is the sole routing key |
 | 4 | `TaskClaimPayload.taskId` | Present (duplicated routing key) | **Removed** — envelope `task_id` is the sole routing key |
 | 5 | `ConnHelloPayload.agents` | `unknown`, untyped, best-effort-normalized by the server | **Renamed and retyped**: `runtimes?: { id: 'pi'\|'claude'\|'codex', version?, authPresent? }[]` |
@@ -3183,43 +3322,39 @@ A new `AgentEvent` variant (`agent-event.ts`):
 ```
 
 Every field optional (non-negative integers) — runtimes report different
-subsets, and no field is synthesized/computed by this codebase when the
-runtime itself doesn't report it (no adapter sums a `totalTokens` on the
-runtime's behalf).
+subsets, and no adapter fills a field the runtime itself doesn't report (no
+adapter sums a `totalTokens` on the runtime's behalf). The one sum is Pi's
+`inputTokens`, which adds three prompt figures Pi reports (below).
 
 Per-runtime fill (empirical, `packages/client/src/adapters/*/events.ts`):
 
 | Field | pi | claude | codex |
 |---|---|---|---|
-| `inputTokens` | never emitted | `result.usage.input_tokens` | `turn.completed.usage.input_tokens` |
-| `cachedInputTokens` | never emitted | `result.usage.cache_read_input_tokens` — tokens actually SERVED from cache, not tokens written to it | `turn.completed.usage.cached_input_tokens` |
-| `outputTokens` | never emitted | `result.usage.output_tokens` | `turn.completed.usage.output_tokens` |
-| `reasoningTokens` | never emitted | never (claude's own usage shape has no reasoning-token field) | `turn.completed.usage.reasoning_output_tokens` |
-| `totalTokens` | never emitted | never (not synthesized) | never (not synthesized) |
+| `inputTokens` | `message.usage.input + cacheRead + cacheWrite`, only when all three are readable | `result.usage.input_tokens` | `turn.completed.usage.input_tokens` |
+| `cachedInputTokens` | `message.usage.cacheRead`, only with `inputTokens` | `result.usage.cache_read_input_tokens` — tokens actually SERVED from cache, not tokens written to it | `turn.completed.usage.cached_input_tokens` |
+| `outputTokens` | `message.usage.output` | `result.usage.output_tokens` | `turn.completed.usage.output_tokens` |
+| `reasoningTokens` | `message.usage.reasoning` | never (claude's own usage shape has no reasoning-token field) | `turn.completed.usage.reasoning_output_tokens` |
+| `totalTokens` | `message.usage.totalTokens` (Pi's own figure, not synthesized) | never (not synthesized) | never (not synthesized) |
 
-**pi reports no usage information at all** — the pi adapter never emits a
-`usage` event. A consumer must treat an absent `usage` event for a
-pi-dispatched task as "unknown," never as "zero usage."
+**pi reports usage per provider call.** The pi adapter emits one `usage`
+event for each assistant `message_end`, that is, for each provider call. Each
+event is that call's figures, never a running total. When the call's usage
+block is absent or unreadable, the event still goes out without the
+unreadable figures. A consumer must treat an absent figure as "unknown,"
+never as "zero usage."
 
-When emitted, a `usage` event is placed immediately before the `turn_end` (or
-`error`) event it accompanies within the same `task.progress` batch —
+Claude and Codex place their `usage` event immediately before the `turn_end`
+(or `error`) event it accompanies within the same `task.progress` batch —
 ordering is load-bearing (both adapters' own doc comments call this out
 explicitly) — so a consumer processing a batch in arrival order always sees
-a turn's usage before that turn's terminal marker.
+a turn's usage before that turn's terminal marker. Pi's events follow each
+assistant message, so the last one before `turn_end` holds the last call's
+figures.
 
-**Upstream reopened additive candidate: fresh Agent egress session.** The
-published `0.7.0` `task.offer_for_agent_with_egress` contract remains frozen and
-exact-resume-only. To close its fresh-session deadlock without a protocol-v2
-cut, the candidate adds the distinct
-`task.offer_for_agent_with_egress_fresh` message and
-`agent-egress-fresh-session` capability. The fresh message has no `sessionRef`;
-the selected runtime mints the native session after start, the client fsyncs
-the exact AgentRef/profile/runtime/cwd/session handoff, and only then emits
-`task.started` or reliable egress. The public reliable publisher must prove
-that exact handoff; cloud receipt/ack is not a session authority. The aligned
-fresh-session RC is not published, and this candidate does not authorize
-publish, merge, push, deploy, migration, secret changes, or Agent-home
-deletion.
+**Fresh Agent egress session.** The fresh-session repair that landed under
+v1 as a separate fresh offer type with the `agent-egress-fresh-session`
+capability is `session.mode: 'fresh'` on `task.offer` in v4, gated on the
+same flag. §1.3.1 states its rules.
 
 ### 11.4 Per-runtime capabilities on `conn.hello` (`RuntimeInfo.capabilities`, additive)
 
