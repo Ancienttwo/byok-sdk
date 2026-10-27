@@ -8,8 +8,6 @@ import {
   isServerToDaemonType,
   type MessageType,
 } from '../index';
-import { isSealedMessageType } from '../sealed-payload';
-import { minimalSealedPayload } from './sealed-fixtures';
 
 /**
  * M1 gap #1: envelope `task_id` is required for every `task.*` type (they
@@ -23,6 +21,42 @@ import { minimalSealedPayload } from './sealed-fixtures';
  * regression in either rule for any single type fails a test.
  */
 
+const OFFER_PAYLOAD = {
+  instruction: 'x',
+  agentRef: { agentId: 'a', profileRevision: 'r' },
+  session: { mode: 'resume', sessionRef: 's' },
+} as const;
+
+const OFFER_EGRESS_POLICY = {
+  policyRevision: 'policy-r1',
+  activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
+  reliable: { maxPendingEventsPerAgent: 1, maxPendingBytesPerAgent: 1, maxPendingBytesPerTenant: 1 },
+  transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
+} as const;
+
+/** The task.offer payload variants the four Agent offer types became: resume, fresh with egress, prepared. */
+const OFFER_VARIANTS = {
+  resume: {
+    instruction: 'run with an explicit egress policy',
+    agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+    session: { mode: 'resume', sessionRef: 'session-1' },
+    egressPolicy: OFFER_EGRESS_POLICY,
+  },
+  fresh: {
+    instruction: 'start with an explicit egress policy',
+    agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+    session: { mode: 'fresh' },
+    egressPolicy: OFFER_EGRESS_POLICY,
+  },
+  prepared: {
+    agentMemory: 'none',
+    egressPolicy: OFFER_EGRESS_POLICY,
+    agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+    session: { mode: 'fresh' },
+    preparation: { reference: 'prep-record-1', requestDigest: 'request-digest-1' },
+  },
+} as const;
+
 const TASK_ROUTED_TYPES = MESSAGE_TYPES.filter((t) => t.startsWith('task.'));
 const CONN_TYPES = MESSAGE_TYPES.filter((t) => t.startsWith('conn.'));
 const DAEMON_TO_SERVER_TYPES = MESSAGE_TYPES.filter((t) => !isServerToDaemonType(t));
@@ -32,48 +66,12 @@ function minimalPayload(type: MessageType): unknown {
   switch (type) {
     case 'conn.hello':
       return { protocolVersions: [1], capabilities: [], deviceId: 'device-1', productId: 'acme-agent' };
-    case 'task.offer_for_agent':
-      return { instruction: 'run for agent', agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } };
-    case 'task.offer_for_agent_with_egress':
+    // B2: four offer types, each with its own minimal payload -> one task.offer; the resume variant is the minimal payload and OFFER_VARIANTS below keeps the fresh and prepared variants covered
+    case 'task.offer':
       return {
-        instruction: 'run with an explicit egress policy',
+        instruction: 'run for agent',
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
-        sessionRef: 'session-1',
-        egressPolicy: {
-          policyRevision: 'policy-r1',
-          activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
-          reliable: {
-            maxPendingEventsPerAgent: 1,
-            maxPendingBytesPerAgent: 1,
-            maxPendingBytesPerTenant: 1,
-          },
-          transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
-        },
-      };
-    case 'task.offer_for_agent_with_egress_fresh':
-      return {
-        instruction: 'start with an explicit egress policy',
-        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
-        egressPolicy: {
-          policyRevision: 'policy-r1',
-          activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
-          reliable: {
-            maxPendingEventsPerAgent: 1,
-            maxPendingBytesPerAgent: 1,
-            maxPendingBytesPerTenant: 1,
-          },
-          transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
-        },
-      };
-    case 'task.offer_prepared':
-      return {
-        agentMemory: 'none',
-        egressPolicy: { policyRevision: 'default-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
-        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
-        preparation: {
-          reference: 'prep-record-1',
-          requestDigest: 'request-digest-1',
-        },
+        session: { mode: 'resume', sessionRef: 'session-1' },
       };
     case 'agent.egress.reliable':
       return {
@@ -223,7 +221,6 @@ function minimalPayload(type: MessageType): unknown {
     case 'task.approval_resolved':
       return { approvalId: 'appr-1', decision: 'approve', resolvedBy: 'local', at: new Date().toISOString() };
     default: {
-      if (isSealedMessageType(type)) return minimalSealedPayload(type, minimalPayload);
       const exhaustive: never = type;
       throw new Error(`no minimal payload fixture for message type: ${exhaustive}`);
     }
@@ -277,6 +274,19 @@ describe('envelope.seq requiredness (M1 Part B redelivery cursor)', () => {
   });
 });
 
+describe('task.offer variants keep both envelope requirements', () => {
+  it.each(Object.keys(OFFER_VARIANTS) as (keyof typeof OFFER_VARIANTS)[])('requires envelope.task_id and envelope.seq for the %s variant', (variant) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const envelope = createEnvelope('task.offer', OFFER_VARIANTS[variant] as any, { taskId: 'task-1', seq: 1 });
+    expect(EnvelopeSchema.safeParse(envelope).success).toBe(true);
+
+    const { task_id: _taskId, ...withoutTaskId } = envelope as Record<string, unknown>;
+    expect(EnvelopeSchema.safeParse(withoutTaskId).success).toBe(false);
+    const { seq: _seq, ...withoutSeq } = envelope as Record<string, unknown>;
+    expect(EnvelopeSchema.safeParse(withoutSeq).success).toBe(false);
+  });
+});
+
 describe('SERVER_TO_DAEMON_TYPES / isServerToDaemonType agree, and partition MESSAGE_TYPES', () => {
   it('every message type is either server->daemon or daemon->server, never both', () => {
     for (const type of MESSAGE_TYPES) {
@@ -290,7 +300,7 @@ describe('SERVER_TO_DAEMON_TYPES / isServerToDaemonType agree, and partition MES
 /**
  * Finding F1 (createEnvelope type-unsound): before this fix, `taskId`/`seq`
  * were uniformly optional on `createEnvelope`'s `opts` regardless of `type`
- * — a call site missing a required field (e.g. `createEnvelope('task.offer_for_agent',
+ * — a call site missing a required field (e.g. `createEnvelope('task.offer',
  * payload)` with no `taskId`/`seq` at all) type-checked cleanly and only
  * surfaced as a runtime `EnvelopeValidationError` wherever the malformed
  * envelope happened to get decoded, often on the *other* side of the wire.
@@ -312,12 +322,12 @@ describe('createEnvelope: taskId/seq requiredness (finding F1)', () => {
    * the project's typecheck script rather than by anything vitest runs.
    */
   function typeOnlyRejectedShapes(): void {
-    // @ts-expect-error task.offer_for_agent requires both taskId and seq — opts omitted entirely
-    createEnvelope('task.offer_for_agent', { instruction: 'x', agentRef: { agentId: 'a', profileRevision: 'r' } });
-    // @ts-expect-error task.offer_for_agent requires taskId
-    createEnvelope('task.offer_for_agent', { instruction: 'x', agentRef: { agentId: 'a', profileRevision: 'r' } }, { seq: 1 });
-    // @ts-expect-error task.offer_for_agent requires seq (server->daemon type)
-    createEnvelope('task.offer_for_agent', { instruction: 'x', agentRef: { agentId: 'a', profileRevision: 'r' } }, { taskId: 'task-1' });
+    // @ts-expect-error task.offer requires both taskId and seq — opts omitted entirely
+    createEnvelope('task.offer', OFFER_PAYLOAD);
+    // @ts-expect-error task.offer requires taskId
+    createEnvelope('task.offer', OFFER_PAYLOAD, { seq: 1 });
+    // @ts-expect-error task.offer requires seq (server->daemon type)
+    createEnvelope('task.offer', OFFER_PAYLOAD, { taskId: 'task-1' });
     // @ts-expect-error task.claim requires taskId — every task.* type routes by it, daemon->server or not
     createEnvelope('task.claim', { deviceId: 'device-1' });
     // @ts-expect-error task.approve requires seq (server->daemon type), even though taskId alone would be enough for most task.* types
@@ -337,7 +347,7 @@ describe('createEnvelope: taskId/seq requiredness (finding F1)', () => {
   it('still refuses to hand back a malformed envelope at runtime if a caller bypasses the type system (e.g. `as any`)', () => {
     expect(() =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      createEnvelope('task.offer_for_agent', { instruction: 'x', agentRef: { agentId: 'a', profileRevision: 'r' } }, {} as any),
+      createEnvelope('task.offer', OFFER_PAYLOAD, {} as any),
     ).toThrow(EnvelopeValidationError);
 
     expect(() =>
@@ -354,7 +364,7 @@ describe('createEnvelope: taskId/seq requiredness (finding F1)', () => {
     expect(() => {
       createEnvelope('conn.hello', { protocolVersions: [1], capabilities: [], deviceId: 'd', productId: 'p' }); // no opts at all
       createEnvelope('provider.provisioning.available', { requestId: '00000000-0000-4000-8000-000000000026' }, { seq: 1 });
-      createEnvelope('task.offer_for_agent', { instruction: 'x', agentRef: { agentId: 'a', profileRevision: 'r' } }, { taskId: 't', seq: 1 });
+      createEnvelope('task.offer', OFFER_PAYLOAD, { taskId: 't', seq: 1 });
       createEnvelope('task.claim', { deviceId: 'd' }, { taskId: 't' }); // seq optional, may be omitted
       createEnvelope('task.claim', { deviceId: 'd' }, { taskId: 't', seq: 1 }); // seq optional, may also be supplied
     }).not.toThrow();
