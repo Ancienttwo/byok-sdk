@@ -139,6 +139,8 @@ export function controlSocketPath(storeDir: string): string {
  * from the same `storeDir` alone. Impostor servers are defeated by the
  * mutual HMAC handshake below, not by pipe-name secrecy — keying by user
  * was security theater that broke the service-account topology.
+ * `storeDir` must come from `DeviceStore.resolveDir`, so the daemon and every
+ * client derive the name from the same folded spelling.
  */
 export function controlPipeName(productId: string, storeDir: string): string {
   const id = shortHash(`${productId}|${path.resolve(storeDir)}`);
