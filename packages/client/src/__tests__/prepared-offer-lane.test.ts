@@ -10,7 +10,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, TaskOfferPreparedPayloadSchema, type Envelope, type InputPreparationOfferBinding, type TaskOfferPreparedPayload } from '@byok-sdk/protocol';
+import { createEnvelope, TaskOfferPlainPayloadSchema, type Envelope, type InputPreparationOfferBinding, type TaskOfferPlainPayload } from '@byok-sdk/protocol';
 import { AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
@@ -56,9 +56,11 @@ import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared
 import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-memory-mcp-server';
 import { AGENT_MEMORY_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_OFFER } from './fixtures/fresh-offer';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 /**
- * `task.offer_prepared` end to end through the real `TaskRunner`, the real
+ * The prepared `task.offer` end to end through the real `TaskRunner`, the real
  * durable `InputPreparationStore`, and the real digest functions both sides
  * compute with.
  *
@@ -79,7 +81,7 @@ import { testIngressBudget } from './fixtures/activity-ingress';
  *   nothing.
  * - A missing record, and a record that is not ready, decline by name.
  * - A replay after the pin reads back the same pin rather than taking a second.
- * - Ordinary `task.offer*` traffic is untouched.
+ * - An ordinary `task.offer` (no `preparation`) is untouched.
  */
 
 const MCP_CAPABLE: RuntimeCapabilities = {
@@ -359,7 +361,7 @@ async function lane(options: {
 
 async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<TaskRunnerDeps> = {}): Promise<TaskRunner> {
   const storeDir = await tempDir('byok-prepared-runner-store-');
-  return new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  return new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     deviceId: DEVICE_ID,
     send: (envelope) => sent.push(envelope),
@@ -390,12 +392,13 @@ function preparedOffer(
   taskId: string,
   preparation: InputPreparationOfferBinding,
   seq = 1,
-  overrides: Partial<TaskOfferPreparedPayload> = {},
+  overrides: Partial<TaskOfferPlainPayload> = {},
 ): Envelope {
   const { requiredToolsets: overriddenToolsets, ...rest } = overrides;
   return createEnvelope(
-    'task.offer_prepared',
+    'task.offer',
     {
+      session: { mode: 'fresh' },
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       runtime: 'pi',
       agentRef: AGENT_REF,
@@ -1704,18 +1707,19 @@ describe('prepared Agent memory admission declines with its exact typed reason',
 });
 
 describe('ordinary offers are untouched by the prepared lane', () => {
-  it('runs a task.offer_for_agent on the instruction lane while a preparation record sits in the store', async () => {
+  it('runs a task.offer without a preparation on the instruction lane while a preparation record sits in the store', async () => {
     const built = await lane();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
     const runner = await makeRunner(built, adapter, sent);
 
     await runner.handleEnvelope(createEnvelope(
-      'task.offer_for_agent',
+      'task.offer',
       {
         instruction: 'an ordinary instruction',
         runtime: 'pi',
         agentRef: AGENT_REF,
+        ...FRESH_OFFER,
         requiredToolsets: [TOOLSET_ID],
       },
       { taskId: 'task-ordinary', seq: 1 },
@@ -1850,7 +1854,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
     };
   }
 
-  function toollessOffer(recordId: string, taskId: string, overrides: Partial<TaskOfferPreparedPayload> = {}): Envelope {
+  function toollessOffer(recordId: string, taskId: string, overrides: Partial<TaskOfferPlainPayload> = {}): Envelope {
     return preparedOffer(taskId, { reference: recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST },
       1, { requiredToolsets: undefined, terminalProjection: selector, ...overrides });
   }
@@ -1973,10 +1977,11 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
   });
 
   it('is rejected by the protocol schema when an offer names an empty requiredToolsets', () => {
-    const parsed = TaskOfferPreparedPayloadSchema.safeParse({
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, runtime: 'pi',
+    // B2: TaskOfferPreparedPayloadSchema -> TaskOfferPlainPayloadSchema (a prepared offer is the plain branch with `preparation`); the payload gains `session` and loses `taskId`, which the strict v4 offer rejects, so the empty requiredToolsets is the only reason to fail
+    const parsed = TaskOfferPlainPayloadSchema.safeParse({
+      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, runtime: 'pi',
       agentRef: AGENT_REF, preparation: { reference: 'r', requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST },
-      agentMemory: 'none', requiredToolsets: [], terminalProjection: selector, taskId: 'schema-check',
+      agentMemory: 'none', requiredToolsets: [], terminalProjection: selector,
     });
     expect(parsed.success).toBe(false);
   });
