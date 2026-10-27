@@ -21,6 +21,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   const offered = runtimeTaskInput(payload);
   const requestedRuntime = payload.harnessId ?? payload.dispatchSelection?.runtimeId ?? payload.runtime;
   const requiresAgentMemoryMcp = preparation === undefined && ordinaryMemoryMcp;
+  const mcpToolApprovals = resolvedMcp?.ok ? resolvedMcp.mcpToolApprovals : undefined;
   let pick: PickResult;
   try {
     pick = await this['pickAdapter'](
@@ -29,6 +30,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
         || (preparation === undefined && (messageRequirement !== undefined || terminalProjection?.mode === 'result-document'))
         || requiresAgentMemoryMcp || preparedMemorySelected,
       blobAbort.signal,
+      mcpToolApprovals !== undefined,
     );
   } catch (error) {
     if (!admissionWithdrawn()) decline(`runtime detection failed: ${outboundErrorMessage(error)}`, true);
@@ -109,11 +111,9 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
       return undefined;
     }
   }
-  // Observe each projected toolset server's OWN tool list before the
-  // adapter is asked to admit the task. Both bundled runtimes refuse an
-  // MCP tool they were not told to allow, and the only honest source for
-  // those names is the server itself — device toolset configuration
-  // carries `command`/`args` and nothing more.
+  // Adapters that register tools need the server's observed schemas. Host
+  // approval names do not establish tool existence and never trigger this
+  // probe for a runtime that owns its own discovery.
   //
   // All servers are probed CONCURRENTLY under one shared deadline
   // (`MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS`, see its own doc comment):
@@ -186,7 +186,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     decline(prepared.reason, prepared.retryable);
     return undefined;
   }
-  return { scratch, offered, pick, env, mcpEnv, taskMcpServers, mcpToolsetTools, prepared };
+  return { scratch, offered, pick, env, mcpEnv, taskMcpServers, mcpToolsetTools, mcpToolApprovals, prepared };
 }
 
 export async function pickAdapter(
@@ -194,6 +194,7 @@ export async function pickAdapter(
   requestedRuntime: string | undefined,
   requiresMcpToolsets: boolean,
   signal: AbortSignal,
+  requiresMcpToolApprovals = false,
 ): Promise<PickResult> {
   const allowlist = this['deps'].runtimeAllowlist;
 
@@ -216,6 +217,9 @@ export async function pickAdapter(
         reason: `runtime "${requestedRuntime}" cannot project required MCP toolsets`,
         retryable: false,
       };
+    }
+    if (requiresMcpToolApprovals && descriptor.mcpToolApprovals !== true) {
+      return { ok: false, reason: `runtime "${requestedRuntime}" cannot enforce Host MCP tool approvals`, retryable: false };
     }
     const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
     // Another device may support this platform, as it may have the runtime installed.
@@ -241,12 +245,15 @@ export async function pickAdapter(
   for (const adapter of candidates) {
     const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
     if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) continue;
+    if (requiresMcpToolApprovals && descriptor.mcpToolApprovals !== true) continue;
     const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
     if (detected.kind === 'available') return { ok: true, adapter, descriptor };
   }
   return {
     ok: false,
-    reason: requiresMcpToolsets
+    reason: requiresMcpToolApprovals
+      ? 'no available runtime on this device can enforce Host MCP tool approvals'
+      : requiresMcpToolsets
       ? 'no available runtime on this device can project required MCP toolsets'
       : 'no available runtime on this device',
     retryable: true,

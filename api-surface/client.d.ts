@@ -12719,7 +12719,12 @@ export declare function runSdkReservedHelperCommand(argv?: readonly string[]): P
 export declare const AGENT_MESSAGE_MCP_SERVER_NAME = "byokagentmessage";
 export declare const AGENT_MESSAGE_TOOL_NAME = "send_agent_message";
 export declare const AGENT_MEMORY_MCP_SERVER_NAME = "byokagentmemory";
+export declare const AGENT_MEMORY_RECALL_TOOL_NAME = "memory_recall";
+export declare const AGENT_MEMORY_SAVE_TOOL_NAME = "memory_save";
 export declare const AGENT_TEAM_MCP_SERVER_NAME = "byokagentteam";
+export declare const TEAM_POST_TOOL_NAME = "post_team_message";
+export declare const TEAM_READ_TOOL_NAME = "read_team_messages";
+export declare const TEAM_ACK_TOOL_NAME = "ack_team_messages";
 /** The structured outcome channel of a `terminalProjection.mode: 'result-document'` offer (wire v3). */
 export declare const AGENT_RESULT_MCP_SERVER_NAME = "byokagentresult";
 /** Its one tool; the `inputSchema` it advertises is the offer's frozen result schema. */
@@ -12741,6 +12746,13 @@ export declare const AGENT_RESULT_TOOL_DESCRIPTION = "Submit the structured outc
 export declare const RESERVED_MCP_SERVER_NAMES: readonly ["byokagentmessage", "byokagentmemory", "byokagentteam", "byokagentresult"];
 /** Whether `name` is one of the SDK-owned MCP server names above. */
 export declare function isReservedMcpServerName(name: string): boolean;
+/** Fixed helper protocols; runtime-discovered or host tool names cannot grant themselves approval. */
+export declare const SDK_RESERVED_MCP_TOOL_NAMES: Readonly<{
+    byokagentmessage: readonly string[];
+    byokagentmemory: readonly string[];
+    byokagentteam: readonly string[];
+    byokagentresult: readonly string[];
+}>;
 // ==== @byok-sdk/client dist/testing/index.d.ts ====
 import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeDetectResult } from '../types';
 /** The built-in adapters a fake can stand in for. */
@@ -12852,7 +12864,10 @@ export interface McpStdioServerConfig {
 }
 /** A logical group of local MCP servers selectable by a wire-level toolset id. */
 export interface McpToolsetConfig {
-    mcpServers: Readonly<Record<string, McpStdioServerConfig>>;
+    mcpServers: Readonly<Record<string, McpStdioServerConfig & {
+        /** Exact Host-approved tool names; omitted or empty adds no approval. Local configuration only. */
+        readonly approveTools?: readonly string[];
+    }>>;
 }
 /** Lifecycle facts a device host may explicitly report for one configured toolset. */
 export type McpToolsetLifecycleState = 'installed' | 'unauthorized' | 'starting' | 'ready' | 'degraded' | 'crashed' | 'incompatible';
@@ -12991,6 +13006,8 @@ export interface RuntimeAdapterDescriptor {
      * never makes an offer wait on one it has no use for.
      */
     readonly requiresMcpToolsetToolObservation?: boolean;
+    /** Can enforce the local Host's exact per-tool MCP approvals. Nonempty grants require this capability. */
+    readonly mcpToolApprovals?: boolean;
     /**
      * Whether each `progress` event carries one complete assistant message
      * rather than a streaming delta. Codex emits one event per completed
@@ -13190,6 +13207,8 @@ interface RuntimeOperationStartBase {
     readonly env: NodeJS.ProcessEnv;
     /** Local MCP authority resolved from logical wire ids. */
     readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
+    /** Local registry approvals copied and frozen with this attempt's servers; never sourced from wire or transcript. */
+    readonly mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
     /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
     readonly mcpToolsetTools?: McpToolsetToolObservation;
     /**
