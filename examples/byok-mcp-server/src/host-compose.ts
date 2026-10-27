@@ -8,12 +8,12 @@
 // for the first paired device, then issues one task-only Grok Bot key and prints
 // its token once, inside the Grok Bot entry. The token is never logged again and
 // never stored; the ledger keeps only its digest.
-import { closeSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createByokServer, listenLoopback, type ByokServer, type LoopbackPortStore } from '@byok-sdk/server';
 import type { RuntimeId } from '@byok-sdk/protocol';
-import { BetaLedger, createBetaMcpServer, createTaskTools, type KeyInfo, type KeySpec } from './index';
+import { BetaLedger, createBetaMcpServer, createTaskTools, type AccessEntry, type KeyInfo, type KeySpec } from './index';
 
 export const GROK_BOT_SCOPES: KeySpec['scopes'] = ['tasks.dispatch', 'tasks.read', 'tasks.cancel'];
 const MCP_PATH = '/mcp';
@@ -50,6 +50,12 @@ function filePortStore(file: string): LoopbackPortStore {
   };
 }
 
+/** Append-only JSONL, owner-only. Entries hold no Authorization header, token or body. */
+function accessLog(file: string): (entry: AccessEntry) => void {
+  closeSync(openSync(file, 'a', 0o600));
+  return entry => appendFileSync(file, `${JSON.stringify(entry)}\n`);
+}
+
 /** The entry a Grok Bot owner pastes as a custom MCP server (remote shape, static bearer in `headers`). */
 export function grokBotEntry(mcpUrl: string, token: string) {
   return { type: 'http', url: mcpUrl, headers: { Authorization: `Bearer ${token}` } } as const;
@@ -67,6 +73,7 @@ export async function startHost(options: HostOptions) {
       maxBodyBytes: MAX_BODY_BYTES,
       createHandler: origin => {
         endpoint = createBetaMcpServer({ ledger, origin, serverInfo: { name: 'byok-mcp-host', version: '1' },
+          onAccess: accessLog(path.join(options.stateDir, 'access.log')),
           tools: createTaskTools({ sdk, ledger, blobBaseUrl: origin, ...(options.statusPollMs ? { statusPollMs: options.statusPollMs } : {}) }) });
         const mcp = endpoint;
         return request => new URL(request.url).pathname === MCP_PATH ? mcp.fetch(request) : sdk.hono.fetch(request);
@@ -75,6 +82,7 @@ export async function startHost(options: HostOptions) {
     const origin = listener.serverUrl;
     return {
       sdk, ledger, origin, productId,
+      accessLogPath: path.join(options.stateDir, 'access.log'),
       mcpUrl: `${origin}${MCP_PATH}`,
       async pairingCode(): Promise<string> { return (await sdk.pairing.createPairingCode({ productId })).code; },
       /** Resolves with the first registered device. */
@@ -124,6 +132,7 @@ async function main(argv: string[]): Promise<void> {
 
   console.log(`byok MCP Host on ${host.origin} (product ${host.productId}, state ${opts.stateDir})`);
   console.log(`MCP endpoint: ${host.mcpUrl}`);
+  console.log(`MCP access log (JSONL): ${host.accessLogPath}`);
   if ((await host.sdk.machines.list()).length === 0) {
     console.log('\nPair a device (daemon config productId and serverUrl must match):');
     console.log(`  byok-agent pair ${await host.pairingCode()} --server ${host.origin} --config <daemon-config.json>`);

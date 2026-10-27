@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createMcpHttpServer, type McpHttpServer } from '@byok-sdk/client/mcp-server/http';
 import type { McpServerToolDefinition } from '@byok-sdk/client/mcp-server';
 import { BetaLedger } from './ledger';
@@ -10,12 +11,27 @@ export interface ScopedTool {
   /** Only authenticated caller handles reach this Host-owned callback. */
   call(caller: Caller, args: Readonly<Record<string, unknown>> | undefined, signal: AbortSignal): Promise<Record<string, unknown>>;
 }
+/** One line per HTTP request. It never carries the Authorization header, the token or a request body. */
+export interface AccessEntry {
+  readonly ts: string;
+  readonly method: string;
+  readonly path: string;
+  readonly status: number;
+  readonly keyId?: string;
+  /** Set when the request ran a tool call: its tool name and, for a refusal, the refusal code. */
+  readonly rpc?: 'tools/call';
+  readonly tool?: string;
+  readonly toolError?: string;
+}
 export interface BetaMcpOptions {
   readonly ledger: BetaLedger;
   readonly origin: string;
   readonly serverInfo: { name: string; version: string };
   readonly tools: readonly ScopedTool[];
+  /** Host-owned access log sink, called after each request is answered. */
+  readonly onAccess?: (entry: AccessEntry) => void;
 }
+type ToolTrace = { tool?: string; toolError?: string };
 
 function refusal(error: BetaError): Record<string, unknown> {
   return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code: error.code, message: error.message,
@@ -42,40 +58,63 @@ export function createBetaMcpServer(options: BetaMcpOptions): McpHttpServer {
   const unsubscribe = options.ledger.onRevocation(drop);
   let closed = false;
   const unavailable = () => new Response('Beta MCP service unavailable', { status: 503 });
+  // B1 runs tool calls inside the request's async context; this ties a call back to its access line.
+  const trace = new AsyncLocalStorage<ToolTrace>();
+
+  async function answer(request: Request, seen: { keyId?: string }): Promise<Response> {
+    if (closed) return unavailable();
+    const from = request.headers.get('origin');
+    if (from !== null && from !== options.origin) return new Response('Invalid Origin', { status: 403 });
+    try {
+      const caller = options.ledger.authenticate(request.headers.get('authorization'));
+      seen.keyId = caller.keyId;
+      let transport = transports.get(caller.keyId);
+      if (!transport) {
+        const allowed = [...tools.values()].filter(tool => tool.scope === 'authenticated' || caller.scopes.includes(tool.scope));
+        if (!allowed.length) return new Response('No authorized tools', { status: 403 });
+        transport = createMcpHttpServer({ origin: options.origin, serverInfo: options.serverInfo, tools: allowed.map(tool => tool.definition),
+          callTool: async call => {
+            const traced = trace.getStore();
+            if (traced) traced.tool = call.name;
+            try {
+              const tool = tools.get(call.name);
+              if (!tool) throw new BetaError('not_found', 'Resource not found');
+              options.ledger.authorize(caller, tool.scope === 'authenticated' ? undefined : tool.scope);
+              return await tool.call(caller, call.arguments, call.signal);
+            } catch (error) {
+              const refused = error instanceof BetaError ? error : new BetaError('unavailable', 'Tool request could not be completed');
+              if (traced) traced.toolError = refused.code;
+              return refusal(refused);
+            }
+          },
+        });
+        transports.set(caller.keyId, transport);
+      }
+      return await transport.fetch(request);
+    } catch (error) {
+      if (error instanceof BetaError && error.code === 'unauthorized') {
+        return new Response('Invalid byok bot key', { status: 401,
+          headers: { 'www-authenticate': 'Bearer realm="byok-mcp"', 'cache-control': 'no-store' } });
+      }
+      return unavailable();
+    }
+  }
 
   return {
     async fetch(request) {
-      if (closed) return unavailable();
-      const from = request.headers.get('origin');
-      if (from !== null && from !== options.origin) return new Response('Invalid Origin', { status: 403 });
-      try {
-        const caller = options.ledger.authenticate(request.headers.get('authorization'));
-        let transport = transports.get(caller.keyId);
-        if (!transport) {
-          const allowed = [...tools.values()].filter(tool => tool.scope === 'authenticated' || caller.scopes.includes(tool.scope));
-          if (!allowed.length) return new Response('No authorized tools', { status: 403 });
-          transport = createMcpHttpServer({ origin: options.origin, serverInfo: options.serverInfo, tools: allowed.map(tool => tool.definition),
-            callTool: async call => {
-              try {
-                const tool = tools.get(call.name);
-                if (!tool) throw new BetaError('not_found', 'Resource not found');
-                options.ledger.authorize(caller, tool.scope === 'authenticated' ? undefined : tool.scope);
-                return await tool.call(caller, call.arguments, call.signal);
-              } catch (error) {
-                return refusal(error instanceof BetaError ? error : new BetaError('unavailable', 'Tool request could not be completed'));
-              }
-            },
-          });
-          transports.set(caller.keyId, transport);
+      const seen: { keyId?: string } = {};
+      const traced: ToolTrace = {};
+      const response = await trace.run(traced, () => answer(request, seen));
+      if (options.onAccess) {
+        try {
+          options.onAccess({ ts: new Date().toISOString(), method: request.method, path: new URL(request.url).pathname,
+            status: response.status, ...(seen.keyId ? { keyId: seen.keyId } : {}),
+            ...(traced.tool ? { rpc: 'tools/call' as const, tool: traced.tool } : {}), ...(traced.toolError ? { toolError: traced.toolError } : {}) });
+        } catch (error) {
+          console.error('byok MCP access log write failed:', error instanceof Error ? error.message : error);
         }
-        return await transport.fetch(request);
-      } catch (error) {
-        if (error instanceof BetaError && error.code === 'unauthorized') {
-          return new Response('Invalid byok bot key', { status: 401,
-            headers: { 'www-authenticate': 'Bearer realm="byok-mcp"', 'cache-control': 'no-store' } });
-        }
-        return unavailable();
       }
+      return response;
     },
     close() {
       if (closed) return;
