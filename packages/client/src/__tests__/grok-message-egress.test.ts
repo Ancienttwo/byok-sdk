@@ -68,6 +68,6 @@ it('publishes the closing Grok reply on the message lane when Grok never called 
   }, { taskId, seq: 2 }));
   await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
   const complete = sent.find((envelope) => envelope.type === 'task.complete');
-  if (complete?.type !== 'task.complete') throw new Error('missing task.complete');
+  if (complete?.type !== 'task.complete' || complete.payload.sealed !== undefined) throw new Error('missing plaintext task.complete');
   expect(complete.payload.finalMessage).toBe('Found a.txt.');
 });

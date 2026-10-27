@@ -178,14 +178,14 @@ describe('fresh Agent egress session authority', () => {
     const spool = await fs.readFile(path.join(home, '.byok', 'egress', 'reliable-v1.jsonl'), 'utf8');
     expect(spool).not.toContain(rejectedBytes);
 
-    // The legacy strict egress message remains exact-resume-only.
+    // A resume offer (with egress) remains exact-resume-only.
     server.send(createEnvelope(
-      'task.offer_for_agent_with_egress',
+      'task.offer',
       {
         instruction: 'this must not become fresh',
         runtime: 'pi',
         agentRef,
-        sessionRef: 'mismatched-resume-session',
+        session: { mode: 'resume', sessionRef: 'mismatched-resume-session' },
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       },
       { taskId: 'legacy-egress-resume-mismatch', seq: server.nextSeq() },

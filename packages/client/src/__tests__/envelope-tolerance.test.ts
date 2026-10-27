@@ -73,7 +73,7 @@ describe('unknown AgentEvent tolerance on the client inbound path (pre-freeze pr
     decoded = decodeEnvelope(wireLine);
 
     expect(decoded.type).toBe('task.progress');
-    if (decoded.type !== 'task.progress') throw new Error('unreachable');
+    if (decoded.type !== 'task.progress' || decoded.payload.sealed !== undefined) throw new Error('unreachable');
 
     const { known, unknown } = partitionAgentEvents(decoded.payload.events);
     expect(known).toEqual([{ type: 'progress', text: 'hi' }, { type: 'turn_end' }]);

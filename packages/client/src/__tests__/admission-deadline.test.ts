@@ -80,7 +80,7 @@ for (const phase of ['detect', 'prepare'] as const) {
           // `!cancelled` makes it retryable. Pinned by exact equality, not by
           // "some decline arrived" — the other two reasons are what the sibling
           // cancel/shutdown rows own.
-          const blocked = server.received.flatMap(e => (e.type === 'task.decline' && e.task_id === 'blocked'
+          const blocked = server.received.flatMap(e => (e.type === 'task.decline' && e.payload.sealed === undefined && e.task_id === 'blocked'
             ? [{ reason: e.payload.reason, retryable: e.payload.retryable }] : []))[0]!;
           expect(blocked.reason).toBe('runtime startup deadline exceeded');
           expect(blocked.retryable).toBe(true);
@@ -112,7 +112,7 @@ for (const phase of ['detect', 'prepare'] as const) {
         // `TaskRunner`; here it is kept only as the negative below.
         try {
           const replacementDeclineReasons = (): string[] => server.received
-            .flatMap(e => (e.type === 'task.decline' && e.task_id === 'replacement' ? [e.payload.reason] : []));
+            .flatMap(e => (e.type === 'task.decline' && e.payload.sealed === undefined && e.task_id === 'replacement' ? [e.payload.reason] : []));
           let outcome: { kind: 'started' } | { kind: 'declined'; reason: string } | undefined;
           await vi.waitFor(() => {
             const declined = replacementDeclineReasons()[0];

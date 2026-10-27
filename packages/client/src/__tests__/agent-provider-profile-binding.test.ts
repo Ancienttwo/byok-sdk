@@ -121,7 +121,7 @@ describe('Agent provider profile binding admission', () => {
       }, { taskId, seq: server.nextSeq() }));
 
       const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === taskId);
-      expect(decline.type === 'task.decline' && decline.payload.reason).toMatch(/hash mismatch/);
+      expect(decline.type === 'task.decline' && decline.payload.sealed === undefined && decline.payload.reason).toMatch(/hash mismatch/);
       expect(server.received.some((envelope) => envelope.type === 'task.claim' && envelope.task_id === taskId)).toBe(false);
       expect(spawnFn).not.toHaveBeenCalled();
     } finally {

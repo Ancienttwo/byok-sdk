@@ -350,8 +350,9 @@ function preparedOffer(
   seq: number,
 ): Envelope {
   return createEnvelope(
-    'task.offer_prepared',
+    'task.offer',
     {
+      session: { mode: 'fresh' },
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       runtime: 'pi',
       agentRef: agentRefOf(agentId),
@@ -368,9 +369,9 @@ function report(before: number): Record<string, unknown> {
   const produced = sent.slice(before);
   return {
     claims: produced.filter((envelope) => envelope.type === 'task.claim').length,
-    declines: produced
-      .filter((envelope) => envelope.type === 'task.decline')
-      .map((envelope) => (envelope as Extract<Envelope, { type: 'task.decline' }>).payload.reason),
+    declines: produced.flatMap((envelope) => (
+      envelope.type === 'task.decline' && envelope.payload.sealed === undefined ? [envelope.payload.reason] : []
+    )),
     preparedStarts: adapter.preparedStartCalls.length,
     instructionStarts: adapter.startCalls.length,
     openCalls,

@@ -156,7 +156,7 @@ describe('submit_result: admission (R6, R8)', () => {
     expect(adapter.startCalls).toHaveLength(0);
     const decline = sent.find((e) => e.type === 'task.decline');
     expect(decline).toMatchObject({ payload: { retryable: false } });
-    expect(decline?.type === 'task.decline' ? decline.payload.reason : '').toMatch(reason);
+    expect(decline?.type === 'task.decline' && decline.payload.sealed === undefined ? decline.payload.reason : '').toMatch(reason);
     expect(decline?.payload).not.toHaveProperty('code');
   });
 });
@@ -237,7 +237,7 @@ describe('submit_result: stage, ack and turn_end', () => {
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     const failure = await waitForTerminal(sent, 'missing-task');
     expect(failure.type).toBe('task.fail');
-    if (failure.type !== 'task.fail') throw new Error('unreachable');
+    if (failure.type !== 'task.fail' || failure.payload.sealed !== undefined) throw new Error('unreachable');
     expect(failure.payload.retryable).toBe(false);
     expect(failure.payload.reason.startsWith(RESULT_NOT_SUBMITTED_REASON_PREFIX)).toBe(true);
     expect(failure.payload.reason).toContain('example.review.v1');
@@ -285,7 +285,7 @@ describe('submit_result: one document shape for every runtime lane', () => {
       await runner.submitAgentResult({ contextToken: resultToken(adapter), outcome: { notes: ['a', 'b'], score: 5, verdict: 'pass' } });
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       const done = await waitForTerminal(sent, taskId);
-      if (done.type !== 'task.complete') throw new Error(`expected task.complete, got ${done.type}`);
+      if (done.type !== 'task.complete' || done.payload.sealed !== undefined) throw new Error(`expected plaintext task.complete, got ${done.type}`);
       documents.push(done.payload.document);
     }
     expect(documents[1]).toEqual(documents[0]);
