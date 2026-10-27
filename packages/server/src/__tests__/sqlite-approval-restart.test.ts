@@ -85,4 +85,3 @@ describe('ByokServer.tasks.events restoring an approval written before a SQLite 
     }
   });
 });
-
