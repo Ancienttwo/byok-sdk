@@ -92,13 +92,11 @@ see `server.ts`); a mismatch is rejected by authenticated HTTP admission.
    and is declined. The feed streams the task's state, Agent progress,
    artifacts and approval requests via SSE from `byok.tasks.events`
    (`task-events-route.ts`); each event's SSE `id` is its cursor, so a
-   reconnecting browser resumes where it left off; when it cannot resume (a
-   restart, or a finished task whose feed is gone) the route sends the current
-   state, and the pending approval if there is one. After an unknown cursor it
-   then replays the feed this server holds, dropping states older than that
-   snapshot; after an approval round the replay can still show the answered
-   approval request until the task's later state arrives. These and the
-   route's other known limit are listed at the top of `task-events-route.ts`. The task runs with a
+   reconnecting browser resumes where it left off. A new stream, or one whose
+   cursor the server cannot resume (after a restart), starts at the task's
+   current state with `from: 'state'`: its latest state, after the pending
+   approval request while it awaits one. A finished task whose feed is gone
+   gets its final state. The task runs with a
    `latest-value` egress policy, so the daemon may send only the latest
    progress event of each batch. The approve/reject/cancel buttons call
    `byok.tasks.approve`, `reject` and `cancel` by taskId. `"agentEgress": {}`

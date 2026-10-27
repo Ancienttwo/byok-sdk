@@ -1,6 +1,7 @@
 // The SSE route's own decisions: 404 before streaming, cursors as SSE ids,
-// `Last-Event-ID` passed back as `after`, and the snapshot fallback when the
-// feed cannot resume. The feed itself is covered by @byok-sdk/server's tests.
+// `Last-Event-ID` passed back as `after`, `from: 'state'` for a new stream or an
+// unknown cursor, and the final snapshot when a finished task's feed is gone.
+// The feed itself is covered by @byok-sdk/server's tests.
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 import {
@@ -34,11 +35,11 @@ async function messages(response: Response): Promise<Array<{ id?: string; event:
 
 /** A scripted `tasks`: `get` answers `snapshot`; each `events` call takes the next script, a list of entries or an error to throw. */
 function scripted(snapshot: TaskSnapshot | undefined, scripts: Array<TaskEventEntry[] | Error>) {
-  const calls: Array<string | undefined> = [];
+  const calls: Array<{ after?: string; from?: 'state' }> = [];
   const tasks: Tasks = {
     get: async () => snapshot,
     events(_taskId, options) {
-      calls.push(options?.after);
+      calls.push({ ...(options?.after === undefined ? {} : { after: options.after }), ...(options?.from === undefined ? {} : { from: options.from }) });
       const script = scripts.shift();
       return (async function* () {
         if (script instanceof Error) throw script;
@@ -60,7 +61,7 @@ describe('GET /api/tasks/:taskId/events', () => {
     expect(calls).toEqual([]);
   });
 
-  it('streams each entry with its cursor as the SSE id', async () => {
+  it('starts a new stream at the current state, each entry with its cursor as the SSE id', async () => {
     const { tasks, calls } = scripted(SNAPSHOT, [[RUNNING, PROGRESS]]);
     const response = await app(tasks).request('/api/tasks/task-1/events');
     expect(response.headers.get('content-type')).toContain('text/event-stream');
@@ -68,67 +69,33 @@ describe('GET /api/tasks/:taskId/events', () => {
       { id: 'feed-a.2', event: RUNNING.event },
       { id: 'feed-a.3', event: PROGRESS.event },
     ]);
-    expect(calls).toEqual([undefined]);
+    expect(calls).toEqual([{ from: 'state' }]);
   });
 
   it('resumes after the Last-Event-ID a reconnecting browser sends', async () => {
     const { tasks, calls } = scripted(SNAPSHOT, [[PROGRESS]]);
     const response = await app(tasks).request('/api/tasks/task-1/events', { headers: { 'Last-Event-ID': 'feed-a.2' } });
     expect(await messages(response)).toEqual([{ id: 'feed-a.3', event: PROGRESS.event }]);
-    expect(calls).toEqual(['feed-a.2']);
+    expect(calls).toEqual([{ after: 'feed-a.2' }]);
   });
 
-  it('sends the current state and follows from now when the cursor is unknown', async () => {
-    const live: TaskEventEntry = { cursor: 'feed-b.0', event: { kind: 'agent', event: { type: 'progress', text: 'after restart' } } };
-    const { tasks, calls } = scripted(SNAPSHOT, [new TaskEventsUnavailableError('task-1', 'cursor_unknown'), [live]]);
+  it('starts at the current state when the cursor is unknown', async () => {
+    const request: TaskEventEntry = { cursor: 'feed-b.4', event: { kind: 'await_approval', summary: 'ok to write?', approvalId: 'appr-7' } };
+    const waiting: TaskEventEntry = { cursor: 'feed-b.5', event: { kind: 'state', state: 'AwaitApproval', at: '2026-10-27T00:00:06.000Z' } };
+    const { tasks, calls } = scripted(SNAPSHOT, [new TaskEventsUnavailableError('task-1', 'cursor_unknown'), [request, waiting]]);
     const response = await app(tasks).request('/api/tasks/task-1/events', { headers: { 'Last-Event-ID': 'feed-a.3' } });
     expect(await messages(response)).toEqual([
-      { event: { kind: 'state', state: 'Running', at: SNAPSHOT.updatedAt } },
-      { id: 'feed-b.0', event: live.event },
+      { id: 'feed-b.4', event: request.event },
+      { id: 'feed-b.5', event: waiting.event },
     ]);
-    expect(calls).toEqual(['feed-a.3', undefined]);
+    expect(calls).toEqual([{ after: 'feed-a.3' }, { from: 'state' }]);
   });
 
-  it('drops replayed states stamped before the snapshot when the fallback follows a feed with history', async () => {
-    const history: TaskEventEntry[] = [
-      { cursor: 'feed-b.0', event: { kind: 'state', state: 'Offered', at: '2026-10-27T00:00:00.000Z' } },
-      { cursor: 'feed-b.1', event: { kind: 'state', state: 'AwaitApproval', at: '2026-10-27T00:00:03.000Z' } },
-      { cursor: 'feed-b.2', event: { kind: 'agent', event: { type: 'progress', text: 'earlier line' } } },
-      { cursor: 'feed-b.3', event: { kind: 'state', state: 'Running', at: SNAPSHOT.updatedAt } },
-      { cursor: 'feed-b.4', event: { kind: 'state', state: 'Complete', at: '2026-10-27T00:00:09.000Z' } },
-    ];
-    const { tasks } = scripted(SNAPSHOT, [new TaskEventsUnavailableError('task-1', 'cursor_unknown'), history]);
-    const response = await app(tasks).request('/api/tasks/task-1/events', { headers: { 'Last-Event-ID': 'feed-a.3' } });
-    expect(await messages(response)).toEqual([
-      { event: { kind: 'state', state: 'Running', at: SNAPSHOT.updatedAt } },
-      { id: 'feed-b.2', event: history[2]!.event },
-      { id: 'feed-b.3', event: history[3]!.event },
-      { id: 'feed-b.4', event: history[4]!.event },
-    ]);
-  });
-
-  it('keeps every state when the browser resumes from a known cursor', async () => {
-    const old: TaskEventEntry = { cursor: 'feed-a.1', event: { kind: 'state', state: 'Offered', at: '2026-10-27T00:00:00.000Z' } };
-    const { tasks } = scripted(SNAPSHOT, [[old]]);
-    const response = await app(tasks).request('/api/tasks/task-1/events', { headers: { 'Last-Event-ID': 'feed-a.0' } });
-    expect(await messages(response)).toEqual([{ id: 'feed-a.1', event: old.event }]);
-  });
-
-  it('sends the pending approval with the current state when the fallback finds the task waiting', async () => {
-    const waiting = { ...SNAPSHOT, state: 'AwaitApproval', pendingApprovalId: 'appr-7' } as TaskSnapshot;
-    const { tasks } = scripted(waiting, [new TaskEventsUnavailableError('task-1', 'cursor_unknown'), []]);
-    const response = await app(tasks).request('/api/tasks/task-1/events', { headers: { 'Last-Event-ID': 'feed-a.3' } });
-    expect(await messages(response)).toEqual([
-      { event: { kind: 'state', state: 'AwaitApproval', at: SNAPSHOT.updatedAt } },
-      { event: { kind: 'await_approval', summary: 'approval appr-7 is pending', approvalId: 'appr-7' } },
-    ]);
-  });
-
-  it('sends only the current state when a finished task has no feed left', async () => {
+  it('sends only the final state when a finished task has no feed left', async () => {
     const complete = { ...SNAPSHOT, state: 'Complete' } as TaskSnapshot;
     const { tasks, calls } = scripted(complete, [new TaskEventsUnavailableError('task-1', 'feed_expired')]);
     const response = await app(tasks).request('/api/tasks/task-1/events');
     expect(await messages(response)).toEqual([{ event: { kind: 'state', state: 'Complete', at: SNAPSHOT.updatedAt } }]);
-    expect(calls).toEqual([undefined]);
+    expect(calls).toEqual([{ from: 'state' }]);
   });
 });

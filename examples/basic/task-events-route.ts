@@ -1,23 +1,9 @@
 // `GET /api/tasks/:taskId/events`: one task's event feed as server-sent events.
 // Each entry's cursor is the SSE `id`, so a browser `EventSource` that
 // reconnects sends it back as `Last-Event-ID` and the feed resumes after it.
-//
-// Two known limits, because `tasks.events` has no "from now" position:
-// - A new stream (no `Last-Event-ID`) for a task this server instance did not
-//   dispatch, such as one still running after a SQLite restart, gets only the
-//   events that happen from then on. It sends no current state first, so it
-//   stays silent until the task's next event. The bundled page opens a stream
-//   only right after it dispatches a task.
-// - When the cursor is unknown but this instance's feed already holds events
-//   (a forged cursor, or a second reader reattached the task after a restart),
-//   the fallback sends the current state and then replays the retained feed,
-//   dropping states stamped before the snapshot's `updatedAt`. Older agent
-//   lines still repeat. That time moves with the attempt, not with approvals:
-//   after Running, AwaitApproval, an approval and Running again, it is the
-//   first Running's, so the replay shows AwaitApproval and the answered
-//   approval request until the later Running arrives. A terminal can drop the
-//   other way: once the device acknowledges a Host cancel, the feed's Cancelled
-//   is stamped before the snapshot, which already said Cancelled.
+// A new stream, or one whose cursor this server cannot resume, starts at the
+// task's current state: its latest state, after the pending approval request
+// while it awaits one.
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { TaskEventsUnavailableError, type ByokServer } from '@byok-sdk/server';
@@ -30,34 +16,22 @@ export function taskEventsRoute(byok: { tasks: Pick<ByokServer['tasks'], 'get' |
     return streamSSE(c, async (stream) => {
       const abort = new AbortController();
       stream.onAbort(() => abort.abort());
-      // `since` is the snapshot already sent. Feed and snapshot times come from
-      // the same server clock, and a state stamped earlier is history.
-      const follow = async (after?: string, since?: string) => {
-        const options = after === undefined ? { signal: abort.signal } : { after, signal: abort.signal };
-        for await (const { cursor, event } of byok.tasks.events(taskId, options)) {
-          if (since !== undefined && event.kind === 'state' && event.at < since) continue;
+      const follow = async (start: { after: string } | { from: 'state' }) => {
+        for await (const { cursor, event } of byok.tasks.events(taskId, { ...start, signal: abort.signal })) {
           await stream.writeSSE({ id: cursor, data: JSON.stringify(event) });
         }
       };
       try {
-        await follow(lastEventId);
+        await follow(lastEventId === undefined ? { from: 'state' } : { after: lastEventId });
       } catch (error) {
         if (!(error instanceof TaskEventsUnavailableError)) throw error;
-        // The feed cannot resume where the browser left off (a server restart,
-        // or a finished task whose feed was reclaimed): send the current state,
-        // then follow from now while the task is still live.
-        const snapshot = await byok.tasks.get(taskId);
-        if (snapshot !== undefined) {
-          await stream.writeSSE({ data: JSON.stringify({ kind: 'state', state: snapshot.state, at: snapshot.updatedAt }) });
-          // The page shows its approval panel on an `await_approval` event, which
-          // a feed that cannot resume will not replay. The snapshot carries the
-          // pending approval's id, not its summary.
-          if (snapshot.state === 'AwaitApproval' && snapshot.pendingApprovalId !== undefined) {
-            const approvalId = snapshot.pendingApprovalId;
-            await stream.writeSSE({ data: JSON.stringify({ kind: 'await_approval', summary: `approval ${approvalId} is pending`, approvalId }) });
-          }
+        if (error.reason === 'cursor_unknown') {
+          await follow({ from: 'state' });
+          return;
         }
-        if (error.reason === 'cursor_unknown') await follow(undefined, snapshot?.updatedAt);
+        // A finished task whose feed is gone: nothing follows its final state.
+        const snapshot = await byok.tasks.get(taskId);
+        if (snapshot !== undefined) await stream.writeSSE({ data: JSON.stringify({ kind: 'state', state: snapshot.state, at: snapshot.updatedAt }) });
       }
     });
   };
