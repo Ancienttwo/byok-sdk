@@ -8,5 +8,5 @@ it('the CI dataplane job runs the hosted example against real Postgres', () => {
   const job = workflow.split('\n  dataplane:\n')[1]?.split(/\n {2}[a-z][a-z0-9-]*:\n/)[0] ?? '';
   expect(job).toContain("BYOK_REQUIRE_DATAPLANE: '1'");
   expect(job).toContain('BYOK_TEST_POSTGRES_URL: postgres://');
-  expect(job).toContain('run: bun run --filter @byok-sdk/example-hosted-bot-collaboration test');
+  expect(job).toContain('run: bash scripts/ci/with-secret-service.sh bun run --filter @byok-sdk/example-hosted-bot-collaboration test');
 });
