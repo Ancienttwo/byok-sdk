@@ -41,7 +41,8 @@ reader and no capability negotiation between the two majors.
   task's Agent events, artifacts and approval requests; for a submitted task,
   `byok.events.subscribe()` reports only `task.created` and `task.state`, and
   `tasks.get` reads the current snapshot. Progress and artifact events are not
-  available for submitted tasks in this release.
+  available for submitted tasks at this commit; #1022 adds a per-task event
+  stream in 0.31.0.
 - `dispatch` refusals come from the Agent lane: an unknown or revoked device
   is `agent_capability_missing` (was `device_not_found`), and an existing
   taskId is `agent_task_already_exists` (was `coordination_input_invalid`).

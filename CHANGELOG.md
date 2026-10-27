@@ -50,7 +50,7 @@
     and `sessionRef`); `LegacyDispatchInput` is removed. Fresh work uses
     `executions.submit`, which returns no `TaskHandle`: a submitted task has
     no per-task stream of Agent events and artifacts yet, only the
-    `task.created` and `task.state` server events. Two `dispatch` refusal
+    `task.created` and `task.state` server events; #1022 adds one in 0.31.0. Two `dispatch` refusal
     codes change, because the Agent lane answers them: an unknown or revoked
     device is `agent_capability_missing` (was `device_not_found`), and a
     taskId that already exists is `agent_task_already_exists` (was
