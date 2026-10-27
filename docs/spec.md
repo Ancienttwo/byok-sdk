@@ -1192,7 +1192,24 @@ Host UI or native tools. SDK source is now v9 (see the v9 cut); downstream paire
 remain separate actions. No v7 reader, mode default or fallback is retained.
 
 Fresh Pi execution keeps Pi's default native tools and the user's own
-extensions and skills. Prepared execution launches no native tool. Observed MCP
+extensions and skills by default. For Agent tasks on the ordinary RPC lane,
+local `PiAdapterOptions.agentBuiltinTools` selects the native tools (an empty
+list disables all), `agentUserContext: 'excluded'` removes user extensions,
+skills, templates, themes, instruction files and session resource settings, and
+`agentExtensions` selects the SDK web/subagent/todo extensions independently.
+The MCP bridge remains admitted separately. The excluded loader uses a fresh
+SDK resources directory while Pi's original model/auth stores remain the
+authentication authority; credentials are not copied or added to tool environments.
+The existing session-storage directory setting remains authoritative for continuity.
+An explicit tool policy is re-applied on resume, including dropping stale
+transcript tools. A resume that cannot clear pending tools fails closed.
+These options apply only when the manifest carries `agentRef`; unsupported
+prepared/durable lanes reject a non-inherited policy before spawning.
+The launch config is digest-bound v6; v5 is not accepted.
+Tool selection does not restrict file paths or provide an OS sandbox. Keeping
+user extensions or SDK web/subagent extensions permits their separately
+registered tools; a strict total tool set requires excluded user context and
+an explicit SDK extension set. Prepared execution launches no native tool. Observed MCP
 toolsets and reserved helpers on fresh offers remain separately admitted;
 prepared offers expose only their counted MCP tools and explicitly selected SDK
 memory tools.
@@ -3596,6 +3613,8 @@ wire contracts do not change.
 `DaemonConfig.storage` owns optional budget, scratchRoot, skillPackDataDirs and retention cadence/limits/expiring TTLs. Defaults: 15-minute sweeps, 5-minute pressure sweeps, 256 deletions, 10-second soft pass limit, runtime/old skill revisions 24 hours, daemon/home temps one hour, reader runs seven days, Agent result records seven days and 256 per home, confirmed journal receipts 30 days. Agent result records are still swept under storage pressure. Home temps cannot be configured below one hour; confirmed journal TTL must exceed the seven-day mailbox redelivery window. Input preparation retains its own absolute artifact/record horizons and pins; only its timer moves to the unified sweeper. Current skill revisions are resolved from installer lock.json under a shared publication gate. One usage measurement visits at most 65,536 entries across the store, scratch, skill, Agent-home and Pi sessionDir roots in that order. Past that bound it stops: each class whose root it did not finish reports `truncated: true` with lower-bound `bytes`/`entries`, and a class whose roots it never reached is also `measured: false`. Pressure is computed from the lower-bound used bytes and the complete free-space reading; truncation alone neither latches emergency nor fails startup, and an error-free truncated measurement can clear an emergency latch. Real I/O, root identity, journal usage and free-space errors still fail closed.
 
 Reader-run retention reads the complete session reference authority under the idle-home lease using the original pass inspection and soft-time budget. Only after a complete read does its 250 ms deletion window begin; deletion also consumes the remaining pass budget. An incomplete reference scan protects all reader runs in that home, without caching a partial map across passes. A slow home may therefore hold its maintenance lease for the remaining pass soft budget, delaying writer admission; a soft limit does not interrupt an outstanding filesystem call. Progress requires the full scan and some deletion work to fit in that budget.
+
+Startup fully enumerates the owned `exec-sdk` namespace before publishing capabilities. This safety enumeration is outside the maintenance inspection quota and soft wall-clock limit; its I/O cost grows with execution directories retained during the runtime TTL window. Actual SDK tree reclamation remains bounded and an incomplete cleanup still refuses startup. Normally released history alone does not exhaust startup enumeration. Periodic and pressure sweeps retain their existing quotas.
 
 Standalone adapter Hosts must pass `scratch: await createExecutionScratch({ root })` to operation.start and Pi launch resolution. They must await release after child disposal. Scratch roots must be short, absolute, private, canonical and exclusive. On Unix, the root must belong to the current process user before any permission change. Unix socket validation reserves 16 bytes for the runtime socket name and one terminating NUL. The root limit is 61 UTF-8 bytes on macOS and 65 on Linux.
 

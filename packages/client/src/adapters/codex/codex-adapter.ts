@@ -83,7 +83,8 @@ export interface CodexAdapterOptions {
    * opens, the adapter reads Codex's effective configuration for the task cwd
    * (`config/read`), sets `enabled = false` on every other `mcp_servers`
    * entry, and turns off the `apps` (connectors) and `plugins` features for
-   * the thread. The thread then has no plugins at all, not only no plugin
+   * the thread. Plugin exclusion also applies at app-server launch, before
+   * startup plugin sync. The thread then has no plugins at all, not only no plugin
    * MCP servers. After the open it reads the thread's MCP server status
    * back, and the start fails if any other server is not disabled, or if a
    * user server has the name of a task or SDK server. The user's
@@ -163,14 +164,13 @@ export class CodexAdapter implements RuntimeAdapter {
       }
       let authPresent = false;
       try {
-        const auth = await execFileAsync(command, [...args, 'login', 'status'], {
+        await execFileAsync(command, [...args, 'login', 'status'], {
           timeout: DETECT_TIMEOUT_MS,
           killSignal: 'SIGKILL',
           env: buildRuntimeEnv({ ambient: process.env }),
         });
-        authPresent = /logged in (using|with)/i.test(
-          auth.stdout + '\n' + auth.stderr,
-        );
+        // Codex reports configured credentials with exit 0; its display text is not a contract.
+        authPresent = true;
       } catch {}
       return {
         kind: 'available',
@@ -270,7 +270,11 @@ export class CodexAdapter implements RuntimeAdapter {
           ...(this.options.nativeInteractions === undefined ? {} : { approvalPolicy: "on-request" as const }),
           sandboxMode: this.options.sandbox ?? 'danger-full-access',
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
-          ...(input.manifest.homeAccess === 'memory-reader' ? { launchArgs: READER_PROJECT_ROOT_ARGS } : {}),
+          launchArgs: [
+            ...(input.manifest.homeAccess === 'memory-reader' ? READER_PROJECT_ROOT_ARGS : []),
+            // Startup plugin sync precedes beforeOpen and the thread's feature overrides.
+            ...(excludeUserMcp ? ['-c', 'features.plugins=false'] : []),
+          ],
           ...(input.manifest.sessionRef === undefined
             ? {}
             : { resume: input.manifest.sessionRef }),

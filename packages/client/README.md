@@ -238,6 +238,31 @@ Claude loads the user's own MCP configuration,
 settings, deny rules and hooks. The SDK adds its task servers with
 `--mcp-config`. Ordinary Pi loads the user's own extensions and skills from
 its agent directory.
+For ordinary Pi RPC Agent tasks, local Hosts can select native tools and
+resources independently:
+
+```ts
+new PiAdapter({
+  agentBuiltinTools: ['read', 'grep', 'find', 'ls'],
+  agentUserContext: 'excluded',
+  agentExtensions: [],
+});
+```
+
+These options default to `inherit` and apply only to Agent manifests.
+`agentBuiltinTools: []` disables native tools while task MCP and SDK helpers
+remain separately admitted. `agentExtensions` selects `web`, `subagent` and
+`todo`; an empty list loads none of those. Excluded user context loads no user
+extensions, skills, templates, themes, instruction files or session resource settings.
+The existing session-storage directory setting still applies for session continuity. Pi model
+and authentication stores are still used without copying credentials into the
+resources directory. Resume applies the current policy and rejects if pending
+tools cannot be cleared. Prepared and durable Pi reject non-inherited policies.
+Native file tools still access paths with the process user's permissions;
+this option does not confine them to Agent home. Retained extensions may expose
+additional tools, so use excluded context and an explicit extension set when
+the complete tool surface must be bounded.
+
 Codex runs with sandbox `danger-full-access` by default. Set
 `DaemonConfig.codexSandbox` to `read-only` or `workspace-write` for a stricter
 mode, or to `inherit` to apply the user's own `config.toml`. Any other value
