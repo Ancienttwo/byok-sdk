@@ -86,7 +86,9 @@ class JsonChild {
   }
 
   async ready(): Promise<JsonLine> {
-    return this.waitFor((event) => event.ready === true);
+    // #978: pairing with Windows Credential Manager custody took 9.2 s on
+    // windows-latest (run 40533270421); the 10 s default leaves no margin.
+    return this.waitFor((event) => event.ready === true, process.platform === 'win32' ? 30_000 : 10_000);
   }
 
   async rpc(method: string, params?: Record<string, unknown>): Promise<unknown> {
