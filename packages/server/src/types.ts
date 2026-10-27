@@ -334,30 +334,6 @@ export interface TaskEventEntry {
   readonly event: ServerTaskEvent;
 }
 
-/**
- * Thrown by the first `next()` of `ByokServer.tasks.events` or
- * {@link TaskHandle.events}, before any entry, when the read cannot continue
- * from where the caller asked. Read the task's current facts with
- * `ByokServer.tasks.get` instead.
- *
- * - `cursor_unknown`: `after` names no position in this instance's current
- *   feed of the task (a restart, another task's cursor, or a malformed one).
- * - `feed_expired`: the task is terminal and this instance retains no feed for
- *   it, because retention reclaimed it or the task ended before this instance
- *   started.
- */
-export class TaskEventsUnavailableError extends Error {
-  readonly taskId: string;
-  readonly reason: 'cursor_unknown' | 'feed_expired';
-
-  constructor(taskId: string, reason: 'cursor_unknown' | 'feed_expired') {
-    super(`events of task ${taskId} unavailable: ${reason}`);
-    this.name = 'TaskEventsUnavailableError';
-    this.taskId = taskId;
-    this.reason = reason;
-  }
-}
-
 /** Handle returned by {@link ByokServer.dispatch} for one in-flight task. */
 export interface TaskHandle {
   readonly taskId: string;

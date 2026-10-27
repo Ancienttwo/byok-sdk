@@ -94,7 +94,7 @@ export type {
   TaskResult,
   TaskSnapshot,
 } from './types';
-export { TaskEventsUnavailableError } from './types';
+export { TaskEventsUnavailableError } from './relay';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
