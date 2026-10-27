@@ -307,8 +307,9 @@ async function pair(cloud: JsonChild, daemonOptions: Partial<ChildConfig> = {}):
 
 beforeAll(async () => {
   suiteRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-execution-recovery-kill-suite-'));
-  daemonBin = path.join(suiteRoot, 'execution-recovery-daemon');
-  cloudBin = path.join(suiteRoot, 'execution-recovery-cloud');
+  const exe = process.platform === 'win32' ? '.exe' : '';
+  daemonBin = path.join(suiteRoot, `execution-recovery-daemon${exe}`);
+  cloudBin = path.join(suiteRoot, `execution-recovery-cloud${exe}`);
   await run('bun', ['build', 'packages/client/src/__tests__/fixtures/execution-recovery-daemon.ts', '--compile', '--outfile', daemonBin]);
   await run('bun', ['build', 'packages/client/src/__tests__/fixtures/execution-recovery-cloud.ts', '--compile', '--outfile', cloudBin]);
 }, 120_000);
@@ -1014,4 +1015,33 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     }
     expect(starts()).toHaveLength(1);
   }, 30_000);
+});
+
+// #978: the Windows hard kill is `taskkill /F` (TerminateProcess). The daemon
+// keeps its default credential store (Windows Credential Manager) and journal.
+describe.runIf(process.platform === 'win32')('compiled daemon taskkill /F execution recovery on Windows', () => {
+  it('fails a claimed task once with daemon_interrupted after taskkill /F and restart, without starting the runtime again', async () => {
+    const cloud = await startCloud();
+    const { daemon, deviceId } = await pair(cloud);
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'hang until taskkill' }) as { taskId: string };
+    await waitForAttempt(cloud, offer.taskId, 'running');
+    expect(starts().map((start) => start.taskId)).toEqual([offer.taskId]);
+    await run('taskkill', ['/F', '/PID', String(daemon.child.pid)]);
+    expect(await daemon.exited()).toEqual({ code: 1, signal: null });
+    expect((await cloud.rpc('readTaskAttempt', { taskId: offer.taskId }) as { status: string }).status).toBe('running');
+
+    await startDaemon();
+    const attempt = await waitForAttempt(cloud, offer.taskId, 'failed');
+    expect(attempt.terminalCause).toBe('daemon_interrupted');
+    const terminal = decodeEnvelope(String(await cloud.rpc('readTerminalBody', { taskId: offer.taskId })));
+    expect(terminal).toMatchObject({ type: 'task.fail', task_id: offer.taskId, payload: { reason: 'daemon_interrupted', retryable: false } });
+    await waitForJournalTruth('confirmed');
+    expect(journalRows('SELECT terminal_type, truth_state FROM journal_terminal')).toEqual([
+      { terminal_type: 'failed', truth_state: 'confirmed' },
+    ]);
+    const wire = await cloud.rpc('readWire') as Array<{ type: string; task_id?: string }>;
+    expect(wire.filter((row) => row.task_id === offer.taskId && ['task.complete', 'task.fail', 'task.cancelled'].includes(row.type)))
+      .toEqual([expect.objectContaining({ type: 'task.fail' })]);
+    expect(starts().map((start) => start.taskId)).toEqual([offer.taskId]);
+  }, 60_000);
 });
