@@ -371,8 +371,8 @@ What the kept rows hold:
   So the cloud keeps that ContextPack, with its resident memory text, as long as it keeps the offer receipt.
 - An `agent_message_admission` row goes only when its `task` row goes (`deploy/sql/0017_agent_message_admission.sql:20-22`).
 - The receipt store writes each body as it gets it (`packages/cloud-dataplane/src/stores/receipts.ts:63-73`).
-  The SDK adds no payload encryption.
-  Issue [#654](https://github.com/Ancienttwo/byok-sdk/issues/654) asks for end-to-end payload encryption.
+  For a task whose offer has `sealing`, a body of a sealed category holds the sealed member, so the store keeps ciphertext ([protocol §2.5](protocol.md#25-sealed-payload-v1-654-gated-addition)).
+  Every other body is plaintext. [security.md, Sealed tasks](security.md#sealed-tasks) lists what a sealed task still shows the Host.
 
 Deletion paths:
 

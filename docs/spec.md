@@ -1535,6 +1535,35 @@ lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without
 publishing a second `task.complete`, `task.fail`, or `task.cancelled`.
 
+## Hosted sealed payload (#654)
+
+A hosted Host can run a task whose task input, task output or both are sealed
+end to end. The categories are frozen on the offer as `sealing`
+([protocol §2.5](./protocol.md#25-sealed-payload-v1-654-gated-addition)). A web client member
+seals the input before it calls `submitSealedAgentExecution` or
+`steerSealedTask`. The device opens it, runs the task and seals the output.
+The Host stores and returns the sealed members and the plaintext metadata
+next to them. It holds no scope key in plaintext, so it cannot open them.
+
+- A missing key, a member that does not open and a policy mismatch are
+  refused. Nothing falls back to plaintext. A device that cannot open a sealed
+  offer declines it with one of the four sealed decline codes.
+- v1 seals only `task-input` and `task-output`. Agent messages, memory
+  projections, input preparation and drafts stay plaintext. A sealed task
+  streams no draft.
+- `@byok-sdk/server` has no sealed dispatch: it refuses `sealing` and
+  `sealed` with `coordination_input_invalid`. A sealed task must not go to
+  `@byok-sdk/cloud-do`, which reads task content in plaintext.
+- The Host's truth route stores a `task.terminal` record as the product
+  writes it and does not check sealing. A product that records a sealed
+  task's terminal there must write sealed content only.
+- [security.md, Sealed tasks](./security.md#sealed-tasks) lists what a sealed
+  task still shows the Host (for example the artifact name, the changed memory
+  file paths and the model in `usage`) and what sealing does not protect.
+  `examples/hosted-bot-collaboration/src/sealed-zero-hit.test.ts` measures it:
+  a sealed task's content has zero hits in every store, object, log line and
+  observer call that the run writes.
+
 ## Hosted task cancellation authority
 
 The hosted cloud exposes one tenant-scoped `cancelTask(taskId, reason?)`
@@ -2742,7 +2771,8 @@ logs, or a second file authority.
 member (#654 E2d-1, [protocol §2.6](./protocol.md)). The member keys, `pv` and
 the member state are three more entries of the same OS credential provider,
 cleared at a re-pair and at unpair. A daemon with an injected enrollment
-backend refuses an E2EE pairing.
+backend refuses an E2EE pairing. What a hosted sealed task protects is in
+[Hosted sealed payload](#hosted-sealed-payload-654).
 Copy the complete command from the Host's pairing page. A string used once
 without `--e2ee` is burned: start a new registration at the Host and do not
 retry it (protocol §2.6, device enrollment).
