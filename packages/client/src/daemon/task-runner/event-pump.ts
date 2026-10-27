@@ -5,7 +5,6 @@ import { resultReplyFailureReason } from '../result-reply-failure';
 import { DEFAULT_ARTIFACT_LIMITS, readArtifactBytes } from '../artifact-read';
 import { createEnvelope, type AgentEvent, type BlobRef, SEALED_SPLIT_TABLE } from '@byok-sdk/protocol';
 import { projectRuntimeBoundaryFailure } from '../../runtime-failure';
-import type { ApprovalOrigin } from '../approvals';
 import { spillOversizedEvent } from '../event-spill';
 import { ProgressEventTooLargeError } from '../progress-batcher';
 import type { ActiveTask } from './support';
@@ -116,7 +115,7 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
         && active.adapter.descriptor.progressEventsAreMessages === true && event.text.trim() !== ''
         && active.session.progressStartsMessage?.(event) !== false;
       active.messageDraft?.push(event, startsMessage);
-      if (event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'needs_approval') {
+      if (event.type === 'tool_use' || event.type === 'tool_result') {
         // A tool interaction ends the current text run: whatever the model
         // said before it was narration about what it was ABOUT to do, not
         // its answer. See `ActiveTask.finalTextParts` for why `usage`,
@@ -124,90 +123,6 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
         active.finalTextParts.length = 0;
       }
 
-      if (event.type === 'needs_approval') {
-        active.batcher.flush();
-        // Acceptance finding 1 (dormant branch bypassing the approval
-        // registry): this used to mint its own approvalId and stamp it
-        // onto `active.pendingApprovalId` directly, entirely bypassing
-        // `deps.approvalRegistry` — no registry entry ever existed for it,
-        // and nothing ever cleared this field for it either (clearing
-        // lived ONLY in `dispatchApproval`'s own `onResolve` callback,
-        // which is registered only when a request actually goes through
-        // the registry). For a hypothetical adapter mixing this
-        // stream-based path with the out-of-band `approvalChannel` path
-        // on the SAME task (e.g. a custom session whose `resolveApproval()`
-        // sometimes delegates to `ctx.approvalChannel.resolve()`), that
-        // meant: this event could clobber an already-dispatched channel
-        // approval's id (a later wire decision for the REAL dispatched
-        // approval would then look stale and be dropped); a resolved
-        // dormant approval left a stale id blocking every later
-        // `requestApproval` call for this task until the task finished;
-        // and routing a wire decision through `ctx.approvalChannel.resolve()`
-        // for a dormant id that was never registered threw
-        // `ApprovalNotFoundError` — not treated as benign staleness by
-        // `handleApprove`/`handleReject` — failing the task outright.
-        //
-        // Fix: reuse `requestApproval`, the SAME entry point a real
-        // out-of-band approval (MCP-triggered) goes through. This gives
-        // the dormant path the exact same lifecycle: it queues (rather
-        // than clobbers) behind an already-dispatched approval for this
-        // task, registers in `deps.approvalRegistry` once actually
-        // dispatched, and arms the same timeout — see
-        // `task-runner-approval.test.ts`'s mixed-path regression test.
-        //
-        // C1 (cross-model review, P1): reusing `requestApproval` fixed the
-        // registry-bypass above, but its returned promise used to be
-        // discarded outright (`void`d with no continuation at all). That
-        // was harmless for the WIRE path — `handleApprove`/`handleReject`
-        // already call `active.session.resolveApproval()` themselves,
-        // directly, before ever touching the registry (see
-        // `clearPendingApproval`'s own doc comment) — but a decision that
-        // resolves THIS registry entry any OTHER way (the local
-        // control-socket CLI's `approvals.resolve`, this request's own
-        // `dispatchApproval` timeout, or a bounded-eviction fallback in
-        // `ApprovalRegistry.register`) never goes through
-        // `handleApprove`/`handleReject` at all — so nothing ever called
-        // `session.resolveApproval()` for it. The runtime session stayed
-        // paused forever even though the daemon (and, for a `'local'`
-        // origin, the server too, via `sendApprovalResolved`) already
-        // considered the approval resolved.
-        //
-        // Fix: chain a continuation onto the SAME promise that forwards
-        // the decision into `active.session.resolveApproval()` — but ONLY
-        // when the resolution's origin is NOT `'wire'`, since the wire
-        // path already did that itself, synchronously, before this
-        // registry entry was ever resolved; forwarding again here would
-        // double-resolve the session. `origin` is deliberately NOT part of
-        // the promise's own resolved value — that shape (`{approved,
-        // reason}`) is `requestApproval`'s public contract, asserted
-        // exactly by this file's own tests and relied on by
-        // `create-daemon.ts`'s shared control socket —
-        // instead it's threaded through via the optional `onOrigin`
-        // callback parameter (additive, invisible to every other caller).
-        // See `task-runner-approval.test.ts`'s "C1" describe block for the
-        // local-resolve / wire-resolve / timeout regression tests, and
-        // `clearPendingApproval`'s own doc comment for the sibling wire
-        // half of this exact design.
-        const { taskId } = active;
-        let resolutionOrigin: ApprovalOrigin = 'local';
-        void this.requestApproval(taskId, event.summary, (origin) => {
-          resolutionOrigin = origin;
-        }).then(async ({ approved, reason }) => {
-          if (resolutionOrigin === 'wire') return;
-          // The task may have finished (completed/failed/cancelled) by the
-          // time this settles — look it up fresh rather than trust the
-          // `active` closed over above, mirroring every other post-await
-          // guard in this method (e.g. this loop's own stray-event check,
-          // and the catch block below).
-          if (this['tasks'].get(taskId) !== active) return;
-          try {
-            await active.session.resolveApproval(approved, reason);
-          } catch (err) {
-            await this['fail'](taskId, `failed to resume session after approval decision: ${errorMessage(err)}`, false);
-          }
-        });
-        continue;
-      }
       if (event.type === 'turn_end') {
         await pumpTurnEnd.call(this, active, event);
         return;

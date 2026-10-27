@@ -633,21 +633,13 @@ export interface Daemon {
    */
   unpair(): Promise<void>;
   /**
-   * M3-2a: locally resolve a task currently paused on `needs_approval` —
-   * drives the exact same code path a server-sent `task.approve` does
-   * (`TaskRunner.handleApprove`), invoked directly instead of over the wire,
-   * then reports the decision to the server as `task.approval_resolved`.
-   * Honest-but-currently-unexercised: none of the three bundled adapters
-   * (pi/claude/codex) ever actually pauses for approval — each one's
-   * `resolveApproval` throws unconditionally (see `toRuntimeInfoCapabilities`'s
-   * doc comment below) — so calling this against a task on this daemon today
-   * always fails that task with a clear reason instead of resuming it,
-   * exactly as an honest, doing-nothing-magic implementation should. Ready
-   * for the day a runtime adapter implements real interactive approval, with
-   * no further changes needed here. A no-op (resolves immediately) for a
-   * `taskId` this daemon doesn't currently have active. `approvalId` names
-   * the pending approval, as a wire v4 decision does; a different id is a
-   * stale decision and changes nothing.
+   * Locally approve the pending approval `approvalId` of a task — the same
+   * resolution a server-sent `task.approve` makes (`TaskRunner.handleApprove`),
+   * reported to the server as `task.approval_resolved`. The session that
+   * requested it through its `approvalChannel` (or a control-socket
+   * `approvals.request`) receives `{ approved: true }`. A no-op (resolves
+   * immediately) for a `taskId` this daemon doesn't currently have active;
+   * a different `approvalId` is a stale decision and changes nothing.
    */
   approve(taskId: string, opts: { approvalId: string }): Promise<void>;
   /** M3-2a: same as {@link approve} but rejects — see that method's doc comment. */

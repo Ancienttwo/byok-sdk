@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH } from '../constants';
 import {
   AgentEventOrUnknownSchema,
+  KNOWN_AGENT_EVENT_TYPES,
   AgentEventSchema,
   TaskProgressPayloadSchema,
   UnknownAgentEventSchema,
@@ -181,10 +182,9 @@ describe('tool observation fields', () => {
     expect(AgentEventSchema.safeParse({ type: 'tool_result', tool: 'bash', toolCallId: '   ' }).success).toBe(false);
   });
 
-  it('leaves needs_approval unchanged', () => {
-    expect(AgentEventSchema.parse({ type: 'needs_approval', summary: 'approve Bash' })).toEqual({
-      type: 'needs_approval', summary: 'approve Bash',
-    });
+  it('no longer knows needs_approval: approval is the task.await_approval message', () => {
+    expect(AgentEventSchema.safeParse({ type: 'needs_approval', summary: 'approve Bash' }).success).toBe(false);
+    expect(KNOWN_AGENT_EVENT_TYPES).not.toContain('needs_approval');
   });
 });
 

@@ -145,10 +145,6 @@ class ControlledSession implements Session {
     }
     writeFileSync(path.join(config.controlDir, `${this.taskId}.closed`), 'closed\n');
   }
-
-  async resolveApproval(): Promise<void> {
-    throw new Error('controlled execution-recovery fixture has no approval flow');
-  }
 }
 
 class ControlledAdapter implements RuntimeAdapter {

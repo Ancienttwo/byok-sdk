@@ -135,6 +135,7 @@ describe.skipIf(!RUN)('the Host clock on local workerd (#794 D3, H4)', () => {
     expect((await h.routineIntents())[0]?.submission).not.toBe('delivered');
     worker = await h.restart({ fault: 'drop-notify' });
     await until(async () => (await h!.routineIntents())[0]?.submission === 'delivered' || undefined);
+    await until(async () => alarmReports(worker).some(report => report.submit.tried > 0) || undefined, 3 * CLOCK_MS);
     expect(alarmReports(worker).some(report => report.submit.tried > 0)).toBe(true);
     expect((await h.occurrences()).filter(occurrence => occurrence.plannedAt === slot)).toHaveLength(1);
     expect(await h.routineIntents()).toHaveLength(1);

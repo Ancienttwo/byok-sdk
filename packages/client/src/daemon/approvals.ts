@@ -1,16 +1,9 @@
 /**
- * M4 Phase 2: minimal pending-approval registry backing the control
- * socket's `approvals.list`/`approvals.resolve` methods.
- *
- * Nothing PRODUCES an approval yet in Phase 2 — every one of the three
- * bundled runtime adapters (pi/claude/codex) still has no interactive
- * `needs_approval` path (see `create-daemon.ts`'s `toRuntimeInfoCapabilities`
- * doc comment) — so `list()` always returns `[]` and `resolve()` always
- * throws {@link ApprovalNotFoundError} against a real daemon today. This
- * class exists now so Phase 3 (the claude permission-prompt path) only has
- * to call `register()` from wherever it detects a prompt; the control-socket
- * plumbing (`control-server.ts`'s method registry, the CLI's `approve`/
- * `reject` commands) is already wired end-to-end against this same registry.
+ * The pending-approval registry: the one place an approval is resolved.
+ * `TaskRunner.requestApproval` registers each dispatched approval (from a
+ * session's `approvalChannel` or the control socket's `approvals.request`);
+ * wire and local decisions, the CLI's `approvals.resolve`, timeouts, task
+ * finish and eviction all resolve it here.
  */
 
 export type ApprovalDecision = 'approve' | 'reject';
@@ -18,18 +11,17 @@ export type ApprovalDecision = 'approve' | 'reject';
 /**
  * Distinguishes a resolution
  * that arrived over the wire (a server-sent `task.approve`/`task.reject`,
- * relayed here via `RuntimeOperationStartInput.approvalChannel.resolve` — `task-runner.ts`'s
- * `handleOffer`) from one this device decided on its own (the local
- * `approvals.resolve` control-socket RPC, a fail-closed `requestApproval`
- * timeout, or a fail-closed finish/eviction rejection). `TaskRunner` uses
+ * `TaskRunner.handleApprove`/`handleReject`) from one this device decided on
+ * its own (`Daemon.approve`/`reject`, the local `approvals.resolve`
+ * control-socket RPC, a fail-closed `requestApproval` timeout, or a
+ * fail-closed finish/eviction rejection). `TaskRunner` uses
  * this to decide whether to report `task.approval_resolved` back to the
  * server: a wire-triggered resolution is something the server already knows
  * about (it sent the decision itself) and must never be echoed back;
  * everything else is new information only the device has, and gets
  * reported. `'local'` is the default (see `resolve()`
- * below) precisely because it's the common case: every call site in this
- * module and `task-runner.ts` except the one wire-relay closure is local by
- * construction.
+ * below) precisely because it's the common case: every call site except
+ * the wire decision handlers is local by construction.
  */
 export type ApprovalOrigin = 'wire' | 'local';
 
@@ -118,8 +110,7 @@ export class ApprovalRegistry {
    * `requestApproval` timeout and `finish()` fail-closed cleanup
    * (`task-runner.ts`) — resolves a decision this device made on its own.
    * The one exception, a server-sent wire `task.approve`/`task.reject`
-   * relayed through `RuntimeOperationStartInput.approvalChannel.resolve`
-   * (`task-runner.ts`'s `handleOffer`), passes `'wire'` explicitly.
+   * (`TaskRunner.handleApprove`/`handleReject`), passes `'wire'` explicitly.
    */
   resolve(approvalId: string, decision: ApprovalDecision, reason?: string, origin: ApprovalOrigin = 'local'): void {
     const entry = this.pending.get(approvalId);

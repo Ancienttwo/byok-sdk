@@ -1220,15 +1220,6 @@ class PiSession implements Session {
     await this.closeAttempt;
   }
 
-  async resolveApproval(): Promise<void> {
-    // pi has no built-in per-call approval gate
-    // and never emits `needs_approval` in M0/M1, so this should be
-    // unreachable in practice. Kept as an explicit, descriptive failure
-    // rather than a silent no-op so a future caller (or a misbehaving
-    // server) gets a clear error instead of a hang.
-    throw new Error('pi adapter does not support approval resume: pi never emits needs_approval in M0/M1');
-  }
-
   /** Pi reports every tool result itself; this adapter never makes one up. */
   evidence(): SessionEvidence {
     return { decodeDropped: this.rpc.decodeDropped, unmappedFrames: this.rpc.unmappedFrames, syntheticToolResults: 0 };

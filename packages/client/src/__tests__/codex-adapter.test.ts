@@ -103,6 +103,26 @@ describe('Codex persistent app-server adapter', () => {
       authPresent: false,
     });
   });
+  it.each([
+    ['codex-cli 0.160.0', 'Logged in using an API key - sk-placeholder'],
+    ['codex-cli 0.164.0', 'API key configured - sk-placeholder\nAuthentication is checked when you send a request.'],
+  ])('detects configured API-key auth for %s from the successful status exit', async (version, output) => {
+    vi.stubEnv('FAKE_CODEX_VERSION', version);
+    vi.stubEnv('FAKE_CODEX_LOGIN_STATUS_OUTPUT', output);
+    expect(await adapter().detect()).toMatchObject({
+      kind: 'available',
+      version,
+      authPresent: true,
+    });
+  });
+  it('keeps a failed login status unauthenticated regardless of its display text', async () => {
+    vi.stubEnv('FAKE_CODEX_LOGGED_IN', '0');
+    vi.stubEnv('FAKE_CODEX_LOGIN_STATUS_OUTPUT', 'Logged in using ChatGPT');
+    expect(await adapter().detect()).toMatchObject({
+      kind: 'available',
+      authPresent: false,
+    });
+  });
   it('declares steer, resume, no interactive approval and YOLO-only auto', () => {
     expect(adapter().descriptor.capabilities).toEqual({
       steer: true,
@@ -630,13 +650,6 @@ describe('Codex persistent app-server adapter', () => {
     await s.close();
     await s.close();
   });
-  it('approval resume rejects rather than pretending an interactive product lane', async () => {
-    const s = await open();
-    await turn(s);
-    await expect(s.resolveApproval(true)).rejects.toThrow(
-      'interactive approval',
-    );
-  });
   it('passes reserved MCP servers in the thread config, never in argv or the process env', async () => {
     const captured: string[][] = [];
     const envs: NodeJS.ProcessEnv[] = [];
@@ -672,9 +685,9 @@ describe('Codex persistent app-server adapter', () => {
     expect(captured).toHaveLength(1);
     const frames = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { method?: string; params?: { config?: { mcp_servers?: unknown } } });
     expect(frames.find((frame) => frame.method === 'thread/start')?.params?.config?.mcp_servers).toEqual({
-      byokagentmessage: { command: '/fixture/server', args: [], env: { SERVER_ONLY: 'secret' }, enabled: true },
+      byokagentmessage: { command: '/fixture/server', args: [], env: { SERVER_ONLY: 'secret' }, enabled: true, tools: { send_agent_message: { approval_mode: 'approve' } } },
     });
-    // No per-tool grant or per-tool approval mode is projected.
+    // Helper grants stay in thread configuration, never process arguments.
     expect(captured[0]!.some((arg) => arg.includes('mcp_servers') || arg.includes('enabled_tools') || arg.includes('approval_mode'))).toBe(false);
     expect(Object.values(envs[0]!).some((value) => value?.includes('secret'))).toBe(false);
   });
