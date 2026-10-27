@@ -40,3 +40,17 @@ PR #1066 首轮 CI run `40578376946` 在 scope selection 拒绝新增 `packages/
 签字依据：2026-10-28，协调席位 **wB:p4** 按 **#1008 已有协调代签授权** 选择「批准该精确映射」。这是该映射的协调代签，不是新的 owner 产品决定。
 
 新增回归验证两条 Codex probe 路径选择完全相同的范围，未知脚本仍被拒绝。`node --test scripts/ci/select-impact.test.mjs scripts/ci/plan-ci.test.mjs`：50 passed、exit 0，日志 `/tmp/byok-1058-ci-mapping.log`。生产源码保持冻结，最终 CI 绑定后续 head 单独核对。
+
+
+## 收紧预算后的整合签字（2026-10-28）
+
+主线审批清理收紧预算后，整合已冻结前置修复并按实际构建重新计量。协调席位 wB:p4 按 #1008 代签批准以下精确上限，无额外余量；不涉及 lane M/#1012，不放宽其他 policy。
+
+| Entry | Budget bytes |
+| --- | ---: |
+| `@byok-sdk/client` | 1846427 |
+| `@byok-sdk/client/adapters` | 329980 |
+| `@byok-sdk/client/testing` | 315466 |
+| `bin:byok-agent` | 1791069 |
+
+entry facts 和 README 表从该组合构建再生，未手工保留 opaque import 旧行号。签字证据：`_ops/issue-lanes/1066-1067-budget-signoff.md`。
