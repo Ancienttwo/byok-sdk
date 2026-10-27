@@ -273,14 +273,20 @@ export class TaskEventRelay implements ByokCloudObserver {
       case 'task.started':
         this.#transition(state, taskId, 'Running', at);
         return;
+      // A sealed output carries no plaintext for this feed. A sealed approval
+      // still moves the task to AwaitApproval, without a request, as the
+      // restart seed reads it back.
       case 'task.progress':
+        if (envelope.payload.sealed !== undefined) return;
         for (const event of envelope.payload.events) state.queue.push({ kind: 'agent', event });
         return;
       case 'task.artifact':
+        if (envelope.payload.sealed !== undefined) return;
         state.queue.push({ kind: 'artifact', artifact: envelope.payload });
         return;
       case 'task.await_approval':
-        this.#transition(state, taskId, 'AwaitApproval', at, { kind: 'await_approval', summary: envelope.payload.summary, approvalId: envelope.payload.approvalId });
+        this.#transition(state, taskId, 'AwaitApproval', at, envelope.payload.sealed !== undefined ? undefined
+          : { kind: 'await_approval', summary: envelope.payload.summary, approvalId: envelope.payload.approvalId });
         return;
       case 'task.approval_resolved':
         this.emitServerEvent({

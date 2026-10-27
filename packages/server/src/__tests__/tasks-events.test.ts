@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import type { Server as HttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -84,6 +84,21 @@ function stateRead(state: TaskState) {
 type StateRead = ReturnType<typeof stateRead> | undefined;
 const noRequest = async () => undefined;
 
+/** The sealed task-output envelopes of the v4 corpus, by type. */
+const SEALED_OUTPUTS = new Map(readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
+  .trimEnd().split('\n').map((raw) => JSON.parse(raw) as Envelope)
+  .filter((envelope) => (envelope.payload as { sealed?: unknown }).sealed !== undefined)
+  .map((envelope) => [envelope.type, envelope.payload]));
+
+function sealedOutput(type: 'task.progress' | 'task.artifact' | 'task.await_approval', taskId: string) {
+  const payload = SEALED_OUTPUTS.get(type);
+  if (payload === undefined) throw new Error(`no sealed ${type} in the v4 corpus`);
+  return {
+    tenantId: tenantId(PRODUCT_ID), deviceId: 'device-a', outcome: 'accepted' as const,
+    envelope: createEnvelope(type, payload as never, { taskId }),
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((settle) => { resolve = settle; });
@@ -114,7 +129,7 @@ describe('ByokServer.tasks.events', () => {
     await instance.executions.submit({
       taskId,
       deviceId: daemon.deviceId,
-      payload: { instruction: 'stream me', runtime: 'pi', agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+      payload: { instruction: 'stream me', runtime: 'pi', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
     });
   }
 
@@ -366,7 +381,7 @@ describe('ByokServer.tasks.events across a SQLite restart', () => {
       for (const taskId of ['survivor', 'cancelled']) {
         await instance.executions.submit({
           taskId, deviceId: daemon.deviceId,
-          payload: { instruction: 'outlive me', runtime: 'pi', agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+          payload: { instruction: 'outlive me', runtime: 'pi', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
         });
         await post(createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef: AGENT }, { taskId }));
         await post(createEnvelope('task.started', {}, { taskId }));
@@ -435,7 +450,7 @@ describe('ByokServer.tasks.events seeding a feed attached after a SQLite restart
       };
       await instance.executions.submit({
         taskId: 'waiting', deviceId: daemon.deviceId,
-        payload: { instruction: 'ask first', runtime: 'pi', agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+        payload: { instruction: 'ask first', runtime: 'pi', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
       });
       await post(createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef: AGENT }, { taskId: 'waiting' }));
       await post(createEnvelope('task.started', {}, { taskId: 'waiting' }));
@@ -488,7 +503,7 @@ describe('ByokServer.tasks.events after a SQLite restart, when the task is submi
       };
       const input = {
         taskId: 'resubmitted', deviceId: daemon.deviceId,
-        payload: { instruction: 'outlive me', runtime: 'pi' as const, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' as const } },
+        payload: { instruction: 'outlive me', runtime: 'pi' as const, session: { mode: 'fresh' as const }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' as const } },
       };
       await instance.executions.submit(input);
       await post(createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef: AGENT }, { taskId: 'resubmitted' }));
@@ -602,6 +617,36 @@ describe('TaskEventRelay dispatch phases', () => {
     relay.noteHostTransition('cancelled-early', 'Cancelled', '2026-10-27T00:00:01.000Z');
     relay.noteDispatched('cancelled-early', '2026-10-27T00:00:00.000Z');
     expect(await states(relay, 'cancelled-early', 2)).toMatchObject([{ state: 'Offered' }, { state: 'Cancelled' }]);
+    relay.stop();
+  });
+});
+
+describe('a sealed task on the relay', () => {
+  it('moves the live feed to AwaitApproval on a sealed approval, with no request, and pushes no sealed output', async () => {
+    const relay = new TaskEventRelay({});
+    relay.provision('sealed-live');
+    relay.noteDispatched('sealed-live', '2026-10-27T00:00:00.000Z');
+    relay.onInboundCommitted(sealedOutput('task.progress', 'sealed-live'));
+    relay.onInboundCommitted(sealedOutput('task.artifact', 'sealed-live'));
+    relay.onInboundCommitted(sealedOutput('task.await_approval', 'sealed-live'));
+    relay.onInboundCommitted({
+      tenantId: tenantId(PRODUCT_ID), deviceId: 'device-a', outcome: 'accepted', envelope: createEnvelope('task.started', {}, { taskId: 'sealed-live' }),
+    });
+    const reader = relay.entries('sealed-live', relay.feed('sealed-live')!)[Symbol.asyncIterator]();
+    const events: unknown[] = [];
+    for (let i = 0; i < 3; i += 1) events.push((await reader.next()).value?.value);
+    expect(events).toMatchObject([{ kind: 'state', state: 'Offered' }, { kind: 'state', state: 'AwaitApproval' }, { kind: 'state', state: 'Running' }]);
+    relay.stop();
+  });
+
+  it('seeds AwaitApproval with no request after a restart, the same entry the live feed pushed', async () => {
+    const relay = new TaskEventRelay({});
+    const reader = readTaskEvents(
+      { relay, readState: async () => stateRead('AwaitApproval'), readApprovalRequest: noRequest }, 'sealed-restarted', { from: 'state' },
+    )[Symbol.asyncIterator]();
+    expect((await reader.next()).value?.event).toEqual({ kind: 'state', state: 'AwaitApproval', at: '2026-10-27T00:00:00.000Z' });
+    expect(relay.feed('sealed-restarted')?.current).toHaveLength(1);
+    await reader.return!();
     relay.stop();
   });
 });

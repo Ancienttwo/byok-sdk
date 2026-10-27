@@ -315,7 +315,7 @@ export interface TaskResult {
 export type ServerTaskEvent =
   | { kind: 'state'; state: TaskState; at: string }
   | { kind: 'agent'; event: AgentEventOrUnknown }
-  | { kind: 'artifact'; artifact: TaskArtifactPayload }
+  | { kind: 'artifact'; artifact: Extract<TaskArtifactPayload, { sealed?: undefined }> }
   | { kind: 'await_approval'; summary: string; approvalId: string }
   | { kind: 'error'; reason: string; retryable?: boolean };
 
