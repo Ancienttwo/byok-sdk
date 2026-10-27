@@ -96,3 +96,9 @@ bun run check:version-authority
 ```
 
 Parent owns integrated-head checks, public API review and any deliberate golden/budget updates; none are preemptively changed here. This new option/type may require an API-surface update at that boundary. Only diff inspection and `git diff --check` are performed in the implementation lane.
+
+## Parent acceptance
+
+Root build/typecheck/version-authority pass; four focused files pass 132 tests. Independent Codex source/test review passes. A separate real SDK probe imports the built public client entry and runs ClaudeAdapter.prepare → operation.start on Claude 2.1.302: Read fresh, empty fresh, and Read→empty resume all reject hostile Bash, leave their sentinels absent and successfully call Host MCP (nine local Messages requests total). Source/dist hashes were unchanged during that probe; sessions, scratch and child processes were cleaned up. This SDK evidence is distinct from the earlier direct-CLI permission/pending-resume cells.
+
+Recovery candidate #1071 is integrated without product-source conflicts; build/typecheck and the same 132 tests pass on the combination. Coordinator wB:p4 signs the new local option/type and four measured +1160 B closures under #1008 authority. Current client/CLI limits also include #1071's signed +20 B: client 1846179 B, adapters 329661 B, testing 315147 B and byok-agent 1790830 B. No other budget expansion. Final API readback and PR CI remain separate from publication, S2 filesystem authority and Grok support.

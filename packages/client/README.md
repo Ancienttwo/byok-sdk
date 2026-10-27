@@ -238,6 +238,13 @@ Claude loads the user's own MCP configuration,
 settings, deny rules and hooks. The SDK adds its task servers with
 `--mcp-config`. Ordinary Pi loads the user's own extensions and skills from
 its agent directory.
+For Agent operations, `new ClaudeAdapter({ agentBuiltinTools: ['Read'] })`
+selects only the named Claude native tools; `[]` disables them all and the default
+`inherit` keeps the CLI defaults. The set is frozen at construction and applies
+to fresh sessions, follow-ups and resume. Task MCP stays independent. Unknown
+names are rejected before spawn; names are qualified against Claude 2.1.302.
+This does not restrict file paths or disable settings, hooks or user extensions.
+
 Codex runs with sandbox `danger-full-access` by default. Set
 `DaemonConfig.codexSandbox` to `read-only` or `workspace-write` for a stricter
 mode, or to `inherit` to apply the user's own `config.toml`. Any other value
