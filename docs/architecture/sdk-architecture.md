@@ -283,6 +283,19 @@ task-scoped `--mcp-config` 加入这些 stdio server，用户自己的 MCP 配�
 不存在 command、env、header、token 或 cookie 字段；任意 instruction 文本不在此
 保护之内，host 不得将凭证写入其中，connector 凭证仍由本地 broker 管理。
 
+Host 的工具预批准只由本机 toolset server 的 `approveTools` 精确名单声明；
+registry 定义期一次校验、排序并深冻结，名单进入 canonical digest。
+`resolveMcpServers` 在同一次快照解析中复制 server 与授权，准入时要求本地
+`RuntimeAdapterDescriptor.mcpToolApprovals` 能力；Codex 声明，其他 bundled
+runtime 不声明。显式选择不支持者在 claim 前拒绝，自动选择会排除它们。
+`toolsets.reload` 不能放宽正在准入或运行的 attempt。
+Codex 的同一 beforeOpen 投影处理 start/resume：固定 SDK helper 表与 Host
+声明按 server 隔离，仅写精确工具的 `approval_mode: approve`，不写 wildcard、
+server 默认批准或 `enabled_tools`。不增加 wire、tools/list 探测、status API，
+不从 prompt、模型输出、用户 config/read 或 transcript 推导 Host 声明。
+缺省没有额外 SDK 授权；用户原生配置与 nativeInteractions 保持原语义。
+这不是工具禁用名单或 filesystem sandbox；拼错名由 runtime 保持拒绝。
+
 Connector 首次建立长期绑定时，可把 daemon 签发的 device assertion 作为一次性
 exchange credential 交给 host。`@byok-sdk/core` 的高层 authenticator 负责 exact
 issuer/product/audience、当前 row authority 与原子 JTI consumption；
@@ -952,7 +965,7 @@ flowchart TB
 | --- | --- | --- |
 | device auth | pairing single-use、Ed25519 nonce proof、bearer claims、revoke | 同一 OS user 读取本地 `device.json` |
 | transport gate | remote plaintext 默认拒绝；HTTPS 默认路径（本地开发可用 loopback HTTP） | SDK 自己提供 TLS termination |
-| agent guardrail | YOLO launch；用户 agent 自身配置（sandbox、deny rules、MCP、extensions）生效；Codex sandbox 由 `codexSandbox` 选择 | SDK 层的 filesystem、network 或 tool 限制；kernel-level sandbox |
+| agent guardrail | YOLO launch；用户 agent 自身配置（sandbox、deny rules、MCP、extensions）生效；Codex sandbox 由 `codexSandbox` 选择；普通 Pi RPC Agent task 可显式选择 native tools、SDK extensions 并排除用户资源 | Pi 文件路径或 network 限制；kernel-level sandbox；未排除的扩展不会自动受 native allowlist 限制 |
 | runtime credentials | subscription login store 与 BYOK key 都不由 dispatch daemon 读取；authoritative BYOK 走独立 launcher | 同一 OS user 无法调试/观察 launcher 或 Pi child process |
 | control socket | mutual HMAC、endpoint permission/DACL、method pre-auth unreachable | 同一 user 且能读 token 的恶意进程 |
 | audit/observer | 只记录 task id、event type、tool/runtime name、counts/sizes | 保存完整 tool input/output 作为审计证据 |
@@ -960,6 +973,16 @@ flowchart TB
 | workspace | SDK 组合的 Agent home、单写者 lease | runtime 无法访问 Agent home 之外的路径 |
 
 `limits.maxTokens` 当前不能由任一 bundled adapter 精确执行，因此必须在 pre-claim fail-closed，而不是估算。Agent home 是 cwd convention，不应被 UI 描述成 sandbox。
+
+Pi 的 Agent 工具策略由本机 `PiAdapterOptions` 冻结，随 v6 RPC launch config
+进入既有 digest 校验；helper 只读 v6。`agentBuiltinTools` 通过 native selection
+modifiers 与固定 native exclusions 生效，使 MCP/extension 准入不被全局 tools
+allowlist 意外删除。resume 清除旧 pending loadout，再应用当前 native 与 extension
+工具；无法清空时拒绝恢复。`agentUserContext: excluded` 为 resource loader 使用
+新建的 SDK 目录和内存 settings，`ModelRuntime` 单独使用原 Pi 的 auth/models
+store；既有 sessionDir 设置仍负责会话存储连续性。不复制整个用户目录、不把登录凭据放进工具 env。SDK web/subagent/todo
+由 `agentExtensions` 单独选择，MCP bridge 始终按任务准入。prepared/durable
+不执行这些策略，若 Agent task 配置了非 inherit 策略，启动前拒绝。
 
 ### 9.1 Credential isolation 的具体承诺
 

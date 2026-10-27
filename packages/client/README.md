@@ -238,6 +238,31 @@ Claude loads the user's own MCP configuration,
 settings, deny rules and hooks. The SDK adds its task servers with
 `--mcp-config`. Ordinary Pi loads the user's own extensions and skills from
 its agent directory.
+For ordinary Pi RPC Agent tasks, local Hosts can select native tools and
+resources independently:
+
+```ts
+new PiAdapter({
+  agentBuiltinTools: ['read', 'grep', 'find', 'ls'],
+  agentUserContext: 'excluded',
+  agentExtensions: [],
+});
+```
+
+These options default to `inherit` and apply only to Agent manifests.
+`agentBuiltinTools: []` disables native tools while task MCP and SDK helpers
+remain separately admitted. `agentExtensions` selects `web`, `subagent` and
+`todo`; an empty list loads none of those. Excluded user context loads no user
+extensions, skills, templates, themes, instruction files or session resource settings.
+The existing session-storage directory setting still applies for session continuity. Pi model
+and authentication stores are still used without copying credentials into the
+resources directory. Resume applies the current policy and rejects if pending
+tools cannot be cleared. Prepared and durable Pi reject non-inherited policies.
+Native file tools still access paths with the process user's permissions;
+this option does not confine them to Agent home. Retained extensions may expose
+additional tools, so use excluded context and an explicit extension set when
+the complete tool surface must be bounded.
+
 For Agent operations, `new ClaudeAdapter({ agentBuiltinTools: ['Read'] })`
 selects only the named Claude native tools; `[]` disables them all and the default
 `inherit` keeps the CLI defaults. The set is frozen at construction and applies
@@ -302,12 +327,39 @@ createDaemon({
 });
 ```
 
-The map accepts only `command` and `args`; put OAuth tokens, cookies, and other
+The map accepts `command`, `args`, and optional `approveTools`; put OAuth tokens, cookies, and other
 secrets behind the local MCP process's own credential broker.
 
-The SDK grants no per-tool permission
-([ADR-037](../../docs/architecture/adr-2026-10-07-minimal-guardrails.md)).
-Sessions run YOLO and each tool call follows the agent's own guardrails:
+For Codex, the local Host can explicitly preapprove exact tools on one server:
+
+```ts
+mcpToolsets: {
+  'salesko.prospecting': {
+    mcpServers: {
+      'salesko-connectors': {
+        command: '/opt/salesko/bin/connector-mcp',
+        approveTools: ['find_leads'],
+      },
+    },
+  },
+}
+```
+
+Only exact, unique tool names are accepted; no wildcard or server-wide default
+is supported. Reserved SDK server names cannot be configured or overridden.
+An omitted/empty list adds no approval. The list participates in the registry's
+content revision and is frozen with each attempt before runtime detection;
+reloads affect later attempts only. A nonempty list requires the adapter's local
+`mcpToolApprovals` capability (currently Codex); another explicitly selected
+runtime is declined before claim. No wire field or new tool discovery is added.
+
+A misspelled tool name may allow the thread to open but does not authorize the
+real tool. There is no separate approval-status API. Start and resume both use
+the current attempt's declaration, never a remembered transcript grant.
+`approveTools` does not limit tool availability or filesystem access, and does
+not revoke permissions in the user's own agent configuration. The SDK does not
+classify tools as read-only or mutating. Default and nativeInteractions modes
+remain unchanged, and each tool call follows the runtime's own guardrails:
 
 - Claude: the selected servers go into a task-scoped `--mcp-config`, next to
   the user's own MCP configuration. Claude starts with
