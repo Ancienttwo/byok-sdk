@@ -155,23 +155,6 @@
   and `reject`, share their one code path over `ByokCloud.approveTask` and
   `rejectTask`, and refuse the same way: `task_not_found`,
   `task_not_awaiting_approval` or `StaleApprovalError`.
-- **Feature (protocol, client; #1014)** — `task.claim` and `task.decline`
-  gain an optional `admission` (`OfferAdmissionTimingsSchema`, strict): how
-  long the device took to admit the offer, in whole milliseconds, with a
-  required `totalMs` and optional `agentHomeWaitMs`,
-  `messageHelperPreflightMs`, `resultHelperPreflightMs`, `toolsetProbeMs` and
-  `runtimeLaunchMs`. Each value is capped at seven days
-  (`OFFER_ADMISSION_MAX_DURATION_MS`). The daemon sends it on the claim or
-  decline its task runner sends for each offer, a sealed task's decline
-  included, in plaintext; the `claimed` and `failed` `DaemonEvent`s carry it.
-- **Feature (protocol, client; #1014)** — the `usage` AgentEvent gains an
-  optional `model`: the model the provider served, as the runtime reported it,
-  1 to 160 characters, never the requested id. Pi sets it from pi-ai's
-  `responseModel`; Claude sets it on the turn's usage when every root-agent
-  frame named the same model; Codex does not set it. Terminal usage copies it
-  from the last observation, and a last observation with a model but no token
-  counts now yields the block. `TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH` moves
-  to `@byok-sdk/protocol/constants`; the root export is unchanged.
 - **Feature (server; #1022)** — `ByokServer.tasks.events(taskId, { after?,
   from?, signal? })` follows one task's event feed by taskId, so a task
   `executions.submit` created has its state, Agent events, artifacts and
