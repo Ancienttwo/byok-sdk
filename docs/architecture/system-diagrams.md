@@ -401,7 +401,7 @@ flowchart LR
 | Hermes，Host 注入 | `hermes gateway run --quiet --external-supervisor --force` 与 `hermes --yolo acp` | Hermes 按 ACP `session/new` 的 `mcpServers` 拉起 | `--yolo` |
 | Grok，Host 注入 | `grok agent --always-approve --no-leader stdio` | Grok 按 ACP `session/new` 的 `mcpServers` 拉起 | `--always-approve` |
 
-出处：`packages/client/src/adapters/claude/claude-adapter.ts:274-344`，`packages/client/src/adapters/codex/codex-adapter.ts:245-247`，`packages/client/vendor/oar/c88a514/runtimes/codex/app-server-client.ts:110`，`packages/client/src/adapters/pi/pi-adapter.ts:501-527`，`packages/client/src/adapters/hermes/hermes-adapter.ts:332,343`，`packages/client/vendor/oar/c88a514/runtimes/grok/session.ts:144`。
+出处：`packages/client/src/adapters/claude/claude-adapter.ts:274-344`，`packages/client/src/adapters/codex/codex-adapter.ts:245-247`，`packages/client/vendor/oar/51b83c9/runtimes/codex/app-server-client.ts:110`，`packages/client/src/adapters/pi/pi-adapter.ts:501-527`，`packages/client/src/adapters/hermes/hermes-adapter.ts:332,343`，`packages/client/vendor/oar/51b83c9/runtimes/grok/session.ts:144`。
 
 - **环境变量**：`buildRuntimeEnv` 继承 daemon 的完整环境，只去掉 `CLAUDECODE` 与 `BYOK_*`（`packages/client/src/daemon/environment.ts:101-104`），再叠加 scratch 的 `TMPDIR`、`TEMP`、`TMP`（`packages/client/src/daemon/task-runner.ts:3592`）。provider key 等环境里的秘密会传到 agent 子进程。Pi prepared lane、durable 工具 shell 与经 launcher 的 Hermes 改用窄 allowlist（`buildAllowlistedEnv`）。
 - **目录变量**：`PI_CODING_AGENT_DIR` 只在经 keys launcher 时由 SDK 指向 `sdk/` 下新建的空目录；`HERMES_HOME` 指向 Host 提供的 Hermes home（`packages/client/src/adapters/hermes/hermes-adapter.ts:93-100`）。
