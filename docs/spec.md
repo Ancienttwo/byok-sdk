@@ -1192,7 +1192,24 @@ Host UI or native tools. SDK source is now v9 (see the v9 cut); downstream paire
 remain separate actions. No v7 reader, mode default or fallback is retained.
 
 Fresh Pi execution keeps Pi's default native tools and the user's own
-extensions and skills. Prepared execution launches no native tool. Observed MCP
+extensions and skills by default. For Agent tasks on the ordinary RPC lane,
+local `PiAdapterOptions.agentBuiltinTools` selects the native tools (an empty
+list disables all), `agentUserContext: 'excluded'` removes user extensions,
+skills, templates, themes, instruction files and session resource settings, and
+`agentExtensions` selects the SDK web/subagent/todo extensions independently.
+The MCP bridge remains admitted separately. The excluded loader uses a fresh
+SDK resources directory while Pi's original model/auth stores remain the
+authentication authority; credentials are not copied or added to tool environments.
+The existing session-storage directory setting remains authoritative for continuity.
+An explicit tool policy is re-applied on resume, including dropping stale
+transcript tools. A resume that cannot clear pending tools fails closed.
+These options apply only when the manifest carries `agentRef`; unsupported
+prepared/durable lanes reject a non-inherited policy before spawning.
+The launch config is digest-bound v6; v5 is not accepted.
+Tool selection does not restrict file paths or provide an OS sandbox. Keeping
+user extensions or SDK web/subagent extensions permits their separately
+registered tools; a strict total tool set requires excluded user context and
+an explicit SDK extension set. Prepared execution launches no native tool. Observed MCP
 toolsets and reserved helpers on fresh offers remain separately admitted;
 prepared offers expose only their counted MCP tools and explicitly selected SDK
 memory tools.

@@ -5,6 +5,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync, existsSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
+import { observeMcpServer, qualifiedMcpToolName } from '../mcp';
 // Relative and test-only: the release graph keeps `@byok-sdk/keys` and the dispatch packages disjoint.
 import { PI_THINKING_LEVELS } from '../../../keys/src/pi-model-config';
 import { assertPiLaunchArgs, buildPiProviderArgs } from '../../../keys/src/pi-provider-projection';
@@ -45,7 +47,8 @@ function fixture() {
   const entry = join(root, 'host-entry.ts');
   writeFileSync(entry, `import {runPiRpcHost} from ${JSON.stringify(resolve(import.meta.dirname, '../../dist/bin/pi-runtime-host.js'))}; runPiRpcHost(process.argv.slice(2)).catch(error=>{console.error(String(error));process.exit(1)});`);
   const command = spawnSync(bun, ['--print', 'process.execPath'], {encoding:'utf8'}).stdout.trim();
-  const config = { format: 'byok.pi.rpc-launch', version: 5, credentialSource: 'pi-auth-store', cwd,
+  const config = { format: 'byok.pi.rpc-launch', version: 6, credentialSource: 'pi-auth-store', cwd,
+    agentToolPolicy: { builtinTools: 'inherit', userContext: 'inherit', extensions: 'inherit' },
     mcp: { mcpEnv: {}, mcpServers: {}, observation: {} } };
   const configPath = join(root, 'config.json');
   const serialized=serializePiHostConfig(config);
@@ -81,6 +84,103 @@ describe('SDK ordinary Pi RPC entry', () => {
     `);
     expect(result).toEqual(Array(15).fill(true));
   });
+
+  it('rejects v5 and malformed Agent policy instead of accepting an unrestricted launch', () => {
+    const f = fixture();
+    expect(evaluate(`
+      const base = ${JSON.stringify(f.config)};
+      console.log(JSON.stringify([
+        {...base, version:5}, {...base, agentToolPolicy:undefined},
+        {...base, agentToolPolicy:{...base.agentToolPolicy,builtinTools:['bash','bash']}},
+        {...base, agentToolPolicy:{...base.agentToolPolicy,builtinTools:['shell']}},
+        {...base, agentToolPolicy:{...base.agentToolPolicy,userContext:'best-effort'}},
+        {...base, agentToolPolicy:{...base.agentToolPolicy,extensions:['unknown']}},
+      ].map(value=>{try {host.parsePiRpcHostConfig(value);return false;}catch{return true;}})));
+    `)).toEqual(Array(6).fill(true));
+  });
+
+  it.each([
+    {builtinTools:['read'], withMcp:false},
+    {builtinTools:[], withMcp:false},
+    {builtinTools:[], withMcp:true},
+  ])('advertises selected native tools $builtinTools and task MCP=$withMcp while refusing unadvertised bash', async ({builtinTools, withMcp}) => {
+    const f = fixture();
+    const marker = join(f.root, 'user-extension-loaded');
+    const bashMarker = join(f.root, 'forbidden-bash-write');
+    const agentDir = join(f.root, 'agent');
+    mkdirSync(join(agentDir, 'extensions'), { recursive: true });
+    mkdirSync(join(f.cwd, '.pi'), { recursive: true });
+    writeFileSync(join(agentDir, 'extensions', 'forbidden.ts'), `import {writeFileSync} from 'node:fs'; export default function(pi){writeFileSync(${JSON.stringify(marker)},'loaded');pi.registerCommand('forbidden-user-command',{handler:async()=>{}});}`);
+    writeFileSync(join(agentDir, 'AGENTS.md'), 'FORBIDDEN_GLOBAL_CONTEXT');
+    writeFileSync(join(f.cwd, '.pi', 'SYSTEM.md'), 'FORBIDDEN_PROJECT_SYSTEM');
+    const taskServer = {
+      command: f.command,
+      args: [resolve(import.meta.dirname, 'fixtures/toolset-echo-mcp.mjs'), join(f.root, 'task-mcp-audit.jsonl')],
+    };
+    const mcp = withMcp ? {
+      mcpEnv: {},
+      launchCwd: f.sealed,
+      mcpServers: { task: taskServer },
+      observation: { task: { ...await observeMcpServer('task', taskServer, { env: f.env }), toolsetId: 'task.v1' } },
+    } : f.config.mcp;
+    let received!: (body: { tools?: { function: { name: string } }[]; messages?: unknown[] }) => void;
+    const requestBody = new Promise<{ tools?: { function: { name: string } }[]; messages?: unknown[] }>(done => { received = done; });
+    let receivedToolResult!: (body: { messages?: unknown[] }) => void;
+    const toolResultBody = new Promise<{ messages?: unknown[] }>(done => { receivedToolResult = done; });
+    let requestCount = 0;
+    const server = createServer(async (request, response) => {
+      let body = '';
+      for await (const chunk of request) body += chunk;
+      const parsed = JSON.parse(body);
+      requestCount += 1;
+      if (requestCount === 1) received(parsed);
+      else receivedToolResult(parsed);
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      if (requestCount === 1) {
+        // A provider is not constrained to the advertised schemas. Execution
+        // must reject this call before the command can create an outside file.
+        const argumentsJson = JSON.stringify({ command: `touch '${bashMarker}'` });
+        response.end('data: ' + JSON.stringify({ id:'loopback-call', object:'chat.completion.chunk', choices:[{index:0,delta:{role:'assistant',tool_calls:[{index:0,id:'forbidden-bash',type:'function',function:{name:'bash',arguments:argumentsJson}}]},finish_reason:null}] }) + '\n\n' +
+          'data: ' + JSON.stringify({ id:'loopback-call', object:'chat.completion.chunk', choices:[{index:0,delta:{},finish_reason:'tool_calls'}] }) + '\n\ndata: [DONE]\n\n');
+        return;
+      }
+      response.end('data: ' + JSON.stringify({ id:'loopback', object:'chat.completion.chunk', choices:[{index:0,delta:{role:'assistant',content:'ok'},finish_reason:null}] }) + '\n\n' +
+        'data: ' + JSON.stringify({ id:'loopback', object:'chat.completion.chunk', choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:1,completion_tokens:1,total_tokens:2} }) + '\n\ndata: [DONE]\n\n');
+    });
+    await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('missing loopback address');
+    writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers: { 's1-loopback': {
+      baseUrl:`http://127.0.0.1:${address.port}/v1`, api:'openai-completions', apiKey:'synthetic-not-a-secret',
+      models:[{id:'probe',name:'probe',contextWindow:4096,maxTokens:32,input:['text'],reasoning:false}],
+    } } }));
+    const config = { ...f.config, mcp, agentToolPolicy: { builtinTools, userContext:'excluded', extensions:[] } };
+    const serialized = serializePiHostConfig(config);
+    writeFileSync(f.configPath, serialized.bytes);
+    const client = new PiRpcClient({
+      command:bun, cwd:f.sealed, env:f.env,
+      args:[f.entry, `--config-digest=${serialized.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 's1-loopback', '--model', 'probe'],
+    });
+    try {
+      const commands = await client.send({ type:'get_commands' });
+      expect(commands.success).toBe(true);
+      expect((commands.data as {commands:{name:string}[]}).commands.some(command=>command.name==='forbidden-user-command')).toBe(false);
+      expect((await client.send({type:'prompt',message:'say ok'})).success).toBe(true);
+      const body = await requestBody;
+      expect((body.tools?.map(tool=>tool.function.name) ?? []).sort()).toEqual(
+        [...builtinTools, ...(withMcp ? [qualifiedMcpToolName('task', 'echo')] : [])].sort(),
+      );
+      expect(JSON.stringify(body.messages)).not.toContain('FORBIDDEN_GLOBAL_CONTEXT');
+      expect(JSON.stringify(body.messages)).not.toContain('FORBIDDEN_PROJECT_SYSTEM');
+      expect(existsSync(marker)).toBe(false);
+      const continuation = await toolResultBody;
+      expect(JSON.stringify(continuation.messages)).toContain('Tool bash not found');
+      expect(existsSync(bashMarker)).toBe(false);
+    } finally {
+      await client.dispose();
+      await new Promise<void>((done,reject)=>server.close(error=>error?reject(error):done()));
+    }
+  }, 30_000);
 
   // #636: a Host validates a keys profile with `assertPiLaunchArgs` when it
   // saves it. That verdict must be the rpc host parser's verdict on the
