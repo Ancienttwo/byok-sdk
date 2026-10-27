@@ -261,17 +261,17 @@ flowchart TB
 | 分组 | 方向 | 内容 |
 | --- | --- | --- |
 | connection | daemon → server | `conn.hello`：每次连接先发的设备快照（runtimes、capabilities、cursor）。server 的 capabilities 随每次 long-poll 响应返回；`conn.ack` 已在 wire v4（#925）删除 |
-| offer | server → daemon | 每个 offer 都绑定 Agent：fresh 执行用 `task.offer_for_agent_with_egress_fresh`；resume 用 `task.offer_for_agent` 或 `task.offer_for_agent_with_egress`；prepared lane 用 `task.offer_prepared`。runtime-only 的 `task.offer`、`task.offer_with_toolsets` 及其 sealed 类型已在 wire v4（#925）删除 |
+| offer | server → daemon | 只有一个 `task.offer`，每个都绑定 Agent。必填的 `session` 区分 fresh（`{ mode: 'fresh' }`）与 resume（`{ mode: 'resume', sessionRef }`）；带 `preparation` 的是 prepared lane，带 `egressPolicy` 的是 egress offer。wire v4（#925）删除了 v3 runtime-only 的 `task.offer`、`task.offer_with_toolsets` 及其 sealed 类型，并把 v3 的四个 Agent offer 类型及其 sealed 类型合并成现在的 `task.offer`，沿用这个名字 |
 | task control | server → daemon | `task.approve`、`task.reject`（必带 `approvalId`，只解决它指名的审批）、`task.cancel`、`task.steer` |
 | Agent / device control | server → daemon | `agent.*` 的 egress ack、message disposition、content read、home projection、input preparation，`provider.provisioning.available`，`agent.memory.intent.available`，`e2ee.key_package.available` |
 | task lifecycle | daemon → server | `task.claim`、`task.started`、`task.decline`、`task.await_approval`、`task.complete`、`task.fail`、`task.cancelled` |
 | task data | daemon → server | `task.progress`、`task.artifact`、`task.approval_resolved`（baseline：daemon 本地解决的每个审批都上报；server 不从后续活动推断解决） |
 | Agent data | daemon → server | `agent.egress.reliable`、`agent.message.draft`、`agent.message.publish`、`agent.content.receipt` |
-| sealed（#654） | 两个方向 | 有内容的类型各有一个 `*_sealed` 孪生类型（offer、`task.steer`、终态、进度、artifact 与审批）；`task.offer_prepared` 没有 sealed 类型 |
+| sealed（#654） | 两个方向 | sealed 是 payload 的分支，不是消息类型：`task.offer` 带 `sealing`、`task.steer` 和 7 个 daemon → server 类型（终态、进度、artifact 与审批）带 `sealed` 时走 sealed 分支。`SEALED_SPLIT_TABLE` 按明文类型做 key，是分支形状和门的唯一出处。prepared offer 不能 sealed。v3 的 `*_sealed` 类型已在 wire v4 删除 |
 
 server → daemon 的类型都带 envelope `seq`，所有 `task.*` 都带 `task_id`（`envelope.ts`）。
 
-`workspaceHint` 原是 `task.offer` 上无人消费的 reserved 字段（ADR-023），随 `task.offer` 在 wire v4 删除；Agent offer 没有这个字段，工作目录由 Agent home 决定。
+`workspaceHint` 原是 v3 runtime-only `task.offer` 上无人消费的 reserved 字段（ADR-023），随那个类型在 wire v4 删除；v4 的 `task.offer` 没有这个字段，工作目录由 Agent home 决定。
 
 Agent offer 的可选字段 `requiredToolsets` 只携带逻辑 id，是 gated wire
 addition：server 与 hosted cloud 只把它发给声明 `toolset-selection` 的设备，
@@ -1455,7 +1455,7 @@ credentials 均不进入 SDK authority。
 #### 12.6.8 Fresh Agent egress 与 resume session authority（0.7.0 deadlock，upstream reopened）
 
 已发布的 `0.7.0` strict egress path 把 `sessionRef` 放进
-`task.offer_for_agent_with_egress`。这个要求对 exact resume 是正确的，但对
+当时的 egress offer（`task.offer_for_agent_with_egress`）。这个要求对 exact resume 是正确的，但对
 fresh execution 形成了可复现的 deadlock：runtime 只能在 `start()` 后 mint
 真实 native session，client 又必须拒绝没有 Agent-home handoff 的伪造或
 preseeded `sessionRef`，所以 fresh task 在启动前既没有合法 session，也不能
@@ -1469,17 +1469,16 @@ Datum authority 必须保持单一且可追溯：
 | --- | --- | --- |
 | Fresh native session | 实际启动的 runtime adapter/session | runtime 在 fresh `start()` 后 mint；server、task id、client 不能预造 |
 | Durable handoff | SDK-owned canonical Agent home `.byok/runtime-sessions/` | 记录 exact `AgentRef/profileRevision/runtime/cwd/sessionRef`，fsync 成功才算可消费 |
-| Resume session | 既有 durable handoff | 旧 `task.offer_for_agent_with_egress` 继续要求 exact `sessionRef`，缺失、过期或 mismatch fail closed |
+| Resume session | 既有 durable handoff | `session.mode: 'resume'` 要求 exact `sessionRef`，缺失、过期或 mismatch fail closed |
 | Egress policy/capability | host 选择的 typed policy + device 的 durable declaration | server/cloud 只按 capability admission；不由 presence 或 runtime guess |
 | Reliable event identity | public publisher 读取的 exact handoff + stable event/cursor | publisher 证明 Agent/task/session/runtime/cwd 后才 append/send；cloud receipt/ack 不 mint session |
 
-修复当时保持 Protocol v1 frozen（当前 wire 是 v3，K7），采用两个 additive facts：
+修复当时保持 Protocol v1 frozen，加了一个独立的 fresh offer 类型。wire v4（#925）把这两个 fact 收进 `task.offer` 必填的 `session`：
 
-- `task.offer_for_agent_with_egress_fresh` 是 fresh-only message，明确不带
-  `sessionRef`；目标设备必须持久声明 `agent-egress-fresh-session`，旧 daemon
-  不会收到它。
-- `task.offer_for_agent_with_egress` 保持 byte-compatible、exact-resume-only，
-  仍要求原有 `sessionRef` 和 handoff；任何缺失或错配都不能转成 fresh。
+- `session: { mode: 'fresh' }` 不带 `sessionRef`；目标设备必须持久声明
+  `agent-egress-fresh-session`，没有声明的 daemon 不会收到它，收到也会 decline。
+- `session: { mode: 'resume', sessionRef }` 是 exact-resume-only，要求原有
+  `sessionRef` 和 handoff；任何缺失或错配都不能转成 fresh。
 
 Fresh 的真实顺序是 `claim` 后以无 resume 参数启动 runtime，runtime mint
 session，SDK 将 exact AgentRef/runtime/cwd/session handoff fsync 到 canonical
@@ -2167,13 +2166,13 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-025 | Device、Agent、placement 与 runtime session 分权；fleet 不得复用 runtime/task identity | Accepted；仅由明确 multi-Agent 产品 slice 触发实现 |
 | ADR-026 | 领域词汇冻结为 Tenant / Computer / Installation / Agent / Session / Run / Attempt / Workspace / ResultContext；`deviceId` 语义即 Installation，Computer 留宿主侧 | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-027 | 一事实一权威矩阵（SaaS 与 Local Agent 两列），ambient device selection 标 legacy | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
-| ADR-028 | native session locator 永不上云；`sessionId` 由 SDK 铸造；云端 Session 不存运行时中间态 | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+| ADR-028 | native session locator 永不上云；`sessionId` 由 SDK 铸造；云端 Session 不存运行时中间态 | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`）；fresh/resume 合并由 wire v4（#925）落地为 `task.offer` 的 `session.mode: fresh\|resume`（原文写 `create`） |
 | ADR-029 | Attempt 由 store 原子铸造 `{attemptId, leaseEpoch}`；每次权威副作用校验当前 Attempt，旧 epoch 只进 audit | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-030 | capability 收敛为一个 FeatureRegistry + Deployment / Installation / Runtime 三个独立 authority，准入取交集 | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-031 | AgentHome / SessionState / Workspace 三分；mutable Workspace 单写者、同 Session Run 串行；backend 只有 plain-directory 与 git-worktree | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`）；ADR-037 保留 Agent-home 单写者 lease，cwd = 用户指定 workspace 或 Agent home；v2 `workspaceRef` 未实现（protocol 无此字段） |
 | ADR-032 | `@byok-sdk/server` 折叠为 cloud domain kernel 的 embedded façade，删除独立协调状态机与旧 transport | Accepted，Supersedes ADR-004（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-033 | `local-first-v1` 为默认数据 policy profile，contentful 进 `shared-observability-v1`；结果事务权威是 `SessionResultCommitter` | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
-| ADR-034 | legacy `task.offer*` / `strictAgentOnly` / 旧 gitWorkspace authority / ambient 选设备在一次 v2 cutover 中删除，无双读双写 | Accepted，Supersedes ADR-002（详见 `adr-2026-09-03-domain-model-and-authority.md`）；legacy offer、`strictAgentOnly` 与 gitWorkspace authority 的删除由 wire v4（#925）执行 |
+| ADR-034 | legacy `task.offer*` / `strictAgentOnly` / 旧 gitWorkspace authority / ambient 选设备在一次 v2 cutover 中删除，无双读双写 | Accepted，Supersedes ADR-002（详见 `adr-2026-09-03-domain-model-and-authority.md`）；legacy offer、`strictAgentOnly`、gitWorkspace authority 的删除与 fresh/resume 两种 offer 的合并由 wire v4（#925）执行 |
 | ADR-035 | 保留 `@byok-sdk/server` 的 self-hosted Node/Hono deployment boundary；无独立能力的 `byok-sdk` umbrella 在另行批准的 breaking cutover 中退出，public artifacts 由 10 降为 9 | Accepted；implemented in 0.21.0（umbrella 删除，同 release `@byok-sdk/testkit` 转 private，public artifacts 实际由 11 降为 9；详见 `adr-2026-09-05-public-package-topology.md`） |
 | ADR-036 | 云端 Generic Agent：Bot 模式每次唤醒 = 新执行（方案 A）；云端模型 key 只由平台持有、BYOK 永远只在本地（每请求 key / 信封加密托管作废）；云端不支持官方 CLI / Keychain / 本地文件 / stdio MCP；云端工具 / 作业调用基于 Durable Objects；byok-sdk 拥有云端 backend，Aiphabee 为首个消费方；Aiphabee chat Workflow 直接替换（无并行 / flag / shadow）；DO 同时承载工具与长作业且保持最简；云端只读数据工具与 skill 加载器 `replay:'safe'`（冻结清单），本地全 unsafe | Accepted（2026-10-03，decided by Aimpact）；`@byok-sdk/cloud-do` 自 0.24.0 起发布，其余切片的落地情况本表未核实；D7 对真相层的约束由 ADR-038 修订（详见 `adr-2026-10-03-cloud-generic-agent.md`） |
 | ADR-037 | 最小 guardrail：删除 `PermissionPolicy`（protocol v2）、MCP readonly/grants、strict MCP、env allowlist 与 key 剥离、egress sanitizer、trusted launch cwd、attestation 与 custody；session 在用户指定 workspace 中以 YOLO 运行，继承用户 agent 配置；SDK 只保留自有不变量 | Accepted（owner 2026-10-07）；implemented in slices 1–5（详见 `adr-2026-10-07-minimal-guardrails.md`） |
@@ -2184,7 +2183,8 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 - wire v2 随 ADR-037 落地（`PROTOCOL_VERSION = 2`，`packages/protocol/src/version.ts`）；ADR-034 设想的那次 cutover 没有发生。2026-10-16 注：K7（#468）随后把 wire 升到 v3（`PROTOCOL_VERSION = 3`）。
 - 2026-10-27 注：wire v4（#925，`PROTOCOL_VERSION = 4`）执行了 ADR-034 的 offer 删除项：`task.offer`、`task.offer_with_toolsets` 及其 sealed 类型从 protocol 删除，每个 offer 都绑定 Agent；`strict-agent-only` flag 删除，`DaemonConfig.strictAgentOnly` 抛 `DaemonConfigFieldRemovedError`；`ByokServer.dispatch` 只接受 `AgentResumeDispatchInput`。同一 cut 删除了 pre-M5 审批路径（`approvalId` 必填、`task.approval_resolved` 成为 baseline、server 不再推断隐式解决）。
 - 同一 cut 执行了 ADR-034 的 Git workspace authority 一项：Git workspace 模式、`SessionWorkspaceStore` 与 `DaemonConfig.workspaceRoot` 删除，`gitWorkspace` 与 `workspaceRoot` 抛 `DaemonConfigFieldRemovedError`。
-- ADR-028/029/030/033 看不到对应实现：`FeatureRegistry`、`SessionResultCommitter`、`local-first-v1`、`leaseEpoch` 在 `packages/` 源码中没有命中；ADR-028 的 `session.mode` 也没有出现在 protocol 中。
+- 同一 cut 的第二阶段执行了 ADR-034 的「fresh/resume 两种 offer 的分裂」一项：v3 的四个 Agent offer 类型及其三个 sealed 类型合并成一个 `task.offer`，fresh/resume 由必填的 `session`（`SessionSelectionSchema`）表达，取值按 #925 owner 决定 O1 用 `fresh|resume`，不用 ADR-028 原文的 `create`；prepared 由 `preparation` 字段表达。其余 8 个 `*_sealed` 类型并回各自的明文类型，sealed 成为 payload 分支（offer 的判别字段是 `sealing`，其余是 `sealed`）。`EnvelopeSchema` 从 47 个分支收到 28 个。两个阶段一起在 0.31.0 发布，中间不发版。
+- ADR-029/030/033 看不到对应实现：`FeatureRegistry`、`SessionResultCommitter`、`local-first-v1`、`leaseEpoch` 在 `packages/` 源码中没有命中。ADR-028 的 `session.mode` 由上一条落地。
 - `Accepted` 不等于已实现。是否继续执行这些删除与实现，由 owner 决定。
 
 - Completed workstream evidence: `tasks/workstreams/root/20260904-sdk-root.md`（#390 后不再跟踪）

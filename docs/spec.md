@@ -1089,7 +1089,7 @@ A zero-tool session is supported: it is a record whose counted
 manifest is empty (`requiredToolsets: []`, `agentMemory: 'none'`, and no result-document selection) (see the lifecycle below).
 
 One refusal is structural rather than incidental. A prepared Execution never
-resumes: a sealed `sessionRef` and a preparation reference together fail closed,
+resumes: a resume `session` and a preparation reference together fail closed,
 because resuming binds the frozen request to a history nobody counted.
 
 A prepared session launches no native tool. A preparation observes and counts
@@ -1129,12 +1129,12 @@ nothing here retries.
 
 ### The prepared offer, and the moment a record is consumed
 
-A prepared Execution reaches a device as `task.offer_prepared`, its own message
-type. It requires `egressPolicy`, optionally carries `messageEgress`, and carries
-no instruction or sessionRef. On long-poll, both an unknown executable message
+A prepared Execution reaches a device as a `task.offer` with `preparation`. It
+requires `egressPolicy`, optionally carries `messageEgress`, carries no
+instruction, and its `session` is always `{ mode: 'fresh' }`. On long-poll, both an unknown executable message
 type and an unknown key in a strict payload freeze the cursor. Enqueue capability
 gates prevent version-skewed delivery; they do not translate older offers.
-Both omissions are structural, not defaults.
+The missing instruction and the fixed fresh session are structural, not defaults.
 
 Nothing the offer states about the preparation is authority. `reference`,
 `requestDigest` and `artifactDigest` are the Host re-presenting what this
@@ -1233,7 +1233,8 @@ task; only the lane refuses, typed, as `input_preparation_record_log_unsupported
 — on every local `input_preparation.*` call (the message names the record log),
 on every remote completion, by not advertising the input-preparation capability
 (so the cloud refuses to enqueue onto it), and by carrying no prepared-offer
-lane (so a `task.offer_prepared` declines by name). Nothing is migrated, read
+lane (so a prepared `task.offer` that reaches it is declined, naming the
+missing flag). Nothing is migrated, read
 forward or deleted automatically. **Operator step:** stop the daemon, run
 `byok-agent retire-input-preparation` (or, from a host installer or branded
 host CLI, the library `retireInputPreparation({ productId, storeDir }, { mode:
@@ -2596,7 +2597,7 @@ matrix and downstream Salesko configuration.
 ### Fresh Agent egress versus exact resume
 
 The published `0.7.0` strict egress offer exposed a fresh-execution deadlock.
-`task.offer_for_agent_with_egress` requires `sessionRef`, which is valid when a
+That offer required `sessionRef`, which is valid when a
 runtime is resuming an existing session, but a fresh runtime cannot mint its
 native session until after `start()`. The client must also reject a missing,
 preseeded, or invented handoff. Therefore the fresh path cannot be repaired by
@@ -2609,20 +2610,19 @@ The authority for each datum is explicit:
 | --- | --- | --- |
 | Fresh `sessionRef` | The runtime session actually started by the selected adapter | Runtime mints it after fresh `start()`; no server/client preseed |
 | Session handoff | SDK-owned canonical Agent-home `.byok/runtime-sessions/` | SDK records exact AgentRef/profile/runtime/cwd/session and fsyncs it before exposing the session |
-| Resume `sessionRef` | Existing exact handoff | The old egress offer remains exact-resume-only; missing/stale/cross-Agent/profile/runtime/cwd evidence fails closed |
+| Resume `sessionRef` | Existing exact handoff | A resume offer (`session.mode: 'resume'`) is exact-resume-only; missing/stale/cross-Agent/profile/runtime/cwd evidence fails closed |
 | Egress policy and fresh capability | Host-selected typed policy plus durable device declaration | Cloud/server admit only the exact declared capability; presence is not authority |
 | Reliable egress identity | The handoff read by the public publisher | Publisher proves exact AgentRef/task/runtime/cwd/session handoff before durable append/send; cloud receipt and ack do not mint a session |
 
-Protocol v1 remains frozen. The repair is additive and keeps the old wire facts
-separate:
+The repair landed additively under v1 as a separate fresh offer type. Since
+wire v4 the two facts are the required `session` of the one `task.offer`:
 
-- `task.offer_for_agent_with_egress_fresh` carries the strict Agent fields and
-  policy but no `sessionRef`; it is gated by the durable
-  `agent-egress-fresh-session` capability, so an older daemon is never sent the
-  message.
-- `task.offer_for_agent_with_egress` remains byte-compatible and requires an
-  exact resume `sessionRef` plus its canonical handoff. There is no fresh
-  fallback for a missing or mismatched resume.
+- `session: { mode: 'fresh' }` carries the strict Agent fields and policy but
+  no `sessionRef`; it is gated by the durable `agent-egress-fresh-session`
+  capability, so a daemon without it is never sent such an offer.
+- `session: { mode: 'resume', sessionRef }` requires an exact resume
+  `sessionRef` plus its canonical handoff. There is no fresh fallback for a
+  missing or mismatched resume.
 
 The host APIs preserve the same distinction: hosted composition uses
 `submitAgentExecution(tenant, input)`, and the reference server uses
@@ -2631,7 +2631,8 @@ The host APIs preserve the same distinction: hosted composition uses
 runtime and terminal projection. Agent resume calls, with or without egress
 (`dispatch({ agentRef, sessionRef })`, `enqueueAgentOffer`), require the exact
 session; omitting sessionRef is refused and does not select fresh execution.
-The wire `task.offer_for_agent` keeps `sessionRef` optional.
+The wire `session` is required, so no offer is read as fresh for lack of a
+reference.
 
 The fresh trace is `claim` → start the runtime without resume arguments → runtime
 issues its real session → SDK fsyncs the exact AgentRef/runtime/cwd/session
@@ -2738,10 +2739,9 @@ Copy the complete command from the Host's pairing page. A string used once
 without `--e2ee` is burned: start a new registration at the Host and do not
 retry it (protocol §2.6, device enrollment).
 
-Agent-only admission is the wire itself since v4: every offer type is
-Agent-bound (`task.offer_for_agent`, its egress and fresh-egress variants,
-their `_sealed` twins, and `task.offer_prepared`), and the runtime-only offers
-are gone from the protocol. The local runner is the final authority: a daemon
+Agent-only admission is the wire itself since v4: the one offer type,
+`task.offer`, requires an `agentRef` in every form (resume, fresh, prepared,
+sealed), and the runtime-only offers are gone from the protocol. The local runner is the final authority: a daemon
 without `DaemonConfig.agentHome` advertises no `agent-home-contract` and
 declines every offer before admission, workspace, claim or start. The
 `strict-agent-only` flag is removed, and `DaemonConfig.strictAgentOnly` raises
