@@ -65,7 +65,7 @@ bun _ops/1034-repro/repro.ts
 3. reader-run 候选选择提取到内部 `agent-home-reader-retention.ts`；原公开 `pruneReaderRuns` 签名不变。两个消费者共用同一 active/reference/TTL/overflow 规则。retention 逐个取得到期候选立即回收，pending 目标优先；每次重新取得 idle lease 与 handoff references。
 4. collector 在部分回收的 finally 中将同 identity 目标目录的 mtime 恢复为原值，磁盘 mtime 继续是唯一 TTL authority。新 registry 无需 sidecar 或内存 mtime 副本即可继续。进程在 finally 前被强杀的窗口不在本次 registry-restart 证据范围内，不声称 crash atomicity。
 5. leaf bytes 写回原始 pass budget 的 WeakMap，class wrapper 记录 parent；home 时间 wrapper 只提供 available，accounting 仍传 class budget。完整对象计数只在最终删除增加。
-6. 父线程定案：runtime 保留 4,096 inspections；exec-sdk、daemon-temp、reader-run 各 1,024，可续扫 listing/删除份额总计最多 7,168。完整 reference authority 扫描单独使用原始 pass 的 8,192 全局上限及 250 ms home 时限，不受 1,024 删除份额限制；因此引用清单较大时不承诺其他类每轮还剩 1,024。classBudget 是删除份额唯一 owner，所有工作仍共享全局上限。周期轮换起点，startup 始终 SDK 先。全局时间上限不保证每轮所有类均服务，有限工作下轮换提供跨轮机会。保留旧 runtime 五轮清空断言，不修改已有测试。
+6. 父线程定案：runtime 保留 4,096 inspections；exec-sdk、daemon-temp、reader-run 各 1,024，可续扫 listing/删除份额总计最多 7,168。完整 reference authority 扫描单独使用原始 pass 的 8,192 全局上限及整轮软时限；完整读取后才开始 250 ms 删除窗口，不受 1,024 删除份额限制；因此引用清单较大时不承诺其他类每轮还剩 1,024。classBudget 是删除份额唯一 owner，所有工作仍共享全局上限。周期轮换起点，startup 始终 SDK 先。全局时间上限不保证每轮所有类均服务，有限工作下轮换提供跨轮机会。保留旧 runtime 五轮清空断言，不修改已有测试。
 
 10× 积压首先耗尽 inspections / wall time，不应再次触发整树测量上限；应增加完成轮数而非停止进展。每轮固定预算下，不承诺持续写入量超过清理吞吐时队列能清空。
 
@@ -100,3 +100,9 @@ bun _ops/1034-repro/repro.ts
 最终 closure：client 1,833,448 / 2,304,426 B；byok-agent 1,778,082 / 2,232,941 B。`api-surface/entries.json` 仅同步同三个 opaque import 的新行号（245、5109、5167）；预算、规则、依赖、公开声明没有变更。build、typecheck、API surface、version authority 均 exit 0。
 
 此改动解决本 PR 的 client 主构建体积阻塞。其他包的发布注释策略和统一重测仍属于 M；本稿不声明全局 M 已完成。最终提交的 workspace tests 与远端 CI 由本轮 PR 验证记录给出。
+
+## Reader reference progress correction
+
+Coordinator wB:p4 revises the earlier internal 250 ms authority window after a controlled reproduction: 4 ms per real ledger read repeatedly truncated the same prefix and made no deletion progress; the unchanged no-delay control passed. Reference reads now use the original pass budget, followed by a fresh 250 ms deletion window under the same idle-home lease. Session ledgers are read once and parsed through the existing shared validator. Partial authority still protects the whole home; there is no cross-pass cache or budget increase. The maintenance lease may last for the remaining pass soft budget, and larger/slower scans that cannot fit still fail closed without progress.
+
+On ed63150f8, build/typecheck/version pass and six focused files pass 102 tests. The original 4 ms injection with its unchanged assertion passes. A separate real RetentionSweeper.runPass with defaults 8192 inspections / 10000 ms soft time / 256 deletions completes its 1026-ledger scan in 5408.888 ms and the pass in 5621.708 ms, using 3102 inspections. It reclaims 1021 leaf bytes (2048→1027 files), leaves the referenced file and all 1026 ledgers intact, and reports no failures. This is one observed local slow-I/O profile, not an arbitrary-scale or hard-deadline guarantee. Client and byok-agent closures each increase exactly 20 B; coordinator wB:p4 signs those measured limits under #1008 authority.
