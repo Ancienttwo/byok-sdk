@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Breaking (client; #1036)** — `byok-agent retire-input-preparation` and
+  `retireInputPreparation` are removed, with the five
+  `InputPreparationRetirement*` error classes and the `RetireInputPreparation*`,
+  `InputPreparationRetirement*`, `InputPreparationNamespaceInspection` and
+  `RetirementFileDigest` types. A daemon whose input-preparation record log
+  holds an older record still refuses that lane at open; with the daemon
+  stopped, move `<storeDir>/input-preparation/` aside and start it again.
+- **Breaking (client; #1036)** — the local journal declares `withheld_bytes` in
+  `CREATE TABLE` and no longer adds it to an older `daemon.db`. A journal
+  written before #826 is refused at open with `JournalUnavailableError`, and
+  left unchanged.
+- **Breaking (examples; #1036)** — bot-collaboration drops
+  `promoteReplyReceipts`. State that still needed it is collaboration state
+  version 1 or 2, which `stateOf` already refuses.
 - **Breaking (protocol, client, server, cloud; #925)** — wire major 4. A v3
   envelope is rejected; there is no v3 reader and no negotiation. Drain the
   v3 deployment, stop it, then start the v4 server side and daemons together
