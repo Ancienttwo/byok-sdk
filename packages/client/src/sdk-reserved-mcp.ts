@@ -2,7 +2,12 @@
 export const AGENT_MESSAGE_MCP_SERVER_NAME = 'byokagentmessage';
 export const AGENT_MESSAGE_TOOL_NAME = 'send_agent_message';
 export const AGENT_MEMORY_MCP_SERVER_NAME = 'byokagentmemory';
+export const AGENT_MEMORY_RECALL_TOOL_NAME = 'memory_recall';
+export const AGENT_MEMORY_SAVE_TOOL_NAME = 'memory_save';
 export const AGENT_TEAM_MCP_SERVER_NAME = 'byokagentteam';
+export const TEAM_POST_TOOL_NAME = 'post_team_message';
+export const TEAM_READ_TOOL_NAME = 'read_team_messages';
+export const TEAM_ACK_TOOL_NAME = 'ack_team_messages';
 /** The structured outcome channel of a `terminalProjection.mode: 'result-document'` offer (wire v3). */
 export const AGENT_RESULT_MCP_SERVER_NAME = 'byokagentresult';
 /** Its one tool; the `inputSchema` it advertises is the offer's frozen result schema. */
@@ -33,3 +38,11 @@ export const RESERVED_MCP_SERVER_NAMES = Object.freeze([
 export function isReservedMcpServerName(name: string): boolean {
   return (RESERVED_MCP_SERVER_NAMES as readonly string[]).includes(name);
 }
+
+/** Fixed helper protocols; runtime-discovered or host tool names cannot grant themselves approval. */
+export const SDK_RESERVED_MCP_TOOL_NAMES = Object.freeze({
+  [AGENT_MESSAGE_MCP_SERVER_NAME]: Object.freeze([AGENT_MESSAGE_TOOL_NAME]),
+  [AGENT_MEMORY_MCP_SERVER_NAME]: Object.freeze([AGENT_MEMORY_RECALL_TOOL_NAME, AGENT_MEMORY_SAVE_TOOL_NAME]),
+  [AGENT_TEAM_MCP_SERVER_NAME]: Object.freeze([TEAM_POST_TOOL_NAME, TEAM_READ_TOOL_NAME, TEAM_ACK_TOOL_NAME]),
+  [AGENT_RESULT_MCP_SERVER_NAME]: Object.freeze([AGENT_RESULT_TOOL_NAME]),
+});

@@ -225,15 +225,16 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     for await (const entry of entries(id, root, budget)) {
       if (!entry.isDirectory()) continue;
       await manager.withIdleHomeLease(entry.name, async home => {
+        // Complete authority is read under this lease using the original pass's
+        // soft budget. Only deletion gets a fresh 250ms window; references are
+        // never cached across passes or used when the scan is incomplete.
+        const referenced = id === 'reader-run'
+          ? await options.handoffs!.readerRunReferences(home, authorityBudget(budget).available)
+          : undefined;
+        if (id === 'reader-run' && referenced === undefined) return;
         const deadline = performance.now() + 250;
         const homeBudget: SweepBudget = { ...budget, available: () => { if (performance.now() >= deadline) { budget.truncate(); return false; } return budget.available(); } };
-        if (id === 'reader-run') {
-          const authority = authorityBudget(budget);
-          const referenced = await options.handoffs!.readerRunReferences(home, () => {
-            if (performance.now() >= deadline) { budget.truncate(); return false; }
-            return authority.available();
-          });
-          if (referenced === undefined) return; // Incomplete reference authority protects the entire home.
+        if (referenced !== undefined) {
           const runsRoot = path.join(home, '.byok', 'runs');
           const candidates = selectReaderRuns({ runsRoot, active: new Set(), referenced,
             nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['reader-run'],

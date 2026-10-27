@@ -1,3 +1,4 @@
+import { TEAM_POST_TOOL_NAME as POST_TOOL, TEAM_READ_TOOL_NAME as READ_TOOL, TEAM_ACK_TOOL_NAME as ACK_TOOL } from '../sdk-reserved-mcp';
 import {
   McpServerToolError,
   serveMcpOverStdio,
@@ -5,9 +6,9 @@ import {
   type McpServerToolDefinition,
 } from '../mcp-server';
 
-export const TEAM_POST_TOOL_NAME = 'post_team_message';
-export const TEAM_READ_TOOL_NAME = 'read_team_messages';
-export const TEAM_ACK_TOOL_NAME = 'ack_team_messages';
+export const TEAM_POST_TOOL_NAME = POST_TOOL;
+export const TEAM_READ_TOOL_NAME = READ_TOOL;
+export const TEAM_ACK_TOOL_NAME = ACK_TOOL;
 
 export interface TeamMcpDeps {
   post(input: { body: string; contentType?: string }): Promise<unknown>;
