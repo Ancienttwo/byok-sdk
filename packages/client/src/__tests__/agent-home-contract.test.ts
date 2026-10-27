@@ -386,6 +386,23 @@ describe('SDK-owned Agent home contract', () => {
     await expect(restarted.get(identity)).rejects.toThrow(/not valid JSON/);
   });
 
+  it('names a missing session ledger as missing, and keeps the mismatch text for a ledger that exists', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const binding = await manager.prepare(ref('one', 'profile-7'));
+    const store = new AgentSessionHandoffStore();
+    const identity = { agentRef: ref('one', 'profile-7'), sessionRef: 'session-1', runtimeId: 'pi', cwd: binding.resolution.canonicalHome } as const;
+    await store.record({ ...identity, taskId: 'task-1', leaseId: binding.lease.leaseId });
+    await binding.lease.release();
+    const missing = /^Agent session handoff session-1 does not exist on this device: it was never recorded here, or retention removed it$/;
+    await expect(store.requireMatch({ ...identity, agentRef: ref('one', 'profile-8') })).rejects.toThrow(/session-1 does not match AgentRef/);
+    const evidenceDir = path.join(identity.cwd, '.byok', 'runtime-sessions');
+    for (const file of await fs.readdir(evidenceDir)) await fs.rm(path.join(evidenceDir, file));
+    await expect(store.requireMatch(identity)).rejects.toThrow(missing);
+    await expect(store.requireMatch(identity)).rejects.toBeInstanceOf(AgentSessionHandoffMismatchError);
+    await expect(store.readerSessionCwd({ agentRef: identity.agentRef, sessionRef: 'session-1', runtimeId: 'pi', home: identity.cwd })).rejects.toThrow(missing);
+  });
+
   it('seals exact AgentRef, canonical cwd and lease in an immutable runtime manifest', () => {
     const manifest = sealRuntimeOperationManifest({
       taskId: 'task-1',

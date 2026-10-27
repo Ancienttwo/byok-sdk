@@ -69,7 +69,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     home(agentId: string): Promise<string>;
   }
 
-  async function start(overrides: Partial<DaemonConfig> = {}): Promise<Harness> {
+  async function start(overrides: Partial<DaemonConfig> = {}, options?: Parameters<typeof createDaemonWithAdapters>[2]): Promise<Harness> {
     const storeDir = await temp('byok-readers-store-');
     const hostStorageRoot = await temp('byok-readers-home-');
     const pi = new StubRuntimeAdapter('pi');
@@ -82,7 +82,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
       agentHome: { hostStorageRoot },
       agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       ...overrides,
-    }, [pi]);
+    }, [pi], options);
     daemon = started;
     await started.pair('pairing-code');
     await started.start();
@@ -381,6 +381,78 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     expect(decline.retryable).toBe(false);
     expect(decline.reason).toMatch(/^Agent session handoff mismatch: .*not a memory-reader session/);
     expect(harness.pi.startCalls).toHaveLength(1);
+  });
+
+  // A retention pass the test runs by hand, after aging the Agent's session ledgers past the 30-day default.
+  async function expireSessionLedgers(harness: Harness, agentId: string, sweep: () => (() => void) | undefined): Promise<string> {
+    const ledgers = path.join(await harness.home(agentId), '.byok', 'runtime-sessions');
+    const expired = new Date(Date.now() - 31 * DAY_MS);
+    for (const name of await fs.readdir(ledgers)) await fs.utimes(path.join(ledgers, name), expired, expired);
+    sweep()!();
+    await waitUntil(() => harness.daemon.status().storage.lastSweep?.trigger === 'periodic', 'a retention pass');
+    return ledgers;
+  }
+  const manualRetention = (): { options: Parameters<typeof createDaemonWithAdapters>[2]; sweep: () => (() => void) | undefined } => {
+    let handler: (() => void) | undefined;
+    return { options: { retention: { timers: { setTimeout: (next) => { handler = next; return 'timer'; }, clearTimeout: () => {} } } }, sweep: () => handler };
+  };
+
+  it('declines a writer resume after retention removed its expired session ledger, without retry', async () => {
+    const retention = manualRetention();
+    const harness = await start({}, retention.options);
+    offer('expired-writer', 'ledger-a');
+    await claimed('expired-writer');
+    const sessionRef = harness.pi.sessions[0]!.sessionRef;
+    await complete(harness, 0, 'expired-writer');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the writer to release');
+    const ledgers = await expireSessionLedgers(harness, 'ledger-a', retention.sweep);
+    expect((await fs.readdir(ledgers)).filter((name) => !name.includes('-task-'))).toEqual([]);
+
+    offer('expired-writer-resume', 'ledger-a', { sessionRef });
+    const decline = await declined('expired-writer-resume');
+    expect(decline.retryable).toBe(false);
+    expect(decline.reason).toMatch(/^Agent session handoff mismatch: Agent session handoff .+ does not exist on this device: it was never recorded here, or retention removed it$/);
+    expect(harness.pi.startCalls).toHaveLength(1);
+  });
+
+  it('declines a reader resume after retention removed its expired session ledger, without retry', async () => {
+    const retention = manualRetention();
+    const harness = await start({}, retention.options);
+    offer('expired-reader', 'ledger-b', { reader: true });
+    await claimed('expired-reader');
+    const sessionRef = harness.pi.sessions[0]!.sessionRef;
+    await complete(harness, 0, 'expired-reader');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the reader to release');
+    await expireSessionLedgers(harness, 'ledger-b', retention.sweep);
+
+    offer('expired-reader-resume', 'ledger-b', { reader: true, sessionRef });
+    const decline = await declined('expired-reader-resume');
+    expect(decline.retryable).toBe(false);
+    expect(decline.reason).toMatch(/^Agent session handoff mismatch: Agent session handoff .+ does not exist on this device/);
+    expect(harness.pi.startCalls).toHaveLength(1);
+  });
+
+  it('restarts the retention window when a resume appends to an expired, not yet removed session ledger', async () => {
+    const retention = manualRetention();
+    const harness = await start({}, retention.options);
+    offer('kept-writer', 'ledger-c');
+    await claimed('kept-writer');
+    const sessionRef = harness.pi.sessions[0]!.sessionRef;
+    await complete(harness, 0, 'kept-writer');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the writer to release');
+    const ledgers = path.join(await harness.home('ledger-c'), '.byok', 'runtime-sessions');
+    const expired = new Date(Date.now() - 31 * DAY_MS);
+    for (const name of await fs.readdir(ledgers)) await fs.utimes(path.join(ledgers, name), expired, expired);
+
+    offer('kept-writer-resume', 'ledger-c', { sessionRef });
+    await claimed('kept-writer-resume');
+    await complete(harness, 1, 'kept-writer-resume');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the resume to release');
+    retention.sweep()!();
+    await waitUntil(() => harness.daemon.status().storage.lastSweep?.trigger === 'periodic', 'a retention pass');
+    const kept = (await fs.readdir(ledgers)).filter((name) => !name.includes('-task-'));
+    expect(kept).toHaveLength(1);
+    expect(Date.now() - (await fs.stat(path.join(ledgers, kept[0]!))).mtimeMs).toBeLessThan(DAY_MS);
   });
 
   it('declines a reader session resumed as a writer, without retry', async () => {

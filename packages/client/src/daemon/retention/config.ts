@@ -47,6 +47,7 @@ export const DEFAULT_RETENTION_TTL_MS: Readonly<Record<ExpiringClassId, number>>
   'exec-sdk': 0, 'exec-runtime': 86_400_000, 'daemon-temp': 3_600_000, 'durable-replica': 0,
   'input-preparation': 0, 'confirmed-journal': 30 * 86_400_000, 'reader-run': 7 * 86_400_000,
   'agent-result': 7 * 86_400_000, 'home-temp': 3_600_000, 'skill-pack-old': 86_400_000,
+  'session-ledger': 30 * 86_400_000,
 });
 function integer(value: number, field: string, minimum = 1): number {
   if (!Number.isSafeInteger(value) || value < minimum) throw new LocalStorageConfigError(field);
