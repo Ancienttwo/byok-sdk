@@ -19,7 +19,7 @@ type Payload = Record<string, unknown> & { routineRef: RoutineRef; agentRef: { a
 
 const TYPE = 'task.offer_for_agent_with_egress_fresh_sealed';
 const CONTEXT = { destinationBinding: 'conversation/654/routine/1' };
-const routineLines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
+const routineLines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; ts: string; payload: Payload })

@@ -20,7 +20,7 @@ import { createWebCrypto } from '../crypto/web-crypto';
 import { CloudRouteRegistry, ROUTE_CLASSES, routeKey, type RouteClass } from '../router/registry';
 import { createInMemoryBlobBytes } from '../stores/in-memory/blobs';
 import { createInMemoryCloudStores } from '../stores/in-memory/index';
-import { CLOUD_ORIGIN, createHarness, offerPayload, TENANT_A, TENANT_B, type CloudHarness, type PairedDevice } from './support/harness';
+import { CLOUD_ORIGIN, createHarness, grantAgentHome, offerPayload, TENANT_A, TENANT_B, type CloudHarness, type PairedDevice } from './support/harness';
 
 /** The inventory as of S3a. Kept here so a route ADDED without a decision fails a review, not just a diff. */
 const EXPECTED_INVENTORY: Record<string, RouteClass> = {
@@ -145,7 +145,8 @@ describe('tenant isolation across every device-class resource', () => {
     const mallory = await harness.pairDevice(TENANT_B);
 
     // Tenant A's fixtures: a queued offer and an uploaded blob.
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, alice.deviceId, { payload: offerPayload('secret work') });
+    await grantAgentHome(harness, TENANT_A, alice.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, alice.deviceId, { payload: offerPayload('secret work') });
     const blobId = await uploadBlob(harness, alice, 'tenant a bytes');
     const before = await snapshot(harness, alice, offer.taskId, blobId);
 
@@ -159,7 +160,7 @@ describe('tenant isolation across every device-class resource', () => {
       capabilities: [
         'custom-harness',
         'mailbox-read-ahead',
-        'approval_resolved', 'agent-message-draft',
+        'agent-message-draft',
         'agent-home-contract',
         'agent-home-projection',
         'agent-egress-policy',

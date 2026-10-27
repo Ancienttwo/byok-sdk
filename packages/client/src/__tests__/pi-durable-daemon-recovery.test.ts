@@ -115,7 +115,7 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
   await new Promise<void>(resolve=>provider!.listen(0,'127.0.0.1',resolve)); const address=provider.address(); if (!address || typeof address==='string') throw new Error('missing provider port');
   const profilePath=path.join(root,'profile.json');
   await fs.writeFile(profilePath,JSON.stringify({controlDir:control,profile:{adapter:'openai_compatible',auth_mode:'bearer',base_url:`http://127.0.0.1:${address.port}/v1`,capabilities:[],created_at:'2026-10-02T00:00:00.000Z',updated_at:'2026-10-02T00:00:00.000Z',display_name:'Fixture',enabled:true,kind:'model',model:'probe',profile_ref:'probe',provider_kind:'custom',pi_model:{...PI_MODEL_FIXTURE,reasoning:false,thinkingLevel:'off'}}}));
-  server=await TestServer.start(); const config={clientEntry:index,launcherEntry:launcher,serverUrl:server.url,productId:`durable-restart-${randomUUID()}`,scratchRoot:testScratchRoot(),storeDir:path.join(root,'store'),workspaceRoot:path.join(root,'workspace'),homeRoot:path.join(root,'home'),profilePath,sessionDir:path.join(root,'sessions')};
+  server=await TestServer.start(); const config={clientEntry:index,launcherEntry:launcher,serverUrl:server.url,productId:`durable-restart-${randomUUID()}`,scratchRoot:testScratchRoot(),storeDir:path.join(root,'store'),homeRoot:path.join(root,'home'),profilePath,sessionDir:path.join(root,'sessions')};
   const configPath=path.join(root,'daemon.json'); await fs.writeFile(configPath,JSON.stringify(config));
   let enrollment:unknown;
   const start=async () => {

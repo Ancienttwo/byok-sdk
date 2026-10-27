@@ -2,68 +2,13 @@ import { TASK_STATES, type TaskState } from '@byok-sdk/protocol';
 import { type DaemonTaskInfo } from '../index';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import type { DaemonRecord } from '../daemon/daemon-record';
-import { GIT_ERROR_CATEGORIES, GIT_WORKSPACE_PHASES } from '../daemon/git-workspace';
-
-export interface TaskGitStatus {
-  /** Opaque local correlation ID; never a path or commit ID. */
-  workspaceId: string;
-  phase: string;
-  headChanged?: boolean;
-  commitsSinceBaseline?: number;
-  dirty?: { staged: number; unstaged: number; untracked: number; conflicted: number };
-  errorCategory?: string;
-}
 
 /**
  * A task as the audit log describes it: `DaemonTaskInfo`'s lifecycle fields,
  * with the free-form `summary` replaced by its byte count (the log never holds
- * the text — issue #395) and the last Git observation.
+ * the text — issue #395).
  */
-export type DerivedTaskInfo = Omit<DaemonTaskInfo, 'summary'> & { summaryBytes?: number; git?: TaskGitStatus };
-
-/**
- * Both stable-set filters below are projected from `daemon/git-workspace.ts`'s
- * `GIT_WORKSPACE_PHASES`/`GIT_ERROR_CATEGORIES` (the single sources of truth
- * for the `GitWorkspacePhase`/`GitErrorCategory` unions) rather than carrying
- * literal copies that could drift from them; the runtime half of that
- * guarantee is `__tests__/git-category-drift.test.ts`. Same projection-of-
- * union idiom as `TASK_STATES` from `@byok-sdk/protocol` above.
- *
- * @internal Exported for the drift-guard test only (never re-exported from
- * `index.ts`).
- */
-export const STABLE_GIT_PHASES = new Set<string>(GIT_WORKSPACE_PHASES);
-export const STABLE_GIT_ERROR_CATEGORIES = new Set<string>(GIT_ERROR_CATEGORIES);
-
-function nonNegativeSafeInteger(value: number | undefined): number | undefined {
-  return value !== undefined && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
-}
-
-function deriveGitStatus(event: Extract<DaemonRecord, { kind: 'git-workspace' }>): TaskGitStatus {
-  const dirty = event.dirty
-    ? {
-        staged: nonNegativeSafeInteger(event.dirty.staged),
-        unstaged: nonNegativeSafeInteger(event.dirty.unstaged),
-        untracked: nonNegativeSafeInteger(event.dirty.untracked),
-        conflicted: nonNegativeSafeInteger(event.dirty.conflicted),
-      }
-    : undefined;
-  const sanitizedDirty = dirty && Object.values(dirty).every((count) => count !== undefined)
-    ? (dirty as TaskGitStatus['dirty'])
-    : undefined;
-  return {
-    workspaceId: event.workspaceId,
-    phase: STABLE_GIT_PHASES.has(event.phase) ? event.phase : 'unknown',
-    ...(typeof event.headChanged === 'boolean' ? { headChanged: event.headChanged } : {}),
-    ...(nonNegativeSafeInteger(event.commitsSinceBaseline) !== undefined
-      ? { commitsSinceBaseline: nonNegativeSafeInteger(event.commitsSinceBaseline) }
-      : {}),
-    ...(sanitizedDirty ? { dirty: sanitizedDirty } : {}),
-    ...(event.errorCategory !== undefined && STABLE_GIT_ERROR_CATEGORIES.has(event.errorCategory)
-      ? { errorCategory: event.errorCategory }
-      : {}),
-  };
-}
+export type DerivedTaskInfo = Omit<DaemonTaskInfo, 'summary'> & { summaryBytes?: number };
 
 /**
  * Reconstructs the shape `DaemonObserver.tasks()` exposes to a LIVE
@@ -121,20 +66,6 @@ export function deriveTasksFromRecords(records: readonly DaemonRecord[]): Derive
       case 'cancelled':
         upsert(event.taskId, event.ts, { state: 'Cancelled', summaryBytes: event.reasonBytes });
         break;
-      case 'git-workspace': {
-        const existing = tasks.get(event.taskId);
-        // Git-only events are observational supplements. They cannot create a
-        // task row or change lifecycle authority, and only update an existing
-        // row created by a lifecycle event.
-        if (existing) {
-          tasks.set(event.taskId, {
-            ...existing,
-            git: deriveGitStatus(event),
-            updatedAt: event.ts,
-          });
-        }
-        break;
-      }
       // 'artifact' carries no task-STATE transition of its own (observer.ts
       // never calls its own upsertTask for it either); the remaining kinds
       // are daemon-level, not per-task.

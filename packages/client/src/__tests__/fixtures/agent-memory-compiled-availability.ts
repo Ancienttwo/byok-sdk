@@ -3,7 +3,7 @@ import { resolveAgentMemoryFilesystemHelper } from '../../daemon/agent-memory-he
 
 const root = process.argv[2]!;
 const config = {
-  strictAgentOnly: true, productName: 'Memory availability', productId: 'memory-availability',
+  productName: 'Memory availability', productId: 'memory-availability',
   serverUrl: 'http://localhost:1', storeDir: `${root}/store`,
   localAgentRelease: { version: '0.0.0-test' }, agentHome: { hostStorageRoot: `${root}/homes` },
   sdkHelperHost: { mode: 'self-executable' as const },

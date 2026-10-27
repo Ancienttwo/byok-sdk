@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import type { ByokServer, MachineInfo, TaskSnapshot } from '@byok-sdk/server';
+import type { AgentExecutionInput, ByokServer, MachineInfo, TaskSnapshot } from '@byok-sdk/server';
 import { RequiredToolsetsSchema, TASK_STATES, type RuntimeId, type TaskState } from '@byok-sdk/protocol';
 import type { ScopedTool } from './http';
 import type { BetaLedger } from './ledger';
@@ -7,10 +7,12 @@ import { BetaError, canonicalJson, invalid, object, taskArguments, text, type Ca
   type TaskReservation } from './model';
 
 /** The public SDK surface the task tools use. The Host passes its own `createByokServer` instance. */
-export type TaskToolServer = Pick<ByokServer, 'dispatch' | 'tasks' | 'blobs' | 'machines'>;
+export type TaskToolServer = Pick<ByokServer, 'executions' | 'tasks' | 'blobs' | 'machines'>;
 export interface TaskToolOptions {
   readonly sdk: TaskToolServer;
   readonly ledger: BetaLedger;
+  /** The Host's egress policy for task executions. The device must accept it. */
+  readonly egressPolicy: AgentExecutionInput['payload']['egressPolicy'];
   /** Absolute origin where the Host serves the SDK routes. Blob download paths resolve against it. */
   readonly blobBaseUrl: string;
   /** Pause between task reads while `byok_task_status` waits. Default 500 ms. */
@@ -80,24 +82,33 @@ export function createTaskTools(options: TaskToolOptions): ScopedTool[] {
       ...(result?.retryable === undefined ? {} : { retryable: result.retryable }) };
   }
 
+  /** The binding's AgentRef. The ledger admits `tasks.dispatch` only for keys with one, so a missing one is corrupt state. */
+  function bindingAgent(reservation: TaskReservation): NonNullable<TaskReservation['binding']['agentRef']> {
+    const agentRef = reservation.binding.agentRef;
+    if (!agentRef) throw new Error('Saved task binding has no AgentRef');
+    return agentRef;
+  }
   function verifyOffer(offer: NonNullable<Awaited<ReturnType<TaskToolServer['tasks']['offer']>>>, reservation: TaskReservation): void {
-    const payload = offer.payload as Readonly<Record<string, unknown>>;
     const args = reservation.binding.arguments;
-    if (offer.taskId !== reservation.taskId || offer.deviceId !== reservation.binding.deviceId
-      || offer.type !== (args.toolsets ? 'task.offer_with_toolsets' : 'task.offer') || 'agentRef' in payload
-      || payload.instruction !== args.instruction || payload.runtime !== args.runtime
-      || canonicalJson(payload.requiredToolsets ?? null) !== canonicalJson(args.toolsets ?? null)) {
+    if (offer.type !== 'task.offer_for_agent_with_egress_fresh' || offer.taskId !== reservation.taskId
+      || offer.deviceId !== reservation.binding.deviceId
+      || canonicalJson(offer.payload.agentRef) !== canonicalJson(bindingAgent(reservation))
+      || offer.payload.instruction !== args.instruction || offer.payload.runtime !== args.runtime
+      || canonicalJson(offer.payload.requiredToolsets ?? null) !== canonicalJson(args.toolsets ?? null)) {
       throw new Error('SDK offer does not match the saved task binding');
     }
   }
-  /** Dispatches a saved, unreleased reservation once. A conflict counts only after exact offer readback. */
+  /** Submits a saved, unreleased reservation once as a fresh Agent execution. A conflict counts only after exact offer readback. */
   async function ensureDispatched(reservation: TaskReservation): Promise<void> {
     const existing = await sdk.tasks.offer(reservation.taskId);
     if (existing) return verifyOffer(existing, reservation);
     const args = reservation.binding.arguments;
+    const agentRef = bindingAgent(reservation);
     try {
-      await sdk.dispatch({ taskId: reservation.taskId, deviceId: reservation.binding.deviceId, runtime: args.runtime,
-        instruction: args.instruction, ...(args.toolsets ? { requiredToolsets: [...args.toolsets] } : {}) });
+      await sdk.executions.submit({ taskId: reservation.taskId, deviceId: reservation.binding.deviceId, payload: {
+        runtime: args.runtime, instruction: args.instruction, agentRef,
+        egressPolicy: options.egressPolicy, terminalProjection: { mode: 'none' },
+        ...(args.toolsets ? { requiredToolsets: [...args.toolsets] } : {}) } });
     } catch {
       const offered = await sdk.tasks.offer(reservation.taskId);
       if (!offered) throw new BetaError('unavailable', 'The task was admitted but not dispatched. Retry the same call.', 1);
@@ -109,7 +120,7 @@ export function createTaskTools(options: TaskToolOptions): ScopedTool[] {
   }
   function submitArguments(args: Readonly<Record<string, unknown>> | undefined): TaskArguments {
     const parsed = taskArguments(args ?? {});
-    // The SDK carries a result schema only on Agent-bound offers, and has no workspace selection.
+    // Task executions submit terminalProjection `none` and define no result contract (routines do). The SDK has no workspace selection.
     if (parsed.resultSchema !== undefined) throw new BetaError('invalid_input', 'resultSchema is not available for beta task dispatch');
     if (parsed.workspace !== undefined) throw new BetaError('invalid_input', 'workspace selection is not available for beta task dispatch');
     // The SDK takes 1-16 distinct toolset ids; anything else would hold a slot for a dispatch it refuses.

@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createPublicKey, generateKeyPairSync, sign as edSign, verify as edVerify } from 'node:crypto';
@@ -128,13 +129,12 @@ describe('device assertion broker: assertion.issue', () => {
     overrides: DaemonOverrides = {},
     adapter: StubRuntimeAdapter = new StubRuntimeAdapter('pi'),
   ): Promise<Started> {
-    const workspaceRoot = await tmpDir(`byok-assert-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-assert-${productId}-store-`);
     const full: DaemonConfig = {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId,
       serverUrl: server.url,
-      workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
       deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },
       ...config,
@@ -387,7 +387,7 @@ describe('device assertion broker: assertion.issue', () => {
     // window exists on every unpair — the CLI shuts the daemon down first and
     // clears device.json afterwards — it is just narrower.
     server.send(
-      createEnvelope('task.offer', { instruction: 'work' }, { taskId: 't-shutdown', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'work' }, { taskId: 't-shutdown', seq: server.nextSeq() }),
     );
     await server.waitFor((event) => event.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -813,11 +813,11 @@ describe('device assertion broker: config validation is a construction error', (
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId: `acme-assert-config-${unique}`,
       serverUrl: 'https://api.example.com',
-      workspaceRoot: path.join(os.tmpdir(), `byok-assert-config-ws-${unique}`),
+      agentHome: testAgentHomeConfig(),
       storeDir: path.join(os.tmpdir(), `byok-assert-config-store-${unique}`),
       deviceAssertion,
     } as DaemonConfig;
-    return () => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
+    return () => createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
   }
 
   const negatives: readonly (readonly [string, unknown])[] = [

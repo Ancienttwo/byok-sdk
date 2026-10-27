@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner, testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -11,7 +12,6 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import {
   McpAuthorityError,
@@ -76,11 +76,10 @@ async function makeRunner(
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     mcpToolsetToolsProbe,
     adapters: [adapter],
-    workspaceRoot: await tmpDir('byok-mcp-toolsets-workspace-'),
+    ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => sent.push(envelope),
     blobClient: unusedBlobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-mcp-toolsets-store-')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
@@ -110,8 +109,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
 
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_with_toolsets',
-        {
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),
           instruction: 'find qualified leads',
           runtime: 'claude',
           requiredToolsets: ['salesko'],
@@ -147,8 +146,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
       const runner = await makeRunner(adapter, sent, registry);
       await runner.handleEnvelope(
         createEnvelope(
-          'task.offer_with_toolsets',
-          {
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),
             instruction: 'x',
             runtime: 'claude',
             requiredToolsets: ['salesko'],
@@ -172,8 +171,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     );
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_with_toolsets',
-        { instruction: 'x', runtime: 'pi', requiredToolsets: ['salesko'] },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'pi', requiredToolsets: ['salesko'] },
         { taskId: 'task-unsupported', seq: 1 },
       ),
     );
@@ -195,8 +194,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     );
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_with_toolsets',
-        {
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),
           instruction: 'x',
           runtime: 'claude',
           requiredToolsets: ['mail', 'social'],
@@ -226,8 +225,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
       );
       await runner.handleEnvelope(
         createEnvelope(
-          'task.offer_with_toolsets',
-          { instruction: 'x', runtime: 'claude', requiredToolsets: ['salesko'] },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'claude', requiredToolsets: ['salesko'] },
           { taskId: 'task-unobservable', seq: 1 },
         ),
       );
@@ -249,8 +248,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
 
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_with_toolsets',
-        { instruction: 'first', runtime: 'claude', requiredToolsets: ['salesko'] },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'first', runtime: 'claude', requiredToolsets: ['salesko'] },
         { taskId: 'task-before-reload', seq: 1 },
       ),
     );
@@ -261,8 +260,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     );
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_with_toolsets',
-        { instruction: 'second', runtime: 'claude', requiredToolsets: ['salesko'] },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'second', runtime: 'claude', requiredToolsets: ['salesko'] },
         { taskId: 'task-after-reload', seq: 2 },
       ),
     );
@@ -297,8 +296,8 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
     );
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_with_toolsets',
-        { instruction: 'x', runtime: 'pi', requiredToolsets: ['salesko'] },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'pi', requiredToolsets: ['salesko'] },
         { taskId: 'task-pi-no-probe', seq: 1 },
       ),
     );
@@ -331,8 +330,8 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
     );
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_with_toolsets',
-        { instruction: 'x', runtime: 'claude', requiredToolsets: ['salesko'] },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'claude', requiredToolsets: ['salesko'] },
         { taskId: 'task-ungrantable', seq: 1 },
       ),
     );
@@ -373,8 +372,8 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
     const startedAt = Date.now();
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_with_toolsets',
-        { instruction: 'x', runtime: 'claude', requiredToolsets: ['salesko'] },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'claude', requiredToolsets: ['salesko'] },
         { taskId: 'task-probe-deadline', seq: 1 },
       ),
     );
@@ -482,13 +481,13 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
     productId: 'test-product',
     serverUrl: 'http://localhost:3000',
-    workspaceRoot: '/tmp/byok-test-workspace',
+    agentHome: testAgentHomeConfig(),
   };
 
   it('accepts a bounded stdio definition', () => {
     expect(() =>
       createDaemonWithAdapters(
-        { storage: { scratchRoot: testScratchRoot() },
+        {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },
           ...baseConfig,
           mcpToolsets: {
             salesko: { mcpServers: { salesko: { command: '/opt/salesko/mcp', args: ['--stdio'] } } },
@@ -502,7 +501,7 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
   it('refuses a server name runtimes cannot express at daemon start', () => {
     expect(() =>
       createDaemonWithAdapters(
-        { storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: { salesko: { mcpServers: { 'salesko.probe': { command: '/opt/salesko/mcp' } } } } },
+        {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: { salesko: { mcpServers: { 'salesko.probe': { command: '/opt/salesko/mcp' } } } } },
         [new StubRuntimeAdapter('codex', { kind: 'available' }, MCP_CAPABLE)],
       ),
     ).toThrow(/"salesko\.probe", which cannot be expressed as a runtime MCP server name/);
@@ -511,7 +510,7 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
   it('refuses the removed permissionDefaults key instead of ignoring it', () => {
     expect(() =>
       createDaemonWithAdapters(
-        { storage: { scratchRoot: testScratchRoot() }, ...({ ...baseConfig, permissionDefaults: { mode: 'auto' } } as DaemonConfig) },
+        {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...({ ...baseConfig, permissionDefaults: { mode: 'auto' } } as DaemonConfig) },
         [new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE)],
       ),
     ).toThrow("DaemonConfig.permissionDefaults was removed: the local agent's own permission settings apply");
@@ -521,13 +520,13 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
     const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     expect(() =>
       createDaemonWithAdapters(
-        { storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: { Salesko: { mcpServers: { salesko: { command: '/bin/true' } } } } },
+        {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: { Salesko: { mcpServers: { salesko: { command: '/bin/true' } } } } },
         [adapter],
       ),
     ).toThrow(/invalid toolset id/);
     expect(() =>
       createDaemonWithAdapters(
-        { storage: { scratchRoot: testScratchRoot() },
+        {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },
           ...baseConfig,
           mcpToolsets: {
             salesko: { mcpServers: { byokagentmessage: { command: '/bin/true' } } },
@@ -538,7 +537,7 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
     ).toThrow(/reserved/);
     expect(() =>
       createDaemonWithAdapters(
-        { storage: { scratchRoot: testScratchRoot() },
+        {agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },
           ...baseConfig,
           mcpToolsets: {
             salesko: {
@@ -567,11 +566,11 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
 
     // Writer 1: daemon construction, which is the only place `DaemonConfig`
     // reaches the registry.
-    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: bare }, [adapter]))
+    expect(() => createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: bare }, [adapter]))
       .toThrow(/mcp_toolset_command_not_absolute/);
-    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: relative }, [adapter]))
+    expect(() => createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: relative }, [adapter]))
       .toThrow(/mcp_toolset_command_not_absolute/);
-    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: optionLike }, [adapter]))
+    expect(() => createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: optionLike }, [adapter]))
       .toThrow(/mcp_toolset_command_option_like/);
 
     // Writer 2: the registry's own constructor, reached directly by hosts that
@@ -617,14 +616,14 @@ describe('absolute toolset command, consistently across every runtime', () => {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
     productId: 'test-product',
     serverUrl: 'http://localhost:3000',
-    workspaceRoot: '/tmp/byok-test-workspace',
+    agentHome: testAgentHomeConfig(),
   };
   const configured = { salesko: { mcpServers: { salesko: { command: 'salesko-agent' } } } };
 
   it('never probes, claims or starts a toolset whose command the registry refused, on pi, codex or claude', async () => {
     for (const runtime of ['pi', 'codex', 'claude'] as const) {
       const adapter = new StubRuntimeAdapter(runtime, { kind: 'available' }, MCP_CAPABLE);
-      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: configured }, [adapter]))
+      expect(() => createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: configured }, [adapter]))
         .toThrow(/mcp_toolset_command_not_absolute/);
 
       // A daemon that refused the definition holds no snapshot carrying it, so
@@ -634,8 +633,8 @@ describe('absolute toolset command, consistently across every runtime', () => {
       const runner = await makeRunner(adapter, sent, new Map<string, McpToolsetConfig>(), undefined, probe);
       await runner.handleEnvelope(
         createEnvelope(
-          'task.offer_with_toolsets',
-          { instruction: 'x', runtime, requiredToolsets: ['salesko'] },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'x', runtime, requiredToolsets: ['salesko'] },
           { taskId: `task-refused-${runtime}`, seq: 1 },
         ),
       );
@@ -690,13 +689,11 @@ describe('TaskRunner host toolset context nonce injection', () => {
     const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       mcpToolsetToolsProbe: stubToolsProbe,
       adapters: [adapter],
-      workspaceRoot: await tmpDir('byok-host-toolset-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot: await tmpDir('byok-host-toolset-home-') }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'device-host-toolset',
       send: (envelope) => sent.push(envelope),
       blobClient: unusedBlobClient,
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'host-toolset-product',
@@ -763,33 +760,6 @@ describe('TaskRunner host toolset context nonce injection', () => {
     // The nonce never leaves this device: nothing sent to the server carries it.
     expect(JSON.stringify(sent)).not.toContain(readToken);
     expect(JSON.stringify(sent)).not.toContain(proposeToken);
-
-    adapter.sessions[0]?.emit({ type: 'turn_end' });
-    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
-  });
-
-  it('mints no nonce at all for a non-Agent toolset task', async () => {
-    // `byok-task-assertion-v1` REQUIRES the frozen offer's AgentRef, so an
-    // offer that has none gets no task lane rather than a weaker assertion.
-    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE, false);
-    const sent: Envelope[] = [];
-    const runner = await agentRunner(adapter, sent, twoToolsets);
-
-    await runner.handleEnvelope(
-      createEnvelope(
-        'task.offer_with_toolsets',
-        {
-          instruction: 'legacy toolset task',
-          runtime: 'pi',
-          requiredToolsets: ['salesko.read.v1'],
-        },
-        { taskId: 'task-no-agent', seq: 1 },
-      ),
-    );
-
-    expect(adapter.startCalls[0]?.ctx.mcpServers).toEqual({
-      saleskoread: { command: '/opt/salesko/read', args: ['--stdio'] },
-    });
 
     adapter.sessions[0]?.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));

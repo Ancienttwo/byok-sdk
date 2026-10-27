@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -52,7 +53,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-gate-pair-fail',
         serverUrl: 'http://example.com',
-        workspaceRoot: await tmpDir('byok-gate-pair-fail-ws-'),
+        agentHome: testAgentHomeConfig(),
         storeDir: await tmpDir('byok-gate-pair-fail-store-'),
       });
 
@@ -72,7 +73,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
         productId: 'acme-gate-pair-hatch',
         serverUrl: 'http://example.com',
         dangerouslyAllowInsecureRemote: true,
-        workspaceRoot: await tmpDir('byok-gate-pair-hatch-ws-'),
+        agentHome: testAgentHomeConfig(),
         storeDir: await tmpDir('byok-gate-pair-hatch-store-'),
       });
 
@@ -97,7 +98,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
         productId: 'acme-gate-pair-inert-hatch',
         serverUrl: 'http://127.0.0.1:1',
         dangerouslyAllowInsecureRemote: true,
-        workspaceRoot: await tmpDir('byok-gate-pair-inert-ws-'),
+        agentHome: testAgentHomeConfig(),
         storeDir: await tmpDir('byok-gate-pair-inert-store-'),
       });
 
@@ -113,7 +114,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
         productId: 'acme-gate-pair-unsupported-scheme',
         serverUrl: 'ftp://x',
         dangerouslyAllowInsecureRemote: true,
-        workspaceRoot: await tmpDir('byok-gate-pair-unsupported-ws-'),
+        agentHome: testAgentHomeConfig(),
         storeDir: await tmpDir('byok-gate-pair-unsupported-store-'),
       });
 
@@ -129,7 +130,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-gate-start-fail',
         serverUrl: 'http://example.com',
-        workspaceRoot: await tmpDir('byok-gate-start-fail-ws-'),
+        agentHome: testAgentHomeConfig(),
         storeDir: await tmpDir('byok-gate-start-fail-store-'),
       });
 
@@ -143,7 +144,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
         productId: 'acme-gate-start-hatch',
         serverUrl: 'http://example.com',
         dangerouslyAllowInsecureRemote: true,
-        workspaceRoot: await tmpDir('byok-gate-start-hatch-ws-'),
+        agentHome: testAgentHomeConfig(),
         storeDir: await tmpDir('byok-gate-start-hatch-store-'),
       });
 
@@ -163,7 +164,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
         productId: 'acme-gate-start-loopback',
         serverUrl: 'http://127.0.0.1:1',
         dangerouslyAllowInsecureRemote: true,
-        workspaceRoot: await tmpDir('byok-gate-start-loopback-ws-'),
+        agentHome: testAgentHomeConfig(),
         storeDir: await tmpDir('byok-gate-start-loopback-store-'),
       });
 
@@ -177,7 +178,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
         productId: 'acme-gate-start-unsupported-scheme',
         serverUrl: 'ftp://x',
         dangerouslyAllowInsecureRemote: true,
-        workspaceRoot: await tmpDir('byok-gate-start-unsupported-ws-'),
+        agentHome: testAgentHomeConfig(),
         storeDir: await tmpDir('byok-gate-start-unsupported-store-'),
       });
 

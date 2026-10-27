@@ -81,7 +81,6 @@ export async function interruptBounded(this: TaskRunner, active: ActiveTask, dra
 export async function teardownActiveTask(this: TaskRunner, active: ActiveTask, reason: string, retryable: boolean, drainEvents = true): Promise<boolean> {
   return this['settleSemanticTerminal'](active, async () => {
     active.blobAbort.abort();
-    await this['observeGit'](active, 'salvage');
     await this['interruptBounded'](active, drainEvents);
     await this['persistAgentTerminalEvidence'](active, 'failed', reason);
     return createEnvelope('task.fail', {
@@ -158,7 +157,6 @@ export async function handleCancel(this: TaskRunner, taskId: string, reason: str
   await this['settleSemanticTerminal'](active, async () => {
     active.blobAbort.abort();
     await this['interruptBounded'](active);
-    await this['observeGit'](active, 'salvage');
     // Deliberately NOT active.batcher.flush()-ed here (M1-4 e2e finding):
     // §4's "server state is authoritative on its own action" rule means the
     // server already moved this task to `Cancelled` — and already closed

@@ -52,7 +52,6 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "byok-protocol-floor": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.27.0.tgz",
-    "byok-protocol-previous": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.26.1.tgz"
+    "byok-protocol-previous": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.30.2.tgz"
   }
 }

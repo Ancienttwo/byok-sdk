@@ -4,7 +4,7 @@ export const EXPIRING_CLASS_IDS = [
 ] as const;
 export const PROTECTED_CLASS_IDS = [
   'journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'terminal-evidence',
-  'agent-content', 'byok-authority', 'agent-home-lease', 'workspace', 'retired-namespace',
+  'agent-content', 'byok-authority', 'agent-home-lease', 'retired-namespace',
   'pi-session-dir', 'skill-pack-current', 'store-authority',
 ] as const;
 export type ExpiringClassId = typeof EXPIRING_CLASS_IDS[number];

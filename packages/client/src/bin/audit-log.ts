@@ -135,7 +135,7 @@ async function appendAuditLine(storeDir: string, line: string): Promise<void> {
 /** Record kinds that end a task: a task with one of these anywhere in the file is fully described by it, so none of its earlier lines need to survive a rotation. */
 const TERMINAL_RECORD_KINDS = new Set<DaemonRecord['kind']>(['completed', 'failed', 'cancelled']);
 
-/** The task a record anchors, for the kinds that create or move a task row in `deriveTasksFromRecords`. Artifacts, Git observations and disposal diagnostics never anchor one. */
+/** The task a record anchors, for the kinds that create or move a task row in `deriveTasksFromRecords`. Artifacts and disposal diagnostics never anchor one. */
 function lifecycleRecordTaskId(record: DaemonRecord): string | undefined {
   switch (record.kind) {
     case 'outbound-rejected':
@@ -339,7 +339,6 @@ function parseRecordLine(line: string | undefined): DaemonRecord | undefined {
     case 'failed':
     case 'cancelled':
     case 'stale-approval-decision':
-    case 'git-workspace':
     case 'runtime-disposal-failed':
     case 'execution-record':
       return typeof raw.taskId === 'string' ? (raw as unknown as DaemonRecord) : undefined;

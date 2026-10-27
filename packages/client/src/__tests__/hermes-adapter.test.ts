@@ -1,9 +1,10 @@
+import type { RuntimeTaskInput } from '../types';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import { HermesAdapter, type HermesAdapterOptions } from '../adapters/hermes/hermes-adapter';
 import { hermesProfileConfig } from '../adapters/hermes/hermes-home';
 import { sealRuntimeOperationManifest, SteerUnsupportedError, type Session, type MessageDraftDelta } from '../types';
@@ -28,7 +29,7 @@ vi.mock('../adapters/hermes/gateway-ownership', async (original) => {
 const fixture = fileURLToPath(new URL('./fixtures/fake-hermes.mjs', import.meta.url));
 const sessions: Session[] = [];
 const dirs: string[] = [];
-const task: TaskOfferPayload = { instruction: 'hello' };
+const task: RuntimeTaskInput = { instruction: 'hello' };
 const windows = process.platform === 'win32';
 /** Windows children need SystemRoot for sockets and pipes. */
 const platformEnv: NodeJS.ProcessEnv = windows ? { SystemRoot: process.env.SystemRoot } : {};
@@ -72,7 +73,7 @@ async function setup(env: NodeJS.ProcessEnv = {}, options: Partial<HermesAdapter
   const receipt = path.join(await tempDir('br-'), 'receipt.jsonl');
   const adapter = new HermesAdapter({ home: root, resolveBin: () => ({ command, source: 'path' }), ...options });
   const resources = { workspaceDir, env: { PATH: process.env.PATH, HOME: os.homedir(), ...platformEnv, FAKE_HERMES_RECEIPT: receipt, ...env } };
-  const open = async (offer: TaskOfferPayload = task, extra: Partial<typeof resources> & Record<string, unknown> = {}) => {
+  const open = async (offer: RuntimeTaskInput = task, extra: Partial<typeof resources> & Record<string, unknown> = {}) => {
     const session = await startPreparedOperation(adapter, offer, { ...resources, ...extra });
     sessions.push(session);
     return session;
@@ -245,7 +246,7 @@ describe('HermesAdapter prepare', () => {
     const { adapter } = await setup();
     await withAmbientReceipt(async (read) => {
       expect(await adapter.prepare({
-        offer: { instruction: 'x', dispatchSelection: { lane: 'subscription', runtimeId: 'codex' } } as TaskOfferPayload,
+        offer: { instruction: 'x', dispatchSelection: { lane: 'subscription', runtimeId: 'codex' } } as RuntimeTaskInput,
         descriptor: adapter.descriptor, requiredToolsetIds: [],
       })).toMatchObject({ kind: 'reject', retryable: false });
       expect(await adapter.prepare({ offer: { instruction: 'x', sessionRef: 's' }, descriptor: adapter.descriptor, requiredToolsetIds: [] }))

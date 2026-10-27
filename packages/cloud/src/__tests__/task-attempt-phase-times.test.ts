@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { handleInboundEnvelope } from '../inbound';
 import { InMemoryTaskAttemptState, InMemoryTaskAttemptStore } from '../stores/in-memory/task-attempts';
 import { tenantStoresFor } from '../tenant-stores';
-import { PRODUCT_ID, TENANT_A, createHarness, offerPayload } from './support/harness';
+import { PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload } from './support/harness';
 
 describe('task attempt phase instants (#980)', () => {
   it('reads an attempt stored before the fields with none, and stamps only later transitions', async () => {
@@ -95,14 +95,15 @@ describe('task attempt phase instants (#980)', () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const taskId = 'progress-is-not-output';
-    await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { taskId, payload: offerPayload() });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId, payload: offerPayload() });
     const stores = tenantStoresFor(
       { kind: 'device', tenantId: TENANT_A as TenantId, productId: PRODUCT_ID, deviceId: device.deviceId },
       { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
     );
     const send = (type: MessageType, payload: object) =>
       handleInboundEnvelope(stores, device.deviceId, createEnvelope(type as Envelope['type'], payload as never, { taskId }) as Envelope);
-    expect(await send('task.claim', { deviceId: device.deviceId })).toEqual({ outcome: 'accepted' });
+    expect(await send('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF })).toEqual({ outcome: 'accepted' });
     expect(await send('task.started', {})).toEqual({ outcome: 'accepted' });
     expect(await send('task.progress', { seq: 1, events: [{ type: 'progress', text: 'working' }] })).toEqual({ outcome: 'accepted' });
     const attempt = await harness.cloud.readTaskAttempt(TENANT_A, taskId);

@@ -34,6 +34,14 @@ describe('bin/audit-log: appendAuditRecord / readAuditRecords', () => {
     expect(await readAuditRecords(storeDir)).toEqual([record]);
   });
 
+  it('skips an older build\'s retention failure for the removed workspace class (#925)', async () => {
+    const storeDir = await tmpDir('byok-audit-retention-workspace-');
+    const record: DaemonRecord = { kind: 'retention-failure', ts: '2026-10-14T00:00:01.000Z', trigger: 'periodic', classId: 'agent-result', code: 'sweep_failed', count: 1 };
+    const removed = JSON.stringify({ kind: 'retention-failure', ts: '2026-10-14T00:00:00.000Z', trigger: 'periodic', classId: 'workspace', code: 'measurement_failed', count: 1 });
+    await fs.writeFile(auditLogPath(storeDir), `${removed}\n${formatDaemonRecordLine(record)}\n`, { mode: 0o600 });
+    expect(await readAuditRecords(storeDir)).toEqual([record]);
+  });
+
   it('captures queued lines before nested records mutate, and returns the exact stdout bytes', async () => {
     const storeDir = await tmpDir('byok-audit-capture-');
     const appender = createAuditAppender(storeDir);

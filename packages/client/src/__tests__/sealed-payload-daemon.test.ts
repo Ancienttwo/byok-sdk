@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 /**
  * #654 E3c, E2d-3, E2d-4: a daemon that is a verified E2EE member opens a sealed
  * task's input and seals its output with the keys of its member keyring.
@@ -30,6 +31,7 @@ import {
   decodeEnvelope,
   encodeEnvelope,
   isSealedTaskPlainOutput,
+  type AgentRef,
   type Envelope,
   type MessageType,
   type SealedMessageType,
@@ -47,6 +49,7 @@ import { RuntimeExecutionFailure } from '../runtime-failure';
 import { E2eeWebClient } from './fixtures/e2ee-web-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 
 const BUDGET_MS = 4_000;
 const TENANT = 'tenant-test';
@@ -55,7 +58,7 @@ const EPOCH = 1;
 const BOTH: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input', 'task-output'] };
 const OUTPUT_ONLY: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-output'] };
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; payload: Record<string, unknown> });
@@ -115,7 +118,7 @@ async function start(options: {
   const config = {
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed daemon test', productId: 'sealed-daemon-test',
-    serverUrl: server.url, storeDir, workspaceRoot: path.join(root, 'workspace'),
+    serverUrl: server.url, storeDir, agentHome: testAgentHomeConfig(),
     ...(options.shutdown === undefined ? {} : { shutdownGraceMs: options.shutdown.graceMs }),
   };
   server.setCapabilityDeclaration(options.e2ee === false ? NO_E2EE_DECLARATION : options.e2ee === 'no-kem-epoch' ? NO_KEM_EPOCH_DECLARATION : E2EE_DECLARATION);
@@ -149,8 +152,13 @@ async function otherDevice(member: ScopeMember) {
   return bundle;
 }
 
+/** Each task runs as its own Agent, so concurrent tasks never share an Agent home. */
+function agentOf(taskId: string): AgentRef {
+  return { agentId: `sealed-${taskId}`, profileRevision: 'rev-1' };
+}
+
 function binding(family: MessageType, direction: SealedBinding['direction'], identity: SealedBinding['identity'], deviceId: string, sealing: TaskSealing): SealedBinding {
-  return { tenantId: TENANT, family, direction, identity, deviceId, agentRef: null, categories: sealing.categories, notAfter: null };
+  return { tenantId: TENANT, family, direction, identity, deviceId, agentRef: agentOf(String(identity.taskId)), categories: sealing.categories, notAfter: null };
 }
 
 async function sealedMember(member: ScopeMember, plaintext: Record<string, unknown>, bound: SealedBinding, category: 'task-input' | 'task-output' = 'task-input') {
@@ -167,11 +175,11 @@ async function sealedOffer(
 ): Promise<Envelope> {
   const plain = options.plain ?? {};
   if (!sealing.categories.includes('task-input')) {
-    return createEnvelope('task.offer_sealed', { ...plain, instruction, sealing } as never, { taskId, seq });
+    return createEnvelope('task.offer_for_agent_sealed', { agentRef: agentOf(taskId), ...plain, instruction, sealing } as never, { taskId, seq });
   }
-  const bound = binding('task.offer', 'server-to-daemon', { taskId }, deviceId, options.boundSealing ?? sealing);
+  const bound = binding('task.offer_for_agent', 'server-to-daemon', { taskId }, deviceId, options.boundSealing ?? sealing);
   const { header, ciphertext } = await sealedMember(member, { instruction }, bound);
-  return createEnvelope('task.offer_sealed', { ...plain, sealing, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId, seq });
+  return createEnvelope('task.offer_for_agent_sealed', { agentRef: agentOf(taskId), ...plain, sealing, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId, seq });
 }
 
 /** Opens a sealed output as a member would, with the binding the receiver builds, under `scopeKey` (the scope key by default). */
@@ -203,10 +211,10 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.setCapabilityDeclaration(E2EE_DECLARATION);
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
     dirs.push(root);
-    daemon = createDaemonWithAdapters({
+    daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),
       storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed daemon test', productId: 'sealed-daemon-test',
-      serverUrl: server.url, storeDir: path.join(root, 'store'), workspaceRoot: path.join(root, 'workspace'),
+      serverUrl: server.url, storeDir: path.join(root, 'store'),
     }, [new StubRuntimeAdapter('pi')]);
     await daemon.pair('pair-code');
     await daemon.start();
@@ -297,7 +305,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
     expect(server.e2ee.packageReads).toBe(1);
-    expect(adapter.startCalls[0]!.task.instruction).toBe(instruction);
+    expect(adapter.startCalls[0]!.task.instruction).toBe(prependAgentMemoryGuidance(instruction));
     adapter.sessions[0]!.emit({ type: 'progress', text: 'secret progress' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
 
@@ -356,7 +364,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const inputOnly: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input'] };
     server.send(await sealedOffer(member, 'below-policy', server.nextSeq(), deviceId, 'never runs', inputOnly));
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'below-policy', BUDGET_MS);
-    expect(decline.payload).toEqual({ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
     expect(adapter.startCalls).toHaveLength(0);
   });
 
@@ -370,22 +378,22 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const inputOnly: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input'] };
     server.send(await sealedOffer(member, 'policy-moved', server.nextSeq(), deviceId, 'never runs', inputOnly));
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'policy-moved', BUDGET_MS);
-    expect(decline.payload).toEqual({ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
     expect(adapter.startCalls).toHaveLength(0);
   });
 
   it('declines content whose sender view is not on the verified chain with sealed_open_failed', async () => {
     const { server, adapter, deviceId, member } = await start();
-    const bound = binding('task.offer', 'server-to-daemon', { taskId: 'foreign-head' }, deviceId, BOTH);
+    const bound = binding('task.offer_for_agent', 'server-to-daemon', { taskId: 'foreign-head' }, deviceId, BOTH);
     const { header, ciphertext } = await sealContent({
       scopeKey: member.scopeKey, scope: { id: SCOPE, epoch: EPOCH }, chainHead: { seq: member.web.head!.seq, hash: `sha256:${'0'.repeat(64)}` },
       sender: member.web.member.memberId, category: 'task-input', binding: bound, plaintext: { instruction: 'never runs' } as never,
       maxContentLength: SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
     });
-    server.send(createEnvelope('task.offer_sealed', { sealing: BOTH, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never,
+    server.send(createEnvelope('task.offer_for_agent_sealed', { agentRef: agentOf('foreign-head'), sealing: BOTH, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never,
       { taskId: 'foreign-head', seq: server.nextSeq() }));
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'foreign-head', BUDGET_MS);
-    expect(decline.payload).toEqual({ reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
     expect(adapter.startCalls).toHaveLength(0);
   });
 
@@ -410,7 +418,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(offer);
 
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'declined', BUDGET_MS);
-    expect(decline.payload).toEqual({ reason: code, code, retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: code, code, retryable: false });
     await vi.waitFor(async () => expect(await cursor()).toBe(offer.seq), BUDGET_MS);
     server.send({ ...offer, id: randomUUID(), seq: server.nextSeq() });
     await vi.waitFor(async () => expect(await cursor()).toBe(offer.seq! + 1), BUDGET_MS);
@@ -424,7 +432,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(await sealedOffer(member, 'blob-instruction', server.nextSeq(), deviceId, blobRef));
 
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'blob-instruction', BUDGET_MS);
-    expect(decline.payload).toEqual({ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
   });
 
   it('declines in plaintext, without a code, when the server does not accept sealed output', async () => {
@@ -432,7 +440,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(await sealedOffer(member, 'no-flag', server.nextSeq(), deviceId, 'never runs'));
 
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'no-flag', BUDGET_MS);
-    expect(decline.payload).toEqual({ reason: 'sealed_payload_unsupported: the server does not accept sealed task output', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_payload_unsupported: the server does not accept sealed task output', retryable: false });
     expect(adapter.startCalls).toHaveLength(0);
   });
 
@@ -443,7 +451,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(await sealedOffer(member, 'downgraded', server.nextSeq(), deviceId, 'never runs', inputOnly, { boundSealing: BOTH }));
 
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'downgraded', BUDGET_MS);
-    expect(decline.payload).toEqual({ reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
     expect(adapter.startCalls).toHaveLength(0);
   });
 
@@ -465,7 +473,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(await sealedOffer(member, 'output-only-steer', server.nextSeq(), deviceId, 'run output-only-steer', OUTPUT_ONLY));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
     // The two offers may start in either order; each start call records its instruction.
-    const sessionOf = (taskId: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === `run ${taskId}`)]!;
+    const sessionOf = (taskId: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === prependAgentMemoryGuidance(`run ${taskId}`))]!;
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       server.send(createEnvelope('task.steer', { text: 'host injected' }, { taskId: 'sealed-input', seq: server.nextSeq() }));
@@ -851,12 +859,13 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const { server, adapter, deviceId, member } = await start();
     const instruction = 'i'.repeat(300 * 1024);
     const offerOf = async (taskId: string, corrupt: boolean): Promise<Envelope> => {
-      const { header, ciphertext } = await sealedMember(member, { instruction }, binding('task.offer', 'server-to-daemon', { taskId }, deviceId, BOTH));
+      const { header, ciphertext } = await sealedMember(member, { instruction }, binding('task.offer_for_agent', 'server-to-daemon', { taskId }, deviceId, BOTH));
       const bytes = Buffer.from(ciphertext);
       const blobId = `blob-${taskId}`;
       server.seedBlob(blobId, bytes, 'application/octet-stream');
       const contentHash = `sha256:${createHash('sha256').update(corrupt ? Buffer.from('other') : bytes).digest('hex')}`;
-      return createEnvelope('task.offer_sealed', {
+      return createEnvelope('task.offer_for_agent_sealed', {
+        agentRef: agentOf(taskId),
         sealing: BOTH,
         sealed: { ...header, ciphertextRef: { blobId, contentHash, size: bytes.length, contentType: 'application/octet-stream' } },
       } as never, { taskId, seq: server.nextSeq() });
@@ -864,21 +873,21 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
     server.send(await offerOf('bad-hash', true));
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'bad-hash', BUDGET_MS);
-    expect(decline.payload).toEqual({ reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
 
     server.send(await offerOf('blob-offer', false));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
-    expect(adapter.startCalls[0]!.task.instruction).toBe(instruction);
+    expect(adapter.startCalls[0]!.task.instruction).toBe(prependAgentMemoryGuidance(instruction));
   });
 
   it('declines an over-bound sealed offer with sealed_open_failed', async () => {
     const { server, cursor } = await start();
-    const line = corpus.find((candidate) => candidate.type === 'task.offer_sealed' && (candidate.payload.sealed as { ciphertext?: string } | undefined)?.ciphertext !== undefined)!;
+    const line = corpus.find((candidate) => candidate.type === 'task.offer_for_agent_sealed' && (candidate.payload.sealed as { ciphertext?: string } | undefined)?.ciphertext !== undefined)!;
     const big = EnvelopeSchema.parse({
-      v: PROTOCOL_VERSION, id: randomUUID(), ts: new Date().toISOString(), type: 'task.offer_sealed', task_id: 'big-sealed', seq: server.nextSeq(),
+      v: PROTOCOL_VERSION, id: randomUUID(), ts: new Date().toISOString(), type: 'task.offer_for_agent_sealed', task_id: 'big-sealed', seq: server.nextSeq(),
       payload: {
         ...line.payload,
-        workspaceHint: 'w'.repeat(100 * 1024),
+        sessionRef: 's'.repeat(100 * 1024),
         sealed: {
           ...(line.payload.sealed as Record<string, unknown>),
           paddedLength: SEALED_INLINE_MAX_PADDED_LENGTH,
@@ -889,7 +898,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(big);
 
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'big-sealed', BUDGET_MS);
-    expect(decline.payload).toEqual({ reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: line.payload.agentRef, reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
     await vi.waitFor(async () => expect(await cursor()).toBe(big.seq), BUDGET_MS);
   });
 });
@@ -1209,7 +1218,7 @@ describe('sealed output by ciphertextRef on a server that holds the blob (#654 Â
     server.send(await sealedOffer(member, 'held-upload', server.nextSeq(), deviceId, 'run the large task'));
     server.send(await sealedOffer(member, 'small-terminal', server.nextSeq(), deviceId, 'run the small task'));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2), BUDGET_MS);
-    const session = (instruction: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === instruction)]!;
+    const session = (instruction: string) => adapter.sessions[adapter.startCalls.findIndex((call) => call.task.instruction === prependAgentMemoryGuidance(instruction))]!;
     const held = session('run the large task');
     const small = session('run the small task');
     const release = server.holdBlobUploads();

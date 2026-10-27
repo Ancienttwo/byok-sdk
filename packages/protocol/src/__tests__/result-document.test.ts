@@ -335,12 +335,10 @@ describe('task.complete.document is v3 baseline (no capability flag)', () => {
   });
 
   it('kept every other pre-existing flag in order', () => {
-    expect([...CAPABILITY_FLAGS].slice(0, 5)).toEqual([
+    expect([...CAPABILITY_FLAGS].slice(0, 3)).toEqual([
       'steer',
       'blob-upload',
-      'interactive-approval',
-      'approval_resolved',
-      'approval-targeting',
+      'dispatch-selection',
     ]);
   });
 });

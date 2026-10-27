@@ -48,7 +48,6 @@ describe('terminal evidence of the applied Agent-home projection (#318)', () => 
       serverUrl: server.url,
       storeDir,
       agentHome: { hostStorageRoot, projection: consumer },
-      strictAgentOnly: true,
     }, [adapter]);
     await daemon.pair('pairing-code');
     await daemon.start();

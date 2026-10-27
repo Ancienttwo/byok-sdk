@@ -93,7 +93,7 @@ export function scope(value: unknown): Scope {
   if (typeof value !== 'string' || !SCOPES.includes(value as Scope)) invalid();
   return value as Scope;
 }
-export function agentScope(value: Scope): boolean { return value.startsWith('memory.') || value.startsWith('routines.'); }
+export function agentScope(value: Scope): boolean { return value === 'tasks.dispatch' || value.startsWith('memory.') || value.startsWith('routines.'); }
 function runtime(value: unknown): RuntimeId {
   const parsed = RuntimeIdSchema.safeParse(value);
   if (!parsed.success) invalid();

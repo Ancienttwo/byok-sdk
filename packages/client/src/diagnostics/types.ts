@@ -7,7 +7,7 @@ import type { ServiceEnvironmentRecord } from '../lifecycle/service-environment'
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 
 export interface DiagnosticCheck {
-  id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'health' | 'journal' | 'workspace' | 'quarantine';
+  id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'health' | 'journal' | 'quarantine';
   status: DiagnosticStatus;
   summary: string;
 }
@@ -61,8 +61,6 @@ export interface DiagnosticsSnapshot {
     failedTerminalCount?: number;
     reason?: string;
   };
-  /** `not-configured`: a strict Agent daemon has no `workspaceRoot`; each Agent offer runs in its SDK-owned home. */
-  workspace: { status: 'available' | 'missing' | 'unavailable' | 'not-configured'; writable?: boolean; reason?: string };
   quarantine: {
     status: 'available' | 'missing' | 'unavailable';
     count: number;

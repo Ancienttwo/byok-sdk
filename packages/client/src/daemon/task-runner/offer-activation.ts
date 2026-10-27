@@ -9,16 +9,15 @@ import type { ActiveTask, OfferPhaseContext } from './support';
 import { outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
-import type { OfferClaim, OfferHeld, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
+import type { OfferHeld, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
 
 export interface OfferActivationInput
   extends Pick<OfferRequest, 'readerAttempt'>,
     Pick<OfferRuntime, 'pick' | 'scratch'>,
     Pick<OfferWorkspace, 'appliedAgentHomeProjection' | 'readerMemoryBaseline'>,
     Pick<OfferManifest, 'preparedObservation'>,
-    Pick<OfferClaim, 'workspaceDir' | 'gitWorkspaceId' | 'gitBaseline'> {
+    Pick<OfferWorkspace, 'workspaceDir'> {
   readonly agentBinding: OfferHeld['agentBinding'];
-  readonly gitLease: OfferHeld['gitLease'];
   readonly blobAbort: AbortController;
   readonly payload: AcceptedOfferPayload;
   readonly session: Session;
@@ -34,8 +33,8 @@ export interface OfferActivationInput
 export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, held: OfferHeld, input: OfferActivationInput): Promise<void> {
   const { taskId } = phase;
   const {
-    agentBinding, gitLease, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
-    workspaceDir, gitWorkspaceId, gitBaseline, blobAbort, payload, session, messageRequirement, terminalProjection,
+    agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
+    workspaceDir, blobAbort, payload, session, messageRequirement, terminalProjection,
   } = input;
   try {
   if (agentBinding !== undefined) {
@@ -78,9 +77,6 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
       ...(appliedAgentHomeProjection === undefined ? {} : { appliedAgentHomeProjection }),
       ...(readerMemoryBaseline === undefined ? {} : { readerMemoryBaseline }),
     }),
-    gitWorkspaceId,
-    gitLease,
-    gitBaseline,
     summaryParts: [],
     finalTextParts: [],
     batcher: new ProgressBatcher(
@@ -178,7 +174,6 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     await this['settleSemanticTerminal'](active, async () => {
       active.eventPump ??= this['pump'](active);
       await this['interruptBounded'](active);
-      await this['updateGitPhaseBestEffort'](gitWorkspaceId, 'cancelled');
       await this['persistAgentTerminalEvidence'](active, 'cancelled', reason);
       return createEnvelope('task.cancelled', {
         reason, ...this['terminalInferenceUsagePayload'](active), ...this['agentTerminalPayload'](active),
@@ -197,10 +192,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   // can arrive and be processed by `handleEnvelope` at any `await` point,
   // and every one of those handlers starts with `this.tasks.get(taskId)`
   // — if this task isn't registered yet, they silently no-op (see e.g.
-  // `handleCancel`). An earlier version of this method awaited the
-  // sessionWorkspaces write (below) before registering `active` and broke
-  // exactly this: a cancel racing a task.offer lost its `interrupt()`/
-  // `task.cancelled` entirely.
+  // `handleCancel`).
   this['inFlightBlobAborts'].delete(taskId);
   this['startupOwnership'].transferToActive(taskId);
   this['tasks'].set(taskId, active);
@@ -216,26 +208,6 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     this['armMaxDurationTimer'](active, payload.limits.maxDurationMs);
   }
   active.eventPump = this['pump'](active);
-
-  // Record (or refresh) this session's resumable workspace for any future
-  // task.offer that carries the same sessionRef, fire-and-forget:
-  // `session.sessionRef` is always the adapter's real, resumable
-  // identifier (see PiSession / resolveFreshSessionId) whether or not
-  // *this* dispatch was itself a resume. Deliberately not awaited — see
-  // the comment above; losing this mapping only costs a future resume
-  // opportunity, never the correctness of the task in progress.
-  if (agentBinding === undefined) {
-    void this['deps'].sessionWorkspaces
-      .record(session.sessionRef, {
-        workspaceDir,
-        runtimeSessionId: session.sessionRef,
-        ...(gitWorkspaceId ? { workspaceKind: 'git' as const, gitWorkspaceId } : {}),
-      })
-      .catch(() => {});
-  }
-  if (gitWorkspaceId && this['deps'].gitWorkspaceStore) {
-    void this['deps'].gitWorkspaceStore.attachSession(gitWorkspaceId, session.sessionRef).catch(() => {});
-  }
   } catch (error) {
     if (this['tasks'].has(taskId)) throw error;
     const reason = `runtime activation failed: ${outboundErrorMessage(error)}`;

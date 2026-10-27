@@ -1,3 +1,5 @@
+import type { RuntimeTaskInput } from '../types';
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
@@ -43,12 +45,11 @@ describe('DaemonConfig.branding', () => {
   });
 
   it('is carried through verbatim to status().branding', async () => {
-    const workspaceRoot = await tmpDir('byok-branding-workspace-');
     const storeDir = await tmpDir('byok-branding-store-');
     const branding = { displayName: 'Acme Coder', supportUrl: 'https://acme.example/support', accent: '#336699' };
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product', serverUrl: server.url, workspaceRoot, storeDir, branding },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product', serverUrl: server.url, storeDir, branding },
       [new StubRuntimeAdapter('pi')],
     );
     await daemon.pair('pairing-code');
@@ -58,11 +59,10 @@ describe('DaemonConfig.branding', () => {
   });
 
   it('is undefined when the config configures none (no over-eager default)', async () => {
-    const workspaceRoot = await tmpDir('byok-branding-workspace-');
     const storeDir = await tmpDir('byok-branding-store-');
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product-nobrand', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product-nobrand', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter('pi')],
     );
     await daemon.pair('pairing-code');
@@ -105,14 +105,13 @@ describe('createDaemon — runtimeAllowlist-driven bundled adapter set', () => {
   });
 
   it('runtimeAllowlist: ["claude", "codex"] advertises exactly those two runtimes, never pi', async () => {
-    const workspaceRoot = await tmpDir('byok-allowlist-workspace-');
     const storeDir = await tmpDir('byok-allowlist-store-');
 
     daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
       productId: 'test-product-claude-codex',
       serverUrl: server.url,
-      workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
       runtimeAllowlist: ['claude', 'codex'],
     });
@@ -126,14 +125,13 @@ describe('createDaemon — runtimeAllowlist-driven bundled adapter set', () => {
   });
 
   it('no runtimeAllowlist configured defaults to all three bundled runtimes (pi, claude, codex)', async () => {
-    const workspaceRoot = await tmpDir('byok-allowlist-workspace-');
     const storeDir = await tmpDir('byok-allowlist-store-');
 
     daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
       productId: 'test-product-default',
       serverUrl: server.url,
-      workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
     });
     await daemon.pair('pairing-code');
@@ -164,10 +162,9 @@ describe('runtimeAllowlist enforcement regression (TaskRunner.pickAdapter, uncha
     // `runtime` is constrained by the frozen protocol to 'pi'|'claude'|'codex'
     // (RuntimeIdSchema — mirrors daemon-task-loop.test.ts's identical
     // reasoning), so the stubs must claim real runtime ids to exercise a
-    // genuine TaskOfferPayload.
+    // genuine RuntimeTaskInput.
     const pi = new StubRuntimeAdapter('pi');
     const claude = new StubRuntimeAdapter('claude');
-    const workspaceRoot = await tmpDir('byok-allowlist-enforce-workspace-');
     const storeDir = await tmpDir('byok-allowlist-enforce-store-');
 
     daemon = createDaemonWithAdapters(
@@ -175,7 +172,7 @@ describe('runtimeAllowlist enforcement regression (TaskRunner.pickAdapter, uncha
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-enforce',
         serverUrl: server.url,
-        workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         runtimeAllowlist: ['pi'],
       },
@@ -186,8 +183,8 @@ describe('runtimeAllowlist enforcement regression (TaskRunner.pickAdapter, uncha
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'x', runtime: 'claude' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'claude' },
         { taskId: 'task-disallowed', seq: server.nextSeq() },
       ),
     );

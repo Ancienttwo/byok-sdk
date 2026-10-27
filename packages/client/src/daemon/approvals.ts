@@ -16,7 +16,7 @@
 export type ApprovalDecision = 'approve' | 'reject';
 
 /**
- * M4 (additive-minor, `task.approval_resolved`): distinguishes a resolution
+ * Distinguishes a resolution
  * that arrived over the wire (a server-sent `task.approve`/`task.reject`,
  * relayed here via `RuntimeOperationStartInput.approvalChannel.resolve` — `task-runner.ts`'s
  * `handleOffer`) from one this device decided on its own (the local
@@ -25,8 +25,8 @@ export type ApprovalDecision = 'approve' | 'reject';
  * this to decide whether to report `task.approval_resolved` back to the
  * server: a wire-triggered resolution is something the server already knows
  * about (it sent the decision itself) and must never be echoed back;
- * everything else is new information only the device has, and — capability
- * permitting — gets reported. `'local'` is the default (see `resolve()`
+ * everything else is new information only the device has, and gets
+ * reported. `'local'` is the default (see `resolve()`
  * below) precisely because it's the common case: every call site in this
  * module and `task-runner.ts` except the one wire-relay closure is local by
  * construction.

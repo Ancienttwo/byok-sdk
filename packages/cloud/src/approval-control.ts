@@ -20,10 +20,10 @@
  *     the previous one resolved has moved on, and the newest request is what
  *     an operator is being asked about (`hub.ts:1399`).
  *   - `approval_resolved(X)` CLEARS the slot when the slot's own id is `X`, or
- *     when the slot has no id at all (a pre-M5 daemon never reported one, so
- *     the resolution can only be about the single outstanding request). A
- *     resolution naming some OTHER id is about an approval already superseded
- *     and leaves the current slot standing (`hub.ts:1569`).
+ *     when the slot has no id at all (a request recorded before wire v4 named
+ *     none, so the resolution can only be about the single outstanding
+ *     request). A resolution naming some OTHER id is about an approval already
+ *     superseded and leaves the current slot standing (`hub.ts:1569`).
  *
  * Two ways there is legitimately nothing pending: the tail has no unresolved
  * request, or the tail is gone entirely — it is a bounded, TTL'd observation
@@ -67,10 +67,9 @@ export class StaleApprovalError extends Error {
 /** The one approval a task currently has outstanding. */
 export interface PendingApproval {
   /**
-   * The daemon's own id for this approval. ABSENT for a pre-M5 daemon that
-   * reported `task.await_approval` without one — the approval is still pending
-   * and still resolvable, it just cannot be targeted, so a caller-supplied
-   * `approvalId` proceeds untargeted exactly as it does on the server.
+   * The daemon's own id for this approval. Wire v4 requires one; it is ABSENT
+   * only on a request recorded before v4. A host decision refuses such a
+   * request, because a v4 `task.approve`/`task.reject` must name it.
    */
   readonly approvalId?: string;
   /** Immutable daemon envelope identity for this exact request observation. */

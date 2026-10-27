@@ -946,9 +946,7 @@ function approvalTimelineAppendInput(
         event: {
           type: 'approval_requested',
           summary: envelope.payload.summary,
-          ...(envelope.payload.approvalId === undefined
-            ? {}
-            : { approvalId: envelope.payload.approvalId }),
+          approvalId: envelope.payload.approvalId,
         },
       };
     case 'task.await_approval_sealed':

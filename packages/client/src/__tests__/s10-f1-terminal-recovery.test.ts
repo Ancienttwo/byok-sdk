@@ -10,7 +10,6 @@ import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import * as mutationGate from '../daemon/path-mutation-gate';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -55,12 +54,12 @@ async function cancellationFixture(overrides: Partial<TaskRunnerDeps> = {}) {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
     const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-      adapters: [adapter], workspaceRoot: await temporary('byok-publish-cancel-workspace-'),
+      adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-cancel',
       send: envelope => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      approvalRegistry: new ApprovalRegistry(),
       storeDir, productId: 'cancel-test', tenantId: 'tenant-cancel',
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
       agentMessageMcpPreflight: async () => {},
@@ -105,8 +104,15 @@ async function activeFixture(unsent: boolean, overrides: Partial<TaskRunnerDeps>
 function cancel(runner: TaskRunner, reason = 'first cancellation') {
   return runner.handleEnvelope(createEnvelope('task.cancel', { reason }, { taskId: TASK, seq: 2 }));
 }
-function reject(runner: TaskRunner) {
-  return runner.handleEnvelope(createEnvelope('task.reject', { reason: 'first rejection' }, { taskId: TASK, seq: 3 }));
+/** A reject names the approval it decides, so the task first asks for one. */
+async function reject(h: { runner: TaskRunner; sent: Envelope[] }) {
+  void h.runner.requestApproval(TASK, 'gate');
+  const request = await vi.waitFor(() => {
+    const envelope = h.sent.find(e => e.type === 'task.await_approval');
+    if (envelope?.type !== 'task.await_approval') throw new Error('no approval request yet');
+    return envelope;
+  });
+  return h.runner.handleEnvelope(createEnvelope('task.reject', { reason: 'first rejection', approvalId: request.payload.approvalId }, { taskId: TASK, seq: 3 }));
 }
 function terminals(sent: Envelope[]) {
   return sent.filter(e => ['task.cancelled', 'task.fail', 'task.complete'].includes(e.type));
@@ -134,7 +140,7 @@ describe('S10-F1 active terminal revocation recovery', () => {
     const originalRevoke = AgentMessageOutbox.prototype.revoke;
     const revoke = vi.spyOn(AgentMessageOutbox.prototype, 'revoke').mockRejectedValueOnce(new Error('transient revoke failure'));
     try {
-      await expect(cause === 'cancelled' ? cancel(h.runner) : reject(h.runner)).rejects.toThrow('transient revoke failure');
+      await expect(cause === 'cancelled' ? cancel(h.runner) : reject(h)).rejects.toThrow('transient revoke failure');
       expect(revoke).toHaveBeenCalledTimes(1);
       expect(terminals(h.sent)).toHaveLength(0);
       expect(h.runner.activeTaskCount, JSON.stringify(h.sent)).toBe(1);
@@ -169,7 +175,7 @@ it.each(['cancelled', 'failed'] as const)('S10-F1 shares one failed and one reco
     .mockImplementationOnce(async () => { entered.resolve(); await first.promise; throw new Error('first revoke failed'); })
     .mockImplementationOnce(async function (this: AgentMessageOutbox, taskId) { retried.resolve(); await retry.promise; return original.call(this, taskId); });
   try {
-    const selected = cause === 'cancelled' ? cancel(h.runner) : reject(h.runner);
+    const selected = cause === 'cancelled' ? cancel(h.runner) : reject(h);
     await entered.promise;
     const waiting = Promise.allSettled([selected, cancel(h.runner, 'competing cancel'), h.runner.shutdownActiveTasks('competing shutdown')]);
     first.resolve();

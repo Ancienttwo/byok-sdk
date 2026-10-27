@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -18,7 +19,7 @@ describe('createDaemonWithAdapters: removed DaemonConfig.toolImplementationAutho
       productName: 'Test Product',
       productId: 'test-product-tool-authority',
       serverUrl: 'http://localhost:1',
-      workspaceRoot: await fs.mkdtemp(path.join(os.tmpdir(), 'byok-tool-authority-workspace-')),
+      agentHome: testAgentHomeConfig(),
       storeDir: await fs.mkdtemp(path.join(os.tmpdir(), 'byok-tool-authority-store-')),
       toolImplementationAuthority: { mode: 'dev' },
     } as DaemonConfig;
@@ -26,7 +27,6 @@ describe('createDaemonWithAdapters: removed DaemonConfig.toolImplementationAutho
       expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi', { kind: 'available' })]))
         .toThrow('DaemonConfig.toolImplementationAuthority was removed: the SDK does not attest tool or runtime executables');
     } finally {
-      await fs.rm(config.workspaceRoot!, { recursive: true, force: true });
       await fs.rm(config.storeDir!, { recursive: true, force: true });
     }
   });

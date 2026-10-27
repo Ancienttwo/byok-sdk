@@ -25,7 +25,6 @@ interface TaskRelayState {
   terminalSettled: boolean;
   provisional: boolean;
   readonly early: Array<{ readonly envelope: InboundCommitted['envelope']; readonly at: string }>;
-  latestApprovalRequestSourceEnvelopeId?: string;
   claimedRuntime?: RuntimeId;
   claimedHarnessId?: string;
   reclaimTimer?: ReturnType<typeof setTimeout>;
@@ -64,9 +63,7 @@ export interface TaskEventRelayOptions {
  * store no-op rather than a rejection.
  *
  * `onInboundCommitted` runs inline on the kernel's request path and must stay
- * synchronous and cheap; anything needing a store read goes through
- * {@link onTaskActivity}, which the composition sets and which owns its own
- * failure handling.
+ * synchronous and cheap.
  */
 export class TaskEventRelay implements ByokCloudObserver {
   readonly #draftWakes = new Map<string, Set<() => void>>();
@@ -75,18 +72,6 @@ export class TaskEventRelay implements ByokCloudObserver {
   readonly #bufferLimit: number;
   readonly #retentionMs: number;
   #stopped = false;
-
-  /**
-   * Called once per committed task-progress observation for a dispatched task.
-   * The composition uses it to run the implicit-approval-resume check, which
-   * needs a store read and therefore cannot happen inline here.
-   */
-  onTaskActivity: ((
-    taskId: string,
-    pendingRequestSourceEnvelopeId: string | undefined,
-    activitySourceEnvelopeId: string,
-    activityAt: string,
-  ) => void) | undefined;
 
   constructor(options: TaskEventRelayOptions) {
     this.#bufferLimit = positiveLimit(options.taskEventBufferLimit ?? DEFAULT_TASK_EVENT_BUFFER_LIMIT, 'taskEventBufferLimit');
@@ -222,24 +207,11 @@ export class TaskEventRelay implements ByokCloudObserver {
         return;
       case 'task.progress':
         for (const event of envelope.payload.events) state.queue.push({ kind: 'agent', event });
-        this.onTaskActivity?.(
-          taskId,
-          state.latestApprovalRequestSourceEnvelopeId,
-          envelope.id,
-          envelope.ts,
-        );
         return;
       case 'task.artifact':
         state.queue.push({ kind: 'artifact', artifact: envelope.payload });
-        this.onTaskActivity?.(
-          taskId,
-          state.latestApprovalRequestSourceEnvelopeId,
-          envelope.id,
-          envelope.ts,
-        );
         return;
       case 'task.await_approval':
-        state.latestApprovalRequestSourceEnvelopeId = envelope.id;
         state.queue.push({ kind: 'await_approval', summary: envelope.payload.summary });
         this.#transition(state, taskId, 'AwaitApproval', at);
         return;
@@ -251,12 +223,6 @@ export class TaskEventRelay implements ByokCloudObserver {
           approvalId: envelope.payload.approvalId,
           decision: envelope.payload.decision,
           resolvedBy: envelope.payload.resolvedBy,
-          // Whether the reporting daemon advertised `approval-targeting` was a
-          // property of its live WS registration, which no longer exists. The
-          // durable capability list is a device-build fact rather than a
-          // per-report one, so this reports the honest answer for the transport
-          // that remains: not targeted.
-          targeted: false,
         });
         this.#transition(state, taskId, 'Running', at);
         return;
@@ -275,12 +241,6 @@ export class TaskEventRelay implements ByokCloudObserver {
       default:
         return;
     }
-  }
-
-  /** Publish an implicit resolution the composition inferred from later task traffic. */
-  emitImplicitApprovalResolved(taskId: string, at: string): void {
-    this.emitServerEvent({ kind: 'task.approval_resolved_implicit', taskId, at });
-    this.noteHostTransition(taskId, 'Running', at);
   }
 
   /** Close every feed and drop every timer. Safe to call more than once. */

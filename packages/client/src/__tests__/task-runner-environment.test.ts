@@ -1,3 +1,5 @@
+import type { RuntimeTaskInput } from '../types';
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { spawn as realSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -5,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { createEnvelope, type Envelope, type RuntimeId, type TaskOfferPayload } from '@byok-sdk/protocol';
+import { createEnvelope, type Envelope, type RuntimeId } from '@byok-sdk/protocol';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import type { SpawnFn as PiSpawnFn } from '../adapters/pi/rpc-client';
@@ -16,7 +18,6 @@ import type { spawn as codexNodeSpawn } from 'node:child_process';
 type CodexSpawnFn = typeof codexNodeSpawn;
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
@@ -66,7 +67,7 @@ function makeCapturingSpawn<T>(sink: { env?: NodeJS.ProcessEnv }): T {
 interface Harness {
   sent: Envelope[];
   captured: Record<RuntimeId, { env?: NodeJS.ProcessEnv }>;
-  offer(runtime: RuntimeId, taskId: string, dispatchSelection?: TaskOfferPayload['dispatchSelection']): Promise<void>;
+  offer(runtime: RuntimeId, taskId: string, dispatchSelection?: RuntimeTaskInput['dispatchSelection']): Promise<void>;
   /** Best-effort teardown of every task this harness offered — interrupts + closes each real fixture-backed session so no child process is left running past the test. */
   cancelAll(): Promise<void>;
 }
@@ -90,13 +91,12 @@ async function makeHarness(): Promise<Harness> {
   const sent: Envelope[] = [];
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [piAdapter, claudeAdapter, codexAdapter],
-    workspaceRoot: await tmpDir('byok-taskrunner-env-workspace-'),
+    ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => {
       sent.push(envelope);
     },
     blobClient: unusedBlobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-taskrunner-env-store-')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
@@ -106,14 +106,14 @@ async function makeHarness(): Promise<Harness> {
   let seq = 1;
   const taskIds: string[] = [];
 
-  async function offer(runtime: RuntimeId, taskId: string, dispatchSelection?: TaskOfferPayload['dispatchSelection']): Promise<void> {
+  async function offer(runtime: RuntimeId, taskId: string, dispatchSelection?: RuntimeTaskInput['dispatchSelection']): Promise<void> {
     taskIds.push(taskId);
     // `adapter.start()` (and therefore the spawn call this test captures)
     // is awaited by `handleOffer` before `handleEnvelope` resolves, so the
     // capture below is always populated by the time this call returns —
     // no polling/`vi.waitFor` needed, unlike the full daemon-level tests.
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'say hi', runtime, ...(dispatchSelection === undefined ? {} : { dispatchSelection }) }, { taskId, seq: seq++ }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'say hi', runtime, ...(dispatchSelection === undefined ? {} : { dispatchSelection }) }, { taskId, seq: seq++ }),
     );
   }
 

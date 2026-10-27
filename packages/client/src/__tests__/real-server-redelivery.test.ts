@@ -1,3 +1,5 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -5,7 +7,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
+import { dispatchResumedAgentTask, startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -20,11 +22,11 @@ async function tmpDir(prefix: string): Promise<string> {
  * hand-rolled stub server would not reliably reproduce.
  *
  * WP3B Step 2 restates the scenario on the one transport that still exists.
- * The original root cause was handshake-shaped: `conn.ack` carries a `seq` higher than
- * any backlog envelope about to be redelivered right after it, and the old
- * client advanced its cursor from ANY envelope's seq, so the reconnect ack
- * wrongly skipped the backlog. Over long-poll the daemon has no `conn.ack`
- * at all — the equivalent gap is the daemon simply not receiving for a while
+ * The original root cause was handshake-shaped: the WS handshake answer
+ * carried a `seq` higher than any backlog envelope about to be redelivered
+ * right after it, and the old client advanced its cursor from ANY envelope's
+ * seq, so the reconnect answer wrongly skipped the backlog. Long-poll has no
+ * such answer — the equivalent gap is the daemon simply not receiving for a while
  * (`GET /byok/events` failing at the network layer, a genuine transport
  * outage, not a simulated one) — but the FACT under test is the same one and
  * is the reason the finding mattered: a server-side action taken while the
@@ -50,12 +52,11 @@ describe('redelivery across a real receive outage (finding F2, real @byok-sdk/se
   it('a task.approve sent while the daemon is not polling is delivered when polling resumes, and the task completes', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
@@ -69,13 +70,11 @@ describe('redelivery across a real receive outage (finding F2, real @byok-sdk/se
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({ deviceId: record.deviceId,
+    const { handle, session } = await dispatchResumedAgentTask(real, adapter, {
+      deviceId: record.deviceId,
       instruction: 'do a thing that needs approval',
     });
-
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
-    const session = adapter.sessions[0]!;
 
     session.emit({ type: 'needs_approval', summary: 'about to do the risky thing' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'AwaitApproval');

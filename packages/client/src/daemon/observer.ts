@@ -127,7 +127,6 @@ export type DaemonEvent =
    * full race this closes.
    */
   | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reason?: string }
-  | { kind: 'git-workspace'; ts: string; taskId: string; workspaceId: string; phase: string; headChanged?: boolean; commitsSinceBaseline?: number; dirty?: { staged: number; unstaged: number; untracked: number; conflicted: number }; errorCategory?: string }
   | { kind: 'runtime-disposal-failed'; ts: string; taskId: string; runtimeId: string; stage: 'signal' | 'quiescence' | 'cleanup'; reason: string }
   /**
    * Octop ③ (#553): whether the SDK saw one started execution's whole event
@@ -548,18 +547,6 @@ export class DaemonObserver {
   /** M4 Phase 3 hardening: see the `stale-approval-decision` `DaemonEvent` variant's own doc comment. */
   noteStaleApprovalDecision(taskId: string, decision: 'approve' | 'reject', reason?: string): void {
     this.emit({ kind: 'stale-approval-decision', ts: nowIso(), taskId, decision, reason });
-  }
-
-  noteGitWorkspace(event: {
-    taskId: string;
-    workspaceId: string;
-    phase: string;
-    headChanged?: boolean;
-    commitsSinceBaseline?: number;
-    dirty?: { staged: number; unstaged: number; untracked: number; conflicted: number };
-    errorCategory?: string;
-  }): void {
-    this.emit({ kind: 'git-workspace', ts: nowIso(), ...event });
   }
 
   /** WP2I-S2: see the `agent-memory-intent-integrity` `DaemonEvent` variant's own doc comment. */

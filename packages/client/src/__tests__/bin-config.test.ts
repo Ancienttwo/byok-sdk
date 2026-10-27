@@ -17,7 +17,7 @@ describe('bin/config: loadConfig', () => {
     const configPath = path.join(dir, 'config.json');
     await fs.writeFile(
       configPath,
-      JSON.stringify({ productName: 'Acme', productId: 'acme', serverUrl: 'http://old.example', workspaceRoot: '/ws' }),
+      JSON.stringify({ productName: 'Acme', productId: 'acme', serverUrl: 'http://old.example', }),
     );
 
     const config = loadConfig(configPath, { serverUrl: 'http://new.example' });
@@ -26,7 +26,6 @@ describe('bin/config: loadConfig', () => {
       productName: 'Acme',
       productId: 'acme',
       serverUrl: 'http://new.example',
-      workspaceRoot: '/ws',
       localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE,
     });
   });
@@ -40,7 +39,6 @@ describe('bin/config: loadConfig', () => {
         productName: 'Acme',
         productId: 'acme',
         serverUrl: 'http://example',
-        workspaceRoot: '/ws',
         authRequestDeadlineMs: 250,
       }),
     );
@@ -57,7 +55,6 @@ describe('bin/config: loadConfig', () => {
         productName: 'Acme',
         productId: 'acme',
         serverUrl: 'http://example',
-        workspaceRoot: '/ws',
         localAgentRelease: { version: '9.9.9' },
       }),
     );
@@ -68,7 +65,6 @@ describe('bin/config: loadConfig', () => {
       productName: 'Acme',
       productId: 'acme',
       serverUrl: 'http://example',
-      workspaceRoot: '/ws',
       localAgentRelease: { version: '9.9.9' },
     } as never)).toThrow(/localAgentRelease.*distribution/i);
   });
@@ -78,13 +74,10 @@ describe('bin/config: loadConfig', () => {
     expect(() => loadConfig(undefined, { productName: 'Acme' })).toThrow(/productId/);
   });
 
-  it('requires workspaceRoot unless the config is strict Agent-only (#319)', () => {
+  it('does not require workspaceRoot: every daemon runs its offers in the Agent home (#319, #925)', () => {
     const base = { productName: 'Acme', productId: 'acme', serverUrl: 'http://example' };
-    expect(() => loadConfig(undefined, base)).toThrow(ConfigError);
-    expect(() => loadConfig(undefined, base)).toThrow(/workspaceRoot/);
-    expect(loadConfig(undefined, { ...base, strictAgentOnly: true })).toEqual({
+    expect(loadConfig(undefined, base)).toEqual({
       ...base,
-      strictAgentOnly: true,
       localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE,
     });
   });
@@ -106,15 +99,12 @@ describe('bin/config: loadConfig', () => {
     const sentinel = 'SENTINEL-395';
     try {
       await fs.writeFile(configPath, `{"secret":"${sentinel}", invalid}`);
-      const base = { productName: sentinel, productId: sentinel, serverUrl: sentinel, workspaceRoot: sentinel };
+      const base = { productName: sentinel, productId: sentinel, serverUrl: sentinel, };
       const cases: Array<[() => unknown, string]> = [
         [() => loadConfig(configPath), `config at "${configPath}" is not valid JSON`],
         [() => loadConfig(path.join(dir, 'missing.json')), `could not read config at "${path.join(dir, 'missing.json')}"; check the path and read permissions`],
         [() => loadConfig(undefined, { productName: sentinel }), 'config is missing required field "productId"'],
-        [() => loadConfig(undefined, { ...base, workspaceRoot: undefined }), 'config is missing required field "workspaceRoot"'],
         [() => loadConfig(undefined, { ...base, localAgentRelease: { version: sentinel } } as never), 'config field "localAgentRelease" is distribution-owned and must not be supplied'],
-        [() => loadConfig(undefined, { ...base, gitWorkspace: sentinel } as never), 'gitWorkspace must be an object'],
-        [() => loadConfig(undefined, { ...base, gitWorkspace: { mode: sentinel } } as never), 'gitWorkspace.mode must be local-checkpoints'],
       ];
       for (const [load, message] of cases) {
         let caught: unknown;
@@ -126,13 +116,6 @@ describe('bin/config: loadConfig', () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
-  });
-
-  it('strictly validates the optional Git workspace config', () => {
-    const base = { productName: 'Acme', productId: 'acme', serverUrl: 'http://example', workspaceRoot: '/ws' };
-    expect(loadConfig(undefined, { ...base, gitWorkspace: { mode: 'local-checkpoints' } }).gitWorkspace).toEqual({ mode: 'local-checkpoints' });
-    expect(() => loadConfig(undefined, { ...base, gitWorkspace: { mode: 'local-checkpoints', extra: true } as never })).toThrow(ConfigError);
-    expect(() => loadConfig(undefined, { ...base, gitWorkspace: { mode: 'invalid' } as never })).toThrow(ConfigError);
   });
 
 });

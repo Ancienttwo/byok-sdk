@@ -5,32 +5,63 @@ the M1-2 (server) and M1-3 (client) implementers — the schemas in
 `packages/protocol/src/` are authoritative; this document explains the rules
 those schemas encode and why.
 
-Status: wire version `v:3`, **FROZEN**. The pi, claude, and codex runtime
+Status: wire version `v:4`, **FROZEN**. The pi, claude, and codex runtime
 adapters have all exercised the wire (M2); every M1/M2 protocol gap identified
 along the way has been closed in place. From this point forward, this
 document and the schemas in `packages/protocol/src/` describe a closed
 contract — see "Freeze rule" immediately below for exactly what "frozen"
 does and doesn't allow.
 
-Only wire major `3` is currently supported. v3 makes `schema` required on the
+Only wire major `4` is currently supported. v4 completes the Agent-only
+cutover (ADR-034) and removes the approval paths kept for peers that predate
+approval ids:
+
+- Every offer is Agent-bound. v4 removes `conn.ack`, `task.offer`,
+  `task.offer_with_toolsets` and their sealed twins `task.offer_sealed` and
+  `task.offer_with_toolsets_sealed`. The offers are `task.offer_for_agent`,
+  `task.offer_for_agent_with_egress`, `task.offer_for_agent_with_egress_fresh`,
+  their `_sealed` twins and `task.offer_prepared`. The `strict-agent-only`
+  capability flag is gone: every daemon runs Agent offers only, and a daemon
+  without an Agent home declines every offer. The server answers the handshake
+  in the long-poll response metadata (`EventsPollResponse`, §8.1).
+- `approvalId` is required on `task.await_approval`, `task.approve` and
+  `task.reject`, and a decision resolves only the approval it names (§5.3).
+- `task.approval_resolved` is baseline: the daemon sends it for every
+  approval it resolves locally, and every v4 server reads it (§5.2). A pending
+  approval is resolved only by a decision or by that report, never inferred
+  from later task activity. The `approval_resolved` server flag and the other
+  approval capability flags of v3 are gone.
+
+There is no v3 reader and no capability negotiation between v3 and v4. Every
+envelope must carry major `4`. **Drain before upgrading**, exactly as for the
+v2 → v3 cut below: stop new submissions, let every pending mailbox row be
+processed and acknowledged, every in-flight execution reach a terminal, and
+every daemon pending terminal be acknowledged by the server. Then run the
+one-shot receipt migration ([Wire v3 → v4 receipt migration](#wire-v3--v4-receipt-migration))
+and start the v4 server side and the v4 daemons together. A v3 daemon is
+refused: its envelopes, `conn.hello` included, fail decode at the version
+boundary as the v1 → v2 note below describes, and it receives no v4 offer. A
+`conn.hello` whose `protocolVersions` omits `4` is refused with
+`hello_protocol_version_unsupported`. A v4 daemon cannot use a v3 server. The
+embedded server refuses to open a store with pending v3 rows
+([SQLite startup check](#sqlite-startup-check-for-wire-major-upgrades)).
+
+History: v3 made `schema` required on the
 `terminalProjection.mode: 'result-document'` arm of the Agent offers: the
 offer freezes a JSON Schema subset for the task's structured outcome
 ([§7.2](#72-taskcompletedocument--bounded-structured-terminal-result-additive-minor)). That
-narrows a strict shape, so it is a wire major. There is no v2 reader and no
+narrows a strict shape, so it was a wire major. There was no v2 reader and no
 capability negotiation between the two result-document shapes; the v2
-`result-document` capability flag is gone. **Drain before upgrading:** stop new
-submissions on the old version, let every pending mailbox row be processed and
-acknowledged, every in-flight execution reach a terminal, and every daemon
-pending terminal be acknowledged by the server. Then upgrade the server side
-(embedded server, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`) and the
-daemons together. A v2 daemon is refused at `conn.hello`
-(`hello_protocol_version_unsupported`) and receives no v3 offer; a v3 daemon
-cannot use a v2 server. Every envelope must carry major `3`. Schema decode
-rejects another major with `EnvelopeValidationError`, and the HTTP messages
-boundary, the cloud inbound gate and client long-poll treat it exactly as the
-v1 → v2 note below describes. The embedded server refuses to open a store
-with pending v2 rows ([SQLite startup check](#sqlite-startup-check-for-wire-major-upgrades));
-nothing rewrites or deletes them.
+`result-document` capability flag is gone. The v2 → v3 cut used the same
+drain: every pending mailbox row processed and acknowledged, every in-flight
+execution terminal and every daemon pending terminal acknowledged, then the
+server side (embedded server, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`)
+and the daemons upgraded together. A v2 daemon received no v3 offer, and a v3
+daemon could not use a v2 server. Schema decode rejects a major other than the
+current one with `EnvelopeValidationError`, and the HTTP messages boundary,
+the cloud inbound gate and client long-poll treat it exactly as the v1 → v2
+note below describes. The SQLite startup check never rewrites or deletes a
+pending row of another major.
 
 History: v2 removed the task offer's
 `policy` (`PermissionPolicy`), the runtime capability `permissionModes`, the
@@ -54,11 +85,11 @@ envelope as v2. Package/application SemVer remains unrelated to wire admission.
 
 ## Freeze rule
 
-`PROTOCOL_VERSION` is `3`. Every v3 change takes exactly one of three paths.
+`PROTOCOL_VERSION` is `4`. Every v4 change takes exactly one of three paths.
 Compatibility is decided by `packages/protocol/src/__tests__/compat.test.ts`,
-not by author judgment. No v3 release has been published yet, so there is no
-published v3 decoder to run: until the first v3 release is registered and
-pinned, the suite proves v3 self-consistency only and cross-release gates are
+not by author judgment. No v4 release has been published yet, so there is no
+published v4 decoder to run: until the first v4 release is registered and
+pinned, the suite proves v4 self-consistency only and cross-release gates are
 unproven (see the evidence list below).
 
 1. **Version bump.** Bump `PROTOCOL_VERSION`; server and client upgrade
@@ -88,44 +119,51 @@ unproven (see the evidence list below).
    declaration says dropping it does not change what the receiver executes or
    acknowledges.
 
-`compat.test.ts` and `published-compat.test.ts` hold the wire evidence:
+`compat.test.ts` holds the wire evidence:
 
 - **Retired v2 evidence (negative oracle).** `golden/v2.envelopes.ndjson`,
   `golden/v2.http.ndjson` and the v2 registry `golden/releases.json` are
   byte-identical to the v2 cut and read-only. The current decoder rejects
-  every v2 envelope line at the version boundary. The v3 contract also
-  requires a result schema, so rewriting only the version is not an upgrade.
-  The v2 HTTP lines that carry envelopes are rejected too.
-- **v3 self-consistency.** `golden/v3.envelopes.ndjson` and
-  `golden/v3.http.ndjson` are append-only, with one narrow exception: before
-  the first v3 release is registered in `golden/v3.releases.json`, a v3 corpus
-  line that no registered entry covers may be corrected in place when a
-  pre-release v3 tightening makes it undecodable. Once any v3 release is
-  registered, the lines it covers are immutable and the rest stays
-  append-only. The current decoder reads every
+  every v2 envelope line at the version boundary, and the v2 HTTP lines that
+  carry envelopes too.
+- **Retired v3 evidence (negative oracle).** `golden/v3.envelopes.ndjson`,
+  `golden/v3.http.ndjson` and the v3 registry `golden/v3.releases.json`
+  (0.27.0 through 0.30.2) are byte-identical to what the last v3 release
+  shipped and read-only. The current decoder rejects every v3 envelope line
+  at the version boundary, and the v3 HTTP lines that carry envelopes too.
+  Rewriting only the version is not an upgrade: v4 removed message types and
+  made `approvalId` required.
+- **v4 self-consistency.** `golden/v4.envelopes.ndjson` and
+  `golden/v4.http.ndjson` are append-only. The current decoder reads every
   line back to the committed JSON, and the current HTTP decoders read every
   literal body to its independently authored value (messages responses must
-  account for their `batchLength`). The v3 corpus carries every message type,
-  every `WIRE_ADDITIONS` entry and a result-document offer with `schema` on
-  each Agent offer type. `golden/v3.releases.json` registers 0.27.0 and sets
-  `floor` to 0.27.0. Each v3 entry pins both corpus prefixes.
-- **Published rejection oracle.** `byok-protocol-previous` (0.26.1, the last
-  registered v2 release) rejects every v3 corpus line, a v3 `conn.hello` and
-  the v3 HTTP lines that carry envelopes. Nothing it produces is v3 evidence.
+  account for their `batchLength`). The v4 corpus carries every message type,
+  every `WIRE_ADDITIONS` entry, a result-document offer with `schema` on each
+  Agent offer type, and an `approvalId` on every approval request and
+  decision. `golden/v4.releases.json` has no release and no `floor` until the
+  first v4 release is registered. Each registered v4 entry pins both corpus
+  prefixes, and the lines it covers are immutable.
+- **Published rejection oracle.** `byok-protocol-previous` aliases the
+  published 0.30.2 registry tarball, the last v3 release. It rejects every v4
+  corpus line, a v4 `conn.hello` and the v4 HTTP lines that carry envelopes:
+  a v3 peer cannot read v4 bytes. Nothing it produces is v4 evidence, and it
+  never enters the v4 registry.
 
-`byok-protocol-floor` pins the real published 0.27.0 registry tarball.
-`published-compat.test.ts` checks released JSON Schema constraints, constants
-and state transitions, current envelope and HTTP bytes, and declared gated
-or strip-safe losses. It also proves the alias is independent of the
-workspace. JSON Schema does not express arbitrary runtime refinements.
+No published release reads v4, so no test proves the gated and strip-safe
+declarations against a released decoder yet. That evidence starts with the
+first registered v4 release.
 
-v3 starts from a reset table: the v2 strip-safe rows and the v2
-`result-document` gate are baseline and gone. `WIRE_ADDITIONS` keeps the
-`gated` device rows, most of which name capabilities a daemon advertises only
-when it is configured for the surface (Agent home, readers, egress, input
-preparation, provisioning, memory intents), and the server
-`approval_resolved` gate. Senders still take admission flags from
-`requiredReceiverCapabilities`.
+v4 starts from the v3 table minus the server `approval_resolved` gate (every
+v4 server reads `task.approval_resolved`) and minus the rows of the removed
+offers (`harnessId` on `task.offer` and `task.offer_with_toolsets`, gated on
+`custom-harness`), plus the same `harnessId` gate on every Agent offer type:
+an Agent offer naming a harness now also needs the device's `custom-harness`
+flag. The v3 reset already made the v2
+strip-safe rows and the v2 `result-document` gate baseline. `WIRE_ADDITIONS`
+keeps the `gated` rows, most of which name device capabilities a daemon
+advertises only when it is configured for the surface (Agent home, readers,
+egress, input preparation, provisioning, memory intents). Senders still take
+admission flags from `requiredReceiverCapabilities`.
 
 - Every recursive property path (array items, record values, each union
   branch) and every enum or literal value of each current payload schema
@@ -137,8 +175,8 @@ preparation, provisioning, memory intents), and the server
   required path. The events page schema carries its entries undecoded
   (`events: unknown[]`, #386), so there is nothing below them to exempt: the
   suite pins that one undecoded path and decodes each page entry with
-  `parseMessage`, both when reading the v3 corpus back and when rejecting the
-  v2 one.
+  `parseMessage`, both when reading the v4 corpus back and when rejecting the
+  v2 and v3 ones.
 
 That the server and hosted cloud actually refuse an undeclared receiver is
 tested at the senders (for example
@@ -148,7 +186,7 @@ tested at the senders (for example
 ledger entries are frozen envelope-only history; they never gain HTTP hashes.
 The v2 suite's three typed private-client exclusions (`EventsPollResponse`,
 `ChallengeResponse`, `TokenResponse`, bounded through 0.26.1) applied only to
-running v2 HTTP bodies through published v2 decoders, which v3 no longer does.
+running v2 HTTP bodies through published v2 decoders, which v3 stopped doing.
 Those exclusions named the client-private parsers that releases through 0.26.1
 still run on deployed devices. The current client has none: since #386 it
 decodes the events page, the challenge response and the token response with
@@ -158,9 +196,9 @@ bump (see `docs/releases/README.md`).
 
 **History note.** The "Landed additive minor" entries in this document, and
 other sections that say a change landed with "no `PROTOCOL_VERSION` bump" or
-name the `v1.*` golden files, record additive changes made under v1. v2 kept
-every one of those shapes; only the fields listed in the status note above were
-removed. There is no in-place "tighten it a little" allowance post-freeze the
+name the `v1.*` golden files, record additive changes made under v1. v2, v3
+and v4 kept every one of those shapes except the fields and message types the
+status notes above list as removed. There is no in-place "tighten it a little" allowance post-freeze the
 way pre-freeze M0→M1 had (§10).
 
 **Scoped input-preparation cut:** the Owner-approved
@@ -170,7 +208,7 @@ extends the earlier official-Pi exception to input-preparation v8. The strict
 preparation request, receipt binding and `task.offer_prepared` require explicit
 `agentMemory: 'none' | 'read' | 'read-write'`. `INPUT_PREPARATION_WIRE_VERSION` and
 record schema were 8 at that cut; admission requires `agent-input-preparation-v8`. The outer
-envelope was then v1 (it is v2 now). Binding and observation digests use domain v2. This is a paired
+envelope was then v1 (it is v4 now). Binding and observation digests use domain v2. This is a paired
 upgrade, with no old reader, mode default or dual token. Drain pre-cut preparation
 requests and prepared Executions first. The exception does not change unrelated
 strict messages; downstream deployment is separate from this source cut.
@@ -184,7 +222,8 @@ protocol version common to its own supported set and the daemon's
 immediately-prior major version so a fleet of daemons can roll forward
 without a hard cutover. (The v1 → v2 cut deliberately has no N-1 reader:
 the server accepts only `v:2`, so server and client upgrade together. The
-v2 → v3 cut is the same: the server accepts only `v:3`.)
+v2 → v3 and v3 → v4 cuts are the same: the server accepts only `v:3`, and
+now only `v:4`.)
 
 **The observability-vs-control asymmetry.** Unknown is TOLERATED for
 observability data, but FAIL-CLOSED for control/security data:
@@ -217,29 +256,17 @@ This asymmetry is enforced by the freeze-guard regression test
 (`packages/protocol/src/__tests__/freeze-guard.test.ts`), not just documented
 here — see that file for the executable version of every bullet above.
 
-**Landed additive minor: `task.approval_resolved` (was tracked here as a
-deferred candidate; now shipped).** A daemon → server message — an explicit
-notification for the case where a pending approval was resolved entirely
-locally (the daemon's own control-socket `approvals.resolve`, a fail-closed
+**`task.approval_resolved`: added as a gated message, baseline in v4.** A
+daemon → server message that reports an approval resolved entirely on the
+device (the daemon's own control-socket `approvals.resolve`, a fail-closed
 `requestApproval` timeout, or a fail-closed finish/eviction rejection — see
-`packages/client/src/daemon/task-runner.ts`'s `sendApprovalResolved`), with
-no wire `task.approve`/`task.reject` ever exchanged for it. Exactly what the
-first bullet at the top of this section already allows — "a new message
-type" — so it landed with no `PROTOCOL_VERSION` bump, alongside a new
-handshake capability flag, `approval_resolved` (`CAPABILITY_FLAGS`,
-`version.ts`), that a server advertises when it understands the message; see
-§2's catalog entry and §5.2 below for the full flow and the wire shape.
-
-Before this landed, the server could only infer a local resolution after the
-fact (`ConnectionHub.resumeIfImplicitlyApproved`, `packages/server/src/hub.ts`, since deleted)
-once the daemon's next `task.progress`/`task.artifact`/`task.complete`
-proved it had already moved on — surfaced purely as an embedder-facing
-`task.approval_resolved_implicit` `ByokServerEvent` (`packages/server/src/
-types.ts`), never a protocol change. That inference path is untouched and
-remains the permanent N/N-1 fallback: an old daemon that predates this
-message, or a daemon talking to an old server that never advertises
-`approval_resolved`, never sends the new message at all, and the server
-keeps inferring exactly as it did before this section's previous wording.
+`packages/client/src/daemon/task-runner.ts`'s `sendApprovalResolved`), with no
+wire `task.approve`/`task.reject` exchanged for it. It landed under v1 as a new
+message type gated on a server capability flag, `approval_resolved`. v4 makes
+it baseline: every v4 server reads it, the flag is gone, and the daemon sends
+it for every approval it resolves locally. The server never infers a local
+resolution from later task activity. See §2's catalog entry and §5.2 for the
+flow and the wire shape.
 
 **Landed additive minor: `task.complete.document` + the `result-document`
 capability flag (v1; the flag is retired in v3, where every server keeps
@@ -350,16 +377,78 @@ field. `failure` stays plaintext on `task.fail_sealed`. The reference server
 and the hosted cloud advertise the flag and project the field as
 `TaskResult.failure` and `TerminalResult.failure`.
 
+## Wire v3 → v4 receipt migration
+
+Stored v3 envelopes do not decode under v4, so a store that keeps receipts
+across the cut runs a one-shot migration. The operator runs it once, after
+draining mailboxes and ending executions (see the status note above), and
+before the v4 server starts. It ships in 0.31.x only; 0.32.0 removes it
+(#1017).
+
+`@byok-sdk/protocol` exports the envelope half
+(`packages/protocol/src/wire-v4-migration.ts`):
+
+- `WIRE_V3_TO_V4_TYPES` maps every v3 message type to its v4 type, or to
+  `null` when v4 does not carry it: `conn.ack`, `task.offer`,
+  `task.offer_with_toolsets`, `task.offer_sealed` and
+  `task.offer_with_toolsets_sealed`. Every other v3 type keeps its name.
+- `wireV4TypeOf(v3Type)` returns the v4 type, or `undefined`.
+- `migrateWireV3Envelope(body)` re-encodes one stored v3 envelope as canonical
+  v4, so its bytes and hash differ from the v3 body. It refuses with one of
+  three reasons: `not_wire_v3` (not JSON, not an envelope object, or not
+  `v: 3`), `type_without_v4_form` (a type that maps to `null` or is not
+  listed), or `invalid_under_v4` (the mapped envelope does not parse under v4;
+  for example a `task.await_approval`, `task.approve` or `task.reject` without
+  `approvalId`).
+
+`@byok-sdk/cloud` exports the store-independent half
+(`packages/cloud/src/wire-v4-receipt-migration.ts`):
+
+- `wireV4ReceiptKind(key)` names the two migrated receipt families: `offer`
+  for `task-offer:<messageId>` and `terminal` for `task:<taskId>:terminal`.
+  Every other receipt key is outside the migration.
+- `migrateWireV3Receipt(kind, body)` returns `unchanged`, `migrated` with the
+  new body, or `refused` with a refusal reason. A redaction tombstone is
+  unchanged. A terminal receipt is a v3 envelope and goes through
+  `migrateWireV3Envelope`; one that already decodes under v4 is unchanged. An
+  offer receipt (`{ deviceId, type, payload }`, without a wire version) keeps
+  its bytes when v4 keeps its type and its payload parses under v4 unchanged.
+  An offer receipt of a removed offer type is refused
+  (`type_without_v4_form`).
+- A legacy task (`WireV3LegacyTask`: `tenantId`, `taskId`, `deviceId`,
+  `type`) is a task offered on a removed offer type, so it has no AgentRef.
+  `wireV3LegacyOfferType(body)` and `wireV3LegacyOfferReceiptKeys(...)` find
+  its offer receipts. It is deleted, not mapped.
+- `WireV4UnmappableRow` is a row with no v4 form: a refused `receipt`, an
+  `approval` recorded without `approvalId`, or a pending `mailbox` row of a
+  non-legacy task in older bytes.
+- `assertWireV4MigrationConfirmed(preflight, confirmedLegacyTasks)` throws
+  `ReceiptMigrationUnmappableError` (code `wire_v4_migration_unmappable`)
+  when any row is unmappable, and `WireV4LegacyTaskListMismatchError` (code
+  `wire_v4_legacy_task_list_mismatch`) when the confirmed list is not exactly
+  the store's legacy tasks.
+
+Each store runs it in two steps. The read-only preflight
+(`preflightPostgresWireV4Migration(pool)` in `@byok-sdk/cloud-dataplane`,
+`preflightSqliteWireV4Migration(path)` in `@byok-sdk/server`) returns
+`{ legacyTasks, unmappable }`. The migration
+(`migratePostgresToWireV4(pool, confirmedLegacyTasks)`,
+`migrateSqliteToWireV4(path, confirmedLegacyTasks)`) takes the operator's
+confirmed list back and, in one transaction, deletes every row those tasks
+own and re-encodes the remaining offer and terminal receipts, or throws and
+changes nothing. See [the wire v4 upgrade note](releases/925-wire-v4.md) for
+what each store deletes and the upgrade order.
+
 ## 1. Envelope
 
 Every wire message is a single-line NDJSON envelope:
 
 ```ts
 {
-  v: number;            // protocol version, currently 1
+  v: number;            // protocol version, currently 4
   id: string;            // uuid, unique per envelope
   ts: string;             // ISO-8601 datetime with offset
-  type: MessageType;       // e.g. "task.offer"
+  type: MessageType;       // e.g. "task.offer_for_agent"
   task_id?: string;         // routing key — see rule below
   session_ref?: string;      // opaque session continuation token
   seq?: number;                // per-device redelivery cursor — see rule below
@@ -400,9 +489,9 @@ for the full redelivery procedure.
 Server → daemon types (`seq` required): all `task.*` control messages,
 `agent.egress.ack`, `agent.content.read`, and `agent.home.projection`.
 Every daemon → server type leaves `seq` optional — M1 only specifies
-server-to-daemon redelivery, not the reverse. The frozen `conn.ack` schema is
-retained for decoding older envelopes, but the current long-poll server does
-not emit it; capability advertisement is carried by the poll response.
+server-to-daemon redelivery, not the reverse. The server sends no `conn.*`
+message: its capabilities arrive on each long-poll response
+(`EventsPollResponse.capabilities`, §8.1).
 
 **Do not confuse this with `task.progress`'s payload-level `seq`.** That field
 (`TaskProgressPayload.seq`) is unrelated — it orders progress batches *within
@@ -411,22 +500,23 @@ Two different counters happen to share the field name `seq` at two different
 levels (envelope vs. payload) for two different purposes; keep them separate
 in your head and in any redelivery/ordering code.
 
-**`conn.*` envelopes never advance the redelivery cursor.** The current
-`conn.hello` is submitted as the first daemon→server long-poll message and
-has no cursor-advancing side effect. The frozen `conn.ack` schema is retained
-for decoding older envelopes, but its historical `seq` must never be treated
-as "the highest seq processed so far" for a future `conn.hello` (§9). Current
-capability advertisement arrives in `EventsPollResponse.capabilities`, and
-cursor accounting covers every server → daemon control that requires durable
+**`conn.*` envelopes never advance the redelivery cursor.** `conn.hello` is
+submitted as the first daemon→server long-poll message and has no
+cursor-advancing side effect. Server capability advertisement arrives in
+`EventsPollResponse.capabilities`, and cursor accounting covers every server → daemon control that requires durable
 handler completion, including `task.*`, `agent.egress.ack`,
 `agent.content.read`, and `agent.home.projection`; it excludes `conn.*`.
 
 ### 1.3 `session_ref`
 
-For ordinary offers, `session_ref` is an opaque continuation token the daemon
-maps to a runtime session id (`claude --resume`, codex resume, pi session). A
-follow-up task carries the same `session_ref` in a new `task.offer`. That
-legacy/ordinary meaning is unchanged in M1.
+The session reference is an opaque continuation token the daemon maps to a
+runtime session id (`claude --resume`, codex resume, pi session). An Agent
+offer carries it as the payload `sessionRef`: a follow-up Agent task resumes
+by carrying the same `sessionRef` in a new Agent offer, and the daemon admits
+it only when it matches the durable Agent-home handoff (§1.3.1). A fresh
+Agent execution carries no `sessionRef`. The embedded server's `dispatch()`
+only resumes, so it requires `agentRef` and `sessionRef`; a fresh execution
+goes through `executions.submit` with a required egress policy (§2.1).
 
 #### 1.3.1 Strict Agent fresh versus resume authority
 
@@ -436,8 +526,8 @@ cannot mint its native session until after `start()`. The client must reject a
 missing, preseeded, or invented Agent-home handoff, so task id or a server-side
 reservation cannot substitute for the runtime session.
 
-Protocol v1 remains frozen. The repair is additive and keeps these wire facts
-distinct:
+The repair landed additively under frozen protocol v1 and keeps these wire
+facts distinct:
 
 - `task.offer_for_agent_with_egress` stays byte-compatible and
   exact-resume-only. Its `sessionRef` must match the existing durable canonical
@@ -463,10 +553,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | Type | Dir | `task_id` | `seq` | Payload | Sent when |
 |---|---|---|---|---|---|
 | `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `configuredToolsets?`, `cursor?` | First message on an authenticated long-poll session (including after reconnect) |
-| `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Historical handshake acknowledgement; current long-poll uses response metadata |
-| `task.offer` | S→D | **required** | **required** | `instruction`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
-| `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
-| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `homeAccess?` (additive — §2.2), `agentMemory?` (additive — §2.2; `read-if-admitted` needs `agent-memory-read-if-admitted`, `read-write-if-admitted` needs `agent-memory-read-write-if-admitted`), `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
+| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `homeAccess?` (additive — §2.2), `agentMemory?` (additive — §2.2; `read-if-admitted` needs `agent-memory-read-if-admitted`, `read-write-if-admitted` needs `agent-memory-read-write-if-admitted`), `runtime?`, `harnessId?`, `dispatchSelection?` (see below), `terminalProjection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
 | `task.offer_for_agent_with_egress` | S→D | **required** | **required** | All strict Agent fields plus required `sessionRef` and exact `egressPolicy` | An Agent dispatch targets a daemon that consumed the revisioned egress contract |
 | `task.offer_for_agent_with_egress_fresh` | S→D | **required** | **required** | All strict Agent fields plus exact `egressPolicy`, with no `sessionRef` | A fresh Agent dispatch targets a daemon advertising `agent-egress-fresh-session` |
 | `task.offer_prepared` | S→D | **required** | **required** | `agentRef`, `homeAccess?`, `agentMemory`, `egressPolicy`, `messageEgress?`, `preparation` (`reference`, `requestDigest`, `artifactDigest?`), `runtime?`, `dispatchSelection?`, `requiredToolsets?`, `terminalProjection?`, `limits?` — and deliberately NO `instruction` and NO `sessionRef` | An already-counted preparation is dispatched to the device that counted it |
@@ -476,8 +563,8 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `provider.provisioning.available` | S→D | forbidden | **required** | exactly `{ requestId }` (strict; nothing else) | A Host holds a sealed provider provisioning request for one exact device advertising `provider-provisioning.v1` (§2.3) |
 | `agent.memory.intent.available` | S→D | forbidden | **required** | exactly `{ intentId, agentRef }` (strict; nothing else) | A Host holds an approved Agent memory intent for one exact device advertising `agent-memory-intent.v1` (§2.4) |
 | `e2ee.key_package.available` | S→D | forbidden | **required** | exactly `{ scopeId, epoch }` (strict; nothing else) | A Host stored a scope key package for the member of one exact device advertising `sealed-payload-v1` (§2.7) |
-| `task.approve` | S→D | **required** | **required** | `{}`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
-| `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
+| `task.approve` | S→D | **required** | **required** | `approvalId` (required — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
+| `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId` (required — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
 | `task.steer` | S→D | **required** | **required** | `text` | `TaskHandle.steer()` while `Running` |
 | `task.claim` | D→S | **required** | optional | `deviceId`, `agentId?`, `agentRef?`, `runtime?` (M5, additive — §3.1), `capabilities?` (S0, additive — §11.5) | Daemon accepts an offer (idempotent CAS) |
@@ -485,11 +572,11 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.decline` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?`, `code?` | Daemon fail-closed-rejects an offer *before* claiming — `Offered → Failed` |
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
-| `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId?` (M5, additive — §5.3) | Runtime raised `needs_approval` |
+| `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId` (required — §5.3) | Runtime raised `needs_approval` |
 | `task.complete` | D→S | **required** | optional | `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` (additive — §2.2) | Runtime reached `turn_end` |
 | `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `failure?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends in error; `failure` is gated on the server's `runtime-failure-class` flag |
 | `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends `Cancelled` (server- or daemon-initiated) |
-| `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
+| `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2); baseline, no capability gate |
 | `agent.message.draft` | D→S | **required** | optional | `agentRef`, `revision`, UTF-8 `offset`, `text` (≤ 16 KiB), `overflow?: true` | Display-only snapshot frames; server-advertised `agent-message-draft` gate |
 | `agent.egress.reliable` | D→S | optional | optional | exact Agent/session/policy identity, stable `eventId`/`cursor`, payload hash and byte count | A locally fsynced reliable event is sent or retried |
 | `agent.content.receipt` | D→S | optional | optional | exact request/actor/Agent/session/runtime/cwd/policy/target/MIME/decode identity; allowed includes hash/size/BlobRef, denied includes zero bytes and typed reason | Local content policy and audit completed |
@@ -571,7 +658,7 @@ and persists taskId, exact deviceId, runtime, AgentRef, egressPolicy and
 terminalProjection; messageEgress is optional, with message context and consumer
 required only when selected. Existing egress resume dispatch rejects a missing
 sessionRef instead of selecting the fresh message. This control-plane refactor
-does not change the wire schema, envelope kinds or protocol version 2.
+did not change the wire schema, envelope kinds or protocol version.
 
 The policy has one exact `policyRevision`. Activity is `latest-value` with
 positive coalesce and event-byte bounds. The daemon sends Agent events as the
@@ -645,7 +732,7 @@ applied projection record. The host compares it with the terminal `agentRef`
 and decides whether the result is usable. The cloud read model
 (`readTaskResult`) projects it verbatim.
 
-**`TaskOfferPayload.dispatchSelection` is the authoritative LLM target when
+**An Agent offer's `dispatchSelection` is the authoritative LLM target when
 present.** It is a strict discriminated union:
 
 - subscription: `{lane:'subscription', runtimeId:'claude'|'codex',
@@ -658,16 +745,17 @@ present.** It is a strict discriminated union:
 Every id is non-empty, bounded to 160 characters, and rejects NUL/CR/LF. The
 server derives the task's requested runtime from `runtimeId`; if the legacy
 optional `runtime` field is also present, disagreement is rejected before task
-creation. Because an older v1 daemon is allowed to strip an unknown optional
-field, the server first requires the target connection to advertise the
-additive `dispatch-selection` capability; absence rejects before task creation
-instead of degrading to a runtime-only offer. The daemon repeats the runtime
+creation. The Agent offers are strict, so a daemon that does not know the
+field refuses the offer; the server first requires the target device to
+advertise the `dispatch-selection` capability (`WIRE_ADDITIONS`), and absence
+rejects before task creation instead of degrading to an offer without a
+selection. The daemon repeats the runtime
 check before claim and selects the adapter
 from `dispatchSelection.runtimeId`. Adapters then pass the exact model (and, for
 Pi, provider) to the runtime. No layer may infer a missing provider/model or
-fall back to another target. The field is additive in frozen v1; offers that do
-not use provider selection retain the pre-existing `runtime?` behavior, but the
-new path never degrades into it after a selection was supplied.
+fall back to another target. Offers that do not use provider selection keep
+the `runtime?` behavior, but the selection path never degrades into it after a
+selection was supplied.
 
 The `byok-profile` lane additionally requires the target daemon to advertise
 `provider-profile-binding`. Its ref is an opaque device-local identity, its
@@ -679,57 +767,34 @@ the credential-custody launcher rechecks the same binding before credential
 access and Pi spawn. Missing or stale state is a fail-closed refusal, never a
 fallback to `providerId` or provider kind.
 
-**`task.offer_with_toolsets` is a distinct additive message, not an optional
-field on `task.offer`.** `requiredToolsets` carries only bounded logical ids
-such as `salesko.crm`; it never carries an executable command, environment,
-header, token, cookie, or connector credential. The daemon resolves every id
-against its operator-owned local `mcpToolsets` configuration before claiming
-the task. Missing ids, duplicate MCP server names, an empty resolved set, or a
-runtime without `mcpToolsets` support all produce `task.decline` and no child
-process starts.
+**An Agent offer's `requiredToolsets` names the Host MCP toolsets the task
+needs.** It carries only bounded logical ids (1–16) such as `salesko.crm`; it
+never carries an executable command, environment, header, token, cookie, or
+connector credential. The daemon resolves every id against its operator-owned
+local `mcpToolsets` configuration before claiming the task. Missing ids,
+duplicate MCP server names, an empty resolved set, or a runtime without
+`mcpToolsets` support all produce `task.decline` and no child process starts.
 
-The separate message type is the backward-safety boundary: a frozen-v1 daemon
-may skip an unknown additive message, but it cannot silently strip a new field
-and run the instruction without its required tools. The self-hosted server
-therefore requires the live connection's `toolset-selection` capability before
-creating the task. A hosted caller uses `enqueueToolsetOffer()` and must route
-only to a device it knows is toolset-capable. All three bundled runtimes
-advertise `mcpToolsets`. Claude gets the selected local stdio servers in one
-task-scoped `--mcp-config`, and the user's own MCP configuration also loads;
-Codex gets them in the `thread/start` or `thread/resume` config
-(`mcp_servers`); Pi starts them from its
-task-scoped pool.
+The field is gated on the device's `toolset-selection` capability
+(`WIRE_ADDITIONS`): the server and hosted cloud refuse an offer that carries it
+before creating the task unless the target device advertises the flag. All
+three bundled runtimes advertise `mcpToolsets`. Claude gets the selected local
+stdio servers in one task-scoped `--mcp-config`, and the user's own MCP
+configuration also loads; Codex gets them in the `thread/start` or
+`thread/resume` config (`mcp_servers`); Pi starts them from its task-scoped
+pool.
 
-**`TaskOfferPayload.workspaceHint` is RESERVED — currently ignored end to
-end.** The field exists on the wire (`TaskOfferPayloadSchema`,
-`packages/protocol/src/messages.ts`) but nothing reads it today: no bundled
-adapter (pi/claude/codex) consults it, no `task-runner.ts` code threads it
-into an adapter's `workspaceDir` resolution, and the public SDK's own
-`DispatchInput` (`packages/server/src/types.ts`, the input to
-`ByokServer.dispatch`) has no field for a caller to set it through in the
-first place. Do not rely on it to influence workspace selection — a real
-implementation (what it should override or merely suggest, relative to the
-existing `sessionRef`-keyed workspace mapping) is an undesigned follow-on
-task, not something already wired up behind this field.
-
-**Decision (S0): `workspaceHint` stays reserved.** Leaving the field on the
-wire costs nothing (an ignored optional payload key) and removing it would be
-a breaking wire-v1 change, so it is kept as declared-but-unconsumed rather
-than either wired up opportunistically or deleted. The rule that follows from
-that: no public documentation, SDK surface, or UI may present this field as a
-workspace-selection capability, and no code may start reading it as a
-side effect of unrelated work. Wiring it later requires its own ADR that first
-settles legacy task-workspace precedence against the `sessionRef`-keyed
-mapping, path validation and confinement, and what a device does with a hint
-it cannot honor. The Agent-home contract below does not activate this field.
-See `docs/architecture/sdk-architecture.md` ADR-023.
+**No offer carries a workspace hint.** The reserved `workspaceHint` existed
+only on the runtime-only offers that v4 removed; no reader ever consumed it.
+An Agent Attempt's working directory follows from the Agent home and
+`homeAccess` below. See `docs/architecture/sdk-architecture.md` ADR-023.
 
 **`task.offer_for_agent` is the strict Agent-home path.** Its required
 `agentRef` contains a bounded single-segment `agentId` and bounded
 `profileRevision`; both are limited by UTF-8 byte length. The target device
 must have durably declared `agent-home-contract` before the server/cloud creates
-or enqueues the task. A legacy daemon therefore cannot strip identity and run
-the instruction in `workspaceRoot/<taskId>`. `agentId` must also be a portable
+or enqueues the task, and a daemon without an Agent home declines every
+offer, so no instruction runs outside an Agent home. `agentId` must also be a portable
 Windows pathname segment: reserved device names and trailing dot/space are
 rejected. A strict Agent `taskId` is reserved exactly once; any later enqueue
 with that id fails closed instead of appending a second offer.
@@ -737,9 +802,9 @@ with that id fails closed instead of appending a second offer.
 The daemon accepts an absolute `hostStorageRoot` from its local host config and
 the SDK exclusively composes `<hostStorageRoot>/agents/<agentId>`. It then
 requires exact AgentRef/profileRevision/session/runtime/cwd agreement for
-resume and echoes exact AgentRef through claim/decline/terminal messages.
-`workspaceHint` has no precedence because it is absent from the strict Agent
-offer. Profile contents and non-`.byok` Agent files are opaque; `artifacts` is
+resume and echoes exact AgentRef through claim/decline/terminal messages
+(`task.claim`, `task.decline`, `task.complete`, `task.fail`,
+`task.cancelled`). Profile contents and non-`.byok` Agent files are opaque; `artifacts` is
 not a protocol field, schema, index, or required directory.
 
 **`homeAccess: 'memory-reader'` runs a reader Attempt.** An Agent offer without
@@ -1109,8 +1174,6 @@ plaintext types do not change.
 
 | Sealed type | Plaintext type | Category | Identity | Moved into `sealed` | Dropped in v1 |
 | --- | --- | --- | --- | --- | --- |
-| `task.offer_sealed` | `task.offer` | `task-input` | | `instruction` | |
-| `task.offer_with_toolsets_sealed` | `task.offer_with_toolsets` | `task-input` | | `instruction` | |
 | `task.offer_for_agent_sealed` | `task.offer_for_agent` | `task-input` | | `instruction` | |
 | `task.offer_for_agent_with_egress_sealed` | `task.offer_for_agent_with_egress` | `task-input` | | `instruction` | |
 | `task.offer_for_agent_with_egress_fresh_sealed` | `task.offer_for_agent_with_egress_fresh` | `task-input` | | `instruction` | |
@@ -1141,14 +1204,14 @@ steer. The server advertises it for the task output. A decoder that does not
 know a sealed type refuses it with `UnknownMessageTypeError`. A sealed type
 also takes every gate of its plaintext type, except the gates of the moved and
 dropped fields. For example, `task.offer_for_agent_sealed` also needs
-`agent-home-contract`, and `harnessId` on `task.offer_sealed` also needs
-`custom-harness`. Sealing never removes a gate. A sealed task output that
+`agent-home-contract`, and `requiredToolsets` on it also needs
+`toolset-selection`. Sealing never removes a gate. A sealed task output that
 names its ciphertext blob (`sealed.ciphertextRef`) also needs the server flag
 `sealed-output-ciphertext-ref`. The split table marks `task.progress_sealed`
 and `task.await_approval_sealed` `inlineOnly`, so they have no such gate: they
 are always inline.
 
-`PROTOCOL_VERSION` stays 3. `task.offer_prepared`, input preparation, Agent
+`task.offer_prepared`, input preparation, Agent
 messages, egress, drafts and memory projections are not sealed in v1.
 
 **Sealing policy.** A sealed offer carries `sealing: { scopeId, epoch,
@@ -1751,7 +1814,7 @@ stateDiagram-v2
     Running --> Complete: task.complete
     Running --> Failed: task.fail
     Running --> Cancelled: task.cancel / task.cancelled
-    AwaitApproval --> Running: task.approve
+    AwaitApproval --> Running: task.approve / task.approval_resolved
     AwaitApproval --> Failed: task.reject / task.fail
     AwaitApproval --> Cancelled: task.cancel / task.cancelled
     Complete --> [*]
@@ -1775,10 +1838,11 @@ yet acknowledged `task.cancel` with `task.cancelled`. An unleased hosted offer
 goes directly to `cancelled`; a leased one goes
 `running → cancel_requested → cancelled` at the attempt-store boundary.
 
-A server may additionally force a task straight to `Failed` when an inbound
-message doesn't fit the task's current state (e.g. `task.progress` arriving
-while `AwaitApproval`) — this is an implementation safety net (see the
-reference `ConnectionHub`), not itself a distinct wire message.
+Task activity (`task.progress`, `task.artifact`) that arrives while a task is
+`AwaitApproval` is applied, but it neither resolves the pending approval nor
+moves the task out of `AwaitApproval`. Only a decision (`task.approve`,
+`task.reject`) or the daemon's `task.approval_resolved` report resolves it
+(§5).
 
 ### 3.1 Claim no longer implies Running (M1 gap #2)
 
@@ -1796,7 +1860,7 @@ alone.
 no-op, not an illegal-transition error.
 
 **`task.claim.runtime` (M5, additive minor): the ACTUALLY-selected runtime,
-distinct from `task.offer.runtime`/`TaskSnapshot.runtime` (the merely
+distinct from the offer's `runtime`/`TaskSnapshot.runtime` (the merely
 REQUESTED one, unchanged by this addition) — when an offer names no runtime
 the daemon auto-selects in `claude → codex → pi` order (pi is the fallback,
 tried last, only once nothing more capable is available; overridable
@@ -1938,200 +2002,138 @@ skip never wrongly catches them.
 The full round trip from a runtime pausing for human input to it resuming:
 
 1. The runtime adapter surfaces a normalized `needs_approval` `AgentEvent`.
-2. The daemon sends `task.await_approval { summary }`. Server: `Running → AwaitApproval`.
+2. The daemon registers the approval under its own `approvalId` and sends
+   `task.await_approval { summary, approvalId }`. Server: `Running → AwaitApproval`.
 3. The server-embedding SaaS surfaces the summary to a human (or automated
    policy) and calls `TaskHandle.approve()` or `.reject(reason?)`.
 4. Server state moves immediately (`AwaitApproval → Running` or
-   `AwaitApproval → Failed`); `task.approve` / `task.reject` go out as
-   best-effort notifications ([§4](#4-cancelapprovereject-wire-semantics-m1-gap-3)).
+   `AwaitApproval → Failed`); `task.approve` / `task.reject`, each naming the
+   pending `approvalId`, go out as best-effort notifications
+   ([§4](#4-cancelapprovereject-wire-semantics-m1-gap-3)).
 5. Daemon reacts: on approve, resumes the runtime session and normal
    `task.progress` traffic continues; on reject, stops the session and sends
    `task.fail`.
 
-This flow was already representable with `task.approve`/`task.reject` before
-M1 — nothing new needed schema-wise. What M1 pins down is the semantics in
-step 4 (§4) and documents the flow end-to-end so the M1-3 client worker can
-wire an adapter's `needs_approval` event all the way through to a resumed
-session without re-deriving these rules.
+An approval can also resolve on the device without a wire decision; the
+daemon then reports it with `task.approval_resolved` (§5.2). Nothing else
+resolves a pending approval: task activity while the task awaits approval is
+applied but leaves the approval pending (§3).
 
 ### 5.1 Shared approval seam; bundled runtimes reject confirm
 
 **The entire approval round trip above — `needs_approval`,
-`task.await_approval`, `task.approve`/`task.reject`, and
-`Session.resolveApproval` — is present in the frozen v1 wire.** It
-is retained for third-party adapters and the shared daemon approval controls.
-None of the bundled adapters emits `needs_approval`: ordinary sessions run
-YOLO ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)).
-`Session.resolveApproval` rejects for these adapters. The `needs_approval`
-event and approval messages remain unchanged; v2 removed the `PermissionMode`
-enum with the offer `policy`.
+`task.await_approval`, `task.approve`/`task.reject`, `task.approval_resolved`
+and `Session.resolveApproval` — is part of the v4 wire.** It is retained for
+third-party adapters and the shared daemon approval controls. None of the
+bundled adapters emits `needs_approval`: ordinary sessions run YOLO
+([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)).
+`Session.resolveApproval` rejects for these adapters. v2 removed the
+`PermissionMode` enum with the offer `policy`.
 
-The connection-level `interactive-approval` capability flag stays RESERVED.
 Per-runtime routing uses `RuntimeInfo.capabilities.approvalInteractive`; all
-bundled adapters currently report `approvalInteractive: false`.
+bundled adapters currently report `approvalInteractive: false`. There is no
+connection-level approval capability flag.
 
-### 5.2 `task.approval_resolved` — explicit local-resolution report (additive minor)
+### 5.2 `task.approval_resolved` — local-resolution report
 
-The approval flow above (§5) has always had two resolution paths: the wire
-`task.approve`/`task.reject` (server-authoritative, §4) and the daemon's own
-local control-socket `approvals.resolve` (device-owner-authoritative). Before
-this addition, the SERVER only ever learned about a *local* resolution
-implicitly — the next `task.progress`/`task.artifact`/`task.complete` for
-that task proved, after the fact, that the daemon had already moved past
-`AwaitApproval` (`ConnectionHub.resumeIfImplicitlyApproved`,
-`packages/server/src/hub.ts`, since deleted). In the window between the local resolution and
-that next message, the server's own record still said `AwaitApproval` — long
-enough for a SaaS-side `TaskHandle.approve()`/`.reject()` to independently
-decide (and win) the server's authoritative record while the daemon had
-already moved on locally.
-
-**`task.approval_resolved` (D→S) closes that window.** The daemon sends it
-immediately whenever an approval resolves through any LOCAL path — the
-control socket's `approvals.resolve` RPC, a fail-closed `requestApproval`
+The approval flow has two resolution paths: the wire `task.approve`/
+`task.reject` (server-authoritative, §4) and a resolution on the device
+itself (device-owner-authoritative). **`task.approval_resolved` (D→S) reports
+the second.** The daemon sends it for every approval it resolves locally —
+the control socket's `approvals.resolve` RPC, a fail-closed `requestApproval`
 timeout, or a fail-closed finish/registry-eviction rejection
 (`packages/client/src/daemon/task-runner.ts`'s `sendApprovalResolved`) —
-*never* for a resolution that arrived over the wire (`task.approve`/
-`task.reject`): the server already knows its own decision, so it must never
-be echoed back. Payload: `approvalId` (the resolved `ApprovalRegistry` entry
+and *never* for a resolution that arrived over the wire (`task.approve`/
+`task.reject`): the server already knows its own decision, so it is never
+echoed back. Payload: `approvalId` (the resolved `ApprovalRegistry` entry
 id), `decision` (`'approve'` or `'reject'`), `resolvedBy` (currently always
-`'local'` — a single-value enum, deliberately future-proofed for an
-additional value later without a version bump), and `at` (ISO-8601 datetime).
-Envelope `task_id` is required (routes by task, like every other `task.*`
-type); `seq` stays optional (daemon → server).
+`'local'` — a single-value enum, so a later value can be added as a gated
+addition), and `at` (ISO-8601 datetime). Envelope `task_id` is required
+(routes by task, like every other `task.*` type); `seq` stays optional
+(daemon → server).
 
-**Gated on a new handshake capability flag, `approval_resolved`**
-(`CAPABILITY_FLAGS`, `version.ts`) — the N/N-1 answer for this message: an
-old server never advertises the flag in its long-poll response capabilities,
-so a new daemon talking to it never sends `task.approval_resolved` at all and
-uses the pre-existing implicit-inference path, exactly as before this message
-existed. Server-side handling
-(`ConnectionHub.onApprovalResolved`, `hub.ts`): `AwaitApproval` legally
-transitions to `Running` (the same edge `approveTask` itself uses) and emits
-a `task.approval_resolved` `ByokServerEvent` carrying
-`approvalId`/`decision`/`resolvedBy`; already-`Running` (evidence, or the
-implicit path, already got there first) is a silent idempotent no-op; any
-other state (terminal, or a state that never reached `AwaitApproval` at all)
-is a stale no-op with a logged warning, never force-failed. The pre-existing
-`resumeIfImplicitlyApproved`/`task.approval_resolved_implicit` machinery is
-completely untouched and remains the permanent fallback for the N/N-1 cases
-above; the two mechanisms can never both fire for the same resolution —
-whichever the server processes first performs the actual transition, and the
-other's own guard is already true by the time it would otherwise run.
+The message is baseline in v4: there is no capability gate, and every v4
+server reads it. The server appends every report to the task's durable
+approval timeline (`ApprovalTimelineStore`, `packages/cloud/src/inbound.ts`).
+A report naming the pending approval resolves it, and the task leaves
+`AwaitApproval` (the same edge `approve()` uses). A report naming any other
+approval resolves nothing: the pending approval stands, and the task's read
+state (`TaskSnapshot`, `packages/server/src/snapshot.ts`) stays
+`AwaitApproval`. After the task's terminal, a report changes no task state;
+it is never force-failed. The embedded server's event feed
+(`packages/server/src/relay.ts`) emits a `task.approval_resolved`
+`ByokServerEvent` carrying `approvalId`/`decision`/`resolvedBy` for each
+committed report.
 
-**Residual race (honest, by design — narrowed, not eliminated):** a SaaS
-decision (`TaskHandle.approve()`/`.reject()`) already in flight on the wire
-when the local resolution happens can still land on the server FIRST and
-move the record to a terminal state before `task.approval_resolved` arrives.
-When that happens, the message hits the stale-no-op branch above — exactly
-like any other late message for an already-terminal task — and the daemon
-independently treats a crossing `task.approve`/`task.reject` the same way
-(`NoPendingApprovalError`, an audit-only no-op — §5, `task-runner.ts`'s
-`handleApprove`/`handleReject`). Both sides treat the loser as a stale no-op;
-neither crashes or double-applies anything. What changed is the SIZE of the
-window this can happen in: before this addition it was open until the
-daemon's next progress message (arbitrarily long); now it is
-network-latency-sized (however long `task.approval_resolved` takes to
-reach the server) — and the only possible divergence is exactly the same
-kind §4 already accepts elsewhere: the server's terminal record disagreeing
-with a daemon that (in the reject case) already stopped, or (in the approve
-case) already continued, its own local session. **§5.3's `approvalId`
-targeting narrows an ADJACENT race further still** — a late `task.approve`/
-`task.reject` that arrives not for a terminal task, but for the SAME task's
-NEXT approval cycle (a different, still-`AwaitApproval` pending id) — but,
-per that section's own residual-race note, does not eliminate it either.
+The server never infers a local resolution. Until the report arrives, the
+task stays `AwaitApproval` even when the daemon has already moved on and its
+progress or artifacts arrive in the meantime.
 
-### 5.3 `approvalId` targeting (additive minor)
+**Residual race (by design — narrowed, not eliminated):** a SaaS decision
+(`TaskHandle.approve()`/`.reject()`) already in flight on the wire when the
+local resolution happens can still land on the server FIRST and move the
+record before `task.approval_resolved` arrives. When that happens, the report
+names an approval that is no longer pending and resolves nothing, and the
+daemon independently treats the crossing `task.approve`/`task.reject` as a
+stale, audit-only no-op (`NoPendingApprovalError`, or an `approvalId` that is
+no longer its pending one — §5.3). Both sides treat the loser as a stale
+no-op; neither crashes or double-applies anything. The window is
+network-latency-sized (however long `task.approval_resolved` takes to reach
+the server), and the only possible divergence is the kind §4 already accepts:
+the server's record disagreeing with a daemon that (in the reject case)
+already stopped, or (in the approve case) already continued, its own local
+session.
 
-**Problem this closes (M5):** none of `task.await_approval`/`task.approve`/
-`task.reject` carried any identity for *which* pending approval a decision
-was about — only "the one currently pending for this task." A daemon
-generates its own `approvalId` locally (`ApprovalRegistry`,
-`packages/client`'s `approvals.ts`) the moment it dispatches one, but that id
-never reached the wire before M5. As long as a task only ever has ONE
-approval in its whole lifetime this is harmless; it stops being harmless the
-moment a SECOND approval (B) gets dispatched for the SAME task before a
-decision for the FIRST one (A) has round-tripped all the way through the
-server and back — e.g. A resolves entirely locally (the control socket's
-`approvals.resolve`), B is dispatched next, and only THEN does a slow/queued
-server-side decision for A finally arrive as a wire `task.approve`/
-`task.reject`. Pre-M5, the daemon had no way to tell A's decision from B's:
-`TaskContext.approvalChannel.resolve` always resolved "whichever approval is
-CURRENTLY pending" — i.e. B — silently misapplying A's decision to it.
+### 5.3 `approvalId` targeting
 
-**The fix: all three carry an optional `approvalId`.**
+**Problem this closes:** a task can have more than one approval in its
+lifetime, and a decision can arrive after the approval it was meant for is
+gone. For example, approval A resolves entirely locally (the control socket's
+`approvals.resolve`), the daemon dispatches approval B for the same task, and
+only THEN does a slow or queued server-side decision for A arrive as a wire
+`task.approve`/`task.reject`. Without an identity on the decision, the daemon
+could not tell A's decision from B's and would apply it to B.
+
+**`approvalId` is required on `task.await_approval`, `task.approve` and
+`task.reject`;** the schemas reject each of them without it.
 `task.await_approval.approvalId` is the daemon's own generated id for the
-approval it's reporting — included unconditionally by an M5+ daemon (no
-capability gating needed to send it safely; see below).
-`task.approve.approvalId`/`task.reject.approvalId` let a decision target
-that SAME specific approval rather than "whichever is current." All three
-fields are plain optional properties on already-tolerant `z.object()`
-payloads — an old peer that doesn't recognize the field simply never reads
-it, so this needed no version bump and no emission gating on either side.
-
-**Matching semantics, both sides field-presence-driven (never
-capability-driven — see below):**
+approval it reports (`ApprovalRegistry`, `packages/client`'s `approvals.ts`).
+`task.approve.approvalId`/`task.reject.approvalId` name the approval the
+decision resolves. **A decision resolves only the approval it names.** A
+decision naming no pending approval is stale and resolves nothing.
 
 - **Daemon** (`TaskRunner.handleApprove`/`handleReject`, `task-runner.ts`):
-  if the incoming `task.approve`/`task.reject` carries an `approvalId` that
-  does NOT match this task's own currently-dispatched
-  `ActiveTask.pendingApprovalId`, the decision is a stale, audit-only no-op —
-  logged via the same `onStaleApprovalDecision` hook `NoPendingApprovalError`
-  already uses, never resolving anything and never tearing the task down.
-  Absent `approvalId` (a legacy server, or one that never recorded an id)
-  preserves the pre-M5 behavior exactly: resolve whichever approval is
-  currently pending. The daemon-side check is always the AUTHORITATIVE gate
-  — see the residual race below for why.
-- **Server** (`ConnectionHub.onAwaitApproval`/`approveTask`/`rejectTask`/
-  `onApprovalResolved`, `hub.ts`): `TaskSnapshot.pendingApprovalId` records
-  the daemon's last-reported id for a task's CURRENT `AwaitApproval` cycle,
-  updated even across a re-delivered/updated `task.await_approval` while
-  still `AwaitApproval` (the daemon moved on to a fresh approval before the
-  server's record left the state), and cleared centrally the instant the
-  task leaves `AwaitApproval` for any reason, so a later cycle never inherits
-  a stale id. `approveTask(taskId, {approvalId})`/`rejectTask(taskId, reason,
-  {approvalId})` validate BEFORE any state change: a caller-supplied id that
-  disagrees with the recorded one throws a typed `StaleApprovalError` (no
-  transition, no wire send) — distinct from the pre-existing
-  `TaskNotAwaitingApprovalError` (task isn't `AwaitApproval` at all right
-  now, checked first). `onApprovalResolved` gains the mirror check: a
-  reported `approvalId` that disagrees with the recorded one is a stale
-  no-op (warned, state untouched) rather than resuming the wrong approval.
+  an incoming `task.approve`/`task.reject` whose `approvalId` does not match
+  this task's currently dispatched `ActiveTask.pendingApprovalId` is a stale,
+  audit-only no-op — logged via the same `onStaleApprovalDecision` hook
+  `NoPendingApprovalError` uses, never resolving anything and never tearing
+  the task down. The daemon-side check is the AUTHORITATIVE gate — see the
+  residual race below for why.
+- **Server** (`packages/cloud/src/approval-control.ts`; the embedded server
+  projects the same fold as `TaskSnapshot.pendingApprovalId` in
+  `packages/server/src/snapshot.ts`): the pending approval is derived from
+  the durable approval timeline. A `task.await_approval` sets it, superseding
+  any earlier one; a decision or a `task.approval_resolved` naming it clears
+  it. `approveTask`/`rejectTask` validate BEFORE any state change or mailbox
+  row: no pending approval is `task_not_awaiting_approval`, checked first; a
+  caller-supplied `approvalId` that names a different approval throws a typed
+  `StaleApprovalError` (no transition, no wire send). The outgoing decision
+  names the pending approval's id.
 
-**A new handshake capability flag, `approval-targeting`** (`CAPABILITY_FLAGS`,
-`version.ts`), is purely informational — unlike `approval_resolved` (§5.2),
-it gates nothing. Both sides already emit `approvalId` unconditionally the
-moment they're upgraded; a receiver decides whether to apply exact-match
-targeting by FIELD PRESENCE on the specific message at hand, never by
-checking this flag. It exists only so each side can advertise, and an
-embedder/operator can observe (`ConnectionHub.getDeviceCapabilities` — M5
-also plumbs a previously-ignored gap where `conn.hello.capabilities` was
-silently dropped end to end, forwarding only `runtimes`), whether the OTHER
-side is new enough to participate in targeting at all.
-
-**Residual race (honest, by design — narrowed, not eliminated): this server
-knows a task's `pendingApprovalId` only up to its LAST delivered
-`task.await_approval` — this narrows the window, it does not close it.** The
-server's own record of "the current approval" always LAGS the daemon by at
+**Residual race (by design — narrowed, not eliminated): the server knows a
+task's pending approval only up to its LAST delivered `task.await_approval`.**
+The server's record of "the current approval" always LAGS the daemon by at
 least one round trip: the daemon can locally resolve its current approval and
-dispatch a brand-new one at any instant the server has no way to observe
-until the next `task.await_approval` actually arrives. A server-side
-`approveTask`/`rejectTask` call issued in that exact gap has nothing stale to
-compare against yet (`record.pendingApprovalId` is still the OLD id, because
-nothing newer has been reported) — the `StaleApprovalError` check can only
-ever catch a mismatch the server ALREADY knows about, never one that's still
-in flight. The DAEMON-side exact-match check
-(`ActiveTask.pendingApprovalId`) is therefore the authoritative gate, not the
-server-side one: even when a server-side decision sails through validation
-unaware anything changed, the wire message it sends still carries whatever
-`approvalId` the server believed was current, and the daemon's own
-up-to-the-instant comparison is what correctly resolves it as a no-op if the
-daemon has already moved past it. What targeting changes is that
-`pendingApprovalId` now exists on the server side at all: without it, every
-decision was untargeted and every one of these crossing cases resolved
-"whichever is current" silently, with no way to detect a misapplication
-after the fact. With it, late/cross decisions for a SUPERSEDED approval
-become detectable no-ops on at least one side (usually both) instead of
-silent misapplications — narrower, never zero.
+dispatch a new one at any instant the server cannot observe until the next
+`task.await_approval` arrives. A server-side `approveTask`/`rejectTask` call
+issued in that gap has nothing stale to compare against yet — the
+`StaleApprovalError` check only catches a mismatch the server ALREADY knows
+about. The DAEMON-side exact-match check (`ActiveTask.pendingApprovalId`) is
+therefore the authoritative gate: the wire decision still names the approval
+the server believed was current, and the daemon's own up-to-the-instant
+comparison resolves it as a no-op when the daemon has already moved past it.
+A late or crossing decision for a superseded approval is a detectable no-op
+on at least one side (usually both), never a silent misapplication.
 
 ## 6. Auth flows
 
@@ -2379,7 +2381,7 @@ wave, before any compatibility shim would have been needed. A client must
 always emit this exact form when declaring or referencing a blob.
 
 Inline payloads stay under the existing 64KB limit (`task.artifact.inline`,
-`task.offer.instruction` string form); anything larger goes through blobs.
+the Agent offers' `instruction` string form); anything larger goes through blobs.
 Default per-product size ceiling: 100MB (server-enforced, not schema-enforced).
 
 ### 7.2 `task.complete.document` — bounded structured terminal result (additive minor)
@@ -2643,7 +2645,7 @@ daemon's run as halted instead; it does not reconnect.
 
 `capabilities` on a poll is the server capability advertisement for THIS
 response, is refreshed on every successful poll, and is applied before the
-response's events are delivered. It is required on wire v3; an empty list
+response's events are delivered. It is required (since wire v3); an empty list
 advertises nothing, and a page without it is a route failure.
 An HTTP/network/response-validation failure ends the session and withdraws
 the last advertisement immediately: no earlier request remains authoritative
@@ -2743,12 +2745,12 @@ that genuinely requires both an accepted message and a structured result keeps
 a typed, fail-closed path.
 
 **Only daemon → server `task.*` types are accepted here.** A `type` outside
-that set — a server → daemon type (`task.offer`, `conn.ack`, etc.) arriving
+that set — a server → daemon type (`task.offer_for_agent`, `agent.egress.ack`, etc.) arriving
 inbound, or anything unrecognized — is rejected per-envelope: not dispatched
 to any handler, and not counted toward `accepted`. This never 400s the rest
 of the batch: a *structurally* invalid `Envelope` (fails schema validation
 outright) still 400s the whole request as before, but a *wrong-direction*
-type is schema-valid — a `task.offer` is a well-formed envelope regardless
+type is schema-valid — a `task.offer_for_agent` is a well-formed envelope regardless
 of which side sent it — and only fails this endpoint's semantic type-allow
 check, which is per-envelope. The batch itself is also capped at 256
 envelopes (`MessagesSendRequestSchema`); exceeding the cap 400s the whole
@@ -2936,7 +2938,7 @@ distinguish either case from "never yet attempted" — the reference client
 tracks both in memory for exactly this reason. That in-memory bookkeeping
 resets on every reconnect/restart, though, so it is not a substitute for
 handlers themselves being safely repeatable against an already-active or
-already-finished target (e.g. a redelivered `task.offer` for a task the
+already-finished target (e.g. a redelivered Agent offer for a task the
 daemon already claimed or finished must be a no-op, not a second attempt) —
 see the per-type idempotency notes below.
 
@@ -2995,8 +2997,9 @@ fresh envelope rather than resending the exact original bytes):
 - **`task.started` is idempotent** the same way (§3.1): repeated from the
   owning device while already `Running`, it's a no-op.
 - **`task.await_approval` is idempotent** the same way: repeated while the
-  task is already `AwaitApproval` is a no-op, not an illegal self-transition
-  forced to `Failed`. (`AwaitApproval → AwaitApproval` is deliberately not a
+  task is already `AwaitApproval` causes no state transition, not an illegal
+  self-transition forced to `Failed`. A repeat with a new `approvalId`
+  replaces the pending approval (§5.3). (`AwaitApproval → AwaitApproval` is deliberately not a
   transition in [§3](#3-task-state-machine-m1-gap-2-5-6)'s table — this
   idempotency is handled as an explicit guard ahead of the transition
   attempt, the same shape as `task.started`'s, not by adding a self-loop to
@@ -3022,7 +3025,7 @@ does not fix server/client**; that is M1-2/M1-3's job against this document.
 | # | Change | Was (M0) | Now (M1) |
 |---|---|---|---|
 | 1 | `envelope.task_id` requiredness | Optional for every type | **Required** for every `task.*` type; stays optional for `conn.*` |
-| 2 | `envelope.seq` requiredness | Always optional | **Required** for server→daemon types (`conn.ack`, `task.offer`, `task.offer_with_toolsets`, `task.approve`, `task.reject`, `task.cancel`, `task.steer`); stays optional for daemon→server types |
+| 2 | `envelope.seq` requiredness | Always optional | **Required** for server→daemon types (then `conn.ack`, `task.offer`, `task.offer_with_toolsets`, `task.approve`, `task.reject`, `task.cancel`, `task.steer`; v4 removed the first three); stays optional for daemon→server types |
 | 3 | `TaskOfferPayload.taskId` | Present (duplicated routing key) | **Removed** — envelope `task_id` is the sole routing key |
 | 4 | `TaskClaimPayload.taskId` | Present (duplicated routing key) | **Removed** — envelope `task_id` is the sole routing key |
 | 5 | `ConnHelloPayload.agents` | `unknown`, untyped, best-effort-normalized by the server | **Renamed and retyped**: `runtimes?: { id: 'pi'\|'claude'\|'codex', version?, authPresent? }[]` |
@@ -3113,7 +3116,7 @@ closing this out.
 v2 removed `PermissionPolicy` (`permission.ts`): there is no offered mode,
 `allowTools`/`denyTools`, `network` or `workspaceRoot` any more
 ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)). Sessions run
-YOLO in the user-specified workspace. Each local agent applies its own
+YOLO in the Agent home (since wire v4, the only task cwd). Each local agent applies its own
 guardrails and the user's own configuration: Claude `~/.claude`, Codex
 `config.toml` (sandbox per `DaemonConfig.codexSandbox`), Pi agentDir and
 extensions.
@@ -3135,12 +3138,11 @@ real binary observations from fixture proofs and still-unverified behavior.
 | `steer` (mid-turn injection) | yes | no — stdin injection is not implemented as steering | yes — app-server turn/steer; actual text consumption remains unverified |
 | launch permission | pre-trusted session cwd; user's agentDir, extensions and skills load | `--dangerously-skip-permissions`; user's `~/.claude` applies | `approvalPolicy: never`; sandbox per `codexSandbox` (default `danger-full-access`) |
 | task-scoped host MCP toolsets | supported — daemon `tools/list` observation | supported — task `--mcp-config`, user MCP config also loads | supported — `thread/start` config `mcp_servers`, user `config.toml` also applies |
-| `interactive-approval` | no (RESERVED, §5.1) | no¹ | no |
+| `approvalInteractive` | no | no | no |
 | `usage` fields filled | provider cost counters plus estimated context occupancy/window | provider input/cache/output and modelUsage window | cumulative cost deltas plus last occupancy/window |
 
-¹ The connection-level `interactive-approval` flag remains reserved. All
-bundled runtimes declare `approvalInteractive: false`; a future adapter must
-advertise its own real support without changing the shared wire.
+All bundled runtimes declare `approvalInteractive: false`; a future adapter
+must advertise its own real support without changing the shared wire.
 
 **Connection-level `steer` capability = logical OR across every configured
 adapter's own `capabilities().steer`.** `conn.hello.capabilities` (the
@@ -3241,8 +3243,7 @@ derived from — see `create-daemon.ts`'s `detectRuntimes`/
 `toRuntimeInfoCapabilities`, which is now a pure passthrough of the adapter's
 own declaration and synthesizes no value of its own. `approvalInteractive` is
 therefore per-adapter truth: `false` for all bundled adapters after removal
-of Claude's private confirm path (§11.2). It is unrelated to the
-reserved connection-level `interactive-approval` flag (§5.1).
+of Claude's private confirm path (§11.2).
 
 `RuntimeInfo.capabilities` here is CONNECTION-level discovery data: it
 answers "what could this device run", for a client picking where to dispatch.
@@ -3430,8 +3431,8 @@ a normal slow turn.
 
 Compatibility between releases is decided by
 `packages/protocol/src/__tests__/compat.test.ts` (see "Freeze rule"; until a
-v3 release is published it proves v3 self-consistency and that the last v2
-release rejects v3 bytes). It replaces the hand-built
+v4 release is published it proves v4 self-consistency and that the last v3
+release rejects v4 bytes). It replaces the hand-built
 future-peer simulation this section used to describe. What remains below is
 the receiver policy that the suite and the behavioural tests rely on: which
 unknowns a current receiver tolerates and which it refuses. Four scenarios,
@@ -3466,15 +3467,16 @@ each with its real evidence:
    through the real end-to-end `decodeEnvelope` entrypoint (not just the
    isolated payload schema) to close the loop.
 4. **Handshake version negotiation: a daemon advertising a set that contains
-   the server's single `PROTOCOL_VERSION` (today `3`) agrees on it; a set
-   without it (e.g. `[2]`) gets a clean, typed failure, not a hang.** The schema half (`conn.hello` accepts
-   either shape; `conn.ack` can only ever express one resolved version) is in
-   `version-negotiation-drill.test.ts`. The negotiated version is selected at
+   the server's single `PROTOCOL_VERSION` (today `4`) agrees on it; a set
+   without it (e.g. `[3]`) gets a clean, typed failure, not a hang.** The
+   schema half (`conn.hello.protocolVersions` accepts a set that overlaps the
+   server's version and a disjoint one; the schema never referees
+   negotiation) is in `version-negotiation-drill.test.ts`. The negotiated version is selected at
    long-poll admission by checking whether the daemon advertises the server's
    single `PROTOCOL_VERSION`; a disjoint set is rejected before any task
    message is accepted. The real integration test exercises the rejection
    path and a timeout race, so incompatibility is observable rather than a
-   hanging request. The v1 → v2 and v2 → v3 cuts have no N-1 reader, so the "highest common
+   hanging request. The v1 → v2, v2 → v3 and v3 → v4 cuts have no N-1 reader, so the "highest common
    version across an N/N-1 range" policy remains future work.
 
 **Adjacent honest note (gatekeeper advisory, docs-only, no code change): an
@@ -3588,17 +3590,18 @@ its cumulative `total` remains the provider cost authority. Claude reports
 reports `get_session_stats.contextUsage` as an estimate before task settlement;
 null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.
-Historical v1 envelopes remain readable and unchanged; older consumers ignore
-these optional fields.
+Older consumers ignore these optional fields.
 
 ## SQLite startup check for wire-major upgrades
 
 The embedded server checks every pending mailbox row when it opens SQLite.
-A major other than the current `PROTOCOL_VERSION` (3), a missing major, or
+A major other than the current `PROTOCOL_VERSION` (4), a missing major, or
 malformed JSON causes `SqliteSchemaError` with code
-`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. SQLite schema version 4 alone does not
-prove that the pending wire rows use v3. Retained `acked` and `expired` rows
+`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. SQLite schema version 5 alone does not
+prove that the pending wire rows use v4. Retained `acked` and `expired` rows
 do not block startup. The check does not change or retire mailbox rows.
+Stored receipts are a separate step
+([Wire v3 → v4 receipt migration](#wire-v3--v4-receipt-migration)).
 
 Before upgrading, stop new dispatch and let the previous server and clients
 finish and acknowledge their pending rows. On an offline copy, check:
@@ -3608,7 +3611,7 @@ SELECT tenant_id, device_id, seq, message_id
 FROM mailbox_message
 WHERE state = 'pending'
   AND CASE WHEN json_valid(body)
-    THEN json_type(body, '$.v') IS NOT 'integer' OR json_extract(body, '$.v') <> 3
+    THEN json_type(body, '$.v') IS NOT 'integer' OR json_extract(body, '$.v') <> 4
     ELSE 1 END;
 ```
 

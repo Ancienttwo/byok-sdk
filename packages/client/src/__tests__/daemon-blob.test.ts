@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs, symlinkSync, unlinkSync } from 'node:fs';
@@ -11,6 +12,7 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { RuntimeAdapter } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 
 const FAKE_CLAUDE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -32,10 +34,9 @@ describe('blob client (protocol §7)', () => {
   });
 
   async function setupDaemon(adapter: RuntimeAdapter): Promise<Daemon> {
-    const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
       [adapter],
     );
     await daemon.pair('code');
@@ -53,8 +54,8 @@ describe('blob client (protocol §7)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        {
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),
           instruction: {
             blobRef: {
               blobId: 'instr-blob-1',
@@ -70,7 +71,7 @@ describe('blob client (protocol §7)', () => {
 
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
-    expect(adapter.startCalls[0]?.task.instruction).toBe(bigInstruction);
+    expect(adapter.startCalls[0]?.task.instruction).toBe(prependAgentMemoryGuidance(bigInstruction));
   });
 
   it('admits a blobRef through a bundled prepared adapter, resolves it after claim, and starts with the resolved string', async () => {
@@ -85,8 +86,8 @@ describe('blob client (protocol §7)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        {
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),
           instruction: {
             blobRef: {
               blobId: 'instr-blob-bundled-prepared',
@@ -112,7 +113,7 @@ describe('blob client (protocol §7)', () => {
         event.type === 'task.progress' &&
         event.task_id === taskId &&
         (event.payload as { events: Array<{ type: string; text?: string }> }).events.some(
-          (item) => item.type === 'progress' && item.text === `reply-1:${resolvedInstruction}`,
+          (item) => item.type === 'progress' && item.text === `reply-1:${prependAgentMemoryGuidance(resolvedInstruction)}`,
         ),
       nativeWaitMs,
     );
@@ -127,8 +128,8 @@ describe('blob client (protocol §7)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        {
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),
           instruction: {
             blobRef: {
               blobId: 'no-such-blob',
@@ -158,8 +159,8 @@ describe('blob client (protocol §7)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        {
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),
           instruction: {
             blobRef: {
               blobId: 'instr-blob-tampered',
@@ -185,7 +186,7 @@ describe('blob client (protocol §7)', () => {
     await setupDaemon(adapter);
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-artifact-small', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-artifact-small', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -209,7 +210,7 @@ describe('blob client (protocol §7)', () => {
     await setupDaemon(adapter);
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-artifact-big', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-artifact-big', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -255,8 +256,8 @@ describe('blob client (protocol §7)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'x' },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'x' },
           { taskId: 'task-artifact-traversal', seq: server.nextSeq() },
         ),
       );
@@ -296,8 +297,8 @@ describe('blob client (protocol §7)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'x' },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'x' },
           { taskId: 'task-artifact-absolute', seq: server.nextSeq() },
         ),
       );
@@ -336,8 +337,8 @@ describe('blob client (protocol §7)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'x' },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'x' },
           { taskId: 'task-artifact-upload-fail', seq: server.nextSeq() },
         ),
       );
@@ -378,8 +379,8 @@ describe('blob client (protocol §7)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer',
-          { instruction: 'x' },
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'x' },
           { taskId: 'task-artifact-regular-ok', seq: server.nextSeq() },
         ),
       );
@@ -423,8 +424,8 @@ describe('blob client (protocol §7)', () => {
 
         server.send(
           createEnvelope(
-            'task.offer',
-            { instruction: 'x' },
+            'task.offer_for_agent',
+            { agentRef: freshTestAgentRef(),  instruction: 'x' },
             { taskId: 'task-artifact-symlink-outside', seq: server.nextSeq() },
           ),
         );
@@ -462,8 +463,8 @@ describe('blob client (protocol §7)', () => {
 
         server.send(
           createEnvelope(
-            'task.offer',
-            { instruction: 'x' },
+            'task.offer_for_agent',
+            { agentRef: freshTestAgentRef(),  instruction: 'x' },
             { taskId: 'task-artifact-intermediate-symlink', seq: server.nextSeq() },
           ),
         );
@@ -521,8 +522,8 @@ describe('blob client (protocol §7)', () => {
 
         server.send(
           createEnvelope(
-            'task.offer',
-            { instruction: 'x' },
+            'task.offer_for_agent',
+            { agentRef: freshTestAgentRef(),  instruction: 'x' },
             { taskId: 'task-artifact-toctou-swap', seq: server.nextSeq() },
           ),
         );
@@ -552,16 +553,18 @@ describe('blob client (protocol §7)', () => {
         // — instead of guessing microtask timing from outside. This proves
         // the actual security boundary for this narrowest window is the
         // `O_NOFOLLOW` open, not either realpath step: a swap timed exactly
-        // here is still rejected.
-        const originalRealpath = fs.realpath;
-        const realpathSpy = vi.spyOn(fs, 'realpath');
-        realpathSpy.mockImplementationOnce(async (p: Parameters<typeof fs.realpath>[0]) =>
-          (originalRealpath as (p: unknown) => Promise<string>)(p),
-        );
-        realpathSpy.mockImplementationOnce(async (p: Parameters<typeof fs.realpath>[0]) => {
-          const result = await (originalRealpath as (p: unknown) => Promise<string>)(p);
-          unlinkSync(swapPath);
-          symlinkSync('/etc/hosts', swapPath);
+        // here is still rejected. The Agent home resolves paths with realpath
+        // too, so the spy picks the candidate call by its path, not by order.
+        const originalRealpath = fs.realpath as (p: unknown) => Promise<string>;
+        const candidate = path.resolve(await originalRealpath(workspaceDir), swapName);
+        let candidateCalls = 0;
+        const realpathSpy = vi.spyOn(fs, 'realpath').mockImplementation(async (p: Parameters<typeof fs.realpath>[0]) => {
+          const result = await originalRealpath(p);
+          if (p === candidate) {
+            candidateCalls += 1;
+            unlinkSync(swapPath);
+            symlinkSync('/etc/hosts', swapPath);
+          }
           return result;
         });
 
@@ -569,9 +572,10 @@ describe('blob client (protocol §7)', () => {
         session.emit({ type: 'turn_end' });
 
         await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-artifact-toctou-swap');
-        // Both realpath calls happened (workspaceDir, then the candidate),
-        // and the swap landed inside the second one, exactly as targeted.
-        expect(realpathSpy).toHaveBeenCalledTimes(2);
+        // The candidate was resolved once, and the swap landed right after
+        // it, exactly as targeted.
+        expect(realpathSpy).toHaveBeenCalledWith(workspaceDir);
+        expect(candidateCalls).toBe(1);
         realpathSpy.mockRestore();
 
         expect(

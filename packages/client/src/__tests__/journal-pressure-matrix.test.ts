@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 /**
  * Sprint S3.4's disk-pressure matrix, points 7-12 (P-007).
  *
@@ -68,7 +69,7 @@ afterEach(async () => {
 });
 
 function offerRecord(taskId: string, seq: number): ReceivedEnvelopeRecord {
-  const bytes = JSON.stringify({ v: 1, id: `env-${taskId}`, type: 'task.offer', task_id: taskId, seq });
+  const bytes = JSON.stringify({ v: 1, id: `env-${taskId}`, type: 'task.offer_for_agent', task_id: taskId, seq });
   return {
     identity: IDENTITY,
     envelopeId: `env-${taskId}`,
@@ -141,7 +142,6 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
       setFreeBytes: (value: number) => void;
     }> {
       const storeDir = await tmpDir('byok-pressure-daemon-store-');
-      const workspaceRoot = await tmpDir('byok-pressure-daemon-workspace-');
       const journal = new SqliteLocalTaskJournal({ storeDir });
       let freeBytes = initialFreeBytes;
       let sweeper!: RetentionSweeper;
@@ -160,7 +160,7 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
           localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
           productId: 'test-product-pressure',
           serverUrl: server.url,
-          workspaceRoot,
+          agentHome: testAgentHomeConfig(),
           storeDir,
           storage: { scratchRoot: testScratchRoot(), budget: freeDrivenPolicy() },
         },
@@ -179,7 +179,7 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
 
       expect((await engine.tick()).state).toBe('hard-pressure');
 
-      server.send(createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-hard-idle', seq: server.nextSeq() }));
+      server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-hard-idle', seq: server.nextSeq() }));
       const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'task-hard-idle');
 
       // Declined before anything was claimed or spawned — the whole point of
@@ -223,14 +223,14 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
 
       expect((await engine.tick()).state).toBe('normal');
 
-      server.send(createEnvelope('task.offer', { instruction: 'first' }, { taskId: 'task-running-1', seq: server.nextSeq() }));
+      server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'first' }, { taskId: 'task-running-1', seq: server.nextSeq() }));
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-running-1');
 
       // The disk fills while that task is mid-flight.
       setFreeBytes(50 * 1024 * 1024);
       expect((await engine.tick()).state).toBe('hard-pressure');
 
-      server.send(createEnvelope('task.offer', { instruction: 'second' }, { taskId: 'task-declined-2', seq: server.nextSeq() }));
+      server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'second' }, { taskId: 'task-declined-2', seq: server.nextSeq() }));
       const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'task-declined-2');
       expect(decline.payload).toMatchObject({ retryable: true });
       expect(adapter.startCalls).toHaveLength(1); // still only the first task's session
@@ -248,7 +248,6 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
     // -----------------------------------------------------------------
     it('10: an IO failure before the commit leaves no half row and freezes the cursor; the redelivery then succeeds', async () => {
       const storeDir = await tmpDir('byok-pressure-10-store-');
-      const workspaceRoot = await tmpDir('byok-pressure-10-workspace-');
       let failing = true;
       let faultFired = false;
       const journal = new SqliteLocalTaskJournal({
@@ -268,7 +267,7 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
           localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
           productId: 'test-product-pressure',
           serverUrl: server.url,
-          workspaceRoot,
+          agentHome: testAgentHomeConfig(),
           storeDir,
           storage: { scratchRoot: testScratchRoot(), budget: freeDrivenPolicy() },
         },
@@ -281,7 +280,7 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
       const cursorStore = new CursorStore(storeDir);
       const cursorBefore = await cursorStore.load(server.url, record.deviceId);
 
-      server.send(createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-diskfull', seq: server.nextSeq() }));
+      server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-diskfull', seq: server.nextSeq() }));
       // Waiting on a POSITIVE signal — the fault actually fired inside the
       // append — rather than on the absence of one.
       await vi.waitFor(() => expect(faultFired).toBe(true), { timeout: 5000 });
@@ -322,7 +321,7 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
           budget: { pressureState: 'hard-pressure', budgetBytes: 1024 * 1024 * 1024 },
           freeBytes: 50 * 1024 * 1024,
         });
-        expect(status.storage.classes).toHaveLength(23);
+        expect(status.storage.classes).toHaveLength(22);
         expect(status.storage.lastSweep).toMatchObject({ trigger: 'pressure' });
         expect(status.queueWatermarks).toEqual([]);
         expect(formatLiveStatusLines(status).some(line => line.startsWith('live-storage:'))).toBe(true);
@@ -346,7 +345,7 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
       const envelopesBefore = countRows(storeDir, 'journal_envelope');
       const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
       try {
-        server.send(createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-emergency', seq: server.nextSeq() }));
+        server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-emergency', seq: server.nextSeq() }));
         // The positive signal: `ConnectionManager` reporting that the handler
         // rejected and it therefore left the cursor where it was. Waiting on
         // this rather than on an absence is what keeps the assertion below

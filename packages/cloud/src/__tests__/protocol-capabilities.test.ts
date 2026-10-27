@@ -1,16 +1,11 @@
 /**
  * The protocol capability advertisement a long-poll daemon negotiates against.
  *
- * On the deleted reference server this list reached the daemon two ways: the WS
- * `conn.ack` and the long-poll response body, both carrying `CAPABILITY_FLAGS`
- * wholesale (`packages/server/src/http.ts:382` on `origin/main`). The WP3B
- * façade serves no WS upgrade, so `GET /byok/events` is now the ONLY channel —
- * and the daemon hard-gates real wire behavior on what it finds there
- * (`packages/client/src/daemon/task-runner.ts:3319,3849`,
- * `packages/client/src/daemon/agent-egress-controller.ts:122,285`). A flag
- * dropped from the kernel's declaration is therefore a silently disabled
- * protocol path, not a cosmetic difference — which is exactly how
- * `approval_resolved` went missing.
+ * `GET /byok/events` is the ONLY channel that carries it, and the daemon
+ * hard-gates real wire behavior on what it finds there
+ * (`packages/client/src/daemon/agent-egress-controller.ts`). A flag dropped
+ * from the kernel's declaration is therefore a silently disabled protocol
+ * path, not a cosmetic difference.
  *
  * So the list is pinned exactly rather than by `toContain`: any future edit to
  * `CLOUD_PROTOCOL_CAPABILITIES` shows up here as a visible diff that has to be
@@ -19,7 +14,7 @@
  */
 import { createEnvelope, PROTOCOL_VERSION, type MessagesSendResponse } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
-import { TENANT_A, createHarness, decodeEventsPage, offerPayload } from './support/harness';
+import { TENANT_A, createHarness, decodeEventsPage, grantAgentHome, offerPayload } from './support/harness';
 
 /**
  * The exact advertisement, in declaration order
@@ -29,7 +24,7 @@ import { TENANT_A, createHarness, decodeEventsPage, offerPayload } from './suppo
 const EXPECTED_CAPABILITIES = [
   'custom-harness',
   'mailbox-read-ahead',
-  'approval_resolved', 'agent-message-draft',
+  'agent-message-draft',
   'agent-home-contract',
   'agent-home-projection',
   'agent-egress-policy',
@@ -58,7 +53,8 @@ describe('GET /byok/events protocol capability advertisement', () => {
   it('serves the same list on the delivered-page path', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload(),
     });
 
@@ -100,25 +96,22 @@ describe('GET /byok/events protocol capability advertisement', () => {
     expect(other.status).toBe(200);
     expect(Object.hasOwn(other.body as object, 'capabilities')).toBe(false);
 
-    // A rejected hello opens nothing, so it advertises nothing. A v2-only
-    // daemon is refused here: wire v3 has no v2 reader.
-    const refused = await post([hello([2])]);
+    // A rejected hello opens nothing, so it advertises nothing. A v3-only
+    // daemon is refused here: wire v4 has no v3 reader.
+    const refused = await post([hello([3])]);
     expect(refused.status).toBe(200);
     expect(refused.body as MessagesSendResponse).toMatchObject({ accepted: 0, rejected: 1 });
   });
 
-  it('advertises approval_resolved, which the kernel inbound accepts', async () => {
+  it('advertises no approval flag: task.approval_resolved is wire v4 baseline', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
 
     const poll = await harness.json('/byok/events?cursor=0', { headers: device.authorization });
 
-    // Pinned on its own because this one is load-bearing for a whole daemon
-    // path: `TaskRunner.sendApprovalResolved` returns early without it, so a
-    // locally-resolved approval is never reported at all and the server is left
-    // to infer the resume. `packages/cloud/src/inbound.ts:576,610` handles the
-    // message the flag unlocks.
-    expect(decodeEventsPage(poll.body).capabilities).toContain('approval_resolved');
+    // The kernel inbound accepts `task.approval_resolved` from every v4 daemon,
+    // which sends it without consulting this list.
+    expect(decodeEventsPage(poll.body).capabilities.filter((flag) => flag.includes('approval'))).toEqual([]);
   });
 
   it('keeps protocol flags off the deployment declaration route', async () => {

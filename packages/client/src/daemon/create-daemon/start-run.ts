@@ -30,7 +30,7 @@ export async function openStartRun(daemonScope: DaemonScope) {
     ownedProcessLedger, scratchRoot, storeDir, daemonState, initializeInputPreparation, config,
     retentionSweeper, replaceControlServer, setLifecycle, initializeOwnedHostedStorage,
     storagePressure, egressPolicy, agentHomeManager, cursorStore, terminalCommits, operationalHealth,
-    observer, gitWorkspaceManager, gitWorkspaceStore, adapters, provenAgentMemoryIntentBackend,
+    observer, adapters, provenAgentMemoryIntentBackend,
   } = daemonScope;
   // #384 item 3 / #393: on POSIX a SIGKILLed or OOM-killed daemon leaves its
   // owned runtime groups running, and a tool process in one could still be
@@ -207,12 +207,6 @@ export async function openStartRun(daemonScope: DaemonScope) {
   // rather than the previous start's outcomes.
   daemonState.runtimeObservations = [];
   observer.noteEnvironmentResolved({ ...daemonState.resolvedEnvironment }, daemonState.environmentResolvedAt);
-
-  if (gitWorkspaceManager) {
-    await gitWorkspaceManager.preflight();
-    await gitWorkspaceStore?.initialize();
-    await gitWorkspaceStore?.reconcile();
-  }
 
   daemonState.blobLifecycleAbort = new AbortController();
   const [{ runtimes, harnesses, observations }, blobClient] = await Promise.all([

@@ -1,4 +1,5 @@
 import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
+import type { RuntimeTaskInput } from '../../types';
 import { claudeMcpEventIdentities } from './mcp-identity';
 import { claudeAgentUserContextSettings } from './agent-user-context';
 import type { McpEventIdentity } from '../../mcp/event-identity';
@@ -9,7 +10,7 @@ import { promises as fs, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
@@ -521,7 +522,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
 }
 
 function subscriptionModel(
-  selection: TaskOfferPayload['dispatchSelection'],
+  selection: RuntimeTaskInput['dispatchSelection'],
   runtimeId: 'claude',
 ): string | undefined {
   if (selection === undefined) return undefined;
@@ -702,7 +703,7 @@ class ClaudeSession implements Session {
     );
   }
 
-  async followUp(task: TaskOfferPayload): Promise<void> {
+  async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('claude adapter only supports string instructions in M2 (no blob-ref fetch yet)');
     }

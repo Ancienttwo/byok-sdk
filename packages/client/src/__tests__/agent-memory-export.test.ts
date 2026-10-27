@@ -28,7 +28,7 @@ async function harness(enabled = true) {
   const projection = { prepare: vi.fn() };
   const config: DaemonConfig = {
     productId: 'export-test', productName: 'Export test', serverUrl: 'http://localhost:1',
-    localAgentRelease: { version: '0.0.0-test' }, strictAgentOnly: true,
+    localAgentRelease: { version: '0.0.0-test' },
     storeDir: path.join(root, 'store'), storage: { scratchRoot: testScratchRoot() },
     agentHome: { hostStorageRoot, projection }, agentMemoryMcp: 'off',
     ...(enabled ? { agentMemoryExport: true } : {}),

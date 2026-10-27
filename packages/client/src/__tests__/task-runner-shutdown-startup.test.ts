@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -5,7 +6,6 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
@@ -16,17 +16,16 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
     const sent: Envelope[] = [];
     const adapter = new StubRuntimeAdapter();
     const release = adapter.blockStart();
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-      adapters: [adapter], deviceId: 'shutdown-device', workspaceRoot: path.join(dir, 'workspace'),
+    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+      adapters: [adapter], deviceId: 'shutdown-device',
       send: event => { sent.push(event); },
       blobClient: {
         resolveInstruction: async () => { throw new Error('unexpected blob resolution'); },
         uploadArtifact: async () => { throw new Error('unexpected upload'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(path.join(dir, 'sessions')),
       approvalRegistry: new ApprovalRegistry(), storeDir: dir, productId: 'shutdown-start',
     });
-    const offered = runner.handleEnvelope(createEnvelope('task.offer', {
+    const offered = runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),
       instruction: 'blocked startup',
     }, { taskId: 'starting-task', seq: 1 }));
     try {

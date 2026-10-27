@@ -28,7 +28,7 @@ async function openRoutineHost() {
   const origin = `http://127.0.0.1:${address.port}`;
   const core = host.core;
   endpoint = createBetaMcpServer({ ledger, origin, serverInfo: { name: 'B4 test host', version: '1' }, tools: [
-    ...createTaskTools({ sdk: host.server, ledger, blobBaseUrl: origin }),
+    ...createTaskTools({ sdk: host.server, ledger, egressPolicy: policy, blobBaseUrl: origin }),
     ...createRoutineTools({ sdk: host.server, ledger, core, egressPolicy: policy, waitMs: 60_000, lateAfterMs: 60_000 }),
   ] });
   cleanup.push(async () => {

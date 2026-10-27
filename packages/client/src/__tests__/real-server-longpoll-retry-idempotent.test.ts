@@ -1,3 +1,5 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -5,7 +7,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
+import { dispatchResumedAgentTask, startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -50,12 +52,11 @@ describe('a lost/failed long-poll POST is retried with the identical batch, exac
   it('the retried POST carries the same envelope ids as the failed attempt, and the task reaches Complete via a clean AwaitApproval, not Failed', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
@@ -90,11 +91,9 @@ describe('a lost/failed long-poll POST is retried with the identical batch, exac
       return originalFetch(input, init);
     }) as typeof globalThis.fetch;
 
-    const handle = await real.byok.dispatch({ deviceId: record.deviceId, instruction: 'needs a human to say go' });
+    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, instruction: 'needs a human to say go' });
 
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
-    const session = adapter.sessions[0]!;
 
     session.emit({ type: 'needs_approval', summary: 'about to do the risky thing' });
 

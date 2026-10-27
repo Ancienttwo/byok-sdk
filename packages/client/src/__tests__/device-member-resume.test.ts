@@ -40,7 +40,7 @@ async function device() {
   const daemon = createDaemonWithAdapters({
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Member resume test', productId,
-    serverUrl: server.url, storeDir: path.join(root, 'store'), workspaceRoot: path.join(root, 'workspace'),
+    serverUrl: server.url, storeDir: path.join(root, 'store'),
   }, [new StubRuntimeAdapter('pi')]);
   const { deviceId } = await daemon.pair('pair-code');
   const record = (await testDeviceCredentials(productId).read())!;

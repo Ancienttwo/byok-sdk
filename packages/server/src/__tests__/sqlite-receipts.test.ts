@@ -12,11 +12,12 @@ import { handleInboundEnvelope } from '../../../cloud/src/inbound';
 import { tenantStoresFor } from '../../../cloud/src/tenant-stores';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 import { SqliteOwnershipError } from '../sqlite-support';
+import { TEST_AGENT_DISPATCH, TEST_AGENT_REF } from './test-support';
 
 const tenant = tenantId('receipts');
 const other = tenantId('other');
 const deviceId = 'device-receipts';
-const payload = { instruction: 'original', runtime: 'claude' } as const;
+const payload = { ...TEST_AGENT_DISPATCH, instruction: 'original', runtime: 'claude' } as const;
 
 describe('SQLite receipt recovery', () => {
   const roots: string[] = [];
@@ -175,9 +176,10 @@ describe('SQLite receipt recovery', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
-      const first = await runtime.cloud.enqueueOffer(tenant, deviceId, input);
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', { deviceId }, { taskId })).then((result) => result.outcome)).toBe('accepted');
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'first', sessionRef: 'session-first' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
+      const first = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, input);
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'first', sessionRef: 'session-first' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       const receipt = await runtime.cloud.readTerminalReceipt(tenant, taskId);
       const result = await runtime.cloud.readTaskResult(tenant, taskId);
       const deviceTerminal = await runtime.cloud.readDeviceTerminal(tenant, taskId);
@@ -189,10 +191,10 @@ describe('SQLite receipt recovery', () => {
       expect(await runtime.cloud.readDeviceTerminal(tenant, taskId)).toEqual(deviceTerminal);
       expect(await runtime.cloud.readTaskResult(other, taskId)).toBeUndefined();
       for (const retry of [input, { taskId, payload: { ...payload, instruction: 'changed' } }]) {
-        await expect(runtime.cloud.enqueueOffer(tenant, deviceId, retry)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        await expect(runtime.cloud.enqueueAgentOffer(tenant, deviceId, retry)).rejects.toMatchObject({ code: 'agent_task_already_exists' });
       }
       expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toEqual([]);
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'conflict', sessionRef: 'session-other' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'conflict', sessionRef: 'session-other' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       expect(await runtime.cloud.readTerminalReceipt(tenant, taskId)).toEqual(receipt);
       expect(await runtime.cloud.readTaskResult(tenant, taskId)).toEqual(result);
     } finally { await runtime.stores.close(); }
@@ -263,14 +265,15 @@ describe('SQLite receipt recovery', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
-      await expect(runtime.cloud.enqueueOffer(tenant, deviceId, input)).rejects.toMatchObject({
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
+      await expect(runtime.cloud.enqueueAgentOffer(tenant, deviceId, input)).rejects.toMatchObject({
         code: 'task_offer_append_refused', taskId: input.taskId, cause: expect.objectContaining({ message: expect.stringContaining('injected append failure') }) });
       expect(await runtime.cloud.readTaskOffer(tenant, input.taskId)).toMatchObject({ delivered: false, payload });
       await runtime.stores.close();
       const reset = new DatabaseSync(path); reset.exec('DROP TRIGGER fail_append'); reset.close();
       runtime = open();
-      await expect(runtime.cloud.enqueueOffer(tenant, deviceId, { ...input, payload: { ...payload, instruction: 'changed' } })).rejects.toMatchObject({ code: 'coordination_input_invalid' });
-      await runtime.cloud.enqueueOffer(tenant, deviceId, input);
+      await expect(runtime.cloud.enqueueAgentOffer(tenant, deviceId, { ...input, payload: { ...payload, instruction: 'changed' } })).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+      await runtime.cloud.enqueueAgentOffer(tenant, deviceId, input);
       expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toHaveLength(1);
     } finally { await runtime.stores.close(); }
   });
@@ -285,13 +288,14 @@ describe('SQLite receipt recovery', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
-      await expect(runtime.cloud.enqueueOffer(tenant, deviceId, input)).rejects.toThrow('injected delivered failure');
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
+      await expect(runtime.cloud.enqueueAgentOffer(tenant, deviceId, input)).rejects.toThrow('injected delivered failure');
       const before = (await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages;
       expect(before).toHaveLength(1);
       await runtime.stores.close();
       const reset = new DatabaseSync(path); reset.exec('DROP TRIGGER fail_delivered'); reset.close();
       runtime = open();
-      await runtime.cloud.enqueueOffer(tenant, deviceId, input);
+      await runtime.cloud.enqueueAgentOffer(tenant, deviceId, input);
       expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toEqual(before);
     } finally { await runtime.stores.close(); }
   });
@@ -318,7 +322,8 @@ describe('SQLite receipt recovery', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
-      await runtime.cloud.enqueueOffer(tenant, deviceId, { taskId: 'cancelled-task', payload });
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
+      await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { taskId: 'cancelled-task', payload });
       await runtime.cloud.cancelTask(tenant, 'cancelled-task', 'host-cancel');
       const result = await runtime.cloud.readTaskResult(tenant, 'cancelled-task');
       expect(result?.state).toBe('cancelled');
@@ -334,12 +339,13 @@ describe('SQLite receipt recovery', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
       await runtime.stores.cloud.tasks.open(tenant, { taskId: 'unsubmitted', deviceId });
       expect(await runtime.cloud.readTaskOffer(tenant, 'unsubmitted')).toBeUndefined();
-      const enqueued = await runtime.cloud.enqueueOffer(tenant, deviceId, { taskId, payload });
+      const enqueued = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { taskId, payload });
       const original = await runtime.cloud.readTaskOffer(tenant, taskId);
       expect(original).toMatchObject({ taskId, deviceId, messageId: enqueued.envelope.id, delivered: true,
-        type: 'task.offer', payload });
+        type: 'task.offer_for_agent', payload });
       expect(await runtime.cloud.readTaskOffer(other, taskId)).toBeUndefined();
       await runtime.stores.close();
       const db = new DatabaseSync(path, { readOnly: true });

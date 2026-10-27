@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -56,7 +57,7 @@ async function fixture(serverUrl: string, macosKeychainPath?: string): Promise<{
     productName: 'Acme',
     productId: 'acme-login-shell',
     serverUrl,
-    workspaceRoot: home,
+    agentHome: testAgentHomeConfig(),
     storeDir,
     runtimeAllowlist: ['claude'],
     ...(macosKeychainPath === undefined ? {} : { deviceCredentials: { macosKeychainPath } }),

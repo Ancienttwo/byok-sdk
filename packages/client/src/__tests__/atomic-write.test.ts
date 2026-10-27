@@ -9,8 +9,7 @@ async function tmpDir(prefix: string): Promise<string> {
 }
 
 /**
- * `atomic-write.ts` is the shared helper extracted from
- * `session-workspace-store.ts`'s own (already atomic) save pattern, so that
+ * `atomic-write.ts` is the shared atomic save helper, so that
  * `store.ts` (device.json — device keys/JWT, 0600) and `cursor-store.ts`
  * (redelivery cursor persistence) stop using a plain, non-atomic
  * `fs.writeFile` — which truncates the target in place before writing the
@@ -35,8 +34,7 @@ describe('atomicWriteFile', () => {
     const parseFailures: Array<{ raw: string; message: string }> = [];
 
     // Tight read loop, no artificial delay — real disk I/O racing the
-    // writes below exactly like `session-workspace-store.test.ts`'s own
-    // concurrency tests. Any read that succeeds must parse as valid JSON;
+    // writes below. Any read that succeeds must parse as valid JSON;
     // ENOENT can only happen if the OS ever let the target not exist
     // (never true here, since it's created above before the loop starts,
     // and every write goes to a private temp path first).

@@ -9,7 +9,7 @@ decimal `profileRevision`, SHA-256 `profileHash`, `modelId`, and bounded
 `requiredCapabilities`. Endpoint, auth configuration, and credential material
 remain outside the protocol.
 
-`TaskOfferPayload.dispatchSelection` is the optional strict dual-lane target
+An Agent offer's `dispatchSelection` is the optional strict dual-lane target
 contract: subscription selects Claude/Codex + model, while BYOK selects Pi +
 provider + model. When present it is authoritative and runtime disagreement
 fails closed. Servers send it only to a daemon advertising the

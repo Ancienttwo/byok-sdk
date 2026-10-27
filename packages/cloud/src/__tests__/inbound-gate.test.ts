@@ -10,20 +10,20 @@
  */
 import { readFileSync } from 'node:fs';
 import { tenantId, type TenantId } from '@byok-sdk/core';
-import { DAEMON_TO_SERVER_TYPES, createEnvelope, isSealedMessageType, type Envelope } from '@byok-sdk/protocol';
+import { DAEMON_TO_SERVER_TYPES, UnknownMessageTypeError, createEnvelope, isSealedMessageType, parseMessage, type Envelope } from '@byok-sdk/protocol';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { handleInboundEnvelope, terminalReceiptKey } from '../inbound';
 import { agentReliabilityKey } from '../agent-reliability';
 import { tenantStoresFor, type TenantStores } from '../tenant-stores';
 import type { InboundRateLimiter } from '../stores/ports';
-import { TENANT_A, TENANT_B, createHarness, offerPayload, type CloudHarness } from './support/harness';
+import { TENANT_A, TENANT_B, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
 function devicePrincipal(tenant: TenantId, deviceId: string) {
   return { kind: 'device', tenantId: tenant, productId: 'test-product', deviceId } as const;
 }
 
 function claim(taskId: string, deviceId: string): Envelope {
-  return createEnvelope('task.claim', { deviceId }, { taskId });
+  return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId });
 }
 
 function progress(taskId: string): Envelope {
@@ -31,7 +31,7 @@ function progress(taskId: string): Envelope {
 }
 
 function complete(taskId: string, summary: string): Envelope {
-  return createEnvelope('task.complete', { summary, sessionRef: 'session-1' }, { taskId });
+  return createEnvelope('task.complete', { summary, sessionRef: 'session-1', agentRef: TEST_AGENT_REF }, { taskId });
 }
 
 describe('the inbound gate', () => {
@@ -43,6 +43,7 @@ describe('the inbound gate', () => {
     harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     deviceId = device.deviceId;
+    await grantAgentHome(harness, TENANT_A, deviceId);
     stores = tenantStoresFor(devicePrincipal(TENANT_A, deviceId), { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake });
   });
 
@@ -63,26 +64,36 @@ describe('the inbound gate', () => {
 
     // A type the allow-list would reject anyway: it must still cost a token,
     // and the answer must be `rate_limited`, not `rejected`.
-    const wrongDirection = createEnvelope('task.approve', {}, { taskId: 'task-1', seq: 1 });
+    const wrongDirection = createEnvelope('task.approve', { approvalId: 'approval-1' }, { taskId: 'task-1', seq: 1 });
     expect(await handleInboundEnvelope(limitedStores, device.deviceId, wrongDirection).then((result) => result.outcome)).toBe('rate_limited');
     expect(seen).toEqual([device.deviceId]);
   });
 
   it('step 1: rejects every server -> daemon type arriving inbound', async () => {
     const inbound = [
-      createEnvelope('task.approve', {}, { taskId: 'task-1', seq: 1 }),
+      createEnvelope('task.approve', { approvalId: 'approval-1' }, { taskId: 'task-1', seq: 1 }),
       createEnvelope('task.cancel', {}, { taskId: 'task-1', seq: 2 }),
-      createEnvelope('conn.ack', { protocolVersion: 2, capabilities: [], serverTime: new Date().toISOString() }, { seq: 3 }),
     ];
     for (const envelope of inbound) {
       expect(await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome)).toBe('rejected');
     }
   });
 
+  it('step 1: refuses a type wire v4 does not define, such as the removed conn.ack', async () => {
+    const removed = {
+      ...createEnvelope('task.cancel', {}, { taskId: 'task-1', seq: 3 }),
+      type: 'conn.ack',
+      payload: { protocolVersion: 3, capabilities: [], serverTime: new Date().toISOString() },
+    };
+    expect(() => parseMessage(removed)).toThrow(UnknownMessageTypeError);
+    expect(await handleInboundEnvelope(stores, deviceId, removed as unknown as Envelope)).toEqual({ outcome: 'rejected', reason: 'type_not_allowed' });
+  });
+
   it('step 1: accepts every generic daemon -> server type', async () => {
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
     await stores.devices.recordCapabilities({
       capabilities: [
+        'agent-home-contract',
         'agent-egress-policy',
         'agent-egress-reliable-ack',
         'agent-content-workspace-read',
@@ -128,7 +139,7 @@ describe('the inbound gate', () => {
 
   it('step 2: rejects an envelope from a device other than the immutable offer target before claim', async () => {
     const other = await harness.pairDevice(TENANT_A);
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
 
     const intruderStores = tenantStoresFor(devicePrincipal(TENANT_A, other.deviceId), {
       core: harness.core,
@@ -152,8 +163,8 @@ describe('the inbound gate', () => {
   });
 
   it('step 2: rejects a claim whose device echo differs from its authenticated principal', async () => {
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
-    const spoofed = createEnvelope('task.claim', { deviceId: 'device-spoofed' }, { taskId });
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
+    const spoofed = createEnvelope('task.claim', { deviceId: 'device-spoofed', agentRef: TEST_AGENT_REF }, { taskId });
 
     expect(await handleInboundEnvelope(stores, deviceId, spoofed).then((result) => result.outcome)).toBe('rejected');
     await expect(harness.cloud.readTaskAttempt(TENANT_A, taskId)).resolves.toMatchObject({
@@ -164,7 +175,7 @@ describe('the inbound gate', () => {
 
   it('step 2: rejects an envelope for a task another device already owns, and does not disturb it', async () => {
     const other = await harness.pairDevice(TENANT_A);
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
 
     expect(await handleInboundEnvelope(stores, deviceId, claim(taskId, deviceId)).then((result) => result.outcome)).toBe('accepted');
 
@@ -197,7 +208,7 @@ describe('the inbound gate', () => {
   });
 
   it('step 3: a repeated envelope id is a duplicate, not a rejection, and re-runs nothing', async () => {
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
     const envelope = claim(taskId, deviceId);
 
     expect(await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome)).toBe('accepted');
@@ -206,7 +217,7 @@ describe('the inbound gate', () => {
   });
 
   it('persists approval lifecycle after the real ownership and dedup gate', async () => {
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, {
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, {
       payload: offerPayload(),
     });
     const requested = createEnvelope(
@@ -242,22 +253,6 @@ describe('the inbound gate', () => {
     ]);
     expect(tail?.entries.map((entry) => entry.revision)).toEqual([1, 2]);
     expect(await harness.cloud.readApprovalTimeline(TENANT_B, taskId)).toBeUndefined();
-  });
-
-  it('preserves a legacy request without approvalId as explicitly unpaired source data', async () => {
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, {
-      payload: offerPayload(),
-    });
-    const requested = createEnvelope(
-      'task.await_approval',
-      { summary: 'Legacy request' },
-      { taskId },
-    );
-    expect(await handleInboundEnvelope(stores, deviceId, requested).then((result) => result.outcome)).toBe('accepted');
-    expect((await harness.cloud.readApprovalTimeline(TENANT_A, taskId))?.entries[0]?.event).toEqual({
-      type: 'approval_requested',
-      summary: 'Legacy request',
-    });
   });
 
   it('rejects blank approval identity before recording the envelope in dedup', async () => {
@@ -316,7 +311,7 @@ describe('the inbound gate', () => {
   });
 
   it('step 4: the first terminal is the fact; a retried terminal records nothing new', async () => {
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
     await handleInboundEnvelope(stores, deviceId, claim(taskId, deviceId)).then((result) => result.outcome);
 
     expect(await handleInboundEnvelope(stores, deviceId, complete(taskId, 'first')).then((result) => result.outcome)).toBe('accepted');
@@ -331,7 +326,7 @@ describe('the inbound gate', () => {
   });
 
   it('records the lifecycle a daemon actually reports', async () => {
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('offered');
 
     await handleInboundEnvelope(stores, deviceId, claim(taskId, deviceId)).then((result) => result.outcome);
@@ -345,7 +340,7 @@ describe('the inbound gate', () => {
   });
 
   it('never writes into a tenant it was not bound to', async () => {
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
     const foreign = tenantStoresFor(devicePrincipal(TENANT_B, deviceId), {
       core: harness.core,
       cloud: harness.stores,
@@ -364,7 +359,7 @@ describe('the inbound gate', () => {
 
 /** The first sealed golden line of each sealed daemon type (#654). */
 const sealedGoldenPayloads = new Map<string, unknown>();
-for (const raw of readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8').trimEnd().split('\n')) {
+for (const raw of readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8').trimEnd().split('\n')) {
   const line = JSON.parse(raw) as { type: string; payload: unknown };
   if (isSealedMessageType(line.type) && !sealedGoldenPayloads.has(line.type)) sealedGoldenPayloads.set(line.type, line.payload);
 }
@@ -373,23 +368,23 @@ function envelopeOfType(type: (typeof DAEMON_TO_SERVER_TYPES)[number], taskId: s
   if (isSealedMessageType(type)) return createEnvelope(type, sealedGoldenPayloads.get(type) as never, { taskId });
   switch (type) {
     case 'task.claim':
-      return createEnvelope('task.claim', { deviceId }, { taskId });
+      return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId });
     case 'task.started':
       return createEnvelope('task.started', {}, { taskId });
     case 'task.decline':
-      return createEnvelope('task.decline', { reason: 'no runtime' }, { taskId });
+      return createEnvelope('task.decline', { reason: 'no runtime', agentRef: TEST_AGENT_REF }, { taskId });
     case 'task.progress':
       return createEnvelope('task.progress', { seq: 1, events: [] }, { taskId });
     case 'task.artifact':
       return createEnvelope('task.artifact', { name: 'a', contentType: 'text/plain', inline: 'x' }, { taskId });
     case 'task.await_approval':
-      return createEnvelope('task.await_approval', { summary: 'may I' }, { taskId });
+      return createEnvelope('task.await_approval', { summary: 'may I', approvalId: 'ap-1' }, { taskId });
     case 'task.complete':
-      return createEnvelope('task.complete', { summary: 'ok', sessionRef: 's' }, { taskId });
+      return createEnvelope('task.complete', { summary: 'ok', sessionRef: 's', agentRef: TEST_AGENT_REF }, { taskId });
     case 'task.fail':
-      return createEnvelope('task.fail', { reason: 'nope' }, { taskId });
+      return createEnvelope('task.fail', { reason: 'nope', agentRef: TEST_AGENT_REF }, { taskId });
     case 'task.cancelled':
-      return createEnvelope('task.cancelled', {}, { taskId });
+      return createEnvelope('task.cancelled', { agentRef: TEST_AGENT_REF }, { taskId });
     case 'task.approval_resolved':
       return createEnvelope(
         'task.approval_resolved',

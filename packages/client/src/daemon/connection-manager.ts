@@ -32,8 +32,7 @@ export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 
 
 /**
  * Server work requiring durable handler completion before acknowledgement.
- * `conn.*` frames (including `conn.ack`) carry a sequence only for schema
- * uniformity and never move this cursor.
+ * `conn.*` frames never move this cursor.
  */
 function isCursorEnvelopeType(type: Envelope['type']): boolean {
   return isServerToDaemonType(type) && !type.startsWith('conn.');
@@ -679,14 +678,10 @@ export class ConnectionManager {
   /**
    * Findings F2 + F3. Two rules, both pinned in docs/protocol.md §1.2/§9:
    *
-   * - F2 (redelivery dead on reconnect): cursor accounting covers ONLY
-   *   `task.*` envelopes. `conn.ack` carries a `seq` too (required by the
-   *   schema for schema uniformity across every server->daemon type), but a
-   *   reconnecting server sends it BEFORE replaying the backlog and always
-   *   assigns it the next (i.e. highest-so-far) per-device seq — advancing
-   *   the cursor for it would make every backlog envelope's (necessarily
-   *   lower) seq look already-delivered and drop it. `conn.*` envelopes
-   *   never advance the cursor.
+   * - F2 (redelivery dead on reconnect): cursor accounting covers only
+   *   work envelopes. `conn.*` envelopes never advance the cursor, so a
+   *   handshake frame can never make a backlog envelope's lower seq look
+   *   already delivered.
    * - F3 (at-most-once): the old code persisted the cursor advance BEFORE
    *   `onEnvelope` even ran (fire-and-forget) — a handler that then failed
    *   left a redelivery-proof envelope permanently marked processed. Inbound

@@ -2,6 +2,111 @@
 
 ## Unreleased
 
+- **Breaking (protocol, client, server, cloud; #925)** — wire major 4. A v3
+  envelope is rejected; there is no v3 reader and no negotiation. Drain,
+  migrate stored receipts, then upgrade server and client together; see
+  [the wire v4 upgrade note](docs/releases/925-wire-v4.md).
+  - Every offer is Agent-bound. `conn.ack`, `task.offer`,
+    `task.offer_with_toolsets`, `task.offer_sealed` and
+    `task.offer_with_toolsets_sealed` are removed, with
+    `ConnAckPayloadSchema`, `TaskOfferPayloadSchema`,
+    `TaskOfferWithToolsetsPayloadSchema` and their payload types and the
+    `strict-agent-only` flag (`STRICT_AGENT_ONLY_CAPABILITY`, also removed
+    from `@byok-sdk/server`). The daemon declines every offer when it has no
+    Agent home. `DaemonConfig.strictAgentOnly` is removed and raises
+    `DaemonConfigFieldRemovedError`.
+    Runtime adapters take the client-owned `RuntimeTaskInput` (exported from
+    `@byok-sdk/client`) instead of the removed wire `TaskOfferPayload`.
+  - `approvalId` is required on `task.await_approval`, `task.approve` and
+    `task.reject`; a decision resolves only the approval it names.
+    `Daemon.approve(taskId, { approvalId })` and
+    `Daemon.reject(taskId, { approvalId, reason? })` require it.
+    `task.approval_resolved` is baseline: the daemon reports every approval it
+    resolves locally, including a `Daemon.approve` or `Daemon.reject`
+    decision, and the `approval_resolved` server flag is gone. The
+    server no longer infers a resolution from later task activity: the
+    `task.approval_resolved_implicit` server event and the `targeted` field of
+    `task.approval_resolved` events are removed, and activity while a task
+    awaits approval leaves it awaiting approval.
+  - Git workspace mode and the daemon's task workspace root are removed
+    (ADR-034): every task runs in its Agent home. `DaemonConfig.gitWorkspace`,
+    `DaemonOverrides.gitWorkspace` and `DaemonConfig.workspaceRoot` raise
+    `DaemonConfigFieldRemovedError`; delete them from daemon configs.
+    `@byok-sdk/client` no longer exports `GitWorkspaceManager`,
+    `GitWorkspaceError`, `isGitWorkspaceConfig`,
+    `prependGitWorkspaceGuidance`, `GitWorkspaceStore`, `GitWorkspaceConfig`,
+    `GitWorkspaceObservation`, `GitWorkspaceLease`, `GitWorkspaceOptions`,
+    `GitErrorCategory`, `GitWorkspaceLedger`, `GitWorkspaceLedgerRecord` or
+    `GitWorkspacePhase`. `RuntimeOperationManifest.workspace` loses
+    `workspaceId` and `baseline`. The `byok-agent workspaces` command, the
+    `git-workspace` daemon event and audit record, the doctor `workspace`
+    check and the support bundle's `workspace` field are removed; an older
+    audit log's `git-workspace` lines are skipped as an unknown kind.
+    `ProtectedClassId` and `RetentionClassId` lose `'workspace'`: storage
+    usage no longer reports a workspace class, and an older audit log's
+    `retention-failure` line for it is skipped. The daemon leaves
+    `<storeDir>/git-workspaces.json` and old task directories untouched.
+  - `ByokServer.dispatch` takes only `AgentResumeDispatchInput` (`agentRef`
+    and `sessionRef`); `LegacyDispatchInput` is removed. Fresh work uses
+    `executions.submit`, which returns no `TaskHandle`: a submitted task has
+    no per-task stream of Agent events and artifacts yet, only the
+    `task.created` and `task.state` server events; #1022 adds one in 0.31.0. Two `dispatch` refusal
+    codes change, because the Agent lane answers them: an unknown or revoked
+    device is `agent_capability_missing` (was `device_not_found`), and a
+    taskId that already exists is `agent_task_already_exists` (was
+    `coordination_input_invalid`). A Host that matches on the old codes must
+    match the new ones.
+  - One-shot wire v4 migration of stored state, in two steps per store. The
+    read-only preflight (`preflightPostgresWireV4Migration(pool)` in
+    `@byok-sdk/cloud-dataplane`, `preflightSqliteWireV4Migration(path)` in
+    `@byok-sdk/server`) lists the legacy tasks (offered on a removed offer
+    type) and every row with no v4 form. The migration
+    (`migratePostgresToWireV4(pool, confirmedLegacyTasks)`,
+    `migrateSqliteToWireV4(path, confirmedLegacyTasks)`) takes the confirmed
+    list back and, in one transaction, deletes every row of those tasks and
+    re-encodes the remaining offer and terminal receipts. It changes nothing
+    and throws `ReceiptMigrationUnmappableError` when a receipt has no v4
+    form, an approval was recorded without an id, or a pending v3 mailbox row
+    of another task could still reach a device; and
+    `WireV4LegacyTaskListMismatchError` when the confirmed list differs from
+    the store's. A legacy task's `task-redaction:<taskId>` audit receipt is
+    deleted with it, so a new Agent task may reuse the id;
+    `migratePostgresToWireV4` returns those receipts
+    (`deletedRedactionReceipts`: `redactedAt` and `counts`) for the
+    operator's records, and `@byok-sdk/cloud` exports
+    `taskRedactionReceiptKey`. Expired v3 dead letters are left in place:
+    `replayDeadLetter` refuses their v3 bytes with `cleanup_invalid_input`,
+    and `discardDeadLetter` still drops them. Replay or discard them before
+    the upgrade. Acked rows stay v3 bytes: within the acked retention (1 day
+    by default) a retry with the same messageId fails with an envelope
+    decoding error and delivers nothing; after it, the retry is a new
+    message. `@byok-sdk/protocol` adds `WIRE_V3_TO_V4_TYPES`,
+    `wireV4TypeOf` and `migrateWireV3Envelope`; `@byok-sdk/cloud` adds the
+    store-independent half (`migrateWireV3Receipt`, `wireV4ReceiptKind`,
+    `assertWireV4MigrationConfirmed` and the types and errors above). All of
+    it ships in 0.31.x only; 0.32.0 removes it (#1017).
+  - `harnessId` on every Agent offer is gated on the device's `custom-harness`
+    capability, the gate the removed offers carried. Before, an Agent offer
+    with `harnessId` needed only the device's declared harness inventory.
+    Bundled daemons always advertise the flag; a third-party daemon that
+    declares harnesses without it has such offers refused.
+  - The protocol test alias `byok-protocol-previous` pins 0.30.2, the last v3
+    release, as the rejection oracle. `byok-protocol-floor` (0.27.0) and
+    `published-compat.test.ts` are removed until a v4 release is published.
+- **Breaking (examples; #925)** — byok-mcp-server submits each task as a
+  fresh Agent execution of the key's AgentRef. A `tasks.dispatch` key without
+  an AgentRef fails authentication with `invalid_input`; revoke it and issue
+  a new key with one. An Agent home has one writer, so a device runs one task
+  of a key at a time, whatever the key's `runningTasks` quota allows. The
+  basic example submits fresh executions and decides approvals with
+  `ByokServer.tasks.approve` and `reject`.
+- **Feature (server; #925)** — `ByokServer.tasks.approve(taskId, opts?)` and
+  `tasks.reject(taskId, reason?, opts?)` decide a pending approval by taskId,
+  so a task that `executions.submit` created can be approved without a
+  `TaskHandle`. They take the same `opts.approvalId` as `TaskHandle.approve`
+  and `reject`, share their one code path over `ByokCloud.approveTask` and
+  `rejectTask`, and refuse the same way: `task_not_found`,
+  `task_not_awaiting_approval` or `StaleApprovalError`.
 - **Breaking (client)** — `ExpiringClassId` and `RetentionClassId` gain
   `'agent-result'`, so an exhaustive switch over them no longer compiles
   until it handles the new class (#1009). `ClassUsage.truncated` is now

@@ -5,7 +5,6 @@ import { InputPreparationRequestError } from '../input-preparation-service';
 import type { PiRuntimeLaunchResources } from '../../adapters/pi/runtime-launch';
 import { terminalIdentity } from '../terminal-identity';
 import { abortedStartOf, startOwnedRuntime } from '../runtime-start';
-import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { sealRuntimeOperationManifest, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types';
@@ -14,9 +13,6 @@ import type { InputPreparationStore } from '../input-preparation-store';
 import { inputPreparationDigest } from '../../input-preparation';
 import { isRuntimeStartupDisposalFailure, projectRuntimeBoundaryFailure } from '../../runtime-failure';
 import { toRuntimeInfoCapabilities } from '../runtime-capabilities';
-import type { GitWorkspaceObservation, GitWorkspaceError } from '../git-workspace';
-import { prependGitWorkspaceGuidance } from '../git-workspace';
-import type { GitWorkspaceLedgerRecord, GitWorkspacePhase } from '../git-workspace-store';
 import { prependAgentMemoryModeGuidance } from '../memory-guidance';
 import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';
 import type { PreparedExecutionObservation, ActiveTask, OfferPhaseContext } from './support';
@@ -31,9 +27,8 @@ export interface OfferManifestInput
   extends Pick<OfferRequest, 'agentRef' | 'agentMemory' | 'preparation' | 'preparedMemorySelected' | 'readerAttempt' | 'sessionRef'>,
     Pick<OfferRuntime, 'env' | 'mcpEnv' | 'mcpToolsetTools' | 'offered' | 'pick' | 'prepared' | 'scratch'>,
     Pick<OfferLimits, 'requiredToolsets' | 'resolvedMcp'>,
-    Pick<OfferWorkspace, 'known' | 'workspaceDir' | 'gitWorkspaceId' | 'gitBaseline'> {
+    Pick<OfferWorkspace, 'workspaceDir'> {
   readonly agentBinding: OfferHeld['agentBinding'];
-  readonly gitLease: OfferHeld['gitLease'];
   readonly blobAbort: AbortController;
   readonly preparationLane: TaskRunnerDeps['inputPreparationLane'];
   readonly terminalProjection: ActiveTask['terminalProjection'];
@@ -43,9 +38,9 @@ export interface OfferManifestInput
 export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseContext, input: OfferManifestInput) {
   const { taskId, decline, admissionWithdrawn } = phase;
   const {
-    agentBinding, gitLease, agentRef, agentMemory, preparation, preparedMemorySelected, readerAttempt, sessionRef, env, mcpEnv,
-    mcpToolsetTools, offered, pick, prepared, scratch, requiredToolsets, resolvedMcp, known, workspaceDir, gitWorkspaceId,
-    gitBaseline, blobAbort, preparationLane, terminalProjection,
+    agentBinding, agentRef, agentMemory, preparation, preparedMemorySelected, readerAttempt, sessionRef, env, mcpEnv,
+    mcpToolsetTools, offered, pick, prepared, scratch, requiredToolsets, resolvedMcp, workspaceDir, blobAbort,
+    preparationLane, terminalProjection,
   } = input;
   let runtimeLaunch: PiRuntimeLaunchResources | undefined;
   if (prepared.operation.resolveRuntimeLaunch !== undefined) {
@@ -55,11 +50,10 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
         scratch,
       });
     } catch (error) {
-      gitLease?.release();
       if (!admissionWithdrawn()) decline(`runtime launch admission failed: ${errorMessage(error)}`, false);
       return;
     }
-    if (admissionWithdrawn()) { gitLease?.release(); return; }
+    if (admissionWithdrawn()) return;
   }
 
   // `env` was built before admission (see its declaration above) so the
@@ -72,9 +66,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
     descriptor: pick.descriptor,
     requiredToolsetIds: requiredToolsets ?? [],
     ...(offered.dispatchSelection === undefined ? {} : { dispatchSelection: offered.dispatchSelection }),
-    ...(sessionRef === undefined || (known === undefined && agentBinding === undefined)
-      ? {}
-      : { sessionRef }),
+    ...(sessionRef === undefined ? {} : { sessionRef }),
     ...(agentBinding === undefined ? {} : {
       agentRef: agentBinding.resolution.agentRef,
       cwd: agentBinding.lease.cwd,
@@ -85,11 +77,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
       },
     }),
     cwd: workspaceDir,
-    workspace: {
-      workspaceDir,
-      ...(gitWorkspaceId === undefined ? {} : { workspaceId: gitWorkspaceId }),
-      ...(gitBaseline === undefined ? {} : { baseline: gitBaseline }),
-    },
+    workspace: { workspaceDir },
     forwardedEnvironmentNames: Object.freeze(Object.keys(env).sort()),
   });
 
@@ -105,7 +93,6 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
     const lane = preparationLane!;
     const record = lane.store.get(preparation.reference);
     if (record === undefined) {
-      gitLease?.release();
       decline('preparation_not_found: no preparation record under this reference on this device', false);
       return;
     }
@@ -114,7 +101,6 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
     // reading an error message. Every one is before pin and claim, and no
     // raw helper/transport text reaches the wire.
     const declineMemory = (reason: string): void => {
-      gitLease?.release();
       decline(reason, false);
     };
     if (agentMemory === undefined) {
@@ -188,7 +174,6 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
       nowMs: Date.now(),
     });
     if (!admitted.ok) {
-      gitLease?.release();
       // Non-retryable, every one of them: re-offering the same reference
       // against the same device state reaches the same answer, and a
       // prepared failure never permits sending a DIFFERENT input under the
@@ -204,12 +189,10 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
         sealedAt: new Date().toISOString(),
       });
     } catch (error) {
-      gitLease?.release();
       decline(`preparation_not_ready: the preparation pin could not be written: ${errorMessage(error)}`, false);
       return;
     }
     if (pinned.kind === 'occupied') {
-      gitLease?.release();
       decline(
         `preparation_already_pinned: task ${JSON.stringify(pinned.record.pin!.taskId)} already consumed this preparation`,
         false,
@@ -231,31 +214,26 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
 }
 
 export interface OfferClaimInput
-  extends Pick<OfferRequest, 'agentRef' | 'sessionRef'>,
+  extends Pick<OfferRequest, 'agentRef'>,
     Pick<OfferRuntime, 'pick'>,
-    Pick<OfferWorkspace, 'known' | 'gitExisting' | 'plainWorkspaceNeedsResolve' | 'workspaceDir' | 'gitWorkspaceId' | 'gitBaseline'>,
     Pick<OfferManifest, 'manifest' | 'preparedLaunch'> {
   readonly agentBinding: OfferHeld['agentBinding'];
-  readonly gitLease: OfferHeld['gitLease'];
   readonly blobAbort: AbortController;
   readonly payload: AcceptedOfferPayload;
   readonly taskMcpServers: OfferRuntime['taskMcpServers'];
 }
 
-/** Claims the task, resolves its instruction, prepares the Git workspace and binds prepared Agent memory. */
+/** Claims the task, resolves its instruction and binds prepared Agent memory. */
 export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, input: OfferClaimInput) {
   const { taskId, admissionWithdrawn } = phase;
-  const {
-    agentBinding, gitLease, agentRef, sessionRef, pick, known, gitExisting, plainWorkspaceNeedsResolve, manifest, preparedLaunch,
-    blobAbort, payload,
-  } = input;
-  let { workspaceDir, gitWorkspaceId, gitBaseline, taskMcpServers } = input;
+  const { agentBinding, agentRef, pick, manifest, preparedLaunch, blobAbort, payload } = input;
+  let { taskMcpServers } = input;
   // All semantic admission is now in `prepare()` and the frozen manifest.
-  // Claim is the first externally visible commitment; instruction bytes,
-  // workspace preparation, and process creation remain after it.
-  if (admissionWithdrawn()) { gitLease?.release(); return; }
+  // Claim is the first externally visible commitment; instruction bytes and
+  // process creation remain after it.
+  if (admissionWithdrawn()) return;
   await this['deps'].beforeClaim?.(taskId, manifest.descriptor.id);
-  if (admissionWithdrawn()) { gitLease?.release(); return; }
+  if (admissionWithdrawn()) return;
   if (!isKnownRuntimeId(manifest.descriptor.id)) this['claimedHarnesses'].set(taskId, manifest.descriptor.id);
   this['deps'].send(
     createEnvelope(
@@ -296,7 +274,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
     ),
   );
 
-  // Resolve the instruction blob after claim; workspace preparation follows.
+  // Resolve the instruction blob after claim.
   // A prepared Execution resolves nothing here — it carries no instruction,
   // and the empty string below is never read: the prepared start variant has
   // no `instruction` field for it to reach.
@@ -306,9 +284,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
     resolvedInstruction = offeredInstructionValue === undefined
       ? ''
       : await this['resolveInstruction'](offeredInstructionValue, blobAbort.signal);
-    if (plainWorkspaceNeedsResolve) workspaceDir = await this['resolveWorkspaceDir'](taskId, known?.workspaceDir);
   } catch (err) {
-    gitLease?.release();
     const reason = `failed to resolve instruction blob: ${errorMessage(err)}`;
     if (agentBinding === undefined) {
       await this['fail'](taskId, reason, true);
@@ -321,64 +297,6 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
     return;
   }
 
-  if (this['deps'].gitWorkspaceManager && gitLease) {
-    try {
-      let observation: GitWorkspaceObservation;
-      if (gitExisting) {
-        observation = await this['deps'].gitWorkspaceManager.validateExisting(workspaceDir);
-      } else {
-        const workspaceId = gitWorkspaceId ?? randomUUID();
-        const now = new Date().toISOString();
-        gitWorkspaceId = workspaceId;
-        await this['deps'].gitWorkspaceStore?.upsert({
-          workspaceId,
-          taskId,
-          workspaceDir,
-          phase: 'preparing',
-          commitsSinceBaseline: 0,
-          staged: 0,
-          unstaged: 0,
-          untracked: 0,
-          conflicted: 0,
-          createdAt: now,
-          updatedAt: now,
-        });
-        this['deps'].onGitWorkspaceEvent?.({ taskId, workspaceId, phase: 'preparing' });
-        observation = await this['deps'].gitWorkspaceManager.prepareFresh(workspaceDir);
-      }
-      const workspaceId = gitWorkspaceId ?? randomUUID();
-      const phase: GitWorkspacePhase = 'active';
-      const now = new Date().toISOString();
-      const ledgerRecord: GitWorkspaceLedgerRecord = {
-        workspaceId,
-        taskId,
-        workspaceDir,
-        sessionRef,
-        phase,
-        baseline: gitBaseline ?? observation.head,
-        current: observation.head,
-        commitsSinceBaseline: observation.commitsSinceBaseline,
-        staged: observation.staged,
-        unstaged: observation.unstaged,
-        untracked: observation.untracked,
-        conflicted: observation.conflicted,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await this['deps'].gitWorkspaceStore?.upsert(ledgerRecord);
-      this['deps'].onGitWorkspaceEvent?.({ taskId, workspaceId, phase, observation });
-      gitWorkspaceId = workspaceId;
-      gitBaseline = gitBaseline ?? observation.head;
-    } catch (err) {
-      const category = (err as GitWorkspaceError).category ?? 'repository-invalid';
-      await this['updateGitPhaseBestEffort'](gitWorkspaceId, 'failed', category);
-      gitLease.release();
-      this['deps'].onGitWorkspaceEvent?.({ taskId, workspaceId: gitWorkspaceId ?? '', phase: 'failed', errorCategory: category });
-      await this['fail'](taskId, 'Git workspace preparation failed', true);
-      return;
-    }
-  }
-
   if (preparedLaunch !== undefined && preparedLaunch.agentMemory !== 'none') {
     // Post-claim: a failure here is a truthful task failure, never a raw
     // throw that strands the claimed task. The finally below revokes any
@@ -389,8 +307,6 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
       taskMcpServers = this['withAgentMemoryMcp'](taskMcpServers, taskId, agentRef, preparedLaunch.agentMemory, helper, 'complete');
     } catch {
       const reason = 'agent_memory_unavailable: the sealed Agent memory helper could not be bound for launch';
-      await this['updateGitPhaseBestEffort'](gitWorkspaceId, 'failed');
-      gitLease?.release();
       if (agentBinding === undefined) {
         await this['fail'](taskId, reason, false);
       } else {
@@ -402,16 +318,15 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
       return;
     }
   }
-  return { resolvedInstruction, workspaceDir, gitWorkspaceId, gitBaseline, taskMcpServers };
+  return { resolvedInstruction, taskMcpServers };
 }
 
 export interface OfferStartInput
   extends Pick<OfferRequest, 'ordinaryMemoryMode' | 'readerAttempt'>,
     Pick<OfferRuntime, 'env' | 'mcpEnv' | 'mcpToolsetTools' | 'pick' | 'prepared' | 'scratch'>,
     Pick<OfferManifest, 'manifest' | 'preparedLaunch' | 'runtimeLaunch'>,
-    Pick<OfferClaim, 'resolvedInstruction' | 'gitWorkspaceId' | 'taskMcpServers'> {
+    Pick<OfferClaim, 'resolvedInstruction' | 'taskMcpServers'> {
   readonly agentBinding: OfferHeld['agentBinding'];
-  readonly gitLease: OfferHeld['gitLease'];
   readonly blobAbort: AbortController;
   readonly startupDeadline: number;
 }
@@ -430,8 +345,8 @@ export async function startOfferRuntime(
 ): Promise<void> {
   const { taskId } = phase;
   const {
-    agentBinding, gitLease, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, pick, prepared, scratch, manifest,
-    preparedLaunch, runtimeLaunch, resolvedInstruction, gitWorkspaceId, taskMcpServers, blobAbort, startupDeadline,
+    agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, pick, prepared, scratch, manifest,
+    preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline,
   } = input;
   const durableBinding = agentBinding;
   const startInput: RuntimeOperationStartInput = {
@@ -462,7 +377,7 @@ export async function startOfferRuntime(
       ? {
         kind: 'instruction' as const,
         instruction: agentBinding === undefined
-          ? (gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction)
+          ? resolvedInstruction
           : prependAgentMemoryModeGuidance(resolvedInstruction, ordinaryMemoryMode, readerAttempt),
       }
       : { kind: 'prepared' as const, preparation: preparedLaunch }),
@@ -528,7 +443,6 @@ export async function startOfferRuntime(
         } } : {}),
         release: async () => {
           await ownedBinding?.lease.release();
-          gitLease?.release();
           await this['releasePreparationPin'](taskId);
         },
       });
@@ -554,8 +468,6 @@ export async function startOfferRuntime(
       // adapter's error can carry runtime output (issue #395).
       console.error(`[byok/client] runtime adapter ${pick.descriptor.id} start() returned an untyped failure for task ${taskId}`);
     }
-    await this['updateGitPhaseBestEffort'](gitWorkspaceId, 'failed', 'repository-invalid');
-    gitLease?.release();
     if (agentBinding === undefined) {
       await this['fail'](taskId, failure.reason, failure.retryable, failure.failure);
     } else {
@@ -573,7 +485,6 @@ export async function startOfferRuntime(
     dispose: async () => { await session.close(); await scratch.release(); },
     release: async () => {
       await ownedBinding?.lease.release();
-      gitLease?.release();
       await this['releasePreparationPin'](taskId);
     },
   });

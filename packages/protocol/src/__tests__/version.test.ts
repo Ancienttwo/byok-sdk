@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { CAPABILITY_FLAGS, PROTOCOL_VERSION, PROVIDER_PROFILE_BINDING_CAPABILITY } from '../index';
+import { CAPABILITY_FLAGS, PROTOCOL_VERSION, PROVIDER_PROFILE_BINDING_CAPABILITY, WIRE_ADDITIONS } from '../index';
 
 describe('protocol version and capability flags', () => {
-  it('PROTOCOL_VERSION is 3', () => {
-    expect(PROTOCOL_VERSION).toBe(3);
+  it('PROTOCOL_VERSION is 4', () => {
+    expect(PROTOCOL_VERSION).toBe(4);
   });
 
   it('includes at least the steer and blob-upload capability flags', () => {
@@ -11,8 +11,9 @@ describe('protocol version and capability flags', () => {
     expect(CAPABILITY_FLAGS).toContain('blob-upload');
   });
 
-  it('includes the interactive-approval flag (RESERVED: gates routing an approval-requiring policy to a daemon)', () => {
-    expect(CAPABILITY_FLAGS).toContain('interactive-approval');
+  it('has no approval flag: v4 approval targeting and task.approval_resolved are baseline', () => {
+    expect(CAPABILITY_FLAGS.filter((flag) => flag.includes('approval'))).toEqual([]);
+    expect(WIRE_ADDITIONS.filter((entry) => entry.kind === 'envelope' && entry.surface === 'task.approval_resolved')).toEqual([]);
   });
 
   it('includes the dispatch-selection correctness gate', () => {

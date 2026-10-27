@@ -63,9 +63,6 @@ import { minimalSealedPayload } from './sealed-fixtures';
 function codecRequirednessMatrix(): CodecRequirednessMatrix {
   return {
     'conn.hello': { taskId: 'optional', seq: 'optional' },
-    'conn.ack': { taskId: 'optional', seq: 'required' },
-    'task.offer': { taskId: 'required', seq: 'required' },
-    'task.offer_with_toolsets': { taskId: 'required', seq: 'required' },
     'task.offer_for_agent': { taskId: 'required', seq: 'required' },
     'task.offer_for_agent_with_egress': { taskId: 'required', seq: 'required' },
     'task.offer_for_agent_with_egress_fresh': { taskId: 'required', seq: 'required' },
@@ -96,8 +93,6 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'task.fail': { taskId: 'required', seq: 'optional' },
     'task.cancelled': { taskId: 'required', seq: 'optional' },
     'task.approval_resolved': { taskId: 'required', seq: 'optional' },
-    'task.offer_sealed': { taskId: 'required', seq: 'required' },
-    'task.offer_with_toolsets_sealed': { taskId: 'required', seq: 'required' },
     'task.offer_for_agent_sealed': { taskId: 'required', seq: 'required' },
     'task.offer_for_agent_with_egress_sealed': { taskId: 'required', seq: 'required' },
     'task.offer_for_agent_with_egress_fresh_sealed': { taskId: 'required', seq: 'required' },
@@ -137,12 +132,6 @@ type FieldRequiredness<T extends MessageType, K extends 'taskId' | 'seq'> =
  */
 type CodecRequirednessMatrix = {
   'conn.hello': { taskId: FieldRequiredness<'conn.hello', 'taskId'>; seq: FieldRequiredness<'conn.hello', 'seq'> };
-  'conn.ack': { taskId: FieldRequiredness<'conn.ack', 'taskId'>; seq: FieldRequiredness<'conn.ack', 'seq'> };
-  'task.offer': { taskId: FieldRequiredness<'task.offer', 'taskId'>; seq: FieldRequiredness<'task.offer', 'seq'> };
-  'task.offer_with_toolsets': {
-    taskId: FieldRequiredness<'task.offer_with_toolsets', 'taskId'>;
-    seq: FieldRequiredness<'task.offer_with_toolsets', 'seq'>;
-  };
   'task.offer_for_agent': { taskId: FieldRequiredness<'task.offer_for_agent', 'taskId'>; seq: FieldRequiredness<'task.offer_for_agent', 'seq'> };
   'task.offer_for_agent_with_egress': {
     taskId: FieldRequiredness<'task.offer_for_agent_with_egress', 'taskId'>;
@@ -223,14 +212,6 @@ type CodecRequirednessMatrix = {
   'task.approval_resolved': {
     taskId: FieldRequiredness<'task.approval_resolved', 'taskId'>;
     seq: FieldRequiredness<'task.approval_resolved', 'seq'>;
-  };
-  'task.offer_sealed': {
-    taskId: FieldRequiredness<'task.offer_sealed', 'taskId'>;
-    seq: FieldRequiredness<'task.offer_sealed', 'seq'>;
-  };
-  'task.offer_with_toolsets_sealed': {
-    taskId: FieldRequiredness<'task.offer_with_toolsets_sealed', 'taskId'>;
-    seq: FieldRequiredness<'task.offer_with_toolsets_sealed', 'seq'>;
   };
   'task.offer_for_agent_sealed': {
     taskId: FieldRequiredness<'task.offer_for_agent_sealed', 'taskId'>;
@@ -321,7 +302,7 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
     expect(parsed.payload.events[1]).toEqual({ type: 'plan_update', step: 1, of: 3 });
   });
 
-  it('an unknown capability flag is accepted, not a distinct type (both conn.hello.capabilities and conn.ack.capabilities are bare string[])', () => {
+  it('an unknown capability flag is accepted, not a distinct type (conn.hello.capabilities is a bare string[])', () => {
     const hello = MESSAGE_PAYLOAD_SCHEMAS['conn.hello'].safeParse({
       protocolVersions: [1],
       capabilities: ['steer', 'some-future-capability-flag'],
@@ -329,24 +310,19 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
       productId: 'acme-agent',
     });
     expect(hello.success).toBe(true);
-
-    const ack = MESSAGE_PAYLOAD_SCHEMAS['conn.ack'].safeParse({
-      protocolVersion: 1,
-      capabilities: ['steer', 'some-future-capability-flag'],
-      serverTime: '2026-01-01T00:00:00.000Z',
-    });
-    expect(ack.success).toBe(true);
   });
 
   it('an unknown `instruction` shape is REJECTED, fail-closed (control/security data, not observability)', () => {
-    const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({
+    const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent'].safeParse({
+      agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
       instruction: { someFutureShape: true }, // neither a plain string nor { blobRef }
     });
     expect(result.success).toBe(false);
   });
 
   it('an unknown field alongside an otherwise well-formed `instruction.blobRef` is REJECTED, fail-closed (same `.strict()` asymmetry applied to the blob-ref instruction variant)', () => {
-    const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({
+    const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent'].safeParse({
+      agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
       instruction: {
         blobRef: {
           blobId: 'blob-1',
@@ -360,12 +336,12 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
     expect(result.success).toBe(false);
   });
 
-  it('the current wire major is 3', () => {
-    expect(PROTOCOL_VERSION).toBe(3);
-    expect(createEnvelope('task.started', {}, { taskId: 'task-1' }).v).toBe(3);
+  it('the current wire major is 4', () => {
+    expect(PROTOCOL_VERSION).toBe(4);
+    expect(createEnvelope('task.started', {}, { taskId: 'task-1' }).v).toBe(4);
   });
 
-  it.each([1, 2])('a v%i envelope is REJECTED: there is no v1 or v2 reader', (v) => {
+  it.each([1, 2, 3])('a v%i envelope is REJECTED: there is no v1, v2 or v3 reader', (v) => {
     const envelope = createEnvelope('task.started', {}, { taskId: 'task-1' });
     expect(() => parseMessage({ ...envelope, v })).toThrow(EnvelopeValidationError);
   });
@@ -389,7 +365,6 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
   });
 
   it.each([
-    'task.offer_with_toolsets',
     'task.offer_for_agent',
     'task.offer_for_agent_with_egress',
     'task.offer_for_agent_with_egress_fresh',
@@ -402,10 +377,6 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
     expect(MESSAGE_PAYLOAD_SCHEMAS[type].safeParse(withPolicy).success).toBe(false);
     const raw = { v: PROTOCOL_VERSION, id: '00000000-0000-4000-8000-000000000102', ts: '2026-01-01T00:00:00.000Z', type, task_id: 'task-1', seq: 1, payload: withPolicy };
     expect(() => parseMessage(raw)).toThrow(EnvelopeValidationError);
-  });
-
-  it('a task.offer without `policy` is accepted', () => {
-    expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({ instruction: 'do it' }).success).toBe(true);
   });
 
   it('an agent.input.preparation that still carries the removed `permissionMode` is REJECTED (strict)', () => {
@@ -432,12 +403,6 @@ function minimalPayloadForProbe(type: MessageType): unknown {
   switch (type) {
     case 'conn.hello':
       return { protocolVersions: [PROTOCOL_VERSION], capabilities: [], deviceId: 'device-1', productId: 'acme-agent' };
-    case 'conn.ack':
-      return { protocolVersion: PROTOCOL_VERSION, capabilities: [], serverTime: '2026-01-01T00:00:00.000Z' };
-    case 'task.offer':
-      return { instruction: 'do it' };
-    case 'task.offer_with_toolsets':
-      return { instruction: 'find leads', requiredToolsets: ['salesko'] };
     case 'task.offer_for_agent':
       return { instruction: 'run for agent', agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } };
     case 'task.offer_for_agent_with_egress':
@@ -601,9 +566,9 @@ function minimalPayloadForProbe(type: MessageType): unknown {
     case 'e2ee.key_package.available':
       return { scopeId: 'scope-1', epoch: 1 };
     case 'task.approve':
-      return {};
+      return { approvalId: 'approval-1' };
     case 'task.reject':
-      return {};
+      return { approvalId: 'approval-1' };
     case 'task.cancel':
       return {};
     case 'task.steer':
@@ -619,7 +584,7 @@ function minimalPayloadForProbe(type: MessageType): unknown {
     case 'task.artifact':
       return { name: 'a.txt', contentType: 'text/plain' };
     case 'task.await_approval':
-      return { summary: 'about to do a thing' };
+      return { summary: 'about to do a thing', approvalId: 'approval-1' };
     case 'task.complete':
       return { summary: 'done', sessionRef: 'sess-1' };
     case 'task.fail':

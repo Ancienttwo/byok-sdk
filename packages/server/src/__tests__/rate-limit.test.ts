@@ -10,6 +10,8 @@ import {
   waitForServerEvent,
   waitForTaskEvent,
   type FakeLongPollDaemon,
+  TEST_AGENT_DISPATCH,
+  TEST_AGENT_REF,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -53,7 +55,7 @@ async function rateLimitedEventsUpTo(byok: ByokServer, barrierTaskId: string): P
 
 /** Offered -> Claimed -> Running over the long-poll send path. */
 async function claimAndStart(daemon: FakeLongPollDaemon, taskId: string): Promise<void> {
-  await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId }));
+  await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId }));
   await daemon.send(createEnvelope('task.started', {}, { taskId }));
 }
 
@@ -97,7 +99,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     const started = await start({ messagesPerSecond: 1000, burst: 10 });
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'sustained rate' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'sustained rate' });
     await claimAndStart(daemon, handle.taskId);
 
     for (let i = 0; i < 25; i++) {
@@ -121,11 +123,11 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     const started = await start({ messagesPerSecond: 5, burst: 3 });
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'burst' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'burst' });
 
     const statuses: number[] = [];
     for (let i = 0; i < 8; i++) {
-      const res = await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+      const res = await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
       statuses.push(res.status);
     }
     expect(statuses).toContain(429);
@@ -142,9 +144,9 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     const started = await start({ messagesPerSecond: 20, burst: 3 });
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'recovers after refill' });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'recovers after refill' });
     for (let i = 0; i < 6; i++) {
-      await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+      await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
     }
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Claimed'); // the first (in-budget) claim landed
 
@@ -172,7 +174,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     });
 
     const envelopes = Array.from({ length: 6 }, () =>
-      createEnvelope('task.claim', { deviceId: 'unused' }, { taskId: 'task_bogus' }),
+      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: 'unused' }, { taskId: 'task_bogus' }),
     );
 
     const res = await fetch(`${started.baseUrl}/byok/messages`, {
@@ -198,12 +200,12 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
       deviceName: 'device-b',
     });
 
-    const handleA = await started.byok.dispatch({ instruction: 'flood', deviceId: deviceA.deviceId });
-    const handleB = await started.byok.dispatch({ instruction: 'untouched', deviceId: deviceB.deviceId });
+    const handleA = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, instruction: 'flood', deviceId: deviceA.deviceId });
+    const handleB = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, instruction: 'untouched', deviceId: deviceB.deviceId });
 
     const statuses: number[] = [];
     for (let i = 0; i < 8; i++) {
-      const res = await deviceA.send(createEnvelope('task.claim', { deviceId: deviceA.deviceId }, { taskId: handleA.taskId }));
+      const res = await deviceA.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: deviceA.deviceId }, { taskId: handleA.taskId }));
       statuses.push(res.status);
     }
     expect(statuses).toContain(429);
@@ -246,10 +248,10 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     // remaining 7 all hit the limit — 7 raw hits, but they're all the SAME
     // continuous episode (nothing in between ever succeeds).
     for (let i = 0; i < 10; i++) {
-      await flooder.send(createEnvelope('task.claim', { deviceId: flooder.deviceId }, { taskId: 'bogus-task-coalesce' }));
+      await flooder.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: flooder.deviceId }, { taskId: 'bogus-task-coalesce' }));
     }
 
-    const barrier = await started.byok.dispatch({ deviceId: barrierDevice.deviceId, instruction: 'coalesce barrier' });
+    const barrier = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: barrierDevice.deviceId, instruction: 'coalesce barrier' });
     const rateLimitedEvents = await rateLimitedEventsUpTo(started.byok, barrier.taskId);
 
     expect((await started.byok.stats()).rateLimitEvents).toBe(7); // every hit counted

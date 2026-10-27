@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createTaskTools, type KeySpec } from './index';
-import { call, cleanup, connect, openDaemonHost } from './tools.test-support';
+import { policy } from '@byok-sdk/example-host-execution-core/test-support';
+import { AGENT, call, cleanup, connect, openDaemonHost } from './tools.test-support';
 
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 const scopes: KeySpec['scopes'] = ['tasks.dispatch', 'tasks.read', 'tasks.cancel', 'artifacts.read'];
@@ -19,7 +20,7 @@ async function until(client: Client, taskId: string, done: (state: string) => bo
 
 it('runs submit, status and list against the real daemon, and frees the slot at the device terminal', async () => {
   const host = await openDaemonHost();
-  const key = host.ledger.issueKey({ label: 'Bot A', scopes, deviceIds: [host.deviceId], runtimes: ['pi'] });
+  const key = host.ledger.issueKey({ label: 'Bot A', scopes, deviceIds: [host.deviceId], runtimes: ['pi'], agentRef: AGENT });
   const client = await connect(host, key.token);
   expect((await client.listTools()).tools.map(tool => tool.name).sort()).toEqual(TOOLS);
   expect((await call(client, 'byok_whoami', {})).value).toEqual({ keyId: key.key.keyId, label: 'Bot A', scopes, runtimes: ['pi'],
@@ -53,7 +54,7 @@ it('runs submit, status and list against the real daemon, and frees the slot at 
 
 it('cancels a running task on the real daemon, and a repeated cancel keeps the final state', async () => {
   const host = await openDaemonHost();
-  const key = host.ledger.issueKey({ label: 'Bot A', scopes, deviceIds: [host.deviceId], runtimes: ['pi'] });
+  const key = host.ledger.issueKey({ label: 'Bot A', scopes, deviceIds: [host.deviceId], runtimes: ['pi'], agentRef: AGENT });
   const client = await connect(host, key.token);
   const { taskId } = (await call(client, 'byok_task_submit', { runtime: 'pi', instruction: 'Run until cancelled.', clientRequestId: 'cancel-1' })).value;
   const session = await host.runtime.session(taskId);
@@ -73,9 +74,9 @@ it('cancels a running task on the real daemon, and a repeated cancel keeps the f
 
 it('refuses bad or ungranted submits before admission, and hides foreign tasks', async () => {
   const host = await openDaemonHost();
-  const key = host.ledger.issueKey({ label: 'Bot A', scopes, deviceIds: [host.deviceId], runtimes: ['pi'] });
+  const key = host.ledger.issueKey({ label: 'Bot A', scopes, deviceIds: [host.deviceId], runtimes: ['pi'], agentRef: AGENT });
   const reader = host.ledger.issueKey({ label: 'Bot B', scopes: ['tasks.read'], deviceIds: [host.deviceId], runtimes: ['pi'] });
-  const offline = host.ledger.issueKey({ label: 'Bot C', scopes, deviceIds: ['dev-not-paired'], runtimes: ['pi'] });
+  const offline = host.ledger.issueKey({ label: 'Bot C', scopes, deviceIds: ['dev-not-paired'], runtimes: ['pi'], agentRef: AGENT });
   const client = await connect(host, key.token);
   const refused = async (target: Client, name: string, args: Record<string, unknown>) => {
     const result = await call(target, name, args); expect(result.isError).toBe(true); return result.value.code as string;
@@ -92,7 +93,7 @@ it('refuses bad or ungranted submits before admission, and hides foreign tasks',
   expect((await call(client, 'byok_whoami')).value.quota.now).toMatchObject({ runningTasks: 0, remainingSubmits: 60 });
   expect(host.runtime.offers).toHaveLength(0);
   for (const blobBaseUrl of ['http://bot.example', 'https://bot.example/sdk', 'not a url']) {
-    expect(() => createTaskTools({ sdk: host.server, ledger: host.ledger, blobBaseUrl })).toThrow(TypeError);
+    expect(() => createTaskTools({ sdk: host.server, ledger: host.ledger, egressPolicy: policy, blobBaseUrl })).toThrow(TypeError);
   }
 
   const { taskId } = (await call(client, 'byok_task_submit', { runtime: 'pi', instruction: 'Owned by Bot A.' })).value;

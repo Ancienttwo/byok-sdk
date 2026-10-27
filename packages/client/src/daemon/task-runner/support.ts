@@ -1,4 +1,5 @@
 // Types and helpers shared by `TaskRunner` (../task-runner.ts) and the member
+import type { RuntimeTaskInput } from '../../types';
 // modules in this directory.
 //
 // A member module holds the bodies of `TaskRunner` methods as functions that
@@ -15,7 +16,7 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import { RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalProjectionSelection, type TaskOfferPayload, type TaskDeclinePayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
+import { RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalProjectionSelection, type TaskDeclinePayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, RuntimeAdapterDescriptor, Session } from '../../types';
 import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home';
 import type { AgentHomeAccessMode, AgentHomeMemoryDigest } from '../../agent-home-readers';
@@ -24,7 +25,6 @@ import type { ApprovalOrigin } from '../approvals';
 import type { BlobResolver } from '../blob-client';
 import { ExecutionRecordAccumulator, type ExecutionRecord } from '../execution-record';
 import { ProgressBatcher } from '../progress-batcher';
-import type { GitWorkspaceLease } from '../git-workspace';
 import { AgentMessageOutbox } from '../agent-message-outbox';
 import { AgentResultStore } from '../agent-result-store';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
@@ -38,9 +38,6 @@ import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REA
 export type AcceptedOfferPayload = Parameters<NonNullable<TaskRunnerDeps['admissionGuard']>>[0]['payload'];
 
 export const AGENT_TERMINAL_EVIDENCE_RETRY_DELAY_MS = 20;
-
-/** Bound best-effort Git observation so terminal protocol outcomes cannot wait forever on repository I/O. */
-export const GIT_OBSERVATION_TIMEOUT_MS = 5_000;
 
 /** Inline artifact payloads must stay under this many UTF-8 bytes — mirrors the frozen `TaskArtifactPayloadSchema.inline` limit in `packages/protocol` (see docs/protocol.md §7). Anything bigger goes through the blob client. */
 export const MAX_INLINE_ARTIFACT_BYTES = 64 * 1024;
@@ -133,9 +130,6 @@ export interface ActiveTask {
   terminalReason?: string;
   agentTerminalPersisted?: boolean;
   agentTerminalEvidenceFailureReported?: boolean;
-  gitWorkspaceId?: string;
-  gitLease?: GitWorkspaceLease;
-  gitBaseline?: string;
   batcher: ProgressBatcher;
   summaryParts: string[];
   /**
@@ -171,6 +165,13 @@ export interface ActiveTask {
    * `RuntimeOperationStartInput.approvalChannel.resolve`'s doc comments.
    */
   pendingApprovalId?: string;
+  /**
+   * The approval a `Daemon.approve`/`reject` call is deciding right now. The
+   * registry resolves it as `'wire'`, so `dispatchApproval`'s callback reads
+   * this to report the local decision before it dispatches the next queued
+   * approval.
+   */
+  localApprovalDecision?: string;
   /**
    * M4 Phase 4 (fold-in from the P3 gate): FIFO queue of `requestApproval`
    * calls for this SAME task that arrived while another one was already
@@ -405,8 +406,8 @@ export function adapterSupportsMcpToolsets(descriptor: RuntimeAdapterDescriptor)
   return descriptor.capabilities.mcpToolsets === true;
 }
 
-export function withoutRequiredToolsets(payload: AcceptedOfferPayload): TaskOfferPayload {
-  const { requiredToolsets, egressPolicy, messageEgress, preparation, ...offer } = payload as TaskOfferWithToolsetsPayload
+export function withoutRequiredToolsets(payload: AcceptedOfferPayload): RuntimeTaskInput {
+  const { requiredToolsets, egressPolicy, messageEgress, preparation, ...offer } = payload as TaskOfferForAgentPayload
     & Partial<TaskOfferForAgentWithEgressPayload>
     & Partial<TaskOfferForAgentWithEgressFreshPayload>
     & Partial<TaskOfferPreparedPayload>;
@@ -417,7 +418,7 @@ export function withoutRequiredToolsets(payload: AcceptedOfferPayload): TaskOffe
   // admits a RUNTIME, and a preparation reference is not a runtime input. The
   // prepared lane carries it to `start()` as its own start variant instead.
   void preparation;
-  return offer as TaskOfferPayload;
+  return offer as RuntimeTaskInput;
 }
 
 /**
@@ -439,7 +440,7 @@ export function offeredPreparation(payload: AcceptedOfferPayload): InputPreparat
  * prepared run that resolved a separate instruction would have two answers to
  * what it is about to send.
  */
-export function offeredInstruction(payload: AcceptedOfferPayload): TaskOfferPayload['instruction'] | undefined {
+export function offeredInstruction(payload: AcceptedOfferPayload): RuntimeTaskInput['instruction'] | undefined {
   return 'instruction' in payload ? payload.instruction : undefined;
 }
 
@@ -644,7 +645,7 @@ export type OpenArtifactResult = { ok: true; handle: FileHandle } | { ok: false;
  * must never be mistaken for the guard having held.
  */
 export async function openArtifact(workspaceDir: string, name: string): Promise<OpenArtifactResult> {
-  // Workspace root is daemon-created (see `resolveWorkspaceDir`) and
+  // The workspace is the SDK-owned Agent home cwd and
   // trusted — realpath'd exactly once, not derived from the untrusted
   // `name`, so this step has no TOCTOU exposure of its own.
   const realWorkspaceDir = await fs.realpath(workspaceDir).catch(() => workspaceDir);

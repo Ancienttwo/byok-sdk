@@ -53,9 +53,10 @@ marker be reclaimed. If a group survives SIGKILL, start is refused and the
 error names the record file: verify the processes are gone, then delete that
 file.
 
-`agentHome` and legacy `gitWorkspace` are mutually exclusive daemon
-authorities. Agent execution never silently inherits task-scoped Git workspace
-semantics or creates a second durable workspace owner.
+The Agent home is the only workspace authority. Wire v4 removed Git
+workspace mode and `DaemonConfig.workspaceRoot` (#925); the daemon leaves an
+older daemon's `<storeDir>/git-workspaces.json`,
+`<storeDir>/session-workspaces.json` and task directories untouched.
 
 `agentId` is also rejected when it is not a portable Windows pathname segment
 (reserved device names or a trailing dot/space). A strict Agent `taskId` is a
@@ -174,13 +175,12 @@ declaration of that capability; the hosted composition persists the
 declaration in the device row. `workspaceHint` remains reserved and ignored;
 it is not an Agent-home input.
 
-Cutover is explicit and one-shot. Existing task workspaces and legacy
-`SessionWorkspaceStore` records are not adopted, copied, or searched. A
+Cutover is explicit and one-shot. Task directories and session workspace
+records an older daemon left are not adopted, copied, or searched. A
 Salesko migration may enable Agent dispatch only after the target daemon has
 the capability and the branded root has been selected. An old daemon, missing
 AgentRef, profile revision mismatch, session/cwd/runtime mismatch, or busy
-Agent home fails closed; none silently falls back to
-`workspaceRoot/<taskId>`.
+Agent home fails closed; none falls back to another directory.
 
 Egress enablement is a second explicit admission step. Salesko first authors
 one exact policy revision, then waits for the daemon's durable

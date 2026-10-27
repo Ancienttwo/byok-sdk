@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -48,7 +49,6 @@ describe('LocalAgentReleaseIdentity', () => {
   });
 
   it('copies and freezes the identity once at daemon construction', async () => {
-    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-release-workspace-'));
     const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-release-store-'));
     const input: LocalAgentReleaseIdentity = { version: '1.2.3', buildId: 'build-a' };
     const daemon = createDaemonWithAdapters(
@@ -56,7 +56,7 @@ describe('LocalAgentReleaseIdentity', () => {
         productName: 'Release Test',
         productId: 'release-test',
         serverUrl: 'http://127.0.0.1:1',
-        workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         localAgentRelease: input,
       },
@@ -70,12 +70,11 @@ describe('LocalAgentReleaseIdentity', () => {
   });
 
   it('rejects a missing identity at the runtime boundary for untyped JavaScript callers', async () => {
-    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-release-missing-workspace-'));
     expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       productName: 'Release Test',
       productId: 'release-test-missing',
       serverUrl: 'http://127.0.0.1:1',
-      workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       localAgentRelease: undefined,
     } as never, [new StubRuntimeAdapter()])).toThrow(/localAgentRelease/);
   });
