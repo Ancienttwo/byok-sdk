@@ -80,6 +80,14 @@ describe('GET /api/tasks/:taskId/events', () => {
   });
 
   it('starts at the current state when the cursor is unknown', async () => {
+    const live: TaskEventEntry = { cursor: 'feed-b.0', event: { kind: 'state', state: 'Running', at: '2026-10-27T00:00:06.000Z' } };
+    const { tasks, calls } = scripted(SNAPSHOT, [new TaskEventsUnavailableError('task-1', 'cursor_unknown'), [live]]);
+    const response = await app(tasks).request('/api/tasks/task-1/events', { headers: { 'Last-Event-ID': 'feed-a.3' } });
+    expect(await messages(response)).toEqual([{ id: 'feed-b.0', event: live.event }]);
+    expect(calls).toEqual([{ after: 'feed-a.3' }, { from: 'state' }]);
+  });
+
+  it('sends the pending approval with the current state when the fallback finds the task waiting', async () => {
     const request: TaskEventEntry = { cursor: 'feed-b.4', event: { kind: 'await_approval', summary: 'ok to write?', approvalId: 'appr-7' } };
     const waiting: TaskEventEntry = { cursor: 'feed-b.5', event: { kind: 'state', state: 'AwaitApproval', at: '2026-10-27T00:00:06.000Z' } };
     const { tasks, calls } = scripted(SNAPSHOT, [new TaskEventsUnavailableError('task-1', 'cursor_unknown'), [request, waiting]]);
