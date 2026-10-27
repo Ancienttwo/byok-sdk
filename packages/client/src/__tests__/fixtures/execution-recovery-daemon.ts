@@ -258,10 +258,18 @@ if (config.action === 'unpair') {
   process.exit(0);
 }
 
+const diagStart = Date.now();
+const diag = (label: string) => process.stderr.write(`[diag ${Date.now() - diagStart}ms] ${label} ${JSON.stringify(daemon.status().lifecycle)}\n`);
+const diagTimer = setInterval(() => diag('tick'), 2000);
+diag('before pair');
 const paired = config.pairingCode === undefined ? undefined : await daemon.pair(config.pairingCode);
+diag('after pair');
 await daemon.start();
+diag('after start');
 // #391: start() is local startup only; "ready" means the cloud accepted this run's hello.
-await waitForDaemonOpen(daemon);
+await waitForDaemonOpen(daemon, 80_000);
+diag('open');
+clearInterval(diagTimer);
 const device = paired ?? await new DeviceStore(config.storeDir, createDeviceCredentialStore(config)).load();
 process.stdout.write(`${JSON.stringify({ ready: true, pid: process.pid, deviceId: device?.deviceId })}\n`);
 

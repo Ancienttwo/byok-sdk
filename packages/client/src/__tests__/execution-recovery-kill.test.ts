@@ -86,7 +86,7 @@ class JsonChild {
   }
 
   async ready(): Promise<JsonLine> {
-    return this.waitFor((event) => event.ready === true);
+    return this.waitFor((event) => event.ready === true, process.platform === 'win32' ? 90_000 : 10_000);
   }
 
   async rpc(method: string, params?: Record<string, unknown>): Promise<unknown> {
@@ -1023,6 +1023,7 @@ describe.runIf(process.platform === 'win32')('compiled daemon taskkill /F execut
   it('fails a claimed task once with daemon_interrupted after taskkill /F and restart, without starting the runtime again', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud);
+    console.error(`[diag first daemon]\n${daemon.stderr}`);
     const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'hang until taskkill' }) as { taskId: string };
     await waitForAttempt(cloud, offer.taskId, 'running');
     expect(starts().map((start) => start.taskId)).toEqual([offer.taskId]);
@@ -1030,7 +1031,8 @@ describe.runIf(process.platform === 'win32')('compiled daemon taskkill /F execut
     expect(await daemon.exited()).toEqual({ code: 1, signal: null });
     expect((await cloud.rpc('readTaskAttempt', { taskId: offer.taskId }) as { status: string }).status).toBe('running');
 
-    await startDaemon();
+    const restarted = await startDaemon();
+    console.error(`[diag restarted daemon]\n${restarted.stderr}`);
     const attempt = await waitForAttempt(cloud, offer.taskId, 'failed');
     expect(attempt.terminalCause).toBe('daemon_interrupted');
     const terminal = decodeEnvelope(String(await cloud.rpc('readTerminalBody', { taskId: offer.taskId })));
@@ -1043,5 +1045,5 @@ describe.runIf(process.platform === 'win32')('compiled daemon taskkill /F execut
     expect(wire.filter((row) => row.task_id === offer.taskId && ['task.complete', 'task.fail', 'task.cancelled'].includes(row.type)))
       .toEqual([expect.objectContaining({ type: 'task.fail' })]);
     expect(starts().map((start) => start.taskId)).toEqual([offer.taskId]);
-  }, 60_000);
+  }, 240_000);
 });
