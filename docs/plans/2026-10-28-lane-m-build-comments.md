@@ -61,3 +61,25 @@ Product inputs are frozen in candidate tree `ad0a16f39c3c5fa1d8c9541c704e1a0697b
 - `bun run check:release-pack -- --out-dir _ops/release-pack-04b4aa4a`: exit 0, nine tarballs. Installed root/adapters/CLI MCP tools/call and submit_result smoke pass, as do asset integrity and official Pi pin checks. The prior packed fixture was corrected to require exact SDK helper grants while rejecting default Host grants; no production code changed.
 
 Local receipts: `_ops/lane-m-{artifact-audit,map-license-audit,measured-closures}.json`, `_ops/release-pack-04b4aa4a/release-manifest.json`, and `/tmp/byok-final-composite-{build,test-r2,typecheck-final,api-final,version-final,pack-r2-run}.log`. Final CI must bind the reviewable PR head. Individual pre-M budget records in other plans are historical; `api-surface/entries.json` is the current budget authority.
+
+
+## Reviewed CI scope for M build inputs
+
+Coordinator wB:p4 approved the exact sealed-client path to retain ordinary client tsup coverage, and the complete M changed-file audit identified seven more precise build inputs. Each selects its actual workspace owner plus npm-release-pack; existing dependency expansion and family ownership remain intact. No tsup wildcard or unknown-path fallback is added.
+
+| Exact path | Workspace |
+| --- | --- |
+| `packages/client/tsup.sealed.config.ts` | `packages/client` |
+| `packages/cloud-dataplane/tsup.config.ts` | `packages/cloud-dataplane` |
+| `packages/cloud-do/tsup.config.ts` | `packages/cloud-do` |
+| `packages/cloud/tsup.config.ts` | `packages/cloud` |
+| `packages/protocol/tsup.config.ts` | `packages/protocol` |
+| `packages/server/tsup.config.ts` | `packages/server` |
+| `packages/testkit/tsup.config.ts` | `packages/testkit` |
+| `packages/ui-runtime/tsup.config.ts` | `packages/ui-runtime` |
+
+The complete changed-file selector run against main c4a725603 resolved all 71 paths. Selected workspaces: `examples/basic`, `examples/bot-collaboration`, `examples/byok-mcp-server`, `examples/codex-interaction-host`, `examples/host-execution-core`, `examples/hosted-bot-collaboration`, `examples/hosted-bot-collaboration-worker`, `examples/live-activity-host`, `examples/packaging`, `examples/salesko-connector-broker`, `packages/client`, `packages/cloud`, `packages/cloud-dataplane`, `packages/cloud-do`, `packages/conformance`, `packages/core`, `packages/keys`, `packages/protocol`, `packages/server`, `packages/testkit`, `packages/ui-runtime`.
+
+Selected families: `adapter-lifecycle-smoke`, `credential-isolation-audit`, `dataplane`, `npm-release-pack`.
+
+`node --test scripts/ci/select-impact.test.mjs scripts/ci/plan-ci.test.mjs`: 54 passed, zero skipped. Regressions require sealed/ordinary client scope equality, owner-consumer and pack coverage, rejection of nearby unknown configs, and failure when required pack coverage is skipped. The complete release-only matrix is not used as a fallback. Product sources, build inputs and all 43 measured budget values remain unchanged.
