@@ -13,4 +13,8 @@ export default defineConfig({
   clean: true,
   splitting: false,
   treeshake: true,
+  minifyWhitespace: true,
+  esbuildOptions(options) {
+    options.legalComments = 'inline';
+  },
 });

@@ -9,6 +9,10 @@ export default defineConfig({
   entry: ['src/bin/pi-runtime-host-sealed.ts'], outDir: 'dist/bin',
   format: ['esm'], target: 'es2022', platform: 'node', dts: false,
   sourcemap: true, clean: false, splitting: false, treeshake: true, metafile: true,
+  minifyWhitespace: true,
+  esbuildOptions(options) {
+    options.legalComments = 'inline';
+  },
   esbuildPlugins: [workspaceExternals(), subagentsBuild(true)],
   noExternal: ['pi-web-access', /^@byok-sdk\//],
   external: ['koffi', '#byok-pi-todo-runtime', 'typebox', 'typebox/compile',

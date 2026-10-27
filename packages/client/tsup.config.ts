@@ -40,6 +40,9 @@ export default defineConfig({
   treeshake: true,
   // Strip source comments and formatting without renaming symbols or rewriting syntax.
   minifyWhitespace: true,
+  esbuildOptions(options) {
+    options.legalComments = 'inline';
+  },
   // Let our plugin annotate these external edges before tsup short-circuits them.
   noExternal: ['pi-web-access', /^@byok-sdk\//],
   esbuildPlugins: [workspaceExternals(), subagentsBuild(false), {

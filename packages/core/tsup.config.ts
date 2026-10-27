@@ -9,6 +9,10 @@ const shared: Options = {
   sourcemap: true,
   splitting: false,
   treeshake: true,
+  minifyWhitespace: true,
+  esbuildOptions(options) {
+    options.legalComments = 'inline';
+  },
 };
 
 const ERRORS_MODULE = path.resolve('src/errors.ts');
