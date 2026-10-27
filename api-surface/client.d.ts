@@ -1960,7 +1960,7 @@ export interface AgentEgressControllerOptions {
     readonly tenantId?: string;
 }
 export interface AgentEgressProgressInput {
-    readonly agentRef?: AgentRef;
+    readonly agentRef: AgentRef;
     readonly taskId: string;
     readonly events: readonly AgentEvent[];
 }
