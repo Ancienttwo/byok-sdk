@@ -15,6 +15,7 @@ const input = {
   taskId: 'turn-execution-1', deviceId: 'device',
   payload: { instruction: 'context plus current input', runtime: 'codex',
     agentRef: { agentId: 'agent', profileRevision: 'revision' },
+    session: { mode: 'fresh' },
     egressPolicy: { policyRevision: 'policy', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
       reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
       transfers: { workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] }, transcript: 'disabled', artifact: 'disabled' } },
@@ -24,10 +25,11 @@ const input = {
 };
 
 describe('fresh Agent execution submission', () => {
-  it.each(['taskId', 'deviceId', 'runtime', 'agentRef', 'egressPolicy', 'terminalProjection', 'sessionRef', 'unknownField'])('rejects invalid %s before any attempt or mailbox write', async (field) => {
+  it.each(['taskId', 'deviceId', 'runtime', 'agentRef', 'egressPolicy', 'terminalProjection', 'session', 'resumeSession', 'sessionRef', 'unknownField'])('rejects invalid %s before any attempt or mailbox write', async (field) => {
     const harness = createHarness();
     const candidate = structuredClone(input) as any;
     if (field === 'sessionRef') candidate.payload.sessionRef = 'old-session';
+    else if (field === 'resumeSession') candidate.payload.session = { mode: 'resume', sessionRef: 'old-session' };
     else if (field === 'unknownField') candidate.payload.unknownField = 'undeclared';
     else if (field in candidate) delete candidate[field];
     else delete candidate.payload[field];
@@ -70,7 +72,8 @@ describe('fresh Agent execution submission', () => {
       payload: { ...payload, terminalProjection: { mode: 'result-document', contract: 'test.result.v1', schema: RESULT_SCHEMA } } });
     const offered = await harness.cloud.submitAgentExecution(TENANT_A, persisted);
     expect(offered.taskId).toBe(input.taskId);
-    expect(offered.envelope).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh',
+    // B2: task.offer_for_agent_with_egress_fresh -> task.offer (fresh session)
+    expect(offered.envelope).toMatchObject({ type: 'task.offer',
       payload: { terminalProjection: persisted.payload.terminalProjection } });
     expect(offered.envelope.payload).not.toHaveProperty('messageEgress');
     expect(await harness.cloud.readTaskOffer(TENANT_A, input.taskId)).toMatchObject({ delivered: true, payload: persisted.payload });
@@ -122,7 +125,9 @@ describe('fresh Agent execution submission', () => {
     const persisted = JSON.parse(JSON.stringify(prepared));
     const offered = await harness.cloud.submitAgentExecution(TENANT_A, persisted);
     expect(offered.taskId).toBe(input.taskId);
-    expect(offered.envelope.type).toBe('task.offer_for_agent_with_egress_fresh');
+    // B2: task.offer_for_agent_with_egress_fresh -> task.offer (fresh session)
+    expect(offered.envelope.type).toBe('task.offer');
+    expect(offered.envelope.payload).toMatchObject({ session: { mode: 'fresh' } });
     expect(offered.envelope.payload).not.toHaveProperty('sessionRef');
     expect(offered.envelope.payload).not.toHaveProperty('agentMessageContext');
     expect(await harness.cloud.readTaskOffer(TENANT_A, input.taskId)).toMatchObject({ delivered: true, payload: prepared.payload });
