@@ -80,7 +80,6 @@ const submitSealedFresh: Enqueue = (h, d, payload: { messageEgress?: unknown }) 
     ...(payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT }),
   });
 
-// B2: one ENQUEUE entry per old offer type -> one per lane of the single task.offer, chosen by offerVariantOf
 const OFFER_ENQUEUE: Record<OfferVariant, Enqueue> = {
   resume: (h, d, payload) => h.cloud.enqueueAgentOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'resume with egress': (h, d, payload) => h.cloud.enqueueAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
@@ -100,7 +99,6 @@ const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
   'provider.provisioning.available': (h, d, payload) => h.cloud.enqueueProviderProvisioningNotice(TENANT_A, d, payload),
   'agent.memory.intent.available': (h, d, payload) => h.cloud.enqueueAgentMemoryIntentNotice(TENANT_A, d, payload),
   'e2ee.key_package.available': (h, d, payload) => h.cloud.enqueueScopeKeyPackageNotice(TENANT_A, d, payload),
-  // B2: task.steer_sealed -> task.steer (only its sealed lines carry a gate)
   'task.steer': steerSealedRunningTask,
 };
 
@@ -164,7 +162,6 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
   it('every fresh-execution flag stays exercised through the hosted API', () => {
     const union = (entries: readonly (typeof gatedLines)[number][]) => new Set(entries.flatMap((entry) => entry.flags));
     const fresh = gatedLines.filter((entry) => entry.variant === 'fresh execution');
-    // B2: the old fresh offer surface -> the task.offer rows a plaintext fresh execution can carry (all but `preparation` and `sealing`)
     const table = new Set(
       WIRE_ADDITIONS.flatMap((entry) => (
         entry.kind === 'envelope' && entry.rule === 'gated' && entry.advertisedBy === 'device' && entry.surface === 'task.offer'

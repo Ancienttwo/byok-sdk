@@ -118,7 +118,6 @@ describe('a task-opening envelope over the journal bound (#826)', () => {
 
   it('declines a sealed offer whose plaintext metadata passes the inline floor', async () => {
     const { server, cursor } = await start();
-    // B2: inflate `sessionRef` by 100 KiB on a sealed task-input offer -> inflate the plaintext `instruction` of an output-sealed offer.
     // v4 caps `session.sessionRef` at 512 characters, so no valid plaintext member of an offer that carries ciphertext
     // can pass the inline floor; an offer with `sealing` and no `sealed` still takes the sealed floor and has a free-text member.
     const payload = golden('task.offer', (candidate) => candidate.sealing !== undefined && candidate.sealed === undefined && typeof candidate.instruction === 'string');

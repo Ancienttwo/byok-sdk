@@ -72,7 +72,6 @@ describe('fresh Agent execution submission', () => {
       payload: { ...payload, terminalProjection: { mode: 'result-document', contract: 'test.result.v1', schema: RESULT_SCHEMA } } });
     const offered = await harness.cloud.submitAgentExecution(TENANT_A, persisted);
     expect(offered.taskId).toBe(input.taskId);
-    // B2: task.offer_for_agent_with_egress_fresh -> task.offer (fresh session)
     expect(offered.envelope).toMatchObject({ type: 'task.offer',
       payload: { terminalProjection: persisted.payload.terminalProjection } });
     expect(offered.envelope.payload).not.toHaveProperty('messageEgress');
@@ -125,7 +124,6 @@ describe('fresh Agent execution submission', () => {
     const persisted = JSON.parse(JSON.stringify(prepared));
     const offered = await harness.cloud.submitAgentExecution(TENANT_A, persisted);
     expect(offered.taskId).toBe(input.taskId);
-    // B2: task.offer_for_agent_with_egress_fresh -> task.offer (fresh session)
     expect(offered.envelope.type).toBe('task.offer');
     expect(offered.envelope.payload).toMatchObject({ session: { mode: 'fresh' } });
     expect(offered.envelope.payload).not.toHaveProperty('sessionRef');

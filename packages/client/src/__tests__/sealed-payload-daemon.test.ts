@@ -242,7 +242,6 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const info = vi.spyOn(console, 'info');
     const { server, adapter, deviceId, member } = await start({ e2ee: false });
     await vi.waitFor(() => expect(info).toHaveBeenCalledWith(expect.stringMatching(/^\[byok\/client\] E2EE member \S+ verified/u)), BUDGET_MS);
-    // B2: the verified member opens a sealed offer and runs it -> the offer is declined sealed_key_unavailable before it is opened:
     // the receiver checks the offer's `sealing` gate against the flags this daemon advertises, and it never advertises sealed-payload-v1 here.
     server.send(await sealedOffer(member, 'undeclared', server.nextSeq(), deviceId, 'run'));
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'undeclared', BUDGET_MS);
@@ -317,8 +316,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     expect(server.e2ee.packageReads).toBe(1);
     expect(adapter.startCalls[0]!.task.instruction).toBe(prependAgentMemoryGuidance(instruction));
     adapter.sessions[0]!.emit({ type: 'progress', text: 'secret progress' });
-    // B2: the progress batch forwarded all its events -> the Agent egress lane (which every v4 fresh offer carries) forwards the last event of a batch,
-    // so the turn ends only after the progress envelope under test was sent.
+    // The Agent egress lane of a fresh offer forwards the last event of a batch, so the turn ends only after the progress envelope under test was sent.
     await server.waitFor((envelope) => wireForm(envelope) === 'task.progress_sealed' && envelope.task_id === 'sealed-task', BUDGET_MS);
     adapter.sessions[0]!.emit({ type: 'turn_end' });
 
@@ -834,8 +832,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       adapter.sessions[0]!.emit({ type: 'artifact', name: 'huge.bin', contentType: 'application/octet-stream' });
-      // B2: the progress batch forwarded all its events -> the Agent egress lane (which every v4 fresh offer carries) forwards the last event of a batch,
-      // so the turn ends only after the progress envelope under test was sent.
+      // The Agent egress lane of a fresh offer forwards the last event of a batch, so the turn ends only after the progress envelope under test was sent.
       await server.waitFor((envelope) => wireForm(envelope) === 'task.progress_sealed' && envelope.task_id === 'too-big', BUDGET_MS);
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'too-big', BUDGET_MS);
@@ -858,8 +855,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       adapter.sessions[0]!.emit({ type: 'artifact', name: 'large.bin', contentType: 'application/octet-stream' });
-      // B2: the progress batch forwarded all its events -> the Agent egress lane (which every v4 fresh offer carries) forwards the last event of a batch,
-      // so the turn ends only after the progress envelope under test was sent.
+      // The Agent egress lane of a fresh offer forwards the last event of a batch, so the turn ends only after the progress envelope under test was sent.
       await server.waitFor((envelope) => wireForm(envelope) === 'task.progress_sealed' && envelope.task_id === 'large', BUDGET_MS);
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'large', BUDGET_MS);
@@ -903,7 +899,6 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
   it('declines an over-bound sealed offer with sealed_open_failed', async () => {
     const { server, cursor } = await start();
-    // B2: inflate `sessionRef` by 100 KiB on a sealed task-input offer -> inflate the plaintext `instruction` of an output-sealed offer.
     // v4 caps `session.sessionRef` at 512 characters, so no valid plaintext member of an offer that carries ciphertext
     // can pass the inline floor; an offer with `sealing` and no `sealed` still takes the sealed floor and closed decline code.
     const line = corpus.find((candidate) => candidate.type === 'task.offer' && candidate.payload.sealing !== undefined

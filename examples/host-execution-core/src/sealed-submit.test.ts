@@ -37,11 +37,9 @@ function readback(input: SealedAgentExecutionInput | FrozenInput, delivered: boo
 describe('a sealed frozen input (#953)', () => {
   it('reads back only the offer of its own lane', async () => {
     const sealed = await sealedInput('task-1', 'device-1'), open = plain(sealed);
-    // B2: the type of each lane -> 'task.offer' for both, because the plain and the sealed lane now share one wire type
     expect(frozenOfferType()).toBe('task.offer');
     expect(sameFrozenOffer(readback(sealed, true), sealed)).toBe(true);
     // A plain offer recorded for a sealed input, or the reverse, is never the frozen input.
-    // B2: a readback of the other lane's type -> a readback of the other lane's payload, because the lanes no longer differ by type
     expect(sameFrozenOffer(readback(open, true), sealed)).toBe(false);
     expect(sameFrozenOffer(readback(sealed, true), open)).toBe(false);
     expect(sameFrozenOffer({ ...readback(sealed, true), payload: open.payload } as FrozenOffer, sealed)).toBe(false);

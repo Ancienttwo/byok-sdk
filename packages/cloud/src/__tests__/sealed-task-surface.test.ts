@@ -29,7 +29,6 @@ const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.e
   .map((raw) => JSON.parse(raw) as CorpusLine);
 const lines = corpus.map((line, index) => ({ ...line, index }));
 const isFreshOffer = (payload: Record<string, unknown>) => (payload.session as { mode?: unknown } | undefined)?.mode === 'fresh';
-// B2: egressLine(sealed type, ...) -> egressLine(lane, ...): every offer is a task.offer, so the lane is told by the session mode
 const egressLine = (lane: 'sealed' | 'fresh', categories: readonly string[]) => lines.find((line) => line.type === 'task.offer'
   && line.payload.messageEgress !== undefined
   && isFreshOffer(line.payload) === (lane === 'fresh')

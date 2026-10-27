@@ -105,7 +105,6 @@ describe('hosted prepared-Execution dispatch', () => {
     });
     // The omission of the instruction is structural, and survives the round trip as an omission.
     expect('instruction' in decoded.payload).toBe(false);
-    // B2: no sessionRef key -> a fresh session selection (a prepared offer never resumes)
     expect(decoded.payload.session).toEqual({ mode: 'fresh' });
     expect(offered.attempt.agentRef).toEqual(AGENT_REF);
     expect((await harness.cloud.readTaskAttempt(TENANT_A, 'prepared-task-1'))?.agentRef).toEqual(AGENT_REF);

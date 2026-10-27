@@ -130,7 +130,6 @@ describe('the inbound gate', () => {
       if (type === 'agent.message.draft') expect(outcome).toBe('rejected'); // No frozen message requirement in this generic fixture.
       if (outcome === 'accepted') accepted.push(type);
     }
-    // B2: the sealed daemon types were entries of DAEMON_TO_SERVER_TYPES -> the sealed branches of its plaintext types, sent after the plain ones as before
     for (const [type, payload] of sealedGoldenPayloads) {
       const sealed = createEnvelope(type as Envelope['type'], payload as never, { taskId }) as Envelope;
       // #654 E3a: this kernel does not open sealed output yet.

@@ -83,7 +83,6 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
       runtime: 'claude',
       requiredToolsets: ['salesko.connectors'],
     });
-    // B2: type 'task.offer_for_agent_with_egress_fresh' -> type 'task.offer' with payload.session.mode 'fresh'
     expect(offer.envelope).toMatchObject({
       type: 'task.offer',
       payload: { session: { mode: 'fresh' }, runtime: 'claude', requiredToolsets: ['salesko.connectors'] },

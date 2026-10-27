@@ -131,7 +131,6 @@ describe('a sealed envelope at the inline maximum, on a daemon with the default 
     const offer = envelopeOf('task.offer', 'sealed-large-offer', server.nextSeq());
     server.send(offer);
 
-    // B2: this daemon has no Agent home, so the advertised-flag check now declines the offer before the sealed handler would; the decline is still non-retryable and journaled.
     const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'sealed-large-offer', EVENTUAL_STATE_BUDGET_MS);
     expect(decline.payload).toMatchObject({ retryable: false });
     await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, device.deviceId)).toBe(offer.seq), EVENTUAL_STATE_BUDGET_MS);

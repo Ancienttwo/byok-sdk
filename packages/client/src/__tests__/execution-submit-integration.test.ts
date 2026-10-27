@@ -153,7 +153,6 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     expect(adapter.startCalls[precedingTurns]?.task.instruction).toContain(summaryInstruction);
     const offer = await sdk.tasks.offer(taskId);
     expect(offer).toMatchObject({ type: 'task.offer', payload: { agentRef, terminalProjection: selector } });
-    // B2: the fresh offer has no `sessionRef` member -> its `session` is `{ mode: 'fresh' }` and names no `sessionRef`
     expect(offer?.payload).toMatchObject({ session: { mode: 'fresh' } });
     expect((offer?.payload as { session: object } | undefined)?.session).not.toHaveProperty('sessionRef');
     expect(offer?.payload).not.toHaveProperty('messageEgress');

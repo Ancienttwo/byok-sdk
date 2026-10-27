@@ -64,7 +64,6 @@ const OFFER_PROBE_VARIANTS = ['resume', 'fresh', 'prepared'] as const;
 function codecRequirednessMatrix(): CodecRequirednessMatrix {
   return {
     'conn.hello': { taskId: 'optional', seq: 'optional' },
-    // B2: four Agent offer types -> one task.offer with the same requiredness
     'task.offer': { taskId: 'required', seq: 'required' },
     'agent.egress.reliable': { taskId: 'optional', seq: 'optional' },
     'agent.egress.ack': { taskId: 'optional', seq: 'required' },
@@ -92,7 +91,6 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'task.fail': { taskId: 'required', seq: 'optional' },
     'task.cancelled': { taskId: 'required', seq: 'optional' },
     'task.approval_resolved': { taskId: 'required', seq: 'optional' },
-    // B2: the *_sealed types are payload branches of their plaintext types, so they share the plaintext rows above
   };
 }
 
@@ -282,7 +280,6 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
     expect(() => parseMessage({ ...envelope, v })).toThrow(EnvelopeValidationError);
   });
 
-  // B2: the four strict offer types -> the resume, fresh and prepared payload variants of the strict task.offer
   it.each(OFFER_PROBE_VARIANTS)('a strict task.offer (%s variant) whose result-document projection lacks `schema` (the v2 shape) is REJECTED', (variant) => {
     const type = 'task.offer' as const;
     const payload = offerProbePayload(variant);

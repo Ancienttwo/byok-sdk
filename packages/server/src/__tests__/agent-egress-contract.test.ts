@@ -310,7 +310,6 @@ describe('reference-server Agent egress contract', () => {
       payload: { agentRef: AGENT_REF, egressPolicy: POLICY, session: { mode: 'fresh' } },
     });
     expect('sessionRef' in offer.payload).toBe(false);
-    // B2: no top-level sessionRef -> session is exactly { mode: 'fresh' } (v4 nests the reference, so a stray one would sit inside session)
     expect((offer.payload as { session: unknown }).session).toEqual({ mode: 'fresh' });
   });
 

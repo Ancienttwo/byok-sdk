@@ -294,7 +294,6 @@ describe('hosted Agent-home contract', () => {
       deviceId: device.deviceId,
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
     });
-    // B2: a payload without sessionRef -> a payload whose session.mode is not resume
     const fresh = { ...agentPayload(), session: { mode: 'fresh' } };
 
     // The required static type refuses this at compile time; a JS caller still meets the runtime guard.
@@ -355,7 +354,6 @@ describe('hosted Agent-home contract', () => {
     const harness = createHarness();
     // Paired but has advertised no capabilities, so admission alone would refuse it.
     const bare = await harness.pairDevice(TENANT_A);
-    // B2: a payload without sessionRef -> a payload without session, and one with a fresh session
     const { session: _session, ...missing } = agentPayload();
     const fresh = { ...agentPayload(), session: { mode: 'fresh' } };
     const empty = { ...agentPayload(), session: { mode: 'resume', sessionRef: '' } };

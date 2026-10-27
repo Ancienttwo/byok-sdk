@@ -16,7 +16,6 @@ const offer = {
 } as const;
 
 describe('agent-home-contract protocol', () => {
-  // B2: a distinct strict Agent offer type -> the strict task.offer, which now carries an explicit resume session
   it('uses a strict offer and round-trips its exact AgentRef', () => {
     const envelope = createEnvelope('task.offer', offer, {
       taskId: 'task-agent-1',

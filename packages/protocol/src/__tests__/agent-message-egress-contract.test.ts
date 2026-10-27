@@ -26,7 +26,6 @@ const messageEgress = {
 } as const;
 
 describe('Agent-initiated message egress protocol', () => {
-  // B2: two distinct egress offer types (fresh, resume) -> the fresh and resume session variants of task.offer
   test('admits the frozen fresh and resume consumer shape under a distinct capability', () => {
     expect(AGENT_MESSAGE_EGRESS_CAPABILITY).toBe('agent-message-egress');
     const shared = {

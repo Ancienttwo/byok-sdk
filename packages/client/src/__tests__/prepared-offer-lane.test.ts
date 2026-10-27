@@ -1977,7 +1977,6 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
   });
 
   it('is rejected by the protocol schema when an offer names an empty requiredToolsets', () => {
-    // B2: TaskOfferPreparedPayloadSchema -> TaskOfferPlainPayloadSchema (a prepared offer is the plain branch with `preparation`); the payload gains `session` and loses `taskId`, which the strict v4 offer rejects, so the empty requiredToolsets is the only reason to fail
     const parsed = TaskOfferPlainPayloadSchema.safeParse({
       session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, runtime: 'pi',
       agentRef: AGENT_REF, preparation: { reference: 'r', requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST },

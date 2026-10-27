@@ -141,9 +141,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     expect(received).toHaveLength(2);
   });
 
-  // B2: a prepared offer was its own message type, so a build that predates it skipped it as an unknown type -> in v4 it is a
-  // `preparation` field on `task.offer`, which a build that does not know it refuses by stopping the cursor (strict payload).
-  // That refusal cannot be reproduced from this build, so the case below keeps the unknown-type skip with a prepared-shaped payload.
+  // A v4 build refuses an unknown `task.offer` field by stopping the cursor (`offer-unknown-field-stall.test.ts`); this case keeps the unknown-type skip with a prepared-shaped payload.
   it('long-poll (a2): a message type from a newer minor carrying a prepared-offer payload is skipped whole, and never becomes an ordinary offer', async () => {
     // The N/N-1 property `task.offer_prepared` exists for, exercised against
     // the transport rather than argued about. This is the byte-for-byte shape a

@@ -24,7 +24,6 @@ const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.e
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; payload: Record<string, unknown> });
-// B2: the three sealed offer types are the sealed `task.offer` of each session form: resume, resume with egress, fresh
 const SEALED_OFFER_FORMS = [
   ['sealed resume', (payload: Record<string, unknown>) => (payload.session as { mode: string }).mode === 'resume' && payload.egressPolicy === undefined],
   ['sealed resume+egress', (payload: Record<string, unknown>) => (payload.session as { mode: string }).mode === 'resume' && payload.egressPolicy !== undefined],
@@ -34,7 +33,6 @@ const sealedOffers = SEALED_OFFER_FORMS.flatMap(([form, matches]) => [
   [form, 'sealed input', corpus.find((line) => line.type === 'task.offer' && line.payload.sealing !== undefined && line.payload.sealed !== undefined && matches(line.payload))!],
   [form, 'sealed output only', corpus.find((line) => line.type === 'task.offer' && line.payload.sealing !== undefined && line.payload.sealed === undefined && matches(line.payload))!],
 ] as const);
-// B2: task.steer_sealed -> the task.steer line that carries `sealed`
 const sealedSteer = corpus.find((line) => line.type === 'task.steer' && line.payload.sealed !== undefined)!.payload;
 
 const dirs: string[] = [];

@@ -72,7 +72,6 @@ describe('SealedTasks send order (#654 E3c)', () => {
     expect(order).toEqual([]);
     release();
     await Promise.all([first, second]);
-    // B2: task.await_approval_sealed -> task.await_approval carrying `sealed`
     expect(order).toEqual(['task.await_approval', 'task.approval_resolved']);
     expect(sealedOrder).toEqual([true, false]);
   });
@@ -93,7 +92,6 @@ describe('SealedTasks memory after a terminal (#654 E3c)', () => {
 
     const sendTerminal = async (): Promise<WeakRef<Envelope>> => {
       const sealed = await tasks.sealOutbound(createEnvelope('task.complete', { summary: 'r'.repeat(100_000), sessionRef: 'session' }, { taskId: 'finished' }));
-      // B2: task.complete_sealed -> task.complete carrying `sealed`
       expect(sealed?.type).toBe('task.complete');
       expect(sealed?.payload).toHaveProperty('sealed');
       tasks.plainOf(sealed!);
@@ -182,7 +180,6 @@ describe('the failure class of a sealed task (#869)', () => {
   it('stays plaintext on the sealed branch of task.fail', async () => {
     const tasks = await sealedTasks(new GatedKeyring(), 'sealed-fail');
     const sealed = await tasks.sealOutbound(createEnvelope('task.fail', { reason: 'secret reason', retryable: false, failure }, { taskId: 'sealed-fail' }));
-    // B2: task.fail_sealed -> task.fail carrying `sealed`
     expect(sealed?.type).toBe('task.fail');
     expect(sealed?.payload).toHaveProperty('sealed');
     // The strict sealed decoder accepts it.

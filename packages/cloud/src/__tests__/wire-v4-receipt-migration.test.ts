@@ -48,7 +48,6 @@ describe('wire v3 -> v4 receipt migration (#925)', () => {
     }
   });
 
-  // B2: unchanged -> migrated. Every v3 Agent offer type is renamed to task.offer, so no offer receipt keeps its bytes.
   const OFFER_VARIANTS = [
     ['resume', 'task.offer_for_agent', 'resume'],
     ['resume with egress', 'task.offer_for_agent_with_egress', 'resume'],

@@ -237,7 +237,6 @@ describe('sealed payload v1: the golden corpus lines are real ciphertext', () =>
       });
       expect(elsewhere, 'the Host cannot move a sealed member to another task').toEqual({ ok: false, reason: 'sealed_open_failed' });
 
-      // B2: opening under the sealed wire type's family -> opening under another sealable type's family (a sealed message has no wire type of its own)
       const underOtherFamily = await openSealedContent({
         header: headerOf(member),
         ciphertext,
@@ -432,7 +431,6 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
   type Lane = (harness: ReturnType<typeof createHarness>, deviceId: string, payload: never) => Promise<{ envelope: Envelope }>;
   const CONTEXT = { destinationBinding: 'conversation/654/turn/1' };
   const withContext = (payload: { messageEgress?: unknown }) => (payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT });
-  // B2: one lane per sealed offer wire type -> one lane per sealed variant of task.offer, told apart by the payload
   type Variant = 'sealed resume' | 'sealed egress' | 'sealed execution';
   const variantOf = (payload: Json): Variant => (
     (payload.session as { mode?: unknown } | undefined)?.mode === 'fresh' ? 'sealed execution'
@@ -543,7 +541,6 @@ describe('sealed payload v1: each sealed offer variant has its own hosted entry 
     const read = harness.stores.devices.get.bind(harness.stores.devices);
     vi.spyOn(harness.stores.devices, 'get').mockImplementation(async (...args) => {
       // A non-resume offer with a selection would need dispatch-selection, which this device lacks.
-      // B2: delete payload.sessionRef -> a fresh session (a resume offer has no sessionRef key to remove)
       payload.session = { mode: 'fresh' };
       payload.dispatchSelection = { lane: 'subscription', runtimeId: 'codex' };
       return read(...args);

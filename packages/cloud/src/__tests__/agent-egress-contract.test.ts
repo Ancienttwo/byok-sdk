@@ -246,7 +246,6 @@ describe('hosted Agent egress contract', () => {
       taskId: 'fresh-agent-egress-task',
       payload: freshEgressOfferPayload(),
     });
-    // B2: task.offer_for_agent_with_egress_fresh -> task.offer with a fresh session
     expect(offered.envelope).toMatchObject({
       type: 'task.offer',
       payload: { agentRef: AGENT_REF, egressPolicy: POLICY, session: { mode: 'fresh' } },
@@ -263,7 +262,6 @@ describe('hosted Agent egress contract', () => {
       payload: egressOfferPayload(),
     });
 
-    // B2: task.offer_for_agent_with_egress (sessionRef) -> task.offer with a resume session
     expect(offered.envelope).toMatchObject({
       type: 'task.offer',
       payload: { session: { mode: 'resume', sessionRef: 'session-egress' } },

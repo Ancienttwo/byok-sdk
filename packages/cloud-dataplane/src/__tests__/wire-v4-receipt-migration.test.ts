@@ -130,7 +130,6 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres wire v3 -> v4 migration (#925)', () =>
 
       const preflight = await preflightPostgresWireV4Migration(pool);
       expect(preflight).toEqual({ legacyTasks: [LEGACY], unmappable: [] });
-      // B2: migrated 2 / unchanged 1 -> migrated 3 / unchanged 0: a v3 `task.offer_for_agent` receipt is renamed to `task.offer` and gains `session`, so it is migrated, not unchanged
       expect(await migratePostgresToWireV4(pool, preflight.legacyTasks)).toEqual({
         migrated: 3, unchanged: 0, deletedTasks: 1,
         deletedRedactionReceipts: [{ tenantId: 'tenant-a', taskId: 'legacy-1', ...REDACTION }],

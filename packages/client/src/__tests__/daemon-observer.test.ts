@@ -116,8 +116,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     // Octop ③ (#553): a started task's execution record follows its terminal event.
     await vi.waitFor(() => expect(taskEvents(events, 'task-seq-1').some((event) => event.kind === 'execution-record')).toBe(true));
     const kinds = taskEvents(events, 'task-seq-1').map((e) => e.kind);
-    // B2: two local `progress` events -> one. A v4 offer without egress cannot start a new session, so this daemon
-    // runs the offer with Agent egress, whose latest-value lane forwards one event (the last) per flushed batch.
+    // A fresh offer runs with Agent egress, whose latest-value lane forwards one event (the last) per flushed batch.
     expect(kinds).toEqual(['offered', 'claimed', 'started', 'progress', 'completed', 'execution-record']);
 
     const completed = events.find((e) => e.kind === 'completed' && e.taskId === 'task-seq-1');

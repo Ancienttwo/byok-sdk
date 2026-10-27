@@ -53,7 +53,6 @@ describe('Agent-only daemon admission (#925)', () => {
     const agentRef = { agentId: 'homeless-agent', profileRevision: 'r1' };
     server.send(createEnvelope('task.offer', { instruction: 'agent work', agentRef, ...FRESH_OFFER }, { taskId: 'no-home-offer', seq: server.nextSeq() }));
     const decline = await server.waitFor((entry) => entry.type === 'task.decline' && entry.task_id === 'no-home-offer');
-    // B2: declined by Agent home admission -> declined non-retryably by the advertised-flag check (this daemon advertises no agent-home-contract); the asserted outcome is the same
     expect(decline.payload).toMatchObject({ retryable: false, agentRef });
     expect(adapter.sessions).toHaveLength(0);
     expect(server.received.some((entry) => entry.type === 'task.claim')).toBe(false);

@@ -75,7 +75,6 @@ describe('Agent egress typed wire contract', () => {
     expect(() => parseMessage(malformed)).toThrow(/failed validation/u);
   });
 
-  // B2: policy consumption on the separate Agent egress offer type -> the resume variant of task.offer carrying egressPolicy
   it('requires policy consumption on the Agent offer and keeps reliable payload content opaque', () => {
     const offer = createEnvelope(
       'task.offer',
@@ -107,7 +106,6 @@ describe('Agent egress typed wire contract', () => {
     ).toThrow(/invalid envelope/u);
   });
 
-  // B2: a distinct fresh offer type forbids sessionRef -> session is required, resume needs sessionRef, fresh carries none and needs egressPolicy
   it('keeps exact resume sessionRef required while the fresh session carries none', () => {
     const freshOffer = createEnvelope(
       'task.offer',

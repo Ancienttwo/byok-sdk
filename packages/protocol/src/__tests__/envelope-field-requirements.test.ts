@@ -66,7 +66,6 @@ function minimalPayload(type: MessageType): unknown {
   switch (type) {
     case 'conn.hello':
       return { protocolVersions: [1], capabilities: [], deviceId: 'device-1', productId: 'acme-agent' };
-    // B2: four offer types, each with its own minimal payload -> one task.offer; the resume variant is the minimal payload and OFFER_VARIANTS below keeps the fresh and prepared variants covered
     case 'task.offer':
       return {
         instruction: 'run for agent',

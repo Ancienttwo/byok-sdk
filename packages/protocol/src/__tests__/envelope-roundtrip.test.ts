@@ -64,7 +64,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
-  // B2: four offer types, one test each -> one task.offer test per payload variant (resume, fresh with egress, prepared)
   it('task.offer (resume, blobRef instruction)', () => {
     const type = 'task.offer' as const;
     roundTrip(
@@ -598,7 +597,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     .trimEnd().split('\n').map((raw) => JSON.parse(raw) as Envelope);
   it.each(Object.keys(SEALED_SPLIT_TABLE) as Array<keyof typeof SEALED_SPLIT_TABLE>)('sealed branch of %s', (type) => {
     testedTypes.push(type);
-    // B2: a sealed type's first golden line -> the first golden line of the plaintext type that takes its sealed branch
     const line = goldenLines.find((envelope) => envelope.type === type && isSealedPayload(type, envelope.payload));
     expect(line).toBeDefined();
     roundTrip(type, line!);

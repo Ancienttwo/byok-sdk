@@ -70,7 +70,6 @@ describe('submitFrozen (#793 D2b)', () => {
   it.each([
     ['taskId', { taskId: 'task-2' }],
     ['deviceId', { deviceId: 'device-2' }],
-    // B2: type 'task.offer' -> 'task.steer', because 'task.offer' is now the only offer type and equals the frozen one; the row still refuses a readback of another type
     ['type', { type: 'task.steer' }],
     ['payload', { payload: { ...structuredClone(input.payload), instruction: 'Another turn.' } }],
   ])('refuses a readback with another %s and never submits', async (_field, change) => {

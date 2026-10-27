@@ -89,7 +89,6 @@ describe.skipIf(!isSqliteAvailable())('SQLite wire v3 -> v4 migration (#925)', (
 
     const preflight = await preflightSqliteWireV4Migration(path);
     expect(preflight).toEqual({ legacyTasks: [LEGACY], unmappable: [] });
-    // B2: migrated 2 / unchanged 1 -> migrated 3 / unchanged 0: a v3 `task.offer_for_agent` receipt is renamed to `task.offer` and gains `session`, so it is migrated, not unchanged
     expect(await migrateSqliteToWireV4(path, preflight.legacyTasks)).toEqual({ migrated: 3, unchanged: 0, deletedTasks: 1 });
 
     const after = snapshot(path);

@@ -174,7 +174,6 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       const offer = await expectFrozenOffer(taskId);
       expect(offer).toMatchObject({ type: 'task.offer',
         payload: { agentRef, terminalProjection: { mode: 'none' }, messageEgress } });
-      // B2: the fresh offer has no `sessionRef` member -> its `session` is `{ mode: 'fresh' }` and names no `sessionRef`
       expect(offer.payload).toMatchObject({ session: { mode: 'fresh' } });
       expect((offer.payload as { session: object }).session).not.toHaveProperty('sessionRef');
       const session = adapter.sessions[index]!;
@@ -244,7 +243,6 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       expect(adapter.startCalls[index]?.task.instruction).toContain(instruction);
       const offer = await expectFrozenOffer(job.taskId);
       expect(offer).toMatchObject({ type: 'task.offer', payload: { agentRef, terminalProjection: selector } });
-      // B2: the fresh offer has no `sessionRef` member -> its `session` is `{ mode: 'fresh' }` and names no `sessionRef`
       expect(offer.payload).toMatchObject({ session: { mode: 'fresh' } });
       expect((offer.payload as { session: object }).session).not.toHaveProperty('sessionRef');
       expect(offer.payload).not.toHaveProperty('messageEgress');

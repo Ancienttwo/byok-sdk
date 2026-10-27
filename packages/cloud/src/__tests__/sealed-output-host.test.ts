@@ -495,7 +495,6 @@ describe('every sealed offer lane freezes the output sealing that the gate reads
   const CONTEXT = { destinationBinding: 'conversation/654/turn/1' };
   const withContext = (payload: { messageEgress?: unknown }) => (payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT });
   type Lane = (harness: CloudHarness, deviceId: string, taskId: string, payload: never) => Promise<unknown>;
-  // B2: one lane per sealed offer wire type -> one lane per sealed variant of task.offer, told apart by the payload
   type Variant = 'sealed resume' | 'sealed egress' | 'sealed execution';
   const variantOf = (payload: { session?: { mode?: string }; egressPolicy?: object }): Variant => (
     payload.session?.mode === 'fresh' ? 'sealed execution' : payload.egressPolicy === undefined ? 'sealed resume' : 'sealed egress');

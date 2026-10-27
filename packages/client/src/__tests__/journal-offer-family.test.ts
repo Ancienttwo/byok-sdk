@@ -19,7 +19,6 @@ import { TestServer } from './fixtures/test-server';
 // Independent completeness oracle: the declared wire family is one type, and
 // the cases below are the variants its payload can take. Payloads still pass
 // the real EnvelopeSchema.
-// B2: the offer family was 7 types (`MESSAGE_TYPES` prefix scan); v4 has one `task.offer`, so the variants are listed here
 const offerTypes = MESSAGE_TYPES.filter((type) => type.startsWith('task.offer'));
 const agentRef = { agentId: 'journal-family-agent', profileRevision: 'r1' };
 const RESUME = { mode: 'resume', sessionRef: 'resume-session' } as const;
@@ -59,14 +58,12 @@ interface OfferCase {
  *   to a server that accepts it).
  */
 const offerCases: readonly OfferCase[] = [
-  // B2: task.offer_for_agent carried no sessionRef and was declined for its missing toolset -> a resume offer, declined by the advertised-flag check (toolset-selection) before the toolset lookup
   { name: 'resume', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: RESUME, requiredToolsets: ['test-missing'] }, declined: true },
   { name: 'resume+egress', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: RESUME, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY }, declined: false },
   { name: 'fresh', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY }, declined: false },
   {
     // The one offer that carries no instruction: the request is already inside
     // the frozen envelope the referenced record retained.
-    // B2: declined `preparation_lane_unconfigured` -> declined `offer_capability_missing` (agent-input-preparation-v9 is not advertised); the journal contract asserted here is unchanged
     name: 'prepared',
     payload: {
       runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -75,7 +72,6 @@ const offerCases: readonly OfferCase[] = [
     },
     declined: true,
   },
-  // B2: sealed offers were declined in handleSealedOffer -> declined by the advertised-flag check (sealed-payload-v1 is not advertised), which takes the same declineSealedOffer path; the journal contract asserted here is unchanged
   { name: 'sealed resume', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: RESUME, sealing: SEALING }, declined: true },
   { name: 'sealed resume+egress', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: RESUME, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, sealing: SEALING }, declined: true },
   { name: 'sealed fresh', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, sealing: SEALING }, declined: true },

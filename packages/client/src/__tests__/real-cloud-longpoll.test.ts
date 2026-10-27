@@ -70,7 +70,6 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     // `dispatch()`, this returns no handle to await — the offer is bytes in a
     // mailbox from the moment it lands, so there is no connection to race.
     const offer = await cloud.submitFreshAgent(record.deviceId, { instruction: 'do it over long-poll' });
-    // B2: task.offer_for_agent_with_egress_fresh -> task.offer with a fresh session
     expect(offer.envelope.type).toBe('task.offer');
     expect((offer.envelope.payload as { session?: unknown }).session).toEqual({ mode: 'fresh' });
     expect(offer.envelope.seq).toBe(1);

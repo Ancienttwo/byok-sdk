@@ -89,9 +89,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     const progress = await server.waitFor((e) => e.type === 'task.progress');
     // The final batch includes the terminal `turn_end` event itself, not just
     // what the separate task.complete that follows implies.
-    // B2: [progress, turn_end] -> [turn_end]. A fresh task.offer carries the egress policy, whose
-    // latest-value delivery reduces each progress batch to its last event; the full history
-    // is no longer preserved in task.progress.
+    // A fresh task.offer carries the egress policy, whose latest-value delivery reduces each progress batch to its last event.
     expect(progress.payload).toMatchObject({
       seq: 1,
       events: [{ type: 'turn_end' }],
