@@ -162,7 +162,6 @@ export class TaskEventRelay implements ByokCloudObserver {
 
   detach(taskId: string, feed: TaskFeed): void {
     if (this.#tasks.get(taskId) !== feed || feed.provisional || feed.dispatched) return;
-    feed.settleTerminal();
     feed.queue.close();
     this.#tasks.delete(taskId);
   }

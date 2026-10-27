@@ -114,21 +114,53 @@ type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState'>;
  * One task's event feed from the relay, shared by `ByokServer.tasks.events`
  * and {@link TaskHandle.events}. Every refusal is thrown by the first `next()`,
  * before any entry; once entries flow, the read only ends (terminal, `signal`,
- * server close).
+ * `return()`, server close).
  *
+ * `return()` also releases a pending `next()`, as the relay queue's own
+ * iterator does. An async generator cannot: it queues `return()` behind the
+ * outstanding `next()`, so a reader stopping an idle feed would hang. Here
+ * `return()` aborts the read's own signal first, which wakes the queue.
+ * `project` shapes each entry: `TaskHandle.events()` yields the event alone.
+ */
+export function readTaskEvents<T = TaskEventEntry>(
+  deps: EventDeps,
+  taskId: string,
+  options: { after?: string; signal?: AbortSignal } = {},
+  project: (entry: TaskEventEntry) => T = (entry) => entry as T,
+): AsyncIterable<T> {
+  return {
+    [Symbol.asyncIterator](): AsyncIterator<T> {
+      const stop = new AbortController();
+      const entries = followTaskEvents(deps, taskId, options.after, AbortSignal.any([stop.signal, options.signal ?? stop.signal]));
+      return {
+        async next(): Promise<IteratorResult<T>> {
+          const next = await entries.next();
+          return next.done ? next : { value: project(next.value), done: false };
+        },
+        return(): Promise<IteratorResult<T>> {
+          stop.abort();
+          // A generator's return() always reports done.
+          return entries.return() as Promise<IteratorReturnResult<void>>;
+        },
+      };
+    },
+  };
+}
+
+/**
  * Liveness is judged by the projection `tasks.get` answers with, never by the
  * attempt status: an accepted host cancellation is terminal there at once
  * while the attempt still reads `cancel_requested`, and a feed attached on that
  * basis would wait for a device message that may never come.
  */
-export async function* readTaskEvents(
+async function* followTaskEvents(
   deps: EventDeps,
   taskId: string,
-  options: { after?: string; signal?: AbortSignal } = {},
+  after: string | undefined,
+  signal: AbortSignal,
 ): AsyncGenerator<TaskEventEntry, void, undefined> {
   const { relay, readState } = deps;
-  const { signal } = options;
-  if (relay.stopped || signal?.aborted) return;
+  if (relay.stopped || signal.aborted) return;
   let feed = relay.feed(taskId);
   let state = await readState(taskId);
   if (feed === undefined) {
@@ -150,19 +182,19 @@ export async function* readTaskEvents(
     relay.detach(taskId, feed);
     throw new TaskEventsUnavailableError(taskId, 'feed_expired');
   }
-  const entries = relay.entries(taskId, feed, options.after)[Symbol.asyncIterator]();
+  const entries = relay.entries(taskId, feed, after)[Symbol.asyncIterator]();
   // The queue's own return() also releases a pending next(), which this
   // generator's return() could not do while it is suspended in one.
-  const stop = () => { void entries.return?.(); };
-  signal?.addEventListener('abort', stop, { once: true });
+  const stop = () => { void entries.return!(); };
+  signal.addEventListener('abort', stop, { once: true });
   try {
-    if (signal?.aborted) return;
+    if (signal.aborted) return;
     for (let next = await entries.next(); !next.done; next = await entries.next()) {
       yield { cursor: `${feed.feedId}.${next.value.sequence}`, event: next.value.value };
     }
   } finally {
-    signal?.removeEventListener('abort', stop);
-    await entries.return?.();
+    signal.removeEventListener('abort', stop);
+    await entries.return!();
   }
 }
 
@@ -215,11 +247,7 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
     taskId,
 
     events(): AsyncIterable<ServerTaskEvent> {
-      return {
-        async *[Symbol.asyncIterator](): AsyncGenerator<ServerTaskEvent> {
-          for await (const entry of readTaskEvents(deps, taskId)) yield entry.event;
-        },
-      };
+      return readTaskEvents(deps, taskId, {}, (entry) => entry.event);
     },
 
     async cancel(reason?: string): Promise<void> {

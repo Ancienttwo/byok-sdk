@@ -103,10 +103,7 @@ export class AsyncEventQueue<T> {
             const next = await entries.next();
             return next.done ? next : { value: next.value.value, done: false };
           },
-          async return(): Promise<IteratorResult<T>> {
-            await entries.return!();
-            return { value: undefined, done: true };
-          },
+          return: () => entries.return!() as Promise<IteratorResult<T>>,
         };
       },
     };

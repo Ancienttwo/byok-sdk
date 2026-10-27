@@ -251,6 +251,27 @@ describe('ByokServer.tasks.events', () => {
     expect(await instance.tasks.events('stoppable')[Symbol.asyncIterator]().next()).toEqual({ value: undefined, done: true });
   });
 
+  it('releases a pending read on return(), for tasks.events and TaskHandle.events()', async () => {
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: 150 });
+    byok = instance;
+    const started = await startServer(instance);
+    server = started.server;
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, instance, { productId: PRODUCT_ID });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'idle' });
+    const readers: Array<AsyncIterator<unknown>> = [
+      instance.tasks.events(handle.taskId)[Symbol.asyncIterator](),
+      handle.events()[Symbol.asyncIterator](),
+    ];
+    for (const reader of readers) {
+      await reader.next();
+      const pending = reader.next();
+      // Nothing else will happen to this task, so only return() can settle both.
+      await expect(reader.return!()).resolves.toEqual({ value: undefined, done: true });
+      await expect(pending).resolves.toEqual({ value: undefined, done: true });
+      await expect(reader.next()).resolves.toEqual({ value: undefined, done: true });
+    }
+  });
+
   it('gives TaskHandle.events() the same events as tasks.events', async () => {
     const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: 150 });
     byok = instance;
@@ -350,12 +371,12 @@ describe('readTaskEvents against the relay', () => {
     const relay = new TaskEventRelay({});
     relay.provision('in-flight');
     const provisional = relay.feed('in-flight');
-    const refused = await readTaskEvents({ relay, readState: async () => undefined }, 'in-flight').next().catch((error: unknown) => error);
+    const refused = await first(readTaskEvents({ relay, readState: async () => undefined }, 'in-flight')).catch((error: unknown) => error);
     expect(isCloudError(refused, 'task_not_found')).toBe(true);
     expect(relay.feed('in-flight')).toBe(provisional);
 
     relay.noteDispatched('in-flight', '2026-10-27T00:00:00.000Z');
-    const reader = readTaskEvents({ relay, readState: async () => 'Offered' }, 'in-flight');
+    const reader = readTaskEvents({ relay, readState: async () => 'Offered' }, 'in-flight')[Symbol.asyncIterator]();
     expect((await reader.next()).value?.event).toEqual({ kind: 'state', state: 'Offered', at: '2026-10-27T00:00:00.000Z' });
     relay.stop();
   });
@@ -363,7 +384,7 @@ describe('readTaskEvents against the relay', () => {
   it('drops the feed it attached when the task turns terminal before the feed listened', async () => {
     const relay = new TaskEventRelay({});
     const reads: Array<TaskState | undefined> = ['Running', 'Complete'];
-    const refused = await readTaskEvents({ relay, readState: async () => reads.shift() }, 'restarted').next().catch((error: unknown) => error);
+    const refused = await first(readTaskEvents({ relay, readState: async () => reads.shift() }, 'restarted')).catch((error: unknown) => error);
     expect(refused).toMatchObject(unavailable('restarted', 'feed_expired'));
     expect(relay.feed('restarted')).toBeUndefined();
     relay.stop();
@@ -373,7 +394,7 @@ describe('readTaskEvents against the relay', () => {
     const relay = new TaskEventRelay({});
     const read = deferred<TaskState | undefined>();
     const reads = [Promise.resolve<TaskState | undefined>('Running'), read.promise];
-    const reader = readTaskEvents({ relay, readState: () => reads.shift()! }, 'existing');
+    const reader = readTaskEvents({ relay, readState: () => reads.shift()! }, 'existing')[Symbol.asyncIterator]();
     const first = reader.next();
     await vi.waitFor(() => { expect(relay.feed('existing')).toBeDefined(); });
     const attached = relay.feed('existing');
