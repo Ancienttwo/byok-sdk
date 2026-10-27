@@ -1234,26 +1234,10 @@ on every remote completion, by not advertising the input-preparation capability
 (so the cloud refuses to enqueue onto it), and by carrying no prepared-offer
 lane (so a prepared `task.offer` that reaches it is declined, naming the
 missing flag). Nothing is migrated, read
-forward or deleted automatically. **Operator step:** stop the daemon, run
-`byok-agent retire-input-preparation` (or, from a host installer or branded
-host CLI, the library `retireInputPreparation({ productId, storeDir }, { mode:
-'preview' })`; the CLI only renders that one implementation) to list the namespace (record counts per
-record schema version, pinned records, artifact files and unparseable lines;
-it writes nothing), then `byok-agent retire-input-preparation --yes` (`{
-mode: 'execute', confirmed: true }`), and
-start the daemon again. `--yes` refuses, typed and with zero writes, while the
-daemon control socket is reachable or the store owner lease is held, and when
-any record line does not parse, sits at the current or an unknown record
-schema version, or when any record holds a live pin (its last line in the log,
-keyed by `recordId` exactly as replay folds it, carries a pin). Otherwise it moves the whole
-`<storeDir>/input-preparation/` directory, unchanged, into
-`<storeDir>/input-preparation-retired/<timestamp>-v<versions>/` beside a
-`manifest.json` (counts per version, sha256 and size of `records.jsonl` and of
-every artifact file). The log is read structurally for its `recordId`, `version`
-and `pin` fields only, never replayed; nothing is deleted or converted, and Agent home
-and Agent memory are not touched. An absent or empty namespace is a no-op. The
-lane comes back empty under the current record schema version, and the
-retired records stay available for audit.
+forward or deleted automatically. **Operator step:** stop the daemon, move
+the whole `<storeDir>/input-preparation/` directory aside (it holds only records
+this build refuses; keep it if it is needed for audit), and start the daemon
+again. The lane comes back empty under the current record schema version.
 
 `ready` answers exactly one question: CAN THIS PREPARATION BE CONSUMED. It is
 not Host budget admission. The device performs no budget arithmetic anywhere on
@@ -1315,9 +1299,7 @@ prepared Executions, required message dispositions and old mailbox entries befor
 upgrading cloud and device together. Recreate preparations using the Host-owned
 systemPrompt, official identity and explicit memory selection. The capability is
 `agent-input-preparation-v8`; wire and record versions both advance to 8, with no dual token/read. Older records
-are refused; the bounded operator action that retires them is
-`byok-agent retire-input-preparation --yes` (library `retireInputPreparation`),
-run against the stopped daemon
+are refused; the operator moves the old namespace aside with the daemon stopped,
 after the drain (see the operator step above). The fourteen admission comparisons retain their roles; the compiler,
 envelope and identity values being compared change. A skipped drain needs explicit
 operator handling of the old entries; upgrading alone does not repair them.
@@ -1329,7 +1311,7 @@ operator handling of the old entries; upgrading alone does not repair them.
 The local record is version 10. The prepared tool binding and surface digests
 are version 3 and the Pi MCP fingerprint is version 2, so a record prepared
 before this change declines with `preparation_tool_binding_digest_mismatch`.
-Apply the same drain, paired upgrade and `retire-input-preparation` steps as for
+Apply the same drain, paired upgrade and operator steps as for
 the v8 cut, then recreate the preparations.
 
 The evidence has four parts, and each is read off a recorded fact rather than
