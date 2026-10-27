@@ -107,18 +107,22 @@
   `rejectTask`, and refuse the same way: `task_not_found`,
   `task_not_awaiting_approval` or `StaleApprovalError`.
 - **Feature (server; #1022)** — `ByokServer.tasks.events(taskId, { after?,
-  signal? })` follows one task's event feed by taskId, so a task
+  from?, signal? })` follows one task's event feed by taskId, so a task
   `executions.submit` created has its state, Agent events, artifacts and
   approval requests again. Each `TaskEventEntry` carries an opaque `cursor`;
   pass it back as `after` to resume after that entry. A cursor is valid only
-  for the same server instance's current feed of the task. The first `next()`
-  throws, before any entry: `task_not_found` for an unknown task, and the new
+  for the same server instance's current feed of the task. `from: 'state'`
+  starts at the task's latest state entry, after the pending `await_approval`
+  request while it awaits approval; those entries survive the buffer's
+  drop-oldest. The first `next()` throws, before any entry: a `TypeError` for
+  `after` and `from` together, `task_not_found` for an unknown task, and the new
   `TaskEventsUnavailableError` with `reason: 'cursor_unknown'` (a restart,
   another feed's cursor, a malformed one) or `'feed_expired'` (a terminal
   task whose feed was reclaimed or ended before this instance started). A
   live task that this instance did not dispatch, such as one still running
-  after a SQLite restart, is followed from the moment of the call, without
-  earlier events. From then on `events.subscribe()` also reports that task's
+  after a SQLite restart, gets a feed that starts with its current state read
+  back from the stores, without earlier events; that state can appear twice.
+  From then on `events.subscribe()` also reports that task's
   `task.state` changes, with no `task.created` before them.
 - **Breaking (server; #1022)** — `TaskHandle.events()` reads the same feed as
   `tasks.events`. Its first `next()` now reads the task's snapshot once, and a

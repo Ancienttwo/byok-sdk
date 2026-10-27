@@ -546,8 +546,9 @@ request receipts alongside six coordination interfaces. Pairing, authenticated
 lookup, revoke and same-machine replacement share the durable device directory.
 Device IDs are globally tenant-unique. Presence, nonces and unredeemed pairing
 codes remain process-local; no runtime or TaskHandle is reconstructed. Embedded
-`tasks.events` attaches a new feed to a task that is still live after a restart
-and follows it from then on; it does not reconstruct earlier events.
+`tasks.events` attaches a new feed to a task that is still live after a restart;
+the feed starts with the task's current state read back from the stores and
+does not reconstruct earlier events.
 
 File-backed SQLite has one owner: the actual database handle sets
 `PRAGMA locking_mode=EXCLUSIVE` before WAL initialization. A second open waits
@@ -3062,7 +3063,7 @@ the execution identity. This does not authorize a new execution after failure.
 
 ### Embedded per-task event feed
 
-Embedded `tasks.events(taskId, { after?, signal? })` hands a Host the relay
+Embedded `tasks.events(taskId, { after?, from?, signal? })` hands a Host the relay
 notifications of one task by taskId, so a submitted task without a TaskHandle
 has its state, Agent events, artifacts and approval requests (with the
 `approvalId` that `tasks.approve`/`reject` take). It reads the existing relay
@@ -3074,16 +3075,31 @@ receipt. `TaskHandle.events()` reads the same feed without cursors.
   feed and `seq` increases within it, so a cursor is valid only for one server
   instance's current feed of the task. Order is that instance's arrival order;
   progress, artifacts and approvals have no protocol total order.
-- Refusals are thrown by the first `next()`, before any entry: an unknown task
+- A read starts after `after`, at the start of what is retained, or, with
+  `from: 'state'`, at the entries where the task's current state began: its
+  latest `state` entry, preceded by the pending `await_approval` request while
+  it awaits approval. The relay keeps those entries apart from the bounded
+  queue, so that start survives drop-oldest with its original cursors.
+- Refusals are thrown by the first `next()`, before any entry: `after` and
+  `from` together are a `TypeError`; an unknown task
   is `task_not_found`; a cursor the feed never handed out is
   `TaskEventsUnavailableError` `cursor_unknown`; a terminal task with no
   retained feed is `feed_expired`. Terminal is judged by the `tasks.get`
   projection, so an accepted Host cancellation is terminal even while the
   attempt reads `cancel_requested`.
-- A live task with no feed in this instance (after a restart) gets one from
-  the moment of the call, without replay. A read never creates relay state for
-  an unknown or terminal task, and only a Host read can create it: device
-  envelopes for a task with no feed still allocate nothing.
+- A live task with no feed in this instance (after a restart) gets one whose
+  first entry is its current state from the `tasks.get` projection (`state`,
+  `updatedAt`), unless a transition reached the feed first; earlier events are
+  not reconstructed. The kernel notifies the relay after the write's own
+  await, so that state can appear twice. A read stopped before it attached
+  creates nothing, a read never creates relay state for an unknown or terminal
+  task, and only a Host read can create it: device envelopes for a task with
+  no feed still allocate nothing.
+- While this instance's dispatch of a task is in flight, its feed buffers every
+  delivery, device envelopes and Host transitions alike, including a feed a
+  Host read attached, so `Offered` is the first entry of a dispatched feed. A
+  refused dispatch drops a feed it opened and returns an attached feed to its
+  readers with what it buffered.
 - Each feed is bounded by `taskEventBufferLimit` and drops its oldest entries.
   A reader whose resume position was dropped receives one `events_truncated`
   marker for that gap, whose cursor stands just before the oldest retained
