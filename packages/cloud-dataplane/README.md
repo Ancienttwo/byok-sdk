@@ -426,6 +426,13 @@ answers a different question without throwing. The parser is installed on the
 pool config, never on the process-wide `pg.types` registry, so composing this
 SDK cannot change how a host's own database code decodes results.
 
+Every store takes the pool as a `ByokPool`, the type `createByokPool` returns,
+so TypeScript refuses a bare `pg.Pool`. The composition entry points
+(`createPostgresCoreStores`, `createPostgresCloudStores`, and the stores built
+from an options object) also refuse one at runtime. A single store constructed
+directly from JavaScript is not checked: it must still be given a
+`createByokPool` pool.
+
 ## Testing
 
 The suites need a real Postgres, and get one from the repository's

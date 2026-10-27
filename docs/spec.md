@@ -2219,7 +2219,18 @@ Agent dispatch requires an explicit device and its durable authenticated
 `agent-home-contract` declaration before task creation or mailbox enqueue.
 Claim, decline, and every terminal message echo exact AgentRef. Resume requires
 exact agentId, profileRevision, sessionRef, runtime and canonical cwd; mismatch
-fails closed. Within one daemon process, a canonical Agent home runs at most
+fails closed. A session's ledger is kept at least until its last append
+(each Attempt's start and terminal) is `storage.retention.ttlMs['session-ledger']`
+old (default 30 days). A writer session stays resumable while its ledger
+exists; a reader session also needs its run directory, which reader-run
+retention removes after 7 days (below). Once the home is idle, retention
+removes an expired ledger. After that, a resume of that session is a
+non-retryable decline that says the handoff does not exist on this device,
+`agent.content.read` with that sessionRef is denied as `identity-mismatch`,
+and `Daemon.publishReliableAgentEgress` for that session fails with the same
+does-not-exist error. With `ttlMs['session-ledger']: 0`, every sweep of an
+idle home removes all of its session ledgers, so none of those sessions can
+be resumed. Within one daemon process, a canonical Agent home runs at most
 one writer Attempt and at most `maxConcurrentReaderAttemptsPerAgentHome`
 reader Attempts (default four), counted apart, across every lane and every
 session. An Agent offer without `homeAccess` is the writer and runs in the
@@ -2245,7 +2256,8 @@ is a non-retryable decline, and a missing run directory is a non-retryable
 decline that names the session. Run directories stay after the terminal;
 unified startup/periodic retention, under the same base home lease, removes
 the oldest beyond 32 per home and those older than 7 days, never an active one, and keeps one that a reader
-handoff updated within 7 days. The SDK does not make memory read-only: each
+handoff updated within 7 days. The session ledgers themselves expire under
+the `session-ledger` class above; `-task-` terminal evidence stays. The SDK does not make memory read-only: each
 reader terminal carries `agentHomeMemoryChange` (`unchanged`,
 `reader-attributed`, `unattributed` when a writer overlapped, or `unmeasured`)
 with the changed paths. A task-free projection still needs the base lease, so
@@ -2667,7 +2679,7 @@ The authority for each datum is explicit:
 | --- | --- | --- |
 | Fresh `sessionRef` | The runtime session actually started by the selected adapter | Runtime mints it after fresh `start()`; no server/client preseed |
 | Session handoff | SDK-owned canonical Agent-home `.byok/runtime-sessions/` | SDK records exact AgentRef/profile/runtime/cwd/session and fsyncs it before exposing the session |
-| Resume `sessionRef` | Existing exact handoff | A resume offer (`session.mode: 'resume'`) is exact-resume-only; missing/stale/cross-Agent/profile/runtime/cwd evidence fails closed |
+| Resume `sessionRef` | Existing exact handoff | A resume offer (`session.mode: 'resume'`) is exact-resume-only; missing/stale/cross-Agent/profile/runtime/cwd evidence fails closed, including a ledger retention removed after `ttlMs['session-ledger']` |
 | Egress policy and fresh capability | Host-selected typed policy plus durable device declaration | Cloud/server admit only the exact declared capability; presence is not authority |
 | Reliable egress identity | The handoff read by the public publisher | Publisher proves exact AgentRef/task/runtime/cwd/session handoff before durable append/send; cloud receipt and ack do not mint a session |
 

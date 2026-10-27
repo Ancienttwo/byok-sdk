@@ -7,6 +7,7 @@ import type {
 } from '@byok-sdk/cloud';
 import { assertCanonicalTimestamp, assertCollectExpiredInput, type Clock, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 
 interface ProofReceiptRow {
   readonly tenant_id: string;
@@ -43,7 +44,7 @@ export class PostgresProofRequestReceiptStore implements ProofRequestReceiptStor
   readonly #pool: Pool;
   readonly #clock: Clock;
 
-  constructor(pool: Pool, clock: Clock) {
+  constructor(pool: ByokPool, clock: Clock) {
     this.#pool = pool;
     this.#clock = clock;
   }
@@ -104,7 +105,7 @@ export class PostgresProofRequestReceiptStore implements ProofRequestReceiptStor
 export class PostgresProofReceiptRetentionAuthority implements ProofReceiptRetentionAuthority {
   readonly #pool: Pool;
 
-  constructor(pool: Pool) {
+  constructor(pool: ByokPool) {
     this.#pool = pool;
   }
 

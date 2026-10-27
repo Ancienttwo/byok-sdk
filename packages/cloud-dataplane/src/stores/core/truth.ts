@@ -36,6 +36,7 @@ import {
   type TruthStore,
 } from '@byok-sdk/core';
 import type { Pool } from 'pg';
+import type { ByokPool } from '../../pool';
 
 const DEFAULT_MANIFEST_LIMIT = 100;
 
@@ -99,7 +100,7 @@ export class PostgresTruthStore implements TruthStore {
   readonly #pool: Pool;
   readonly #clock: Clock;
 
-  constructor(pool: Pool, clock: Clock) {
+  constructor(pool: ByokPool, clock: Clock) {
     this.#pool = pool;
     this.#clock = clock;
   }
