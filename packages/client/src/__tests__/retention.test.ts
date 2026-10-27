@@ -357,3 +357,51 @@ it('retains release eligibility when final token removal fails and accounts its 
  for(let pass=0;pass<3;pass++){const report=await f.sweeper.runPass('periodic');deleted+=report.deleted;bytes+=report.bytesReclaimed;}
  expect(deleted).toBe(1);expect(bytes).toBe(Buffer.byteLength(released));expect(await exists(target)).toBe(false);
 });
+const runtimeBudget=(f:{clock:()=>Date},tally:{deleted:number;bytes:number}):SweepBudget=>({now:f.clock(),trigger:'periodic',available:()=>true,remaining:()=>1-tally.deleted,removed:n=>{tally.deleted++;tally.bytes+=n;},truncate:()=>{}});
+it.skipIf(process.platform==='win32')('unlinks a symlink inside a released runtime without touching its target',async()=>{
+ const f=await fixture(),s=await f.scratch.create(),outside=testScratchRoot(),keep=path.join(outside,'keep');
+ await fs.writeFile(keep,'protected');const link=path.join(s.runtimeDir,'link');await fs.symlink(outside,link);const linkBytes=(await fs.lstat(link)).size;
+ await s.release();f.advance(DAY);
+ const target=path.dirname(s.runtimeDir),released=await fs.readFile(path.join(target,'released'),'utf8'),tally={deleted:0,bytes:0},budget=runtimeBudget(f,tally);
+ await f.registry.sweep('exec-runtime',budget);
+ expect(tally.deleted).toBe(1);expect((runtimeReclaimedBytes.get(budget)??0)+tally.bytes).toBe(linkBytes+Buffer.byteLength(released));
+ expect(await exists(target)).toBe(false);expect(await fs.readFile(keep,'utf8')).toBe('protected');
+});
+it('refuses whole-token removal when payload appears after the leaf walk, then removes it on retry',async()=>{
+ const f=await fixture(),s=await f.scratch.create();await fs.writeFile(path.join(s.runtimeDir,'output'),'12345');await s.release();f.advance(DAY);
+ const target=path.dirname(s.runtimeDir),marker=path.join(target,'released'),released=await fs.readFile(marker,'utf8'),late=path.join(target,'late');
+ const realOpendir=fs.opendir.bind(fs);let injected=false;
+ const opendir=vi.spyOn(fs,'opendir').mockImplementation(async(directory,options)=>{
+  const handle=await realOpendir(directory,options);
+  if(directory!==target)return handle;
+  // The payload lands after the token's final empty read, just before the capped whole-token removal.
+  const read=handle.read.bind(handle);
+  handle.read=(async()=>{const entry=await read();if(entry===null&&!injected&&!await exists(s.runtimeDir)){injected=true;await fs.writeFile(late,'new payload');}return entry;}) as typeof handle.read;
+  return handle;
+ });
+ const rm=vi.spyOn(fs,'rm'),tally={deleted:0,bytes:0},first=runtimeBudget(f,tally);
+ await expect(f.registry.sweep('exec-runtime',first)).rejects.toThrow('retention_usage_scan_limit');
+ expect(injected).toBe(true);expect(rm.mock.calls.some(([file])=>file===target)).toBe(false);
+ expect(runtimeReclaimedBytes.get(first)).toBe(5);expect(tally.deleted).toBe(0);
+ expect(await fs.readFile(late,'utf8')).toBe('new payload');expect(await fs.readFile(marker,'utf8')).toBe(released);
+ opendir.mockRestore();
+ let retried=0;for(let pass=0;pass<3&&tally.deleted===0;pass++){const retry=runtimeBudget(f,tally);await f.registry.sweep('exec-runtime',retry);retried+=runtimeReclaimedBytes.get(retry)??0;}
+ expect(tally.deleted).toBe(1);expect(retried+tally.bytes).toBe(Buffer.byteLength('new payload')+Buffer.byteLength(released));
+ expect(await exists(target)).toBe(false);
+});
+it('keeps bytes already removed when a later unlink fails mid-pass, then completes on retry',async()=>{
+ const f=await fixture(),s=await f.scratch.create();
+ for(const name of ['one','two','three'])await fs.writeFile(path.join(s.runtimeDir,name),'12345');
+ await s.release();f.advance(DAY);
+ const target=path.dirname(s.runtimeDir),marker=path.join(target,'released'),released=await fs.readFile(marker,'utf8');
+ const realUnlink=fs.unlink.bind(fs);let calls=0;
+ const unlink=vi.spyOn(fs,'unlink').mockImplementation(async file=>{if(++calls===2)throw Object.assign(new Error('busy'),{code:'EBUSY'});return realUnlink(file);});
+ const tally={deleted:0,bytes:0},first=runtimeBudget(f,tally);
+ await expect(f.registry.sweep('exec-runtime',first)).rejects.toThrow('busy');
+ expect(runtimeReclaimedBytes.get(first)).toBe(5);expect(tally.deleted).toBe(0);
+ expect(await fs.readdir(s.runtimeDir)).toHaveLength(2);expect(await fs.readFile(marker,'utf8')).toBe(released);
+ unlink.mockRestore();
+ let retried=0;for(let pass=0;pass<3&&tally.deleted===0;pass++){const retry=runtimeBudget(f,tally);await f.registry.sweep('exec-runtime',retry);retried+=runtimeReclaimedBytes.get(retry)??0;}
+ expect(tally.deleted).toBe(1);expect(5+retried+tally.bytes).toBe(15+Buffer.byteLength(released));
+ expect(await exists(target)).toBe(false);
+});

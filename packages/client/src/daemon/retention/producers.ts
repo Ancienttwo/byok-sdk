@@ -101,7 +101,9 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       if (!TOKEN.test(entry.name) || !entry.isDirectory() || scratch.isLive(entry.name)) continue;
       const directory = path.join(execRoot, entry.name), released = await releasedAt(directory);
       if (released === undefined || budget.now.getTime() - released < config.ttlMs['exec-runtime']) continue;
-      runtimeCleanup = { collector: await RuntimeCleanup.create(directory), released };
+      const collector = await RuntimeCleanup.create(directory);
+      if (collector === undefined) continue;
+      runtimeCleanup = { collector, released };
       if (!await resume()) return;
     }
   }
