@@ -54,34 +54,25 @@ must equal the release commit above. The annotated tag object is
 
 ### Install matrix at 0.30.2
 
-Use Node >=24.22.1 for Node hosts and daemons. Run one command in the
-consuming application's package directory and retain its lockfile. These
-fixed-version package sets come from the
-[README at v0.30.2](https://github.com/Ancienttwo/byok-sdk/blob/b1469e5a236e99736c9a63b75fe845f102f81dc0/README.md#install-sets),
-whose matrix is checked by `scripts/release/install-matrix.test.mjs`.
-`--save-exact` also prevents npm from saving a caret range.
+Use Node >=24.22.1 for Node hosts and daemons. The install command for each
+composition (Self-hosted, Hosted / Cloudflare, Worker) is in the
+[README install sets at v0.30.2](https://github.com/Ancienttwo/byok-sdk/blob/b1469e5a236e99736c9a63b75fe845f102f81dc0/README.md#install-sets).
+`scripts/release/install-matrix.test.mjs` checks that block, so this page
+does not copy it. Pin every direct SDK dependency to exactly 0.30.2 (npm's
+`--save-exact` keeps npm from saving a caret range), keep the resolved SDK
+graph on 0.30.2, and retain the lockfile.
 
-| Composition | Install command |
-| --- | --- |
-| Self-hosted | `npm install --save-exact @byok-sdk/client@0.30.2 @byok-sdk/server@0.30.2 @byok-sdk/keys@0.30.2` |
-| Hosted / Cloudflare | `npm install --save-exact @byok-sdk/cloud@0.30.2 @byok-sdk/cloud-dataplane@0.30.2 @byok-sdk/cloud-do@0.30.2 @byok-sdk/ui-runtime@0.30.2` |
-| Worker (Agent sessions only) | `npm install --save-exact @byok-sdk/cloud-do@0.30.2 @byok-sdk/protocol@0.30.2` |
-
-On Node/VPS without Durable Objects, omit `cloud-do` from the Hosted set.
-The Worker set is for Agent sessions in Durable Objects without
-`nodejs_compat`; it is not a complete hosted Postgres Host. It also needs
-`npm install --save-dev @cloudflare/workers-types`. A hosted Worker using
-Postgres imports `cloud-dataplane/runtime` through Hyperdrive; migrations
-run separately in Node using `cloud-dataplane`, not inside the Worker.
-Install `client@0.30.2` in the separate daemon package when using the Hosted
-set. Keep every direct SDK dependency and the resolved SDK graph on 0.30.2.
+The Worker set covers Agent sessions in Durable Objects only; it is not a
+complete hosted Postgres Host. A hosted Worker using Postgres imports
+`cloud-dataplane/runtime` through Hyperdrive; migrations run separately in
+Node using `cloud-dataplane`, not inside the Worker. With the Hosted set, the
+daemon is a separate package that installs `client` at 0.30.2.
 
 ### Downstream example
 
-AiphaBee's [`packages/byok-host/package.json`](https://github.com/Ancienttwo/aiphabee/blob/78e80de3222703cdcfb6bd0718b6efdfee132557/packages/byok-host/package.json)
+AiphaBee's `packages/byok-host/package.json`, at AiphaBee commit `78e80de3`,
 already pins `client`, `core`, `keys`, `protocol` and `server` to exactly
-0.30.2. Its [upgrade PR #378](https://github.com/Ancienttwo/aiphabee/pull/378)
-and the [reported macOS smoke](https://github.com/Ancienttwo/byok-sdk/issues/978#issuecomment-6417463835)
+0.30.2. Its upgrade PR 378 and the [reported macOS smoke](https://github.com/Ancienttwo/byok-sdk/issues/978#issuecomment-6417463835)
 are downstream evidence, not proof of a complete walkthrough here. That
 report leaves the installed-device backup/restore rehearsal and Windows
 forced-kill check open. This playbook changes no downstream package.
