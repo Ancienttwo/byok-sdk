@@ -117,6 +117,13 @@ export interface TaskHandleDeps {
 type ApprovalDeps = Pick<TaskHandleDeps, 'tenant' | 'cloud' | 'relay'>;
 type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState' | 'readApprovalRequest'>;
 
+/** Where a task event read starts, and what stops it; see `ByokServer.tasks.events`. */
+export interface TaskEventReadOptions {
+  readonly after?: string;
+  readonly from?: 'state';
+  readonly signal?: AbortSignal;
+}
+
 /**
  * One task's event feed from the relay, shared by `ByokServer.tasks.events`
  * and {@link TaskHandle.events}. Every refusal is thrown by the first `next()`,
@@ -129,11 +136,6 @@ type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState' | 'readApprovalReque
  * `return()` aborts the read's own signal first, which wakes the queue.
  * `project` shapes each entry: `TaskHandle.events()` yields the event alone.
  */
-export interface TaskEventReadOptions {
-  readonly after?: string;
-  readonly from?: 'state';
-  readonly signal?: AbortSignal;
-}
 
 export function readTaskEvents<T = TaskEventEntry>(
   deps: EventDeps,
