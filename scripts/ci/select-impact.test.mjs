@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import { familyOwners, knownFamilies, reviewedScripts, selectImpact, workspaceGraph } from './select-impact.mjs';
+import { familyOwners, knownFamilies, reviewedScripts, selectImpact, vitestTmpRootConsumers, workspaceGraph } from './select-impact.mjs';
 const root = new URL('../../', import.meta.url);
 const sorted = values => [...values].sort();
 
@@ -405,4 +405,18 @@ test('wire v4 (#925) reviewed paths select only their owners', () => {
   for (const path of ['templates/service/notes.md', 'examples/byok-mcp-server/docs/nested/hermes.md', 'scripts/integration/other.test.ts']) {
     assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
   }
+});
+
+// #1030: the shared vitest globalSetup reruns every consumer suite and the Windows client job.
+test('scripts/vitest/tmp-root.mjs selects every workspace that uses it and the Windows client job', () => {
+  const consumers = spawnSync('git', ['grep', '-l', 'scripts/vitest/tmp-root.mjs', '--', 'packages/*/vitest.config.ts', 'examples/*/vitest.config.ts'],
+    { cwd: fileURLToPath(root), encoding: 'utf8' }).stdout.split('\n').filter(Boolean).map(file => file.slice(0, -'/vitest.config.ts'.length)).sort();
+  assert.deepEqual([...vitestTmpRootConsumers].sort(), consumers);
+  const plan = selectImpact(['scripts/vitest/tmp-root.mjs']);
+  for (const dir of consumers) assert.ok(plan.dirs.includes(dir), dir);
+  assert.deepEqual(plan.families, ['dataplane', 'windows-client']);
+  assert.deepEqual(selectImpact(['scripts/vitest/tmp-root.test.mjs']),
+    { dirs: [], files: ['scripts/vitest/tmp-root.test.mjs'], families: [], reason: 'root-ci-scripts' });
+  assert.match(readFileSync(new URL('scripts/ci/run-targeted.mjs', root), 'utf8'), /extraTests\.push\('scripts\/vitest\/tmp-root\.test\.mjs'\)/);
+  assert.throws(() => selectImpact(['scripts/vitest/other.mjs']), /reviewed CI mapping required/i);
 });
