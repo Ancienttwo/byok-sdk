@@ -168,7 +168,7 @@ describe('daemon detection authority', () => {
 
     server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'no start', runtime: 'claude', ...FRESH_OFFER }, { taskId: 'platform-refused', seq: server.nextSeq() }));
     const declined = await server.waitFor(e => e.type === 'task.decline');
-    if (declined.type !== 'task.decline') throw new Error('wrong envelope');
+    if (declined.type !== 'task.decline' || declined.payload.sealed !== undefined) throw new Error('wrong envelope');
     expect(declined.payload.reason).toBe(`platform_unsupported: runtime "claude" does not support ${process.platform}`);
     expect(declined.payload.retryable).toBe(true);
     expect(refused.detect).not.toHaveBeenCalled();

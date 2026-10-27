@@ -188,7 +188,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       } else if (mode === 'no-reply') {
         session.emit({ type: 'turn_end' });
         const terminal = await settledTerminal(taskId, 'task.fail');
-        if (terminal.envelope.type !== 'task.fail') throw new Error('unreachable');
+        if (terminal.envelope.type !== 'task.fail' || terminal.envelope.payload.sealed !== undefined) throw new Error('unreachable');
         expect(await sdk.tasks.agentMessage(taskId, deviceId, agentRef)).toBeUndefined();
         outcome = { kind: 'settled-without-reply', executionTerminal: 'task.fail',
           reason: terminal.envelope.payload.reason, retryable: terminal.envelope.payload.retryable };
@@ -269,7 +269,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
     };
     /** The Host reads the document only from the device terminal's `document`, never `summary` text. */
     const documentOf = (terminal: Awaited<ReturnType<typeof sdk.tasks.deviceTerminal>>): SummaryDocument => {
-      if (terminal?.envelope.type !== 'task.complete' || terminal.envelope.payload.document === undefined) {
+      if (terminal?.envelope.type !== 'task.complete' || terminal.envelope.payload.sealed !== undefined || terminal.envelope.payload.document === undefined) {
         throw new Error('synthetic Host: Summary terminal carries no result document');
       }
       return terminal.envelope.payload.document as SummaryDocument;

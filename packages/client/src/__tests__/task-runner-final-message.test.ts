@@ -63,7 +63,7 @@ async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'cl
 async function completion(sent: Envelope[], taskId: string) {
   await vi.waitFor(() => expect(sent.some((item) => item.type === 'task.complete' && item.task_id === taskId)).toBe(true));
   const envelope = sent.find((item) => item.type === 'task.complete' && item.task_id === taskId);
-  if (envelope?.type !== 'task.complete') throw new Error(`missing task.complete for ${taskId}`);
+  if (envelope?.type !== 'task.complete' || envelope.payload.sealed !== undefined) throw new Error(`missing plaintext task.complete for ${taskId}`);
   return envelope.payload;
 }
 

@@ -72,7 +72,7 @@ it.skipIf(process.platform !== 'linux' && !isAgentMemoryFilesystemHelperSupporte
       expect(capture.helper).not.toHaveBeenCalled();
     } else {
       expect(result.type).toBe('task.decline');
-      if (result.type !== 'task.decline') throw new Error('Expected a decline');
+      if (result.type !== 'task.decline' || result.payload.sealed !== undefined) throw new Error('Expected a plaintext decline');
       expect(result.payload.reason).toContain('cannot project required MCP toolsets');
       expect(adapter.startCalls).toHaveLength(0);
     }

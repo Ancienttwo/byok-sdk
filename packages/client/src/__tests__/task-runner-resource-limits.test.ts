@@ -299,8 +299,8 @@ describe('TaskRunner: server activity ingress enforcement', () => {
     await vi.waitFor(() => expect(sent.some((event) => event.type === 'task.complete')).toBe(true));
     const progress = sent.filter((event) => event.type === 'task.progress');
     expect(progress.length).toBeGreaterThan(1);
-    expect(progress.every((event) => event.type === 'task.progress' && Buffer.byteLength(JSON.stringify(event.payload.events)) <= 65536)).toBe(true);
-    expect(progress.flatMap((event) => event.type === 'task.progress' ? event.payload.events : []).flatMap((event) => event.type === 'progress' ? [event.text] : []).join('')).toBe(text);
+    expect(progress.every((event) => event.type === 'task.progress' && event.payload.sealed === undefined && Buffer.byteLength(JSON.stringify(event.payload.events)) <= 65536)).toBe(true);
+    expect(progress.flatMap((event) => event.type === 'task.progress' && event.payload.sealed === undefined ? event.payload.events : []).flatMap((event) => event.type === 'progress' ? [event.text] : []).join('')).toBe(text);
     expect(sent.find((event) => event.type === 'task.complete')?.payload).toMatchObject({ summary: text });
     expect(sent.some((event) => event.type === 'task.fail')).toBe(false);
   });

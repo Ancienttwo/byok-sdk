@@ -214,7 +214,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     }
     await vi.waitFor(() => expect(daemon.status().activeTaskCount).toBe(0));
     if (outcome === 'document') {
-      if (terminal?.envelope.type !== 'task.complete') throw new Error('Missing Summary terminal');
+      if (terminal?.envelope.type !== 'task.complete' || terminal.envelope.payload.sealed !== undefined) throw new Error('Missing Summary terminal');
       const recoveredDocument = terminal.envelope.payload.document;
       expect(recoveredDocument).toEqual(document);
       const instruction = JSON.stringify({ summary: recoveredDocument, recentHistory: [], input: 'Current user request' });

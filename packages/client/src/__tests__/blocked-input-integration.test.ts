@@ -183,7 +183,7 @@ it('fails a fresh Agent egress offer whose instruction BlobRef cannot be resolve
       envelope: { type: 'task.fail', payload: { retryable: true } },
     }), { timeout: 10000 });
     const terminal = await sdk.tasks.deviceTerminal(taskId);
-    if (terminal?.envelope.type !== 'task.fail') throw new Error('expected task.fail');
+    if (terminal?.envelope.type !== 'task.fail' || terminal.envelope.payload.sealed !== undefined) throw new Error('expected a plaintext task.fail');
     expect(terminal.envelope.payload.reason.startsWith('failed to resolve instruction blob:')).toBe(true);
     expect(adapter.startCalls).toHaveLength(0);
     expect(adapter.sessions).toHaveLength(0);
