@@ -106,7 +106,6 @@ export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenS
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
 export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
 export type { SqliteSchemaErrorCode } from './sqlite-support';
-export { migrateSqliteToWireV4, preflightSqliteWireV4Migration } from './stores/sqlite/wire-v4-receipt-migration';
 export type { RateLimiterOptions } from './rate-limiter';
 export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 /** Page size `tasks.list()` uses when the caller names none. */
@@ -788,17 +787,6 @@ export declare function openSqliteDatabase(path: string, options?: DatabaseSyncO
  * treated as an error. No-op for `:memory:`.
  */
 export declare function secureSqliteFilePermissions(dbPath: string): void;
-// ==== @byok-sdk/server dist/stores/sqlite/wire-v4-receipt-migration.d.ts ====
-import { type WireV3LegacyTask, type WireV4MigrationPreflight, type WireV4ReceiptMigrationResult } from '@byok-sdk/cloud';
-/** Lists the legacy tasks and every unmappable row of the store at `path`. Changes nothing. */
-export declare function preflightSqliteWireV4Migration(path: string): Promise<WireV4MigrationPreflight>;
-/**
- * Migrates the store at `path` when the preflight finds no unmappable row and
- * `confirmedLegacyTasks` is exactly the preflight's legacy task list: deletes
- * every row of those tasks, then re-encodes the remaining offer and terminal
- * receipts, in one transaction. Otherwise it throws and changes nothing.
- */
-export declare function migrateSqliteToWireV4(path: string, confirmedLegacyTasks: readonly WireV3LegacyTask[]): Promise<WireV4ReceiptMigrationResult>;
 // ==== @byok-sdk/server dist/task-handle.d.ts ====
 import { type ByokCloud, type SteerRejectionCode, type TenantId } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
@@ -1199,7 +1187,9 @@ export type ServerTaskEvent = {
     event: AgentEventOrUnknown;
 } | {
     kind: 'artifact';
-    artifact: TaskArtifactPayload;
+    artifact: Extract<TaskArtifactPayload, {
+        sealed?: undefined;
+    }>;
 } | {
     kind: 'await_approval';
     summary: string;

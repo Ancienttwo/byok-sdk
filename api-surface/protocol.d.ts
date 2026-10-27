@@ -2899,8 +2899,6 @@ export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
 export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec';
-export { WIRE_V3_TO_V4_TYPES, migrateWireV3Envelope, wireV4FormOf, wireV4TypeOf } from './wire-v4-migration';
-export type { WireV4MigrationRefusal, WireV4MigrationResult } from './wire-v4-migration';
 export type { CreateEnvelopeOptions } from './codec';
 export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, ActivityIngressSchema, MessageSendOutcomeSchema, OUTBOUND_REFUSAL_REASONS, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, MESSAGES_SEND_MAX_BODY_BYTES, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_E2EE_MEMBER_KEY_PATH, BYOK_E2EE_CHAIN_PATH, BYOK_E2EE_KEY_PACKAGES_PATH, BYOK_E2EE_PAIRING_MAC_PATH, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, } from './http-api';
 export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, ActivityIngress, MessageSendOutcome, OutboundRefusalReason, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, InputPreparationCompletionRequest, InputPreparationStatus, InputPreparationReadback, InputPreparationStatusQuery, } from './http-api';
@@ -7555,45 +7553,3 @@ export declare const WIRE_ADDITIONS: readonly WireAddition[];
  */
 export declare function requiredReceiverCapabilities(type: MessageType, payload: unknown): CapabilityFlag[];
 export {};
-// ==== @byok-sdk/protocol dist/wire-v4-migration.d.ts ====
-import { type MessageType } from './messages';
-/**
- * Every wire v3 message type and its v4 type. `null` marks a v3 type that v4
- * does not carry: a stored body of that type cannot be migrated. The Agent
- * offers become `task.offer`, and each sealed type becomes its plaintext type,
- * whose sealed branch its payload takes unchanged.
- */
-export declare const WIRE_V3_TO_V4_TYPES: Readonly<Record<string, MessageType | null>>;
-/** Why a stored v3 body cannot be migrated. */
-export type WireV4MigrationRefusal = 
-/** Not JSON, not an envelope object, or not `v: 3`. */
-'not_wire_v3'
-/** A v3 type that {@link WIRE_V3_TO_V4_TYPES} maps to `null`, or does not list. */
- | 'type_without_v4_form'
-/** The mapped envelope does not parse under v4. */
- | 'invalid_under_v4';
-export type WireV4MigrationResult = {
-    readonly ok: true;
-    readonly type: MessageType;
-    readonly body: string;
-} | {
-    readonly ok: false;
-    readonly type?: string;
-    readonly refusal: WireV4MigrationRefusal;
-};
-/** The v4 type of a v3 type, or `undefined` when v4 does not carry it. */
-export declare function wireV4TypeOf(v3Type: string): MessageType | undefined;
-/**
- * The v4 type and payload of a stored v3 message, before v4 validation, or
- * `undefined` when v4 does not carry its type. An Agent offer's `sessionRef`
- * becomes `session`; every other payload keeps its fields.
- */
-export declare function wireV4FormOf(v3Type: string, payload: unknown): {
-    readonly type: MessageType;
-    readonly payload: unknown;
-} | undefined;
-/**
- * Re-encodes one stored wire v3 envelope as v4. The result is the canonical
- * v4 encoding, so its bytes and hash differ from the v3 body.
- */
-export declare function migrateWireV3Envelope(body: string): WireV4MigrationResult;
