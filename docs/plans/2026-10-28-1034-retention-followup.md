@@ -6,7 +6,7 @@
 
 #1021 已修复 released exec-runtime。#1042 已合入此基线，原 `producers.ts`、`registry.ts`、`retention.test.ts` 写入冲突已解除；新增 session-ledger 是单文件删除，不扩大本问题。
 
-本车道只写此文档与 `_ops/1034-repro/`，不修改产品或已有测试。实施前由父线程确认边界。
+实现范围为 retention collector/producer/sweeper、内部 reader-run 候选选择器及专属回归文件。公开签名、旧测试断言、API golden 与预算保持不变。
 
 ## P1 — 系统边界
 
@@ -30,7 +30,7 @@
 node _ops/1034-repro/measure-only.mjs
 ```
 
-Node `v24.22.1`，无 mock、无依赖安装、直接加载此基线 `usage.ts`。真实 fixture `/private/tmp/r1034-boundary-7smBkn` 保留：一个根目录与 16,384 个 1-byte 文件。
+Node `v24.22.1`，无 mock、无依赖安装、直接加载此基线 `usage.ts`。真实 fixture `/private/tmp/r1034-boundary-7smBkn` 已在验证后清理：一个根目录与 16,384 个 1-byte 文件。
 
 - 16,384 scanned entries（根 + 16,383 文件）测量成功，bytes=16,383。
 - 16,385 scanned entries（根 + 16,384 文件）连续三次 `removeOwnedPath` 都报 `retention_usage_scan_limit`，每次仍剩 16,384 文件，零删除。
@@ -54,9 +54,9 @@ bun _ops/1034-repro/repro.ts
 | daemon-temp | 同上 | 16,384 | 0 / 0 |
 | reader-run | 同上 | 16,384 | 0 / 0 |
 
-偶数轮读到目录游标尾，没有重新遇到目标；不是恢复。奇数轮每次在真实 `measureTree` 失败，三个类全部没有回收进展。最终 exit **0**；JSON `_ops/1034-repro/sweep-output.jsonl`，退出码 `sweep-exit-code.txt`，stderr 为空。fixture `/private/tmp/r1034-l54Zeu` 保留，包含三个各16,384个文件的目录。
+偶数轮读到目录游标尾，没有重新遇到目标；不是恢复。奇数轮每次在真实 `measureTree` 失败，三个类全部没有回收进展。最终 exit **0**；JSON `_ops/1034-repro/sweep-output.jsonl`，退出码 `sweep-exit-code.txt`，stderr 为空。fixture `/private/tmp/r1034-l54Zeu` 当时包含三个各16,384个文件的目录，已在验证后清理；JSON/exit evidence 保留。
 
-这批证据只验证 registry producer 的周期 sweep，不声称完整 daemon startup 或 Windows 验证。此前无依赖的临时 resolver 三次失败均发生在产品执行前，已停止使用；失败 exit 1 保存在 `exit-code.txt`，不算产品回归。
+这批证据只验证 registry producer 的周期 sweep，不声称完整 daemon startup 或 Windows 验证。
 
 ## P3 — 最小实现提案
 
@@ -65,7 +65,7 @@ bun _ops/1034-repro/repro.ts
 3. reader-run 候选选择提取到内部 `agent-home-reader-retention.ts`；原公开 `pruneReaderRuns` 签名不变。两个消费者共用同一 active/reference/TTL/overflow 规则。retention 逐个取得到期候选立即回收，pending 目标优先；每次重新取得 idle lease 与 handoff references。
 4. collector 在部分回收的 finally 中将同 identity 目标目录的 mtime 恢复为原值，磁盘 mtime 继续是唯一 TTL authority。新 registry 无需 sidecar 或内存 mtime 副本即可继续。进程在 finally 前被强杀的窗口不在本次 registry-restart 证据范围内，不声称 crash atomicity。
 5. leaf bytes 写回原始 pass budget 的 WeakMap，class wrapper 记录 parent；home 时间 wrapper 只提供 available，accounting 仍传 class budget。完整对象计数只在最终删除增加。
-6. 父线程定案：runtime 保留 4,096 inspections；exec-sdk、daemon-temp、reader-run 各 1,024，总计最多 7,168，余下 1,024 服务其他类及 dispatch overhead。classBudget 是份额唯一 owner，listing 和 leaf 都计份额。周期轮换起点，startup 始终 SDK 先。全局时间上限不保证每轮所有类均服务，有限工作下轮换提供跨轮机会。保留旧 runtime 五轮清空断言，不修改已有测试。
+6. 父线程定案：runtime 保留 4,096 inspections；exec-sdk、daemon-temp、reader-run 各 1,024，可续扫 listing/删除份额总计最多 7,168。完整 reference authority 扫描单独使用原始 pass 的 8,192 全局上限及 250 ms home 时限，不受 1,024 删除份额限制；因此引用清单较大时不承诺其他类每轮还剩 1,024。classBudget 是删除份额唯一 owner，所有工作仍共享全局上限。周期轮换起点，startup 始终 SDK 先。全局时间上限不保证每轮所有类均服务，有限工作下轮换提供跨轮机会。保留旧 runtime 五轮清空断言，不修改已有测试。
 
 10× 积压首先耗尽 inspections / wall time，不应再次触发整树测量上限；应增加完成轮数而非停止进展。每轮固定预算下，不承诺持续写入量超过清理吞吐时队列能清空。
 
@@ -75,4 +75,14 @@ bun _ops/1034-repro/repro.ts
 
 ## 实施交接
 
-新增 `retention-oversized-classes.test.ts` 覆盖三个真实大目录、每类上限、完整 byte accounting、部分回收后 registry 重建、mtime 不重置、SDK startup fail closed 与其他单文件类进展。实施代理未运行 build/typecheck/tests；父线程统一验证。此前故障复现及 fixture 保留。没有修改公开 API golden、entry budgets、CHANGELOG 或旧测试断言。
+新增 `retention-oversized-classes.test.ts` 覆盖三个真实大目录、每类上限、完整 byte accounting、部分回收后 registry 重建、mtime 不重置、SDK startup fail closed 与其他单文件类进展。实施代理未运行 build/typecheck/tests；父线程统一验证。此前故障复现的 JSON 与退出码保留，临时大目录已清理。没有修改公开 API golden、entry budgets、CHANGELOG 或旧测试断言。
+
+## 父线程验收记录
+
+验证 subject：`8a85f3ac9f41a96ac76382e49729390099d093f3`，冻结基线 `2fd42d4502693001aa6b9942342731c4d748a84a`。
+
+- 初始三个定向文件（retention、oversized classes、agent-home-readers）：89 tests passed。
+- 独立只读审查发现 references 不可续扫却受 1,024 删除份额限制；`8a85f3ac9` 将完整 authority 扫描恢复为全局预算计费，保留 250ms 和不完整 references 全 home 禁删规则。
+- 第二轮仅读该修复 delta，确认 P2 已修复，无新增 finding；最后的执行条件已由新增专属文件 6 tests passed（exit 0）满足。回归使用生产 writer 建立 1,026 个真实 ledgers，检查未引用目录推进与引用目录保留。
+- `bun run build`、`bun run typecheck`、`bun run check:api-surface`、`bun run check:version-authority`：全部 exit 0。九包 declaration golden 匹配，未提高任何预算。
+- 最终 `bun run test` 在该冻结代码上运行；日志 `/tmp/byok-1034-test.log`。其终态另行记录，不以定向测试代称全绿。
