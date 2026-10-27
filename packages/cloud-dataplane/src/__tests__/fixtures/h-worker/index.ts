@@ -238,7 +238,7 @@ function productHooks(env: Env, ctx: ExecutionContext, fault: string | null, inj
             by: 'observer',
             terminal: {
               state,
-              ...(envelope.type === 'task.complete' ? { summary: envelope.payload.summary } : {}),
+              ...(envelope.type === 'task.complete' && envelope.payload.sealed === undefined ? { summary: envelope.payload.summary } : {}),
               deviceTerminalType: envelope.type,
             },
           }),
