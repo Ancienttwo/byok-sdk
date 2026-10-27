@@ -67,11 +67,11 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
       expect(open.mock.calls.some(([input]) => input.canonicalHome === path.join(root, 'homes'))).toBe(true);
       const notice = createEnvelope('agent.memory.intent.available', { intentId: intent.intentId, agentRef }, { seq: server.nextSeq() });
       server.pushLongPollEvent(notice);
-      // Fetch, a self-executable Node helper start and real helper I/O run between the push and the completion; on the macos-15-intel runner the
-      // default 1 s was not enough. The waits stay inside the 10 s testTimeout next to the ~5-7 s the whole case takes there.
-      await vi.waitFor(() => expect(completions).toHaveLength(1), { timeout: 3_000 });
+      // Fetch, a self-executable Node helper start and real helper I/O run between the push and the completion. On macos-15-intel the whole case
+      // takes 5-7 s, and the default 1 s wait expired twice. Both waits end well before the 30 s case timeout, so a real hang fails at a wait.
+      await vi.waitFor(() => expect(completions).toHaveLength(1), { timeout: 8_000 });
       expect(completions[0]!.outcome).toBe('applied');
-      await vi.waitFor(async () => expect(await new CursorStore(path.join(root, 'store')).load(server.url, deviceId)).toBe(notice.seq), { timeout: 2_000 });
+      await vi.waitFor(async () => expect(await new CursorStore(path.join(root, 'store')).load(server.url, deviceId)).toBe(notice.seq), { timeout: 5_000 });
     } else {
       // No B: no volume probe and no capability.
       expect(hello.payload.capabilities).not.toContain('agent-memory-intent.v1');
@@ -100,4 +100,4 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
     open.mockRestore();
     await fs.rm(root, { recursive: true, force: true });
   }
-});
+}, 30_000);
