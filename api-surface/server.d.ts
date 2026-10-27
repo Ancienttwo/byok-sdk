@@ -222,9 +222,13 @@ export interface ByokServer {
          * record: read task facts with {@link tasks.get}.
          *
          * A live task this instance did not dispatch (after a restart) gets a feed
-         * whose first entry is its current state read back from the stores, and
-         * no earlier events. That state can appear twice when the read saw a
-         * commit the feed had not received yet.
+         * that starts with its current state read back from the stores, after the
+         * pending approval request while it awaits a plaintext one, and no earlier
+         * events. That state can appear twice when the read saw a commit the feed
+         * had not received yet. Once attached, the feed stays until the task's
+         * terminal plus `taskEventRetentionMs` however its readers leave, so a
+         * reconnecting reader resumes with its cursor; a read stopped before its
+         * first store read completed attaches nothing.
          *
          * The first `next()` throws, before any entry: a `TypeError` when both
          * `after` and `from` are given, `ByokCloudError` `task_not_found` for an
@@ -587,13 +591,16 @@ export interface TaskEventRelayOptions {
  * current feed and never creates one; `stopped` turns true at {@link stop}.
  * `attach` starts delivering a live task this instance did not dispatch (after
  * a restart) from now on, without reconstructing earlier events; only a host
- * read creates such a feed. `seed` gives an attached feed that no transition
- * has reached yet its first `state` entry, read back from the durable stores;
- * once a transition arrived, the feed already says more than that would. A
- * seed waits behind an in-flight dispatch like any delivery, so `Offered`
- * still comes first.
- * `detach` drops an `attached` feed that turned out
- * to have nothing to deliver, and never one a dispatch owns. `entries` reads a feed after a cursor, or from the start of what is
+ * read creates such a feed. Attaching to a feed a dispatch opened for a task
+ * that is already stored makes it `attached-dispatching`, so a refused
+ * dispatch hands it back to its reader instead of dropping it. `seed` gives an
+ * attached feed that no transition has reached yet its starting entries, read
+ * back from the durable stores and pushed by the same `#begin` that records a
+ * live state's start; once a transition arrived, the feed already says more
+ * than they would. A seed waits behind an in-flight dispatch like any
+ * delivery, so `Offered` still comes first. `detach` drops an `attached` feed
+ * that turned out to have nothing to deliver, and never one a dispatch owns.
+ * `entries` reads a feed after a cursor, or from the start of what is
  * retained, and refuses a cursor that names no position of the feed with
  * `cursor_unknown`. Members carry no block docs here because comments on class
  * members ship in the bundle, which has an exact size budget.
@@ -621,7 +628,7 @@ export declare class TaskEventRelay implements ByokCloudObserver {
     get stopped(): boolean;
     feed(taskId: string): TaskFeed | undefined;
     attach(taskId: string): TaskFeed | undefined;
-    seed(feed: TaskFeed, event: ServerTaskEvent): void;
+    seed(feed: TaskFeed, next: TaskState, at: string, request?: ServerTaskEvent): void;
     detach(taskId: string, feed: TaskFeed): void;
     entries(taskId: string, feed: TaskFeed, after?: string): AsyncIterable<QueueEntry<ServerTaskEvent>>;
     /** Settles when this task first reaches a terminal — the barrier `TaskHandle.result()` awaits. */
@@ -795,7 +802,7 @@ export declare function migrateSqliteToWireV4(path: string, confirmedLegacyTasks
 import { type ByokCloud, type SteerRejectionCode, type TenantId } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
 import type { TaskEventRelay } from './relay';
-import { type TaskEventEntry, type TaskHandle, type TaskResult } from './types';
+import { type ServerTaskEvent, type TaskEventEntry, type TaskHandle, type TaskResult } from './types';
 /**
  * Thrown by {@link TaskHandle.steer} when the kernel refuses the steer.
  *
@@ -843,11 +850,23 @@ export interface TaskHandleDeps {
         readonly state: TaskState;
         readonly at: string;
     } | undefined>;
+    /**
+     * The pending approval request as the relay would have announced it: a
+     * plaintext request with an `approvalId`. A sealed request, which the relay
+     * never announces, reads as none.
+     */
+    readonly readApprovalRequest: (taskId: string) => Promise<ServerTaskEvent | undefined>;
     /** The read-back this handle's `result()` answers with. */
     readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
 }
 type ApprovalDeps = Pick<TaskHandleDeps, 'tenant' | 'cloud' | 'relay'>;
-type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState'>;
+type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState' | 'readApprovalRequest'>;
+/** Where a task event read starts, and what stops it; see `ByokServer.tasks.events`. */
+export interface TaskEventReadOptions {
+    readonly after?: string;
+    readonly from?: 'state';
+    readonly signal?: AbortSignal;
+}
 /**
  * One task's event feed from the relay, shared by `ByokServer.tasks.events`
  * and {@link TaskHandle.events}. Every refusal is thrown by the first `next()`,
@@ -860,11 +879,6 @@ type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState'>;
  * `return()` aborts the read's own signal first, which wakes the queue.
  * `project` shapes each entry: `TaskHandle.events()` yields the event alone.
  */
-export interface TaskEventReadOptions {
-    readonly after?: string;
-    readonly from?: 'state';
-    readonly signal?: AbortSignal;
-}
 export declare function readTaskEvents<T = TaskEventEntry>(deps: EventDeps, taskId: string, options?: TaskEventReadOptions, project?: (entry: TaskEventEntry) => T): AsyncIterable<T>;
 /**
  * The host's approval decision, shared by {@link TaskHandle.approve} and
