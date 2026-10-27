@@ -13,7 +13,7 @@ import { inputPreparationReadinessReasons } from './input-preparation-service';
 import type { PreparedAgentMemoryState } from './prepared-agent-memory';
 
 /**
- * The item-by-item comparison one `task.offer_prepared` must survive before a
+ * The item-by-item comparison one prepared `task.offer` must survive before a
  * single byte is claimed or dispatched.
  *
  * WHY item by item, rather than one digest over everything: a prepared

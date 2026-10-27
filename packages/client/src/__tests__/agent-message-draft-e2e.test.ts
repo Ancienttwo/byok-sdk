@@ -87,7 +87,7 @@ async function setup(options: { adapter?: RuntimeAdapter; oldServer?: boolean; g
   await waitForDaemonOpen(daemon);
   const submit = async (required = true) => {
     await server.byok.executions.submit({ taskId, deviceId, payload: {
-      instruction: 'Write a reply.', agentRef, egressPolicy: policy,
+      instruction: 'Write a reply.', agentRef, session: { mode: 'fresh' }, egressPolicy: policy,
       ...(adapter.descriptor.id === 'custom-draft' ? { harnessId: 'custom-draft' } : { runtime: 'pi' as const }),
       ...(required ? { messageEgress: {
         mode: 'required' as const, contract: 'draft.v1', contentType: 'text/plain' as const, maxBytes: 1024,

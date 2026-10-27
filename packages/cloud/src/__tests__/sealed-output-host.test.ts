@@ -15,12 +15,11 @@ import { readFileSync } from 'node:fs';
 import type { ContentHash, TenantId } from '@byok-sdk/core';
 import { sealContent, type SealedContent } from '@byok-sdk/core/sealed-payload';
 import {
-  SEALED_SPLIT_TABLE,
   createEnvelope,
   requiredReceiverCapabilities,
   type Envelope,
   type MessageType,
-  type SealedMessageType,
+  type SealableMessageType,
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { handleInboundEnvelope, terminalReceiptKey } from '../inbound';
@@ -40,25 +39,28 @@ import {
 const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
-  .map((raw) => JSON.parse(raw) as { type: MessageType; payload: { sealed?: object } });
+  .map((raw) => JSON.parse(raw) as {
+    type: MessageType;
+    payload: { sealed?: object; sealing?: object; session?: { mode?: string }; egressPolicy?: object };
+  });
 
 /** A schema-valid `task-output` sealed member from the corpus. The Host reads only its outer fields. */
-const OUTPUT_MEMBER = corpus.find((line) => line.type === 'task.complete_sealed')!.payload.sealed!;
+const OUTPUT_MEMBER = corpus.find((line) => line.type === 'task.complete' && line.payload.sealed !== undefined)!.payload.sealed!;
 /** A `task-output` member above the inline limit, which names its ciphertext blob. */
-const BY_REFERENCE_MEMBER = corpus.find((line) => line.type === 'task.complete_sealed'
+const BY_REFERENCE_MEMBER = corpus.find((line) => line.type === 'task.complete' && line.payload.sealed !== undefined
   && (line.payload.sealed as { ciphertextRef?: unknown }).ciphertextRef !== undefined)!.payload.sealed!;
 
-/** The plaintext fields of each sealed output type, with no Agent, harness or recovery binding. */
+/** The sealed branch of each sealable output type, with no Agent, harness or recovery binding. */
 const SEALED_OUTPUTS = {
-  'task.complete_sealed': { sessionRef: 'session-sealed', sealed: OUTPUT_MEMBER },
-  'task.fail_sealed': { retryable: false, sealed: OUTPUT_MEMBER },
-  'task.decline_sealed': { retryable: false, sealed: OUTPUT_MEMBER },
-  'task.cancelled_sealed': { sealed: OUTPUT_MEMBER },
-  'task.artifact_sealed': {
+  'task.complete': { sessionRef: 'session-sealed', sealed: OUTPUT_MEMBER },
+  'task.fail': { retryable: false, sealed: OUTPUT_MEMBER },
+  'task.decline': { retryable: false, sealed: OUTPUT_MEMBER },
+  'task.cancelled': { sealed: OUTPUT_MEMBER },
+  'task.artifact': {
     artifactId: '00000000-0000-4000-8000-000000000600', name: 'patch.diff', contentType: 'text/x-diff', sealed: OUTPUT_MEMBER,
   },
-  'task.progress_sealed': { seq: 1, sealed: OUTPUT_MEMBER },
-  'task.await_approval_sealed': { approvalId: 'approval-1', sealed: OUTPUT_MEMBER },
+  'task.progress': { seq: 1, sealed: OUTPUT_MEMBER },
+  'task.await_approval': { approvalId: 'approval-1', sealed: OUTPUT_MEMBER },
 } as const;
 type SealedOutputType = keyof typeof SEALED_OUTPUTS;
 
@@ -85,7 +87,7 @@ const SCOPE_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
  */
 async function sealAgentInput(
   deviceId: string,
-  type: SealedMessageType,
+  type: SealableMessageType,
   identity: Readonly<Record<string, string>>,
   plaintext: Readonly<Record<string, string>>,
 ): Promise<SealedContent> {
@@ -97,7 +99,7 @@ async function sealAgentInput(
     category: 'task-input',
     binding: {
       tenantId: TENANT_A,
-      family: SEALED_SPLIT_TABLE[type].plainType,
+      family: type,
       direction: 'server-to-daemon',
       identity,
       deviceId,
@@ -113,7 +115,6 @@ async function sealAgentInput(
 /** The types whose report echoes the task's Agent, as a v4 daemon's does. */
 const ECHOES_AGENT: readonly MessageType[] = [
   'task.claim', 'task.decline', 'task.complete', 'task.fail', 'task.cancelled',
-  'task.decline_sealed', 'task.complete_sealed', 'task.fail_sealed', 'task.cancelled_sealed',
 ];
 
 /**
@@ -129,8 +130,8 @@ async function offeredTask(
 ): Promise<Task> {
   const harness = createHarness();
   const device = await harness.pairDevice(TENANT_A);
-  const resume = { agentRef: TEST_AGENT_REF, sessionRef: offerPayload().sessionRef, runtime: 'pi' as const };
-  const capabilities = requiredReceiverCapabilities('task.offer_for_agent_sealed', { ...resume, sealing: OUTPUT_SEALING, sealed: {} });
+  const resume = { agentRef: TEST_AGENT_REF, session: offerPayload().session, runtime: 'pi' as const };
+  const capabilities = requiredReceiverCapabilities('task.offer', { ...resume, sealing: OUTPUT_SEALING, sealed: {} });
   await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities });
   taskCount += 1;
   const taskId = `sealed-output-${taskCount}`;
@@ -138,7 +139,7 @@ async function offeredTask(
   if (sealing === undefined) {
     await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId, payload: { ...offerPayload('plain'), runtime: 'pi' } });
   } else {
-    const content = await sealAgentInput(device.deviceId, 'task.offer_for_agent_sealed', { taskId }, {
+    const content = await sealAgentInput(device.deviceId, 'task.offer', { taskId }, {
       instruction: offerByReference ? 'x'.repeat(BY_REFERENCE_TEXT_LENGTH) : 'sealed',
     });
     if (offerByReference) offerRef = await uploadCiphertext(harness, device, content.ciphertext);
@@ -163,14 +164,15 @@ async function offeredTask(
 }
 
 /** An output-only sealed Agent offer from the corpus. */
-const AGENT_OFFER = corpus.find((line) => line.type === 'task.offer_for_agent_sealed' && line.payload.sealed === undefined)!
+const AGENT_OFFER = corpus.find((line) => line.type === 'task.offer' && line.payload.sealing !== undefined && line.payload.sealed === undefined
+  && line.payload.session?.mode === 'resume' && line.payload.egressPolicy === undefined)!
   .payload as unknown as { agentRef: { agentId: string; profileRevision: string }; runtime: string; sealing: { categories: string[] } };
 
 /** An Agent task whose offer seals its output, claimed unless told not to. */
 async function agentTask(claim: boolean): Promise<Task> {
   const harness = createHarness();
   const device = await harness.pairDevice(TENANT_A);
-  const capabilities = requiredReceiverCapabilities('task.offer_for_agent_sealed', AGENT_OFFER);
+  const capabilities = requiredReceiverCapabilities('task.offer', AGENT_OFFER);
   await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities });
   taskCount += 1;
   const taskId = `sealed-agent-output-${taskCount}`;
@@ -194,9 +196,9 @@ const refused = (reason: string) => ({ outcome: 'rejected', reason });
 
 describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
   const terminals = [
-    ['task.complete_sealed', 'complete', undefined, { state: 'complete', sessionRef: 'session-sealed' }],
-    ['task.fail_sealed', 'failed', undefined, { state: 'failed', retryable: false }],
-    ['task.cancelled_sealed', 'cancelled', undefined, { state: 'cancelled' }],
+    ['task.complete', 'complete', undefined, { state: 'complete', sessionRef: 'session-sealed' }],
+    ['task.fail', 'failed', undefined, { state: 'failed', retryable: false }],
+    ['task.cancelled', 'cancelled', undefined, { state: 'cancelled' }],
   ] as const;
 
   it.each(terminals)('%s records the status, no terminal cause, and reads back with its sealed member', async (type, status, _cause, result) => {
@@ -214,10 +216,10 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
     });
   });
 
-  it('task.decline_sealed keeps only its closed home code as the terminal cause', async () => {
+  it('a sealed task.decline keeps only its closed home code as the terminal cause', async () => {
     const task = await offeredTask(OUTPUT_SEALING, false);
-    const payload = { ...SEALED_OUTPUTS['task.decline_sealed'], code: 'agent_home_writer_busy' };
-    expect(await task.send('task.decline_sealed', payload)).toEqual({ outcome: 'accepted' });
+    const payload = { ...SEALED_OUTPUTS['task.decline'], code: 'agent_home_writer_busy' };
+    expect(await task.send('task.decline', payload)).toEqual({ outcome: 'accepted' });
 
     expect(await task.harness.cloud.readTaskAttempt(TENANT_A, task.taskId)).toMatchObject({
       status: 'failed', terminalCause: 'agent_home_writer_busy',
@@ -230,20 +232,20 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
 
   it('a later terminal does not replace the first one', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
-    expect(await task.send('task.complete_sealed', SEALED_OUTPUTS['task.complete_sealed'])).toEqual({ outcome: 'accepted' });
-    expect(await task.send('task.fail_sealed', SEALED_OUTPUTS['task.fail_sealed'])).toEqual({ outcome: 'accepted' });
-    expect((await task.harness.cloud.readDeviceTerminal(TENANT_A, task.taskId))?.envelope.type).toBe('task.complete_sealed');
+    expect(await task.send('task.complete', SEALED_OUTPUTS['task.complete'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.fail', SEALED_OUTPUTS['task.fail'])).toEqual({ outcome: 'accepted' });
+    expect((await task.harness.cloud.readDeviceTerminal(TENANT_A, task.taskId))?.envelope.type).toBe('task.complete');
   });
 
   it('accepts a sealed artifact and stores nothing for it', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
-    expect(await task.send('task.artifact_sealed', SEALED_OUTPUTS['task.artifact_sealed'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.artifact', SEALED_OUTPUTS['task.artifact'])).toEqual({ outcome: 'accepted' });
     expect(await task.harness.cloud.readTaskAttempt(TENANT_A, task.taskId)).toMatchObject({ status: 'running' });
   });
 
   it('pairs a device approval resolution with a sealed approval request', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
-    expect(await task.send('task.await_approval_sealed', SEALED_OUTPUTS['task.await_approval_sealed'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.await_approval', SEALED_OUTPUTS['task.await_approval'])).toEqual({ outcome: 'accepted' });
     expect(await task.send('task.approval_resolved', { approvalId: 'approval-1', decision: 'reject', resolvedBy: 'local', at: '2026-10-24T00:00:00.000Z' }))
       .toEqual({ outcome: 'accepted' });
     expect((await task.harness.cloud.readApprovalTimeline(TENANT_A, task.taskId))?.entries.map(({ event }) => event)).toEqual([
@@ -254,15 +256,15 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
 
   it('stores nothing for a late sealed progress or approval report on a redacted task', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
-    expect(await task.send('task.complete_sealed', SEALED_OUTPUTS['task.complete_sealed'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.complete', SEALED_OUTPUTS['task.complete'])).toEqual({ outcome: 'accepted' });
     await task.harness.stores.receipts.record(TENANT_A, { key: taskRedactionReceiptKey(task.taskId), body: '{}' });
-    expect(await task.send('task.progress_sealed', SEALED_OUTPUTS['task.progress_sealed'])).toEqual({ outcome: 'accepted' });
-    expect(await task.send('task.await_approval_sealed', SEALED_OUTPUTS['task.await_approval_sealed'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.progress', SEALED_OUTPUTS['task.progress'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.await_approval', SEALED_OUTPUTS['task.await_approval'])).toEqual({ outcome: 'accepted' });
     expect(await task.harness.cloud.readActivity(TENANT_A, task.taskId)).toBeUndefined();
     expect(await task.harness.cloud.readApprovalTimeline(TENANT_A, task.taskId)).toBeUndefined();
   });
 
-  it.each(['task.progress_sealed', 'task.await_approval_sealed'] as const)(
+  it.each(['task.progress', 'task.await_approval'] as const)(
     'refuses %s by ciphertextRef, because its tail row expires (12e), before the envelope identity is reserved',
     async (type) => {
       const task = await offeredTask(OUTPUT_SEALING);
@@ -275,8 +277,8 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
 
   it('stores each sealed progress batch as one activity entry (12e)', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
-    expect(await task.send('task.progress_sealed', SEALED_OUTPUTS['task.progress_sealed'])).toEqual({ outcome: 'accepted' });
-    expect(await task.send('task.progress_sealed', { ...SEALED_OUTPUTS['task.progress_sealed'], seq: 2 })).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.progress', SEALED_OUTPUTS['task.progress'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.progress', { ...SEALED_OUTPUTS['task.progress'], seq: 2 })).toEqual({ outcome: 'accepted' });
     const tail = await task.harness.cloud.readActivity(TENANT_A, task.taskId);
     expect(tail?.entries).toEqual([1, 2].map((batchSeq) => ({
       taskId: task.taskId,
@@ -292,7 +294,7 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
 
   it('stores a sealed approval request, which the Host approves while it is pending (12e)', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
-    expect(await task.send('task.await_approval_sealed', SEALED_OUTPUTS['task.await_approval_sealed'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.await_approval', SEALED_OUTPUTS['task.await_approval'])).toEqual({ outcome: 'accepted' });
     expect((await task.harness.cloud.readApprovalTimeline(TENANT_A, task.taskId))?.entries.map(({ event }) => event)).toEqual([
       { type: 'approval_requested', approvalId: 'approval-1', sealed: OUTPUT_MEMBER },
     ]);
@@ -304,7 +306,7 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
 });
 
 describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
-  const BY_REFERENCE = ['task.complete_sealed', 'task.fail_sealed', 'task.decline_sealed', 'task.cancelled_sealed', 'task.artifact_sealed'] as const;
+  const BY_REFERENCE = ['task.complete', 'task.fail', 'task.decline', 'task.cancelled', 'task.artifact'] as const;
   const REFERENCE_SIZE = (BY_REFERENCE_MEMBER as { ciphertextRef: { size: number } }).ciphertextRef.size;
 
   /** Uploads ciphertext bytes of the corpus member's size. The Host checks the object, not the bytes. */
@@ -318,13 +320,13 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
   }
 
   it.each(BY_REFERENCE)('accepts %s naming a committed blob, and the task holds one reference to it', async (type) => {
-    const task = await offeredTask(OUTPUT_SEALING, type !== 'task.decline_sealed');
+    const task = await offeredTask(OUTPUT_SEALING, type !== 'task.decline');
     const { member, ref } = await uploaded(task);
     expect(await refCount(task, ref)).toBe(0);
 
     expect(await task.send(type, { ...SEALED_OUTPUTS[type], sealed: member })).toEqual({ outcome: 'accepted' });
     expect(await refCount(task, ref)).toBe(1);
-    if (type !== 'task.artifact_sealed') {
+    if (type !== 'task.artifact') {
       expect((await task.harness.cloud.readDeviceTerminal(TENANT_A, task.taskId))?.envelope.payload).toMatchObject({ sealed: { ciphertextRef: ref } });
     }
     // A resend of the same sealed bytes under a new envelope id holds no second reference.
@@ -333,7 +335,7 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
   });
 
   it.each(BY_REFERENCE)('refuses %s naming a blob that does not exist, and records no terminal', async (type) => {
-    const task = await offeredTask(OUTPUT_SEALING, type !== 'task.decline_sealed');
+    const task = await offeredTask(OUTPUT_SEALING, type !== 'task.decline');
     const payload = { ...SEALED_OUTPUTS[type], sealed: BY_REFERENCE_MEMBER };
     expect(await task.send(type, payload)).toEqual(refused('sealed_ciphertext_invalid'));
     expect(await task.send(type, payload)).toEqual(refused('sealed_ciphertext_invalid'));
@@ -359,7 +361,7 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
     const task = await offeredTask(OUTPUT_SEALING);
     const { uploaded, declared } = await prepare(task);
     const member = { ...BY_REFERENCE_MEMBER, ciphertextRef: declared };
-    expect(await task.send('task.complete_sealed', { ...SEALED_OUTPUTS['task.complete_sealed'], sealed: member }))
+    expect(await task.send('task.complete', { ...SEALED_OUTPUTS['task.complete'], sealed: member }))
       .toEqual(refused('sealed_ciphertext_invalid'));
     expect(await refCount(task, uploaded)).toBe(0);
     expect(await task.harness.cloud.readDeviceTerminal(TENANT_A, task.taskId)).toBeUndefined();
@@ -369,27 +371,27 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
     const task = await offeredTask(OUTPUT_SEALING);
     const first = await uploaded(task);
     const later = await uploaded(task);
-    expect(await task.send('task.complete_sealed', { ...SEALED_OUTPUTS['task.complete_sealed'], sealed: first.member })).toEqual({ outcome: 'accepted' });
-    expect(await task.send('task.fail_sealed', { ...SEALED_OUTPUTS['task.fail_sealed'], sealed: later.member })).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.complete', { ...SEALED_OUTPUTS['task.complete'], sealed: first.member })).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.fail', { ...SEALED_OUTPUTS['task.fail'], sealed: later.member })).toEqual({ outcome: 'accepted' });
 
-    expect((await task.harness.cloud.readDeviceTerminal(TENANT_A, task.taskId))?.envelope.type).toBe('task.complete_sealed');
+    expect((await task.harness.cloud.readDeviceTerminal(TENANT_A, task.taskId))?.envelope.type).toBe('task.complete');
     expect(await refCount(task, first.ref)).toBe(1);
     expect(await refCount(task, later.ref)).toBe(0);
   });
 
   /** A losing terminal that names `ref`, with the padded length its size fixes. */
   function terminalNaming(ref: CiphertextRef): object {
-    return { ...SEALED_OUTPUTS['task.fail_sealed'], sealed: { ...BY_REFERENCE_MEMBER, ciphertextRef: ref, paddedLength: ref.size - 16 } };
+    return { ...SEALED_OUTPUTS['task.fail'], sealed: { ...BY_REFERENCE_MEMBER, ciphertextRef: ref, paddedLength: ref.size - 16 } };
   }
 
   it('a losing terminal that names the offer blob leaves the offer reference in place', async () => {
     const task = await offeredTask(OUTPUT_SEALING, true, true);
     const offerRef = task.offerRef!;
     expect(await refCount(task, offerRef)).toBe(1);
-    expect(await task.send('task.complete_sealed', SEALED_OUTPUTS['task.complete_sealed'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.complete', SEALED_OUTPUTS['task.complete'])).toEqual({ outcome: 'accepted' });
 
-    expect(await task.send('task.fail_sealed', terminalNaming(offerRef))).toEqual({ outcome: 'accepted' });
-    expect((await task.harness.cloud.readDeviceTerminal(TENANT_A, task.taskId))?.envelope.type).toBe('task.complete_sealed');
+    expect(await task.send('task.fail', terminalNaming(offerRef))).toEqual({ outcome: 'accepted' });
+    expect((await task.harness.cloud.readDeviceTerminal(TENANT_A, task.taskId))?.envelope.type).toBe('task.complete');
     expect(await refCount(task, offerRef)).toBe(1);
   });
 
@@ -399,15 +401,15 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
       .toEqual({ outcome: 'accepted' });
     expect(await task.send('task.started', {})).toEqual({ outcome: 'accepted' });
     const steerId = '00000000-0000-4000-8000-000000000601';
-    const content = await sealAgentInput(task.device.deviceId, 'task.steer_sealed', { taskId: task.taskId, steerId }, {
+    const content = await sealAgentInput(task.device.deviceId, 'task.steer', { taskId: task.taskId, steerId }, {
       text: 'x'.repeat(BY_REFERENCE_TEXT_LENGTH),
     });
     const steerRef = await uploadCiphertext(task.harness, task.device, content.ciphertext);
     await task.harness.cloud.steerSealedTask(TENANT_A, task.taskId, { steerId, sealed: referenceMember(content, steerRef) });
     expect(await refCount(task, steerRef)).toBe(1);
-    expect(await task.send('task.complete_sealed', SEALED_OUTPUTS['task.complete_sealed'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.complete', SEALED_OUTPUTS['task.complete'])).toEqual({ outcome: 'accepted' });
 
-    expect(await task.send('task.fail_sealed', terminalNaming(steerRef))).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.fail', terminalNaming(steerRef))).toEqual({ outcome: 'accepted' });
     expect(await refCount(task, steerRef)).toBe(1);
   });
 
@@ -415,7 +417,7 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
     const task = await offeredTask(OUTPUT_SEALING);
     await task.harness.stores.receipts.record(TENANT_A, { key: terminalReceiptKey(task.taskId), body: JSON.stringify({ byokRedacted: 1, absent: true }) });
     const { member, ref } = await uploaded(task);
-    expect(await task.send('task.complete_sealed', { ...SEALED_OUTPUTS['task.complete_sealed'], sealed: member })).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.complete', { ...SEALED_OUTPUTS['task.complete'], sealed: member })).toEqual({ outcome: 'accepted' });
     expect(await refCount(task, ref)).toBe(0);
   });
 
@@ -424,15 +426,15 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
     const { member, ref } = await uploaded(task);
     await task.harness.core.objects.addReference(TENANT_A, { hash: ref.contentHash as ContentHash, refKind: 'test', refId: 'other' });
     await task.harness.stores.receipts.record(TENANT_A, { key: terminalReceiptKey(task.taskId), body: JSON.stringify({ byokRedacted: 1, absent: true }) });
-    expect(await task.send('task.complete_sealed', { ...SEALED_OUTPUTS['task.complete_sealed'], sealed: member })).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.complete', { ...SEALED_OUTPUTS['task.complete'], sealed: member })).toEqual({ outcome: 'accepted' });
     expect(await refCount(task, ref)).toBe(1);
   });
 
   it('settles a replayed terminal on a redacted task after redaction deleted its blob', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
     const { member, ref } = await uploaded(task);
-    const payload = { ...SEALED_OUTPUTS['task.complete_sealed'], sealed: member };
-    expect(await task.send('task.complete_sealed', payload)).toEqual({ outcome: 'accepted' });
+    const payload = { ...SEALED_OUTPUTS['task.complete'], sealed: member };
+    expect(await task.send('task.complete', payload)).toEqual({ outcome: 'accepted' });
     // What redaction leaves: the reference released, the blob deleted, the receipts tombstoned.
     const hash = ref.contentHash as ContentHash;
     await task.harness.core.objects.removeReference(TENANT_A, { hash, refKind: 'sealed-task', refId: task.taskId });
@@ -440,26 +442,26 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
     await task.harness.core.objects.markDeleted(TENANT_A, hash);
     await task.harness.stores.receipts.record(TENANT_A, { key: taskRedactionReceiptKey(task.taskId), body: '{}' });
 
-    expect(await task.send('task.complete_sealed', payload)).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.complete', payload)).toEqual({ outcome: 'accepted' });
     expect(await refCount(task, ref)).toBe(0);
   });
 
   it('an artifact that arrives once its task is terminal holds no reference to its blob', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
-    expect(await task.send('task.complete_sealed', SEALED_OUTPUTS['task.complete_sealed'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.complete', SEALED_OUTPUTS['task.complete'])).toEqual({ outcome: 'accepted' });
     const { member, ref } = await uploaded(task);
-    expect(await task.send('task.artifact_sealed', { ...SEALED_OUTPUTS['task.artifact_sealed'], sealed: member })).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.artifact', { ...SEALED_OUTPUTS['task.artifact'], sealed: member })).toEqual({ outcome: 'accepted' });
     expect(await refCount(task, ref)).toBe(0);
   });
 
   it('a replay of an artifact once its task is terminal keeps the reference of its earlier delivery', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
     const { member, ref } = await uploaded(task);
-    const payload = { ...SEALED_OUTPUTS['task.artifact_sealed'], sealed: member };
-    expect(await task.send('task.artifact_sealed', payload)).toEqual({ outcome: 'accepted' });
-    expect(await task.send('task.complete_sealed', SEALED_OUTPUTS['task.complete_sealed'])).toEqual({ outcome: 'accepted' });
+    const payload = { ...SEALED_OUTPUTS['task.artifact'], sealed: member };
+    expect(await task.send('task.artifact', payload)).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.complete', SEALED_OUTPUTS['task.complete'])).toEqual({ outcome: 'accepted' });
 
-    expect(await task.send('task.artifact_sealed', payload)).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.artifact', payload)).toEqual({ outcome: 'accepted' });
     expect(await refCount(task, ref)).toBe(1);
   });
 
@@ -471,20 +473,20 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
     const addReference = objects.addReference.bind(objects);
     objects.addReference = async (tenant, input) => {
       const added = await addReference(tenant, input);
-      expect(await task.send('task.complete_sealed', SEALED_OUTPUTS['task.complete_sealed'])).toEqual({ outcome: 'accepted' });
+      expect(await task.send('task.complete', SEALED_OUTPUTS['task.complete'])).toEqual({ outcome: 'accepted' });
       await task.harness.stores.receipts.record(TENANT_A, { key: taskRedactionReceiptKey(task.taskId), body: '{}' });
       return added;
     };
-    expect(await task.send('task.artifact_sealed', { ...SEALED_OUTPUTS['task.artifact_sealed'], sealed: member })).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.artifact', { ...SEALED_OUTPUTS['task.artifact'], sealed: member })).toEqual({ outcome: 'accepted' });
     expect(await refCount(task, ref)).toBe(0);
   });
 
   it('a late artifact on a redacted task holds no reference to its blob', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
-    expect(await task.send('task.complete_sealed', SEALED_OUTPUTS['task.complete_sealed'])).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.complete', SEALED_OUTPUTS['task.complete'])).toEqual({ outcome: 'accepted' });
     await task.harness.stores.receipts.record(TENANT_A, { key: taskRedactionReceiptKey(task.taskId), body: '{}' });
     const { member, ref } = await uploaded(task);
-    expect(await task.send('task.artifact_sealed', { ...SEALED_OUTPUTS['task.artifact_sealed'], sealed: member })).toEqual({ outcome: 'accepted' });
+    expect(await task.send('task.artifact', { ...SEALED_OUTPUTS['task.artifact'], sealed: member })).toEqual({ outcome: 'accepted' });
     expect(await refCount(task, ref)).toBe(0);
   });
 });
@@ -493,24 +495,31 @@ describe('every sealed offer lane freezes the output sealing that the gate reads
   const CONTEXT = { destinationBinding: 'conversation/654/turn/1' };
   const withContext = (payload: { messageEgress?: unknown }) => (payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT });
   type Lane = (harness: CloudHarness, deviceId: string, taskId: string, payload: never) => Promise<unknown>;
-  const lanes: Record<string, Lane> = {
-    'task.offer_for_agent_sealed': (h, d, taskId, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId, payload }),
-    'task.offer_for_agent_with_egress_sealed': (h, d, taskId, payload) =>
+  type Variant = 'sealed resume' | 'sealed egress' | 'sealed execution';
+  const variantOf = (payload: { session?: { mode?: string }; egressPolicy?: object }): Variant => (
+    payload.session?.mode === 'fresh' ? 'sealed execution' : payload.egressPolicy === undefined ? 'sealed resume' : 'sealed egress');
+  const lanes: Record<Variant, Lane> = {
+    'sealed resume': (h, d, taskId, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId, payload }),
+    'sealed egress': (h, d, taskId, payload) =>
       h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId, payload, ...withContext(payload) }),
-    'task.offer_for_agent_with_egress_fresh_sealed': (h, d, taskId, payload) =>
+    'sealed execution': (h, d, taskId, payload) =>
       h.cloud.submitSealedAgentExecution(TENANT_A, { taskId, deviceId: d, payload, ...withContext(payload) }),
   };
-  const outputOnly = Object.keys(lanes).map((type) => corpus.find((line) => line.type === type && line.payload.sealed === undefined
-    && (type !== 'task.offer_for_agent_with_egress_fresh_sealed' || (line.payload as { terminalProjection?: unknown }).terminalProjection !== undefined))!);
+  const outputOnly = (Object.keys(lanes) as Variant[]).map((variant) => ({
+    variant,
+    line: corpus.find((line) => line.type === 'task.offer' && line.payload.sealing !== undefined && line.payload.sealed === undefined
+      && variantOf(line.payload) === variant
+      && (variant !== 'sealed execution' || (line.payload as { terminalProjection?: unknown }).terminalProjection !== undefined))!,
+  }));
 
-  it.each(outputOnly.map((line) => [line.type, line] as const))('%s: a claimed task accepts a sealed completion', async (type, line) => {
+  it.each(outputOnly.map(({ variant, line }) => [variant, line] as const))('%s: a claimed task accepts a sealed completion', async (variant, line) => {
     const payload = line.payload as { agentRef?: unknown; runtime?: string; harnessId?: string; sealing: { categories: string[] } };
     expect(payload.sealing.categories).toContain('task-output');
     const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
     const device = await harness.pairDevice(TENANT_A);
-    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(type, payload) });
-    const taskId = `sealed-lane-${type}`;
-    await lanes[type]!(harness, device.deviceId, taskId, payload as never);
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', payload) });
+    const taskId = `sealed-lane-${variant.replace(' ', '-')}`;
+    await lanes[variant](harness, device.deviceId, taskId, payload as never);
     const stores = tenantStoresFor(
       { kind: 'device', tenantId: TENANT_A as TenantId, productId: PRODUCT_ID, deviceId: device.deviceId },
       { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
@@ -526,13 +535,13 @@ describe('every sealed offer lane freezes the output sealing that the gate reads
     })).toEqual({ outcome: 'accepted' });
 
     expect(await send('task.complete', { summary: 'plain', sessionRef: 'session-plain', ...echo })).toEqual(refused('sealed_output_required'));
-    expect(await send('task.complete_sealed', { ...SEALED_OUTPUTS['task.complete_sealed'], ...echo })).toEqual({ outcome: 'accepted' });
+    expect(await send('task.complete', { ...SEALED_OUTPUTS['task.complete'], ...echo })).toEqual({ outcome: 'accepted' });
     expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toMatchObject({ status: 'complete' });
   });
 });
 
-describe('a sealed terminal takes the gates of its plaintext type (#654 §8.5)', () => {
-  it.each(['task.complete_sealed', 'task.fail_sealed', 'task.cancelled_sealed'] as const)(
+describe('a sealed terminal takes the gates of its type (#654 §8.5)', () => {
+  it.each(['task.complete', 'task.fail', 'task.cancelled'] as const)(
     '%s with a harness the claim did not name is refused',
     async (type) => {
       const task = await offeredTask(OUTPUT_SEALING);
@@ -541,10 +550,10 @@ describe('a sealed terminal takes the gates of its plaintext type (#654 §8.5)',
     },
   );
 
-  it.each(['task.complete_sealed', 'task.fail_sealed', 'task.decline_sealed', 'task.cancelled_sealed'] as const)(
+  it.each(['task.complete', 'task.fail', 'task.decline', 'task.cancelled'] as const)(
     '%s of an Agent task must echo the Agent identity',
     async (type) => {
-      const task = await agentTask(type !== 'task.decline_sealed');
+      const task = await agentTask(type !== 'task.decline');
       expect(await task.send(type, SEALED_OUTPUTS[type])).toEqual(refused('agent_identity_mismatch'));
       expect(await task.send(type, { ...SEALED_OUTPUTS[type], agentRef: { ...AGENT_OFFER.agentRef, profileRevision: 'profile-other' } }))
         .toEqual(refused('agent_identity_mismatch'));
@@ -552,10 +561,10 @@ describe('a sealed terminal takes the gates of its plaintext type (#654 §8.5)',
     },
   );
 
-  it('task.fail_sealed with recovery is refused: an interruption is reported in plaintext (12d)', async () => {
+  it('a sealed task.fail with recovery is refused: an interruption is reported in plaintext (12d)', async () => {
     const task = await offeredTask(OUTPUT_SEALING);
     const recovery = { kind: 'daemon_interrupted', offerId: '00000000-0000-4000-8000-0000000000c1' };
-    expect(await task.send('task.fail_sealed', { ...SEALED_OUTPUTS['task.fail_sealed'], recovery })).toEqual(refused('recovery_report_invalid'));
+    expect(await task.send('task.fail', { ...SEALED_OUTPUTS['task.fail'], recovery })).toEqual(refused('recovery_report_invalid'));
   });
 });
 
@@ -626,7 +635,7 @@ describe('the output rule of the frozen sealing (#654 12d)', () => {
     'a task with %s refuses every sealed output, and accepts plaintext output',
     async (_name, sealing) => {
       for (const type of Object.keys(SEALED_OUTPUTS) as SealedOutputType[]) {
-        const task = await offeredTask(sealing, type !== 'task.decline_sealed');
+        const task = await offeredTask(sealing, type !== 'task.decline');
         expect(await task.send(type, SEALED_OUTPUTS[type]), type).toEqual(refused('sealed_payload_unsupported'));
       }
       const task = await offeredTask(sealing);

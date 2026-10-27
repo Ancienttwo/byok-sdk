@@ -18,7 +18,10 @@ import { PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, of
  * #470: fresh Agent offers have one hosted entry, `submitAgentExecution`. A
  * corpus line that entry cannot express is refused by its schema before any
  * device read; the closure case proves the expressible lines still exercise
- * every fresh-surface flag.
+ * every flag a fresh execution can need.
+ *
+ * #925: every offer is a `task.offer`, so a corpus line takes the hosted lane
+ * its payload selects (`offerVariantOf`), one per old offer type.
  */
 
 type Enqueue = (harness: CloudHarness, deviceId: string, payload: never) => Promise<unknown>;
@@ -47,8 +50,17 @@ async function steerSealedRunningTask(harness: CloudHarness, deviceId: string, p
   return harness.cloud.steerSealedTask(TENANT_A, offer.taskId, payload);
 }
 
-const FRESH = 'task.offer_for_agent_with_egress_fresh' satisfies MessageType;
-const FRESH_SEALED = 'task.offer_for_agent_with_egress_fresh_sealed' satisfies MessageType;
+type OfferVariant = 'resume' | 'resume with egress' | 'fresh execution' | 'prepared' | 'sealed resume' | 'sealed egress' | 'sealed execution';
+
+/** The hosted lane that sends a `task.offer` payload: every lane sends the one type, so the payload picks the lane. */
+function offerVariantOf(payload: Record<string, unknown>): OfferVariant {
+  const fresh = (payload.session as { mode?: unknown } | undefined)?.mode === 'fresh';
+  if (payload.sealing !== undefined) return fresh ? 'sealed execution' : payload.egressPolicy === undefined ? 'sealed resume' : 'sealed egress';
+  if (payload.preparation !== undefined) return 'prepared';
+  if (fresh) return 'fresh execution';
+  return payload.egressPolicy === undefined ? 'resume' : 'resume with egress';
+}
+
 /** Host input, not wire data: passed only when the payload selects `messageEgress`. */
 const CONTEXT = { destinationBinding: 'conversation/386/turn/1' };
 
@@ -60,28 +72,34 @@ const submitFresh: Enqueue = (h, d, payload: { messageEgress?: unknown }) =>
     ...(payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT }),
   });
 
+const submitSealedFresh: Enqueue = (h, d, payload: { messageEgress?: unknown }) =>
+  h.cloud.submitSealedAgentExecution(TENANT_A, {
+    taskId: 'gated',
+    deviceId: d,
+    payload: payload as never,
+    ...(payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT }),
+  });
+
+const OFFER_ENQUEUE: Record<OfferVariant, Enqueue> = {
+  resume: (h, d, payload) => h.cloud.enqueueAgentOffer(TENANT_A, d, { taskId: 'gated', payload }),
+  'resume with egress': (h, d, payload) => h.cloud.enqueueAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
+  'fresh execution': submitFresh,
+  prepared: (h, d, payload) => h.cloud.enqueuePreparedOffer(TENANT_A, d, { taskId: 'gated', payload }),
+  // #654: each sealed lane has its own hosted entry.
+  'sealed resume': (h, d, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId: 'gated', payload }),
+  'sealed egress': (h, d, payload) => h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
+  'sealed execution': submitSealedFresh,
+};
+
 const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
-  'task.offer_for_agent': (h, d, payload) => h.cloud.enqueueAgentOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  'task.offer_for_agent_with_egress': (h, d, payload) => h.cloud.enqueueAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  [FRESH]: submitFresh,
-  'task.offer_prepared': (h, d, payload) => h.cloud.enqueuePreparedOffer(TENANT_A, d, { taskId: 'gated', payload }),
+  'task.offer': (h, d, payload) => OFFER_ENQUEUE[offerVariantOf(payload as Record<string, unknown>)](h, d, payload),
   'agent.content.read': (h, d, payload) => h.cloud.enqueueAgentContentRead(TENANT_A, d, { payload }),
   'agent.home.projection': (h, d, payload) => h.cloud.enqueueAgentHomeProjection(TENANT_A, d, payload),
   'agent.input.preparation': (h, d, payload) => h.cloud.enqueueInputPreparation(TENANT_A, d, payload),
   'provider.provisioning.available': (h, d, payload) => h.cloud.enqueueProviderProvisioningNotice(TENANT_A, d, payload),
   'agent.memory.intent.available': (h, d, payload) => h.cloud.enqueueAgentMemoryIntentNotice(TENANT_A, d, payload),
   'e2ee.key_package.available': (h, d, payload) => h.cloud.enqueueScopeKeyPackageNotice(TENANT_A, d, payload),
-  // #654: each sealed type has its own hosted entry.
-  'task.offer_for_agent_sealed': (h, d, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  'task.offer_for_agent_with_egress_sealed': (h, d, payload) => h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  [FRESH_SEALED]: (h, d, payload: { messageEgress?: unknown }) =>
-    h.cloud.submitSealedAgentExecution(TENANT_A, {
-      taskId: 'gated',
-      deviceId: d,
-      payload: payload as never,
-      ...(payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT }),
-    }),
-  'task.steer_sealed': steerSealedRunningTask,
+  'task.steer': steerSealedRunningTask,
 };
 
 const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url));
@@ -90,15 +108,21 @@ const gatedLines = readFileSync(corpusPath, 'utf8')
   .filter((line) => line.length > 0)
   .map((line, index) => {
     const envelope = JSON.parse(line) as { type: MessageType; payload: Record<string, unknown> };
-    return { line: index + 1, type: envelope.type, payload: envelope.payload, flags: requiredReceiverCapabilities(envelope.type, envelope.payload) };
+    return {
+      line: index + 1,
+      type: envelope.type,
+      payload: envelope.payload,
+      variant: envelope.type === 'task.offer' ? offerVariantOf(envelope.payload) : undefined,
+      flags: requiredReceiverCapabilities(envelope.type, envelope.payload),
+    };
   })
   .filter((entry) => isServerToDaemonType(entry.type) && entry.flags.length > 0);
 
 /** Whether the line's surface has a hosted entry that accepts its payload. */
 const submitExpressible = (entry: (typeof gatedLines)[number]): boolean => {
-  if (entry.type === FRESH) return AgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
+  if (entry.variant === 'fresh execution') return AgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
   // #654: the sealed fresh lane has the same rules in its own hosted entry.
-  if (entry.type === FRESH_SEALED) return SealedAgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
+  if (entry.variant === 'sealed execution') return SealedAgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
   return true;
 };
 
@@ -135,11 +159,13 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     expect(new Set(gatedLines.map((entry) => entry.type))).toEqual(surfaces);
   });
 
-  it('every fresh-surface flag stays exercised through the hosted API', () => {
+  it('every fresh-execution flag stays exercised through the hosted API', () => {
     const union = (entries: readonly (typeof gatedLines)[number][]) => new Set(entries.flatMap((entry) => entry.flags));
-    const fresh = gatedLines.filter((entry) => entry.type === FRESH);
+    const fresh = gatedLines.filter((entry) => entry.variant === 'fresh execution');
     const table = new Set(
-      WIRE_ADDITIONS.flatMap((entry) => (entry.rule === 'gated' && entry.advertisedBy === 'device' && entry.surface === FRESH ? [entry.capability] : [])),
+      WIRE_ADDITIONS.flatMap((entry) => (
+        entry.kind === 'envelope' && entry.rule === 'gated' && entry.advertisedBy === 'device' && entry.surface === 'task.offer'
+          && entry.field !== 'preparation' && entry.field !== 'sealing' ? [entry.capability] : [])),
     );
     expect(union(fresh)).toEqual(table);
     expect(union(fresh.filter(submitExpressible))).toEqual(table);
@@ -154,9 +180,10 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     expect(harnessOnly.filter(submitExpressible)).toEqual(harnessOnly);
   });
 
-  it.each(gatedLines.flatMap((entry) => entry.flags.map((flag) => [entry.line, entry.type, flag, entry] as const)))(
+  it.each(gatedLines.flatMap((entry) => entry.flags.map((flag) => [entry.line, entry.variant ?? entry.type, flag, entry] as const)))(
     'corpus line %i (%s) is refused without %s, before task or mailbox state',
-    async (_line, type, flag, entry) => {
+    async (_line, _label, flag, entry) => {
+      const { type } = entry;
       const { harness, deviceId } = await deviceWith(entry.flags.filter((candidate) => candidate !== flag));
       const capabilityReads = vi.spyOn(harness.stores.devices, 'get');
 
@@ -176,9 +203,10 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     },
   );
 
-  it.each(gatedLines.map((entry) => [entry.line, entry.type, entry] as const))(
+  it.each(gatedLines.map((entry) => [entry.line, entry.variant ?? entry.type, entry] as const))(
     'corpus line %i (%s) is not refused for a capability when the device advertises every flag the table requires',
-    async (_line, type, entry) => {
+    async (_line, _label, entry) => {
+      const { type } = entry;
       const { harness, deviceId } = await deviceWith(entry.flags);
       const run = ENQUEUE[type]!(harness, deviceId, entry.payload as never);
       if (submitExpressible(entry)) expect(await errorCode(run)).not.toBe('agent_capability_missing');

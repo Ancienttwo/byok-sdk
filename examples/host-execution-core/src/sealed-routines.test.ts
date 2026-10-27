@@ -53,7 +53,7 @@ function sealedLane(options: { declineOnce?: boolean } = {}) {
     tasks: { ...server.tasks,
       offer: async taskId => {
         const input = submitted.find(row => row.taskId === taskId);
-        return input ? { taskId, deviceId: input.deviceId, messageId: `m-${taskId}`, type: 'task.offer_for_agent_with_egress_fresh_sealed',
+        return input ? { taskId, deviceId: input.deviceId, messageId: `m-${taskId}`, type: 'task.offer',
           payload: structuredClone(input.payload), recordedAt: '1', delivered: true } as FrozenOffer : server.tasks.offer(taskId);
       },
       attempt: async taskId => {

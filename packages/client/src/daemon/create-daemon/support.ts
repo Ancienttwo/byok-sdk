@@ -1,6 +1,6 @@
 import type { Envelope, RuntimeInfo, CapabilityFlag, RuntimeId, AgentEgressPolicy, ContentReadPolicy } from '@byok-sdk/protocol';
 import { type JournalIdentity, type ReceivedEnvelopeRecord, journalHash } from '../journal/journal';
-import { encodeEnvelope, isTaskOfferType, TERMINAL_PROJECTION_SELECTION_CAPABILITY, PROVIDER_PROFILE_BINDING_CAPABILITY, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY } from '@byok-sdk/protocol';
+import { encodeEnvelope, TERMINAL_PROJECTION_SELECTION_CAPABILITY, PROVIDER_PROFILE_BINDING_CAPABILITY, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY } from '@byok-sdk/protocol';
 import type { RuntimeAdapter } from '../../types';
 import { type HarnessInfo, HarnessIdSchema } from '@byok-sdk/protocol';
 import { type RuntimeObservation, observeRuntimeDetection, projectRuntimeObservation, isWireRuntimeId } from '../../runtime-detection';
@@ -55,15 +55,14 @@ export function delay(ms: number): Promise<void> {
  * `applyLifecycle`). `task.decline` is deliberately NOT here: declining is
  * refusing to take a task, not producing a result for one.
  *
- * `task.complete`/`task.fail`/`task.cancelled` -> the terminal kind recorded locally.
- * A sealed terminal (`task.complete_sealed`, …) has the kind of its plaintext type.
+ * `task.complete`/`task.fail`/`task.cancelled` -> the terminal kind recorded
+ * locally, whether the payload is plaintext or sealed.
  */
 export function terminalKindOf(type: string): 'complete' | 'failed' | 'cancelled' | 'declined' | undefined {
-  const plainType = type.endsWith('_sealed') ? type.slice(0, -'_sealed'.length) : type;
-  if (plainType === 'task.decline') return 'declined';
-  if (plainType === 'task.complete') return 'complete';
-  if (plainType === 'task.fail') return 'failed';
-  if (plainType === 'task.cancelled') return 'cancelled';
+  if (type === 'task.decline') return 'declined';
+  if (type === 'task.complete') return 'complete';
+  if (type === 'task.fail') return 'failed';
+  if (type === 'task.cancelled') return 'cancelled';
   return undefined;
 }
 
@@ -88,7 +87,7 @@ export function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIde
     bytes,
     bytesHash: journalHash(bytes),
     receivedAt: new Date().toISOString(),
-    opensTask: isTaskOfferType(envelope.type),
+    opensTask: envelope.type === 'task.offer',
   };
 }
 

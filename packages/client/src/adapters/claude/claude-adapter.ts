@@ -99,7 +99,7 @@ export interface ClaudeAdapterOptions {
   /** Local Host callbacks for native stdio requests; never enables remote boolean approvals. */
   nativeInteractions?: NativeInteractionHostOptions;
   /**
-   * For an Agent task (`task.offer_for_agent`), `excluded` starts Claude with
+   * For an Agent task (`task.offer`), `excluded` starts Claude with
    * `--strict-mcp-config`, so only the task's and the SDK's MCP servers load,
    * and with a `--settings` file that excludes the `CLAUDE.md`,
    * `CLAUDE.local.md` and rules of the Claude config directory and of every
@@ -110,7 +110,7 @@ export interface ClaudeAdapterOptions {
    */
   agentUserContext?: 'inherit' | 'excluded';
   /**
-   * For an Agent task (`task.offer_for_agent`), `disabled` starts Claude with
+   * For an Agent task (`task.offer`), `disabled` starts Claude with
    * `--no-session-persistence`, so Claude does not save the session
    * transcript under `<config dir>/projects/`. Such a session cannot be
    * resumed: an Agent task that carries a `sessionRef` fails before Claude

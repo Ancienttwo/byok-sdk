@@ -9,6 +9,10 @@ import { AGENT_HOME_PROJECTION_STATE_FILE, AgentHomeManager, createAgentHomeProj
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 const HASH_3 = `sha256:${'3'.repeat(64)}`;
 const consumer = createAgentHomeProjectionConsumer(() => {});
@@ -47,7 +51,7 @@ describe('terminal evidence of the applied Agent-home projection (#318)', () => 
       productId: `projection-terminal-${path.basename(storeDir)}`,
       serverUrl: server.url,
       storeDir,
-      agentHome: { hostStorageRoot, projection: consumer },
+      agentHome: { hostStorageRoot, projection: consumer }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     }, [adapter]);
     await daemon.pair('pairing-code');
     await daemon.start();
@@ -56,8 +60,8 @@ describe('terminal evidence of the applied Agent-home projection (#318)', () => 
   }
 
   function offer(taskId: string, agentId: string, profileRevision: string): void {
-    server.send(createEnvelope('task.offer_for_agent', {
-      instruction: 'agent work', agentRef: { agentId, profileRevision },
+    server.send(createEnvelope('task.offer', {
+      ...FRESH_OFFER, instruction: 'agent work', agentRef: { agentId, profileRevision },
     }, { taskId, seq: server.nextSeq() }));
   }
 

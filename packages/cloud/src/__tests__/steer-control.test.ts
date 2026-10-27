@@ -112,7 +112,7 @@ async function offered(harness: CloudHarness, device: PairedDevice): Promise<Off
   const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
     payload: offerPayload('steer me'),
   });
-  expect((await poll(harness, device, 0)).events.map((event) => event.type)).toEqual(['task.offer_for_agent']);
+  expect((await poll(harness, device, 0)).events.map((event) => event.type)).toEqual(['task.offer']);
   return { taskId: offer.taskId, seq: offer.seq };
 }
 
@@ -216,10 +216,10 @@ describe('steerTask (GAP-2)', () => {
     });
   });
 
-  it('steerSealedTask delivers task.steer_sealed only to a device that advertised sealed-payload-v1, and steerTask refuses sealed fields (#654)', async () => {
+  it('steerSealedTask delivers the sealed task.steer only to a device that advertised sealed-payload-v1, and steerTask refuses sealed fields (#654)', async () => {
     const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8');
     const sealedSteer = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
-      .find((line) => line.type === 'task.steer_sealed')!.payload;
+      .find((line) => line.type === 'task.steer' && line.payload.sealed !== undefined)!.payload;
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
@@ -241,13 +241,13 @@ describe('steerTask (GAP-2)', () => {
     await harness.cloud.steerSealedTask(TENANT_A, task.taskId, sealedSteer);
     const page = await poll(harness, device, task.seq);
     expect(page.events).toHaveLength(1);
-    expect(page.events[0]).toMatchObject({ type: 'task.steer_sealed', task_id: task.taskId, payload: sealedSteer });
+    expect(page.events[0]).toMatchObject({ type: 'task.steer', task_id: task.taskId, payload: sealedSteer });
   });
 
   it('steerSealedTask refuses a sealed steer by ciphertextRef to a blob that is not committed, and writes no mailbox row (#654)', async () => {
     const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8');
     const byReference = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
-      .find((line) => line.type === 'task.steer_sealed' && 'ciphertextRef' in line.payload.sealed)!.payload;
+      .find((line) => line.type === 'task.steer' && line.payload.sealed !== undefined && 'ciphertextRef' in line.payload.sealed)!.payload;
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });

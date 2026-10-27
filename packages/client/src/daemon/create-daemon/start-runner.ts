@@ -40,7 +40,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     // The prepared-Execution lane, present only on a daemon whose input
     // preparation service actually constructed — which is also the only
     // daemon that advertises `agent-input-preparation-v9` and can hold a record
-    // a `task.offer_prepared` could name. The three device facts travel with
+    // a prepared `task.offer` could name. The three device facts travel with
     // the store because this file already owns them: re-deriving the
     // installed runtime identity or the operator's policy revision inside the
     // task runner would be a second opinion about the same configuration.
@@ -150,6 +150,9 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     // capability is only known once the handshake completes, strictly
     // after this `deps` object is constructed.
     getServerCapabilities: () => daemonState.connection?.getServerCapabilities() ?? [],
+    // The array `conn.hello` is built from; presence and the capability
+    // declaration edit it in place, so read it at offer time.
+    advertisedCapabilities: () => daemonState.helloCapabilities,
     sealedTasks: opened,
     // Same late-binding closure as `getServerCapabilities`; with no
     // connection yet there is no advertisement, and that is an error.

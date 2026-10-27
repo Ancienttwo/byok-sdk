@@ -9,6 +9,8 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { CodexAdapter, createDaemonWithAdapters, type Daemon } from '@byok-sdk/client';
 import { TestServer } from './fixtures/test-server';
 import { InMemoryDeviceCredentialStore } from './fixtures/device-credentials';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { FRESH_OFFER } from './fixtures/fresh-offer';
 
 /**
  * Topology H smoke (#468): a CLI daemon and the shipped result helper, no
@@ -47,13 +49,14 @@ async function run(outcome: unknown) {
     localAgentRelease: { version: '0.0.0-result-smoke' }, productName: 'Result smoke', productId: 'result-smoke',
     serverUrl: server.url, storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'home') },
+    agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
   }, [new CodexAdapter({ resolveBin: () => ({ command: FAKE_CODEX, source: 'path' }) })], { deviceCredentials: new InMemoryDeviceCredentialStore() });
   cleanup.push(() => daemon.stop());
   await daemon.pair('pairing-code');
   await daemon.start();
-  server.send(createEnvelope('task.offer_for_agent', {
+  server.send(createEnvelope('task.offer', {
     instruction: 'review and submit', runtime: 'codex',
-    agentRef: { agentId: 'smoke-agent', profileRevision: '1' },
+    agentRef: { agentId: 'smoke-agent', profileRevision: '1' }, ...FRESH_OFFER,
     terminalProjection: { mode: 'result-document', contract: 'smoke.review.v1', schema: SCHEMA as never },
   }, { taskId: 'smoke-task', seq: server.nextSeq() }));
   const terminal = await server.waitFor((envelope) => envelope.task_id === 'smoke-task'

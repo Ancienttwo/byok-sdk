@@ -23,6 +23,8 @@ import {
 import { AsyncQueue } from '../util/async-queue';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 /**
  * M4 Phase 3: `TaskRunner.requestApproval` in isolation — the daemon-side
@@ -50,7 +52,7 @@ async function makeRunner(
   overrides: Partial<Pick<TaskRunnerDeps, 'approvalTimeoutMs' | 'approvalRegistry' | 'onApprovalDispatched'>> = {},
 ): Promise<{ runner: TaskRunner; approvalRegistry: ApprovalRegistry }> {
   const approvalRegistry = overrides.approvalRegistry ?? new ApprovalRegistry();
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-1',
@@ -69,7 +71,7 @@ async function makeRunner(
 
 async function offerAndActivate(runner: TaskRunner, taskId: string): Promise<void> {
   await runner.handleEnvelope(
-    createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do work' }, { taskId, seq: 1 }),
+    createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'do work' }, { taskId, seq: 1 }),
   );
 }
 
@@ -149,7 +151,7 @@ async function makeChannelRunner(
   sent: Envelope[],
 ): Promise<{ runner: TaskRunner; approvalRegistry: ApprovalRegistry }> {
   const approvalRegistry = new ApprovalRegistry();
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-1',
@@ -187,7 +189,7 @@ describe('TaskRunner.requestApproval', () => {
 
     const awaitApprovalEnvelope = sent.find((e) => e.type === 'task.await_approval');
     expect(awaitApprovalEnvelope).toBeDefined();
-    if (awaitApprovalEnvelope?.type !== 'task.await_approval') throw new Error('unreachable');
+    if (awaitApprovalEnvelope?.type !== 'task.await_approval' || awaitApprovalEnvelope.payload.sealed !== undefined) throw new Error('unreachable');
     expect(awaitApprovalEnvelope.payload.summary).toBe('Bash: echo hi');
     expect(awaitApprovalEnvelope.task_id).toBe(taskId);
 

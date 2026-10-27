@@ -10,7 +10,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { tenantId, type TenantId } from '@byok-sdk/core';
-import { DAEMON_TO_SERVER_TYPES, UnknownMessageTypeError, createEnvelope, isSealedMessageType, parseMessage, type Envelope } from '@byok-sdk/protocol';
+import { DAEMON_TO_SERVER_TYPES, UnknownMessageTypeError, createEnvelope, isSealedPayload, parseMessage, type Envelope } from '@byok-sdk/protocol';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { handleInboundEnvelope, terminalReceiptKey } from '../inbound';
 import { agentReliabilityKey } from '../agent-reliability';
@@ -128,13 +128,17 @@ describe('the inbound gate', () => {
       }
       const outcome = await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome);
       if (type === 'agent.message.draft') expect(outcome).toBe('rejected'); // No frozen message requirement in this generic fixture.
-      if (isSealedMessageType(type)) expect(outcome, type).toBe('rejected'); // #654 E3a: this kernel does not open sealed output yet.
       if (outcome === 'accepted') accepted.push(type);
+    }
+    for (const [type, payload] of sealedGoldenPayloads) {
+      const sealed = createEnvelope(type as Envelope['type'], payload as never, { taskId }) as Envelope;
+      // #654 E3a: this kernel does not open sealed output yet.
+      expect(await handleInboundEnvelope(stores, deviceId, sealed).then((result) => result.outcome), type).toBe('rejected');
     }
     // `agent.message.publish` has its own exact task/Agent binding and product
     // consumer contract; its common rate/dedup admission is covered by the
     // issue regression rather than this generic lifecycle fixture.
-    expect(accepted).toEqual([...DAEMON_TO_SERVER_TYPES].filter((type) => type !== 'agent.message.publish' && type !== 'agent.message.draft' && !isSealedMessageType(type)));
+    expect(accepted).toEqual([...DAEMON_TO_SERVER_TYPES].filter((type) => type !== 'agent.message.publish' && type !== 'agent.message.draft'));
   });
 
   it('step 2: rejects an envelope from a device other than the immutable offer target before claim', async () => {
@@ -357,15 +361,15 @@ describe('the inbound gate', () => {
   });
 });
 
-/** The first sealed golden line of each sealed daemon type (#654). */
+/** The first sealed golden line of each daemon type with a sealed branch (#654). */
 const sealedGoldenPayloads = new Map<string, unknown>();
 for (const raw of readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8').trimEnd().split('\n')) {
   const line = JSON.parse(raw) as { type: string; payload: unknown };
-  if (isSealedMessageType(line.type) && !sealedGoldenPayloads.has(line.type)) sealedGoldenPayloads.set(line.type, line.payload);
+  if ((DAEMON_TO_SERVER_TYPES as readonly string[]).includes(line.type) && isSealedPayload(line.type, line.payload)
+    && !sealedGoldenPayloads.has(line.type)) sealedGoldenPayloads.set(line.type, line.payload);
 }
 
 function envelopeOfType(type: (typeof DAEMON_TO_SERVER_TYPES)[number], taskId: string, deviceId: string): Envelope {
-  if (isSealedMessageType(type)) return createEnvelope(type, sealedGoldenPayloads.get(type) as never, { taskId });
   switch (type) {
     case 'task.claim':
       return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId });

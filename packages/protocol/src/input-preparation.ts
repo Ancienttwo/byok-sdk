@@ -639,7 +639,7 @@ export type InputPreparationReceiptSummary = z.infer<typeof InputPreparationRece
 export const InputPreparationReferenceSchema = OPAQUE_ID;
 
 /**
- * The preparation a `task.offer_prepared` names, re-presented by the Host from
+ * The preparation a prepared `task.offer` names, re-presented by the Host from
  * the receipt it was given.
  *
  * Nothing here is authority. Every value is COMPARED against the device's own

@@ -122,7 +122,7 @@ export const TEST_AGENT_REF = { agentId: 'test-agent', profileRevision: 'rev-1' 
  * any `sessionRef`; only a daemon checks that the session exists.
  */
 export function offerPayload(instruction = 'do the thing') {
-  return { instruction, agentRef: TEST_AGENT_REF, sessionRef: 'test-session' };
+  return { instruction, agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: 'test-session' } } as const;
 }
 
 /** Adds the Agent-home capability to the device's recorded capabilities, which `enqueueAgentOffer` admits on. */

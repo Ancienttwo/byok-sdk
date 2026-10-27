@@ -19,6 +19,7 @@ import { testIngressBudget } from './fixtures/activity-ingress';
 import { waitForOpen } from './fixtures/lifecycle-barrier';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 /**
  * Issue #693: during a route outage every retry of an `agent.message.publish`
@@ -75,6 +76,7 @@ async function openConnection() {
 
 function runnerDeps(manager: ConnectionManager, sentPublishes: Envelope[], storeDir: string): TaskRunnerDeps {
   return {
+    advertisedCapabilities: advertiseEveryDeviceFlag,
     getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [], storeDir, deviceId: 'device-outage',
     productId: 'publish-outage-test', tenantId: 'tenant-outage',
@@ -111,9 +113,9 @@ describe('one pending agent.message.publish per message during a route outage (#
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
       agentMessageMcpPreflight: async () => {},
     });
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+    await runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: 'reply', runtime: 'pi', agentRef: { agentId: 'outage-agent', profileRevision: '1' },
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId: 'live-outage', seq: 1 }));
     const token = adapter.startCalls[0]!.ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;

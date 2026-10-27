@@ -48,7 +48,7 @@ describe('ByokServer.tasks.approve/reject', () => {
     await instance.executions.submit({
       taskId,
       deviceId: daemon.deviceId,
-      payload: { instruction: 'needs a human ok', runtime: 'pi', agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+      payload: { instruction: 'needs a human ok', runtime: 'pi', agentRef: AGENT, session: { mode: 'fresh' }, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
     });
     expect(await sendOne(daemon, createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef: AGENT }, { taskId })))
       .toMatchObject({ status: 200, body: { accepted: 1 } });

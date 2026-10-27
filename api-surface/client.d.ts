@@ -15,7 +15,7 @@ export interface ClaudeAdapterOptions {
     /** Local Host callbacks for native stdio requests; never enables remote boolean approvals. */
     nativeInteractions?: NativeInteractionHostOptions;
     /**
-     * For an Agent task (`task.offer_for_agent`), `excluded` starts Claude with
+     * For an Agent task (`task.offer`), `excluded` starts Claude with
      * `--strict-mcp-config`, so only the task's and the SDK's MCP servers load,
      * and with a `--settings` file that excludes the `CLAUDE.md`,
      * `CLAUDE.local.md` and rules of the Claude config directory and of every
@@ -26,7 +26,7 @@ export interface ClaudeAdapterOptions {
      */
     agentUserContext?: 'inherit' | 'excluded';
     /**
-     * For an Agent task (`task.offer_for_agent`), `disabled` starts Claude with
+     * For an Agent task (`task.offer`), `disabled` starts Claude with
      * `--no-session-persistence`, so Claude does not save the session
      * transcript under `<config dir>/projects/`. Such a session cannot be
      * resumed: an Agent task that carries a `sessionRef` fails before Claude
@@ -420,7 +420,7 @@ export interface CodexAdapterOptions {
     /** Opt-in local Host UI; independent of the remote boolean approval lane. */
     nativeInteractions?: NativeInteractionHostOptions;
     /**
-     * For an Agent task (`task.offer_for_agent`), `excluded` gives the Codex
+     * For an Agent task (`task.offer`), `excluded` gives the Codex
      * thread only the task's and the SDK's MCP servers. Before the thread
      * opens, the adapter reads Codex's effective configuration for the task cwd
      * (`config/read`), sets `enabled = false` on every other `mcp_servers`
@@ -493,7 +493,7 @@ export interface GrokAdapterOptions {
      */
     compatInstructions?: 'inherit' | 'disabled';
     /**
-     * For an Agent task (`task.offer_for_agent`), `excluded` sets
+     * For an Agent task (`task.offer`), `excluded` sets
      * `GROK_CLAUDE_MCPS_ENABLED`, `GROK_CURSOR_MCPS_ENABLED` and
      * `GROK_MANAGED_MCPS_ENABLED` to `0` on the Grok agent process, then runs
      * `grok inspect --json` in the task cwd with the same environment. The
@@ -2010,7 +2010,9 @@ export declare class AgentEgressController {
     noteTransportDrop(reason: AgentEgressDropReason, agentRef?: AgentRef): void;
     /**
      * Coalesce to the latest value before TaskRunner builds a `task.progress`
-     * envelope. Events go to the Host as the runtime produced them.
+     * envelope. Events go to the Host as the runtime produced them. An `error`
+     * reports a failure, not a value a later event supersedes, so every accepted
+     * `error` is sent; the other events of the batch coalesce to their last.
      */
     projectLatestValue(input: AgentEgressProgressInput): readonly AgentEvent[];
     appendReliable(input: AgentEgressReliableInput): Promise<AgentEgressReliableAppendResult>;
@@ -7355,6 +7357,10 @@ export declare class DaemonObserver {
      * state machine decides the transition happened.
      */
     captureOutboundApproval(envelope: Envelope): void;
+    /**
+     * A sealed payload reaches here only when its plaintext was not kept
+     * (`SealedTasks.plainOf`); it has no local view.
+     */
     handleOutboundEnvelope(envelope: Envelope): void;
     noteOutboundRejected(envelope: Envelope, rejection: OutboundRejection): void;
     noteLifecycle(lifecycle: DaemonLifecycle): void;
@@ -8000,9 +8006,9 @@ export declare class RetentionSweeper {
 /**
  * Sealed payload v1 on the device (#654 E3c). A sealed task's offer carries
  * its frozen `sealing` in plaintext. This module opens the task's sealed
- * input (offer and steers) and seals its output (the 7 daemon-to-server
- * types of `SEALED_SPLIT_TABLE`) with the scope key, through the core
- * functions, fail closed.
+ * input (offer and steers) and seals its output (the sealed branch of the 7
+ * daemon-to-server types of `SEALED_SPLIT_TABLE`) with the scope key, through
+ * the core functions, fail closed. The AAD family is the wire type.
  *
  * A task that seals its output never sends plaintext content in those types:
  * each one is sealed, or it is one of the closed plaintext forms (decision
@@ -8415,7 +8421,7 @@ export declare function readDeviceEnrollmentIdentity(options: DeviceEnrollmentSt
 import { type ResultReplyFailure } from './result-reply-failure';
 import type { ActivityIngress } from '@byok-sdk/protocol';
 import type { ScratchRoot } from './retention/scratch';
-import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type RuntimeId, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload } from '@byok-sdk/protocol';
+import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type RuntimeId, type TaskOfferPlainPayload } from '@byok-sdk/protocol';
 import { type McpStdioServerConfig, type McpToolsetConfig, type RuntimeAdapter } from '../types';
 import type { InputPreparationStore } from './input-preparation-store';
 import { type InputPreparationRuntimeIdentityV1, type InputPreparationBindingV1 } from '../input-preparation';
@@ -8608,7 +8614,7 @@ export interface TaskRunnerDeps {
     getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>;
     /**
      * The prepared-Execution lane. Absent on a daemon with no `inputPreparation`
-     * section, and a `task.offer_prepared` arriving there is declined by name
+     * section, and a prepared `task.offer` arriving there is declined by name
      * rather than reinterpreted as an ordinary offer.
      *
      * It carries the durable store plus the three device facts a prepared
@@ -8649,7 +8655,7 @@ export interface TaskRunnerDeps {
      * The writer limit is fixed at one.
      */
     maxConcurrentReaderAttemptsPerAgentHome?: number;
-    /** Exact host-selected policy accepted by `task.offer_for_agent_with_egress`. */
+    /** Exact host-selected policy accepted by a `task.offer` that carries `egressPolicy`. */
     agentEgressPolicy?: Readonly<AgentEgressPolicy>;
     /** Latest-value activity lane and reliable spool for Agent egress offers. */
     agentEgress?: AgentEgressController;
@@ -8781,6 +8787,14 @@ export interface TaskRunnerDeps {
      */
     getServerCapabilities?: () => readonly string[];
     /**
+     * The flags this daemon's current `conn.hello` advertises. Every `task.offer`
+     * is checked against them before it is opened or run: an offer that needs a
+     * flag missing here is declined non-retryably, whatever the sender admitted
+     * (`requiredReceiverCapabilities`). Read fresh at offer time, because a
+     * presence change or a capability declaration edits the advertisement.
+     */
+    advertisedCapabilities: () => readonly string[];
+    /**
      * #654: opens sealed task input and seals sealed task output. Absent on a
      * daemon that holds no scope key, which declines every sealed offer.
      */
@@ -8886,7 +8900,7 @@ export type AdmissionGuardDecision = {
     readonly reason: string;
     readonly retryable: boolean;
 };
-type AcceptedOfferPayload = TaskOfferForAgentPayload | TaskOfferForAgentWithEgressPayload | TaskOfferForAgentWithEgressFreshPayload | TaskOfferPreparedPayload;
+type AcceptedOfferPayload = TaskOfferPlainPayload;
 /**
  * The SDK-owned environment variable that carries one host toolset server's
  * `BYOK_HOST_TOOLSET_CONTEXT` nonce (contract §8.1).
@@ -9678,6 +9692,7 @@ export declare class TaskRunner {
      * decline before the open: the task's output could not be sent to it.
      */
     private handleSealedOffer;
+    private declineOfferMissingCapabilities;
     private failurePayload;
     private sealedCodesAllowed;
     /**
@@ -13112,7 +13127,7 @@ import type { NativeInteractionCapabilities, NativeInteractionChannel } from './
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
-import type { AgentEvent, TaskOfferForAgentPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, TaskOfferPlainPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
 import type { AgentRef } from './agent-home';
 import type { McpToolsetServerObservation } from './mcp/observation';
@@ -13121,7 +13136,11 @@ export type { AgentRef } from './agent-home';
  * The offer fields a runtime adapter receives. The client owns this shape;
  * the daemon projects each wire offer onto it.
  */
-export type RuntimeTaskInput = Pick<TaskOfferForAgentPayload, 'instruction' | 'runtime' | 'harnessId' | 'dispatchSelection' | 'sessionRef' | 'limits'>;
+export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'runtime' | 'harnessId' | 'dispatchSelection' | 'limits'> & {
+    instruction: NonNullable<TaskOfferPlainPayload['instruction']>;
+    /** The runtime session to resume (`session.mode: 'resume'` on the offer); absent for a fresh session. */
+    sessionRef?: string;
+};
 export type { McpServerObservation, McpToolDescriptor, McpToolsetServerObservation, } from './mcp/observation';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 /**
@@ -13435,7 +13454,7 @@ export interface RuntimeOperationManifest {
     /** The credential-free runtime/lane/provider/model authority for this operation. */
     readonly dispatchSelection?: RuntimeTaskInput['dispatchSelection'];
     readonly sessionRef?: string;
-    /** Strict Agent identity, present only for task.offer_for_agent. */
+    /** Strict Agent identity, present on every `task.offer`. */
     readonly agentRef?: AgentRef;
     /**
      * Canonical runtime cwd. For an Agent writer it is the Agent home root. For

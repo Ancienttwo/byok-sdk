@@ -24,7 +24,7 @@ function fakePort(): FrozenSubmitPort {
   const offers = new Map<string, unknown>();
   return {
     submit: async input => {
-      offers.set(input.taskId, { taskId: input.taskId, deviceId: input.deviceId, type: 'task.offer_for_agent_with_egress_fresh',
+      offers.set(input.taskId, { taskId: input.taskId, deviceId: input.deviceId, type: 'task.offer',
         payload: structuredClone(input.payload), delivered: true, messageId: `offer-${input.taskId}` });
       return undefined as never;
     },

@@ -9,28 +9,30 @@ import {
 } from '../index';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' };
+const RESUME_SESSION = { mode: 'resume', sessionRef: 'session-1' } as const;
 
 describe('requiredToolsets on an Agent offer', () => {
   it('carries only logical ids on the server-to-daemon offer', () => {
     const envelope = createEnvelope(
-      'task.offer_for_agent',
+      'task.offer',
       {
         instruction: 'find qualified leads',
         agentRef: AGENT_REF,
+        session: RESUME_SESSION,
         runtime: 'claude',
         requiredToolsets: ['salesko', 'crm.readonly'],
       },
       { taskId: 'task-toolsets-1', seq: 1 },
     );
 
-    expect(envelope.type).toBe('task.offer_for_agent');
+    expect(envelope.type).toBe('task.offer');
     expect(envelope.payload.requiredToolsets).toEqual(['salesko', 'crm.readonly']);
     expect(JSON.stringify(envelope)).not.toMatch(/command|args|env|header|secret/i);
   });
 
   it('rejects duplicate, malformed, empty, and oversized logical id sets', () => {
-    const schema = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent'];
-    const base = { instruction: 'x', agentRef: AGENT_REF };
+    const schema = MESSAGE_PAYLOAD_SCHEMAS['task.offer'];
+    const base = { instruction: 'x', agentRef: AGENT_REF, session: RESUME_SESSION };
     expect(schema.safeParse({ ...base, requiredToolsets: [] }).success).toBe(false);
     expect(schema.safeParse({ ...base, requiredToolsets: ['salesko', 'salesko'] }).success).toBe(false);
     expect(schema.safeParse({ ...base, requiredToolsets: ['Salesko'] }).success).toBe(false);
@@ -43,9 +45,10 @@ describe('requiredToolsets on an Agent offer', () => {
   });
 
   it('is strict control data and cannot carry a remote MCP executable definition', () => {
-    const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent'].safeParse({
+    const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({
       instruction: 'x',
       agentRef: AGENT_REF,
+      session: RESUME_SESSION,
       requiredToolsets: ['salesko'],
       mcpServers: { salesko: { command: '/tmp/untrusted' } },
     });

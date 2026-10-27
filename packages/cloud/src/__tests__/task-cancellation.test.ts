@@ -162,7 +162,7 @@ describe('host task cancellation', () => {
       deviceId: device.deviceId,
       afterSeq: 0,
     });
-    expect(mailbox.messages.map((row) => decodeEnvelope(row.body).type)).toEqual(['task.offer_for_agent']);
+    expect(mailbox.messages.map((row) => decodeEnvelope(row.body).type)).toEqual(['task.offer']);
   });
 
   it('keeps accepted cancellation ahead of a racing success receipt and creates no review side effect', async () => {
@@ -297,7 +297,7 @@ describe('host task cancellation', () => {
       afterSeq: 0,
     });
     expect(mailbox.messages.map((row) => decodeEnvelope(row.body).type)).toEqual([
-      'task.offer_for_agent',
+      'task.offer',
       'task.cancel',
     ]);
   });
@@ -329,7 +329,7 @@ describe('host task cancellation', () => {
       afterSeq: 0,
     });
     expect(mailbox.messages.map((row) => decodeEnvelope(row.body).type)).toEqual([
-      'task.offer_for_agent',
+      'task.offer',
       'task.cancel',
     ]);
   });

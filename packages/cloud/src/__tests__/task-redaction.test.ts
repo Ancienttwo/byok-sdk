@@ -46,6 +46,7 @@ function executionInput(taskId: string, deviceId: string) {
       instruction: `instruction ${SECRET}`,
       agentRef: AGENT_REF,
       runtime: 'codex',
+      session: { mode: 'fresh' },
       egressPolicy: {
         policyRevision: 'policy-v1',
         activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },

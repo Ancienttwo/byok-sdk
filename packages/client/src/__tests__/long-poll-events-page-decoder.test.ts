@@ -10,6 +10,7 @@ import { createTestDeviceStore } from './fixtures/device-credentials';
  * `long-poll-validation-stall.test.ts`.
  */
 import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
+import { FRESH_OFFER } from './fixtures/fresh-offer';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -93,10 +94,10 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
     v: PROTOCOL_VERSION,
     id: 'ffffffff-ffff-4fff-8fff-ffffffffff40',
     ts: new Date().toISOString(),
-    type: 'task.offer_for_agent',
+    type: 'task.offer',
     task_id: 'good-task',
     seq: 1,
-    payload: { agentRef: { agentId: 'agent-long-poll', profileRevision: 'rev-1' }, instruction: 'do it' },
+    payload: { agentRef: { agentId: 'agent-long-poll', profileRevision: 'rev-1' }, instruction: 'do it', ...FRESH_OFFER },
   };
 
   it.each([

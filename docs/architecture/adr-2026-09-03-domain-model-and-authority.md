@@ -67,7 +67,7 @@
 - v2 前的过渡期只允许两件事：`TaskAttempt.sessionRef` 字段，以及从 first-terminal-wins 回执派生的只读 `listAgentSessions(tenant, agentRef)` 投影。禁止在 `task.started` 时向云端写 session status。
 - resume 必须按 exact 绑定 fail-closed：Installation、Agent revision、runtime、cwd、native session evidence 任一不符即拒绝，不得回退为 fresh。
 
-**Consequences**　WP4 v2.3 按此定 Session store；fresh/resume 合并为一种 `run.offer` 的 `session.mode: create|resume`。WP3A 拥有 `sessionId → nativeLocator` 的本地 WAL。禁止把 Session status 做成 UI 实时状态源——UI 读 activity relay（ADR-033）。
+**Consequences**　WP4 v2.3 按此定 Session store；fresh/resume 合并为一种 `run.offer` 的 `session.mode: fresh|resume`（2026-10-27 修订，原为 `create|resume`，见文末修订说明）。WP3A 拥有 `sessionId → nativeLocator` 的本地 WAL。禁止把 Session status 做成 UI 实时状态源——UI 读 activity relay（ADR-033）。
 
 **Status**　Accepted (owner-delegated 2026-09-03)
 
@@ -188,3 +188,8 @@
 - ADR-033 与 ADR-037 D4：ADR-037 让 Agent egress 原样发给 Host，删除了 egress sanitizer 与 `metadata-status` 默认投影。这与 ADR-033「`local-first-v1` 下 ActivityStore 只接受无内容 status event」冲突。`local-first-v1`、`shared-observability-v1`、`SessionResultCommitter` 在 `packages/` 源码中都没有出现。如何取舍待 owner 裁定。
 - ADR-034：wire v2 随 ADR-037 落地（`PROTOCOL_VERSION = 2`），本 ADR 设想的那次 cutover 没有发生。列出的删除项也没有执行：legacy `task.offer` / `task.offer_with_toolsets` 仍在 `packages/protocol/src/envelope.ts`，`strictAgentOnly` 仍在 `packages/client/src/daemon/create-daemon.ts`。是否继续执行待 owner 裁定。
 - ADR-027 权威表：[ADR-038](adr-2026-10-13-bot-platform.md) 新增的都是 Host 拥有的事实（Bot profile / roster、Conversation / Turn、Room、Delegation、Host 执行核心），没有新增 SDK 权威。
+
+## 修订说明（2026-10-27）
+
+- ADR-028：wire v4（#925）落地了 fresh/resume 的合并。消息名是 `task.offer`，不是 `run.offer`；`session` 必填，取值 `{ mode: 'resume', sessionRef }` 或 `{ mode: 'fresh' }`（`packages/protocol/src/messages.ts` 的 `SessionSelectionSchema`）。owner 按 #925 设计稿的 O1 选了 `fresh`，和 capability `agent-egress-fresh-session` 及现有代码的用词一致，所以上文 Consequences 的 `create` 改成了 `fresh`。
+- ADR-034：2026-10-13 修订说明里「列出的删除项也没有执行」已经过时。wire v4（#925）删除了 legacy `task.offer` / `task.offer_with_toolsets`、`strictAgentOnly` 与 task-scoped gitWorkspace authority，并把 fresh/resume 两种 offer 合并成一个 `task.offer`。这次 cutover 是 wire v4，不是本 ADR 设想的 v2；两个阶段一起在 0.31.0 发布，没有双读双写。ambient device selection 一项本次没有核对。

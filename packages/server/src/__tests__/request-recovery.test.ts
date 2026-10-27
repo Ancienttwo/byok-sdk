@@ -25,7 +25,7 @@ describe('public facade request recovery', () => {
       expect(handle.taskId).toBe(input.taskId);
       const original = await byok.tasks.offer(input.taskId);
       expect(original).toMatchObject({ taskId: input.taskId, deviceId: daemon.deviceId, delivered: true,
-        type: 'task.offer_for_agent', payload: { instruction: 'original', runtime: 'claude' } });
+        type: 'task.offer', payload: { instruction: 'original', runtime: 'claude' } });
       for (const retry of [input, { ...input, instruction: 'changed' }]) {
         await expect(byok.dispatch(retry)).rejects.toMatchObject({ code: 'agent_task_already_exists' });
       }

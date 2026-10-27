@@ -38,7 +38,7 @@ const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.e
 const EVENTUAL_STATE_BUDGET_MS = 4_000;
 const IDENTITY: JournalIdentity = { tenantId: 'tenant-a', productId: 'test-product', deviceId: 'dev_1' };
 
-/** Every sealed type that a Host sends to a daemon. */
+/** Every sealable type that a Host sends to a daemon; the golden line of each is its sealed branch. */
 const SEALED_INBOUND_TYPES = (Object.keys(SEALED_SPLIT_TABLE) as MessageType[]).filter((type) => isServerToDaemonType(type));
 
 /** A golden line of `type` with an inline member, grown to the inline maximum of the protocol. */
@@ -89,7 +89,7 @@ describe('the journal bound of an inbound envelope record (#654)', () => {
       expect(Buffer.byteLength(bytes)).toBeGreaterThan(DEFAULT_MAX_RECORD_BYTES);
       await expect(journal.appendEnvelope({
         identity: IDENTITY, envelopeId: randomUUID(), taskId: 'sealed-task', seq: 1, bytes, bytesHash: journalHash(bytes),
-        receivedAt: '2026-10-24T00:00:00.000Z', opensTask: type !== 'task.steer_sealed',
+        receivedAt: '2026-10-24T00:00:00.000Z', opensTask: type !== 'task.steer',
       })).resolves.toMatchObject({ created: true });
     } finally { await journal.close(); }
   });
@@ -97,7 +97,7 @@ describe('the journal bound of an inbound envelope record (#654)', () => {
   it('keeps maxRecordBytes for a terminal record', async () => {
     const journal = new SqliteLocalTaskJournal({ storeDir: await tmp() });
     try {
-      const offer = encodeEnvelope(envelopeOf('task.offer_for_agent_sealed', 'sealed-task', 1));
+      const offer = encodeEnvelope(envelopeOf('task.offer', 'sealed-task', 1));
       await journal.appendEnvelope({
         identity: IDENTITY, envelopeId: randomUUID(), taskId: 'sealed-task', seq: 1, bytes: offer, bytesHash: journalHash(offer),
         receivedAt: '2026-10-24T00:00:00.000Z', opensTask: true,
@@ -128,7 +128,7 @@ describe('a sealed envelope at the inline maximum, on a daemon with the default 
 
   it('journals a sealed offer, declines it, and moves the cursor', async () => {
     const { storeDir, device, server } = await start();
-    const offer = envelopeOf('task.offer_for_agent_sealed', 'sealed-large-offer', server.nextSeq());
+    const offer = envelopeOf('task.offer', 'sealed-large-offer', server.nextSeq());
     server.send(offer);
 
     const decline = await server.waitFor((event) => event.type === 'task.decline' && event.task_id === 'sealed-large-offer', EVENTUAL_STATE_BUDGET_MS);
@@ -140,7 +140,7 @@ describe('a sealed envelope at the inline maximum, on a daemon with the default 
 
   it('journals a sealed steer, drops it, and moves the cursor', async () => {
     const { storeDir, device, server } = await start();
-    const steer = envelopeOf('task.steer_sealed', 'sealed-large-steer', server.nextSeq());
+    const steer = envelopeOf('task.steer', 'sealed-large-steer', server.nextSeq());
     server.send(steer);
 
     await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, device.deviceId)).toBe(steer.seq), EVENTUAL_STATE_BUDGET_MS);

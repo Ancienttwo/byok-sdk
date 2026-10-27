@@ -320,6 +320,7 @@ describe('task.complete.document on the wire', () => {
 
     const decoded = decodeEnvelope(encodeEnvelope(envelope));
     if (decoded.type !== 'task.complete') throw new Error('unreachable');
+    if (decoded.payload.sealed !== undefined) throw new Error('unreachable');
     expect(decoded.payload.document).toEqual(document);
   });
 

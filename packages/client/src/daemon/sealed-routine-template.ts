@@ -10,9 +10,9 @@
  * The template is valid up to and including `notAfter`.
  */
 import type { SealedBinding } from '@byok-sdk/core/sealed-payload';
-import type { AgentRef, TaskOfferForAgentWithEgressFreshSealedPayload, TaskSealing } from '@byok-sdk/protocol';
+import type { AgentRef, TaskOfferSealedPayload, TaskSealing } from '@byok-sdk/protocol';
 
-export type RoutineRef = NonNullable<TaskOfferForAgentWithEgressFreshSealedPayload['routineRef']>;
+export type RoutineRef = NonNullable<TaskOfferSealedPayload['routineRef']>;
 
 export function routineTemplateExpired(routineRef: RoutineRef, now: number): boolean {
   return now > Date.parse(routineRef.notAfter);

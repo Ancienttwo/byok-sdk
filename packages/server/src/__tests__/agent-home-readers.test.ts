@@ -57,7 +57,7 @@ describe('reference-server memory-reader dispatch (#317)', () => {
       homeAccess: 'memory-reader',
     });
     const offered = await nextEnvelope(daemon);
-    expect(offered.type).toBe('task.offer_for_agent');
+    expect(offered.type).toBe('task.offer');
     expect(offered.payload).toMatchObject({ agentRef: AGENT_REF, homeAccess: 'memory-reader' });
   });
 });

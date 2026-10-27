@@ -60,7 +60,7 @@ it.skipIf(process.platform === 'win32').each([
   await vi.waitFor(() => { expect(child!.exitCode, stderr).toBeNull(); expect(stdout).toContain('ready'); }, { timeout: 10_000 });
   const taskId = 'reply-accepted-then-killed';
   const agentRef = { agentId: 'reply-agent', profileRevision: '1' };
-  await server.byok.executions.submit({ taskId, deviceId, payload: { runtime: 'pi', instruction: 'Reply without a result.', agentRef,
+  await server.byok.executions.submit({ taskId, deviceId, payload: { runtime: 'pi', instruction: 'Reply without a result.', agentRef, session: { mode: 'fresh' },
     egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     messageEgress: { mode: 'required', contract: 'reply.v1', contentType: 'text/plain', maxBytes: 1024 },
     terminalProjection: { mode: 'result-document', contract: 'result.v1', schema: { type: 'object' } },

@@ -148,7 +148,7 @@ app.post('/api/tasks', async (c) => {
       ({ taskId } = await byok.executions.submit({
         taskId: randomUUID(),
         deviceId,
-        payload: { instruction, runtime, agentRef: EXAMPLE_AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+        payload: { instruction, runtime, session: { mode: 'fresh' }, agentRef: EXAMPLE_AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
       }));
     }
     dispatched.set(taskId, { instruction, ...(runtime === undefined ? {} : { runtime }) });

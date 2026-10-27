@@ -44,7 +44,7 @@ it('distinguishes pre-claim cancellation from claimed cancellation through attem
 
     const input = (taskId: string) => ({ taskId, deviceId, payload: {
       instruction: 'Hold this execution until cancelled.', runtime: 'pi' as const,
-      agentRef: { agentId: 'probe-agent', profileRevision: '1' }, egressPolicy: policy,
+      session: { mode: 'fresh' as const }, agentRef: { agentId: 'probe-agent', profileRevision: '1' }, egressPolicy: policy,
       terminalProjection: { mode: 'none' as const },
     } });
     await server.executions.submit(input('cancel-before-claim'));

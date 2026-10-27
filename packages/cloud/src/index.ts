@@ -423,29 +423,6 @@ export type {
 } from './maintenance';
 export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
 export type { ReceiptRetentionClass } from './receipt-retention';
-// One-shot wire v3 -> v4 migration (#925), operator-invoked. Shipped in 0.31.x
-// only; 0.32.0 removes it with `taskRedactionReceiptKey`, which only the
-// Postgres runner uses (#1017).
-export { taskRedactionReceiptKey } from './task-redaction';
-export {
-  ReceiptMigrationUnmappableError,
-  WireV4LegacyTaskListMismatchError,
-  assertWireV4MigrationConfirmed,
-  hasUnnamedApproval,
-  isWireV4MailboxBody,
-  migrateWireV3Receipt,
-  wireV3LegacyOfferReceiptKeys,
-  wireV3LegacyOfferType,
-  wireV4ReceiptKind,
-} from './wire-v4-receipt-migration';
-export type {
-  WireV3LegacyTask,
-  WireV4MigrationPreflight,
-  WireV4ReceiptKind,
-  WireV4ReceiptMigration,
-  WireV4ReceiptMigrationResult,
-  WireV4UnmappableRow,
-} from './wire-v4-receipt-migration';
 export type { ReceiptCollectExpiredInput } from './stores/ports';
 export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
 export { createInProcessMailboxWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS } from './stores/in-memory/mailbox-wake';

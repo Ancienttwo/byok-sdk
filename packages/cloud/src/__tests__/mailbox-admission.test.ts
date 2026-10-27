@@ -114,7 +114,7 @@ describe('mailbox admission at the cloud surface', () => {
 
     const page = await poll(harness, device);
     expect(page.events.map((event) => [event.type, event.task_id])).toEqual([
-      ['task.offer_for_agent', 'admission-retry'],
+      ['task.offer', 'admission-retry'],
     ]);
   });
 
@@ -186,7 +186,7 @@ describe('mailbox admission at the cloud surface', () => {
     const page = await poll(harness, device);
     expect(page.events.map((event) => [event.type, event.task_id])).toEqual([
       ['task.cancel', refusedCancel.taskId],
-      ['task.offer_for_agent', refusedRetry.taskId],
+      ['task.offer', refusedRetry.taskId],
     ]);
   });
 
@@ -209,7 +209,7 @@ describe('mailbox admission at the cloud surface', () => {
       payload: {
         instruction: 'emit one reliable event',
         agentRef: AGENT_REF,
-        sessionRef: 'session-admission',
+        session: { mode: 'resume', sessionRef: 'session-admission' },
         egressPolicy: POLICY,
       },
     });
@@ -286,7 +286,7 @@ describe('mailbox admission at the cloud surface', () => {
       payload: {
         instruction: 'emit one reliable event',
         agentRef: AGENT_REF,
-        sessionRef: 'session-no-entitlement',
+        session: { mode: 'resume', sessionRef: 'session-no-entitlement' },
         egressPolicy: POLICY,
       },
     });
