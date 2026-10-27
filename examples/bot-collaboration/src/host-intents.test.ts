@@ -22,7 +22,7 @@ const server = {
   tasks: {
     offer: async (taskId: string) => {
       const input = submitted.get(taskId);
-      return input && { taskId, deviceId: input.deviceId, type: 'task.offer_for_agent_with_egress_fresh', payload: input.payload, delivered: true };
+      return input && { taskId, deviceId: input.deviceId, type: 'task.offer', payload: input.payload, delivered: true };
     },
     deviceTerminal: async (taskId: string) => {
       const input = submitted.get(taskId);

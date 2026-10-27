@@ -33,17 +33,17 @@ type ReaderOffer = (harness: CloudHarness, deviceId: string, taskId: string) => 
 const readerOffers: ReadonlyArray<readonly [string, ReaderOffer]> = [
   ['enqueueAgentOffer', (harness, deviceId, taskId) => harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, {
     taskId,
-    payload: { instruction: 'read memory', agentRef: AGENT_REF, sessionRef: 'reader-session', homeAccess: 'memory-reader' },
+    payload: { instruction: 'read memory', agentRef: AGENT_REF, session: { mode: 'resume', sessionRef: 'reader-session' }, homeAccess: 'memory-reader' },
   })],
   ['enqueueAgentEgressOffer', (harness, deviceId, taskId) => harness.cloud.enqueueAgentEgressOffer(TENANT_A, deviceId, {
     taskId,
     payload: {
-      instruction: 'read memory', agentRef: AGENT_REF, sessionRef: 'reader-session', egressPolicy: POLICY, homeAccess: 'memory-reader',
+      instruction: 'read memory', agentRef: AGENT_REF, session: { mode: 'resume', sessionRef: 'reader-session' }, egressPolicy: POLICY, homeAccess: 'memory-reader',
     },
   })],
   ['submitAgentExecution', (harness, deviceId, taskId) => harness.cloud.submitAgentExecution(TENANT_A, { deviceId: deviceId,
     taskId,
-    payload: { instruction: 'read memory', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, egressPolicy: POLICY, homeAccess: 'memory-reader' },
+    payload: { instruction: 'read memory', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: POLICY, homeAccess: 'memory-reader' },
   })],
 ];
 
@@ -85,8 +85,8 @@ describe('hosted memory-reader Agent offers (#317)', () => {
 
     await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, {
       taskId: 'writer-admitted',
-      payload: { instruction: 'write memory', agentRef: AGENT_REF, sessionRef: 'writer-session' },
+      payload: { instruction: 'write memory', agentRef: AGENT_REF, session: { mode: 'resume', sessionRef: 'writer-session' } },
     });
-    expect(await mailboxTypes(harness, deviceId)).toEqual(['task.offer_for_agent']);
+    expect(await mailboxTypes(harness, deviceId)).toEqual(['task.offer']);
   });
 });

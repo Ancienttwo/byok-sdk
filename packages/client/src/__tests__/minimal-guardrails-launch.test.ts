@@ -18,6 +18,8 @@ import { startPreparedOperation, type PreparedOperationResources } from './fixtu
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { FRESH_OFFER } from './fixtures/fresh-offer';
 
 /**
  * Minimal guardrails: no PermissionPolicy reaches a runtime. Each bundled
@@ -224,7 +226,7 @@ describe('daemon admission', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
-        agentHome: testAgentHomeConfig(),
+        agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir: await tempDir('byok-minimal-guardrails-store-'),
       },
       [adapter],
@@ -232,7 +234,7 @@ describe('daemon admission', () => {
     await daemon.pair('pairing-code');
     await daemon.start();
 
-    const offer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'no policy' }, { taskId: 'task-no-policy', seq: server.nextSeq() });
+    const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'no policy' }, { taskId: 'task-no-policy', seq: server.nextSeq() });
     expect('policy' in offer.payload).toBe(false);
     server.send(offer);
 

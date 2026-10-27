@@ -18,7 +18,7 @@ test('rejects unknown manifest task and matches exact wire identity', () => {
 
 test('missing new-URL cursor never substitutes for a durable server ACK', () => {
   const state = { localCursor: null,
-    mailbox: [{ taskId: 'A', type: 'task.offer_for_agent_with_egress_fresh', seq: 3, state: 'acked' }],
+    mailbox: [{ taskId: 'A', type: 'task.offer', seq: 3, state: 'acked' }],
     serverCursors: [{ device_id: 'device', acked_seq: 3 }] };
   assert.equal(hasAcknowledgedOffer(state, 'device', 'A'), false);
   assert.equal(hasAcknowledgedOffer(state, 'device', 'A', { allowAbsentCursor: true }), true);

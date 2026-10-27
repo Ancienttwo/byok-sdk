@@ -40,7 +40,7 @@ beforeEach(async () => {
     'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress',
     'agent-egress-fresh-session', 'terminal-projection-selection',
   ] });
-  await instance.executions.submit({ taskId, deviceId: daemon.deviceId, payload: { instruction: 'reply', agentRef, runtime: 'pi',
+  await instance.executions.submit({ taskId, deviceId: daemon.deviceId, payload: { instruction: 'reply', agentRef, runtime: 'pi', session: { mode: 'fresh' },
     egressPolicy: { policyRevision: '1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
       reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
       transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },

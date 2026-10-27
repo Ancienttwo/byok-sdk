@@ -15,7 +15,7 @@ export type { MemoryApproval, MemoryBinding, MemoryOptions, MemoryContextPack } 
 export { hash, canonical, isSealed, project, time, validateJson } from './model';
 export type { LedgerState, IgnoredWakeAudit } from './model';
 export { enqueue, agentKey, fifoHeads, queuedExpiry, settle } from './transitions';
-export { FrozenOfferMismatchError, SealedDispatchUnavailableError, frozenOfferType, sameFrozenOffer, submitFrozen } from './submit';
+export { FrozenOfferMismatchError, SealedDispatchUnavailableError, sameFrozenOffer, submitFrozen } from './submit';
 export type { FrozenSubmitPort, FrozenInput, FrozenOffer } from './submit';
 export { routineTemplateBinding, sealRoutineTemplate } from './sealed-routine';
 export type { RoutineRef, SealRoutineTemplateInput, SealedTaskInput } from './sealed-routine';

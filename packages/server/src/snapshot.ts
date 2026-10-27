@@ -90,7 +90,7 @@ export function toTaskSnapshot(
   // The terminal's own `sessionRef` wins: a runtime that resumed or minted a
   // session is reporting the one the work actually ran under, which is a
   // stronger fact than whatever the offer asked for.
-  const sessionRef = result?.sessionRef ?? (offer !== undefined && 'sessionRef' in offer.payload ? offer.payload.sessionRef : undefined);
+  const sessionRef = result?.sessionRef ?? (offer?.payload.session.mode === 'resume' ? offer.payload.session.sessionRef : undefined);
   return {
     taskId: attempt.taskId,
     state: taskStateOf(attempt.status, attempt.cancellation !== undefined, pending !== undefined),

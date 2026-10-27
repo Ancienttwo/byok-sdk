@@ -77,7 +77,7 @@ const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
 const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
-export const SQLITE_SCHEMA_VERSION = '5';
+const SQLITE_SCHEMA_VERSION = '5';
 const TASK_PHASE_COLUMNS = ['offered_at', 'claimed_at', 'first_output_at', 'terminal_at'] as const;
 
 import { SqliteWakeStore, WAKE_SCHEMA } from './wakes';

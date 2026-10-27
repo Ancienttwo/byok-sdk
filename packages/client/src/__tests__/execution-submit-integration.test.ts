@@ -38,7 +38,7 @@ it('runs two recurring executions through real HTTP and TaskRunner with distinct
       const input = { taskId, deviceId, payload: {
         instruction, runtime: 'pi' as const,
         agentRef: { agentId: 'recurring-agent', profileRevision: 'profile-v1' },
-        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required' as const, contract: 'conversation-turn/v1', contentType: 'text/markdown' as const, maxBytes: 1024 },
         terminalProjection: { mode: 'none' as const },
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: `turn-${index}` } };
@@ -120,7 +120,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       frozenInstructions.set('preceding-user-turn', instruction);
       await sdk.executions.submit({ taskId: 'preceding-user-turn', deviceId, payload: {
         agentRef, runtime: 'pi', instruction,
-        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' },
+        session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' },
         messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'preceding-turn' } });
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 10000 });
@@ -145,15 +145,16 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     frozenInstructions.set(taskId, summaryInstruction);
     const input = { taskId, deviceId, payload: { agentRef, runtime: 'pi' as const,
       instruction: summaryInstruction,
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selector } };
+      session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selector } };
     await sdk.executions.submit(input);
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(precedingTurns + 1), { timeout: 10000 });
     const session = adapter.sessions[precedingTurns]!;
     expect(adapter.startCalls[precedingTurns]?.task.sessionRef).toBeUndefined();
     expect(adapter.startCalls[precedingTurns]?.task.instruction).toContain(summaryInstruction);
     const offer = await sdk.tasks.offer(taskId);
-    expect(offer).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh', payload: { agentRef, terminalProjection: selector } });
-    expect(offer?.payload).not.toHaveProperty('sessionRef');
+    expect(offer).toMatchObject({ type: 'task.offer', payload: { agentRef, terminalProjection: selector } });
+    expect(offer?.payload).toMatchObject({ session: { mode: 'fresh' } });
+    expect((offer?.payload as { session: object } | undefined)?.session).not.toHaveProperty('sessionRef');
     expect(offer?.payload).not.toHaveProperty('messageEgress');
     releaseClose = session.blockClose();
     if (outcome === 'document') expect(await submit(precedingTurns, document)).toMatchObject({ state: 'staged' });
@@ -212,7 +213,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     }
     await vi.waitFor(() => expect(daemon.status().activeTaskCount).toBe(0));
     if (outcome === 'document') {
-      if (terminal?.envelope.type !== 'task.complete') throw new Error('Missing Summary terminal');
+      if (terminal?.envelope.type !== 'task.complete' || terminal.envelope.payload.sealed !== undefined) throw new Error('Missing Summary terminal');
       const recoveredDocument = terminal.envelope.payload.document;
       expect(recoveredDocument).toEqual(document);
       const instruction = JSON.stringify({ summary: recoveredDocument, recentHistory: [], input: 'Current user request' });
@@ -220,7 +221,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       // New explicit user execution after Summary, not a retry of the competing probe.
       await sdk.executions.submit({ taskId: 'dependent-user-turn', deviceId, payload: {
         agentRef, runtime: 'pi', instruction,
-        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' },
+        session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' },
         messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'user-turn' } });
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(precedingTurns + 3), { timeout: 10000 });

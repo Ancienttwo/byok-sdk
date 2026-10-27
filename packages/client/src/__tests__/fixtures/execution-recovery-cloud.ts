@@ -440,6 +440,7 @@ lines.on('line', (line) => {
           payload: {
             instruction: String(params.instruction), runtime: 'pi',
             agentRef: params.agentRef ?? { agentId: `recovery-${globalThis.crypto.randomUUID()}`, profileRevision: '1' },
+            session: { mode: 'fresh' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
             terminalProjection: { mode: 'none' },
           },
@@ -452,6 +453,7 @@ lines.on('line', (line) => {
           payload: {
             instruction: 'publish durable reply', runtime: 'pi',
             agentRef: { agentId: 'agent-message', profileRevision: 'profile-v1' },
+            session: { mode: 'fresh' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
             messageEgress: { mode: 'required', contract: 'fixture.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
             terminalProjection: { mode: 'none' },
@@ -465,6 +467,7 @@ lines.on('line', (line) => {
           payload: {
             instruction: 'submit one structured result', runtime: 'pi',
             agentRef: { agentId: 'agent-result', profileRevision: 'profile-v1' },
+            session: { mode: 'fresh' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
             terminalProjection: { mode: 'result-document', contract: 'fixture.result.v1', schema: {
               type: 'object', additionalProperties: false, required: ['verdict'],

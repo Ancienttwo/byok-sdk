@@ -27,9 +27,9 @@ import {
 } from './support/sealed';
 
 const TASK_ID = 'sealed-host-task';
-const TYPE = 'task.offer_for_agent_sealed';
+const TYPE = 'task.offer';
 /** The plaintext fields of the sealed Agent resume offer. */
-const RESUME = { runtime: 'pi', agentRef: TEST_AGENT_REF, sessionRef: offerPayload().sessionRef } as const;
+const RESUME = { runtime: 'pi', agentRef: TEST_AGENT_REF, session: offerPayload().session } as const;
 const SCOPE_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 
 async function sealedDevice(): Promise<{ harness: CloudHarness; device: PairedDevice }> {
@@ -50,7 +50,7 @@ function seal(device: PairedDevice, instruction: string) {
     category: 'task-input',
     binding: {
       tenantId: TENANT_A,
-      family: 'task.offer_for_agent',
+      family: 'task.offer',
       direction: 'server-to-daemon',
       identity: { taskId: TASK_ID },
       deviceId: device.deviceId,
@@ -121,12 +121,12 @@ describe('a sealed offer retry keeps the first ciphertext (#654 §9.2)', () => {
   it('refuses a plaintext field change under the same task id and the same sealed member, and keeps the first offer', async () => {
     const { harness, device } = await sealedDevice();
     const sealed = inlineMember(await seal(device, 'review the patch'));
-    await failedFirstOffer(harness, device, sealed, { sessionRef: 'session-a' });
+    await failedFirstOffer(harness, device, sealed, { session: { mode: 'resume', sessionRef: 'session-a' } });
 
-    await expect(offer(harness, device, sealed, { sessionRef: 'session-b' })).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    await expect(offer(harness, device, sealed, { session: { mode: 'resume', sessionRef: 'session-b' } })).rejects.toMatchObject({ code: 'coordination_input_invalid' });
     expect(await mailbox(harness, device)).toEqual([]);
-    const retried = await offer(harness, device, sealed, { sessionRef: 'session-a' });
-    expect(retried.envelope.payload).toMatchObject({ sessionRef: 'session-a', sealed });
+    const retried = await offer(harness, device, sealed, { session: { mode: 'resume', sessionRef: 'session-a' } });
+    expect(retried.envelope.payload).toMatchObject({ session: { mode: 'resume', sessionRef: 'session-a' }, sealed });
     expect(await mailbox(harness, device)).toEqual([retried.envelope]);
   });
 });

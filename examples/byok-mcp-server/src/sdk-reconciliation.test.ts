@@ -32,7 +32,7 @@ async function host() {
   const reservation = ledger.reserveTask(caller, input, session.deviceId);
   const dispatch = async () => {
     await server.executions.submit({ taskId: reservation.taskId, deviceId: reservation.binding.deviceId, payload: {
-      runtime: reservation.binding.arguments.runtime, instruction: reservation.binding.arguments.instruction,
+      runtime: reservation.binding.arguments.runtime, session: { mode: 'fresh' }, instruction: reservation.binding.arguments.instruction,
       agentRef: reservation.binding.agentRef!, egressPolicy: policy, terminalProjection: { mode: 'none' } } });
     const handle = { taskId: reservation.taskId };
     await send(createEnvelope('task.claim', { deviceId: session.deviceId, agentRef: AGENT, runtime: 'pi' }, { taskId: handle.taskId }));

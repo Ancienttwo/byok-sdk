@@ -18,7 +18,7 @@ try {
       ledger.transaction(state => {
         for (const key of keys) {
           const input: IntentInput = { key, source: 'user', waitUntil: 1000, execution: { deviceId: 'synthetic', payload: {
-            instruction: 'i'.repeat(instructionBytes), runtime: 'pi', agentRef: { agentId: 'main', profileRevision: '1' },
+            session: { mode: 'fresh' }, instruction: 'i'.repeat(instructionBytes), runtime: 'pi', agentRef: { agentId: 'main', profileRevision: '1' },
             egressPolicy: { policyRevision: 'synthetic', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
               reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 16384 },
               transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },

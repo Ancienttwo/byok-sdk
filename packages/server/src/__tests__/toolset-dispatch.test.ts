@@ -61,8 +61,8 @@ describe('logical MCP toolset dispatch', () => {
     });
     const offer = await nextEnvelope(daemon);
 
-    expect(offer.type).toBe('task.offer_for_agent');
-    if (offer.type !== 'task.offer_for_agent') throw new Error('unreachable');
+    expect(offer.type).toBe('task.offer');
+    if (offer.type !== 'task.offer') throw new Error('unreachable');
     expect(offer.payload.requiredToolsets).toEqual(['salesko']);
     expect(JSON.stringify(offer)).not.toMatch(/command|args|secret/i);
   });
@@ -77,7 +77,7 @@ describe('logical MCP toolset dispatch', () => {
       requiredToolsets: ['salesko'],
     });
     expect(await nextEnvelope(daemon)).toMatchObject({
-      type: 'task.offer_for_agent', payload: { requiredToolsets: ['salesko'] },
+      type: 'task.offer', payload: { requiredToolsets: ['salesko'] },
     });
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Offered');
   });

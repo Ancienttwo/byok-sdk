@@ -6,7 +6,7 @@ import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type {
   AgentEgressPolicy,
   AgentEvent,
-  TaskOfferForAgentPayload,
+  TaskOfferPlainPayload,
 } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
 import type { AgentRef } from './agent-home';
@@ -18,10 +18,11 @@ export type { AgentRef } from './agent-home';
  * The offer fields a runtime adapter receives. The client owns this shape;
  * the daemon projects each wire offer onto it.
  */
-export type RuntimeTaskInput = Pick<
-  TaskOfferForAgentPayload,
-  'instruction' | 'runtime' | 'harnessId' | 'dispatchSelection' | 'sessionRef' | 'limits'
->;
+export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'runtime' | 'harnessId' | 'dispatchSelection' | 'limits'> & {
+  instruction: NonNullable<TaskOfferPlainPayload['instruction']>;
+  /** The runtime session to resume (`session.mode: 'resume'` on the offer); absent for a fresh session. */
+  sessionRef?: string;
+};
 export type {
   McpServerObservation,
   McpToolDescriptor,
@@ -360,7 +361,7 @@ export interface RuntimeOperationManifest {
   /** The credential-free runtime/lane/provider/model authority for this operation. */
   readonly dispatchSelection?: RuntimeTaskInput['dispatchSelection'];
   readonly sessionRef?: string;
-  /** Strict Agent identity, present only for task.offer_for_agent. */
+  /** Strict Agent identity, present on every `task.offer`. */
   readonly agentRef?: AgentRef;
   /**
    * Canonical runtime cwd. For an Agent writer it is the Agent home root. For

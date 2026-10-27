@@ -16,6 +16,9 @@ import { createTestDeviceStore } from './fixtures/device-credentials';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
+
 /**
  * Wire v3 result channel, daemon construction and startup:
  * - TE-B: every removed `DaemonConfig` field, `resultDocument` included,
@@ -39,7 +42,7 @@ async function baseConfig(serverUrl = 'http://127.0.0.1:9'): Promise<DaemonConfi
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'result-gating',
     serverUrl,
-    agentHome: testAgentHomeConfig(),
+    agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     storeDir: await tmpDir('byok-result-gating-store-'),
   };
 }
@@ -128,8 +131,8 @@ describe('startup refuses a journal of another wire major', () => {
     const { config, identity } = await pairedDaemonStore();
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
     // A v3 row first: scanning before acting means it gets no terminal either.
-    await seedOffer(journal, identity, 'v3-task', 1, encodeEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'current' }, { taskId: 'v3-task', seq: 1 })));
-    await seedOffer(journal, identity, 'v2-task', 2, v2Bytes(encodeEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'old' }, { taskId: 'v2-task', seq: 2 }))));
+    await seedOffer(journal, identity, 'v3-task', 1, encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'current' }, { taskId: 'v3-task', seq: 1 })));
+    await seedOffer(journal, identity, 'v2-task', 2, v2Bytes(encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'old' }, { taskId: 'v2-task', seq: 2 }))));
     await journal.close();
     await expectStartupRefused(config, { taskId: 'v2-task', record: 'recovery-offer' });
     expect(snapshot(config.storeDir!).journal_terminal).toEqual([]);
@@ -138,7 +141,7 @@ describe('startup refuses a journal of another wire major', () => {
   it('a v2 pending terminal stops startup before replay', async () => {
     const { server, config, identity } = await pairedDaemonStore();
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
-    await seedOffer(journal, identity, 'done-task', 1, encodeEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'done' }, { taskId: 'done-task', seq: 1 })));
+    await seedOffer(journal, identity, 'done-task', 1, encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'done' }, { taskId: 'done-task', seq: 1 })));
     const terminal = v2Bytes(encodeEnvelope(createEnvelope('task.complete', { summary: 'old', sessionRef: 's' }, { taskId: 'done-task', sessionRef: 's' })));
     await journal.recordTerminal({ taskId: 'done-task', terminalType: 'complete', bytes: terminal, payloadHash: journalHash(terminal),
       truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
@@ -169,8 +172,8 @@ describe('result-document recovery from the journal', () => {
     await createDaemonWithAdapters(config, [new StubRuntimeAdapter()]).pair('pairing-code');
     const device = (await createTestDeviceStore(config.storeDir!, undefined, config.productId).credentials.read())!;
     const identity = { tenantId: device.tenantId, productId: config.productId, deviceId: device.deviceId };
-    const offerBytes = (taskId: string) => encodeEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'submit one result', runtime: 'pi', agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selection,
+    const offerBytes = (taskId: string) => encodeEnvelope(createEnvelope('task.offer', {
+      session: { mode: 'fresh' }, instruction: 'submit one result', runtime: 'pi', agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selection,
       ...(requiredReply ? { messageEgress: { mode: 'required', contract: 'reply.v1', contentType: 'text/plain', maxBytes: 1024 } } : {}),
     }, { taskId, seq: 1 }));
     const home = path.join(config.agentHome!.hostStorageRoot, 'agents', agentRef.agentId);

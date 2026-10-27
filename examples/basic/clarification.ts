@@ -119,7 +119,7 @@ export class ClarificationHost {
     text(taskId,'taskId',200);
     const instruction = `Objective:\n${run.objective}\nHost-selected context (${run.contextRevision}):\n${run.context}\n${answer ? `Validated clarification answer:\n${JSON.stringify({ question: answer.ticket.result, answer: answer.value })}\n` : ''}Call submit_result with JSON with contract "${CLARIFICATION_CONTRACT}" and outcome complete, blocked (reason), or needs_input (questionId, question, checkpoint, answerKind). answerKind text has no options; single_choice requires 2-8 unique {id,label} options. No additional fields. Clarification never grants tool permission.`;
     const { deviceId, ...selection } = run.target;
-    return { taskId, deviceId, payload: { ...selection, instruction, terminalProjection: { mode: 'result-document', contract: CLARIFICATION_CONTRACT, schema: CLARIFICATION_SCHEMA } } };
+    return { taskId, deviceId, payload: { ...selection, session: { mode: 'fresh' }, instruction, terminalProjection: { mode: 'result-document', contract: CLARIFICATION_CONTRACT, schema: CLARIFICATION_SCHEMA } } };
   }
   start(input: Omit<ClarificationRun, 'tenantId'|'status'|'generation'|'pending'|'tickets'|'reason'>, taskId: string): HostSnapshot<ClarificationRun> {
     for (const key of ['id','sessionId','respondentId','destination','contextRevision','objective'] as const) text(input[key],key);
@@ -133,7 +133,7 @@ export class ClarificationHost {
     const offer = await this.server.tasks.offer(input.taskId);
     if (!offer) return false;
     const { payload } = input;
-    if (offer.taskId !== input.taskId || offer.deviceId !== input.deviceId || offer.type !== 'task.offer_for_agent_with_egress_fresh' || canonical(offer.payload) !== canonical(payload)) throw new Error('SDK offer differs from reserved input');
+    if (offer.taskId !== input.taskId || offer.deviceId !== input.deviceId || offer.type !== 'task.offer' || canonical(offer.payload) !== canonical(payload)) throw new Error('SDK offer differs from reserved input');
     return offer.delivered;
   }
   private async cancelPending(run: ClarificationRun): Promise<void> {
@@ -180,6 +180,7 @@ export class ClarificationHost {
     else if (!terminal) return row;
     else if (terminal.envelope.task_id !== input.taskId) throw new Error('SDK terminal taskId mismatch');
     else if (terminal.envelope.type !== 'task.complete') { run.status = 'blocked'; run.reason = 'execution_failed_or_declined'; }
+    else if (terminal.envelope.payload.sealed !== undefined) throw new Error('SDK terminal is sealed; this Host submits plaintext executions');
     else {
       let result: ClarificationResult;
       try { result = parseClarification(terminal.envelope.payload.document); }

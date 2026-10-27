@@ -6,6 +6,7 @@ import {
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
+  isSealedPayload,
   parseMessage,
   type Envelope,
   type MessageType,
@@ -63,14 +64,15 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
-  it('task.offer_for_agent (blobRef instruction)', () => {
-    const type = 'task.offer_for_agent' as const;
+  it('task.offer (resume, blobRef instruction)', () => {
+    const type = 'task.offer' as const;
     roundTrip(
       type,
       createEnvelope(
         type,
         {
           agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+          session: { mode: 'resume', sessionRef: 'session-blob-1' },
           instruction: {
             blobRef: {
               blobId: 'blob-1',
@@ -85,8 +87,8 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
-  it('task.offer_for_agent', () => {
-    const type = 'task.offer_for_agent' as const;
+  it('task.offer (resume)', () => {
+    const type = 'task.offer' as const;
     testedTypes.push(type);
     roundTrip(
       type,
@@ -96,15 +98,15 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           instruction: 'continue durable Agent work',
           runtime: 'pi',
           agentRef: { agentId: 'agent-1', profileRevision: 'profile-r7' },
-          sessionRef: 'session-agent-1',
+          session: { mode: 'resume', sessionRef: 'session-agent-1' },
         },
         { taskId: 'task-agent-1', seq: 4 },
       ),
     );
   });
 
-  it('task.offer_for_agent_with_egress', () => {
-    const type = 'task.offer_for_agent_with_egress' as const;
+  it('task.offer (resume with egress)', () => {
+    const type = 'task.offer' as const;
     testedTypes.push(type);
     roundTrip(
       type,
@@ -114,7 +116,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           instruction: 'continue typed egress Agent work',
           runtime: 'pi',
           agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
-          sessionRef: 'session-egress-1',
+          session: { mode: 'resume', sessionRef: 'session-egress-1' },
           egressPolicy: {
             policyRevision: 'egress-policy-r1',
             activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -135,8 +137,8 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
-  it('task.offer_for_agent_with_egress_fresh', () => {
-    const type = 'task.offer_for_agent_with_egress_fresh' as const;
+  it('task.offer (fresh with egress)', () => {
+    const type = 'task.offer' as const;
     testedTypes.push(type);
     roundTrip(
       type,
@@ -146,6 +148,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           instruction: 'start typed egress Agent work',
           runtime: 'pi',
           agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
+          session: { mode: 'fresh' },
           egressPolicy: {
             policyRevision: 'egress-policy-r1',
             activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -166,8 +169,8 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
-  it('task.offer_prepared', () => {
-    const type = 'task.offer_prepared' as const;
+  it('task.offer (prepared)', () => {
+    const type = 'task.offer' as const;
     testedTypes.push(type);
     roundTrip(
       type,
@@ -178,6 +181,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           egressPolicy: { policyRevision: 'default-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
           runtime: 'pi',
           agentRef: { agentId: 'agent-prepared', profileRevision: 'profile-prepared-r1' },
+          session: { mode: 'fresh' },
           requiredToolsets: ['team'],
           preparation: {
             reference: 'prep-record-1',
@@ -587,13 +591,13 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     }, { taskId: 'task-1', seq: 1 }));
   });
 
-  // #654: each sealed type round-trips its first golden line, which carries
-  // real ciphertext under a fixed test scope key.
+  // #654: each sealable type round-trips its first sealed-branch golden line,
+  // which carries real ciphertext under a fixed test scope key.
   const goldenLines = readFileSync(new URL('./golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
     .trimEnd().split('\n').map((raw) => JSON.parse(raw) as Envelope);
-  it.each(Object.keys(SEALED_SPLIT_TABLE) as Array<keyof typeof SEALED_SPLIT_TABLE>)('%s', (type) => {
+  it.each(Object.keys(SEALED_SPLIT_TABLE) as Array<keyof typeof SEALED_SPLIT_TABLE>)('sealed branch of %s', (type) => {
     testedTypes.push(type);
-    const line = goldenLines.find((envelope) => envelope.type === type);
+    const line = goldenLines.find((envelope) => envelope.type === type && isSealedPayload(type, envelope.payload));
     expect(line).toBeDefined();
     roundTrip(type, line!);
   });

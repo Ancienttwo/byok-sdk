@@ -19,13 +19,14 @@ import { TaskRunner } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 /** The fixed inputs the golden sealed lines were sealed with. Test data only. */
 const GOLDEN_TENANT = 'tenant-golden';
 const GOLDEN_SCOPE = { scopeId: 'scope-golden-device-1', epoch: 2 };
 const GOLDEN_SCOPE_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 const TEMPLATE_INSTRUCTION = 'Write the daily digest.';
-const TYPE = 'task.offer_for_agent_with_egress_fresh_sealed';
+const TYPE = 'task.offer';
 
 type Payload = Record<string, unknown> & {
   routineRef: { routineId: string; definitionVersion: number; notAfter: string };
@@ -95,6 +96,7 @@ async function device(keyring: SealedScopeKeyring = new GoldenKeyring()) {
     approvalRegistry: new ApprovalRegistry(),
     agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
     agentMessageMcpPreflight: async () => {},
+    advertisedCapabilities: advertiseEveryDeviceFlag,
     sealedTasks: new SealedTasks({
       keyring, tenantId: GOLDEN_TENANT, deviceId: 'device-golden-1',
       blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },

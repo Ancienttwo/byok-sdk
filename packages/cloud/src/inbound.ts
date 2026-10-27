@@ -52,7 +52,8 @@ import {
   encodeEnvelope,
   PROTOCOL_VERSION,
   SEALED_SPLIT_TABLE,
-  isSealedMessageType,
+  isSealableMessageType,
+  isSealedPayload,
   isSealedTaskPlainOutput,
   type AgentRef,
   type AgentContentReceiptPayload,
@@ -459,10 +460,6 @@ function inboundAgentRef(envelope: Envelope): AgentRef | undefined {
     case 'task.complete':
     case 'task.fail':
     case 'task.cancelled':
-    case 'task.decline_sealed':
-    case 'task.complete_sealed':
-    case 'task.fail_sealed':
-    case 'task.cancelled_sealed':
       return envelope.payload.agentRef;
     default:
       return undefined;
@@ -470,19 +467,13 @@ function inboundAgentRef(envelope: Envelope): AgentRef | undefined {
 }
 
 function agentRefEchoRequired(envelope: Envelope): boolean {
-  return envelope.type === 'task.claim' || TERMINAL_PLAIN_TYPES.includes(plainTypeOf(envelope.type));
+  return envelope.type === 'task.claim' || TERMINAL_TYPES.includes(envelope.type);
 }
 
-/** The plaintext type of a sealed type, so a sealed message takes every gate of the type it seals (§8.5). */
-function plainTypeOf(type: MessageType): MessageType {
-  return isSealedMessageType(type) ? SEALED_SPLIT_TABLE[type].plainType : type;
-}
-
-const TERMINAL_PLAIN_TYPES: readonly MessageType[] = ['task.decline', 'task.complete', 'task.fail', 'task.cancelled'];
-/** The plaintext types that a `task-output` sealed type seals. */
-const SEALED_OUTPUT_PLAIN_TYPES: readonly MessageType[] = Object.values(SEALED_SPLIT_TABLE)
-  .filter((entry) => entry.category === 'task-output')
-  .map((entry) => entry.plainType);
+const TERMINAL_TYPES: readonly MessageType[] = ['task.decline', 'task.complete', 'task.fail', 'task.cancelled'];
+/** The types with a `task-output` sealed branch. */
+const SEALED_OUTPUT_TYPES: readonly MessageType[] = (Object.keys(SEALED_SPLIT_TABLE) as (keyof typeof SEALED_SPLIT_TABLE)[])
+  .filter((type) => SEALED_SPLIT_TABLE[type].category === 'task-output');
 
 /**
  * The frozen `sealing` of a task, from its offer receipt, or `redacted` when
@@ -516,8 +507,8 @@ async function sealedOutputRefusal(
   agentRef: AgentRef | undefined,
   envelope: Envelope,
 ): Promise<Refused | undefined> {
-  const sealedType = isSealedMessageType(envelope.type);
-  if (!sealedType && !SEALED_OUTPUT_PLAIN_TYPES.includes(envelope.type)) return undefined;
+  if (!SEALED_OUTPUT_TYPES.includes(envelope.type)) return undefined;
+  const sealedType = isSealedPayload(envelope.type, envelope.payload);
   const sealing = await frozenOfferSealing(stores, deviceId, taskId, agentRef);
   if (sealing === 'redacted') return undefined;
   const outputSealed = sealing?.categories.includes('task-output') === true;
@@ -614,7 +605,7 @@ async function applyInboundGate(
   // Progress and approval rows expire and release nothing, so their sealed
   // forms are inline only (12e, the split table's `inlineOnly`).
   const ciphertextRef = sealedCiphertextRef(envelope.payload);
-  if (ciphertextRef !== undefined && isSealedMessageType(envelope.type)
+  if (ciphertextRef !== undefined && isSealableMessageType(envelope.type)
     && (SEALED_SPLIT_TABLE[envelope.type] as SealedSplitEntry).inlineOnly === true) return refuse('sealed_payload_unsupported');
 
   if (envelope.type === 'agent.message.draft') {
@@ -733,7 +724,10 @@ async function applyInboundGate(
   if (envelope.type === 'task.fail' && envelope.payload.recovery !== undefined) {
     // Recovery reports a local decision interrupted across the claim boundary.
     // It cannot manufacture cloud execution ownership, nor loosen claimed identity.
-    if (envelope.payload.reason !== 'daemon_interrupted' || envelope.payload.retryable !== false) return refuse('recovery_report_invalid');
+    // An interruption is reported in plaintext with a closed code (#654 12d).
+    if (envelope.payload.sealed !== undefined || envelope.payload.reason !== 'daemon_interrupted' || envelope.payload.retryable !== false) {
+      return refuse('recovery_report_invalid');
+    }
     const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, attempt.agentRef, hashOfferBytes);
     if (envelope.payload.recovery.offerId !== messageId) return refuse('recovery_offer_mismatch');
     const offer = await stores.receipts.get(`task-offer:${messageId}`);
@@ -746,9 +740,7 @@ async function applyInboundGate(
     // admission. Inventory is mutable and is not historical claim authority.
     unclaimedInterruption = attempt.ownerDeviceId === undefined && attempt.claimedHarnessId === undefined;
   }
-  // An interruption is reported in plaintext with a closed code (#654 12d).
-  if (envelope.type === 'task.fail_sealed' && envelope.payload.recovery !== undefined) return refuse('recovery_report_invalid');
-  if (['task.complete', 'task.fail', 'task.cancelled'].includes(plainTypeOf(envelope.type)) && !unclaimedInterruption
+  if (['task.complete', 'task.fail', 'task.cancelled'].includes(envelope.type) && !unclaimedInterruption
     && (envelope.payload as { harnessId?: string }).harnessId !== attempt.claimedHarnessId) return refuse('terminal_harness_mismatch');
 
   // Agent identity is an exact-match boundary. A missing echo is a mismatch
@@ -765,7 +757,7 @@ async function applyInboundGate(
   // artifact report is complete as received, the same as one stored and then
   // redacted. So is a terminal that names its ciphertext blob: redaction
   // deleted the blob, and the terminal receipt is already a tombstone.
-  if ((REDACTABLE_REPORT_TYPES.includes(plainTypeOf(envelope.type)) || ciphertextRef !== undefined)
+  if ((REDACTABLE_REPORT_TYPES.includes(envelope.type) || ciphertextRef !== undefined)
     && TERMINAL_TASK_STATUSES.includes(attempt.status)
     && await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined) {
     return completeInboundEnvelope(stores, deviceId, envelope.id, attempt.agentRef);
@@ -874,14 +866,12 @@ async function applyLifecycle(
       // reader could see reach a terminal and then find no result to read.
       await recordTerminal(stores, taskId, envelope);
       return;
-    case 'task.progress':
-    case 'task.progress_sealed': {
+    case 'task.progress': {
       const batch = activityBatchOf(taskId, envelope);
       if (batch !== undefined) await appendActivityEvents(stores.activity, batch, activityBounds);
       return;
     }
     case 'task.await_approval':
-    case 'task.await_approval_sealed':
       await stores.approvals.append(approvalTimelineAppendInput(taskId, envelope)!);
       return;
     case 'task.approval_resolved':
@@ -896,14 +886,9 @@ async function applyLifecycle(
     case 'task.cancelled':
       await recordTerminal(stores, taskId, envelope);
       return;
-    case 'task.complete_sealed':
-    case 'task.fail_sealed':
-    case 'task.decline_sealed':
-    case 'task.cancelled_sealed':
-      await recordTerminal(stores, taskId, envelope);
-      return;
-    case 'task.artifact_sealed': {
-      const ref = sealedCiphertextRef(envelope.payload);
+    case 'task.artifact': {
+      // A plaintext artifact is complete as received; a sealed one may hold its ciphertext blob.
+      const ref = envelope.payload.sealed === undefined ? undefined : sealedCiphertextRef(envelope.payload);
       if (ref === undefined) return;
       // One reference per (blob, task): a replay cannot tell its reference
       // from the one an earlier delivery added. So an artifact on a terminal
@@ -927,8 +912,9 @@ async function applyLifecycle(
 /** The activity batch of a progress report; an empty plaintext batch has none. */
 function activityBatchOf(taskId: string, envelope: Envelope): Parameters<typeof appendActivityEvents>[1] | undefined {
   const source = { taskId, sourceEnvelopeId: envelope.id, dropped: 0 };
-  if (envelope.type === 'task.progress_sealed') return { ...source, batchSeq: envelope.payload.seq, sealed: envelope.payload.sealed };
-  if (envelope.type === 'task.progress' && envelope.payload.events.length > 0) {
+  if (envelope.type !== 'task.progress') return undefined;
+  if (envelope.payload.sealed !== undefined) return { ...source, batchSeq: envelope.payload.seq, sealed: envelope.payload.sealed };
+  if (envelope.payload.events.length > 0) {
     return { ...source, batchSeq: envelope.payload.seq, events: envelope.payload.events };
   }
   return undefined;
@@ -943,17 +929,9 @@ function approvalTimelineAppendInput(
       return {
         taskId,
         sourceEnvelopeId: envelope.id,
-        event: {
-          type: 'approval_requested',
-          summary: envelope.payload.summary,
-          approvalId: envelope.payload.approvalId,
-        },
-      };
-    case 'task.await_approval_sealed':
-      return {
-        taskId,
-        sourceEnvelopeId: envelope.id,
-        event: { type: 'approval_requested', approvalId: envelope.payload.approvalId, sealed: envelope.payload.sealed },
+        event: envelope.payload.sealed === undefined
+          ? { type: 'approval_requested', summary: envelope.payload.summary, approvalId: envelope.payload.approvalId }
+          : { type: 'approval_requested', approvalId: envelope.payload.approvalId, sealed: envelope.payload.sealed },
       };
     case 'task.approval_resolved':
       return {
@@ -1064,7 +1042,7 @@ function storedCiphertextHash(body: string): string | undefined {
 }
 
 function terminalStatus(envelope: Envelope): 'complete' | 'failed' | 'cancelled' | undefined {
-  switch (plainTypeOf(envelope.type)) {
+  switch (envelope.type) {
     case 'task.complete':
       return 'complete';
     case 'task.fail':
@@ -1092,10 +1070,12 @@ function terminalReceiptBinding(
   // A sealed terminal keeps its reason in the ciphertext. Only a closed code
   // stays plaintext (§9.3).
   const cause =
-    envelope.type === 'task.fail' || envelope.type === 'task.cancelled' || envelope.type === 'task.decline'
-      ? envelope.payload.reason
-      : envelope.type === 'task.decline_sealed'
-        ? envelope.payload.code
-        : undefined;
+    envelope.type !== 'task.fail' && envelope.type !== 'task.cancelled' && envelope.type !== 'task.decline'
+      ? undefined
+      : envelope.payload.sealed === undefined
+        ? envelope.payload.reason
+        : envelope.type === 'task.decline'
+          ? envelope.payload.code
+          : undefined;
   return { status, ...(cause === undefined ? {} : { cause }) };
 }

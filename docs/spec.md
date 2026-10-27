@@ -545,7 +545,10 @@ The explicit SQLite composition persists device enrollment, capabilities and
 request receipts alongside six coordination interfaces. Pairing, authenticated
 lookup, revoke and same-machine replacement share the durable device directory.
 Device IDs are globally tenant-unique. Presence, nonces and unredeemed pairing
-codes remain process-local; no runtime or TaskHandle is reconstructed.
+codes remain process-local; no runtime or TaskHandle is reconstructed. Embedded
+`tasks.events` attaches a new feed to a task that is still live after a restart;
+the feed starts with the task's current state read back from the stores, after
+its pending plaintext approval request, and does not reconstruct earlier events.
 
 File-backed SQLite has one owner: the actual database handle sets
 `PRAGMA locking_mode=EXCLUSIVE` before WAL initialization. A second open waits
@@ -583,13 +586,9 @@ and composite primary key are validated on open. Capacity exhaustion is an
 error; deleting identity fences is not a quota strategy.
 
 Offer and terminal receipts hold wire bytes, and a wire v4 build reads only v4
-bytes. A store written by a v3 build needs the one-shot wire v4 migration
-(0.31.x only; 0.32.0 removes it, #1017) after draining and before a v4 server
-starts. On a stopped embedded store, `preflightSqliteWireV4Migration(path)`
-(`@byok-sdk/server`) lists the legacy tasks (offered on a removed offer type)
-and every row with no v4 form; `migrateSqliteToWireV4(path, confirmedLegacyTasks)`
-takes the confirmed list back, deletes those tasks' rows and re-encodes the
-rest in one transaction, or changes nothing. See
+bytes. There is no receipt migration: a store a wire v3 build wrote is not
+supported, and a v4 deployment starts from a new store (owner decision,
+2026-10-27: no deployment holds wire v3 data). See
 [the wire v4 upgrade note](releases/925-wire-v4.md).
 
 ### Bot turn outcome fragments and routine time points
@@ -1089,7 +1088,7 @@ A zero-tool session is supported: it is a record whose counted
 manifest is empty (`requiredToolsets: []`, `agentMemory: 'none'`, and no result-document selection) (see the lifecycle below).
 
 One refusal is structural rather than incidental. A prepared Execution never
-resumes: a sealed `sessionRef` and a preparation reference together fail closed,
+resumes: a resume `session` and a preparation reference together fail closed,
 because resuming binds the frozen request to a history nobody counted.
 
 A prepared session launches no native tool. A preparation observes and counts
@@ -1129,12 +1128,12 @@ nothing here retries.
 
 ### The prepared offer, and the moment a record is consumed
 
-A prepared Execution reaches a device as `task.offer_prepared`, its own message
-type. It requires `egressPolicy`, optionally carries `messageEgress`, and carries
-no instruction or sessionRef. On long-poll, both an unknown executable message
+A prepared Execution reaches a device as a `task.offer` with `preparation`. It
+requires `egressPolicy`, optionally carries `messageEgress`, carries no
+instruction, and its `session` is always `{ mode: 'fresh' }`. On long-poll, both an unknown executable message
 type and an unknown key in a strict payload freeze the cursor. Enqueue capability
 gates prevent version-skewed delivery; they do not translate older offers.
-Both omissions are structural, not defaults.
+The missing instruction and the fixed fresh session are structural, not defaults.
 
 Nothing the offer states about the preparation is authority. `reference`,
 `requestDigest` and `artifactDigest` are the Host re-presenting what this
@@ -1233,7 +1232,8 @@ task; only the lane refuses, typed, as `input_preparation_record_log_unsupported
 — on every local `input_preparation.*` call (the message names the record log),
 on every remote completion, by not advertising the input-preparation capability
 (so the cloud refuses to enqueue onto it), and by carrying no prepared-offer
-lane (so a `task.offer_prepared` declines by name). Nothing is migrated, read
+lane (so a prepared `task.offer` that reaches it is declined, naming the
+missing flag). Nothing is migrated, read
 forward or deleted automatically. **Operator step:** stop the daemon, run
 `byok-agent retire-input-preparation` (or, from a host installer or branded
 host CLI, the library `retireInputPreparation({ productId, storeDir }, { mode:
@@ -1535,6 +1535,35 @@ lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without
 publishing a second `task.complete`, `task.fail`, or `task.cancelled`.
 
+## Hosted sealed payload (#654)
+
+A hosted Host can run a task whose task input, task output or both are sealed
+end to end. The categories are frozen on the offer as `sealing`
+([protocol §2.5](./protocol.md#25-sealed-payload-v1-654-gated-addition)). A web client member
+seals the input before it calls `submitSealedAgentExecution` or
+`steerSealedTask`. The device opens it, runs the task and seals the output.
+The Host stores and returns the sealed members and the plaintext metadata
+next to them. It holds no scope key in plaintext, so it cannot open them.
+
+- A missing key, a member that does not open and a policy mismatch are
+  refused. Nothing falls back to plaintext. A device that cannot open a sealed
+  offer declines it with one of the four sealed decline codes.
+- v1 seals only `task-input` and `task-output`. Agent messages, memory
+  projections, input preparation and drafts stay plaintext. A sealed task
+  streams no draft.
+- `@byok-sdk/server` has no sealed dispatch: it refuses `sealing` and
+  `sealed` with `coordination_input_invalid`. A sealed task must not go to
+  `@byok-sdk/cloud-do`, which reads task content in plaintext.
+- The Host's truth route stores a `task.terminal` record as the product
+  writes it and does not check sealing. A product that records a sealed
+  task's terminal there must write sealed content only.
+- [security.md, Sealed tasks](./security.md#sealed-tasks) lists what a sealed
+  task still shows the Host (for example the artifact name, the changed memory
+  file paths and the model in `usage`) and what sealing does not protect.
+  `examples/hosted-bot-collaboration/src/sealed-zero-hit.test.ts` measures it:
+  a sealed task's content has zero hits in every store, object, log line and
+  observer call that the run writes.
+
 ## Hosted task cancellation authority
 
 The hosted cloud exposes one tenant-scoped `cancelTask(taskId, reason?)`
@@ -1767,6 +1796,12 @@ and retention metadata without asserting a cross-stream order. Authentication,
 authorization, and both tenant-scoped reads happen before a 304 response. The
 reference remains GET-only and does not define an approval action, SaaS identity
 provider, public browser route, SSE lifecycle, or `ThreadMessageLike` contract.
+
+The embedded server's `tasks.events` is a different thing: an in-process
+notification feed of one task, valid within one server instance, with no
+retention claim beyond its bounded relay buffer. It is not a second projection
+authority, and it is not a host read port for the hosted activity model (see
+[Embedded per-task event feed](#embedded-per-task-event-feed)).
 
 At 10x activity volume, the first expected pressure is whole-row JSONB tail
 updates, per-task hot-row contention, and host polling—not the bounded O(events)
@@ -2543,7 +2578,10 @@ authorized. The additive Agent egress path consumes one exact, revisioned
 `AgentEgressPolicy`. The policy sets transport limits and the content-read
 surfaces. Agent events, results and artifacts go to the Host as the runtime
 produced them. The SDK does not filter, redact or omit them (owner decision
-D4, 2026-10-07, following OAR "nothing gated, nothing dropped").
+D4, 2026-10-07, following OAR "nothing gated, nothing dropped"). Latest-value
+activity coalesces within one progress batch: every event passes the same
+`latest.offer` bounds, each `error` is sent in its place, and the other events
+coalesce to their last.
 
 The tenant used by Agent egress and hosted local journaling is not editable
 host configuration. Pairing projects the required opaque non-secret tenant
@@ -2596,7 +2634,7 @@ matrix and downstream Salesko configuration.
 ### Fresh Agent egress versus exact resume
 
 The published `0.7.0` strict egress offer exposed a fresh-execution deadlock.
-`task.offer_for_agent_with_egress` requires `sessionRef`, which is valid when a
+That offer required `sessionRef`, which is valid when a
 runtime is resuming an existing session, but a fresh runtime cannot mint its
 native session until after `start()`. The client must also reject a missing,
 preseeded, or invented handoff. Therefore the fresh path cannot be repaired by
@@ -2609,20 +2647,19 @@ The authority for each datum is explicit:
 | --- | --- | --- |
 | Fresh `sessionRef` | The runtime session actually started by the selected adapter | Runtime mints it after fresh `start()`; no server/client preseed |
 | Session handoff | SDK-owned canonical Agent-home `.byok/runtime-sessions/` | SDK records exact AgentRef/profile/runtime/cwd/session and fsyncs it before exposing the session |
-| Resume `sessionRef` | Existing exact handoff | The old egress offer remains exact-resume-only; missing/stale/cross-Agent/profile/runtime/cwd evidence fails closed |
+| Resume `sessionRef` | Existing exact handoff | A resume offer (`session.mode: 'resume'`) is exact-resume-only; missing/stale/cross-Agent/profile/runtime/cwd evidence fails closed |
 | Egress policy and fresh capability | Host-selected typed policy plus durable device declaration | Cloud/server admit only the exact declared capability; presence is not authority |
 | Reliable egress identity | The handoff read by the public publisher | Publisher proves exact AgentRef/task/runtime/cwd/session handoff before durable append/send; cloud receipt and ack do not mint a session |
 
-Protocol v1 remains frozen. The repair is additive and keeps the old wire facts
-separate:
+The repair landed additively under v1 as a separate fresh offer type. Since
+wire v4 the two facts are the required `session` of the one `task.offer`:
 
-- `task.offer_for_agent_with_egress_fresh` carries the strict Agent fields and
-  policy but no `sessionRef`; it is gated by the durable
-  `agent-egress-fresh-session` capability, so an older daemon is never sent the
-  message.
-- `task.offer_for_agent_with_egress` remains byte-compatible and requires an
-  exact resume `sessionRef` plus its canonical handoff. There is no fresh
-  fallback for a missing or mismatched resume.
+- `session: { mode: 'fresh' }` carries the strict Agent fields and policy but
+  no `sessionRef`; it is gated by the durable `agent-egress-fresh-session`
+  capability, so a daemon without it is never sent such an offer.
+- `session: { mode: 'resume', sessionRef }` requires an exact resume
+  `sessionRef` plus its canonical handoff. There is no fresh fallback for a
+  missing or mismatched resume.
 
 The host APIs preserve the same distinction: hosted composition uses
 `submitAgentExecution(tenant, input)`, and the reference server uses
@@ -2631,7 +2668,8 @@ The host APIs preserve the same distinction: hosted composition uses
 runtime and terminal projection. Agent resume calls, with or without egress
 (`dispatch({ agentRef, sessionRef })`, `enqueueAgentOffer`), require the exact
 session; omitting sessionRef is refused and does not select fresh execution.
-The wire `task.offer_for_agent` keeps `sessionRef` optional.
+The wire `session` is required, so no offer is read as fresh for lack of a
+reference.
 
 The fresh trace is `claim` → start the runtime without resume arguments → runtime
 issues its real session → SDK fsyncs the exact AgentRef/runtime/cwd/session
@@ -2733,15 +2771,15 @@ logs, or a second file authority.
 member (#654 E2d-1, [protocol §2.6](./protocol.md)). The member keys, `pv` and
 the member state are three more entries of the same OS credential provider,
 cleared at a re-pair and at unpair. A daemon with an injected enrollment
-backend refuses an E2EE pairing.
+backend refuses an E2EE pairing. What a hosted sealed task protects is in
+[Hosted sealed payload](#hosted-sealed-payload-654).
 Copy the complete command from the Host's pairing page. A string used once
 without `--e2ee` is burned: start a new registration at the Host and do not
 retry it (protocol §2.6, device enrollment).
 
-Agent-only admission is the wire itself since v4: every offer type is
-Agent-bound (`task.offer_for_agent`, its egress and fresh-egress variants,
-their `_sealed` twins, and `task.offer_prepared`), and the runtime-only offers
-are gone from the protocol. The local runner is the final authority: a daemon
+Agent-only admission is the wire itself since v4: the one offer type,
+`task.offer`, requires an `agentRef` in every form (resume, fresh, prepared,
+sealed), and the runtime-only offers are gone from the protocol. The local runner is the final authority: a daemon
 without `DaemonConfig.agentHome` advertises no `agent-home-contract` and
 declines every offer before admission, workspace, claim or start. The
 `strict-agent-only` flag is removed, and `DaemonConfig.strictAgentOnly` raises
@@ -3051,6 +3089,67 @@ needs neither that consumer nor message context. Context without messageEgress i
 rejected. Partial initial admission can recover using exactly the
 persisted input, including any selected server-held context. Changed context cannot reuse
 the execution identity. This does not authorize a new execution after failure.
+
+### Embedded per-task event feed
+
+Embedded `tasks.events(taskId, { after?, from?, signal? })` hands a Host the relay
+notifications of one task by taskId, so a submitted task without a TaskHandle
+has its state, Agent events, artifacts and approval requests (with the
+`approvalId` that `tasks.approve`/`reject` take). It reads the existing relay
+feed; it adds no wire message, store, SQL or Cloud port, and it is not a read
+model. Task facts stay with `tasks.get`, `tasks.attempt` and the terminal
+receipt. `TaskHandle.events()` reads the same feed without cursors.
+
+- Each entry carries an opaque cursor `<feedId>.<seq>`. `feedId` is random per
+  feed and `seq` increases within it, so a cursor is valid only for one server
+  instance's current feed of the task. Order is that instance's arrival order;
+  progress, artifacts and approvals have no protocol total order.
+- A read starts after `after`, at the start of what is retained, or, with
+  `from: 'state'`, at the entries where the task's current state began: its
+  latest `state` entry, preceded by the pending `await_approval` request while
+  it awaits approval. The relay keeps those entries apart from the bounded
+  queue, so that start survives drop-oldest with its original cursors.
+- Refusals are thrown by the first `next()`, before any entry: `after` and
+  `from` together are a `TypeError`; an unknown task
+  is `task_not_found`; a cursor the feed never handed out is
+  `TaskEventsUnavailableError` `cursor_unknown`; a terminal task with no
+  retained feed is `feed_expired`. Terminal is judged by the `tasks.get`
+  projection, so an accepted Host cancellation is terminal even while the
+  attempt reads `cancel_requested`.
+- A live task with no feed in this instance (after a restart) gets one that
+  starts with its current state from the `tasks.get` projection (`state`,
+  `updatedAt`), unless a transition reached the feed first; earlier events are
+  not reconstructed. While it awaits approval, the pending request read from
+  the approval timeline comes first, in the relay's own `await_approval` form:
+  only a plaintext request with an `approvalId`, since the relay announces no
+  sealed request. A read of a stored task that finds a feed a dispatch just
+  opened (a resubmit) attaches to it the same way, so a refused dispatch hands
+  the feed to the reader instead of ending it. The kernel notifies the relay
+  after the write's own await, so those entries can appear twice. A read stopped
+  before its first store read completed creates nothing, a read never creates
+  relay state for an unknown or terminal task, and only a Host read can create
+  it: device envelopes for a task with no feed still allocate nothing.
+- Once a read attached a task's feed, the feed stays until the task's terminal
+  plus `taskEventRetentionMs`, however its readers leave (`return()`, abort,
+  disconnect), so a reader that reconnects resumes with its cursor, unless the
+  read that attached it finds the task gone or finished.
+- While this instance's dispatch of a task is in flight, its feed buffers every
+  delivery, device envelopes and Host transitions alike, including a feed a
+  Host read attached, so `Offered` is the first entry of a dispatched feed. A
+  refused dispatch drops a feed it opened and returns an attached feed to its
+  readers with what it buffered.
+- Each feed is bounded by `taskEventBufferLimit` and drops its oldest entries.
+  A reader whose resume position was dropped receives one `events_truncated`
+  marker for that gap, whose cursor stands just before the oldest retained
+  entry. A terminal feed ends at its terminal event and is reclaimed after
+  `taskEventRetentionMs`.
+- Authorization is by taskId within the server's one tenant, as for
+  `tasks.get`, `approve`, `reject` and `cancel`. The feed carries raw tool input
+  and output; the Host authenticates users and redacts before any browser sees
+  it, as in the hosted boundary above.
+
+The hosted `ByokCloud` gains no stream. Hosted Hosts keep `readActivity`,
+`readApprovalTimeline` and `observer.onInboundCommitted`.
 
 Embedded `tasks.attempt(taskId)` returns the same canonical durable TaskAttempt
 as Cloud `readTaskAttempt(tenant, taskId)`, including the independent cancellation

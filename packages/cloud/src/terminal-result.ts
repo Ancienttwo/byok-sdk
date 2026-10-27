@@ -20,10 +20,6 @@ const DEVICE_TERMINAL_TYPES = [
   'task.fail',
   'task.decline',
   'task.cancelled',
-  'task.complete_sealed',
-  'task.fail_sealed',
-  'task.decline_sealed',
-  'task.cancelled_sealed',
 ] as const;
 
 /**
@@ -111,7 +107,7 @@ export interface TerminalResult {
   readonly retryable?: boolean;
   /**
    * The machine-readable runtime failure class, verbatim `task.fail.failure`
-   * (plaintext on `task.fail_sealed` too). Read the class here, never from
+   * (plaintext on a sealed `task.fail` too). Read the class here, never from
    * `reason`. Absent when the daemon or the server predates the field, or the
    * daemon built the terminal while it had no live connection.
    */
@@ -146,6 +142,19 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
   }
   switch (envelope.type) {
     case 'task.complete':
+      if (envelope.payload.sealed !== undefined) {
+        return {
+          taskId,
+          state: 'complete',
+          ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
+          ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
+          ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
+          sessionRef: envelope.payload.sessionRef,
+          ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+          ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
+          recordedAt: receipt.recordedAt,
+        };
+      }
       return {
         taskId,
         state: 'complete',
@@ -167,6 +176,20 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         recordedAt: receipt.recordedAt,
       };
     case 'task.fail':
+      if (envelope.payload.sealed !== undefined) {
+        return {
+          taskId,
+          state: 'failed',
+          ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
+          ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
+          ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
+          ...(envelope.payload.retryable !== undefined ? { retryable: envelope.payload.retryable } : {}),
+          ...(envelope.payload.failure === undefined ? {} : { failure: envelope.payload.failure }),
+          ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+          ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
+          recordedAt: receipt.recordedAt,
+        };
+      }
       return {
         taskId,
         state: 'failed',
@@ -193,6 +216,16 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
     // verbatim, exactly like `task.fail` does; this projection never decides
     // that a decline is retryable on the device's behalf.
     case 'task.decline':
+      if (envelope.payload.sealed !== undefined) {
+        return {
+          taskId,
+          state: 'failed',
+          ...(envelope.payload.code === undefined ? {} : { code: envelope.payload.code, terminalCause: envelope.payload.code }),
+          ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
+          ...(envelope.payload.retryable !== undefined ? { retryable: envelope.payload.retryable } : {}),
+          recordedAt: receipt.recordedAt,
+        };
+      }
       return {
         taskId,
         state: 'failed',
@@ -205,52 +238,19 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           : {}),
         recordedAt: receipt.recordedAt,
       };
-    case 'task.complete_sealed':
-      return {
-        taskId,
-        state: 'complete',
-        ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
-        ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
-        ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
-        sessionRef: envelope.payload.sessionRef,
-        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
-        ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
-        recordedAt: receipt.recordedAt,
-      };
-    case 'task.fail_sealed':
-      return {
-        taskId,
-        state: 'failed',
-        ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
-        ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
-        ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
-        ...(envelope.payload.retryable !== undefined ? { retryable: envelope.payload.retryable } : {}),
-        ...(envelope.payload.failure === undefined ? {} : { failure: envelope.payload.failure }),
-        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
-        ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
-        recordedAt: receipt.recordedAt,
-      };
-    case 'task.decline_sealed':
-      return {
-        taskId,
-        state: 'failed',
-        ...(envelope.payload.code === undefined ? {} : { code: envelope.payload.code, terminalCause: envelope.payload.code }),
-        ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
-        ...(envelope.payload.retryable !== undefined ? { retryable: envelope.payload.retryable } : {}),
-        recordedAt: receipt.recordedAt,
-      };
-    case 'task.cancelled_sealed':
-      return {
-        taskId,
-        state: 'cancelled',
-        ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
-        ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
-        ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
-        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
-        ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
-        recordedAt: receipt.recordedAt,
-      };
     case 'task.cancelled':
+      if (envelope.payload.sealed !== undefined) {
+        return {
+          taskId,
+          state: 'cancelled',
+          ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
+          ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
+          ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
+          ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+          ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
+          recordedAt: receipt.recordedAt,
+        };
+      }
       return {
         taskId,
         state: 'cancelled',

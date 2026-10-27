@@ -112,9 +112,10 @@ and on symlinks.
 
 #### `agentUserContext`
 
-`ClaudeAdapterOptions.agentUserContext: 'excluded'` gives an Agent task
-(`task.offer_for_agent`) only SDK, Host and Agent-home inputs. Other tasks are
-unchanged: a parent `CLAUDE.md` of a workspace is a real project instruction.
+`ClaudeAdapterOptions.agentUserContext: 'excluded'` gives an Agent task (a run
+whose manifest has an `agentRef`, as every `task.offer` does) only SDK, Host
+and Agent-home inputs. A run without an `agentRef` is unchanged: a parent
+`CLAUDE.md` of a workspace is a real project instruction.
 The default, `'inherit'`, sets nothing. The anchor is the sealed
 `lease.canonicalHome`, never the cwd, so a memory reader in
 `<home>/.byok/runs/<taskId>/` still loads the home's files through Claude's
@@ -190,10 +191,11 @@ for user instructions.
 
 #### `agentUserMcpServers` (Codex)
 
-`CodexAdapterOptions.agentUserMcpServers: 'excluded'` gives an Agent task
-(`task.offer_for_agent`) only the task's and the SDK's MCP servers. It changes
-MCP servers only; the user's `AGENTS.md` still loads. Other tasks, and the
-default `'inherit'`, are unchanged. The adapter works on the session's own
+`CodexAdapterOptions.agentUserMcpServers: 'excluded'` gives an Agent task (a
+run whose manifest has an `agentRef`, as every `task.offer` does) only the
+task's and the SDK's MCP servers. It changes MCP servers only; the user's
+`AGENTS.md` still loads. A run without an `agentRef`, and the default
+`'inherit'`, are unchanged. The adapter works on the session's own
 app server, through two caller-owned steps of the
 [vendored session](../packages/client/vendor/oar/c88a514/PROVENANCE.md):
 
@@ -292,8 +294,8 @@ discovery, not prompt text. No live Grok session shows what the model sees.
 #### `agentUserMcpServers` (Grok)
 
 `GrokAdapterOptions.agentUserMcpServers: 'excluded'` applies to Agent tasks
-(`task.offer_for_agent`); other tasks, and the default `'inherit'`, are
-unchanged. Grok has no per-process switch for the servers of
+(runs whose manifest has an `agentRef`, as every `task.offer` does); a run
+without an `agentRef`, and the default `'inherit'`, are unchanged. Grok has no per-process switch for the servers of
 `~/.grok/config.toml`, a project `.grok/config.toml` or `.mcp.json`, or
 plugins, and `GROK_CONFIG` cannot set `disabled_mcp_servers`. So the adapter
 turns off what it can and refuses the start when anything else is on:
@@ -404,7 +406,8 @@ none in this release.
 #### `agentSessionPersistence`
 
 `ClaudeAdapterOptions.agentSessionPersistence: 'disabled'` starts an Agent
-task (`task.offer_for_agent`) with `--no-session-persistence`. Claude 2.1.302
+task (a run whose manifest has an `agentRef`, as every `task.offer` does) with
+`--no-session-persistence`. Claude 2.1.302
 describes the flag as "sessions will not be saved to disk and cannot be
 resumed", and it works only with `--print`, which the adapter always uses.
 The adapter starts one Claude process per task, so the flag also covers every

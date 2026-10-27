@@ -32,6 +32,8 @@ import { NONCE_SIGNING_DOMAIN } from '../daemon/device-keys';
 import type { DaemonEvent } from '../daemon/observer';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { FRESH_OFFER } from './fixtures/fresh-offer';
 
 /**
  * Plan `device-assertion-broker`, client half: the `assertion.issue` control
@@ -134,7 +136,7 @@ describe('device assertion broker: assertion.issue', () => {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId,
       serverUrl: server.url,
-      agentHome: testAgentHomeConfig(),
+      agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       storeDir,
       deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },
       ...config,
@@ -387,7 +389,7 @@ describe('device assertion broker: assertion.issue', () => {
     // window exists on every unpair — the CLI shuts the daemon down first and
     // clears device.json afterwards — it is just narrower.
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'work' }, { taskId: 't-shutdown', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'work' }, { taskId: 't-shutdown', seq: server.nextSeq() }),
     );
     await server.waitFor((event) => event.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));

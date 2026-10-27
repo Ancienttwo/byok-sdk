@@ -164,17 +164,18 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       const messageEgress = { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 } as const;
       const enqueued = await sdk.executions.submit({ taskId, deviceId, payload: {
         agentRef, runtime: 'pi', instruction,
-        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' }, messageEgress,
+        session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' }, messageEgress,
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: `turn-${seq}` } });
-      expect(enqueued).toMatchObject({ taskId, envelope: { type: 'task.offer_for_agent_with_egress_fresh' } });
+      expect(enqueued).toMatchObject({ taskId, envelope: { type: 'task.offer' } });
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(index + 1), { timeout: 10000 });
       expect(adapter.startCalls[index]?.task.sessionRef).toBeUndefined();
       expect(adapter.startCalls[index]?.task.instruction).toContain(instruction);
       // User turns and SummaryJobs share the one fresh submit path; only the projection/egress differ.
       const offer = await expectFrozenOffer(taskId);
-      expect(offer).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh',
+      expect(offer).toMatchObject({ type: 'task.offer',
         payload: { agentRef, terminalProjection: { mode: 'none' }, messageEgress } });
-      expect(offer.payload).not.toHaveProperty('sessionRef');
+      expect(offer.payload).toMatchObject({ session: { mode: 'fresh' } });
+      expect((offer.payload as { session: object }).session).not.toHaveProperty('sessionRef');
       const session = adapter.sessions[index]!;
       const reply = `A${seq}`;
       let outcome: TurnOutcome;
@@ -186,7 +187,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       } else if (mode === 'no-reply') {
         session.emit({ type: 'turn_end' });
         const terminal = await settledTerminal(taskId, 'task.fail');
-        if (terminal.envelope.type !== 'task.fail') throw new Error('unreachable');
+        if (terminal.envelope.type !== 'task.fail' || terminal.envelope.payload.sealed !== undefined) throw new Error('unreachable');
         expect(await sdk.tasks.agentMessage(taskId, deviceId, agentRef)).toBeUndefined();
         outcome = { kind: 'settled-without-reply', executionTerminal: 'task.fail',
           reason: terminal.envelope.payload.reason, retryable: terminal.envelope.payload.retryable };
@@ -234,15 +235,16 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       const index = adapter.sessions.length;
       summaryTaskIds.push(job.taskId);
       const enqueued = await sdk.executions.submit({ taskId: job.taskId, deviceId, payload: {
-        agentRef, runtime: 'pi', instruction, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selector,
+        agentRef, runtime: 'pi', instruction, session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selector,
       } });
-      expect(enqueued).toMatchObject({ taskId: job.taskId, envelope: { type: 'task.offer_for_agent_with_egress_fresh' } });
+      expect(enqueued).toMatchObject({ taskId: job.taskId, envelope: { type: 'task.offer' } });
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(index + 1), { timeout: 10000 });
       expect(adapter.startCalls[index]?.task.sessionRef).toBeUndefined();
       expect(adapter.startCalls[index]?.task.instruction).toContain(instruction);
       const offer = await expectFrozenOffer(job.taskId);
-      expect(offer).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh', payload: { agentRef, terminalProjection: selector } });
-      expect(offer.payload).not.toHaveProperty('sessionRef');
+      expect(offer).toMatchObject({ type: 'task.offer', payload: { agentRef, terminalProjection: selector } });
+      expect(offer.payload).toMatchObject({ session: { mode: 'fresh' } });
+      expect((offer.payload as { session: object }).session).not.toHaveProperty('sessionRef');
       expect(offer.payload).not.toHaveProperty('messageEgress');
       const document: SummaryDocument = { schemaVersion: 'synthetic-host.summary.v1', jobId: job.jobId,
         coveredThroughTurnSeq: job.targetCoveredThrough, text };
@@ -265,7 +267,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
     };
     /** The Host reads the document only from the device terminal's `document`, never `summary` text. */
     const documentOf = (terminal: Awaited<ReturnType<typeof sdk.tasks.deviceTerminal>>): SummaryDocument => {
-      if (terminal?.envelope.type !== 'task.complete' || terminal.envelope.payload.document === undefined) {
+      if (terminal?.envelope.type !== 'task.complete' || terminal.envelope.payload.sealed !== undefined || terminal.envelope.payload.document === undefined) {
         throw new Error('synthetic Host: Summary terminal carries no result document');
       }
       return terminal.envelope.payload.document as SummaryDocument;

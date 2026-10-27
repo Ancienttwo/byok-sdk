@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AgentRefSchema,
   CAPABILITY_FLAGS,
-  TaskOfferForAgentPayloadSchema,
+  TaskOfferPayloadSchema,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
@@ -12,17 +12,18 @@ const agentRef = { agentId: 'agent-1', profileRevision: 'profile-r7' } as const;
 const offer = {
   instruction: 'continue the durable agent task',
   agentRef,
-};
+  session: { mode: 'resume', sessionRef: 'session-agent-1' },
+} as const;
 
 describe('agent-home-contract protocol', () => {
-  it('uses a distinct strict offer and round-trips its exact AgentRef', () => {
-    const envelope = createEnvelope('task.offer_for_agent', offer, {
+  it('uses a strict offer and round-trips its exact AgentRef', () => {
+    const envelope = createEnvelope('task.offer', offer, {
       taskId: 'task-agent-1',
       seq: 1,
     });
-    expect(envelope.type).toBe('task.offer_for_agent');
+    expect(envelope.type).toBe('task.offer');
     expect(decodeEnvelope(encodeEnvelope(envelope))).toEqual(envelope);
-    expect(TaskOfferForAgentPayloadSchema.safeParse({ ...offer, workspaceHint: 'legacy' }).success).toBe(false);
+    expect(TaskOfferPayloadSchema.safeParse({ ...offer, workspaceHint: 'legacy' }).success).toBe(false);
   });
 
   it('rejects malformed, traversal-like, control, and oversized AgentRef values', () => {

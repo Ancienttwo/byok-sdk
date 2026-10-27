@@ -77,7 +77,7 @@ export interface CodexAdapterOptions {
   /** Opt-in local Host UI; independent of the remote boolean approval lane. */
   nativeInteractions?: NativeInteractionHostOptions;
   /**
-   * For an Agent task (`task.offer_for_agent`), `excluded` gives the Codex
+   * For an Agent task (`task.offer`), `excluded` gives the Codex
    * thread only the task's and the SDK's MCP servers. Before the thread
    * opens, the adapter reads Codex's effective configuration for the task cwd
    * (`config/read`), sets `enabled = false` on every other `mcp_servers`

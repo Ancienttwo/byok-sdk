@@ -1,3 +1,4 @@
+import { FRESH_OFFER } from './fixtures/fresh-offer';
 import { freshTestAgentRef } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { createHash } from 'node:crypto';
@@ -104,8 +105,8 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
     let capabilitiesSeenByHandler: readonly string[] | undefined;
     server.pushLongPollEvent(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'prove capability ordering' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(),  instruction: 'prove capability ordering', ...FRESH_OFFER },
         { taskId: 'task-capability-order', seq: 1 },
       ),
     );

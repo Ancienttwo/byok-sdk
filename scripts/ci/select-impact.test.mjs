@@ -266,7 +266,8 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
   const scripts = JSON.parse(readFileSync(new URL('package.json', root), 'utf8')).scripts;
   assert.deepEqual(Object.keys(reviewedScripts).sort(), [
     'scripts/api-surface/check-version-authority.mjs', 'scripts/api-surface/check-version-authority.test.mjs',
-    'scripts/release/beta-release.test.mjs', 'scripts/release/check-package-graph.mjs', 'scripts/release/pack-and-smoke.mjs',
+    'scripts/release/beta-release.test.mjs', 'scripts/release/check-package-graph.mjs', 'scripts/release/execution-submit-smoke.mjs',
+    'scripts/release/pack-and-smoke.mjs',
     'scripts/release/pack-and-smoke.test.mjs',
     'scripts/release/publish.mjs', 'scripts/release/registry-readback.mjs',
   ]);
@@ -389,10 +390,17 @@ test('#794 D3: a direct Worker example path selects only that example and the da
   assert.throws(() => selectImpact(['examples/hosted-bot-collaboration-worker/wrangler.json']), /reviewed CI mapping required/i);
 });
 
+test('the #1022 task events route selects only examples/basic', () => {
+  for (const path of ['examples/basic/task-events-route.ts', 'examples/basic/task-events-route.test.ts']) {
+    assert.deepEqual(selectImpact([path]).dirs, ['examples/basic'], path);
+  }
+  assert.throws(() => selectImpact(['examples/basic/task-events-other.ts']));
+});
+
 test('wire v4 (#925) reviewed paths select only their owners', () => {
   assert.deepEqual(selectImpact(['examples/packaging/launcher.ts']).families, ['packageability-smoke']);
   assert.ok(selectImpact(['examples/packaging/launcher.ts']).dirs.includes('examples/packaging'));
-  for (const path of ['examples/basic/quickstart-smoke.test.ts', 'examples/basic/server.ts']) {
+  for (const path of ['examples/basic/quickstart-smoke.test.ts', 'examples/basic/server.ts', 'examples/basic/clarification.ts', 'examples/basic/goal-btw.ts']) {
     assert.deepEqual(selectImpact([path]).dirs, ['examples/basic'], path);
   }
   for (const path of ['scripts/integration/salesko-recurring.test.ts', 'packages/client/scripts/fixtures/packed-cli-mcp-codex.mjs']) {

@@ -14,6 +14,12 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { ExecutionRecord } from '../daemon/execution-record';
 import { TaskRunner } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { AgentEgressController } from '../daemon/agent-egress-controller';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 const REPLAY = fileURLToPath(new URL('./fixtures/pi-trajectory-replay.mjs', import.meta.url));
@@ -55,7 +61,7 @@ async function runPi(trajectory?: string): Promise<{ sent: Envelope[]; records: 
   const records: ExecutionRecord[] = [];
   let recorded!: () => void;
   const published = new Promise<void>(resolve => { recorded = resolve; });
-  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     adapters: [new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }), spawnFn })],
     ...testAgentHomeDeps(),
     deviceId: 'pi-record-device',
@@ -69,7 +75,7 @@ async function runPi(trajectory?: string): Promise<{ sent: Envelope[]; records: 
     productId: 'pi-record-product',
     onExecutionRecord: record => { records.push(record); recorded(); },
   });
-  await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'say hi', runtime: 'pi' }, { taskId: TASK_ID, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'say hi', runtime: 'pi' }, { taskId: TASK_ID, seq: 1 }));
   // The runner publishes the record after Session.close() and lets the task go right after it.
   await published;
   await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));

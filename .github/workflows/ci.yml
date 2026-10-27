@@ -762,12 +762,20 @@ jobs:
       - name: Conformance suites (in-memory compositions)
         run: bun run --filter @byok-sdk/conformance test
 
+      - name: Install isolated credential-provider dependencies on Linux
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
+
       # #793 D2: the hosted (H) Bot collaboration example suites. This is the
       # only job with a real Postgres, so the example's Postgres suites run
       # here. The selector maps the example to this family, and
       # examples/hosted-bot-collaboration/src/ci.test.ts pins this step.
+      # #654 E6: the sealed zero-hit run pairs a real daemon with E2EE, which
+      # keeps its keys in the OS credential custody, so the step runs inside a
+      # private Secret Service session.
       - name: Hosted Bot collaboration example suites
-        run: bun run --filter @byok-sdk/example-hosted-bot-collaboration test
+        run: bash scripts/ci/with-secret-service.sh bun run --filter @byok-sdk/example-hosted-bot-collaboration test
 
       # #794 D3: the H Host composed as a Worker, served by wrangler dev (local
       # workerd) over this job's Postgres and S3 endpoint, with its fault suites
@@ -789,11 +797,6 @@ jobs:
       # exists, never skipped-while-counting-as-covered. The run's
       # release-manifest.json (printed to the log) carries the source SHA and
       # per-tarball hashes the smoke evidence refers to.
-      - name: Install isolated credential-provider dependencies on Linux
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends dbus-x11 gnome-keyring libsecret-tools
-
       - name: Recurring smoke durable restart leg from packed tarballs
         run: bash scripts/ci/with-secret-service.sh bun run check:release-pack -- --out-dir .ci-artifacts/release-pack
 

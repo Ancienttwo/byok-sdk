@@ -82,7 +82,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
 
     await handle.approve();
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
-    expect(await drainTypes(daemon)).toEqual(['task.offer_for_agent', 'task.approve']);
+    expect(await drainTypes(daemon)).toEqual(['task.offer', 'task.approve']);
   });
 
   // 2d gap: the old `ConnectionHub.rejectTask` was authoritative over the TASK,
@@ -170,7 +170,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
 
       expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // unchanged
       expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B'); // unchanged
-      expect(await drainTypes(daemon)).toEqual(['task.offer_for_agent']); // no task.approve was enqueued
+      expect(await drainTypes(daemon)).toEqual(['task.offer']); // no task.approve was enqueued
     });
 
     it('reject(reason, {approvalId: A}) while a DIFFERENT approval (B) is now the recorded pending one throws StaleApprovalError, changes no state, and sends no wire message', async () => {
@@ -189,7 +189,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
 
       expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // unchanged
       expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B'); // unchanged
-      expect(await drainTypes(daemon)).toEqual(['task.offer_for_agent']); // no task.reject was enqueued
+      expect(await drainTypes(daemon)).toEqual(['task.offer']); // no task.reject was enqueued
     });
 
     it('StaleApprovalError carries taskId/requestedApprovalId/currentApprovalId fields for programmatic handling', async () => {
@@ -251,7 +251,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
       expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
       // Exactly one `task.approve` per successful approval reached the device
       // (the stale attempt contributed none).
-      expect(await drainTypes(daemon)).toEqual(['task.offer_for_agent', 'task.approve', 'task.approve']);
+      expect(await drainTypes(daemon)).toEqual(['task.offer', 'task.approve', 'task.approve']);
     });
 
     it('compat: approve with NO opts still resolves whichever approval is currently pending — untargeted behavior is unchanged from pre-M5', async () => {

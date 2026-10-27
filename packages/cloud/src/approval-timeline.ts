@@ -20,7 +20,7 @@ const ApprovalRequestedEventSchema = z
   })
   .strict();
 
-/** A `task.await_approval_sealed` request: the summary stays in `sealed` (#654 12e). */
+/** A sealed `task.await_approval` request: the summary stays in `sealed` (#654 12e). */
 const SealedApprovalRequestedEventSchema = z
   .object({
     type: z.literal('approval_requested'),

@@ -710,7 +710,7 @@ export class ConnectionManager {
 
     // Startup owns its own lifetime. Controls for that task can reach it;
     // controls among themselves retain arrival order.
-    const controlKey = envelope.task_id !== undefined && !envelope.type.startsWith('task.offer')
+    const controlKey = envelope.task_id !== undefined && envelope.type !== 'task.offer'
       ? envelope.task_id : undefined;
     const prior = controlKey === undefined ? Promise.resolve() : (this.controlTails.get(controlKey) ?? Promise.resolve());
     const operation = prior.then(() => this.process(envelope, tracked));

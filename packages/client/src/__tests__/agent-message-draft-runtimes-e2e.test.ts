@@ -115,7 +115,7 @@ async function setup(runtime: RuntimeCase) {
   await daemon.start();
   await waitForDaemonOpen(daemon);
   await server.byok.executions.submit({ taskId, deviceId, payload: {
-    instruction: 'Write a reply.', agentRef, egressPolicy: policy, ...taskRuntimeTarget(adapter.descriptor),
+    instruction: 'Write a reply.', agentRef, session: { mode: 'fresh' }, egressPolicy: policy, ...taskRuntimeTarget(adapter.descriptor),
     messageEgress: { mode: 'required', contract: 'draft.v1', contentType: 'text/plain', maxBytes: 4096 },
     terminalProjection: { mode: 'none' },
   }, agentMessageContext: { destinationBinding: 'chat' } });

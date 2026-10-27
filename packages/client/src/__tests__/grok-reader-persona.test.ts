@@ -11,6 +11,8 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 // #609: memory-reader Attempts through the real TaskRunner, Agent home and Grok adapter.
 const fixture = fileURLToPath(new URL('./fixtures/fake-acp-agent.mjs', import.meta.url));
@@ -31,7 +33,7 @@ async function harness() {
   const sent: Envelope[] = [];
   const storeDir = await temporary('byok-grok-reader-store-');
   const hostStorageRoot = await temporary('byok-grok-reader-home-');
-  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [new GrokAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }) })],
     getServerCapabilities: () => ['custom-harness'],
     agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -50,9 +52,9 @@ async function harness() {
       if (persona !== undefined) await fs.writeFile(path.join(home, 'AGENTS.md'), persona);
       return home;
     },
-    offerReader: (taskId: string, agentId: string, sessionRef?: string) => runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
+    offerReader: (taskId: string, agentId: string, sessionRef?: string) => runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: 'hello', harnessId: 'grok', agentRef: { agentId, profileRevision: 'r1' }, homeAccess: 'memory-reader' as const,
-      ...(sessionRef === undefined ? {} : { sessionRef }),
+      ...(sessionRef === undefined ? FRESH_OFFER : { session: { mode: 'resume' as const, sessionRef } }),
     }, { taskId, seq: ++seq })),
     terminal: async (taskId: string) => {
       await vi.waitFor(() => expect(sent.some((envelope) => envelope.task_id === taskId
