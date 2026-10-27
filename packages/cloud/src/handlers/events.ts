@@ -93,7 +93,7 @@ export const CLOUD_PROTOCOL_CAPABILITIES = [
   // A sealed terminal or artifact may name its ciphertext blob, which the
   // task holds while it lives (#654 §58a).
   SEALED_OUTPUT_CIPHERTEXT_REF_CAPABILITY,
-  // The inbound gate parses `task.fail.failure` and `task.fail_sealed.failure`,
+  // The inbound gate parses `task.fail.failure` on both branches,
   // and `projectTerminalResult` copies it (#869).
   RUNTIME_FAILURE_CLASS_CAPABILITY,
 ];
