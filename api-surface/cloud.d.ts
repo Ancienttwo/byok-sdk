@@ -297,20 +297,10 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
     payload: z.ZodObject<{
         sealed: z.ZodOptional<z.ZodNever>;
         sealing: z.ZodOptional<z.ZodNever>;
-        instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
-            blobRef: z.ZodObject<{
-                blobId: z.ZodString;
-                contentHash: z.ZodString;
-                size: z.ZodNumber;
-                contentType: z.ZodString;
-                url: z.ZodOptional<z.ZodString>;
-            }, z.core.$strip>;
-        }, z.core.$strict>]>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
-        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         agentMemory: z.ZodOptional<z.ZodEnum<{
             none: "none";
             read: "read";
@@ -318,6 +308,7 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
             "read-write": "read-write";
             "read-write-if-admitted": "read-write-if-admitted";
         }>>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -361,8 +352,8 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
-        }, z.core.$strip>>;
-        egressPolicy: z.ZodObject<{
+        }, z.core.$strict>>;
+        egressPolicy: z.ZodOptional<z.ZodObject<{
             policyRevision: z.ZodString;
             activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
@@ -388,7 +379,7 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
                     allowedMimeTypes: z.ZodArray<z.ZodString>;
                 }, z.core.$strict>]>;
             }, z.core.$strict>;
-        }, z.core.$strict>;
+        }, z.core.$strict>>;
         messageEgress: z.ZodOptional<z.ZodObject<{
             mode: z.ZodLiteral<"required">;
             contract: z.ZodString;
@@ -398,6 +389,20 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
             }>;
             maxBytes: z.ZodNumber;
         }, z.core.$strict>>;
+        routineRef: z.ZodOptional<z.ZodNever>;
+        instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+            blobRef: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strict>]>>;
+        session: z.ZodObject<{
+            mode: z.ZodLiteral<"fresh">;
+        }, z.core.$strict>;
+        preparation: z.ZodOptional<z.ZodNever>;
     }, z.core.$strict>;
     agentMessageContext: z.ZodOptional<z.ZodObject<{
         destinationBinding: z.ZodString;
@@ -406,9 +411,8 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema>;
 /**
- * The sealed counterpart (#654): the payload is a
- * `task.offer_for_agent_with_egress_fresh_sealed` payload with the same
- * rules. Submit it through `submitSealedAgentExecution`.
+ * The sealed counterpart (#654): the payload is the sealed branch of a fresh
+ * `task.offer` with the same rules. Submit it through `submitSealedAgentExecution`.
  */
 export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
     taskId: z.ZodString;
@@ -418,7 +422,6 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
-        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         agentMemory: z.ZodOptional<z.ZodEnum<{
             none: "none";
             read: "read";
@@ -426,6 +429,7 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
             "read-write": "read-write";
             "read-write-if-admitted": "read-write-if-admitted";
         }>>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -469,8 +473,8 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
         limits: z.ZodOptional<z.ZodObject<{
             maxDurationMs: z.ZodOptional<z.ZodNumber>;
             maxTokens: z.ZodOptional<z.ZodNumber>;
-        }, z.core.$strip>>;
-        egressPolicy: z.ZodObject<{
+        }, z.core.$strict>>;
+        egressPolicy: z.ZodOptional<z.ZodObject<{
             policyRevision: z.ZodString;
             activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
@@ -496,7 +500,7 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                     allowedMimeTypes: z.ZodArray<z.ZodString>;
                 }, z.core.$strict>]>;
             }, z.core.$strict>;
-        }, z.core.$strict>;
+        }, z.core.$strict>>;
         messageEgress: z.ZodOptional<z.ZodObject<{
             mode: z.ZodLiteral<"required">;
             contract: z.ZodString;
@@ -554,6 +558,10 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
             definitionVersion: z.ZodNumber;
             notAfter: z.ZodString;
         }, z.core.$strict>>;
+        session: z.ZodObject<{
+            mode: z.ZodLiteral<"fresh">;
+        }, z.core.$strict>;
+        preparation: z.ZodOptional<z.ZodNever>;
     }, z.core.$strict>;
     agentMessageContext: z.ZodOptional<z.ZodObject<{
         destinationBinding: z.ZodString;
@@ -1377,7 +1385,7 @@ export interface FullCapabilityDeclarationOptions {
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
 export declare function declares(declaration: CapabilityDeclaration, capability: CloudCapability): boolean;
 // ==== @byok-sdk/cloud dist/cloud.d.ts ====
-import type { z } from 'zod';
+import { z } from 'zod';
 import { type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft';
 import { type MaintenanceInput, type MaintenanceReport, type ProofReceiptRetentionOptions } from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
@@ -1402,7 +1410,7 @@ import { type AgentExecutionInput, type SealedAgentExecutionInput } from './agen
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerPayload, type TaskSteerSealedPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentSealedPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageV2Schema } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type AgentEgressPolicy, type InputPreparationOfferBinding, type SessionSelection, type TaskOfferPayload, type TaskOfferPlainPayload, type TaskOfferSealedPayload, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskSteerSealedPayload, type E2eeClientPairingMac, type E2eeKeyPackageAvailablePayload, type E2eeMemberChainEntry, type E2eeMemberKeyBundle, type E2eeScopeKeyPackage, type E2eeScopeKeyPackageV2Schema } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1557,6 +1565,9 @@ export type LimitedPublicRoute = {
 };
 /** `true` admits the request; `false` answers 429 before the handler or any store runs. */
 export type PublicRouteLimiter = (route: LimitedPublicRoute, request: Request) => boolean | Promise<boolean>;
+type ResumeSession = Extract<SessionSelection, {
+    readonly mode: 'resume';
+}>;
 /**
  * Strict Agent dispatch input. The device path is intentionally a separate
  * argument on {@link ByokCloud.enqueueAgentOffer}; no legacy offer field is
@@ -1567,43 +1578,50 @@ export interface AgentDispatchInput {
     readonly taskId?: string;
     /**
      * Strict Agent resume payload carrying the exact opaque AgentRef and the
-     * exact `sessionRef` being resumed. The wire message keeps `sessionRef`
-     * optional; this host lane does not: a fresh Agent execution is admitted only
-     * through {@link ByokCloud.submitAgentExecution}.
+     * exact session being resumed (`session.mode: 'resume'`). A fresh Agent
+     * execution is admitted only through {@link ByokCloud.submitAgentExecution};
+     * an egress policy only through {@link ByokCloud.enqueueAgentEgressOffer}.
      */
-    readonly payload: TaskOfferForAgentPayload & {
-        readonly sessionRef: string;
+    readonly payload: TaskOfferPlainPayload & {
+        readonly session: ResumeSession;
+        readonly egressPolicy?: never;
+        readonly messageEgress?: never;
+        readonly preparation?: never;
     };
 }
 /**
  * Strict dispatch of an already-counted preparation back to the device that
  * counted it.
  *
- * Deliberately NOT an optional field on {@link AgentDispatchInput}: the wire
- * message is distinct for the freeze-rule reason documented on
- * `TaskOfferPreparedPayloadSchema`, and a host API that could express both
- * through one input would let a caller reach the ordinary lane by omitting one
- * property.
+ * Deliberately NOT an optional field on {@link AgentDispatchInput}: a host API
+ * that could express both through one input would let a caller reach the
+ * ordinary lane by omitting one property.
  */
 export interface PreparedDispatchInput {
     /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
     readonly taskId?: string;
-    /** Instruction-free strict payload naming the preparation this Execution consumes. */
-    readonly payload: TaskOfferPreparedPayload;
+    /** Instruction-free strict fresh payload naming the preparation this Execution consumes. */
+    readonly payload: TaskOfferPlainPayload & {
+        readonly preparation: InputPreparationOfferBinding;
+    };
     /** Host-only destination/freshness authority; never serialized to the daemon. */
     readonly agentMessageContext?: AgentMessageServerContext;
 }
-/** Strict Agent dispatch that supplies the policy consumed by the typed egress lanes. */
+/** Strict Agent resume dispatch that supplies the policy consumed by the typed egress lanes. */
 export interface AgentEgressDispatchInput {
     /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
     readonly taskId?: string;
-    readonly payload: TaskOfferForAgentWithEgressPayload;
+    readonly payload: TaskOfferPlainPayload & {
+        readonly session: ResumeSession;
+        readonly egressPolicy: AgentEgressPolicy;
+        readonly preparation?: never;
+    };
     /** Host-only product destination/freshness authority; never serialized to the daemon. */
     readonly agentMessageContext?: AgentMessageServerContext;
 }
 /**
  * The sealed lane of {@link AgentDispatchInput} (#654). Resume-only, as the
- * plaintext lane is. Each sealed wire type has its own input, as
+ * plaintext lane is. Each sealed lane has its own input, as
  * {@link PreparedDispatchInput} does: a plaintext lane refuses `sealing` and
  * `sealed`, so a caller cannot reach the plaintext lane by a missing field,
  * and no lane strips a sealing policy.
@@ -1611,15 +1629,20 @@ export interface AgentEgressDispatchInput {
 export interface SealedAgentDispatchInput {
     /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
     readonly taskId?: string;
-    readonly payload: TaskOfferForAgentSealedPayload & {
-        readonly sessionRef: string;
+    readonly payload: TaskOfferSealedPayload & {
+        readonly session: ResumeSession;
+        readonly egressPolicy?: never;
+        readonly messageEgress?: never;
     };
 }
 /** The sealed lane of {@link AgentEgressDispatchInput} (#654). */
 export interface SealedAgentEgressDispatchInput {
     /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
     readonly taskId?: string;
-    readonly payload: TaskOfferForAgentWithEgressSealedPayload;
+    readonly payload: TaskOfferSealedPayload & {
+        readonly session: ResumeSession;
+        readonly egressPolicy: AgentEgressPolicy;
+    };
     /** Host-only product destination/freshness authority; never serialized to the daemon. */
     readonly agentMessageContext?: AgentMessageServerContext;
 }
@@ -1673,21 +1696,17 @@ export interface EnqueuedInputPreparation extends EnqueuedAgentControl {
     readonly status: InputPreparationReadback;
 }
 /** Immutable executable offer authority, independent of mailbox retention. */
-export type TaskOfferReadback = {
-    [T in TaskOfferType]: {
-        readonly taskId: string;
-        readonly deviceId: string;
-        readonly messageId: string;
-        readonly type: T;
-        readonly payload: Extract<Envelope, {
-            type: T;
-        }>['payload'];
-        /** Receipt time, not a transport delivery timestamp. */
-        readonly recordedAt: string;
-        /** The delivered marker is durable; false is not proof append never happened. */
-        readonly delivered: boolean;
-    };
-}[TaskOfferType];
+export interface TaskOfferReadback {
+    readonly taskId: string;
+    readonly deviceId: string;
+    readonly messageId: string;
+    readonly type: 'task.offer';
+    readonly payload: TaskOfferPayload;
+    /** Receipt time, not a transport delivery timestamp. */
+    readonly recordedAt: string;
+    /** The delivered marker is durable; false is not proof append never happened. */
+    readonly delivered: boolean;
+}
 export interface EnqueuedOffer {
     readonly taskId: string;
     /** The per-(tenant, device) delivery seq — the daemon's redelivery cursor position for this envelope. */
@@ -1719,8 +1738,8 @@ export interface ByokCloud {
     }): Promise<PairingCodeInfo>;
     /**
      * Host control plane: enqueue a strict Agent resume offer to an explicit
-     * device. Resume-only: the payload must carry an exact `sessionRef`, and one
-     * without it is refused with `coordination_input_invalid` before any attempt,
+     * device. Resume-only: the payload must carry `session.mode: 'resume'` with
+     * an exact `sessionRef`, and one without it is refused with `coordination_input_invalid` before any attempt,
      * receipt or mailbox write. A fresh Agent execution is admitted only through
      * {@link ByokCloud.submitAgentExecution}.
      * Capability admission is read from the durable authenticated device row
@@ -1733,8 +1752,8 @@ export interface ByokCloud {
      * Admission requires the device to durably advertise both the Agent-home
      * contract and `agent-input-preparation-v9` — the second because only a device
      * that can prepare holds the durable record this offer names. A device that
-     * advertises neither never receives the message, and a device whose protocol
-     * build predates the type skips it whole rather than running it as an
+     * advertises neither never receives the message. The offer is strict, so a
+     * daemon that does not know `preparation` stops rather than running it as an
      * ordinary instruction offer.
      */
     enqueuePreparedOffer(tenant: TenantId, deviceId: string, input: PreparedDispatchInput): Promise<EnqueuedOffer>;
@@ -1749,9 +1768,9 @@ export interface ByokCloud {
      */
     submitAgentExecution(tenant: TenantId, input: AgentExecutionInput): Promise<EnqueuedOffer>;
     /**
-     * Sealed offer lanes (#654). Each sends the sealed wire type of its
-     * plaintext sibling with the same rules, and needs every flag that
-     * `requiredReceiverCapabilities` names for it, `sealed-payload-v1` first.
+     * Sealed offer lanes (#654). Each sends the sealed branch of its plaintext
+     * sibling's `task.offer` with the same rules, and needs every flag that
+     * `requiredReceiverCapabilities` names for it, `sealed-payload-v1` among them.
      * The plaintext siblings refuse `sealing` and `sealed` with
      * `coordination_input_invalid`.
      */
@@ -1963,9 +1982,11 @@ export interface ByokCloud {
      * the enqueued envelope is durable, and whether the runtime acted on it is
      * observable only through that task's own later messages.
      */
-    steerTask(tenant: TenantId, taskId: string, payload: TaskSteerPayload): Promise<EnqueuedAgentControl>;
+    steerTask(tenant: TenantId, taskId: string, payload: {
+        readonly text: string;
+    }): Promise<EnqueuedAgentControl>;
     /**
-     * The sealed lane of {@link steerTask} (#654): `task.steer_sealed`, with the
+     * The sealed lane of {@link steerTask} (#654): the sealed `task.steer`, with the
      * same gates in the same order, and then the device's durable
      * `sealed-payload-v1` (`agent_capability_missing`). `steerTask` refuses
      * `sealed` and `steerId`.
@@ -2031,6 +2052,7 @@ export interface ByokCloud {
     readApprovalTimeline(tenant: TenantId, taskId: string): Promise<ApprovalTimelineTail | undefined>;
 }
 export declare function createByokCloud(options: ByokCloudOptions): ByokCloud;
+export {};
 // ==== @byok-sdk/cloud dist/composition/in-memory.d.ts ====
 /**
  * The in-memory composition: core's reference stores plus cloud's, wired into
@@ -5052,7 +5074,7 @@ export declare function tenantStoresFor(principal: Principal, root: CloudRootSto
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
 import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TaskFailPayload, type TaskFailure, type TaskDeclinePayload } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports';
-declare const DEVICE_TERMINAL_TYPES: readonly ['task.complete', 'task.fail', 'task.decline', 'task.cancelled', 'task.complete_sealed', 'task.fail_sealed', 'task.decline_sealed', 'task.cancelled_sealed'];
+declare const DEVICE_TERMINAL_TYPES: readonly ['task.complete', 'task.fail', 'task.decline', 'task.cancelled'];
 /**
  * Canonical device evidence, independent of the Host cancellation projection.
  * A sealed terminal keeps its sealed member, which a member opens (#654 12e).
@@ -5131,7 +5153,7 @@ export interface TerminalResult {
     readonly retryable?: boolean;
     /**
      * The machine-readable runtime failure class, verbatim `task.fail.failure`
-     * (plaintext on `task.fail_sealed` too). Read the class here, never from
+     * (plaintext on a sealed `task.fail` too). Read the class here, never from
      * `reason`. Absent when the daemon or the server predates the field, or the
      * daemon built the terminal while it had no live connection.
      */
@@ -5326,7 +5348,7 @@ export type WireV4ReceiptKind = 'offer' | 'terminal';
 /** Which migrated receipt family `key` belongs to, or `undefined` for every other receipt. */
 export declare function wireV4ReceiptKind(key: string): WireV4ReceiptKind | undefined;
 export type WireV4ReceiptMigration = 
-/** `body` is already readable under v4: a v4 terminal, an offer receipt whose type v4 keeps, or a redaction tombstone. */
+/** `body` is already readable under v4: a v4 terminal or offer receipt, or a redaction tombstone. */
 {
     readonly outcome: 'unchanged';
 } | {
@@ -5339,9 +5361,10 @@ export type WireV4ReceiptMigration =
 };
 /**
  * Migrates one stored receipt of a {@link WireV4ReceiptKind}. An offer receipt
- * is `{ deviceId, type, payload }` without a wire version: it keeps its bytes
- * when v4 keeps its type unchanged. A terminal receipt is a v3 envelope and is
- * re-encoded under v4.
+ * is `{ deviceId, type, payload }` without a wire version: a v3 one takes its
+ * v4 type and payload ({@link wireV4FormOf}), and is refused when v4 would drop
+ * or change any of its content; a v4 one is kept when v4 reads it. A terminal
+ * receipt is a v3 envelope and is re-encoded under v4.
  */
 export declare function migrateWireV3Receipt(kind: WireV4ReceiptKind, body: string): WireV4ReceiptMigration;
 /** What a store runner changed. */
