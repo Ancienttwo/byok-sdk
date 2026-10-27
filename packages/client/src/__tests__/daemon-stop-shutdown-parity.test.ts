@@ -465,6 +465,23 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     await server.close();
   });
 
+  // TEMPORARY probe for #1030; removed before handoff.
+  it.runIf(process.platform === 'win32')('probe: realpath forms of the Windows temp and store paths', async () => {
+    const store = await tmpDir('byok-alias-probe-');
+    const alias = path.join(path.dirname(store), path.basename(store).toUpperCase());
+    const forms = async (p: string) => ({
+      input: p,
+      js: (() => { try { return realpathSync(p); } catch (e) { return String(e); } })(),
+      native: (() => { try { return realpathSync.native(p); } catch (e) { return String(e); } })(),
+      promises: await fs.realpath(p).catch((e: unknown) => String(e)),
+    });
+    console.log('#1030 probe', JSON.stringify({
+      envTemp: process.env.TEMP, osTmpdir: os.tmpdir(),
+      temp: await forms(os.tmpdir()), store: await forms(store), alias: await forms(alias),
+      scratchFromStore: resolveStorageConfig(store).scratchRoot, scratchFromAlias: resolveStorageConfig(alias).scratchRoot,
+    }, null, 2));
+  });
+
   it.runIf(process.platform === 'win32' || process.platform === 'darwin')('restarts and sweeps the default scratch root when the store is configured through a name alias', async () => {
     const canonical = realpathSync.native(await tmpDir('byok-alias-store-'));
     const storeDir = path.join(path.dirname(canonical), path.basename(canonical).toUpperCase());
