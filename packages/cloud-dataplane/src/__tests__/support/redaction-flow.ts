@@ -185,6 +185,7 @@ export function executionInput(taskId: string, deviceId: string, instruction: st
       instruction,
       runtime: 'codex',
       agentRef: AGENT_REF,
+      session: { mode: 'fresh' },
       egressPolicy: EGRESS_POLICY,
       terminalProjection: { mode: 'none' },
       messageEgress: { mode: 'required', contract: MESSAGE_CONTRACT, contentType: 'text/markdown', maxBytes: 4_096 },
@@ -248,7 +249,7 @@ export interface UploadedArtifact {
 export async function startTask(host: RedactionHost, device: Device, taskId: string, canary: Canary): Promise<TaskRun> {
   await host.cloud.submitAgentExecution(device.tenant, executionInput(taskId, device.deviceId, `instruction ${canary.text}`));
   expect((await device.poll()).map((event) => [event.type, event.task_id])).toContainEqual([
-    'task.offer_for_agent_with_egress_fresh',
+    'task.offer',
     taskId,
   ]);
   await expectAccepted(device.send(createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, runtime: 'codex' }, { taskId })));
