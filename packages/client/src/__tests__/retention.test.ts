@@ -418,16 +418,3 @@ it('a large expired runtime backlog leaves pass budget for agent-result in the s
  expect((await fs.readdir(s.runtimeDir)).length).toBeGreaterThan(0);
  expect(f.failures).toEqual([]);
 });
-it('clears the read-only attribute and retries when Windows refuses to unlink a runtime file',async()=>{
- const f=await fixture(),s=await f.scratch.create(),file=path.join(s.runtimeDir,'readonly');await fs.writeFile(file,'abc');await s.release();f.advance(DAY);
- const target=path.dirname(s.runtimeDir),released=await fs.readFile(path.join(target,'released'),'utf8');
- // Simulated: POSIX can unlink read-only files, so EPERM stands in for the Windows attribute.
- const realUnlink=fs.unlink.bind(fs);let cleared=false;
- vi.spyOn(fs,'chmod').mockImplementation(async(entry,mode)=>{if(entry===file&&mode===0o666)cleared=true;});
- vi.spyOn(fs,'unlink').mockImplementation(async entry=>{if(entry===file&&!cleared)throw Object.assign(new Error('read-only'),{code:'EPERM'});return realUnlink(entry);});
- const platform=Object.getOwnPropertyDescriptor(process,'platform')!;Object.defineProperty(process,'platform',{...platform,value:'win32'});
- const tally={deleted:0,bytes:0},budget=runtimeBudget(f,tally);
- try{await f.registry.sweep('exec-runtime',budget);}finally{Object.defineProperty(process,'platform',platform);}
- expect(cleared).toBe(true);expect(tally.deleted).toBe(1);expect((runtimeReclaimedBytes.get(budget)??0)+tally.bytes).toBe(3+Buffer.byteLength(released));
- expect(await exists(target)).toBe(false);
-});

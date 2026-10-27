@@ -4,17 +4,6 @@ import path from 'node:path';
 import type { SweepBudget } from './registry';
 import { existingDirectory, removeOwnedPath } from './usage';
 
-/**
- * Windows refuses to remove read-only entries. Recursive `fs.rm` clears the attribute and
- * retries, so this does too. Never for a symlink: chmod would follow it out of the token.
- */
-async function removeEntry(remove: (file: string) => Promise<void>, file: string, symlink: boolean): Promise<void> {
-  try { await remove(file); } catch (error) {
-    if (process.platform !== 'win32' || symlink || (error as NodeJS.ErrnoException).code !== 'EPERM') throw error;
-    await fs.chmod(file, 0o666); await remove(file);
-  }
-}
-
 /** Only released, expired scratch tokens may use this resumable leaf collector. */
 export class RuntimeCleanup {
   private current: string;
@@ -55,7 +44,7 @@ export class RuntimeCleanup {
           if (!available()) return false;
           const file = path.join(this.current, entry.name), stat = await fs.lstat(file);
           if (stat.isDirectory() && !stat.isSymbolicLink()) { child = file; break; }
-          await removeEntry(fs.unlink, file, stat.isSymbolicLink()); removedAny = true;
+          await fs.unlink(file); removedAny = true;
           runtimeReclaimedBytes.set(budget, (runtimeReclaimedBytes.get(budget) ?? 0) + stat.size);
         }
       } finally { await directory.close(); }
@@ -63,7 +52,7 @@ export class RuntimeCleanup {
       // Removing entries while reading can hide others, so only an untouched read proves the directory empty.
       if (removedAny) continue;
       if (!available()) return false;
-      if (this.current !== this.target) { await removeEntry(fs.rmdir, this.current, false); this.current = path.dirname(this.current); continue; }
+      if (this.current !== this.target) { await fs.rmdir(this.current); this.current = path.dirname(this.current); continue; }
       await this.validate(root, eligible);
       // Reuse the existing finalization semantics, but cap verification to the
       // token and its marker. Unexpected descendants refuse recursive removal.
