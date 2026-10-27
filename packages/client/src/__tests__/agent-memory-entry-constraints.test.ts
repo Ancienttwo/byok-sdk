@@ -98,6 +98,9 @@ describe('the embedded agent-memory entry module graph', () => {
     // copied assets to the same SDK build without importing daemon composition.
     // #1034 shares reader-run eligibility with bounded retention in this inert
     // tail; the extracted policy adds no dependency or embedded runtime export.
+    // #1058 reuses canonical memory tool names from `sdk-reserved-mcp.ts`
+    // in the MCP server and adapter grants. That import-free name authority
+    // adds no runtime dependency, I/O, or embedded public export.
     expect(GRAPH.modules).toEqual([
       'agent-home-reader-retention.ts',
       'agent-home-readers.ts',
@@ -116,6 +119,7 @@ describe('the embedded agent-memory entry module graph', () => {
       'mcp-server/dispatch.ts',
       'mcp-server/framing.ts',
       'mcp-server/index.ts',
+      'sdk-reserved-mcp.ts',
       'util/atomic-write.ts',
       'util/secure-dir.ts',
     ]);
