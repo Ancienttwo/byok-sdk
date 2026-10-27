@@ -13,6 +13,12 @@ import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-hel
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { AgentEgressController } from '../daemon/agent-egress-controller';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 const AGENT = { agentId: 'cancel-durability-agent', profileRevision: '1' };
 const TASK = 'cancel-durability-task';
@@ -48,7 +54,7 @@ async function fixture(overrides: Partial<TaskRunnerDeps> = {}) {
   const committed = deferred();
   const awaitTerminalCommit = vi.fn(async () => { committing.resolve(); await committed.promise; });
   const runner = new TaskRunner({
-    getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome, agentSessionHandoffs: handoffs, deviceId: 'cancel-device',
     send: envelope => {
@@ -60,8 +66,8 @@ async function fixture(overrides: Partial<TaskRunnerDeps> = {}) {
     storeDir: root, productId: 'cancel-product', tenantId: 'cancel-tenant',
     awaitTerminalCommit, ...overrides,
   });
-  await runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
-    instruction: 'wait for cancellation', runtime: 'pi', agentRef: AGENT,
+  await runner.handleEnvelope(createEnvelope('task.offer', {
+    ...FRESH_OFFER, instruction: 'wait for cancellation', runtime: 'pi', agentRef: AGENT,
   }, { taskId: TASK, seq: 1 }));
   expect(sent.filter(event => event.type === 'task.started')).toHaveLength(1);
   expect(releases).toHaveLength(1);

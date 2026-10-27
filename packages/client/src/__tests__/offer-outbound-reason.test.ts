@@ -16,6 +16,11 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { DurableJsonlFile } from '../util/durable-jsonl';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { AgentEgressController } from '../daemon/agent-egress-controller';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 /**
  * `task.decline`, `task.fail` and `task.progress` leave this device. These
@@ -56,14 +61,14 @@ const MESSAGE_DEPS: Partial<TaskRunnerDeps> = {
 };
 
 function agentOffer(taskId: string, seq: number): Envelope {
-  return createEnvelope('task.offer_for_agent', {
-    instruction: 'outbound offer work', runtime: 'pi', agentRef: AGENT,
+  return createEnvelope('task.offer', {
+    ...FRESH_OFFER, instruction: 'outbound offer work', runtime: 'pi', agentRef: AGENT,
   }, { taskId, seq });
 }
 
 function messageOffer(taskId: string, seq: number): Envelope {
-  return createEnvelope('task.offer_for_agent_with_egress_fresh', {
-    instruction: 'reply', runtime: 'pi', agentRef: AGENT, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+  return createEnvelope('task.offer', {
+    session: { mode: 'fresh' }, instruction: 'reply', runtime: 'pi', agentRef: AGENT, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
   }, { taskId, seq });
 }
@@ -81,7 +86,7 @@ async function runner(adapter: StubRuntimeAdapter, extra: Partial<TaskRunnerDeps
   const hostStorageRoot = await temporary('byok outbound offer home-');
   const agentHome = new AgentHomeManager({ hostStorageRoot });
   const sent: Envelope[] = [];
-  const taskRunner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const taskRunner = new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome,
     agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -165,7 +170,7 @@ describe('local paths in outbound handleOffer reasons', () => {
     });
     localRoots.push(path.dirname(path.dirname(missingServer)));
 
-    await taskRunner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),
+    await taskRunner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
       instruction: 'outbound offer work', runtime: 'pi', requiredToolsets: ['team'],
     }, { taskId: 'toolset-path', seq: 1 }));
 
@@ -222,7 +227,7 @@ describe('local paths in outbound handleOffer reasons', () => {
     const { runner: taskRunner, sent, localRoots } = await runner(adapter);
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    await taskRunner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'outbound offer work' }, { taskId: 'artifact-path', seq: 1 }));
+    await taskRunner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'outbound offer work' }, { taskId: 'artifact-path', seq: 1 }));
     adapter.sessions[0]!.emit({ type: 'artifact', name: 'missing report.txt', contentType: 'text/plain' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some((entry) => entry.type === 'task.complete' && entry.task_id === 'artifact-path')).toBe(true));

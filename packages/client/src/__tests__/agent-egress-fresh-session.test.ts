@@ -13,6 +13,7 @@ import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const roots: string[] = [];
 let server: TestServer | undefined;
@@ -70,9 +71,9 @@ describe('fresh Agent egress session authority', () => {
     });
 
     server.send(createEnvelope(
-      'task.offer_for_agent_with_egress_fresh',
+      'task.offer',
       {
-        instruction: 'mint a native session only after start',
+        session: { mode: 'fresh' }, instruction: 'mint a native session only after start',
         runtime: 'pi',
         agentRef,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -94,9 +95,9 @@ describe('fresh Agent egress session authority', () => {
 
     // Redelivery cannot create a second fresh session for the same task.
     server.send(createEnvelope(
-      'task.offer_for_agent_with_egress_fresh',
+      'task.offer',
       {
-        instruction: 'mint a native session only after start',
+        session: { mode: 'fresh' }, instruction: 'mint a native session only after start',
         runtime: 'pi',
         agentRef,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -202,7 +203,7 @@ describe('fresh Agent egress session authority', () => {
     const handoffs = new AgentSessionHandoffStore();
     vi.spyOn(handoffs, 'record').mockRejectedValueOnce(new Error('fsync unavailable'));
     const sent: Envelope[] = [];
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -219,9 +220,9 @@ describe('fresh Agent egress session authority', () => {
     });
 
     await runner.handleEnvelope(createEnvelope(
-      'task.offer_for_agent_with_egress_fresh',
+      'task.offer',
       {
-        instruction: 'fail only at handoff fsync',
+        session: { mode: 'fresh' }, instruction: 'fail only at handoff fsync',
         runtime: 'pi',
         agentRef,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,

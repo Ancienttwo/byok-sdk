@@ -10,6 +10,10 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { RuntimeExecutionFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON } from '../runtime-failure';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -38,7 +42,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
-        agentHome: testAgentHomeConfig(),
+        agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir,
         ...configOverrides,
       },
@@ -55,8 +59,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'do the thing' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do the thing' },
         { taskId: 'task-1', seq: server.nextSeq() },
       ),
     );
@@ -105,8 +109,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'long running thing' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'long running thing' },
         { taskId: 'task-2', seq: server.nextSeq() },
       ),
     );
@@ -137,8 +141,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'buffer some progress then cancel' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'buffer some progress then cancel' },
         { taskId: 'task-cancel-buffered', seq: server.nextSeq() },
       ),
     );
@@ -168,8 +172,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'race me' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'race me' },
         { taskId: 'task-race', seq: server.nextSeq() },
       ),
     );
@@ -211,8 +215,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'pi' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'pi' },
         { taskId: 'task-4', seq: server.nextSeq() },
       ),
     );
@@ -234,8 +238,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'x' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
         { taskId: 'task-6', seq: server.nextSeq() },
       ),
     );
@@ -255,8 +259,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'x' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
         { taskId: 'task-7', seq: server.nextSeq() },
       ),
     );
@@ -276,8 +280,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'x' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
         { taskId: 'task-5', seq: server.nextSeq() },
       ),
     );
@@ -297,8 +301,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'pi' },
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'pi' },
           { taskId: 'task-runtime-explicit', seq: server.nextSeq() },
         ),
       );
@@ -313,8 +317,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(),  instruction: 'x' }, // no `runtime` — daemon auto-selects
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, // no `runtime` — daemon auto-selects
           { taskId: 'task-runtime-auto', seq: server.nextSeq() },
         ),
       );
@@ -333,8 +337,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(),  instruction: 'needs a human' },
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'needs a human' },
           { taskId, seq: server.nextSeq() },
         ),
       );

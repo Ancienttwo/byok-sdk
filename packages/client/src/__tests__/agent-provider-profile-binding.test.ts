@@ -11,6 +11,10 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import type { RuntimeAdapterPrepareInput } from '../types';
 import { TestServer } from './fixtures/test-server';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 const PI_FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 
@@ -100,14 +104,14 @@ describe('Agent provider profile binding admission', () => {
       productName: 'Provider binding test',
       productId: 'provider-binding-test',
       serverUrl: server.url,
-      agentHome: testAgentHomeConfig(),
+      agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       storeDir,
     }, [adapter]);
     try {
       await daemon.pair('pairing-code');
       await daemon.start();
       const taskId = 'task-stale-provider-profile';
-      server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),
+      server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
         instruction: 'inspect image',
         dispatchSelection: {
           lane: 'byok-profile',

@@ -7,6 +7,10 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const clean of cleanup.reverse()) await clean(); cleanup.length = 0; });
@@ -27,7 +31,7 @@ for (const phase of ['detect', 'prepare'] as const) {
       const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
         productId: `admission-${path.basename(root)}`, productName: 'Admission', localAgentRelease: { version: '0.0.0-test' },
         serverUrl: server.url, storeDir: path.join(root, 'store'),
-        agentHome: { hostStorageRoot: path.join(root, 'home') }, startupTimeoutMs: action === 'deadline' ? 250 : 5000,
+        agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, startupTimeoutMs: action === 'deadline' ? 250 : 5000,
       }, [adapter], { longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
       let release!: () => void;
       const gate = new Promise<void>(resolve => { release = resolve; });
@@ -57,8 +61,8 @@ for (const phase of ['detect', 'prepare'] as const) {
         if (phase === 'prepare') { entered = true; await gate; }
         return originalPrepare(input);
       });
-      const offer = (taskId: string) => createEnvelope('task.offer_for_agent', {
-        instruction: 'work', harnessId: 'acme-harness', agentRef: { agentId: 'shared', profileRevision: 'r1' },
+      const offer = (taskId: string) => createEnvelope('task.offer', {
+        ...FRESH_OFFER, instruction: 'work', harnessId: 'acme-harness', agentRef: { agentId: 'shared', profileRevision: 'r1' },
       }, { taskId, seq: server.nextSeq() });
       server.send(offer('blocked'));
       await vi.waitFor(() => expect(entered).toBe(true));

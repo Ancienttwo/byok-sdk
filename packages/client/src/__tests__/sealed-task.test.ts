@@ -23,6 +23,9 @@ import { testIngressBudget } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
+
 /** A keyring whose sealing key waits for `gate`, so a test can hold a seal open. */
 class GatedKeyring implements SealedScopeKeyring {
   readonly scopeKey = generateScopeKey();
@@ -250,7 +253,7 @@ describe('a terminal built for a sealed task in a run that may not seal it (#866
   });
 
   it('keeps every terminal of a task whose offer does not seal output', async () => {
-    const plainOffer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'plain instruction' }, { taskId: 'recovered', seq: 1 });
+    const plainOffer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction' }, { taskId: 'recovered', seq: 1 });
     const fail = createEnvelope('task.fail', { reason: 'plain reason', retryable: false }, { taskId: 'recovered' });
     expect(await tasks().sealRecovered(plainOffer, fail, false)).toBe(fail);
   });

@@ -23,6 +23,12 @@ import type { McpToolsetConfig, RuntimeCapabilities } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { AgentEgressController } from '../daemon/agent-egress-controller';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 const MCP_CAPABLE: RuntimeCapabilities = {
   steer: false,
@@ -73,7 +79,7 @@ async function makeRunner(
   getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>,
   mcpToolsetToolsProbe: NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']> = stubToolsProbe,
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     mcpToolsetToolsProbe,
     adapters: [adapter],
     ...testAgentHomeDeps(),
@@ -109,8 +115,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
 
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
           instruction: 'find qualified leads',
           runtime: 'claude',
           requiredToolsets: ['salesko'],
@@ -146,8 +152,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
       const runner = await makeRunner(adapter, sent, registry);
       await runner.handleEnvelope(
         createEnvelope(
-          'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(),
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
             instruction: 'x',
             runtime: 'claude',
             requiredToolsets: ['salesko'],
@@ -171,8 +177,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     );
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'pi', requiredToolsets: ['salesko'] },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'pi', requiredToolsets: ['salesko'] },
         { taskId: 'task-unsupported', seq: 1 },
       ),
     );
@@ -194,8 +200,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     );
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
           instruction: 'x',
           runtime: 'claude',
           requiredToolsets: ['mail', 'social'],
@@ -225,8 +231,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
       );
       await runner.handleEnvelope(
         createEnvelope(
-          'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'claude', requiredToolsets: ['salesko'] },
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'claude', requiredToolsets: ['salesko'] },
           { taskId: 'task-unobservable', seq: 1 },
         ),
       );
@@ -248,8 +254,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
 
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'first', runtime: 'claude', requiredToolsets: ['salesko'] },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'first', runtime: 'claude', requiredToolsets: ['salesko'] },
         { taskId: 'task-before-reload', seq: 1 },
       ),
     );
@@ -260,8 +266,8 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     );
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'second', runtime: 'claude', requiredToolsets: ['salesko'] },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'second', runtime: 'claude', requiredToolsets: ['salesko'] },
         { taskId: 'task-after-reload', seq: 2 },
       ),
     );
@@ -296,8 +302,8 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
     );
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'pi', requiredToolsets: ['salesko'] },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'pi', requiredToolsets: ['salesko'] },
         { taskId: 'task-pi-no-probe', seq: 1 },
       ),
     );
@@ -330,8 +336,8 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
     );
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'claude', requiredToolsets: ['salesko'] },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'claude', requiredToolsets: ['salesko'] },
         { taskId: 'task-ungrantable', seq: 1 },
       ),
     );
@@ -372,8 +378,8 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
     const startedAt = Date.now();
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'claude', requiredToolsets: ['salesko'] },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'claude', requiredToolsets: ['salesko'] },
         { taskId: 'task-probe-deadline', seq: 1 },
       ),
     );
@@ -481,7 +487,7 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
     productId: 'test-product',
     serverUrl: 'http://localhost:3000',
-    agentHome: testAgentHomeConfig(),
+    agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
   };
 
   it('accepts a bounded stdio definition', () => {
@@ -616,7 +622,7 @@ describe('absolute toolset command, consistently across every runtime', () => {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
     productId: 'test-product',
     serverUrl: 'http://localhost:3000',
-    agentHome: testAgentHomeConfig(),
+    agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
   };
   const configured = { salesko: { mcpServers: { salesko: { command: 'salesko-agent' } } } };
 
@@ -633,8 +639,8 @@ describe('absolute toolset command, consistently across every runtime', () => {
       const runner = await makeRunner(adapter, sent, new Map<string, McpToolsetConfig>(), undefined, probe);
       await runner.handleEnvelope(
         createEnvelope(
-          'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(),  instruction: 'x', runtime, requiredToolsets: ['salesko'] },
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime, requiredToolsets: ['salesko'] },
           { taskId: `task-refused-${runtime}`, seq: 1 },
         ),
       );
@@ -686,7 +692,7 @@ describe('TaskRunner host toolset context nonce injection', () => {
     extra: Partial<TaskRunnerDeps> = {},
   ): Promise<TaskRunner> {
     const storeDir = await tmpDir('byok-host-toolset-store-');
-    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
       mcpToolsetToolsProbe: stubToolsProbe,
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot: await tmpDir('byok-host-toolset-home-') }),
@@ -716,7 +722,7 @@ describe('TaskRunner host toolset context nonce injection', () => {
   async function offerAgentTask(runner: TaskRunner, taskId: string, requiredToolsets: string[]): Promise<void> {
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_for_agent',
+        'task.offer',
         {
           instruction: 'qualify the inbound lead',
           runtime: 'pi',

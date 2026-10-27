@@ -9,6 +9,12 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { AgentEgressController } from '../daemon/agent-egress-controller';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -25,7 +31,7 @@ describe('TaskRunner metering at the cancellation boundary', () => {
     const sent: Envelope[] = [];
     let enteredUpload!: () => void;
     const uploading = new Promise<void>(resolve => { enteredUpload = resolve; });
-    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
       adapters: [adapter],
       // An enrolled daemon always passes its tenant; without it a closing Agent task logs a skipped memory snapshot on Linux.
       tenantId: 'cancel-usage-tenant', deviceId: 'cancel-usage-device', send: event => { sent.push(event); },
@@ -42,7 +48,7 @@ describe('TaskRunner metering at the cancellation boundary', () => {
       shutdownInterruptTimeoutMs: 20,
       maxInlineEventBytes: 4096,
     });
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),
+    await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
       instruction: 'cancel while metering settles', runtime,
     }, { taskId: 'metered-task', seq: 1 }));
     const session = adapter.sessions[0]!;

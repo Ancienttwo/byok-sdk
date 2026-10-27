@@ -28,6 +28,12 @@ import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { expectAgentMemoryNameRules } from './fixtures/agent-memory-name-rules';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { AgentEgressController } from '../daemon/agent-egress-controller';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 const roots: string[] = [];
 const sha256 = (value: string): string => `sha256:${createHash('sha256').update(value, 'utf8').digest('hex')}`;
@@ -187,7 +193,7 @@ describe('Agent memory MCP local authority', () => {
       approvalInteractive: true,
       mcpToolsets: false,
     });
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -206,9 +212,9 @@ describe('Agent memory MCP local authority', () => {
     });
 
     await runner.handleEnvelope(createEnvelope(
-      'task.offer_for_agent',
+      'task.offer',
       {
-        instruction: 'strict Agent task must not receive an unsupported MCP surface',
+        ...FRESH_OFFER, instruction: 'strict Agent task must not receive an unsupported MCP surface',
         runtime: 'codex',
         agentRef: { agentId: 'agent-memory-mcp-toolsets', profileRevision: 'profile-1' },
       },
@@ -237,7 +243,7 @@ describe('Agent memory MCP local authority', () => {
       approvalInteractive: true,
       mcpToolsets: true,
     });
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
       adapters: [unsupported, supported],
       getServerCapabilities: () => ['custom-harness'],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -257,9 +263,9 @@ describe('Agent memory MCP local authority', () => {
     });
 
     await runner.handleEnvelope(createEnvelope(
-      'task.offer_for_agent',
+      'task.offer',
       {
-        instruction: 'automatic strict Agent selection must skip MCP-incompatible runtimes',
+        ...FRESH_OFFER, instruction: 'automatic strict Agent selection must skip MCP-incompatible runtimes',
         agentRef: { agentId: 'agent-memory-mcp-selection', profileRevision: 'profile-1' },
       },
       { taskId: 'task-memory-mcp-selection', seq: 1 },

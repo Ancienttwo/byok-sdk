@@ -13,6 +13,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const unusedBlobClient: BlobResolver = {
   resolveInstruction: async () => {
@@ -82,7 +83,7 @@ describe('unknown AgentEvent tolerance on the client inbound path (pre-freeze pr
 
   it('TaskRunner.handleEnvelope processes an inbound task.progress carrying an unknown-type event as a no-op, never throwing', async () => {
     const sent: Envelope[] = [];
-    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
       adapters: [], // never consulted — task.progress touches no adapter/session machinery
       ...testAgentHomeDeps(),
       deviceId: 'device-1',

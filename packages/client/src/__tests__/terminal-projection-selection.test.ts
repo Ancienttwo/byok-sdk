@@ -17,6 +17,11 @@ import {
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { AgentEgressController } from '../daemon/agent-egress-controller';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -51,7 +56,7 @@ async function harness(overrides: Partial<TaskRunnerDeps> = {}) {
   });
   const preflight = vi.fn<NonNullable<TaskRunnerDeps['agentResultMcpPreflight']>>(async () => {});
   const storeDir = await temporary('byok-result-control-');
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome: new AgentHomeManager({ hostStorageRoot }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -70,8 +75,8 @@ async function harness(overrides: Partial<TaskRunnerDeps> = {}) {
 }
 
 async function offerResult(runner: TaskRunner, taskId: string, terminalProjection: unknown = SELECTION): Promise<void> {
-  await runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
-    instruction: 'review', runtime: 'pi', agentRef: AGENT_REF,
+  await runner.handleEnvelope(createEnvelope('task.offer', {
+    ...FRESH_OFFER, instruction: 'review', runtime: 'pi', agentRef: AGENT_REF,
     terminalProjection: terminalProjection as typeof SELECTION,
   }, { taskId, seq: 1 }));
 }
@@ -296,8 +301,8 @@ describe('submit_result with a required Agent message (R10)', () => {
       agentMessageMcpPreflight: async () => {},
     });
     const taskId = 'message-and-result';
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'reply and review', runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+    await runner.handleEnvelope(createEnvelope('task.offer', {
+      session: { mode: 'fresh' }, instruction: 'reply and review', runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       terminalProjection: SELECTION,
     }, { taskId, seq: 1 }));
@@ -329,8 +334,8 @@ describe('submit_result with a required Agent message (R10)', () => {
       agentMessageMcpPreflight: async () => {},
     });
     const taskId = 'message-no-result';
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'reply', runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+    await runner.handleEnvelope(createEnvelope('task.offer', {
+      session: { mode: 'fresh' }, instruction: 'reply', runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       terminalProjection: SELECTION,
     }, { taskId, seq: 1 }));

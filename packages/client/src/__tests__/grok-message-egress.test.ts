@@ -12,6 +12,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-acp-agent.mjs', import.meta.url));
 const roots: string[] = [];
@@ -30,7 +31,7 @@ it('publishes the closing Grok reply on the message lane when Grok never called 
   vi.stubEnv('FAKE_ACP_LOG', log);
   const sent: Envelope[] = [];
   const storeDir = await temporary('byok-grok-egress-store-');
-  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
     adapters: [new GrokAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }) })],
     getServerCapabilities: () => ['custom-harness'],
     agentHome: new AgentHomeManager({ hostStorageRoot: await temporary('byok-grok-egress-home-') }),
@@ -44,8 +45,8 @@ it('publishes the closing Grok reply on the message lane when Grok never called 
   });
   const taskId = 'grok-egress-task';
   const agentRef = { agentId: 'agent-grok', profileRevision: 'profile-r1' } as const;
-  await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-    instruction: 'tool', harnessId: 'grok', agentRef,
+  await runner.handleEnvelope(createEnvelope('task.offer', {
+    session: { mode: 'fresh' }, instruction: 'tool', harnessId: 'grok', agentRef,
     egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
   }, { taskId, seq: 1 }));
