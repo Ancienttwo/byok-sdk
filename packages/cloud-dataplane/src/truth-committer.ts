@@ -22,7 +22,8 @@ import {
   type TruthRecordKind,
 } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
-import { assertByokPool, type ByokPool } from './pool';
+import type { ByokPool } from './pool';
+import { assertByokPool } from './pool-brand';
 import { PostgresTruthStore } from './stores/core/truth';
 
 const RECORD_COLUMNS =

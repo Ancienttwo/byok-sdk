@@ -27,7 +27,8 @@ import type {
   TaskRedactionTaskResult,
 } from '@byok-sdk/cloud';
 import type { Pool, PoolClient } from 'pg';
-import { assertByokPool, type ByokPool } from '../pool';
+import type { ByokPool } from '../pool';
+import { assertByokPool } from '../pool-brand';
 import { settleDeletedObject } from './core/object-gc';
 import { BEGIN_OUTBOX_WRITE } from './core/outbox-writer';
 import { R2ObjectMaintenanceStore, type R2ObjectMaintenance } from './r2-blobs';

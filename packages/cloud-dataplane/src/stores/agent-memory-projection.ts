@@ -23,7 +23,8 @@ import {
 } from '@byok-sdk/protocol';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
-import { assertByokPool, type ByokPool } from '../pool';
+import type { ByokPool } from '../pool';
+import { assertByokPool } from '../pool-brand';
 
 export interface PostgresAgentMemoryProjectionStoreOptions {
   readonly pool: ByokPool;

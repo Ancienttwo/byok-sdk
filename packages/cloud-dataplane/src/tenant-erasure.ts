@@ -9,7 +9,8 @@
 import { randomUUID } from 'node:crypto';
 import { tenantId, type Clock, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-import { assertByokPool, type ByokPool } from './pool';
+import type { ByokPool } from './pool';
+import { assertByokPool } from './pool-brand';
 import {
   R2ObjectMaintenanceStore,
   type R2BlobStoreOptions,

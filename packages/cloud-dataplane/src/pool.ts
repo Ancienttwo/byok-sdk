@@ -17,6 +17,7 @@
  */
 import pg from 'pg';
 import type { Pool, PoolClient, PoolConfig } from 'pg';
+import { BYOK_POOL } from './pool-brand';
 
 /**
  * `pg`'s default parser for every other oid, so this config ADDS one decoding
@@ -48,24 +49,10 @@ export interface ByokPoolOptions extends Omit<PoolConfig, 'types'> {
   readonly onPoolError?: (err: Error, client?: PoolClient) => void;
 }
 
-/**
- * Marks a pool built by {@link createByokPool}. A registry symbol, because the
- * package's two entries each bundle their own copy of this module, and a host
- * may build the pool from one entry and pass it to stores from the other.
- */
-const BYOK_POOL = Symbol.for('@byok-sdk/cloud-dataplane.pool');
 declare const byokPoolBrand: unique symbol;
 
 /** A pool from {@link createByokPool}: the only pool the SDK's store compositions accept. */
 export type ByokPool = Pool & { readonly [byokPoolBrand]: true };
-
-/** Refuses, at composition, a pool that {@link createByokPool} did not build. */
-export function assertByokPool(pool: Pool, owner: string): void {
-  if ((pool as Pool & Record<symbol, unknown>)[BYOK_POOL] === true) return;
-  throw new TypeError(
-    `${owner} needs a pool from createByokPool: a bare pg.Pool reads bigint columns as strings and lets an idle-client reset crash the process.`,
-  );
-}
 
 /**
  * Creates a pool wired with the int8 parser above.

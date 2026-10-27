@@ -1,6 +1,6 @@
 // ==== @byok-sdk/cloud-dataplane dist/cleanup.d.ts ====
 import { type Clock, type MailboxMessage, type TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from './pool';
 import { type R2ObjectMaintenance, type R2ObjectMaintenanceOptions } from './stores/r2-blobs';
 export interface ObjectStorageReconcileResult {
     readonly objectsDeleted: bigint;
@@ -37,13 +37,13 @@ export interface ObjectUsageRebuildResult {
     readonly updatedAt: string;
 }
 export interface PostgresCloudCleanupOptions {
-    readonly pool: Pool;
+    readonly pool: ByokPool;
     readonly clock: Clock;
     readonly objectStorage: R2ObjectMaintenance;
     readonly batchSize?: number;
 }
 export interface PostgresCloudMaintenanceOptions {
-    readonly pool: Pool;
+    readonly pool: ByokPool;
     readonly clock: Clock;
     readonly objectStorage: R2ObjectMaintenanceOptions;
     readonly batchSize?: number;
@@ -268,6 +268,11 @@ export interface ByokPoolOptions extends Omit<PoolConfig, 'types'> {
      */
     readonly onPoolError?: (err: Error, client?: PoolClient) => void;
 }
+declare const byokPoolBrand: unique symbol;
+/** A pool from {@link createByokPool}: the only pool the SDK's store compositions accept. */
+export type ByokPool = Pool & {
+    readonly [byokPoolBrand]: true;
+};
 /**
  * Creates a pool wired with the int8 parser above.
  *
@@ -289,7 +294,8 @@ export interface ByokPoolOptions extends Omit<PoolConfig, 'types'> {
  * so the reset is never invisible. It does not paper over live query errors —
  * those still reject their own `await`; this is only the idle-client path.
  */
-export declare function createByokPool(options: ByokPoolOptions): Pool;
+export declare function createByokPool(options: ByokPoolOptions): ByokPool;
+export {};
 // ==== @byok-sdk/cloud-dataplane dist/runtime.d.ts ====
 /**
  * The Worker-loadable online surface of `@byok-sdk/cloud-dataplane`.
@@ -318,7 +324,7 @@ export declare function createByokPool(options: ByokPoolOptions): Pool;
  * `dist/runtime.d.ts`.
  */
 export { createByokPool } from './pool';
-export type { ByokPoolOptions } from './pool';
+export type { ByokPool, ByokPoolOptions } from './pool';
 export { PostgresDeviceDirectory, PostgresInboundDedupStore, PostgresNonceStore, PostgresPairingCodeStore, PostgresProofReceiptRetentionAuthority, PostgresProofRequestReceiptStore, PostgresRequestReceiptStore, PostgresTaskAttemptStore, PostgresTaskCancellationStore, PostgresActivityStore, PostgresAgentMessageDraftStore, PostgresApprovalTimelineStore, PostgresDeviceAssertionReplayAuthority, PostgresAgentMemoryProjectionStore, createPostgresAgentMemoryProjectionStore, PostgresTaskRedactionStore, createPostgresTaskRedactionStore, PostgresE2eeMemberStore, createPostgresCloudStores, POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED, PostgresMailboxProtocolUnsupportedError, } from './stores/index';
 export type { PostgresCloudStoreOptions, PostgresCloudStores, PostgresObjectStorageOptions, PostgresAgentMemoryProjectionStoreOptions, PostgresTaskRedactionStoreOptions, } from './stores/index';
 export { DEFAULT_MAX_ATTEMPTS, DEFAULT_PRESIGN_TTL_SECONDS, DEFAULT_RETRY_DELAY_MS, MAX_PRESIGN_TTL_SECONDS, MIN_PRESIGN_TTL_SECONDS, ObjectStoreRequestError, R2_BLOB_ERROR_CODES, R2BlobStoreError, R2CloudBlobStore, R2ObjectMaintenanceStore, } from './stores/index';
@@ -372,9 +378,9 @@ export declare class PostgresAgentEgressStore implements AgentEgressStore {
  */
 import { type AgentMemoryProjectionCommitInput, type AgentMemoryProjectionEraseResult, type AgentMemoryProjectionReceipt, type AgentMemoryProjectionStore, type CloudCrypto } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 export interface PostgresAgentMemoryProjectionStoreOptions {
-    readonly pool: Pool;
+    readonly pool: ByokPool;
     readonly clock: Clock;
     /** The same Worker-safe crypto authority used by the hosting cloud composition. */
     readonly crypto: Pick<CloudCrypto, 'randomUuid' | 'sha256'>;
@@ -483,7 +489,7 @@ import { type R2ObjectMaintenanceOptions } from '../r2-blobs';
  * either a sleep or a flake.
  */
 import type { Clock, CoreStores } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../../pool';
 export { PostgresMailboxStore } from './mailbox';
 export { PostgresBoardStore } from './board';
 export { PostgresTruthStore } from './truth';
@@ -493,7 +499,7 @@ export { PostgresQuotaStore } from './quota';
 export { PostgresSkillPackStore } from './skill-pack';
 export interface PostgresCoreStoreOptions {
     readonly objectStorage: R2ObjectMaintenanceOptions;
-    readonly pool: Pool;
+    readonly pool: ByokPool;
     /**
      * The clock every TTL and timestamp in this composition reads. Injected, not
      * the database's `now()`: expiry has to be assertable under a test clock, and
@@ -943,7 +949,7 @@ export { PostgresAgentMessageDraftStore } from './agent-message-draft';
 import { type CloudStores } from '@byok-sdk/cloud';
 import type { CloudCrypto } from '@byok-sdk/cloud';
 import type { Clock } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 import { type R2BlobStoreOptions } from './r2-blobs';
 export { PostgresDeviceDirectory } from './devices';
 export { PostgresInboundDedupStore } from './dedup';
@@ -971,7 +977,7 @@ export type PostgresCloudStores = CloudStores;
 /** Everything the blob store needs that is not already a composition-wide input. */
 export type PostgresObjectStorageOptions = Omit<R2BlobStoreOptions, 'objects'>;
 export interface PostgresCloudStoreOptions {
-    readonly pool: Pool;
+    readonly pool: ByokPool;
     /**
      * The clock every TTL and timestamp in this composition reads. Injected, not
      * the database's own: expiry has to be assertable under a test clock, and a
@@ -1557,10 +1563,10 @@ export declare class PostgresTaskCancellationStore implements TaskCancellationSt
  */
 import type { Clock } from '@byok-sdk/core';
 import type { TaskRedactionStore, TaskRedactionStoreInput, TaskRedactionTaskResult } from '@byok-sdk/cloud';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 import type { PostgresObjectStorageOptions } from './index';
 export interface PostgresTaskRedactionStoreOptions {
-    readonly pool: Pool;
+    readonly pool: ByokPool;
     readonly clock: Clock;
     /** The bucket the blob composition writes to. */
     readonly objectStorage: PostgresObjectStorageOptions;
@@ -1573,7 +1579,7 @@ export declare class PostgresTaskRedactionStore implements TaskRedactionStore {
 export declare function createPostgresTaskRedactionStore(options: PostgresTaskRedactionStoreOptions): TaskRedactionStore;
 // ==== @byok-sdk/cloud-dataplane dist/tenant-erasure.d.ts ====
 import { type Clock, type TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from './pool';
 import { type R2BlobStoreOptions, type R2ObjectMaintenance } from './stores/r2-blobs';
 /** Every tenant-owned table as of 0017, in child-before-parent deletion order. */
 export declare const TENANT_ERASURE_TABLES: readonly ['object_reference', 'object_manifest', 'storage_reservation', 'storage_usage', 'storage_entitlement', 'gc_cursor', 'cleanup_job', 'tenant_retention_policy', 'skill_pack_file', 'skill_pack', 'approval_timeline_tail', 'activity_tail', 'attested_record', 'board_item', 'tenant_stream', 'outbox', 'agent_memory_projection_metering_receipt', 'agent_memory_projection_head', 'agent_memory_projection_erase_fence', 'agent_egress_event', 'device_request_receipts', 'proof_request_receipt', 'agent_message_draft', 'e2ee_scope_key_package', 'e2ee_scope_epoch', 'e2ee_scope_shred', 'e2ee_member_kem_floor', 'e2ee_member_chain_entry', 'e2ee_pairing_mac', 'e2ee_member_key', 'agent_message_admission', 'task', 'device_presence', 'device_assertion_replay', 'device_stream', 'inbound_dedup', 'auth_nonce', 'pairing_code', 'device'];
@@ -1614,7 +1620,7 @@ export interface TenantErasureConflict {
 export type TenantErasureResult = TenantErasureReadback | TenantErasureConflict;
 export interface PostgresTenantErasureOptions {
     /** A Node direct-DSN pool. The host owns pool lifetime and write quiescence. */
-    readonly pool: Pool;
+    readonly pool: ByokPool;
     readonly clock: Clock;
     readonly objectStorage: R2ObjectMaintenance;
     /** ListObjectsV2 and one SQL DELETE use this bound; valid range is 1..1000. */
@@ -1625,7 +1631,7 @@ export interface PostgresTenantErasureOptions {
     readonly leaseMs?: number;
 }
 export interface PostgresTenantErasureCompositionOptions {
-    readonly pool: Pool;
+    readonly pool: ByokPool;
     readonly clock: Clock;
     readonly objectStorage: Omit<R2BlobStoreOptions, 'objects'>;
     readonly batchSize?: number;
@@ -1652,9 +1658,9 @@ export declare function createPostgresTenantErasure(options: PostgresTenantErasu
 // ==== @byok-sdk/cloud-dataplane dist/truth-committer.d.ts ====
 import { type CloudCrypto, type TruthCommitInput, type TruthCommitResult, type TruthCommitter } from '@byok-sdk/cloud';
 import { type Clock, type TenantId, type TruthRecord } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from './pool';
 export interface PostgresTruthCommitterOptions {
-    readonly pool: Pool;
+    readonly pool: ByokPool;
     readonly clock: Clock;
     readonly crypto: Pick<CloudCrypto, 'sha256'>;
 }

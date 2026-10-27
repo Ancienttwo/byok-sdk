@@ -19,7 +19,8 @@ import { R2ObjectMaintenanceStore, type R2ObjectMaintenanceOptions } from '../r2
  */
 import type { Clock, CoreStores } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-import { assertByokPool, type ByokPool } from '../../pool';
+import type { ByokPool } from '../../pool';
+import { assertByokPool } from '../../pool-brand';
 import { PostgresPresenceStore } from './presence';
 import { PostgresBoardStore } from './board';
 import { PostgresMailboxStore } from './mailbox';

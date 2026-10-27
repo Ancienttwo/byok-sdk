@@ -19,7 +19,8 @@ import {
 } from '@byok-sdk/core';
 import { decodeEnvelope, encodeEnvelope, EnvelopeSchema, isServerToDaemonType } from '@byok-sdk/protocol';
 import type { Pool, PoolClient } from 'pg';
-import { assertByokPool, type ByokPool } from './pool';
+import type { ByokPool } from './pool';
+import { assertByokPool } from './pool-brand';
 import {
   R2ObjectMaintenanceStore,
   type R2ObjectMaintenance,
