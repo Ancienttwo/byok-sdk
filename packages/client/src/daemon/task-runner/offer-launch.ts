@@ -326,6 +326,11 @@ export interface OfferStartInput
  * Starts the runtime session. A start that failed or raced a cancel goes to
  * startup ownership; a started session goes to startup ownership and then to
  * {@link activateOffer} on the same synchronous path.
+ *
+ * The runtime may ask for approval while it starts or while activation is
+ * still writing. Such a request waits until this launch settles: by then the
+ * task is either active and the request is presented, or it never became
+ * active and the request is refused.
  */
 export async function startOfferRuntime(
   this: TaskRunner,
@@ -333,6 +338,26 @@ export async function startOfferRuntime(
   held: OfferHeld,
   input: OfferStartInput,
   activation: Omit<OfferActivationInput, 'session'>,
+): Promise<void> {
+  let settleLaunch!: () => void;
+  const launch: LaunchGate = { settled: false, promise: new Promise<void>((resolve) => { settleLaunch = resolve; }) };
+  try {
+    await startAndActivateRuntime.call(this, phase, held, input, activation, launch);
+  } finally {
+    launch.settled = true;
+    settleLaunch();
+  }
+}
+
+interface LaunchGate { settled: boolean; readonly promise: Promise<void> }
+
+async function startAndActivateRuntime(
+  this: TaskRunner,
+  phase: OfferPhaseContext,
+  held: OfferHeld,
+  input: OfferStartInput,
+  activation: Omit<OfferActivationInput, 'session'>,
+  launch: LaunchGate,
 ): Promise<void> {
   const { taskId } = phase;
   const {
@@ -374,7 +399,9 @@ export async function startOfferRuntime(
     ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
     ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
     ...(pick.descriptor.capabilities.approvalInteractive
-      ? { approvalChannel: { request: (summary: string) => this.requestApproval(taskId, summary) } }
+      ? { approvalChannel: { request: (summary: string) => launch.settled
+        ? this.requestApproval(taskId, summary)
+        : launch.promise.then(() => this.requestApproval(taskId, summary)) } }
       : {}),
   };
   let session: Session;

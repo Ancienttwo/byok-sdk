@@ -347,6 +347,45 @@ describe('TaskRunner.requestApproval', () => {
     expect(silent.startCalls[0]?.ctx).not.toHaveProperty('approvalChannel');
   });
 
+  it('an approval requested while start() is in flight waits for activation, then is presented and decided', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const { runner, approvalRegistry } = await makeRunner(adapter, sent);
+    const taskId = 'task-early-approval';
+    const release = adapter.blockStart();
+    const offering = offerAndActivate(runner, taskId);
+    await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
+
+    let settled = false;
+    const early = adapter.startCalls[0]!.ctx.approvalChannel!.request('Bash: early').then((outcome) => { settled = true; return outcome; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(settled).toBe(false);
+    expect(sent.some((e) => e.type === 'task.await_approval')).toBe(false);
+
+    release();
+    await offering;
+    await vi.waitFor(() => expect(sent.some((e) => e.type === 'task.await_approval' && e.task_id === taskId)).toBe(true));
+    approvalRegistry.resolve(approvalRegistry.list()[0]!.approvalId, 'approve');
+    await expect(early).resolves.toEqual({ approved: true, reason: undefined });
+  });
+
+  it('an approval requested while start() is in flight is refused when the task never becomes active', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const { runner, approvalRegistry } = await makeRunner(adapter, sent);
+    const taskId = 'task-early-approval-cancelled';
+    const release = adapter.blockStart();
+    const offering = offerAndActivate(runner, taskId);
+    await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
+
+    const early = adapter.startCalls[0]!.ctx.approvalChannel!.request('Bash: early');
+    await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'stop' }, { taskId, seq: 2 }));
+    release();
+    await offering;
+    await expect(early).resolves.toMatchObject({ approved: false });
+    expect(approvalRegistry.list()).toEqual([]);
+  });
+
   /**
    * A decision names one approval. A wire `task.approve` for A resolves A in
    * the registry, whose callback dispatches the queued B — B must stay

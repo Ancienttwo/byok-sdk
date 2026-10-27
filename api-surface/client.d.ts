@@ -13192,7 +13192,10 @@ interface RuntimeOperationStartBase {
     readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
     /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
     readonly mcpToolsetTools?: McpToolsetToolObservation;
-    /** Present only when the adapter declares `approvalInteractive: true`. */
+    /**
+     * Present only when the adapter declares `approvalInteractive: true`. A
+     * request made before `start()` returns waits until the task is active.
+     */
     readonly approvalChannel?: ApprovalChannel;
 }
 /** The ordinary start: a resolved instruction the runtime turns into its own first request. */
