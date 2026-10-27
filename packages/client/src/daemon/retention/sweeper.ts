@@ -67,6 +67,7 @@ export class RetentionSweeper {
       },
       remaining: () => this.options.config.maxDeletionsPerPass - deleted,
       removed: bytes => { deleted++; bytesReclaimed += bytes; },
+      reclaimed: bytes => { bytesReclaimed += bytes; },
       truncate: () => { truncated = true; },
     };
     const { registry, pressure } = this.options;

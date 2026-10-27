@@ -15,7 +15,7 @@ import { createRetentionRegistry } from '../daemon/retention/producers';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { StoragePressure } from '../daemon/retention/pressure';
 import { resolveStorageConfig, type StorageBudgetInput } from '../daemon/retention/config';
-import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, RetentionRegistry, type RetentionClassId, type ClassUsage, type ClassAuthority } from '../daemon/retention/registry';
+import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, RetentionRegistry, type SweepBudget, type RetentionClassId, type ClassUsage, type ClassAuthority } from '../daemon/retention/registry';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { createSupportBundle } from '../diagnostics/support-bundle';
 import { testScratchRoot, testExecutionScratch } from './fixtures/execution-scratch';
@@ -33,7 +33,7 @@ async function fixture(input:{max?:number;journal?:SqliteLocalTaskJournal;home?:
   ...(input.home?{home:input.home,handoffs:new AgentSessionHandoffStore()}:{}),...(input.usageScanLimit===undefined?{}:{usageScanLimit:input.usageScanLimit})});
  const pressure=new StoragePressure(config.budget),failures:string[]=[];
  const sweeper=new RetentionSweeper({registry,config,clock,pressure,freeBytes:async()=>input.freeBytes??1_000_000_000,jitter:(_s,ms)=>ms,onFailure:(_t,id,code)=>{failures.push(`${id}:${code}`);}});
- cleanups.push(()=>sweeper.stop());return {store,scratch,sweeper,registry,pressure,failures,advance:(ms:number)=>{time+=ms;}};
+ cleanups.push(()=>sweeper.stop());return {store,scratch,sweeper,registry,pressure,failures,config,clock,advance:(ms:number)=>{time+=ms;}};
 }
 const usage=(f:{sweeper:RetentionSweeper},id:RetentionClassId)=>f.sweeper.snapshot().classes.find(entry=>entry.classId===id)!;
 const resultName=(n:number)=>`result-${n.toString(16).padStart(64,'0')}.json`;
@@ -296,4 +296,62 @@ it('a daemon store with a long path claims and uses its short default scratch ro
  const scratch=new ScratchRoot(config.scratchRoot);await scratch.open(store);const s=await scratch.create();
  expect(s.runtimeDir.startsWith(config.scratchRoot+path.sep)).toBe(true);await s.release();
  await new ScratchRoot(resolveStorageConfig(store).scratchRoot).open(store);
+});
+
+it('reclaims a released runtime larger than the measurement limit across periodic passes', async () => {
+ const f=await fixture(),large=await f.scratch.create(),small=await f.scratch.create();
+ for(let start=0;start<16_384;start+=128) await Promise.all(Array.from({length:128},(_,offset)=>fs.writeFile(path.join(large.runtimeDir,`empty-${start+offset}`),'')));
+ await fs.writeFile(path.join(small.runtimeDir,'small'),'small');
+ await large.release();await small.release();f.advance(DAY+1);
+ const observations=[];
+ for(let pass=0;pass<5;pass++) {
+  await f.sweeper.runPass('periodic');
+  observations.push({pass,largeExists:await exists(large.runtimeDir),largeFiles:await fs.readdir(large.runtimeDir).then(x=>x.length,()=>0),smallExists:await exists(small.runtimeDir),errors:f.failures.filter(x=>x==='exec-runtime:sweep_failed').length});
+ }
+ expect(observations.some(item=>item.largeFiles<16_384)).toBe(true);
+ expect(f.failures).not.toContain('exec-runtime:sweep_failed');
+ expect(await exists(small.runtimeDir)).toBe(false);
+ expect(await exists(large.runtimeDir)).toBe(false);
+});
+
+it('accounts partial runtime bytes and resumes after registry restart without counting partial tokens',async()=>{
+ const f=await fixture(),s=await f.scratch.create();
+ for(let i=0;i<12;i++)await fs.writeFile(path.join(s.runtimeDir,`file-${i}`),'abc');
+ await s.release();f.advance(DAY);
+ const marker=path.join(path.dirname(s.runtimeDir),'released'),released=await fs.readFile(marker,'utf8');
+ let deleted=0,bytes=0,steps=0;
+ const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1-deleted,removed:n=>{deleted++;bytes+=n;},reclaimed:n=>{bytes+=n;},truncate:()=>{}};
+ await f.registry.sweep('exec-runtime',budget);
+ expect(deleted).toBe(0);expect(bytes).toBeGreaterThan(0);expect(bytes).toBeLessThan(36);
+ expect(await fs.readFile(marker,'utf8')).toBe(released);
+ await f.registry.close();
+ const restart=createRetentionRegistry({storeDir:f.store,scratch:f.scratch,config:f.config,clock:f.clock,journal:()=>undefined,identity:()=>identity,preparation:()=>undefined});
+ cleanups.push(()=>restart.close());
+ for(let pass=0;pass<20&&deleted===0;pass++){steps=0;await restart.sweep('exec-runtime',budget);}
+ expect(deleted).toBe(1);expect(bytes).toBe(36+Buffer.byteLength(released));expect(await exists(path.dirname(s.runtimeDir))).toBe(false);
+});
+it('rechecks release eligibility before resuming a partial runtime cleanup',async()=>{
+ const f=await fixture(),s=await f.scratch.create();
+ for(let i=0;i<12;i++)await fs.writeFile(path.join(s.runtimeDir,`file-${i}`),'abc');
+ await s.release();f.advance(DAY);
+ let steps=0;const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1,removed:()=>{},reclaimed:()=>{},truncate:()=>{}};
+ await f.registry.sweep('exec-runtime',budget);
+ const remaining=await fs.readdir(s.runtimeDir);
+ await fs.writeFile(path.join(path.dirname(s.runtimeDir),'released'),f.clock().toISOString());
+ steps=0;await f.registry.sweep('exec-runtime',budget);
+ expect(await fs.readdir(s.runtimeDir)).toEqual(remaining);
+});
+it('retains release eligibility when final token removal fails and accounts its retry once',async()=>{
+ const f=await fixture(),s=await f.scratch.create();await fs.writeFile(path.join(s.runtimeDir,'payload'),'abc');await s.release();f.advance(DAY);
+ const target=path.dirname(s.runtimeDir),marker=path.join(target,'released'),released=await fs.readFile(marker,'utf8');
+ const realRemove=fs.rm.bind(fs);let refused=false;
+ vi.spyOn(fs,'rm').mockImplementation(async(file,options)=>{
+  if(file===target&&!refused){refused=true;throw Object.assign(new Error('synthetic refusal'),{code:'EACCES'});}
+  return realRemove(file,options);
+ });
+ const first=await f.sweeper.runPass('periodic');expect(refused).toBe(true);expect(first.deleted).toBe(0);expect(first.bytesReclaimed).toBe(3);expect(first.failures).toBe(1);
+ expect(await fs.readFile(marker,'utf8')).toBe(released);
+ let deleted=0,bytes=0;
+ for(let pass=0;pass<3;pass++){const report=await f.sweeper.runPass('periodic');deleted+=report.deleted;bytes+=report.bytesReclaimed;}
+ expect(deleted).toBe(1);expect(bytes).toBe(Buffer.byteLength(released));expect(await exists(target)).toBe(false);
 });

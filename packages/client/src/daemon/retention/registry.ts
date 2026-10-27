@@ -37,6 +37,8 @@ export interface SweepBudget {
   available(): boolean;
   remaining(): number;
   removed(bytes: number): void;
+  /** Account partial runtime reclamation without counting an incomplete token as deleted. */
+  reclaimed(bytes: number): void;
   truncate(): void;
 }
 export interface ClassAuthority {
