@@ -299,6 +299,7 @@ it('a daemon store with a long path claims and uses its short default scratch ro
  await new ScratchRoot(resolveStorageConfig(store).scratchRoot).open(store);
 });
 
+// Cleanup removes one entry per budgeted inspection across 16k+ entries: about 11 s measured, so this test needs more than the default 10 s.
 it('reclaims a released runtime larger than the measurement limit across periodic passes', async () => {
  const f=await fixture(),large=await f.scratch.create(),small=await f.scratch.create();
  for(let start=0;start<16_384;start+=128) await Promise.all(Array.from({length:128},(_,offset)=>fs.writeFile(path.join(large.runtimeDir,`empty-${start+offset}`),'')));
@@ -313,7 +314,7 @@ it('reclaims a released runtime larger than the measurement limit across periodi
  expect(f.failures).not.toContain('exec-runtime:sweep_failed');
  expect(await exists(small.runtimeDir)).toBe(false);
  expect(await exists(large.runtimeDir)).toBe(false);
-});
+}, 30_000);
 
 it('accounts partial runtime bytes and resumes after registry restart without counting partial tokens',async()=>{
  const f=await fixture(),s=await f.scratch.create();
