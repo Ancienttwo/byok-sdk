@@ -1,7 +1,7 @@
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,6 +15,8 @@ import { OperationalHealthTracker } from '../daemon/operational-health';
 import { connectControlClient, isControlDaemonGone } from '../bin/control-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { RuntimeDisposalFailure } from '../runtime-failure';
+import { resolveStorageConfig } from '../daemon/retention/config';
+import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { TestServer } from './fixtures/test-server';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -427,5 +429,72 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     expect(samples.length).toBeGreaterThan(0);
     expect(await fileGone(controlTokenPath(built.storeDir))).toBe(true);
     expect(await fileGone(controlSocketPath(built.storeDir))).toBe(true);
+  }, 20000);
+});
+
+/** A stub whose prepared operation takes an execution scratch, so a run leaves `<scratch root>/exec`. */
+class LaunchingAdapter extends StubRuntimeAdapter {
+  override async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const base = await super.prepare(input);
+    if (base.kind !== 'prepared') return base;
+    return {
+      ...base,
+      operation: {
+        ...base.operation,
+        resolveRuntimeLaunch: async ({ cwd, scratch }) => ({
+          scratch, kind: 'pi-rpc', command: 'unused', fixedArgs: [], cwd, env: {}, sessionCwd: cwd,
+          credentialSource: 'pi-auth-store', release: async () => {},
+        }),
+      },
+    };
+  }
+}
+
+// #1030: 8.3 short names and letter case are Windows name aliases, not links.
+describe('daemon restart through a Windows name alias of the store (#1030)', () => {
+  let server: TestServer;
+  let daemon: Daemon | undefined;
+
+  beforeEach(async () => {
+    server = await TestServer.start();
+  });
+
+  afterEach(async () => {
+    await daemon?.stop().catch(() => {});
+    daemon = undefined;
+    await server.close();
+  });
+
+  it.runIf(process.platform === 'win32' || process.platform === 'darwin')('restarts and sweeps the default scratch root when the store is configured through a name alias', async () => {
+    const canonical = realpathSync.native(await tmpDir('byok-alias-store-'));
+    const storeDir = path.join(path.dirname(canonical), path.basename(canonical).toUpperCase());
+    expect(realpathSync.native(storeDir)).toBe(canonical);
+    expect(storeDir).not.toBe(canonical);
+    // No storage.scratchRoot: the default root derives from the store.
+    const config: DaemonConfig = {
+      agentHome: testAgentHomeConfig(), localAgentRelease: { version: '0.0.0-test' },
+      productName: 'Acme', productId: 'acme-store-alias', serverUrl: server.url, storeDir,
+    };
+    const offer = (taskId: string) => server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), instruction: taskId }, { taskId, seq: server.nextSeq() }));
+
+    const first = new LaunchingAdapter('pi');
+    daemon = createDaemonWithAdapters(config, [first]);
+    await daemon.pair('pairing-code');
+    await daemon.start();
+    offer('alias-first');
+    await waitFor(() => expect(first.sessions).toHaveLength(1));
+    first.sessions[0]!.emit({ type: 'turn_end' });
+    await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'alias-first');
+    await daemon.stop();
+    expect(await fs.readdir(path.join(canonical, 'tmp', 'exec'))).toHaveLength(1);
+
+    // The startup exec-sdk sweep is fatal, so a resolved start proves it read the existing exec root.
+    const second = new LaunchingAdapter('pi');
+    daemon = createDaemonWithAdapters(config, [second]);
+    await daemon.start();
+    offer('alias-second');
+    await waitFor(() => expect(second.sessions).toHaveLength(1));
+    second.sessions[0]!.emit({ type: 'turn_end' });
+    await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'alias-second');
   }, 20000);
 });
