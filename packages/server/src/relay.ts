@@ -29,7 +29,13 @@ const TRUNCATION_MARKER: ServerTaskEvent = { kind: 'error', reason: 'events_trun
  */
 export type TaskFeedPhase = 'dispatching' | 'attached-dispatching' | 'attached' | 'dispatched';
 
-/** One task's delivery plumbing. */
+/**
+ * One task's delivery plumbing. `current` holds the entries where the task's
+ * present state began in this feed: its latest `state` entry, preceded by the
+ * pending `await_approval` request while it awaits approval. They are kept
+ * apart from the bounded queue, so a reader starting there gets them even after
+ * drop-oldest discarded them from the queue.
+ */
 export interface TaskFeed {
   /** Random per feed, so a cursor from a previous instance or a reclaimed feed is recognizably unknown. */
   readonly feedId: string;
@@ -38,6 +44,7 @@ export interface TaskFeed {
   settleTerminal: () => void;
   terminalSettled: boolean;
   phase: TaskFeedPhase;
+  current: ReadonlyArray<QueueEntry<ServerTaskEvent>>;
   readonly early: Array<() => void>;
   claimedRuntime?: RuntimeId;
   claimedHarnessId?: string;
@@ -81,7 +88,10 @@ export interface TaskEventRelayOptions {
  * current feed and never creates one; `stopped` turns true at {@link stop}.
  * `attach` starts delivering a live task this instance did not dispatch (after
  * a restart) from now on, without reconstructing earlier events; only a host
- * read creates such a feed. `detach` drops an `attached` feed that turned out
+ * read creates such a feed. `seed` gives an attached feed that no transition
+ * has reached yet its first `state` entry, read back from the durable stores;
+ * once a transition arrived, the feed already says more than that would.
+ * `detach` drops an `attached` feed that turned out
  * to have nothing to deliver, and never one a dispatch owns. `entries` reads a feed after a cursor, or from the start of what is
  * retained, and refuses a cursor that names no position of the feed with
  * `cursor_unknown`. Members carry no block docs here because comments on class
@@ -166,6 +176,12 @@ export class TaskEventRelay implements ByokCloudObserver {
 
   attach(taskId: string): TaskFeed | undefined {
     return this.#stopped ? undefined : this.#open(taskId);
+  }
+
+  seed(feed: TaskFeed, event: ServerTaskEvent): void {
+    if (feed.current.length > 0) return;
+    const entry = feed.queue.push(event);
+    if (entry !== undefined) feed.current = [entry];
   }
 
   detach(taskId: string, feed: TaskFeed): void {
@@ -255,10 +271,12 @@ export class TaskEventRelay implements ByokCloudObserver {
       case 'task.artifact':
         state.queue.push({ kind: 'artifact', artifact: envelope.payload });
         return;
-      case 'task.await_approval':
-        state.queue.push({ kind: 'await_approval', summary: envelope.payload.summary, approvalId: envelope.payload.approvalId });
+      case 'task.await_approval': {
+        const request = state.queue.push({ kind: 'await_approval', summary: envelope.payload.summary, approvalId: envelope.payload.approvalId });
         this.#transition(state, taskId, 'AwaitApproval', at);
+        if (request !== undefined) state.current = [request, ...state.current];
         return;
+      }
       case 'task.approval_resolved':
         this.emitServerEvent({
           kind: 'task.approval_resolved',
@@ -307,7 +325,8 @@ export class TaskEventRelay implements ByokCloudObserver {
     // store: a later stale terminal changed no durable fact, so announcing it
     // would make the feed disagree with the read model.
     if (state.terminalSettled) return;
-    state.queue.push({ kind: 'state', state: next, at });
+    const entry = state.queue.push({ kind: 'state', state: next, at });
+    if (entry !== undefined) state.current = [entry];
     this.emitServerEvent({
       kind: 'task.state',
       taskId,
@@ -363,6 +382,7 @@ export class TaskEventRelay implements ByokCloudObserver {
       settleTerminal,
       terminalSettled: false,
       phase,
+      current: [],
       early: [],
     };
     this.#tasks.set(taskId, created);

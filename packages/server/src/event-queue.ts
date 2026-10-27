@@ -68,11 +68,13 @@ export class AsyncEventQueue<T> {
     return Number.isSafeInteger(sequence) && sequence >= 0 && sequence < this.nextSequence;
   }
 
-  push(value: T): void {
-    if (this.closed) return;
-    this.buffer.push({ sequence: this.nextSequence++, value });
+  push(value: T): QueueEntry<T> | undefined {
+    if (this.closed) return undefined;
+    const entry = { sequence: this.nextSequence++, value };
+    this.buffer.push(entry);
     this.enforceBound();
     this.wake();
+    return entry;
   }
 
   close(): void {

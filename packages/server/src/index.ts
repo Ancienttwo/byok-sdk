@@ -245,18 +245,28 @@ export interface ByokServer {
     reject(taskId: string, reason?: string, opts?: { approvalId?: string }): Promise<void>;
     /**
      * Follow one task's notifications (state, Agent progress, artifacts,
-     * approval requests) in this instance's arrival order, from the entry after
-     * `after`, or from the start of what is retained. Ends after the terminal
-     * state, when `signal` aborts, or when the server closes. A notification
-     * stream, not a record: read task facts with {@link tasks.get}.
+     * approval requests) in this instance's arrival order. It starts after the
+     * entry `after` names; with `from: 'state'`, at the entries where the
+     * task's current state began (its latest `state` entry, preceded by the
+     * pending `await_approval` request while it awaits approval), which are
+     * kept even after the buffer dropped them; otherwise at the start of what
+     * is retained. An `events_truncated` entry stands for entries dropped
+     * before the reader reached them. Ends after the terminal state, when
+     * `signal` aborts, or when the server closes. A notification stream, not a
+     * record: read task facts with {@link tasks.get}.
      *
-     * The first `next()` throws, before any entry, `ByokCloudError`
-     * `task_not_found` for an unknown task, or {@link TaskEventsUnavailableError}
-     * when `after` is unknown to this instance's feed or the terminal task's
-     * feed is no longer retained. A live task this instance did not dispatch
-     * (after a restart) is followed from now on, without earlier events.
+     * A live task this instance did not dispatch (after a restart) gets a feed
+     * whose first entry is its current state read back from the stores, and
+     * no earlier events. That state can appear twice when the read saw a
+     * commit the feed had not received yet.
+     *
+     * The first `next()` throws, before any entry: a `TypeError` when both
+     * `after` and `from` are given, `ByokCloudError` `task_not_found` for an
+     * unknown task, or {@link TaskEventsUnavailableError} when `after` is
+     * unknown to this instance's feed or the terminal task's feed is no longer
+     * retained.
      */
-    events(taskId: string, options?: { after?: string; signal?: AbortSignal }): AsyncIterable<TaskEventEntry>;
+    events(taskId: string, options?: { after?: string; from?: 'state'; signal?: AbortSignal }): AsyncIterable<TaskEventEntry>;
     /**
      * One bounded page, keyset-paged by task id. Paged rather than "all of
      * them" because the underlying store is: an unbounded `list()` would have
@@ -459,9 +469,11 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
    * refused steer reports the same `TaskState` the snapshot does, because it is
    * literally the snapshot's, read at the moment of the refusal.
    */
-  async function readTaskState(taskId: string): Promise<TaskState | undefined> {
+  async function readTaskState(taskId: string): Promise<{ state: TaskState; at: string } | undefined> {
     const attempt = await cloud.readTaskAttempt(tenant, taskId);
-    return attempt === undefined ? undefined : (await projectTask(attempt)).state;
+    if (attempt === undefined) return undefined;
+    const { state, updatedAt } = await projectTask(attempt);
+    return { state, at: updatedAt };
   }
 
   async function deviceCapabilities(deviceId: string): Promise<readonly string[] | undefined> {

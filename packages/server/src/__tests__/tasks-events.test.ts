@@ -76,6 +76,13 @@ function progress(seq: number, ...texts: string[]) {
   return { seq, events: texts.map((text) => ({ type: 'progress', text })) };
 }
 
+/** A `readState` answer: the projected state and its `updatedAt`. */
+function stateRead(state: TaskState) {
+  return { state, at: '2026-10-27T00:00:00.000Z' };
+}
+
+type StateRead = ReturnType<typeof stateRead> | undefined;
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((settle) => { resolve = settle; });
@@ -273,6 +280,47 @@ describe('ByokServer.tasks.events', () => {
     }
   });
 
+  it('starts from the entry where the current state began with from: state, keeping its cursor', async () => {
+    const { byok: instance, daemon } = await start();
+    await submit(instance, daemon, 'from-state');
+    await claimStarted(daemon, 'from-state');
+    await send(daemon, createEnvelope('task.progress', progress(1, 'earlier line'), { taskId: 'from-state' }));
+    const whole = await take(instance.tasks.events('from-state')[Symbol.asyncIterator](), 4);
+    const reader = instance.tasks.events('from-state', { from: 'state' })[Symbol.asyncIterator]();
+    expect(await take(reader, 2)).toEqual([whole[2], whole[3]]);
+    expect(whole[2]!.event).toMatchObject({ kind: 'state', state: 'Running' });
+    await send(daemon, createEnvelope('task.await_approval', { summary: 'ok to write?', approvalId: 'appr-from-state' }, { taskId: 'from-state' }));
+    const waiting = await take(reader, 2);
+    expect(waiting.map((entry) => entry.event)).toMatchObject([
+      { kind: 'await_approval', summary: 'ok to write?', approvalId: 'appr-from-state' }, { kind: 'state', state: 'AwaitApproval' },
+    ]);
+    await reader.return!();
+    // While it awaits approval the start is the request, then its state.
+    expect(await take(instance.tasks.events('from-state', { from: 'state' })[Symbol.asyncIterator](), 2)).toEqual(waiting);
+  });
+
+  it('keeps the from: state start past drop-oldest, then marks the gap before what is retained', async () => {
+    const { byok: instance, daemon } = await start({ taskEventBufferLimit: 3 });
+    await submit(instance, daemon, 'long-running');
+    await claimStarted(daemon, 'long-running');
+    await send(daemon, createEnvelope('task.await_approval', { summary: 'ok?', approvalId: 'appr-long' }, { taskId: 'long-running' }));
+    const pinned = await take(instance.tasks.events('long-running', { from: 'state' })[Symbol.asyncIterator](), 2);
+    await send(daemon, createEnvelope('task.progress', progress(1, 'a', 'b', 'c', 'd'), { taskId: 'long-running' }));
+    const reader = instance.tasks.events('long-running', { from: 'state' })[Symbol.asyncIterator]();
+    const read = await take(reader, 6);
+    expect(read.slice(0, 2)).toEqual(pinned);
+    expect(read.slice(2).map((entry) => entry.event)).toMatchObject([
+      { kind: 'error', reason: 'events_truncated' }, { event: { text: 'b' } }, { event: { text: 'c' } }, { event: { text: 'd' } },
+    ]);
+    await reader.return!();
+  });
+
+  it('refuses after and from together before any entry', async () => {
+    const { byok: instance, daemon } = await start();
+    await submit(instance, daemon, 'both');
+    await expect(first(instance.tasks.events('both', { after: 'x.0', from: 'state' }))).rejects.toThrow(TypeError);
+  });
+
   it('gives TaskHandle.events() the same events as tasks.events', async () => {
     const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: 150 });
     byok = instance;
@@ -340,19 +388,17 @@ describe('ByokServer.tasks.events across a SQLite restart', () => {
       await expect(first(instance.tasks.events('cancelled'))).rejects.toMatchObject(unavailable('cancelled', 'feed_expired'));
 
       const reader = instance.tasks.events('survivor')[Symbol.asyncIterator]();
-      const firstEntry = reader.next();
-      // A projection read issued after the reader's own read settles after it,
-      // so the reader has attached its feed before the next envelope commits.
-      await instance.tasks.get('survivor');
+      // The attached feed starts with the state the read found, so once it
+      // arrives the feed listens for the next envelope.
+      expect((await reader.next()).value?.event).toEqual({ kind: 'state', state: 'Running', at: (await instance.tasks.get('survivor'))!.updatedAt });
       // Enough entries that the new feed has handed out the old cursor's
       // position too: only the feed id tells the two apart.
       await post(createEnvelope('task.progress', progress(2, 'a', 'b', 'c', 'd', 'e', 'f'), { taskId: 'survivor' }));
-      expect((await firstEntry).value?.event).toEqual({ kind: 'agent', event: { type: 'progress', text: 'a' } });
-      const rest = await take(reader, 5);
+      const rest = await take(reader, 6);
       expect(rest.map((entry) => entry.event)).toMatchObject([
-        { event: { text: 'b' } }, { event: { text: 'c' } }, { event: { text: 'd' } }, { event: { text: 'e' } }, { event: { text: 'f' } },
+        { event: { text: 'a' } }, { event: { text: 'b' } }, { event: { text: 'c' } }, { event: { text: 'd' } }, { event: { text: 'e' } }, { event: { text: 'f' } },
       ]);
-      expect(position(rest[4]!)).toBeGreaterThan(Number(oldCursor.slice(oldCursor.lastIndexOf('.') + 1)));
+      expect(position(rest[5]!)).toBeGreaterThan(Number(oldCursor.slice(oldCursor.lastIndexOf('.') + 1)));
       await expect(first(instance.tasks.events('survivor', { after: oldCursor })))
         .rejects.toMatchObject(unavailable('survivor', 'cursor_unknown'));
 
@@ -400,12 +446,11 @@ describe('ByokServer.tasks.events after a SQLite restart, when the task is submi
       http = await startServer(instance);
 
       const reader = instance.tasks.events('resubmitted')[Symbol.asyncIterator]();
-      const firstEntry = reader.next();
-      await instance.tasks.get('resubmitted');
+      expect((await reader.next()).value?.event).toMatchObject({ kind: 'state', state: 'Running' });
       await expect(instance.executions.submit(input)).rejects.toMatchObject({ code: 'agent_task_already_exists' });
       await post(createEnvelope('task.progress', progress(1, 'after the refused resubmit'), { taskId: 'resubmitted' }));
       // No `Offered` with the original timestamp lands after the live state.
-      expect((await firstEntry).value?.event).toEqual({ kind: 'agent', event: { type: 'progress', text: 'after the refused resubmit' } });
+      expect((await reader.next()).value?.event).toEqual({ kind: 'agent', event: { type: 'progress', text: 'after the refused resubmit' } });
       await reader.return!();
     } finally {
       await stopServer(http.server);
@@ -472,18 +517,18 @@ describe('readTaskEvents against the relay', () => {
     expect(relay.feed('in-flight')).toBe(provisional);
 
     relay.noteDispatched('in-flight', '2026-10-27T00:00:00.000Z');
-    const reader = readTaskEvents({ relay, readState: async () => 'Offered' }, 'in-flight')[Symbol.asyncIterator]();
+    const reader = readTaskEvents({ relay, readState: async () => stateRead('Offered') }, 'in-flight')[Symbol.asyncIterator]();
     expect((await reader.next()).value?.event).toEqual({ kind: 'state', state: 'Offered', at: '2026-10-27T00:00:00.000Z' });
     relay.stop();
   });
 
   it('attaches nothing when the read is stopped during its first store read', async () => {
     const relay = new TaskEventRelay({});
-    const read = deferred<TaskState | undefined>();
+    const read = deferred<StateRead>();
     const abort = new AbortController();
     const pending = first(readTaskEvents({ relay, readState: () => read.promise }, 'stopped-early', { signal: abort.signal }));
     abort.abort();
-    read.resolve('Running');
+    read.resolve(stateRead('Running'));
     expect(await pending).toEqual({ value: undefined, done: true });
     expect(relay.feed('stopped-early')).toBeUndefined();
     relay.stop();
@@ -491,17 +536,35 @@ describe('readTaskEvents against the relay', () => {
 
   it('drops the feed it attached when the task turns terminal before the feed listened', async () => {
     const relay = new TaskEventRelay({});
-    const reads: Array<TaskState | undefined> = ['Running', 'Complete'];
+    const reads: StateRead[] = [stateRead('Running'), stateRead('Complete')];
     const refused = await first(readTaskEvents({ relay, readState: async () => reads.shift() }, 'restarted')).catch((error: unknown) => error);
     expect(refused).toMatchObject(unavailable('restarted', 'feed_expired'));
     expect(relay.feed('restarted')).toBeUndefined();
     relay.stop();
   });
 
+  it('repeats a state at most once when the read sees a commit the relay has not delivered yet', async () => {
+    // The kernel notifies the relay only after the write's own await returns
+    // (`handleInboundEnvelope`), so a read can see a state before its entry.
+    const relay = new TaskEventRelay({});
+    const reader = readTaskEvents(
+      { relay, readState: async () => stateRead('Running') }, 'gap', { from: 'state' },
+    )[Symbol.asyncIterator]();
+    const seeded = reader.next();
+    await vi.waitFor(() => { expect(relay.feed('gap')?.current).toHaveLength(1); });
+    relay.onInboundCommitted({
+      tenantId: tenantId(PRODUCT_ID), deviceId: 'device-a', outcome: 'accepted', envelope: createEnvelope('task.started', {}, { taskId: 'gap' }),
+    });
+    expect((await seeded).value?.event).toMatchObject({ kind: 'state', state: 'Running' });
+    expect((await reader.next()).value?.event).toMatchObject({ kind: 'state', state: 'Running' });
+    await reader.return!();
+    relay.stop();
+  });
+
   it('keeps a feed a host read attached when a dispatch of the same task is refused', async () => {
     const relay = new TaskEventRelay({});
-    const read = deferred<TaskState | undefined>();
-    const reads = [Promise.resolve<TaskState | undefined>('Running'), read.promise];
+    const read = deferred<StateRead>();
+    const reads = [Promise.resolve<StateRead>(stateRead('Running')), read.promise];
     const reader = readTaskEvents({ relay, readState: () => reads.shift()! }, 'existing')[Symbol.asyncIterator]();
     const first = reader.next();
     await vi.waitFor(() => { expect(relay.feed('existing')).toBeDefined(); });
@@ -509,7 +572,7 @@ describe('readTaskEvents against the relay', () => {
     relay.provision('existing');
     relay.abort('existing');
     expect(relay.feed('existing')).toBe(attached);
-    read.resolve('Running');
+    read.resolve(stateRead('Running'));
     relay.noteDispatched('existing', '2026-10-27T00:00:00.000Z');
     expect((await first).value?.event).toEqual({ kind: 'state', state: 'Offered', at: '2026-10-27T00:00:00.000Z' });
     relay.stop();

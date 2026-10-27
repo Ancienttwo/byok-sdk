@@ -99,10 +99,11 @@ export interface TaskHandleDeps {
   readonly cloud: ByokCloud;
   readonly relay: TaskEventRelay;
   /**
-   * The task's current `TaskSnapshot.state`, or `undefined` when the attempt is
-   * gone. The snapshot projection itself — never a second derivation.
+   * The task's current `TaskSnapshot.state` and `updatedAt`, or `undefined`
+   * when the attempt is gone. The snapshot projection itself — never a second
+   * derivation.
    */
-  readonly readState: (taskId: string) => Promise<TaskState | undefined>;
+  readonly readState: (taskId: string) => Promise<{ readonly state: TaskState; readonly at: string } | undefined>;
   /** The read-back this handle's `result()` answers with. */
   readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
 }
@@ -122,16 +123,22 @@ type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState'>;
  * `return()` aborts the read's own signal first, which wakes the queue.
  * `project` shapes each entry: `TaskHandle.events()` yields the event alone.
  */
+export interface TaskEventReadOptions {
+  readonly after?: string;
+  readonly from?: 'state';
+  readonly signal?: AbortSignal;
+}
+
 export function readTaskEvents<T = TaskEventEntry>(
   deps: EventDeps,
   taskId: string,
-  options: { after?: string; signal?: AbortSignal } = {},
+  options: TaskEventReadOptions = {},
   project: (entry: TaskEventEntry) => T = (entry) => entry as T,
 ): AsyncIterable<T> {
   return {
     [Symbol.asyncIterator](): AsyncIterator<T> {
       const stop = new AbortController();
-      const entries = followTaskEvents(deps, taskId, options.after, AbortSignal.any([stop.signal, options.signal ?? stop.signal]));
+      const entries = followTaskEvents(deps, taskId, options, AbortSignal.any([stop.signal, options.signal ?? stop.signal]));
       return {
         async next(): Promise<IteratorResult<T>> {
           const next = await entries.next();
@@ -156,40 +163,47 @@ export function readTaskEvents<T = TaskEventEntry>(
 async function* followTaskEvents(
   deps: EventDeps,
   taskId: string,
-  after: string | undefined,
+  { after, from }: TaskEventReadOptions,
   signal: AbortSignal,
 ): AsyncGenerator<TaskEventEntry, void, undefined> {
+  if (after !== undefined && from !== undefined) throw new TypeError('tasks.events takes after or from, not both');
   const { relay, readState } = deps;
   if (relay.stopped || signal.aborted) return;
   let feed = relay.feed(taskId);
-  let state = await readState(taskId);
+  let read = await readState(taskId);
   if (feed === undefined) {
     // Refuse before attaching, so a read of a reclaimed or unknown task never
     // recreates relay state for it.
-    if (state === undefined) throw taskNotFound(taskId);
-    if (TERMINAL_STATES.has(state)) throw new TaskEventsUnavailableError(taskId, 'feed_expired');
+    if (read === undefined) throw taskNotFound(taskId);
+    if (TERMINAL_STATES.has(read.state)) throw new TaskEventsUnavailableError(taskId, 'feed_expired');
     // A reader stopped during that read must not leave a feed behind.
     feed = signal.aborted ? undefined : relay.attach(taskId);
     if (feed === undefined) return;
     // A terminal committed between the read and the attach never reached the
     // new feed, which would then never end: read again now that it listens.
-    state = await readState(taskId);
+    // A live task's feed starts with what this read found.
+    read = await readState(taskId);
+    if (read !== undefined && !TERMINAL_STATES.has(read.state)) relay.seed(feed, { kind: 'state', state: read.state, at: read.at });
   }
-  if (state === undefined) {
+  if (read === undefined) {
     relay.detach(taskId, feed);
     throw taskNotFound(taskId);
   }
-  if (TERMINAL_STATES.has(state) && feed.phase !== 'dispatched' && !feed.terminalSettled) {
+  if (TERMINAL_STATES.has(read.state) && feed.phase !== 'dispatched' && !feed.terminalSettled) {
     relay.detach(taskId, feed);
     throw new TaskEventsUnavailableError(taskId, 'feed_expired');
   }
-  const entries = relay.entries(taskId, feed, after)[Symbol.asyncIterator]();
+  // `from: 'state'` starts with the entries where the present state began,
+  // kept by the relay even when the queue dropped them, then reads on after them.
+  const start = from === 'state' ? feed.current : [];
+  const entries = (from === 'state' ? feed.queue.entries(start[start.length - 1]?.sequence) : relay.entries(taskId, feed, after))[Symbol.asyncIterator]();
   // The queue's own return() also releases a pending next(), which this
   // generator's return() could not do while it is suspended in one.
   const stop = () => { void entries.return!(); };
   signal.addEventListener('abort', stop, { once: true });
   try {
     if (signal.aborted) return;
+    for (const entry of start) yield { cursor: `${feed.feedId}.${entry.sequence}`, event: entry.value };
     for (let next = await entries.next(); !next.done; next = await entries.next()) {
       yield { cursor: `${feed.feedId}.${next.value.sequence}`, event: next.value.value };
     }
@@ -273,7 +287,7 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
         await deps.cloud.steerTask(deps.tenant, taskId, { text });
       } catch (caught) {
         if (!(caught instanceof KernelSteerRejectedError)) throw caught;
-        const state = await deps.readState(taskId);
+        const state = (await deps.readState(taskId))?.state;
         // A refused steer is a non-event, so nothing it did could have removed
         // the attempt between the gate and this read. If the attempt is gone
         // anyway, the store lost it: report the kernel's own refusal rather
