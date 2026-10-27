@@ -1,22 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { EnvelopeSchema, MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType } from '../index';
+import { DAEMON_TO_SERVER_TYPES, EnvelopeSchema, MESSAGE_TYPES, SERVER_TO_DAEMON_TYPES } from '../index';
 
-describe('protocol task-opening offer family', () => {
-  it('classifies every declared offer and no other message, including future registry additions', () => {
-    const declared = MESSAGE_TYPES.filter((type) => type.startsWith('task.offer_'));
-    expect(TASK_OFFER_TYPES).toEqual(declared);
-    expect(TASK_OFFER_TYPES).toContain('task.offer_for_agent_with_egress');
-    expect(TASK_OFFER_TYPES).toContain('task.offer_for_agent_with_egress_fresh');
-    for (const type of MESSAGE_TYPES) expect(isTaskOfferType(type)).toBe(declared.includes(type));
-    const envelopeTypes = EnvelopeSchema.options.map((schema) => schema.shape.type.value);
-    expect(TASK_OFFER_TYPES.every((type) => envelopeTypes.includes(type))).toBe(true);
+/** The wire v4 message types (#925 stage 2 design, Q1), grouped by direction. */
+const V4_TYPES = {
+  hello: ['conn.hello'],
+  serverToDaemon: [
+    'task.offer', 'agent.egress.ack', 'agent.message.disposition', 'agent.content.read', 'agent.home.projection',
+    'agent.input.preparation', 'provider.provisioning.available', 'agent.memory.intent.available', 'task.approve',
+    'task.reject', 'task.cancel', 'task.steer', 'e2ee.key_package.available',
+  ],
+  daemonToServer: [
+    'task.claim', 'task.started', 'task.decline', 'task.progress', 'task.artifact', 'task.await_approval',
+    'task.complete', 'task.fail', 'task.cancelled', 'task.approval_resolved', 'agent.egress.reliable',
+    'agent.message.draft', 'agent.message.publish', 'agent.content.receipt',
+  ],
+};
+
+describe('wire v4 message types', () => {
+  it('declares exactly the 28 v4 types, each with one envelope branch', () => {
+    const all = [...V4_TYPES.hello, ...V4_TYPES.serverToDaemon, ...V4_TYPES.daemonToServer];
+    expect(all).toHaveLength(28);
+    expect([...MESSAGE_TYPES].sort()).toEqual([...all].sort());
+    expect(EnvelopeSchema.options.map((schema) => schema.shape.type.value).sort()).toEqual([...all].sort());
+    expect([...SERVER_TO_DAEMON_TYPES]).toEqual(V4_TYPES.serverToDaemon);
+    expect([...DAEMON_TO_SERVER_TYPES]).toEqual(V4_TYPES.daemonToServer);
   });
 
-  it('rejects unknown lookalikes and inherited object keys; the exported list is immutable', () => {
-    for (const type of ['task.offer', 'task.offer_unknown', 'task.offer_for_agent_with_egress_fresher', 'toString', '__proto__', 'constructor', '']) {
-      expect(isTaskOfferType(type)).toBe(false);
-    }
-    expect(Object.isFrozen(TASK_OFFER_TYPES)).toBe(true);
-    expect(isTaskOfferType('task.offer_for_agent')).toBe(true);
+  it('has one task-opening offer, and no sealed twin type', () => {
+    expect(MESSAGE_TYPES.filter((type) => type.startsWith('task.offer'))).toEqual(['task.offer']);
+    expect(MESSAGE_TYPES.filter((type) => type.endsWith('_sealed'))).toEqual([]);
   });
 });
