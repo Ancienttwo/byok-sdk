@@ -9,22 +9,24 @@ import { MESSAGE_TYPES, type MessageType } from './messages';
 
 /**
  * Every wire v3 message type and its v4 type. `null` marks a v3 type that v4
- * does not carry: a stored body of that type cannot be migrated.
+ * does not carry: a stored body of that type cannot be migrated. The Agent
+ * offers become `task.offer`, and each sealed type becomes its plaintext type,
+ * whose sealed branch its payload takes unchanged.
  */
 export const WIRE_V3_TO_V4_TYPES: Readonly<Record<string, MessageType | null>> = Object.freeze({
   'conn.hello': 'conn.hello',
   'conn.ack': null,
   'task.offer': null,
   'task.offer_with_toolsets': null,
-  'task.offer_for_agent': 'task.offer_for_agent',
-  'task.offer_for_agent_with_egress': 'task.offer_for_agent_with_egress',
-  'task.offer_for_agent_with_egress_fresh': 'task.offer_for_agent_with_egress_fresh',
-  'task.offer_prepared': 'task.offer_prepared',
+  'task.offer_for_agent': 'task.offer',
+  'task.offer_for_agent_with_egress': 'task.offer',
+  'task.offer_for_agent_with_egress_fresh': 'task.offer',
+  'task.offer_prepared': 'task.offer',
   'task.offer_sealed': null,
   'task.offer_with_toolsets_sealed': null,
-  'task.offer_for_agent_sealed': 'task.offer_for_agent_sealed',
-  'task.offer_for_agent_with_egress_sealed': 'task.offer_for_agent_with_egress_sealed',
-  'task.offer_for_agent_with_egress_fresh_sealed': 'task.offer_for_agent_with_egress_fresh_sealed',
+  'task.offer_for_agent_sealed': 'task.offer',
+  'task.offer_for_agent_with_egress_sealed': 'task.offer',
+  'task.offer_for_agent_with_egress_fresh_sealed': 'task.offer',
   'agent.egress.reliable': 'agent.egress.reliable',
   'agent.egress.ack': 'agent.egress.ack',
   'agent.message.draft': 'agent.message.draft',
@@ -50,14 +52,14 @@ export const WIRE_V3_TO_V4_TYPES: Readonly<Record<string, MessageType | null>> =
   'task.fail': 'task.fail',
   'task.cancelled': 'task.cancelled',
   'task.approval_resolved': 'task.approval_resolved',
-  'task.steer_sealed': 'task.steer_sealed',
-  'task.complete_sealed': 'task.complete_sealed',
-  'task.fail_sealed': 'task.fail_sealed',
-  'task.decline_sealed': 'task.decline_sealed',
-  'task.cancelled_sealed': 'task.cancelled_sealed',
-  'task.progress_sealed': 'task.progress_sealed',
-  'task.artifact_sealed': 'task.artifact_sealed',
-  'task.await_approval_sealed': 'task.await_approval_sealed',
+  'task.steer_sealed': 'task.steer',
+  'task.complete_sealed': 'task.complete',
+  'task.fail_sealed': 'task.fail',
+  'task.decline_sealed': 'task.decline',
+  'task.cancelled_sealed': 'task.cancelled',
+  'task.progress_sealed': 'task.progress',
+  'task.artifact_sealed': 'task.artifact',
+  'task.await_approval_sealed': 'task.await_approval',
   'e2ee.key_package.available': 'e2ee.key_package.available',
 });
 
@@ -86,6 +88,37 @@ export function wireV4TypeOf(v3Type: string): MessageType | undefined {
 }
 
 /**
+ * The `session` each v3 Agent offer type implies. A v3 resume offer names its
+ * session in `sessionRef`; the fresh and prepared offers had none. A
+ * `task.offer_for_agent` without `sessionRef` has no v4 form: v4 has no fresh
+ * offer without egress, and a missing reference never means fresh.
+ */
+const V3_OFFER_SESSION: Readonly<Record<string, 'resume' | 'fresh'>> = Object.freeze({
+  'task.offer_for_agent': 'resume',
+  'task.offer_for_agent_with_egress': 'resume',
+  'task.offer_for_agent_sealed': 'resume',
+  'task.offer_for_agent_with_egress_sealed': 'resume',
+  'task.offer_for_agent_with_egress_fresh': 'fresh',
+  'task.offer_for_agent_with_egress_fresh_sealed': 'fresh',
+  'task.offer_prepared': 'fresh',
+});
+
+/**
+ * The v4 type and payload of a stored v3 message, before v4 validation, or
+ * `undefined` when v4 does not carry its type. An Agent offer's `sessionRef`
+ * becomes `session`; every other payload keeps its fields.
+ */
+export function wireV4FormOf(v3Type: string, payload: unknown): { readonly type: MessageType; readonly payload: unknown } | undefined {
+  const type = wireV4TypeOf(v3Type);
+  if (type === undefined) return undefined;
+  const mode = Object.hasOwn(V3_OFFER_SESSION, v3Type) ? V3_OFFER_SESSION[v3Type] : undefined;
+  if (mode === undefined || payload === null || typeof payload !== 'object' || Array.isArray(payload)) return { type, payload };
+  const { sessionRef, ...rest } = payload as Readonly<Record<string, unknown>>;
+  if (mode === 'fresh') return { type, payload: sessionRef === undefined ? { ...rest, session: { mode } } : payload };
+  return { type, payload: sessionRef === undefined ? rest : { ...rest, session: { mode, sessionRef } } };
+}
+
+/**
  * Re-encodes one stored wire v3 envelope as v4. The result is the canonical
  * v4 encoding, so its bytes and hash differ from the v3 body.
  */
@@ -100,9 +133,9 @@ export function migrateWireV3Envelope(body: string): WireV4MigrationResult {
   const stored = raw as Record<string, unknown>;
   const v3Type = typeof stored.type === 'string' ? stored.type : undefined;
   if (stored.v !== 3 || v3Type === undefined) return { ok: false, ...(v3Type === undefined ? {} : { type: v3Type }), refusal: 'not_wire_v3' };
-  const v4Type = wireV4TypeOf(v3Type);
-  if (v4Type === undefined) return { ok: false, type: v3Type, refusal: 'type_without_v4_form' };
-  const parsed = EnvelopeSchema.safeParse({ ...stored, v: 4, type: v4Type });
+  const v4 = wireV4FormOf(v3Type, stored.payload);
+  if (v4 === undefined) return { ok: false, type: v3Type, refusal: 'type_without_v4_form' };
+  const parsed = EnvelopeSchema.safeParse({ ...stored, v: 4, type: v4.type, payload: v4.payload });
   if (!parsed.success) return { ok: false, type: v3Type, refusal: 'invalid_under_v4' };
-  return { ok: true, type: v4Type, body: encodeEnvelope(parsed.data) };
+  return { ok: true, type: v4.type, body: encodeEnvelope(parsed.data) };
 }

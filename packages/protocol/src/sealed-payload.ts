@@ -1,11 +1,13 @@
 /**
  * Sealed payload v1 on the hosted wire (#654 design §8.1, §8.3, §8.6).
  *
- * Each sealed message type (`task.complete_sealed`, …) is its plaintext type
- * without the fields one data category moves into the ciphertext, plus a
- * sealed member. The type, not a field, is gated, so a decoder that does not
- * know `sealed-payload-v1` refuses the whole message. The Host reads only the
- * sealed member's outer fields. It checks the shape here:
+ * Sealed is a property of the payload, not a message type: each sealable
+ * type's payload is a plaintext branch or a sealed branch. The sealed branch is
+ * the plaintext fields without the ones one data category moves into the
+ * ciphertext, plus a sealed member; its marker field is gated on
+ * `sealed-payload-v1`, and the payload is strict, so a decoder that does not
+ * know the branch refuses the whole message. The Host reads only the sealed
+ * member's outer fields. It checks the shape here:
  * version, suite, encodings, a legal padded length, and exactly one of inline
  * `ciphertext` and `ciphertextRef`. Inline is the only legal form up to
  * {@link SEALED_INLINE_MAX_PADDED_LENGTH}; above it, the ciphertext is a blob.
@@ -20,10 +22,10 @@ import { z } from 'zod';
 
 import { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 
-import { SEALED_SPLIT_TABLE } from './sealed-split-table';
+import { SEALED_SPLIT_TABLE, isSealableMessageType, type SealedSplitEntry } from './sealed-split-table';
 
-export { SEALED_SPLIT_TABLE, isSealedMessageType } from './sealed-split-table';
-export type { SealedDigestRule, SealedMessageType, SealedSplitEntry } from './sealed-split-table';
+export { SEALED_SPLIT_TABLE, isSealableMessageType, isSealedPayload } from './sealed-split-table';
+export type { SealableMessageType, SealedDigestRule, SealedSplitEntry } from './sealed-split-table';
 
 export const SEALED_PAYLOAD_VERSION = 1;
 /** The only suite v1 admits. A new suite is a new constant and a new capability, never a parser branch. */
@@ -56,10 +58,10 @@ export type SealedDeclineCode = (typeof SEALED_DECLINE_CODES)[number];
 
 /**
  * The closed plaintext codes of a task whose output is sealed (#654 12d).
- * It lists each plaintext output type that has a plaintext form on such a
- * task, with the codes that each field moved or dropped by its sealed type
- * may hold. Such a field that is not listed here must be absent. An output
- * type with a sealed form that is not listed has no plaintext form. An
+ * It lists each output type that has a plaintext form on such a task, with
+ * the codes that each field moved or dropped by its sealed branch may hold.
+ * Such a field that is not listed here must be absent. An output type with a
+ * sealed branch that is not listed has no plaintext form. An
  * interrupted task reports `daemon_interrupted`; a device that cannot seal
  * reports `sealed_key_unavailable`. The Host check, the daemon and the member
  * display read this one list, and compare by exact match.
@@ -72,19 +74,18 @@ export const SEALED_TASK_PLAIN_CODES = Object.freeze({
 
 /**
  * True when `payload` is a legal plaintext `type` message of a task whose
- * output is sealed: each field that a `task-output` sealed type of `type`
+ * output is sealed: each field that the `task-output` sealed branch of `type`
  * moves or drops is absent or holds one of {@link SEALED_TASK_PLAIN_CODES}.
- * A type that has a sealed output form and is not listed there is never
+ * A type that has a sealed output branch and is not listed there is never
  * legal. A plaintext decline also names its code as `code`. A type with no
- * sealed output form is always legal.
+ * sealed output branch is always legal.
  */
 export function isSealedTaskPlainOutput(type: string, payload: object): boolean {
   const codes: { readonly [field: string]: readonly string[] } = Object.hasOwn(SEALED_TASK_PLAIN_CODES, type)
     ? SEALED_TASK_PLAIN_CODES[type as keyof typeof SEALED_TASK_PLAIN_CODES]
     : {};
-  const fields = Object.values(SEALED_SPLIT_TABLE)
-    .filter((entry) => entry.category === 'task-output' && entry.plainType === type)
-    .flatMap((entry): readonly string[] => [...entry.moved, ...entry.forbidden]);
+  const entry: SealedSplitEntry | undefined = isSealableMessageType(type) ? SEALED_SPLIT_TABLE[type] : undefined;
+  const fields: readonly string[] = entry?.category === 'task-output' ? [...entry.moved, ...entry.forbidden] : [];
   if (fields.length > 0 && !Object.hasOwn(SEALED_TASK_PLAIN_CODES, type)) return false;
   const record = payload as Readonly<Record<string, unknown>>;
   for (const field of fields) {
