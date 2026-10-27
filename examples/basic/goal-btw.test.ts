@@ -75,8 +75,8 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
   it('T2: reserved input -> real offer -> continue -> fresh step -> complete, no native followUp', async () => {
     const sent = await startStep();
     const offer = await byok.tasks.offer('step-1');
-    expect(offer).toMatchObject({ taskId: 'step-1', deviceId, type: 'task.offer_for_agent_with_egress_fresh', delivered: true,
-      payload: { runtime: 'pi', agentRef: target().agentRef, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT, schema: GOAL_RESULT_SCHEMA } } });
+    expect(offer).toMatchObject({ taskId: 'step-1', deviceId, type: 'task.offer', delivered: true,
+      payload: { runtime: 'pi', session: { mode: 'fresh' }, agentRef: target().agentRef, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT, schema: GOAL_RESULT_SCHEMA } } });
     expect(offer?.payload).not.toHaveProperty('sessionRef'); expect(offer?.payload).not.toHaveProperty('messageEgress');
     adapter.sessions.get('step-1')!.finish(result('continue')); await terminal('step-1');
     const continued = await host.reconcileGoal('goal', sent.revision);
