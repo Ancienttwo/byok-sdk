@@ -18,7 +18,7 @@ the only Agent-home composition rule:
           reliable-v1.jsonl           append/fsync, exact-ack retirement
         content-read-audit-v1.jsonl   content-free per-Agent decisions
         runtime-sessions/
-          <runtime>-<session-hash>.jsonl   writer and reader sessions
+          <runtime>-<session-hash>.jsonl   writer and reader sessions; 30 days after the last append once the home is idle
           <runtime>-task-<task-hash>.jsonl
         runs/
           <taskId>/                    memory-reader runtime cwd, kept after the terminal
@@ -99,7 +99,7 @@ The store lease covers scratch recovery; the shared home base lease plus the
 agents-root mutation gate covers readers and exact memory/projection temp
 names. Gate acquisition is per home with a bounded walk and round-robin
 cursor, so maintenance does not reserve the entire root for a full pass.
-Memory-delete tombstones, opaque Agent files and `.byok` records other than reader runs (`.byok/runs/`) and staged result records (`.byok/results/`) are protected.
+Memory-delete tombstones, opaque Agent files and `.byok` records other than reader runs (`.byok/runs/`), staged result records (`.byok/results/`) and session ledgers (`.byok/runtime-sessions/<runtime>-<session-hash>.jsonl`, not `-task-` terminal evidence) are protected.
 Skill-pack roots outside the store must be listed in `storage.skillPackDataDirs`;
 only non-current hash revisions past 24h are deleted under the install gate.
 
@@ -114,7 +114,7 @@ only non-current hash revisions past 24h are deleted under the install gate.
 | Memory and notes | Create if missing and preserve existing bytes | Define and evolve their content |
 | Agent files | Enforce home containment and cross-Agent isolation only | Own names, formats, directories, and business semantics |
 | Runtime | Seal AgentRef, canonical cwd, runtime/session and lease in the manifest | Select allowed runtimes and product policy |
-| Sessions | Persist append-only exact-match handoff and terminal evidence under `.byok/runtime-sessions`; report bounded write exhaustion without stranding the cloud task or lease | Treat mismatch as a product-visible failed admission and surface the host audit signal; do not invent migration semantics |
+| Sessions | Persist append-only exact-match handoff and terminal evidence under `.byok/runtime-sessions`; report bounded write exhaustion without stranding the cloud task or lease; remove session ledgers from an idle home by retention once their last append is 30 days old by default, and keep `-task-` terminal evidence | Treat mismatch as a product-visible failed admission and surface the host audit signal; do not invent migration semantics; resume within the window or start fresh, and tune only `storage.retention.ttlMs['session-ledger']` |
 | Egress | Send Agent events as the runtime produced them (ADR-037 D4); own the per-Agent reliable spool, cursor/ack/retry, quota and typed drop facts | Select one exact policy revision; decide what to store and show |
 | Explicit reads | Own per-surface capability, canonical path policy, per-Agent audit journal and BlobRef receipt fidelity | Author tenant/actor authz plus narrower root/MIME/text/size policy; never infer authorization from file presence |
 | Concurrency | Enforce one writer Attempt per canonical Agent home, and at most `maxConcurrentReaderAttemptsPerAgentHome` (default 4) `memory-reader` Attempts, each in its own `.byok/runs/<taskId>/`; report reader memory changes in `agentHomeMemoryChange` without enforcing read-only memory; remove reader run directories by retention (32 per home, 7 days, never an active one or one a recent reader handoff points to) | Send concurrent memory-reading work as reader offers and keep memory writes in the writer; do not write memory files while readers run if the attribution matters; do not schedule around or bypass a busy decline |
