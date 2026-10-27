@@ -100,7 +100,6 @@ export class BotStubSession implements Session {
     ]).finally(() => { clearTimeout(timer); this.closing = undefined; });
     return this.closing;
   }
-  async resolveApproval(): Promise<void> { /* no approval */ }
 }
 export class BotStubAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
