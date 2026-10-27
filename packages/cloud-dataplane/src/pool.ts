@@ -49,6 +49,25 @@ export interface ByokPoolOptions extends Omit<PoolConfig, 'types'> {
 }
 
 /**
+ * Marks a pool built by {@link createByokPool}. A registry symbol, because the
+ * package's two entries each bundle their own copy of this module, and a host
+ * may build the pool from one entry and pass it to stores from the other.
+ */
+const BYOK_POOL = Symbol.for('@byok-sdk/cloud-dataplane.pool');
+declare const byokPoolBrand: unique symbol;
+
+/** A pool from {@link createByokPool}: the only pool the SDK's store compositions accept. */
+export type ByokPool = Pool & { readonly [byokPoolBrand]: true };
+
+/** Refuses, at composition, a pool that {@link createByokPool} did not build. */
+export function assertByokPool(pool: Pool, owner: string): void {
+  if ((pool as Pool & Record<symbol, unknown>)[BYOK_POOL] === true) return;
+  throw new TypeError(
+    `${owner} needs a pool from createByokPool: a bare pg.Pool reads bigint columns as strings and lets an idle-client reset crash the process.`,
+  );
+}
+
+/**
  * Creates a pool wired with the int8 parser above.
  *
  * The caller owns the pool's lifetime: this package never holds a module-level
@@ -69,7 +88,7 @@ export interface ByokPoolOptions extends Omit<PoolConfig, 'types'> {
  * so the reset is never invisible. It does not paper over live query errors —
  * those still reject their own `await`; this is only the idle-client path.
  */
-export function createByokPool(options: ByokPoolOptions): Pool {
+export function createByokPool(options: ByokPoolOptions): ByokPool {
   // `onPoolError` is ours, not `pg`'s: strip it before the config reaches
   // `pg.Pool`, the same discipline `types` gets.
   const { onPoolError, ...poolConfig } = options;
@@ -86,5 +105,6 @@ export function createByokPool(options: ByokPoolOptions): Pool {
     console.error('[byok-sdk] idle pg pool client error (handled, not fatal)', err);
   });
 
-  return pool;
+  Object.defineProperty(pool, BYOK_POOL, { value: true });
+  return pool as ByokPool;
 }

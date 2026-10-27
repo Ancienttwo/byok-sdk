@@ -22,6 +22,7 @@ import {
   type TruthRecordKind,
 } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
+import { assertByokPool, type ByokPool } from './pool';
 import { PostgresTruthStore } from './stores/core/truth';
 
 const RECORD_COLUMNS =
@@ -89,7 +90,7 @@ interface AppliedWrite {
 }
 
 export interface PostgresTruthCommitterOptions {
-  readonly pool: Pool;
+  readonly pool: ByokPool;
   readonly clock: Clock;
   readonly crypto: Pick<CloudCrypto, 'sha256'>;
 }
@@ -160,6 +161,7 @@ export class PostgresTruthCommitter implements TruthCommitter {
   readonly #truth: PostgresTruthStore;
 
   constructor(options: PostgresTruthCommitterOptions) {
+    assertByokPool(options.pool, 'PostgresTruthCommitter');
     this.#pool = options.pool;
     this.#clock = options.clock;
     this.#crypto = options.crypto;

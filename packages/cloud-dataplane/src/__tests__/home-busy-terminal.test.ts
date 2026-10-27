@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
 import { createByokCloud, createHmacTokenSigner, createInProcessMailboxWake, createWebCrypto, fullCapabilityDeclaration } from '@byok-sdk/cloud';
 import { createEnvelope } from '@byok-sdk/protocol';
@@ -20,7 +21,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres home-busy terminal — ${SKIP_REASON}`
   it.each(['agent_home_writer_busy', 'agent_home_reader_busy', undefined] as const)(
     'preserves code %s through a fresh Postgres composition', async (code) => {
       const scope = await createDataplaneScope();
-      let restarted: Pool | undefined;
+      let restarted: ByokPool | undefined;
       try {
         await migrate(scope.pool, DEPLOY_SQL);
         const clock = createMutableClock();
@@ -28,7 +29,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres home-busy terminal — ${SKIP_REASON}`
         const { config: objectStorage } = await createObjectStorageScope();
         const declared = fullCapabilityDeclaration();
         const capabilities = { ...declared, capabilities: declared.capabilities.filter(cap => cap !== 'blobs.contentproxy') };
-        async function open(pool: Pool) {
+        async function open(pool: ByokPool) {
           const core = createPostgresCoreStores({ pool, clock, objectStorage });
           const stores = await createPostgresCloudStores({ pool, clock, crypto, objectStorage });
           const mailboxWake = createInProcessMailboxWake();

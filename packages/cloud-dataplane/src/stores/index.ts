@@ -25,6 +25,7 @@ import { AllowAllRateLimiter, type CloudStores } from '@byok-sdk/cloud';
 import type { CloudCrypto } from '@byok-sdk/cloud';
 import type { Clock } from '@byok-sdk/core';
 import type { Pool } from 'pg';
+import { assertByokPool, type ByokPool } from '../pool';
 import { PostgresObjectStore } from './core/objects';
 import { R2CloudBlobStore, R2ObjectMaintenanceStore, type R2BlobStoreOptions } from './r2-blobs';
 import { PostgresDeviceDirectory } from './devices';
@@ -92,7 +93,7 @@ export type PostgresCloudStores = CloudStores;
 export type PostgresObjectStorageOptions = Omit<R2BlobStoreOptions, 'objects'>;
 
 export interface PostgresCloudStoreOptions {
-  readonly pool: Pool;
+  readonly pool: ByokPool;
   /**
    * The clock every TTL and timestamp in this composition reads. Injected, not
    * the database's own: expiry has to be assertable under a test clock, and a
@@ -128,6 +129,7 @@ export async function createPostgresCloudStores(
   options: PostgresCloudStoreOptions,
 ): Promise<PostgresCloudStores> {
   const { pool, clock, crypto } = options;
+  assertByokPool(pool, 'createPostgresCloudStores');
   await assertPendingMailboxProtocol(pool);
   const devices = new PostgresDeviceDirectory(pool, clock);
   const pairing = new PostgresPairingCodeStore(pool, clock);

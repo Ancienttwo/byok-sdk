@@ -23,9 +23,10 @@ import {
 } from '@byok-sdk/protocol';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
+import { assertByokPool, type ByokPool } from '../pool';
 
 export interface PostgresAgentMemoryProjectionStoreOptions {
-  readonly pool: Pool;
+  readonly pool: ByokPool;
   readonly clock: Clock;
   /** The same Worker-safe crypto authority used by the hosting cloud composition. */
   readonly crypto: Pick<CloudCrypto, 'randomUuid' | 'sha256'>;
@@ -88,6 +89,7 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
   readonly #crypto: Pick<CloudCrypto, 'randomUuid' | 'sha256'>;
 
   constructor(options: PostgresAgentMemoryProjectionStoreOptions) {
+    assertByokPool(options.pool, 'PostgresAgentMemoryProjectionStore');
     this.#pool = options.pool;
     this.#clock = options.clock;
     this.#crypto = options.crypto;

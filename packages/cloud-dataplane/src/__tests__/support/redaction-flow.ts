@@ -7,6 +7,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
+import type { ByokPool } from '../../pool';
 import { expect } from 'vitest';
 import { createMutableClock, type CoreStores, type TenantId } from '@byok-sdk/core';
 import {
@@ -85,7 +86,7 @@ export interface RedactionHost {
 /** A Host over the dataplane stores, with the redaction store configured. */
 /** `wrapStore` lets a test put a fault in front of the real redaction store. */
 export async function composeRedactionHost(
-  pool: Pool,
+  pool: ByokPool,
   objectStorage: ObjectStorageScope,
   wrapStore: (store: TaskRedactionStore) => TaskRedactionStore = (store) => store,
 ): Promise<RedactionHost> {
