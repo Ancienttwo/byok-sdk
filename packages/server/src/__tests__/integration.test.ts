@@ -71,8 +71,8 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Offered');
 
     const offerEnvelope = await nextEnvelope(daemon);
-    expect(offerEnvelope.type).toBe('task.offer_for_agent');
-    if (offerEnvelope.type !== 'task.offer_for_agent') throw new Error('unreachable');
+    expect(offerEnvelope.type).toBe('task.offer');
+    if (offerEnvelope.type !== 'task.offer') throw new Error('unreachable');
     // M1 gap #7: taskId is no longer duplicated in the payload — the envelope's `task_id` is the sole routing key.
     expect(offerEnvelope.task_id).toBe(handle.taskId);
     // Per-device `seq` is one shared counter across all server->daemon types
@@ -153,7 +153,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     const daemon = await connectFakeDaemonLongPoll(startedServer.baseUrl, instance, { productId: PRODUCT_ID });
 
     const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'end at the terminal' });
-    await nextEnvelope(daemon); // task.offer_for_agent
+    await nextEnvelope(daemon); // task.offer
 
     // A consumer already iterating when the terminal lands.
     const live = (async () => {
@@ -187,7 +187,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
     const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'say hello' });
-    await nextEnvelope(daemon); // task.offer_for_agent
+    await nextEnvelope(daemon); // task.offer
 
     const claimEnvelope = createEnvelope(
       'task.claim',
@@ -231,7 +231,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
 
     const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'a long task' });
     const offer = await nextEnvelope(daemon);
-    expect(offer.type).toBe('task.offer_for_agent');
+    expect(offer.type).toBe('task.offer');
 
     await handle.cancel('changed my mind');
 
@@ -253,7 +253,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
     const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'do something risky' });
-    await nextEnvelope(daemon); // task.offer_for_agent
+    await nextEnvelope(daemon); // task.offer
     await claimAndStart(started.byok, daemon, handle);
 
     // Every v4 approval request names its approval (docs/protocol.md §5.3).
@@ -323,7 +323,7 @@ describe('redelivery from a stale cursor (§9)', () => {
     // never reads before it "drops".
     const handle1 = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'long running task' });
     const offer1 = (await pageAt(daemon, 0))[0];
-    if (offer1?.type !== 'task.offer_for_agent') throw new Error('unreachable');
+    if (offer1?.type !== 'task.offer') throw new Error('unreachable');
     const cursor = offer1.seq; // "I've fully processed everything through this seq"
 
     await claimAndStart(started.byok, daemon, handle1, 'pi', PI_RUNTIME_INFO.capabilities);

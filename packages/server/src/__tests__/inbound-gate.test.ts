@@ -14,6 +14,7 @@ import {
   type FakeLongPollDaemon,
   TEST_AGENT_DISPATCH,
   TEST_AGENT_REF,
+  TEST_SESSION_REF,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -242,14 +243,14 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
   });
 
   describe('POST /byok/messages restricts to daemon->server task.* types (P2)', () => {
-    it('a server->daemon task.offer_for_agent in the batch is rejected, not counted accepted, and has no side effect', async () => {
+    it('a server->daemon task.offer in the batch is rejected, not counted accepted, and has no side effect', async () => {
       const started = await start();
       const { code } = await started.byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
       const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
       const taskOffer = createEnvelope(
-        'task.offer_for_agent',
-        { instruction: 'do the thing', ...TEST_AGENT_DISPATCH, runtime: 'pi' },
+        'task.offer',
+        { instruction: 'do the thing', agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, runtime: 'pi' },
         { taskId: 'task_forged', seq: 100 },
       );
 
@@ -296,8 +297,8 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x' });
       const claim = createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId });
       const forgedOffer = createEnvelope(
-        'task.offer_for_agent',
-        { instruction: 'forged', ...TEST_AGENT_DISPATCH, runtime: 'pi' },
+        'task.offer',
+        { instruction: 'forged', agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, runtime: 'pi' },
         { taskId: 'task_forged_2', seq: 999 },
       );
 

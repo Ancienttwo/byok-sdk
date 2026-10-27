@@ -83,7 +83,7 @@ async function dispatchClaimedRunning(
 ): Promise<TaskHandle> {
   const handle = await h.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: h.daemon.deviceId, instruction });
   const offer = await nextEnvelope(h.daemon);
-  expect(offer.type).toBe('task.offer_for_agent');
+  expect(offer.type).toBe('task.offer');
   await claimAndStart(h.byok, h.daemon, handle, runtime, capabilities);
   return handle;
 }
