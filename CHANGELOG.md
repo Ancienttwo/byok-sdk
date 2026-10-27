@@ -118,7 +118,8 @@
   task whose feed was reclaimed or ended before this instance started). A
   live task that this instance did not dispatch, such as one still running
   after a SQLite restart, is followed from the moment of the call, without
-  earlier events.
+  earlier events. From then on `events.subscribe()` also reports that task's
+  `task.state` changes, with no `task.created` before them.
 - **Breaking (server; #1022)** — `TaskHandle.events()` reads the same feed as
   `tasks.events`. Its first `next()` now reads the task's snapshot once, and a
   read after the terminal feed is reclaimed throws `TaskEventsUnavailableError`

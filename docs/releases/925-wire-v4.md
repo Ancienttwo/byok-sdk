@@ -40,9 +40,11 @@ reader and no capability negotiation between the two majors.
   the task's state, Agent events, artifacts and approval requests with
   `tasks.events(taskId, { after?, signal? })` instead of
   `TaskHandle.events()` (#1022). Each entry's `cursor` resumes the feed within
-  the same server instance; after a restart or once a finished task's feed is
-  reclaimed, the read throws `TaskEventsUnavailableError` and `tasks.get`
-  gives the current state. A submitted task runs under its egress policy, and
+  the same server instance. Resuming with a cursor from before a restart
+  throws `TaskEventsUnavailableError` (`cursor_unknown`), and so does reading a
+  finished task whose feed was reclaimed (`feed_expired`); `tasks.get` gives
+  the current state. A read without a cursor of a task still running after a
+  restart follows it from the moment of the call. A submitted task runs under its egress policy, and
   with `activity.delivery: 'latest-value'` the daemon may send only the latest
   progress event of each batch, where a legacy dispatch sent every one.
   `TaskHandle.events()` now throws `feed_expired` after reclamation instead of
