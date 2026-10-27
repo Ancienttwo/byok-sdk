@@ -52,7 +52,7 @@ export declare class AsyncEventQueue<T> {
     private readonly truncationMarker;
     constructor(options?: AsyncEventQueueOptions<T>);
     isPosition(sequence: number): boolean;
-    push(value: T): void;
+    push(value: T): QueueEntry<T> | undefined;
     close(): void;
     private enforceBound;
     private wake;
@@ -211,19 +211,30 @@ export interface ByokServer {
         }): Promise<void>;
         /**
          * Follow one task's notifications (state, Agent progress, artifacts,
-         * approval requests) in this instance's arrival order, from the entry after
-         * `after`, or from the start of what is retained. Ends after the terminal
-         * state, when `signal` aborts, or when the server closes. A notification
-         * stream, not a record: read task facts with {@link tasks.get}.
+         * approval requests) in this instance's arrival order. It starts after the
+         * entry `after` names; with `from: 'state'`, at the entries where the
+         * task's current state began (its latest `state` entry, preceded by the
+         * pending `await_approval` request while it awaits approval), which are
+         * kept even after the buffer dropped them; otherwise at the start of what
+         * is retained. An `events_truncated` entry stands for entries dropped
+         * before the reader reached them. Ends after the terminal state, when
+         * `signal` aborts, or when the server closes. A notification stream, not a
+         * record: read task facts with {@link tasks.get}.
          *
-         * The first `next()` throws, before any entry, `ByokCloudError`
-         * `task_not_found` for an unknown task, or {@link TaskEventsUnavailableError}
-         * when `after` is unknown to this instance's feed or the terminal task's
-         * feed is no longer retained. A live task this instance did not dispatch
-         * (after a restart) is followed from now on, without earlier events.
+         * A live task this instance did not dispatch (after a restart) gets a feed
+         * whose first entry is its current state read back from the stores, and
+         * no earlier events. That state can appear twice when the read saw a
+         * commit the feed had not received yet.
+         *
+         * The first `next()` throws, before any entry: a `TypeError` when both
+         * `after` and `from` are given, `ByokCloudError` `task_not_found` for an
+         * unknown task, or {@link TaskEventsUnavailableError} when `after` is
+         * unknown to this instance's feed or the terminal task's feed is no longer
+         * retained.
          */
         events(taskId: string, options?: {
             after?: string;
+            from?: 'state';
             signal?: AbortSignal;
         }): AsyncIterable<TaskEventEntry>;
         /**
@@ -510,9 +521,21 @@ export declare const DEFAULT_TASK_EVENT_BUFFER_LIMIT = 1000;
 /** How long a terminal task's relay state is retained before reclamation, ms. */
 export declare const DEFAULT_TASK_EVENT_RETENTION_MS: number;
 /**
- * One task's delivery plumbing. A feed is provisional while its dispatch is
- * in flight, dispatched once the offer is accepted, and neither when a host
- * event read attached it to a task this instance did not dispatch (a restart).
+ * Where a feed stands with this instance's dispatch of its task. A dispatch
+ * either opens a feed (`dispatching`) or finds one a host event read attached
+ * to a task this instance did not dispatch, after a restart
+ * (`attached-dispatching`). Until the offer is accepted, both buffer every
+ * delivery, so `Offered` is the first entry of a `dispatched` feed. A refused
+ * dispatch drops the feed it opened and returns an attached feed to
+ * `attached`, delivering what it buffered.
+ */
+export type TaskFeedPhase = 'dispatching' | 'attached-dispatching' | 'attached' | 'dispatched';
+/**
+ * One task's delivery plumbing. `current` holds the entries where the task's
+ * present state began in this feed: its latest `state` entry, preceded by the
+ * pending `await_approval` request while it awaits approval. They are kept
+ * apart from the bounded queue, so a reader starting there gets them even after
+ * drop-oldest discarded them from the queue.
  */
 export interface TaskFeed {
     /** Random per feed, so a cursor from a previous instance or a reclaimed feed is recognizably unknown. */
@@ -521,12 +544,9 @@ export interface TaskFeed {
     readonly terminal: Promise<void>;
     settleTerminal: () => void;
     terminalSettled: boolean;
-    provisional: boolean;
-    dispatched: boolean;
-    readonly early: Array<{
-        readonly envelope: InboundCommitted['envelope'];
-        readonly at: string;
-    }>;
+    phase: TaskFeedPhase;
+    current: ReadonlyArray<QueueEntry<ServerTaskEvent>>;
+    readonly early: Array<() => void>;
     claimedRuntime?: RuntimeId;
     claimedHarnessId?: string;
     reclaimTimer?: ReturnType<typeof setTimeout>;
@@ -555,8 +575,9 @@ export interface TaskEventRelayOptions {
  * authoritative copy is `TaskAttempt.claimedRuntime`).
  *
  * Dispatch first {@link provision}s a known task id, then activates it with
- * {@link noteDispatched} after the kernel has accepted its offer. Envelopes
- * that arrive in that narrow interval are buffered, not dropped. An envelope
+ * {@link noteDispatched} after the kernel has accepted its offer, or undoes it
+ * with {@link abort}. Deliveries in that interval are buffered, not dropped
+ * ({@link TaskFeedPhase}). An envelope
  * naming a task with no feed is folded for nobody and allocates nothing —
  * otherwise a device could grow this map without bound by guessing task ids,
  * and the kernel's gate deliberately treats such an envelope as a harmless
@@ -566,11 +587,13 @@ export interface TaskEventRelayOptions {
  * current feed and never creates one; `stopped` turns true at {@link stop}.
  * `attach` starts delivering a live task this instance did not dispatch (after
  * a restart) from now on, without reconstructing earlier events; only a host
- * read creates such a feed. `detach` drops an attached feed that turned out to
- * have nothing to deliver, and never touches a provisional or dispatched feed,
- * which belong to their dispatch. `provision` keeps an attached feed as it is:
- * the task exists, so nothing needs buffering, and a refused enqueue must not
- * drop it. `entries` reads a feed after a cursor, or from the start of what is
+ * read creates such a feed. `seed` gives an attached feed that no transition
+ * has reached yet its first `state` entry, read back from the durable stores;
+ * once a transition arrived, the feed already says more than that would. A
+ * seed waits behind an in-flight dispatch like any delivery, so `Offered`
+ * still comes first.
+ * `detach` drops an `attached` feed that turned out
+ * to have nothing to deliver, and never one a dispatch owns. `entries` reads a feed after a cursor, or from the start of what is
  * retained, and refuses a cursor that names no position of the feed with
  * `cursor_unknown`. Members carry no block docs here because comments on class
  * members ship in the bundle, which has an exact size budget.
@@ -598,6 +621,7 @@ export declare class TaskEventRelay implements ByokCloudObserver {
     get stopped(): boolean;
     feed(taskId: string): TaskFeed | undefined;
     attach(taskId: string): TaskFeed | undefined;
+    seed(feed: TaskFeed, event: ServerTaskEvent): void;
     detach(taskId: string, feed: TaskFeed): void;
     entries(taskId: string, feed: TaskFeed, after?: string): AsyncIterable<QueueEntry<ServerTaskEvent>>;
     /** Settles when this task first reaches a terminal — the barrier `TaskHandle.result()` awaits. */
@@ -811,10 +835,14 @@ export interface TaskHandleDeps {
     readonly cloud: ByokCloud;
     readonly relay: TaskEventRelay;
     /**
-     * The task's current `TaskSnapshot.state`, or `undefined` when the attempt is
-     * gone. The snapshot projection itself — never a second derivation.
+     * The task's current `TaskSnapshot.state` and `updatedAt`, or `undefined`
+     * when the attempt is gone. The snapshot projection itself — never a second
+     * derivation.
      */
-    readonly readState: (taskId: string) => Promise<TaskState | undefined>;
+    readonly readState: (taskId: string) => Promise<{
+        readonly state: TaskState;
+        readonly at: string;
+    } | undefined>;
     /** The read-back this handle's `result()` answers with. */
     readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
 }
@@ -832,10 +860,12 @@ type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState'>;
  * `return()` aborts the read's own signal first, which wakes the queue.
  * `project` shapes each entry: `TaskHandle.events()` yields the event alone.
  */
-export declare function readTaskEvents<T = TaskEventEntry>(deps: EventDeps, taskId: string, options?: {
-    after?: string;
-    signal?: AbortSignal;
-}, project?: (entry: TaskEventEntry) => T): AsyncIterable<T>;
+export interface TaskEventReadOptions {
+    readonly after?: string;
+    readonly from?: 'state';
+    readonly signal?: AbortSignal;
+}
+export declare function readTaskEvents<T = TaskEventEntry>(deps: EventDeps, taskId: string, options?: TaskEventReadOptions, project?: (entry: TaskEventEntry) => T): AsyncIterable<T>;
 /**
  * The host's approval decision, shared by {@link TaskHandle.approve} and
  * `ByokServer.tasks.approve`. Cloud atomically records it in the one approval
