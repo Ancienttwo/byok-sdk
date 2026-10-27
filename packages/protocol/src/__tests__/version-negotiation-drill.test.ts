@@ -105,11 +105,12 @@ describe('M4 Phase 4 version-negotiation drill', () => {
   });
 
   describe('item 3: unknown fields on control/security-class schemas are REJECTED, fail-closed (already established in freeze-guard.test.ts — restated here through the real end-to-end decode entrypoint)', () => {
-    it('a task.offer_for_agent with an unrecognized field alongside an otherwise well-formed `instruction.blobRef`, decoded through the REAL wire entrypoint, is rejected', () => {
+    it('a task.offer with an unrecognized field alongside an otherwise well-formed `instruction.blobRef`, decoded through the REAL wire entrypoint, is rejected', () => {
       const envelope = createEnvelope(
-        'task.offer_for_agent',
+        'task.offer',
         {
           agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+          session: { mode: 'resume', sessionRef: 'session-1' },
           instruction: {
             blobRef: { blobId: 'blob-1', contentHash: `sha256:${'a'.repeat(64)}`, size: 10, contentType: 'text/plain' },
           },
@@ -128,7 +129,11 @@ describe('M4 Phase 4 version-negotiation drill', () => {
     });
 
     it('sanity: the identical offer WITHOUT the unknown field still decodes fine through the same real entrypoint (isolates the rejection to the unknown field, not something else in the fixture)', () => {
-      const envelope = createEnvelope('task.offer_for_agent', { instruction: 'do it', agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } }, { taskId: 'task-1', seq: 1 });
+      const envelope = createEnvelope(
+        'task.offer',
+        { instruction: 'do it', agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' }, session: { mode: 'resume', sessionRef: 'session-1' } },
+        { taskId: 'task-1', seq: 1 },
+      );
       const wireLine = `${JSON.stringify(envelope)}\n`;
       expect(() => decodeEnvelope(wireLine)).not.toThrow();
     });

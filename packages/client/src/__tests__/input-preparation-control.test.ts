@@ -37,6 +37,8 @@ import {
 } from '../input-preparation';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { FRESH_OFFER } from './fixtures/fresh-offer';
 
 /**
  * One real stdio MCP server, configured as a device toolset.
@@ -249,7 +251,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
       productName: 'Acme',
       productId,
       serverUrl: server.url,
-      agentHome: testAgentHomeConfig(),
+      agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       storeDir,
       mcpToolsets: { ...TOOLSETS },
       inputPreparation: { limits: LIMITS, authorityResolver, counter },
@@ -282,7 +284,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
 
     // An ordinary task still runs end to end.
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do work' }, { taskId: 't-ordinary', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'do work' }, { taskId: 't-ordinary', seq: server.nextSeq() }),
     );
     await server.waitFor((envelope) => envelope.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));

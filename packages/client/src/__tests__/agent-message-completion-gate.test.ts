@@ -18,6 +18,7 @@ import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { freezeRuntimeAdapterDescriptor, type Session } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -38,7 +39,7 @@ async function cancellationFixture() {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-cancel',
@@ -63,8 +64,8 @@ describe('required Agent message completion gate', () => {
     const taskId = 'missing-result-with-reply';
     const agentRef = { agentId: 'missing-result-agent', profileRevision: '1' };
     try {
-      await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-        instruction: 'reply', runtime: 'pi', agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      await runner.handleEnvelope(createEnvelope('task.offer', {
+        instruction: 'reply', runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
         terminalProjection: { mode: 'result-document', contract: 'outcome.v1', schema: { type: 'object' } },
       }, { taskId, seq: 1 }));
@@ -104,8 +105,8 @@ describe('required Agent message completion gate', () => {
     };
     const taskId = `missing-result-${mode}`;
     try {
-      await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-        instruction: 'reply', runtime: 'pi', agentRef: { agentId: 'missing-result-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      await runner.handleEnvelope(createEnvelope('task.offer', {
+        instruction: 'reply', runtime: 'pi', agentRef: { agentId: 'missing-result-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
         terminalProjection: { mode: 'result-document', contract: 'outcome.v1', schema: { type: 'object' } },
       }, { taskId, seq: 1 }));
@@ -125,9 +126,9 @@ describe('required Agent message completion gate', () => {
   it.each(['append-before', 'activate-before', 'activate-after'] as const)('fences a tool publish across cancellation: %s', async (phase) => {
     const { runner, adapter, sent, deps } = await cancellationFixture();
     const taskId = 'cancel-publish-task';
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+    await runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: 'reply', runtime: 'pi',
-      agentRef: { agentId: 'cancel-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      agentRef: { agentId: 'cancel-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId, seq: 1 }));
     const ctx = adapter.startCalls[0]!.ctx;
@@ -186,9 +187,9 @@ describe('required Agent message completion gate', () => {
         } } };
       });
       const taskId = `pre-active-${index}`;
-      const offer = runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+      const offer = runner.handleEnvelope(createEnvelope('task.offer', {
         instruction: 'reply', runtime: 'pi',
-        agentRef: { agentId: 'pre-active-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        agentRef: { agentId: 'pre-active-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       }, { taskId, seq: index * 2 + 1 }));
       try {
@@ -276,9 +277,9 @@ describe('required Agent message completion gate', () => {
     let releaseRevoke = () => {};
     let restoreRevoke = () => {};
     try {
-      offer = runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+      offer = runner.handleEnvelope(createEnvelope('task.offer', {
         instruction: 'reply', runtime: 'pi',
-        agentRef: { agentId: 'revoke-failure-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        agentRef: { agentId: 'revoke-failure-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       }, { taskId, seq: 1 }));
       await Promise.race([reachedStart, offer.then(() => { throw new Error('offer settled before the staged runtime started'); })]);
@@ -340,9 +341,9 @@ describe('required Agent message completion gate', () => {
     let release = () => {};
     let restoreActivate = () => {};
     try {
-      offer = runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+      offer = runner.handleEnvelope(createEnvelope('task.offer', {
         instruction: 'reply', runtime: 'pi',
-        agentRef: { agentId: 'startup-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        agentRef: { agentId: 'startup-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       }, { taskId, seq: 1 }));
       await Promise.race([reachedStart, offer.then(() => { throw new Error('offer settled before the staged runtime started'); })]);
@@ -377,9 +378,9 @@ describe('required Agent message completion gate', () => {
   it('cancellation cannot emit terminal truth until an in-flight activation and its local revoke are durable', async () => {
     const { runner, adapter, sent } = await cancellationFixture();
     const taskId = 'activation-sync-cancel';
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+    await runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: 'reply', runtime: 'pi',
-      agentRef: { agentId: 'sync-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      agentRef: { agentId: 'sync-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId, seq: 1 }));
     const ctx = adapter.startCalls[0]!.ctx;
@@ -418,9 +419,9 @@ describe('required Agent message completion gate', () => {
 
   it('ordinary failure preserves admission recovery for a message already handed to transport', async () => {
     const { runner, adapter } = await cancellationFixture();
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+    await runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: 'reply', runtime: 'pi',
-      agentRef: { agentId: 'failure-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      agentRef: { agentId: 'failure-agent', profileRevision: '1' }, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId: 'failure-after-send', seq: 1 }));
     const ctx = adapter.startCalls[0]!.ctx;
@@ -444,7 +445,7 @@ describe('required Agent message completion gate', () => {
     const record = await outbox.activate('pending', 'session-one');
     const payload = outbox.publishPayload(record!);
     const sent: Envelope[] = [];
-    const createRunner = () => new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const createRunner = () => new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag,...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [], storeDir: root, productId: 'recovery-test', deviceId: 'device-one', tenantId: 'tenant-one',
       send: (envelope) => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
@@ -480,7 +481,7 @@ describe('required Agent message completion gate', () => {
       const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
         steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
       });
-      const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+      const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
         adapters: [adapter],
         agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-refusal',
@@ -493,9 +494,9 @@ describe('required Agent message completion gate', () => {
       });
       const taskId = 'refused-task';
       const agentRef = { agentId: 'refused-agent', profileRevision: '1' };
-      await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+      await runner.handleEnvelope(createEnvelope('task.offer', {
         instruction: 'reply', runtime: 'pi', agentRef,
-        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       }, { taskId, seq: 1 }));
       const session = adapter.sessions[0]!;
@@ -568,7 +569,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('codex', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -580,10 +581,10 @@ describe('required Agent message completion gate', () => {
       agentMessageMcpBin: { command: '/compiled/salesko-agent', args: ['__byok_sdk_helper', 'agent-message-mcp'] },
       agentMessageMcpPreflight: async () => { throw new Error('unknown command'); },
     });
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+    await runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: 'send one reply', runtime: 'codex',
       agentRef: { agentId: 'agent-message', profileRevision: 'profile-r1' },
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId: 'message-preflight-failure', seq: 1 }));
 
@@ -601,7 +602,7 @@ describe('required Agent message completion gate', () => {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
     const helperPreflight = vi.fn<NonNullable<TaskRunnerDeps['agentMessageMcpPreflight']>>(async () => {});
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -617,9 +618,9 @@ describe('required Agent message completion gate', () => {
     });
     const taskId = 'message-task';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+    await runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: 'send one reply', runtime: 'pi', agentRef,
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId, seq: 1 }));
 
@@ -679,9 +680,9 @@ describe('required Agent message completion gate', () => {
       .rejects.toThrow(/invalid or expired/);
 
     const refusedTaskId = 'message-task-refused';
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+    await runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: 'send one refused reply', runtime: 'pi', agentRef,
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId: refusedTaskId, seq: 4 }));
     const refusedToken = adapter.startCalls[1]?.ctx.mcpServers?.byokagentmessage?.env?.BYOK_AGENT_MESSAGE_CONTEXT;
@@ -701,7 +702,7 @@ describe('required Agent message completion gate', () => {
     expect(sent.some((envelope) => envelope.type === 'task.complete' && envelope.task_id === refusedTaskId)).toBe(false);
 
     const restartSent: Envelope[] = [];
-    const restarted = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const restarted = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -723,7 +724,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -736,9 +737,9 @@ describe('required Agent message completion gate', () => {
     });
     const taskId = 'message-task-auto';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+    await runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: 'send one reply', runtime: 'pi', agentRef,
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId, seq: 1 }));
 
@@ -766,7 +767,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -779,16 +780,16 @@ describe('required Agent message completion gate', () => {
     });
     const taskId = 'message-task-empty';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+    await runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: 'send one reply', runtime: 'pi', agentRef,
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId, seq: 1 }));
 
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
     const failure = sent.find((envelope) => envelope.type === 'task.fail');
-    if (failure?.type !== 'task.fail') throw new Error('missing task fail');
+    if (failure?.type !== 'task.fail' || failure.payload.sealed !== undefined) throw new Error('missing task fail');
     expect(failure.payload.retryable).toBe(false);
     expect(failure.payload.reason).toContain('no reply text');
     expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(false);
@@ -801,7 +802,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -814,9 +815,9 @@ describe('required Agent message completion gate', () => {
     });
     const taskId = 'message-task-cap';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+    await runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: 'send one reply', runtime: 'pi', agentRef,
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 8 },
     }, { taskId, seq: 1 }));
 
@@ -824,7 +825,7 @@ describe('required Agent message completion gate', () => {
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
     const failure = sent.find((envelope) => envelope.type === 'task.fail');
-    if (failure?.type !== 'task.fail') throw new Error('missing task fail');
+    if (failure?.type !== 'task.fail' || failure.payload.sealed !== undefined) throw new Error('missing task fail');
     expect(failure.payload.retryable).toBe(false);
     expect(failure.payload.reason).toMatch(/failed to deliver/);
     expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(false);
@@ -852,7 +853,7 @@ describe('required Agent message completion gate', () => {
         value: freezeRuntimeAdapterDescriptor({ ...adapter.descriptor, progressEventsAreMessages: true }),
       });
     }
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -864,9 +865,9 @@ describe('required Agent message completion gate', () => {
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
     });
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+    await runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: 'send one reply', runtime: 'pi', agentRef,
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId, seq: 1 }));
     return { sent, adapter, runner, agentRef };
@@ -894,7 +895,7 @@ describe('required Agent message completion gate', () => {
     }, { taskId, seq: 2 }));
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
     const complete = sent.find((envelope) => envelope.type === 'task.complete');
-    if (complete?.type !== 'task.complete') throw new Error('missing task complete');
+    if (complete?.type !== 'task.complete' || complete.payload.sealed !== undefined) throw new Error('missing task complete');
     expect(complete.payload.summary).toBe('narrationthe answer');
   });
 

@@ -70,7 +70,7 @@ async function claimedTask(harness: CloudHarness, device: PairedDevice): Promise
   // Deliver the offer before anything polls past it: the mailbox refuses a
   // cursor beyond its own delivery watermark, so `offer.seq` is only a usable
   // cursor once the device has actually been handed that row.
-  expect((await poll(harness, device, 0)).events.map((event) => event.type)).toEqual(['task.offer_for_agent']);
+  expect((await poll(harness, device, 0)).events.map((event) => event.type)).toEqual(['task.offer']);
   const stores = deviceStores(harness, device);
   expect(
     await handleInboundEnvelope(

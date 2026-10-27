@@ -251,7 +251,7 @@ describe('Issues #112/#114/#115/#116/#117/#118/#120 reference-server regressions
       terminalProjection: { mode: 'none' },
       agentMessageContext: { destinationBinding: 'conversation/issue-120' },
     });
-    expect((await nextEnvelope(daemon)).type).toBe('task.offer_for_agent_with_egress');
+    expect((await nextEnvelope(daemon)).type).toBe('task.offer');
     await task.cancel('cancel before first publish');
     expect((await nextEnvelope(daemon)).type).toBe('task.cancel');
 

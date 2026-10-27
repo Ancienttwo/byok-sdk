@@ -53,7 +53,7 @@ export function settle(state: LedgerState, intent: Intent, conclusion: Conclusio
   if (intent.occurrence) state.occurrences[intent.occurrence]!.conclusion = conclusion;
   delete state.outbox[`intent:${intent.id}`];
   const terminal = state.executions[intent.taskId]?.terminal;
-  const document = conclusion === 'succeeded' && terminal?.envelope.type === 'task.complete' ? terminal.envelope.payload.document : undefined;
+  const document = conclusion === 'succeeded' && terminal?.envelope.type === 'task.complete' && terminal.envelope.payload.sealed === undefined ? terminal.envelope.payload.document : undefined;
   project(state, `intent:${intent.key}`, JSON.parse(JSON.stringify({ intentKey: intent.key, source: intent.source,
     taskId: intent.taskId, conclusion, preparationError: intent.preparationError, occurrenceKey: intent.occurrence, document })) as Json);
 }

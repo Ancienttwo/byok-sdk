@@ -85,7 +85,7 @@ describe('single TTL presence lease', () => {
     const task = await h.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'wait for this laptop' });
     expect((await h.byok.tasks.get(task.taskId))?.state).toBe('Offered');
     const offer = await nextEnvelope(daemon);
-    expect(offer).toMatchObject({ type: 'task.offer_for_agent', task_id: task.taskId });
+    expect(offer).toMatchObject({ type: 'task.offer', task_id: task.taskId });
     expect((await h.byok.machines.list())[0]?.connected).toBe(true);
   });
 

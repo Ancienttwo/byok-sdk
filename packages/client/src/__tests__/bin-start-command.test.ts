@@ -17,6 +17,10 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { connectControlClient } from '../bin/control-client';
 import type { ControlStatusResult } from '../daemon/control-protocol';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -52,7 +56,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-start-product',
         serverUrl: server.url,
-        agentHome: testAgentHomeConfig(),
+        agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir,
         branding: { displayName: 'Acme Coder' },
       },
@@ -85,8 +89,8 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     // Drive one task through so the audit log picks up task-lifecycle events too.
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'do the thing' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do the thing' },
         { taskId: 'task-1', seq: server.nextSeq() },
       ),
     );
@@ -123,7 +127,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     await fs.writeFile(storeDir, 'x');
 
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, storeDir: parent },
+      {agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, storeDir: parent },
       [adapter],
     );
     // Daemon itself uses `parent` (a real dir) for its OWN device store, but
@@ -164,7 +168,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     const storeDir = await tmpDir('byok-start-store-sentinel-');
     const config = {
       storage: { scratchRoot: testScratchRoot() },
-      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-sentinel', serverUrl: server.url, storeDir, agentHome: testAgentHomeConfig(),
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-sentinel', serverUrl: server.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     };
     daemon = createDaemonWithAdapters(config, [adapter]);
     await daemon.pair('pairing-code');
@@ -194,7 +198,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
       } finally {
         connection.client.close();
       }
-      const offer = (taskId: string) => server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: `do ${SENTINEL}` }, { taskId, seq: server.nextSeq() }));
+      const offer = (taskId: string) => server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: `do ${SENTINEL}` }, { taskId, seq: server.nextSeq() }));
 
       // Content in every AgentEvent field, an artifact that exists (name and
       // inline bytes) and one that does not (its name reaches the error
@@ -312,7 +316,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
   it('#394: a revoked device ends start as halted/device_revoked after one authentication, recorded in the audit log', async () => {
     const storeDir = await tmpDir('byok-start-store-revoked-');
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-revoked', serverUrl: server.url, storeDir },
+      {agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-revoked', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter('pi')],
     );
     const record = await daemon.pair('pairing-code');

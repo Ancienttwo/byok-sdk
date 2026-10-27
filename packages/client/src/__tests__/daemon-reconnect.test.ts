@@ -8,6 +8,10 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -27,7 +31,7 @@ async function tmpDir(prefix: string): Promise<string> {
     const storeDir = await tmpDir('byok-client-store-'); // shared across both daemon instances below
 
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
+      {agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter()],
     );
     await daemon.pair('code');
@@ -35,7 +39,7 @@ async function tmpDir(prefix: string): Promise<string> {
 
     const offerSeq = server.nextSeq();
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-A', seq: offerSeq }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, { taskId: 'task-A', seq: offerSeq }),
     );
     await server.waitFor((e) => e.type === 'task.claim');
 
@@ -45,7 +49,7 @@ async function tmpDir(prefix: string): Promise<string> {
     // persists), and it should know the cursor without ever having been told
     // directly: it's read back from disk.
     const daemon2 = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
+      {agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter()],
     );
     daemon = daemon2;
@@ -62,7 +66,7 @@ async function tmpDir(prefix: string): Promise<string> {
     const storeDir = await tmpDir('byok-client-store-');
 
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
+      {agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter()],
     );
     await daemon.pair('code');
@@ -70,7 +74,7 @@ async function tmpDir(prefix: string): Promise<string> {
 
     const firstSeq = server.nextSeq();
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-A', seq: firstSeq }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, { taskId: 'task-A', seq: firstSeq }),
     );
     await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-A');
 
@@ -80,8 +84,8 @@ async function tmpDir(prefix: string): Promise<string> {
     // claimed/declined, not just "no duplicate claim for task-A".
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'x' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
         { taskId: 'task-A-redelivered', seq: firstSeq },
       ),
     );
@@ -90,7 +94,7 @@ async function tmpDir(prefix: string): Promise<string> {
     // must go through exactly as usual.
     const secondSeq = server.nextSeq();
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-B', seq: secondSeq }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, { taskId: 'task-B', seq: secondSeq }),
     );
     await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-B');
 

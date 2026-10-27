@@ -1,7 +1,7 @@
 import { ConnectionManager } from '../connection-manager';
 import { toJournalEnvelopeRecord, terminalKindOf } from './support';
 import { JournalRecordTooLargeError, journalHash } from '../journal/journal';
-import { isTaskOfferType, createEnvelope, decodeEnvelope, encodeEnvelope, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY } from '@byok-sdk/protocol';
+import { createEnvelope, decodeEnvelope, encodeEnvelope, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY } from '@byok-sdk/protocol';
 import { terminalIdentity } from '../terminal-identity';
 import type { DaemonScope } from './scope';
 import type { StartRun } from './start-run';
@@ -91,7 +91,7 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
         await refuseOverBoundEnvelope(envelope, record, error.actualBytes);
         return;
       }
-      if (isTaskOfferType(envelope.type) && envelope.task_id !== undefined) {
+      if (envelope.type === 'task.offer' && envelope.task_id !== undefined) {
         // A selected terminal fences admission even if its transaction rolled
         // back to received. Check before reading a possibly stale task row.
         if (terminalCommits.hasPending(envelope.task_id)) {

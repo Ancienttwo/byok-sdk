@@ -77,7 +77,7 @@ async function setup() {
     payload: {
       instruction: 'run an Agent memory erase epoch regression task',
       agentRef: AGENT_REF,
-      sessionRef: 'session-resume-1',
+      session: { mode: 'resume', sessionRef: 'session-resume-1' },
     },
   });
   return { authorizer, crypto, device, harness };
@@ -104,7 +104,7 @@ describe('Agent-memory erase epoch P1 regression', () => {
       payload: {
         instruction: 'run the second historical Agent memory task',
         agentRef: AGENT_REF,
-        sessionRef: 'session-resume-2',
+        session: { mode: 'resume', sessionRef: 'session-resume-2' },
       },
     });
     const grantA = grant(device.deviceId, 1);

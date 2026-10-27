@@ -172,6 +172,7 @@ export async function startRealCloud(opts: StartRealCloudOptions): Promise<RealC
               ...fields,
               ...(harnessId === undefined ? { runtime: runtime ?? 'pi' } : { harnessId, ...(runtime === undefined ? {} : { runtime }) }),
               agentRef: agentRef ?? freshTestAgentRef(),
+              session: { mode: 'fresh' },
               egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
               terminalProjection: { mode: 'none' },
             },

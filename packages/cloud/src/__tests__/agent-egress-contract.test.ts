@@ -32,7 +32,7 @@ function egressOfferPayload() {
   return {
     instruction: 'run with egress policy',
     agentRef: AGENT_REF,
-    sessionRef: 'session-egress',
+    session: { mode: 'resume', sessionRef: 'session-egress' } as const,
     egressPolicy: POLICY,
   };
 }
@@ -43,6 +43,7 @@ function freshEgressOfferPayload() {
     terminalProjection: { mode: 'none' as const },
     instruction: 'start a fresh runtime with egress policy',
     agentRef: AGENT_REF,
+    session: { mode: 'fresh' as const },
     egressPolicy: POLICY,
   };
 }
@@ -246,8 +247,8 @@ describe('hosted Agent egress contract', () => {
       payload: freshEgressOfferPayload(),
     });
     expect(offered.envelope).toMatchObject({
-      type: 'task.offer_for_agent_with_egress_fresh',
-      payload: { agentRef: AGENT_REF, egressPolicy: POLICY },
+      type: 'task.offer',
+      payload: { agentRef: AGENT_REF, egressPolicy: POLICY, session: { mode: 'fresh' } },
     });
     expect(offered.envelope.payload).not.toHaveProperty('sessionRef');
   });
@@ -262,8 +263,8 @@ describe('hosted Agent egress contract', () => {
     });
 
     expect(offered.envelope).toMatchObject({
-      type: 'task.offer_for_agent_with_egress',
-      payload: { sessionRef: 'session-egress' },
+      type: 'task.offer',
+      payload: { session: { mode: 'resume', sessionRef: 'session-egress' } },
     });
   });
 
@@ -276,7 +277,7 @@ describe('hosted Agent egress contract', () => {
       taskId: 'agent-egress-task',
       payload: egressOfferPayload(),
     });
-    expect(offered.envelope.type).toBe('task.offer_for_agent_with_egress');
+    expect(offered.envelope.type).toBe('task.offer');
     expect(offered.attempt.agentRef).toEqual(AGENT_REF);
 
     const event = reliableEnvelope();

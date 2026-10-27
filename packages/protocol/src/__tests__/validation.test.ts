@@ -5,7 +5,7 @@ import {
   MessagesSendRequestSchema,
   ProtocolError,
   TaskArtifactPayloadSchema,
-  TaskOfferForAgentPayloadSchema,
+  TaskOfferPayloadSchema,
   UnknownMessageTypeError,
   createEnvelope,
   decodeEnvelope,
@@ -167,9 +167,10 @@ describe('instruction remains fail-closed on unknown shapes (pre-freeze asymmetr
   // is a control/security field and must never gain an
   // unknown-tolerant fallback. These are regression guards for that rule.
 
-  it('TaskOfferForAgentPayloadSchema rejects an instruction that is neither a string nor a {blobRef} object', () => {
-    const result = TaskOfferForAgentPayloadSchema.safeParse({
-      agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' }, 
+  it('TaskOfferPayloadSchema rejects an instruction that is neither a string nor a {blobRef} object', () => {
+    const result = TaskOfferPayloadSchema.safeParse({
+      agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+      session: { mode: 'resume', sessionRef: 'session-1' },
       instruction: { unknownKind: 'from a hypothetical future variant' },
     });
     expect(result.success).toBe(false);

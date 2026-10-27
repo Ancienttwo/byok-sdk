@@ -9,6 +9,10 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { RuntimeExecutionFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 async function temporaryDirectory(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -33,7 +37,7 @@ describe('TaskRunner typed runtime failure projection', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Runtime failure test',
         productId: 'runtime-failure-test',
         serverUrl: server.url,
-        agentHome: testAgentHomeConfig(),
+        agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir: await temporaryDirectory('byok-runtime-failure-store-'),
       },
       [adapter],
@@ -43,7 +47,7 @@ describe('TaskRunner typed runtime failure projection', () => {
   }
 
   async function offer(taskId: string): Promise<void> {
-    server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'run' }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'run' }, { taskId, seq: server.nextSeq() }));
     await server.waitFor((event) => event.type === 'task.claim' && event.task_id === taskId);
   }
 

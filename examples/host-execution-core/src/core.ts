@@ -792,7 +792,7 @@ export class HostExecutionCore {
       execution.terminal = terminal; execution.attempt = attempt;
       const envelope = terminal.envelope;
       if (attempt.cancellation || envelope.type === 'task.cancelled') { settle(state, row, 'cancelled'); return; }
-      if (envelope.type === 'task.complete') {
+      if (envelope.type === 'task.complete' && envelope.payload.sealed === undefined) {
         if (!state.applied[row.taskId]) {
           const result = this.options.applyOutcome?.(envelope.payload.document, {
             intent: structuredClone(row), terminal: structuredClone(terminal), application: state.application,

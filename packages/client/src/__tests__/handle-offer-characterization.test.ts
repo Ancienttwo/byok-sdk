@@ -15,6 +15,7 @@ import { RuntimeDisposalFailure } from '../runtime-failure';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_OFFER, freshOfferRunnerDeps, resumeSession } from './fixtures/fresh-offer';
 
 /**
  * Characterization of `TaskRunner.handleOffer` exits that no other test pins
@@ -61,8 +62,9 @@ function claimed(sent: readonly Envelope[], taskId: string): number {
 }
 
 function agentOffer(taskId: string, seq: number, extra: { sessionRef?: string } = {}): Envelope {
-  return createEnvelope('task.offer_for_agent', {
-    instruction: 'characterized work', runtime: 'pi', agentRef: AGENT, ...extra,
+  return createEnvelope('task.offer', {
+    instruction: 'characterized work', runtime: 'pi', agentRef: AGENT,
+    ...(extra.sessionRef === undefined ? FRESH_OFFER : resumeSession(extra.sessionRef)),
   }, { taskId, seq });
 }
 
@@ -84,6 +86,7 @@ async function agentRunner(
     approvalRegistry: new ApprovalRegistry(),
     storeDir,
     productId: 'offer-characterization',
+    ...freshOfferRunnerDeps(),
     ...extra,
   };
   const runner = new TaskRunner(deps);
@@ -224,8 +227,8 @@ describe('handleOffer exit characterization (before the phase split)', () => {
     const acquire = vi.spyOn(agentHome, 'acquireExecution');
     vi.spyOn(AgentMessageOutbox, 'open').mockRejectedValueOnce(new Error('outbox fixture failure'));
     const taskId = 'agent-message-outbox-failed';
-    const offer = (seq: number) => createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'reply', runtime: 'pi', agentRef: AGENT, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+    const offer = (seq: number) => createEnvelope('task.offer', {
+      instruction: 'reply', runtime: 'pi', agentRef: AGENT, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId, seq });
 

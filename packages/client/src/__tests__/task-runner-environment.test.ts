@@ -1,3 +1,4 @@
+import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import type { RuntimeTaskInput } from '../types';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
@@ -89,7 +90,7 @@ async function makeHarness(): Promise<Harness> {
   });
 
   const sent: Envelope[] = [];
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
     adapters: [piAdapter, claudeAdapter, codexAdapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-1',
@@ -113,7 +114,7 @@ async function makeHarness(): Promise<Harness> {
     // capture below is always populated by the time this call returns —
     // no polling/`vi.waitFor` needed, unlike the full daemon-level tests.
     await runner.handleEnvelope(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'say hi', runtime, ...(dispatchSelection === undefined ? {} : { dispatchSelection }) }, { taskId, seq: seq++ }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'say hi', runtime, ...(dispatchSelection === undefined ? {} : { dispatchSelection }), ...FRESH_OFFER }, { taskId, seq: seq++ }),
     );
   }
 

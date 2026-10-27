@@ -9,7 +9,7 @@ const CORPUS_SCOPE_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1
 const CORPUS_TENANT = 'tenant-golden';
 const MAX = 2 * 1024 * 1024;
 type Line = { payload: { routineRef?: RoutineRef; agentRef: AgentRef; sealing: TaskSealing; sealed: SealedTaskInput } };
-const routineLines = readFileSync(new URL('../../../packages/protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
+const routineLines = readFileSync(new URL('../../../packages/protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd().split('\n').map(raw => JSON.parse(raw) as Line).filter(line => line.payload.routineRef !== undefined);
 
 function open(sealed: SealedTaskInput, binding: ReturnType<typeof routineTemplateBinding>, sealing: TaskSealing, scopeKey = CORPUS_SCOPE_KEY) {

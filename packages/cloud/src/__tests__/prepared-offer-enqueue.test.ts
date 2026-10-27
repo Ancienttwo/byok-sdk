@@ -4,9 +4,9 @@ import { AGENT_HOME_CONTRACT_CAPABILITY } from '..';
 import { TENANT_A, createHarness } from './support/harness';
 
 /**
- * The hosted half of `task.offer_prepared`.
+ * The hosted half of the prepared `task.offer` (the one carrying `preparation`).
  *
- * Two properties, both of which the distinct message type exists for:
+ * Two properties, both of which the prepared lane exists for:
  *
  * - A device that cannot prepare never receives an offer naming a preparation.
  *   Capability admission is read from the durable device row BEFORE a mailbox
@@ -14,18 +14,19 @@ import { TENANT_A, createHarness } from './support/harness';
  *   does it, so a refused dispatch leaves nothing behind.
  * - The payload is strict. A caller that tried to reach the ordinary
  *   instruction lane through this message — by adding an `instruction`, or a
- *   `sessionRef` a prepared Execution can never resume — is rejected rather
+ *   `sessionRef` or a resume `session` a prepared Execution can never use — is rejected rather
  *   than silently stripped.
  */
 
 const EGRESS_POLICY = { policyRevision: 'default-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } } as const;
-const CAPABILITIES = [AGENT_HOME_CONTRACT_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, 'toolset-selection'];
+const CAPABILITIES = [AGENT_HOME_CONTRACT_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, 'toolset-selection', 'agent-memory-selection'];
 const AGENT_REF = { agentId: 'agent-prepared-1', profileRevision: 'profile-r1' } as const;
 
 function preparedPayload() {
   return {
     egressPolicy: EGRESS_POLICY,
     agentRef: AGENT_REF,
+    session: { mode: 'fresh' } as const,
     agentMemory: 'none' as const,
     requiredToolsets: ['team'],
     preparation: {
@@ -95,21 +96,21 @@ describe('hosted prepared-Execution dispatch', () => {
     expect(page.messages).toHaveLength(1);
     const decoded = decodeEnvelope(page.messages[0]!.body);
     expect(decoded).toEqual(offered.envelope);
-    expect(decoded.type).toBe('task.offer_prepared');
-    if (decoded.type !== 'task.offer_prepared') throw new Error('unreachable');
+    expect(decoded.type).toBe('task.offer');
+    if (decoded.type !== 'task.offer') throw new Error('unreachable');
     expect(decoded.payload.preparation).toEqual({
       reference: 'prep-record-1',
       requestDigest: 'request-digest-1',
       artifactDigest: 'envelope-digest-1',
     });
-    // The two omissions are structural, and survive the round trip as omissions.
+    // The omission of the instruction is structural, and survives the round trip as an omission.
     expect('instruction' in decoded.payload).toBe(false);
-    expect('sessionRef' in decoded.payload).toBe(false);
+    expect(decoded.payload.session).toEqual({ mode: 'fresh' });
     expect(offered.attempt.agentRef).toEqual(AGENT_REF);
     expect((await harness.cloud.readTaskAttempt(TENANT_A, 'prepared-task-1'))?.agentRef).toEqual(AGENT_REF);
   });
 
-  it('rejects an instruction or a sessionRef smuggled onto the prepared lane instead of stripping it', async () => {
+  it('rejects an instruction, a sessionRef or a resume session smuggled onto the prepared lane instead of stripping it', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
@@ -120,6 +121,7 @@ describe('hosted prepared-Execution dispatch', () => {
     for (const [taskId, extra] of [
       ['prepared-task-instruction', { instruction: 'compile something else' }],
       ['prepared-task-session', { sessionRef: 'session-from-an-earlier-turn' }],
+      ['prepared-task-resume', { session: { mode: 'resume', sessionRef: 'session-from-an-earlier-turn' } }],
     ] as const) {
       await expect(
         harness.cloud.enqueuePreparedOffer(TENANT_A, device.deviceId, {

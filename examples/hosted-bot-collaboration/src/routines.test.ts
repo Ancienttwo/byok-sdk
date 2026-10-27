@@ -204,7 +204,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
       const port: FrozenSubmitPort = {
         submit: async input => {
           submitted.push(input.taskId);
-          offers.set(input.taskId, { taskId: input.taskId, deviceId: input.deviceId, type: 'task.offer_for_agent_with_egress_fresh',
+          offers.set(input.taskId, { taskId: input.taskId, deviceId: input.deviceId, type: 'task.offer',
             payload: structuredClone(input.payload), delivered: true, messageId: `offer-${input.taskId}` });
           return undefined as never;
         },

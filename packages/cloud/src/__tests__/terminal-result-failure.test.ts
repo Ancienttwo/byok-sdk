@@ -6,10 +6,10 @@ import { tenantId } from '@byok-sdk/core';
 
 const receipt = (envelope: Envelope) => ({ tenantId: tenantId('tenant-a'), key: 'terminal', body: encodeEnvelope(envelope), recordedAt: '2026-10-24T00:00:00.000Z' });
 
-/** The golden task.fail_sealed line that carries a quota class (#869). */
+/** The golden sealed task.fail line that carries a quota class (#869). */
 const sealedQuota = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd().split('\n').map((raw) => JSON.parse(raw) as Envelope)
-  .find((line) => line.type === 'task.fail_sealed' && (line.payload as { failure?: { class: string } }).failure?.class === 'quota')!;
+  .find((line) => line.type === 'task.fail' && (line.payload as { sealed?: unknown }).sealed !== undefined && (line.payload as { failure?: { class: string } }).failure?.class === 'quota')!;
 
 describe('projectTerminalResult: the runtime failure class (#869)', () => {
   it('copies task.fail.failure verbatim', () => {
@@ -18,7 +18,7 @@ describe('projectTerminalResult: the runtime failure class (#869)', () => {
     expect(projected).toMatchObject({ state: 'failed', reason: 'limit', retryable: false, failure });
   });
 
-  it('copies the plaintext failure of task.fail_sealed', () => {
+  it('copies the plaintext failure of a sealed task.fail', () => {
     const projected = projectTerminalResult(sealedQuota.task_id!, receipt(sealedQuota));
     expect(projected.failure).toEqual({ class: 'quota', resetsAt: '2026-10-24T05:00:00.000Z' });
     expect(projected.reason).toBeUndefined();

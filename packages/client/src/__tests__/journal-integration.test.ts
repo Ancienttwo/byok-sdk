@@ -32,6 +32,12 @@ import type { JournalIdentity, JournalReceipt, LocalTaskJournal, LocalTerminalRe
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { AgentEgressController } from '../daemon/agent-egress-controller';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 /**
  * Counts every `SqliteLocalTaskJournal` construction while leaving the real
@@ -184,7 +190,7 @@ describe('hosted journal integration (L-002)', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-journal',
         serverUrl: server.url,
-        agentHome: testAgentHomeConfig(),
+        agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir,
         ...configOverrides,
       },
@@ -215,7 +221,7 @@ describe('hosted journal integration (L-002)', () => {
         rejected.push(event);
       }
     });
-    server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'PAYLOAD_SENTINEL' }, { taskId: 'terminal-rejected', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'PAYLOAD_SENTINEL' }, { taskId: 'terminal-rejected', seq: server.nextSeq() }));
     await server.waitFor((envelope) => envelope.type === 'task.started');
     adapter.sessions[0]!.emit({ type: 'progress', text: 'PAYLOAD_SENTINEL' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
@@ -242,7 +248,7 @@ describe('hosted journal integration (L-002)', () => {
       await recordTerminal(record);
     });
     const { adapter } = await startDaemon({}, journal);
-    server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'unique result' },
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'unique result' },
       { taskId: 'terminal-retry', seq: server.nextSeq() }));
     await server.waitFor(e => e.type === 'task.started');
     adapter.sessions[0]!.emit({ type: 'turn_end' });
@@ -269,7 +275,7 @@ describe('hosted journal integration (L-002)', () => {
     });
     const { adapter, storeDir, deviceId } = await startDaemon({}, journal);
     const seq = server.nextSeq();
-    const offer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'invalid limit', limits: { maxTokens: 1 } },
+    const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'invalid limit', limits: { maxTokens: 1 } },
       { taskId: 'decline-retry', seq });
     server.send(offer);
     await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(1));
@@ -295,12 +301,12 @@ describe('hosted journal integration (L-002)', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-journal',
         serverUrl: server.url,
-        agentHome: testAgentHomeConfig(),
+        agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir: await tmpDir('byok-journal-cfg-store-'),
       };
 
       expect(() =>
-        createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...base, hostedJournal: { mode: 'sqlite' } } as DaemonConfig, []),
+        createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },  storage: { scratchRoot: testScratchRoot() }, ...base, hostedJournal: { mode: 'sqlite' } } as DaemonConfig, []),
       ).toThrow(DaemonConfigFieldRemovedError);
       // Nothing was constructed on the rejected path.
       expect(journalConstructions.storeDirs).toEqual([]);
@@ -320,7 +326,7 @@ describe('hosted journal integration (L-002)', () => {
 
       const release = journal.blockAppends();
       const seq = server.nextSeq();
-      server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-order-1', seq }));
+      server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, { taskId: 'task-order-1', seq }));
 
       // The append has been ENTERED (so the journal is genuinely on the
       // inbound path, not merely constructed) and is now held open.
@@ -354,7 +360,7 @@ describe('hosted journal integration (L-002)', () => {
       const { adapter } = await startDaemon({}, journal);
 
       server.send(
-        createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-terminal-1', seq: server.nextSeq() }),
+        createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, { taskId: 'task-terminal-1', seq: server.nextSeq() }),
       );
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-terminal-1');
       adapter.sessions[0]?.emit({ type: 'turn_end' });
@@ -382,7 +388,7 @@ describe('hosted journal integration (L-002)', () => {
         // recovery exists for.
         const storeDir = await tmpDir('byok-journal-recover-store-');
         const seeded = new SqliteLocalTaskJournal({ storeDir });
-        const bytes = encodeEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'recover' }, { taskId: 'task-recover-1', seq: 7 }));
+        const bytes = encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'recover' }, { taskId: 'task-recover-1', seq: 7 }));
         await seeded.appendEnvelope({
           identity: { tenantId: 'tenant-test', productId: 'test-product-journal', deviceId: 'device-1' },
           envelopeId: 'env-crashed',
@@ -402,7 +408,7 @@ describe('hosted journal integration (L-002)', () => {
             localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
             productId: 'test-product-journal',
             serverUrl: server.url,
-            agentHome: testAgentHomeConfig(),
+            agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
             storeDir,
           },
           [adapter],
@@ -467,7 +473,7 @@ async function makeRunner(
   sent: Envelope[],
   admissionGuard?: TaskRunnerDeps['admissionGuard'],
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-1',
@@ -484,7 +490,7 @@ async function makeRunner(
 }
 
 function offer(taskId: string): Envelope {
-  return createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId, seq: 1 });
+  return createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, { taskId, seq: 1 });
 }
 
 describe('TaskRunner.admissionGuard (L-002 seam)', () => {

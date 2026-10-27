@@ -136,8 +136,8 @@ describe('daemon lifecycle (#391)', () => {
     await waitForDaemonOpen(daemon);
 
     server.send(createEnvelope(
-      'task.offer_for_agent_with_egress_fresh',
-      { instruction: 'mint a session to publish from', runtime: 'pi', agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY },
+      'task.offer',
+      { session: { mode: 'fresh' }, instruction: 'mint a session to publish from', runtime: 'pi', agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY },
       { taskId, seq: server.nextSeq() },
     ));
     await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === taskId);

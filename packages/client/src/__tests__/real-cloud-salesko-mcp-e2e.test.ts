@@ -84,8 +84,8 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
       requiredToolsets: ['salesko.connectors'],
     });
     expect(offer.envelope).toMatchObject({
-      type: 'task.offer_for_agent_with_egress_fresh',
-      payload: { runtime: 'claude', requiredToolsets: ['salesko.connectors'] },
+      type: 'task.offer',
+      payload: { session: { mode: 'fresh' }, runtime: 'claude', requiredToolsets: ['salesko.connectors'] },
     });
     // The host sends logical ids only. Local commands remain device authority.
     expect(JSON.stringify(offer.envelope)).not.toContain(SALESKO_MCP_FIXTURE);

@@ -31,6 +31,7 @@ import type { McpToolsetConfig, RuntimeCapabilities } from '../../types';
 import { StubRuntimeAdapter } from './stub-adapter';
 import { observationOf } from './mcp-observation';
 import { testIngressBudget } from './activity-ingress';
+import { advertiseEveryDeviceFlag } from '../support/advertised-capabilities';
 
 /**
  * One daemon LIFETIME of the prepared-offer lane, as its own operating-system
@@ -180,7 +181,7 @@ const sent: Envelope[] = [];
 await fs.mkdir(config.runnerStoreDir, { recursive: true });
 await fs.mkdir(config.agentHomeDir, { recursive: true });
 
-const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: new ScratchRoot(config.scratchRoot),
+const runner = new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: new ScratchRoot(config.scratchRoot),
   adapters: [adapter],
   deviceId: DEVICE_ID,
   send: (envelope) => sent.push(envelope),
@@ -349,8 +350,9 @@ function preparedOffer(
   seq: number,
 ): Envelope {
   return createEnvelope(
-    'task.offer_prepared',
+    'task.offer',
     {
+      session: { mode: 'fresh' },
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       runtime: 'pi',
       agentRef: agentRefOf(agentId),
@@ -367,9 +369,9 @@ function report(before: number): Record<string, unknown> {
   const produced = sent.slice(before);
   return {
     claims: produced.filter((envelope) => envelope.type === 'task.claim').length,
-    declines: produced
-      .filter((envelope) => envelope.type === 'task.decline')
-      .map((envelope) => (envelope as Extract<Envelope, { type: 'task.decline' }>).payload.reason),
+    declines: produced.flatMap((envelope) => (
+      envelope.type === 'task.decline' && envelope.payload.sealed === undefined ? [envelope.payload.reason] : []
+    )),
     preparedStarts: adapter.preparedStartCalls.length,
     instructionStarts: adapter.startCalls.length,
     openCalls,

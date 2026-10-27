@@ -9,7 +9,7 @@ import { AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../
 import { McpAuthorityError, MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from '../mcp-tools-probe';
 import { bindMcpToolsetServerObservation, type McpToolsetServerObservation } from '../../mcp/observation';
 import type { PickResult, OfferPhaseContext, OfferRuntimeInput } from './support';
-import { isKnownRuntimeId, DEFAULT_RUNTIME_PREFERENCE, orderByPreference, adapterSupportsMcpToolsets, withoutRequiredToolsets, errorMessage, outboundErrorMessage } from './support';
+import { isKnownRuntimeId, DEFAULT_RUNTIME_PREFERENCE, orderByPreference, adapterSupportsMcpToolsets, runtimeTaskInput, errorMessage, outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
 
 export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseContext, input: OfferRuntimeInput) {
@@ -18,7 +18,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     payload, agentRef, preparation, preparedMemorySelected, ordinaryMemoryMode, ordinaryMemoryMcp, messageRequirement, terminalProjection,
     readerAttempt, requiredToolsets, resolvedMcp, blobAbort,
   } = input;
-  const offered = withoutRequiredToolsets(payload);
+  const offered = runtimeTaskInput(payload);
   const requestedRuntime = payload.harnessId ?? payload.dispatchSelection?.runtimeId ?? payload.runtime;
   const requiresAgentMemoryMcp = preparation === undefined && agentRef !== undefined && ordinaryMemoryMcp;
   let pick: PickResult;

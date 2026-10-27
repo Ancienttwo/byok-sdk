@@ -14,6 +14,9 @@ import type { JournalReceipt, LocalTaskJournal, ReceivedEnvelopeRecord } from '.
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
+
 const roots: string[] = [];
 let server: TestServer | undefined;
 let daemon: Daemon | undefined;
@@ -121,7 +124,7 @@ describe('authenticated enrollment tenant projection', () => {
         productName: 'Enrollment repair test',
         productId: 'enrollment-repair-test',
         serverUrl: server.url,
-        agentHome: testAgentHomeConfig(),
+        agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir,
       },
       [new StubRuntimeAdapter('pi')],
@@ -165,7 +168,7 @@ describe('authenticated enrollment tenant projection', () => {
         productName: 'Legacy authority refusal test',
         productId,
         serverUrl: server.url,
-        agentHome: testAgentHomeConfig(),
+        agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir,
       },
       [new StubRuntimeAdapter('pi')],
@@ -350,7 +353,7 @@ describe('authenticated enrollment tenant projection', () => {
     expect(appended).toMatchObject({ ok: true, record: { tenantId: 'tenant-daemon' } });
 
     const sequence = server.nextSeq();
-    server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'journal identity' }, {
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'journal identity' }, {
       taskId: 'enrollment-journal-task',
       seq: sequence,
     }));

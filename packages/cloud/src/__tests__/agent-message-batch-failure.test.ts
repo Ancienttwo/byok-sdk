@@ -19,7 +19,7 @@ describe('POST /byok/messages with a failing Agent message', () => {
       taskId,
       deviceId: device.deviceId,
       payload: {
-        instruction: 'reply', agentRef, runtime: 'codex',
+        instruction: 'reply', agentRef, runtime: 'codex', session: { mode: 'fresh' },
         egressPolicy: {
           policyRevision: 'policy-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },

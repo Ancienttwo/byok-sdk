@@ -152,7 +152,7 @@ async function pairCapableDevice(composition, tenant, deviceName) {
 function recurringInput(taskId, deviceId, instruction, agentRef = { agentId: 'packed-agent', profileRevision: 'profile' }) {
   return AgentExecutionInputSchema.parse({
     taskId, deviceId,
-    payload: { instruction, runtime: 'codex',
+    payload: { instruction, runtime: 'codex', session: { mode: 'fresh' },
       agentRef,
       egressPolicy: { policyRevision: 'policy', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
         reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
@@ -409,8 +409,9 @@ await stores.devices.recordCapabilities(tenant, { deviceId, capabilities: AGENT_
 const input = recurringInput('packed-execution', deviceId, 'persisted current input');
 const submitted = await cloud.submitAgentExecution(tenant, JSON.parse(JSON.stringify(input)));
 assert.equal(submitted.taskId, input.taskId);
-assert.equal(submitted.envelope.type, 'task.offer_for_agent_with_egress_fresh');
+assert.equal(submitted.envelope.type, 'task.offer');
 assert.equal('sessionRef' in submitted.envelope.payload, false);
+assert.deepEqual(submitted.envelope.payload.session, { mode: 'fresh' });
 assert.deepEqual((await cloud.readTaskOffer(tenant, input.taskId)).payload, input.payload);
 await assert.rejects(cloud.submitAgentExecution(tenant, input));
 assert.equal(await cloud.readDeviceTerminal(tenant, input.taskId), undefined);

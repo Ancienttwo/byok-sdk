@@ -84,9 +84,9 @@ export async function handleOffer(
       return;
     }
   }
-  const messageRequirement = 'messageEgress' in payload ? payload.messageEgress : undefined;
-  const terminalProjection = 'terminalProjection' in payload ? payload.terminalProjection : undefined;
-  if ('egressPolicy' in payload) {
+  const messageRequirement = payload.messageEgress;
+  const terminalProjection = payload.terminalProjection;
+  if (payload.egressPolicy !== undefined) {
     if (this['deps'].agentEgressPolicy === undefined || !sameEgressPolicy(this['deps'].agentEgressPolicy, payload.egressPolicy)) {
       decline('Agent egress offer policy is not exactly enabled by this daemon', false);
       return;
@@ -269,7 +269,7 @@ function readOfferRequest(this: TaskRunner, taskId: string, payload: AcceptedOff
   // else. Absent for every ordinary offer, so every branch below that does
   // not mention it behaves exactly as it did before this lane existed.
   const preparation = offeredPreparation(payload);
-  const offeredMemory = 'agentMemory' in payload ? payload.agentMemory : undefined;
+  const offeredMemory = payload.agentMemory;
   if (preparation !== undefined && !PreparedAgentMemoryModeSchema.safeParse(offeredMemory).success) {
     decline('agent_memory_selection_invalid: prepared offers require an explicit memory selection', false);
     return;

@@ -14,8 +14,6 @@ import {
   type MessageType,
   type CreateEnvelopeOptions,
 } from '../index';
-import { isSealedMessageType } from '../sealed-payload';
-import { minimalSealedPayload } from './sealed-fixtures';
 
 /**
  * FREEZE GUARD — local invariants of the frozen wire, major 3 (docs/protocol.md
@@ -43,6 +41,9 @@ import { minimalSealedPayload } from './sealed-fixtures';
  */
 
 
+/** The `task.offer` payload variants probed below (see `offerProbePayload`). */
+const OFFER_PROBE_VARIANTS = ['resume', 'fresh', 'prepared'] as const;
+
 // ---------------------------------------------------------------------------
 // Part 1 — the task_id/seq requiredness table (checked in Part 3)
 // ---------------------------------------------------------------------------
@@ -63,10 +64,7 @@ import { minimalSealedPayload } from './sealed-fixtures';
 function codecRequirednessMatrix(): CodecRequirednessMatrix {
   return {
     'conn.hello': { taskId: 'optional', seq: 'optional' },
-    'task.offer_for_agent': { taskId: 'required', seq: 'required' },
-    'task.offer_for_agent_with_egress': { taskId: 'required', seq: 'required' },
-    'task.offer_for_agent_with_egress_fresh': { taskId: 'required', seq: 'required' },
-    'task.offer_prepared': { taskId: 'required', seq: 'required' },
+    'task.offer': { taskId: 'required', seq: 'required' },
     'agent.egress.reliable': { taskId: 'optional', seq: 'optional' },
     'agent.egress.ack': { taskId: 'optional', seq: 'required' },
     'agent.message.draft': { taskId: 'required', seq: 'optional' },
@@ -93,17 +91,6 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'task.fail': { taskId: 'required', seq: 'optional' },
     'task.cancelled': { taskId: 'required', seq: 'optional' },
     'task.approval_resolved': { taskId: 'required', seq: 'optional' },
-    'task.offer_for_agent_sealed': { taskId: 'required', seq: 'required' },
-    'task.offer_for_agent_with_egress_sealed': { taskId: 'required', seq: 'required' },
-    'task.offer_for_agent_with_egress_fresh_sealed': { taskId: 'required', seq: 'required' },
-    'task.steer_sealed': { taskId: 'required', seq: 'required' },
-    'task.complete_sealed': { taskId: 'required', seq: 'optional' },
-    'task.fail_sealed': { taskId: 'required', seq: 'optional' },
-    'task.decline_sealed': { taskId: 'required', seq: 'optional' },
-    'task.cancelled_sealed': { taskId: 'required', seq: 'optional' },
-    'task.progress_sealed': { taskId: 'required', seq: 'optional' },
-    'task.artifact_sealed': { taskId: 'required', seq: 'optional' },
-    'task.await_approval_sealed': { taskId: 'required', seq: 'optional' },
   };
 }
 
@@ -132,19 +119,7 @@ type FieldRequiredness<T extends MessageType, K extends 'taskId' | 'seq'> =
  */
 type CodecRequirednessMatrix = {
   'conn.hello': { taskId: FieldRequiredness<'conn.hello', 'taskId'>; seq: FieldRequiredness<'conn.hello', 'seq'> };
-  'task.offer_for_agent': { taskId: FieldRequiredness<'task.offer_for_agent', 'taskId'>; seq: FieldRequiredness<'task.offer_for_agent', 'seq'> };
-  'task.offer_for_agent_with_egress': {
-    taskId: FieldRequiredness<'task.offer_for_agent_with_egress', 'taskId'>;
-    seq: FieldRequiredness<'task.offer_for_agent_with_egress', 'seq'>;
-  };
-  'task.offer_for_agent_with_egress_fresh': {
-    taskId: FieldRequiredness<'task.offer_for_agent_with_egress_fresh', 'taskId'>;
-    seq: FieldRequiredness<'task.offer_for_agent_with_egress_fresh', 'seq'>;
-  };
-  'task.offer_prepared': {
-    taskId: FieldRequiredness<'task.offer_prepared', 'taskId'>;
-    seq: FieldRequiredness<'task.offer_prepared', 'seq'>;
-  };
+  'task.offer': { taskId: FieldRequiredness<'task.offer', 'taskId'>; seq: FieldRequiredness<'task.offer', 'seq'> };
   'agent.egress.reliable': {
     taskId: FieldRequiredness<'agent.egress.reliable', 'taskId'>;
     seq: FieldRequiredness<'agent.egress.reliable', 'seq'>;
@@ -213,50 +188,6 @@ type CodecRequirednessMatrix = {
     taskId: FieldRequiredness<'task.approval_resolved', 'taskId'>;
     seq: FieldRequiredness<'task.approval_resolved', 'seq'>;
   };
-  'task.offer_for_agent_sealed': {
-    taskId: FieldRequiredness<'task.offer_for_agent_sealed', 'taskId'>;
-    seq: FieldRequiredness<'task.offer_for_agent_sealed', 'seq'>;
-  };
-  'task.offer_for_agent_with_egress_sealed': {
-    taskId: FieldRequiredness<'task.offer_for_agent_with_egress_sealed', 'taskId'>;
-    seq: FieldRequiredness<'task.offer_for_agent_with_egress_sealed', 'seq'>;
-  };
-  'task.offer_for_agent_with_egress_fresh_sealed': {
-    taskId: FieldRequiredness<'task.offer_for_agent_with_egress_fresh_sealed', 'taskId'>;
-    seq: FieldRequiredness<'task.offer_for_agent_with_egress_fresh_sealed', 'seq'>;
-  };
-  'task.steer_sealed': {
-    taskId: FieldRequiredness<'task.steer_sealed', 'taskId'>;
-    seq: FieldRequiredness<'task.steer_sealed', 'seq'>;
-  };
-  'task.complete_sealed': {
-    taskId: FieldRequiredness<'task.complete_sealed', 'taskId'>;
-    seq: FieldRequiredness<'task.complete_sealed', 'seq'>;
-  };
-  'task.fail_sealed': {
-    taskId: FieldRequiredness<'task.fail_sealed', 'taskId'>;
-    seq: FieldRequiredness<'task.fail_sealed', 'seq'>;
-  };
-  'task.decline_sealed': {
-    taskId: FieldRequiredness<'task.decline_sealed', 'taskId'>;
-    seq: FieldRequiredness<'task.decline_sealed', 'seq'>;
-  };
-  'task.cancelled_sealed': {
-    taskId: FieldRequiredness<'task.cancelled_sealed', 'taskId'>;
-    seq: FieldRequiredness<'task.cancelled_sealed', 'seq'>;
-  };
-  'task.progress_sealed': {
-    taskId: FieldRequiredness<'task.progress_sealed', 'taskId'>;
-    seq: FieldRequiredness<'task.progress_sealed', 'seq'>;
-  };
-  'task.artifact_sealed': {
-    taskId: FieldRequiredness<'task.artifact_sealed', 'taskId'>;
-    seq: FieldRequiredness<'task.artifact_sealed', 'seq'>;
-  };
-  'task.await_approval_sealed': {
-    taskId: FieldRequiredness<'task.await_approval_sealed', 'taskId'>;
-    seq: FieldRequiredness<'task.await_approval_sealed', 'seq'>;
-  };
 };
 
 // ---------------------------------------------------------------------------
@@ -298,6 +229,7 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
     );
     const parsed = parseMessage(envelope);
     if (parsed.type !== 'task.progress') throw new Error('unreachable');
+    if (parsed.payload.sealed !== undefined) throw new Error('unreachable');
     expect(parsed.payload.events).toHaveLength(2);
     expect(parsed.payload.events[1]).toEqual({ type: 'plan_update', step: 1, of: 3 });
   });
@@ -313,16 +245,18 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
   });
 
   it('an unknown `instruction` shape is REJECTED, fail-closed (control/security data, not observability)', () => {
-    const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent'].safeParse({
+    const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({
       agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+      session: { mode: 'resume', sessionRef: 'session-1' },
       instruction: { someFutureShape: true }, // neither a plain string nor { blobRef }
     });
     expect(result.success).toBe(false);
   });
 
   it('an unknown field alongside an otherwise well-formed `instruction.blobRef` is REJECTED, fail-closed (same `.strict()` asymmetry applied to the blob-ref instruction variant)', () => {
-    const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent'].safeParse({
+    const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({
       agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+      session: { mode: 'resume', sessionRef: 'session-1' },
       instruction: {
         blobRef: {
           blobId: 'blob-1',
@@ -346,13 +280,9 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
     expect(() => parseMessage({ ...envelope, v })).toThrow(EnvelopeValidationError);
   });
 
-  it.each([
-    'task.offer_for_agent',
-    'task.offer_for_agent_with_egress',
-    'task.offer_for_agent_with_egress_fresh',
-    'task.offer_prepared',
-  ] as const)('a strict %s whose result-document projection lacks `schema` (the v2 shape) is REJECTED', (type) => {
-    const payload = minimalPayloadForProbe(type) as Record<string, unknown>;
+  it.each(OFFER_PROBE_VARIANTS)('a strict task.offer (%s variant) whose result-document projection lacks `schema` (the v2 shape) is REJECTED', (variant) => {
+    const type = 'task.offer' as const;
+    const payload = offerProbePayload(variant);
     const schema = { type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'], additionalProperties: false };
     const v3 = { ...payload, terminalProjection: { mode: 'result-document', contract: 'example.answer.v1', schema } };
     expect(MESSAGE_PAYLOAD_SCHEMAS[type].safeParse(v3).success).toBe(true);
@@ -364,13 +294,9 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
     expect(() => parseMessage(raw)).toThrow(EnvelopeValidationError);
   });
 
-  it.each([
-    'task.offer_for_agent',
-    'task.offer_for_agent_with_egress',
-    'task.offer_for_agent_with_egress_fresh',
-    'task.offer_prepared',
-  ] as const)('a strict %s that still carries the removed `policy` is REJECTED, not stripped', (type) => {
-    const payload = minimalPayloadForProbe(type) as Record<string, unknown>;
+  it.each(OFFER_PROBE_VARIANTS)('a strict task.offer (%s variant) that still carries the removed `policy` is REJECTED, not stripped', (variant) => {
+    const type = 'task.offer' as const;
+    const payload = offerProbePayload(variant);
     expect(MESSAGE_PAYLOAD_SCHEMAS[type].safeParse(payload).success).toBe(true);
     const removedPolicy = { mode: 'auto' };
     const withPolicy = { ...payload, policy: removedPolicy };
@@ -398,54 +324,38 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
 // Part 3 — dual-source cross-check: envelope.ts vs. codec.ts requiredness
 // ---------------------------------------------------------------------------
 
+/** The `task.offer` payload variants the four Agent offer types became: resume, fresh with egress, prepared. */
+function offerProbePayload(variant: (typeof OFFER_PROBE_VARIANTS)[number]): Record<string, unknown> {
+  const agentRef = { agentId: 'agent-1', profileRevision: 'rev-1' };
+  const egressPolicy = {
+    policyRevision: 'policy-r1',
+    activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
+    reliable: { maxPendingEventsPerAgent: 1, maxPendingBytesPerAgent: 1, maxPendingBytesPerTenant: 1 },
+    transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
+  };
+  switch (variant) {
+    case 'resume':
+      return { instruction: 'run for agent', agentRef, session: { mode: 'resume', sessionRef: 'session-1' } };
+    case 'fresh':
+      return { instruction: 'start with egress', agentRef, session: { mode: 'fresh' }, egressPolicy };
+    case 'prepared':
+      return {
+        agentMemory: 'none',
+        egressPolicy,
+        agentRef,
+        session: { mode: 'fresh' },
+        preparation: { reference: 'prep-record-1', requestDigest: 'request-digest-1' },
+      };
+  }
+}
+
 /** Minimal-but-schema-valid payload per type, used only to probe `EnvelopeSchema`'s own requiredness at runtime — self-contained (not imported from another test file), matching this repo's existing test-file convention. */
 function minimalPayloadForProbe(type: MessageType): unknown {
   switch (type) {
     case 'conn.hello':
       return { protocolVersions: [PROTOCOL_VERSION], capabilities: [], deviceId: 'device-1', productId: 'acme-agent' };
-    case 'task.offer_for_agent':
-      return { instruction: 'run for agent', agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } };
-    case 'task.offer_for_agent_with_egress':
-      return {
-        instruction: 'run with egress',
-        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
-        sessionRef: 'session-1',
-        egressPolicy: {
-          policyRevision: 'policy-r1',
-          activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
-          reliable: {
-            maxPendingEventsPerAgent: 1,
-            maxPendingBytesPerAgent: 1,
-            maxPendingBytesPerTenant: 1,
-          },
-          transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
-        },
-      };
-    case 'task.offer_for_agent_with_egress_fresh':
-      return {
-        instruction: 'start with egress',
-        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
-        egressPolicy: {
-          policyRevision: 'policy-r1',
-          activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
-          reliable: {
-            maxPendingEventsPerAgent: 1,
-            maxPendingBytesPerAgent: 1,
-            maxPendingBytesPerTenant: 1,
-          },
-          transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
-        },
-      };
-    case 'task.offer_prepared':
-      return {
-        agentMemory: 'none',
-        egressPolicy: { policyRevision: 'default-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
-        agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
-        preparation: {
-          reference: 'prep-record-1',
-          requestDigest: 'request-digest-1',
-        },
-      };
+    case 'task.offer':
+      return offerProbePayload('resume');
     case 'agent.egress.reliable':
       return {
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
@@ -594,7 +504,6 @@ function minimalPayloadForProbe(type: MessageType): unknown {
     case 'task.approval_resolved':
       return { approvalId: 'appr-1', decision: 'approve', resolvedBy: 'local', at: '2026-01-01T00:00:00.000Z' };
     default: {
-      if (isSealedMessageType(type)) return minimalSealedPayload(type, minimalPayloadForProbe);
       const exhaustive: never = type;
       throw new Error(`no minimal payload fixture for message type: ${String(exhaustive)}`);
     }

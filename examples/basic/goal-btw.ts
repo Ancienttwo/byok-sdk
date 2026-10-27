@@ -115,7 +115,8 @@ export class GoalBtwHost {
       if (Object.keys(input).some(key => !['taskId', 'deviceId', 'payload'].includes(key)) || !input.payload) throw new Error('Reserved execution contains undeclared authority');
       nonempty(input.taskId, 'reserved taskId'); nonempty(input.payload.instruction, 'reserved instruction');
       const contract = value.kind === 'goal' ? GOAL_RESULT_CONTRACT : BTW_RESULT_CONTRACT;
-      const { instruction: _text, terminalProjection: projection, ...selection } = input.payload;
+      const { instruction: _text, terminalProjection: projection, session, ...selection } = input.payload;
+      if (session.mode !== 'fresh') throw new Error('Reserved execution is not a fresh session');
       if (selection.runtime === undefined) throw new Error('Select an explicit runtime and egress policy');
       const target = { deviceId: input.deviceId, ...selection, runtime: selection.runtime };
       validateTarget(target);
@@ -153,7 +154,7 @@ export class GoalBtwHost {
     if (goal.steps >= goal.maxSteps || now >= goal.deadline) throw new Error('Goal budget exhausted');
     const instruction = `Objective:\n${goal.objective}\n\nHost-selected context:\n${context}\n\nCall submit_result with a JSON document with contract "${GOAL_RESULT_CONTRACT}" and outcome "continue", "complete", "blocked" or "wait". blocked requires reason; wait requires reason and resumeAt (future epoch milliseconds or null for an external event). Report complete only with evidence that the objective is fulfilled.`;
     const { deviceId, ...selection } = goal.target;
-    const input: Input = { taskId, deviceId, payload: { ...selection, instruction, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT, schema: GOAL_RESULT_SCHEMA } } };
+    const input: Input = { taskId, deviceId, payload: { ...selection, session: { mode: 'fresh' }, instruction, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT, schema: GOAL_RESULT_SCHEMA } } };
     goal.pending = { input, phase: 'reserved' }; goal.steps += 1; goal.resumeAt = null; goal.reason = null;
     return this.store.write(`goal:${id}`, revision, goal, taskId);
   }
@@ -161,7 +162,7 @@ export class GoalBtwHost {
     const offer = await this.server.tasks.offer(input.taskId);
     if (!offer) return false;
     const { payload } = input;
-    if (offer.taskId !== input.taskId || offer.deviceId !== input.deviceId || offer.type !== 'task.offer_for_agent_with_egress_fresh' || canonical(offer.payload) !== canonical(payload)) {
+    if (offer.taskId !== input.taskId || offer.deviceId !== input.deviceId || offer.type !== 'task.offer' || canonical(offer.payload) !== canonical(payload)) {
       throw new Error('Persisted SDK offer differs from the reserved Host input');
     }
     return offer.delivered;
@@ -222,6 +223,7 @@ export class GoalBtwHost {
     if (!terminal) return undefined;
     if (terminal.envelope.task_id !== input.taskId) throw new Error('Terminal differs from the reservation');
     if (terminal.envelope.type !== 'task.complete') return { outcome: 'blocked' as const };
+    if (terminal.envelope.payload.sealed !== undefined) throw new Error('Terminal is sealed; this Host submits plaintext executions');
     return { outcome: 'complete' as const, document: terminal.envelope.payload.document };
   }
   async reconcileGoal(id: string, revision: number): Promise<HostSnapshot<HostGoal>> {
@@ -286,7 +288,7 @@ export class GoalBtwHost {
     if (input.target.agentRef.agentId === main.agentRef.agentId) throw new Error('btw requires a different Agent home, not a different profileRevision');
     if (input.destination === input.mainDestination || input.taskId === input.mainTaskId) throw new Error('btw requires an independent task and destination');
     const { deviceId, ...selection } = input.target;
-    const execution: Input = { taskId: input.taskId, deviceId, payload: { ...selection,
+    const execution: Input = { taskId: input.taskId, deviceId, payload: { ...selection, session: { mode: 'fresh' },
       instruction: `Host-selected main-thread snapshot (${input.snapshotRevision}):\n${input.snapshot}\n\nSide question:\n${input.question}\n\nAnswer independently. Do not change or steer the main task. Call submit_result with JSON {"contract":"${BTW_RESULT_CONTRACT}","answer":"your answer"}.`,
       terminalProjection: { mode: 'result-document', contract: BTW_RESULT_CONTRACT, schema: BTW_RESULT_SCHEMA } } };
     return this.store.write(`btw:${input.id}`, null, {

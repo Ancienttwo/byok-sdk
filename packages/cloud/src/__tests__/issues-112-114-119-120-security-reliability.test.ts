@@ -40,7 +40,7 @@ async function admitMessageEgress(harness: CloudHarness, deviceId: string, agent
     payload: {
       instruction: 'send one message',
       agentRef,
-      sessionRef: 'issue-session',
+      session: { mode: 'resume', sessionRef: 'issue-session' },
       egressPolicy: {
         policyRevision: 'issue-policy',
         activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },

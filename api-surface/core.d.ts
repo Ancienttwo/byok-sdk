@@ -2717,7 +2717,7 @@ export type SealedContentHeaderV1 = z.infer<typeof SealedContentHeaderV1Schema>;
  */
 export interface SealedBinding {
     readonly tenantId: string;
-    /** Message family, e.g. `task.offer_for_agent`, or `routine.template`. */
+    /** Message family, e.g. `task.offer`, or `routine.template`. */
     readonly family: string;
     readonly direction: SealedDirection;
     /** The write's identity: `{ taskId }`, `{ messageId }`, … or `{ routineId, definitionVersion }`. */

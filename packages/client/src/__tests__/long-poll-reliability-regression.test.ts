@@ -13,6 +13,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { waitForOpen } from './fixtures/lifecycle-barrier';
 import { TEST_ACTIVITY_INGRESS } from './fixtures/activity-ingress';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -31,7 +35,7 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 function offer(taskId: string, seq: number): Envelope {
-  return createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: taskId }, { taskId, seq });
+  return createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: taskId }, { taskId, seq });
 }
 
 async function seededAuth(): Promise<AuthManager> {
@@ -293,7 +297,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     ['gap-crossing unknown task seq', { events: [{ type: 'task.future', seq: 2 }], cursor: 2 }],
     ['decreasing task page order', {
       events: [
-        { v: 2, id: '10000000-0000-4000-8000-000000000135', ts: new Date().toISOString(), type: 'task.offer_for_agent', task_id: 'known', seq: 1, payload: { instruction: 'known' } },
+        { v: 2, id: '10000000-0000-4000-8000-000000000135', ts: new Date().toISOString(), type: 'task.offer', task_id: 'known', seq: 1, payload: { instruction: 'known' } },
         { type: 'task.future', seq: 1 },
       ],
       cursor: 1,

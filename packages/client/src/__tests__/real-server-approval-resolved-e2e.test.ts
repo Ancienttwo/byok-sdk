@@ -71,6 +71,7 @@ describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_res
       taskId,
       deviceId: record.deviceId,
       payload: {
+        session: { mode: 'fresh' },
         instruction: 'do a thing that needs approval',
         runtime: 'pi',
         agentRef: { agentId: 'agent-approval-resolved', profileRevision: 'rev-1' },

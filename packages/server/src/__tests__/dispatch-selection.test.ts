@@ -53,8 +53,8 @@ describe('dispatchSelection authority', () => {
     const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'use exact target', dispatchSelection });
     const offer = await nextEnvelope(daemon);
 
-    expect(offer.type).toBe('task.offer_for_agent');
-    if (offer.type !== 'task.offer_for_agent') throw new Error('unreachable');
+    expect(offer.type).toBe('task.offer');
+    if (offer.type !== 'task.offer') throw new Error('unreachable');
     expect(offer.task_id).toBe(handle.taskId);
     expect(offer.payload.runtime).toBe('pi');
     expect(offer.payload.dispatchSelection).toEqual(dispatchSelection);

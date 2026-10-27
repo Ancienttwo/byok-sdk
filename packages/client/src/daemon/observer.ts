@@ -1,5 +1,5 @@
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
-import { isTaskOfferType,
+import {
   partitionAgentEvents,
   TASK_TRANSITIONS,
   type AgentEvent,
@@ -234,13 +234,17 @@ export interface DaemonTaskInfo {
 
 type TerminalTaskPatch = Partial<Pick<DaemonTaskInfo, 'summary' | 'sessionRef' | 'declined' | 'delivery'>> & { state: TaskState };
 
-/** One projection of the local terminal envelope, shared by accepted and refused delivery. */
+/**
+ * One projection of the local terminal envelope, shared by accepted and refused
+ * delivery. A sealed payload reaches the observer only when its plaintext was
+ * not kept, and has no local view.
+ */
 function terminalTaskPatch(envelope: Envelope): TerminalTaskPatch | undefined {
   switch (envelope.type) {
-    case 'task.complete': return { state: 'Complete', summary: envelope.payload.summary, sessionRef: envelope.payload.sessionRef };
-    case 'task.fail': return { state: 'Failed', summary: envelope.payload.reason };
-    case 'task.decline': return { state: 'Failed', summary: envelope.payload.reason, declined: true };
-    case 'task.cancelled': return { state: 'Cancelled', summary: envelope.payload.reason };
+    case 'task.complete': return envelope.payload.sealed !== undefined ? undefined : { state: 'Complete', summary: envelope.payload.summary, sessionRef: envelope.payload.sessionRef };
+    case 'task.fail': return envelope.payload.sealed !== undefined ? undefined : { state: 'Failed', summary: envelope.payload.reason };
+    case 'task.decline': return envelope.payload.sealed !== undefined ? undefined : { state: 'Failed', summary: envelope.payload.reason, declined: true };
+    case 'task.cancelled': return envelope.payload.sealed !== undefined ? undefined : { state: 'Cancelled', summary: envelope.payload.reason };
     default: return undefined;
   }
 }
@@ -324,8 +328,8 @@ export class DaemonObserver {
    * where those are actually reported from.
    */
   handleInboundEnvelope(envelope: Envelope): void {
-    if (!isTaskOfferType(envelope.type)) return;
-    const offer = envelope as Extract<Envelope, { type: import('@byok-sdk/protocol').TaskOfferType }>;
+    if (envelope.type !== 'task.offer') return;
+    const offer = envelope;
     const taskId = offer.task_id;
 
     // Redelivery guard (protocol §9, at-least-once delivery): this observer
@@ -359,6 +363,10 @@ export class DaemonObserver {
     this.pendingApprovalIdByTask.delete(envelope.task_id);
   }
 
+  /**
+   * A sealed payload reaches here only when its plaintext was not kept
+   * (`SealedTasks.plainOf`); it has no local view.
+   */
   handleOutboundEnvelope(envelope: Envelope): void {
     const ts = nowIso();
     switch (envelope.type) {
@@ -379,6 +387,7 @@ export class DaemonObserver {
         return;
       }
       case 'task.progress': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         this.upsertTask(taskId, { state: 'Running' });
         // `known`-only (`partitionAgentEvents`, `@byok-sdk/protocol`): an
@@ -393,6 +402,7 @@ export class DaemonObserver {
         return;
       }
       case 'task.artifact': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         this.emit({
           kind: 'artifact',
@@ -406,6 +416,7 @@ export class DaemonObserver {
         return;
       }
       case 'task.await_approval': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         // Finding F4: read-and-delete — see `pendingApprovalIdByTask`'s own
         // doc comment for why this never needs a separate eviction policy.
@@ -416,6 +427,7 @@ export class DaemonObserver {
         return;
       }
       case 'task.complete': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         this.upsertTask(taskId, terminalTaskPatch(envelope)!);
         this.emit({
@@ -429,6 +441,7 @@ export class DaemonObserver {
         return;
       }
       case 'task.fail': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         const retryable = envelope.payload.retryable ?? false;
         this.upsertTask(taskId, terminalTaskPatch(envelope)!);
@@ -437,6 +450,7 @@ export class DaemonObserver {
         return;
       }
       case 'task.decline': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         const retryable = envelope.payload.retryable ?? false;
         this.upsertTask(taskId, terminalTaskPatch(envelope)!);
@@ -444,6 +458,7 @@ export class DaemonObserver {
         return;
       }
       case 'task.cancelled': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         this.upsertTask(taskId, terminalTaskPatch(envelope)!);
         this.emit({ kind: 'cancelled', ts, taskId, reason: envelope.payload.reason });
