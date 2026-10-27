@@ -10,9 +10,14 @@
 //   only right after it dispatches a task.
 // - When the cursor is unknown but this instance's feed already holds events
 //   (a forged cursor, or a second reader reattached the task after a restart),
-//   the fallback sends the current state and then replays the retained feed.
-//   It drops replayed states stamped before that snapshot, but older agent
-//   lines repeat, and so can a state from the snapshot's own millisecond.
+//   the fallback sends the current state and then replays the retained feed,
+//   dropping states stamped before the snapshot's `updatedAt`. Older agent
+//   lines still repeat. That time moves with the attempt, not with approvals:
+//   after Running, AwaitApproval, an approval and Running again, it is the
+//   first Running's, so the replay shows AwaitApproval and the answered
+//   approval request until the later Running arrives. A terminal can drop the
+//   other way: once the device acknowledges a Host cancel, the feed's Cancelled
+//   is stamped before the snapshot, which already said Cancelled.
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { TaskEventsUnavailableError, type ByokServer } from '@byok-sdk/server';
