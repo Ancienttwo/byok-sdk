@@ -238,22 +238,7 @@ describe('cloud 4e-1 hooks in real workerd and pi Harness', () => {
       settledAt: source.settledAt, settledEventSeq: source.settledEventSeq });
     expect(rows.cloud_events.some((row: any) => row.eventKey === `tool:${source.invocationId}:settled`)).toBe(false);
   }, mode === 'count' ? 30_000 : undefined);
-  hooksTest('migrates old ledger rows without inventing a clock and rejects them as widget sources', async ({ hooks }) => {
-    hooks.provider.reset([['get_financial_statements']]); const name = await hooks.setup(); await hooks.run(name);
-    await hooks.json(name, 'trim', { input: { legacySchema: true } }); await hooks.restart(); await hooks.json(name, 'ready');
-    const before = await hooks.dump(name); expect(before.cloud_invocations[0]).toMatchObject({ settledAt: null, settledEventSeq: null });
-    hooks.provider.reset([['render_widget']]); expect(await hooks.run(name)).toContain('"type":"done"');
-    expect(hooks.modelResults()).toEqual([{ ok: false, error: { code: 'WIDGET_SOURCE_NOT_BINDABLE' } }]);
-    const rows = await hooks.dump(name); expect(rows.cloud_invocations[0]).toMatchObject({ settledAt: null, settledEventSeq: null });
-  });
 
-  hooksTest('rejects a legacy configured session without a policy digest before recovery dispatch', async ({ hooks }) => {
-    const name = await hooks.setup(); await hooks.json(name, 'seed', { seed: { phase: 'execute', ledger: true } });
-    await hooks.json(name, 'trim', { input: { legacySession: true } }); await hooks.restart(); await hooks.json(name, 'ready');
-    const rows = await hooks.dump(name); expect(rows.cloud_session[0].dispatcherDigest).toBeNull();
-    expect(rows.fixture_dispatches).toHaveLength(0); expect(rows.cloud_invocations[0]).toMatchObject({ state: 'failed', errorCode: 'CLOUD_EXECUTION_INTERRUPTED' });
-    expect(await hooks.run(name)).toContain('CLOUD_SESSION_CONFLICT'); expect(hooks.provider.bodies).toHaveLength(0);
-  });
   hooksTest('accepts reordered declarations at boot and retains safe skill recovery', async ({ hooks }) => {
     const name = await hooks.setup(); await hooks.json(name, 'seed', { seed: { phase: 'execute', ledger: true } });
     await hooks.restart({ domainErrors: ['WIDGET_SOURCE_NOT_BINDABLE', 'WIDGET_INVALID'] }); await hooks.json(name, 'ready');

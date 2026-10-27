@@ -189,7 +189,6 @@ CREATE TABLE IF NOT EXISTS blob (
 export interface SqliteEmbeddedStoreOptions {
   readonly path: string;
   readonly urlTtlMs?: number;
-  readonly migration?: 'v1-to-v5' | 'v2-to-v5' | 'v3-to-v5' | 'v4-to-v5';
 }
 
 export interface SqliteEmbeddedStores {
@@ -210,14 +209,7 @@ class SqliteCoordinator {
   #closing = false;
   #closePromise: Promise<void> | undefined;
 
-  constructor(
-    path: string,
-    migration: SqliteEmbeddedStoreOptions['migration'],
-    wake?: WakeConsumer,
-  ) {
-    if (migration !== undefined && !['v1-to-v5', 'v2-to-v5', 'v3-to-v5', 'v4-to-v5'].includes(migration)) {
-      throw new SqliteSchemaError('SQLITE_SCHEMA_UNSUPPORTED', 'Unsupported migration selector. Target-v4 migration selectors are no longer supported.', undefined, SQLITE_SCHEMA_VERSION);
-    }
+  constructor(path: string, wake?: WakeConsumer) {
     this.db = openSqliteDatabase(path);
     let foundVersion: string | undefined;
     const schemaError = (code: SqliteSchemaErrorCode, message: string, options?: ErrorOptions) =>
@@ -231,8 +223,7 @@ class SqliteCoordinator {
       }
     };
     try {
-      // openSqliteDatabase holds EXCLUSIVE ownership before this schema
-      // transaction. Adoption still requires stopping writers and a backup.
+      // openSqliteDatabase holds EXCLUSIVE ownership before this schema transaction.
       this.db.exec('BEGIN IMMEDIATE');
       try {
         const hasMetadata = this.db
@@ -242,9 +233,9 @@ class SqliteCoordinator {
           const version = this.db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'")
             .get() as { value: string } | undefined;
           foundVersion = version?.value;
-          if (version?.value !== SQLITE_SCHEMA_VERSION && !((version?.value === '1' && migration === 'v1-to-v5') || (version?.value === '2' && migration === 'v2-to-v5') || (version?.value === '3' && migration === 'v3-to-v5') || (version?.value === '4' && migration === 'v4-to-v5'))) {
+          if (version?.value !== SQLITE_SCHEMA_VERSION) {
             throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
-              `this build requires ${SQLITE_SCHEMA_VERSION}. Stop all writers, back up the database and explicitly select migration: 'v1-to-v5' or 'v2-to-v5' for a receipt-free legacy database without task history, 'v3-to-v5' for a database without ambiguous claimed identity, or 'v4-to-v5' to add the wake queue. Target-v4 migration selectors are no longer supported.`);
+              `this build requires ${SQLITE_SCHEMA_VERSION}. An older file is not adopted: start on a new database. A newer file needs a newer build.`);
           }
           for (const projection of [
             'tenant_id, device_id, next_seq, delivered_seq, acked_seq, updated_at FROM mailbox_cursor',
@@ -256,43 +247,6 @@ class SqliteCoordinator {
             'blob_id, tenant_id, reservation_id, content_hash, byte_size, content_type, uploaded, data FROM blob',
           ]) {
             assertProjection(projection);
-          }
-          if (version?.value === '1' || version?.value === '2') {
-            // Old compositions lost these facts on restart. Never synthesize
-            // receipts from status, mailbox bodies or a caller's retry payload.
-            for (const table of ['task_attempt', 'mailbox_message', 'agent_message_admission']) {
-              if (this.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get() !== undefined) {
-                throw schemaError('SQLITE_MIGRATION_REFUSED', 'Cannot migrate BYOK SQLite database with task history: historical receipts are unavailable; preserve this database for reconciliation');
-              }
-            }
-            if (this.db.prepare('SELECT 1 FROM mailbox_cursor WHERE next_seq <> 1 OR delivered_seq <> 0 OR acked_seq <> 0 LIMIT 1').get() !== undefined) {
-              throw schemaError('SQLITE_MIGRATION_REFUSED', 'Cannot migrate BYOK SQLite database with delivery history: historical receipts are unavailable; preserve this database for reconciliation');
-            }
-            if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'request_receipt'").get() !== undefined) {
-              throw schemaError('SQLITE_SCHEMA_INVALID', 'Unexpected request receipt authority in legacy BYOK SQLite schema');
-            }
-            this.db.exec(RECEIPT_SCHEMA);
-          }
-          if (version?.value === '1') {
-            const unexpected = this.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'device_directory'").get();
-            if (unexpected !== undefined) throw schemaError('SQLITE_SCHEMA_INVALID', 'Unexpected device directory in BYOK SQLite schema v1');
-            this.db.exec(DEVICE_SCHEMA);
-          }
-          if (version?.value === '1' || version?.value === '2' || version?.value === '3') {
-            // A v3 claim without a runtime may be a legacy built-in claim or a
-            // custom claim whose identity was discarded. Neither mutable device
-            // inventory nor the requested offer proves the actual adapter.
-            if (this.db.prepare('SELECT 1 FROM task_attempt WHERE owner_device_id IS NOT NULL AND claimed_runtime IS NULL LIMIT 1').get() !== undefined) {
-              throw schemaError('SQLITE_MIGRATION_REFUSED', 'Cannot migrate BYOK SQLite database with ambiguous claimed identity: historical harness identities are unavailable; preserve this database for reconciliation');
-            }
-            this.db.exec('ALTER TABLE task_attempt ADD COLUMN claimed_harness_id TEXT');
-          }
-          if (version?.value !== SQLITE_SCHEMA_VERSION) {
-            if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'wake'").get() !== undefined) {
-              throw schemaError('SQLITE_SCHEMA_INVALID', 'Unexpected wake authority in pre-v5 BYOK SQLite schema');
-            }
-            this.db.exec(WAKE_SCHEMA);
-            this.db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(SQLITE_SCHEMA_VERSION);
           }
         } else {
           const existing = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
@@ -1423,7 +1377,7 @@ export function createSqliteEmbeddedStores(
   options: SqliteEmbeddedStoreOptions,
   dependencies: { readonly clock: Clock; readonly crypto: CloudCrypto; readonly wake?: WakeConsumer },
 ): SqliteEmbeddedStores {
-  const coordinator = new SqliteCoordinator(options.path, options.migration, dependencies.wake);
+  const coordinator = new SqliteCoordinator(options.path, dependencies.wake);
   const ledger = new InMemoryStorageLedger(dependencies.clock);
   const objects = new SqliteObjectStore(coordinator, dependencies.clock, ledger);
   const quota = new InMemoryQuotaStore(dependencies.clock, objects, ledger);

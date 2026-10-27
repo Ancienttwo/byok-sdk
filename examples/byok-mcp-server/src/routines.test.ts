@@ -76,6 +76,7 @@ it('creates a routine on K4, runs one due occurrence on the real daemon, reports
   const offer = await host.server.tasks.offer(taskId);
   expect(offer).toMatchObject({ type: 'task.offer', deviceId: host.deviceId, payload: {
     runtime: 'pi', instruction: 'Write the daily report.', agentRef: { agentId: 'main', profileRevision: '1' },
+    session: { mode: 'fresh' }, egressPolicy: expect.any(Object),
     terminalProjection: { mode: 'result-document', contract: 'byok-mcp-routine-v1', schema: resultSchema } } });
   host.adapter.sessions.get(taskId)!.finish({ text: 'Report sent.' });
   const secondAt = nextRoutineOccurrence(schedule, firstAt + 1)!;

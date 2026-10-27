@@ -8,7 +8,7 @@ import { openDurableObjectStorage } from '../src/storage';
 
 export interface LedgerOperation {
   operation: 'begin' | 'parallel-begin' | 'finish' | 'read' | 'pending' | 'recover' | 'start-execution'
-    | 'execution' | 'fail' | 'abort' | 'model' | 'tool' | 'schema' | 'usage' | 'sent' | 'legacy-schema';
+    | 'execution' | 'fail' | 'abort' | 'model' | 'tool' | 'schema' | 'usage' | 'sent';
   name: string;
   input: InvocationInput;
   id: string;
@@ -45,11 +45,6 @@ export class LedgerDO extends DurableObject {
       case 'model': return this.ledger.countModel(input.conversationId, input.max, input.now, input.budget);
       case 'usage': this.ledger.addModelUsage(input.conversationId, input.inputDelta, input.outputDelta); return this.ledger.execution(input.conversationId);
       case 'sent': this.ledger.markModelSent(input.conversationId); return this.ledger.execution(input.conversationId);
-      case 'legacy-schema':
-        for (const name of ['inputTokens', 'outputTokens', 'credits', 'sentRequests']) {
-          this.ctx.storage.sql.exec(`ALTER TABLE cloud_executions DROP COLUMN ${name}`);
-        }
-        return this.ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(cloud_executions)').toArray().map(row => row.name);
       case 'tool': return this.ledger.countTool(input.conversationId, input.taskId, input.max, input.now);
       case 'schema': return this.schema();
     }

@@ -95,12 +95,12 @@ export async function handleOffer(
       return;
     }
   }
-  if (messageRequirement !== undefined && (agentRef === undefined || (preparation === undefined && this['deps'].agentMessageMcpBin === undefined) || this['deps'].tenantId === undefined)) {
+  if (messageRequirement !== undefined && ((preparation === undefined && this['deps'].agentMessageMcpBin === undefined) || this['deps'].tenantId === undefined)) {
     decline('required Agent message egress is unavailable on this daemon', false);
     return;
   }
   if (terminalProjection?.mode === 'result-document') {
-    if (agentRef === undefined || this['deps'].tenantId === undefined || this['deps'].agentResultMcpBin === undefined) {
+    if (this['deps'].tenantId === undefined || this['deps'].agentResultMcpBin === undefined) {
       decline('offer requires a result document but this daemon cannot host the submit_result channel: it needs an Agent offer, an enrolled tenant and the SDK result helper', false);
       return;
     }
@@ -149,9 +149,7 @@ export async function handleOffer(
   try {
     if (this['admitOffer'](phase) === undefined) return;
 
-    if (agentRef !== undefined) {
-      if (await this['reserveOfferHome'](phase, agentRef, readerAttempt, sessionRef, homeAccess) === undefined) return;
-    }
+    if (await this['reserveOfferHome'](phase, agentRef, readerAttempt, sessionRef, homeAccess) === undefined) return;
 
     const offerLimits = this['admitOfferLimits'](phase, payload);
     if (offerLimits === undefined) return;
@@ -173,8 +171,7 @@ export async function handleOffer(
       agentRef, readerAttempt, sessionRef, homeAccess, homeBusyCode, pick, messageRequirement, terminalProjection,
     });
     if (workspace === undefined) return;
-    const { agentBinding } = held;
-    const { workspaceDir, appliedAgentHomeProjection, readerMemoryBaseline } = workspace;
+    const { agentBinding, workspaceDir, appliedAgentHomeProjection, readerMemoryBaseline } = workspace;
 
     const sealed = await sealOfferManifest.call(this, phase, {
       agentBinding, agentRef, agentMemory, preparation, preparedMemorySelected, readerAttempt, sessionRef, env, mcpEnv,
@@ -245,23 +242,25 @@ export async function handleOffer(
 }
 
 function readOfferRequest(this: TaskRunner, taskId: string, payload: AcceptedOfferPayload, admission: OfferAdmissionTiming) {
-  let agentRef: AgentRef | undefined;
+  let offeredRef: AgentRef | undefined;
   try {
-    agentRef = offeredAgentRef(payload);
+    offeredRef = offeredAgentRef(payload);
   } catch (error) {
     this['decline'](taskId, admission, `invalid AgentRef: ${errorMessage(error)}`, false);
     return;
   }
-  if (agentRef === undefined || this['deps'].agentHome === undefined || this['deps'].agentSessionHandoffs === undefined) {
+  if (offeredRef === undefined || this['deps'].agentHome === undefined || this['deps'].agentSessionHandoffs === undefined) {
     this['decline'](
       taskId,
       admission,
       'Agent offer requires the SDK-owned agent-home-contract layout and handoff store',
       false,
-      agentRef,
+      offeredRef,
     );
     return;
   }
+  // Every offer past this point is bound to exactly one Agent.
+  const agentRef: AgentRef = offeredRef;
   const decline = (reason: string, retryable: boolean, code?: TaskDeclinePayload['code']): void => {
     this['decline'](taskId, admission, reason, retryable, agentRef, code);
   };
