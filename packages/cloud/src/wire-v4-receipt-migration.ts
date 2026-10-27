@@ -29,7 +29,7 @@ export function wireV4ReceiptKind(key: string): WireV4ReceiptKind | undefined {
 }
 
 export type WireV4ReceiptMigration =
-  /** `body` is already readable under v4: a v4 terminal, an offer receipt whose type v4 keeps, or a redaction tombstone. */
+  /** `body` is already readable under v4: a v4 terminal or offer receipt, or a redaction tombstone. */
   | { readonly outcome: 'unchanged' }
   | { readonly outcome: 'migrated'; readonly body: string }
   | { readonly outcome: 'refused'; readonly refusal: WireV4MigrationRefusal; readonly type?: string };
@@ -55,11 +55,21 @@ function sortedJson(value: unknown): string {
 }
 
 /**
+ * v4 reuses the name `task.offer`. The removed v3 type of that name never
+ * carried an AgentRef and every v4 offer does, the same rule the store runners
+ * use to find legacy tasks.
+ */
+function isWireV4OfferReceipt(stored: { readonly type: string; readonly payload: unknown }): boolean {
+  return stored.type === 'task.offer' && stored.payload !== null && typeof stored.payload === 'object'
+    && (stored.payload as { readonly agentRef?: unknown }).agentRef !== undefined;
+}
+
+/**
  * Migrates one stored receipt of a {@link WireV4ReceiptKind}. An offer receipt
- * is `{ deviceId, type, payload }` without a wire version: it takes its v4 type
- * and payload ({@link wireV4FormOf}), and is refused when v4 would drop or
- * change any of its content. A terminal receipt is a v3 envelope and is
- * re-encoded under v4.
+ * is `{ deviceId, type, payload }` without a wire version: a v3 one takes its
+ * v4 type and payload ({@link wireV4FormOf}), and is refused when v4 would drop
+ * or change any of its content; a v4 one is kept when v4 reads it. A terminal
+ * receipt is a v3 envelope and is re-encoded under v4.
  */
 export function migrateWireV3Receipt(kind: WireV4ReceiptKind, body: string): WireV4ReceiptMigration {
   if (isTaskRedactionTombstone(body)) return { outcome: 'unchanged' };
@@ -76,13 +86,17 @@ export function migrateWireV3Receipt(kind: WireV4ReceiptKind, body: string): Wir
   }
   const stored = storedOfferReceipt(body);
   if (stored === undefined) return { outcome: 'refused', refusal: 'not_wire_v3' };
+  if (isWireV4OfferReceipt(stored)) {
+    return MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(stored.payload).success
+      ? { outcome: 'unchanged' }
+      : { outcome: 'refused', refusal: 'invalid_under_v4', type: stored.type };
+  }
   const v4 = wireV4FormOf(stored.type, stored.payload);
   if (v4 === undefined) return { outcome: 'refused', refusal: 'type_without_v4_form', type: stored.type };
   const parsed = MESSAGE_PAYLOAD_SCHEMAS[v4.type].safeParse(v4.payload);
   if (!parsed.success || sortedJson(parsed.data) !== sortedJson(v4.payload)) {
     return { outcome: 'refused', refusal: 'invalid_under_v4', type: stored.type };
   }
-  if (v4.type === stored.type && v4.payload === stored.payload) return { outcome: 'unchanged' };
   return { outcome: 'migrated', body: JSON.stringify({ ...(JSON.parse(body) as object), type: v4.type, payload: parsed.data }) };
 }
 
