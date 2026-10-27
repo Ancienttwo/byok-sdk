@@ -83,6 +83,10 @@ Consequences, ranked:
 
 ### 2.2 What is proven locally
 
+Runnable Host: `bun run --cwd examples/byok-mcp-server host -- --state <dir> --issue-key`
+(`src/host-compose.ts`, smoke in `src/host-compose.test.ts`). Live checklist status and owner steps:
+`Garbage/b6-live-checklist-goa.md`.
+
 `examples/byok-mcp-server/src/grok-bot-mode-g.test.ts` builds a client from the exact Grok Bot remote
 entry (`{ type: "http", url, headers: { Authorization } }`, no `Origin`), against the real composition:
 embedded `@byok-sdk/server`, `BetaLedger`, `createTaskTools`, the real device daemon with a scripted

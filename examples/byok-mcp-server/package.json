@@ -7,7 +7,7 @@
   "license": "MIT",
   "engines": { "node": ">=24.15.0" },
   "exports": { ".": "./src/index.ts" },
-  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "scripts": { "host": "tsx src/host-compose.ts", "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": {
     "@byok-sdk/client": "workspace:*",
     "@byok-sdk/core": "workspace:*",
@@ -20,6 +20,7 @@
     "@modelcontextprotocol/client": "2.0.0",
     "@byok-sdk/testkit": "workspace:*",
     "@types/node": "^24",
+    "tsx": "^4.19.2",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }

@@ -3,7 +3,37 @@
 Date: 2026-10-27. Branch `spike/grok-bot-harness` (base `origin/main@990abd60`). Local commits only, not pushed.
 Scope: RESTEER dual-mode (Mode G = Grok Bot as MCP client; Mode A = Aiphabee frontend on byok Bot mode).
 
-## Result
+## GO-A update (Host compose + B6 prep)
+
+**PASS for everything runnable without a Grok Bot account.** Live items stay PENDING.
+
+| Path | Change |
+| --- | --- |
+| `examples/byok-mcp-server/src/host-compose.ts` | New runnable Host: embedded SDK server (SQLite) + `BetaLedger` + `createBetaMcpServer` + `createTaskTools` on one `listenLoopback` origin; pairing command; `--issue-key` (task-only Grok Bot key, entry printed once); `--revoke` |
+| `examples/byok-mcp-server/src/host-compose.test.ts` | Smoke: start → real daemon library pairs → key → entry drives `byok_whoami`, submit → `Complete` → revoke → 401 → restart keeps the port |
+| `examples/byok-mcp-server/package.json`, `bun.lock` | `host` script; `tsx ^4.19.2` dev dependency (same range as sibling examples; `bun install --frozen-lockfile` clean) |
+| `examples/byok-mcp-server/README.md`, `docs/plans/2026-10-27-grok-bot-dual-mode-plan.md` | Pointers to the entry and the worksheet |
+| `Garbage/b6-live-checklist-goa.md` | B6 §8 worksheet: local PASS rows, live PENDING rows, owner steps, blockers |
+
+Runs:
+
+- `npx vitest run src/host-compose.test.ts` → 1 passed; `src/grok-bot-mode-g.test.ts` → 1 passed.
+- Full example suite: 44/44 passed in 4 of 5 runs. One run, at load average about 22, had 4 failures;
+  the failing names were not captured and three reruns right after passed 44/44.
+- `npx tsc --noEmit` → exit 0.
+- CLI smoke (`bun run host -- --state <tmp>`, scratch driver): banner with MCP URL and pairing command;
+  `POST /mcp` without bearer → 401 `Bearer realm="byok-mcp"`; request with `Host: localhost:<port>` → 403;
+  SIGINT stops it (`bun run` reports 130); `--revoke k_missing` → "no active key". The CLI
+  `--issue-key` path was not run with the real `byok-agent` binary, to keep the device credential
+  store and keychain untouched; the same code path runs in the smoke test with the daemon library.
+
+Live-half blockers: a Grok Bot account (G1, items 1–4), a paired device with a paid signed-in runtime
+(item 3), public HTTPS or a tunnel that sends `Host: 127.0.0.1:<port>` (cloud path), a Grok Bot routine
+with a webhook trigger (item 4).
+
+Not pushed, no PR, no merge, Aiphabee staging untouched.
+
+## Result (dual-mode spike)
 
 **PASS.**
 

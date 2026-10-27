@@ -7,7 +7,12 @@ read-only memory tool (B5) from
 It reuses the public B1 HTTP transport, the public `@byok-sdk/server` API and the
 K4 Host execution core (`examples/host-execution-core`) for routines and memory.
 It adds no public SDK API or new SDK runtime dependency.
-There is no listener, admin HTTP route, default key or model invocation here.
+The library has no listener, admin HTTP route, default key or model invocation.
+The one runnable entry, `src/host-compose.ts` (`bun run host`), serves the SDK
+routes and the task tools on one loopback origin, prints a device pairing command
+and, with `--issue-key`, issues one task-only Grok Bot key and prints its custom
+MCP entry once. `--revoke <keyId>` revokes it with the Host stopped. A cloud-path
+Grok Bot still needs public HTTPS or a tunnel that sends `Host: 127.0.0.1:<port>`.
 - [Grok Bot client guide and owner acceptance checklist (B6)](docs/grok-bot.md)
 
 - [Hermes client guide, setup check and live acceptance checklist (B7)](docs/hermes.md)
