@@ -164,7 +164,11 @@ Small follow-up fixes have local evidence and no third independent verdict.
 | Hosted `submitAgentExecution` cross-device path | OPEN | Downstream hosted Host adapter and execution evidence |
 | Two Topology L Host processes | OPEN | Not in the first release (#606 O4). Implemented service relay and durable request/verdict recovery tests |
 | Two physical computers | OPEN | A run on separate machines; synthetic machine identity does not prove this |
-| Real runtime `submit_result` success rates (Pi / Claude / Codex / Grok, per model/platform) | OPEN | [WO-10b measurement method](../../docs/submit-result-measurement.md); separately authorized real-runtime datasets remain missing |
+| `submit_result` cell: Pi 1.4.0, `zai/glm-5.3-flash`, darwin-arm64, `submit-result-v1` @ `v0.30.2` | OPEN | Run reported in [#977](https://github.com/Ancienttwo/byok-sdk/issues/977#issuecomment-6433620715); sanitized manifest and trial records not attached. [Method](../../docs/submit-result-measurement.md), [#977 gate record](../../docs/plans/2026-10-27-977-pi-product-gate.md) |
+| `submit_result` cell: Pi 1.4.0, proxy `zai/glm-5.3-flash`, darwin-arm64, reply cell, AiphaBee `aiphabee-bot-chat-ask-user.v1` @ 0.30.2 | OPEN | Downstream counted run reported in [#977](https://github.com/Ancienttwo/byok-sdk/issues/977#issuecomment-6428287503); proxy cell, not native provider; sanitized export not attached |
+| `submit_result` cell: Pi 1.4.0, native `zai/glm-5.3-flash`, darwin-arm64, same AiphaBee reply cell | OPEN | Uncounted calibration only; counted run needs an owner-authorized paid run |
+| `submit_result` cell: Pi, win32-x64, same AiphaBee reply cell | NOT RUN | Windows device run |
+| `submit_result` cells: Claude / Codex / Grok | NOT RUN | Separately authorized real-runtime datasets; not part of the #977 Pi gate |
 | Downstream deployment, macOS/Windows product acceptance | OPEN | Fixed downstream build and device acceptance |
 
 The two-process relay document defines `delegation.request` and
