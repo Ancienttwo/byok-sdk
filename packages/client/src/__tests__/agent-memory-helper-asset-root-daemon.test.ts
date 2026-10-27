@@ -67,9 +67,11 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
       expect(open.mock.calls.some(([input]) => input.canonicalHome === path.join(root, 'homes'))).toBe(true);
       const notice = createEnvelope('agent.memory.intent.available', { intentId: intent.intentId, agentRef }, { seq: server.nextSeq() });
       server.pushLongPollEvent(notice);
-      await vi.waitFor(() => expect(completions).toHaveLength(1));
+      // Fetch, a self-executable Node helper start and real helper I/O run between the push and the completion; on the macos-15-intel runner the
+      // default 1 s was not enough. The waits stay inside the 10 s testTimeout next to the ~5-7 s the whole case takes there.
+      await vi.waitFor(() => expect(completions).toHaveLength(1), { timeout: 3_000 });
       expect(completions[0]!.outcome).toBe('applied');
-      await vi.waitFor(async () => expect(await new CursorStore(path.join(root, 'store')).load(server.url, deviceId)).toBe(notice.seq));
+      await vi.waitFor(async () => expect(await new CursorStore(path.join(root, 'store')).load(server.url, deviceId)).toBe(notice.seq), { timeout: 2_000 });
     } else {
       // No B: no volume probe and no capability.
       expect(hello.payload.capabilities).not.toContain('agent-memory-intent.v1');
@@ -99,4 +101,3 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
     await fs.rm(root, { recursive: true, force: true });
   }
 });
-// control run for #1023 (temporary)
