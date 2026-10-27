@@ -361,6 +361,7 @@ try {
       deviceId,
       payload: {
         agentRef: { agentId: taskId, profileRevision: '1' },
+        session: { mode: 'fresh' },
         egressPolicy,
         terminalProjection: { mode: 'none' },
         ...payload,
