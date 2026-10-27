@@ -1,9 +1,11 @@
 name: CI
 
 # Temporary probe branch (train/probe-macos-hang). Never merged.
-# Reproduces the macOS hang in the agent memory helper job's step
-# "Run SDK helper, intent and capability contracts" with that step in its own
-# process group and a ps sampler outside it.
+# Probe 2: find who sends SIGHUP to the test's process group in the agent
+# memory helper job's step "Run SDK helper, intent and capability contracts".
+# The command runs in its own process group with a sentinel member that logs
+# each signal's si_pid (.github/probe/run-in-group.pl); a ps sampler outside
+# the group records every second.
 on:
   pull_request:
 
@@ -13,13 +15,21 @@ concurrency:
 
 jobs:
   probe:
-    name: macOS helper step 15 probe (${{ matrix.os }})
+    name: probe 2 (${{ matrix.os }}, ${{ matrix.set }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, macos-15-intel]
+        set: [assets, crash-assets, all]
+        include:
+          - set: assets
+            files: src/__tests__/agent-memory-helper-assets.test.ts
+          - set: crash-assets
+            files: src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-helper-assets.test.ts
+          - set: all
+            files: src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-asset-root-daemon.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-mcp-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts src/__tests__/agent-memory-helper-identity.test.ts src/__tests__/agent-memory-windows-gate.test.ts
     defaults:
       run:
         shell: bash
@@ -49,24 +59,30 @@ jobs:
       - name: Build and verify SDK helper release assets
         run: bun run --filter @byok-sdk/client build:agent-memory-helper
 
-      # The sampler runs outside the test's process group, so a signal sent to
-      # that group cannot stop it.
-      - name: Run SDK helper, intent and capability contracts (own process group)
+      - name: Run the test set in its own process group with a sentinel
         timeout-minutes: 10
+        env:
+          PROBE_SENTINEL_LOG: ${{ runner.temp }}/probe-sentinel.log
+          PROBE_FILES: ${{ matrix.files }}
         run: |
           (while :; do
              echo "=== $(date -u +%T)"
-             ps -axo pid,pgid,ppid,stat,etime,command | cut -c1-300
-             sleep 10
+             ps -axo pid,pgid,ppid,tpgid,stat,etime,command | cut -c1-300
+             sleep 1
            done) > "$RUNNER_TEMP/probe-ps.log" 2>&1 &
           sampler=$!
           trap 'kill "$sampler" 2>/dev/null || true' EXIT
           echo "step shell pid=$$ pgid=$(ps -o pgid= -p $$)"
-          perl -e 'setpgrp(0,0); exec @ARGV' bun run --filter @byok-sdk/client test -- --reporter=verbose --reporter=hanging-process src/__tests__/agent-memory-fs-helper.test.ts src/__tests__/agent-memory-helper-release.test.ts src/__tests__/agent-memory-helper-assets.test.ts src/__tests__/agent-memory-helper-asset-root-daemon.test.ts src/__tests__/agent-memory-helper-release-errors.test.ts src/__tests__/agent-memory-helper-admission.test.ts src/__tests__/agent-memory-mcp-admission.test.ts src/__tests__/agent-memory-helper-crash.test.ts src/__tests__/agent-memory-intent.test.ts src/__tests__/daemon-conn-hello-capabilities.test.ts src/__tests__/agent-home-directory-barrier.test.ts src/__tests__/agent-memory-helper-identity.test.ts src/__tests__/agent-memory-windows-gate.test.ts
+          # PROBE_FILES is split on spaces on purpose: one argument per file.
+          perl .github/probe/run-in-group.pl bun run --filter @byok-sdk/client test -- --reporter=verbose $PROBE_FILES
 
-      - name: Show the ps samples
+      - name: Show the sentinel log and ps samples
         if: always()
         run: |
-          cat "$RUNNER_TEMP/probe-ps.log" || true
-          echo "=== processes in T (stopped) state now"
-          ps -axo pid,pgid,ppid,stat,etime,command | awk 'NR==1 || $4 ~ /T/' | cut -c1-300
+          sleep 4
+          echo "=== sentinel events"
+          grep -E 'sentinel|SIG(HUP|CONT|TERM|INT)' "$RUNNER_TEMP/probe-sentinel.log" || true
+          echo "=== sentinel log (with ps snapshots at each signal)"
+          cat "$RUNNER_TEMP/probe-sentinel.log" || true
+          echo "=== ps samples: headers, stopped processes, and test-related processes"
+          grep -E '^===|^ *PID| T|node|bun|vitest|perl|helper|byok|codesign|sh -c|zsh|Runner|hca|provjobd' "$RUNNER_TEMP/probe-ps.log" | grep -v 'grep -E' || true
