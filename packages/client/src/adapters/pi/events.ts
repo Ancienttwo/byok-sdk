@@ -3,6 +3,7 @@ import { PREPARED_GATE_REFUSAL_CODES } from './prepared-prompt-frame';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 import type { PiRpcMessage } from './rpc-client';
+import { servedModelName } from '../served-model';
 
 function requireToolCallId(msg: PiRpcMessage): string {
   if (typeof msg.toolCallId === 'string' && msg.toolCallId.trim().length > 0) return msg.toolCallId;
@@ -54,7 +55,7 @@ function usageCount(value: unknown): number | undefined {
  * classifies as `usage_unavailable`.
  */
 function mapPiAssistantUsage(msg: PiRpcMessage): Extract<AgentEvent, { type: 'usage' }> | undefined {
-  const message = msg.message as { role?: unknown; usage?: unknown } | undefined;
+  const message = msg.message as { role?: unknown; usage?: unknown; responseModel?: unknown } | undefined;
   if (message === null || typeof message !== 'object' || message.role !== 'assistant') return undefined;
   const usage = (message.usage !== null && typeof message.usage === 'object' ? message.usage : {}) as Record<string, unknown>;
   const input = usageCount(usage.input);
@@ -67,6 +68,8 @@ function mapPiAssistantUsage(msg: PiRpcMessage): Extract<AgentEvent, { type: 'us
   const outputTokens = usageCount(usage.output);
   const reasoningTokens = usageCount(usage.reasoning);
   const totalTokens = usageCount(usage.totalTokens);
+  // pi-ai's `model` is the requested id; only `responseModel` came from the provider.
+  const model = servedModelName(message.responseModel);
   return {
     type: 'usage',
     ...(inputTokens === undefined ? {} : { inputTokens }),
@@ -74,6 +77,7 @@ function mapPiAssistantUsage(msg: PiRpcMessage): Extract<AgentEvent, { type: 'us
     ...(outputTokens === undefined ? {} : { outputTokens }),
     ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
     ...(totalTokens === undefined ? {} : { totalTokens }),
+    ...(model === undefined ? {} : { model }),
   };
 }
 

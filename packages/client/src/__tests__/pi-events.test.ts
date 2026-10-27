@@ -195,6 +195,19 @@ describe('mapPiMessageToAgentEvent', () => {
       expect(ROUTINE_PI_EVENT_TYPES.has('message_end')).toBe(true);
     });
 
+    it('carries the provider-served responseModel, never the requested model id (#1014)', () => {
+      const end = (fields: Record<string, unknown>): PiRpcMessage => ({
+        type: 'message_end',
+        message: { role: 'assistant', content: [], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }, ...fields },
+      });
+      expect(mapPiMessageToAgentEvent(end({ model: 'requested-alias', responseModel: 'served-2026-10-01' })))
+        .toMatchObject({ type: 'usage', model: 'served-2026-10-01' });
+      expect(mapPiMessageToAgentEvent(end({ model: 'requested-alias' }))).not.toHaveProperty('model');
+      expect(mapPiMessageToAgentEvent(end({ model: 'requested-alias', responseModel: '' }))).not.toHaveProperty('model');
+      expect(mapPiMessageToAgentEvent(end({ model: 'requested-alias', responseModel: 'm'.repeat(161) }))).not.toHaveProperty('model');
+      expect(mapPiMessageToAgentEvent(end({ model: 'requested-alias', responseModel: 7 }))).not.toHaveProperty('model');
+    });
+
     it('never skips a call: absent or unreadable usage still yields an event, without inputTokens', () => {
       // No usage block at all.
       expect(mapPiMessageToAgentEvent(assistantEnd(undefined))).toEqual({ type: 'usage' });

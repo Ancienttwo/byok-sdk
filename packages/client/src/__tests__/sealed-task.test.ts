@@ -167,6 +167,34 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
   });
 });
 
+describe('admission timings on a sealed task\'s decline (#1014)', () => {
+  const admission = { totalMs: 30, resultHelperPreflightMs: 12 };
+  const sealedTasks = async (keyring: SealedScopeKeyring, taskId: string) => {
+    const tasks = new SealedTasks({ keyring, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } }, serverCapabilities: () => [] });
+    await tasks.openOffer(createEnvelope('task.offer', {
+      agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction', sealing: { scopeId: 'scope-a', epoch: 1, categories: ['task-output'] },
+    } as never, { taskId, seq: 1 }));
+    return tasks;
+  };
+  const decline = (taskId: string) => createEnvelope('task.decline', { reason: 'secret reason', retryable: true, admission }, { taskId });
+
+  it('stays plaintext on the sealed branch', async () => {
+    const tasks = await sealedTasks(new GatedKeyring(), 'sealed-decline');
+    const sealed = await tasks.sealOutbound(decline('sealed-decline'));
+    expect(sealed?.payload).toHaveProperty('sealed');
+    expect(decodeEnvelope(encodeEnvelope(sealed!)).payload).toMatchObject({ retryable: true, admission });
+    expect(JSON.stringify(sealed!.payload)).not.toContain('secret reason');
+  });
+
+  it('survives the closed decline sent when the output cannot be sealed', async () => {
+    const keyless: SealedScopeKeyring = new GatedKeyring();
+    const tasks = await sealedTasks(keyless, 'keyless-decline');
+    keyless.sealingKey = async () => undefined;
+    const closed = await tasks.sealOutbound(decline('keyless-decline'));
+    expect(closed?.payload).toEqual({ reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false, admission });
+  });
+});
+
 describe('the failure class of a sealed task (#869)', () => {
   const sealedTasks = async (keyring: SealedScopeKeyring, taskId: string, flags: readonly string[] = []) => {
     const tasks = new SealedTasks({ keyring, tenantId: 'tenant-test', deviceId: 'dev_1', blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } }, serverCapabilities: () => flags });

@@ -101,6 +101,44 @@ describe('TaskRunner terminal inference usage projection', () => {
     expect(completed.payload.usage && Object.hasOwn(completed.payload.usage, 'model')).toBe(false);
   });
 
+  it('carries the model the last observation reports as served, never the requested dispatch model (#1014)', async () => {
+    const adapter = new StubRuntimeAdapter('codex');
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent);
+    const taskId = 'terminal-served-model';
+    await startTask(runner, taskId, 'codex');
+    const session = adapter.sessions[0]!;
+
+    session.emit({ type: 'usage', inputTokens: 100, outputTokens: 20, model: 'gpt-5-served-2026-10-01' });
+    session.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(sent.some((item) => item.type === 'task.complete' && item.task_id === taskId)).toBe(true));
+    expect(terminal(sent, taskId, 'task.complete').payload.usage).toMatchObject({
+      runtime: 'codex', promptTokens: 100, completionTokens: 20, model: 'gpt-5-served-2026-10-01',
+    });
+  });
+
+  it.each([
+    { label: 'a model-only observation', event: { type: 'usage', model: 'claude-sonnet-5-5' } },
+    { label: 'a provider context observation with a model', event: { type: 'usage', contextSource: 'provider', contextWindow: 200000, model: 'claude-sonnet-5-5' } },
+  ] as const)('projects $label as terminal usage with the model and no token counts (#1014)', async ({ event }) => {
+    const adapter = new StubRuntimeAdapter('claude');
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent);
+    const taskId = `terminal-model-only-${event.contextSource ?? 'none'}`;
+    await startTask(runner, taskId, 'claude');
+    const session = adapter.sessions[0]!;
+
+    session.emit({ type: 'usage', inputTokens: 42 });
+    session.emit(event);
+    session.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(sent.some((item) => item.type === 'task.complete' && item.task_id === taskId)).toBe(true));
+    const usage = terminal(sent, taskId, 'task.complete').payload.usage;
+    expect(usage).toMatchObject({ runtime: 'claude', model: 'claude-sonnet-5-5', clientVersion: '0.6.0' });
+    expect(usage && (Object.hasOwn(usage, 'promptTokens') || Object.hasOwn(usage, 'completionTokens'))).toBe(false);
+  });
+
   it('preserves a final Claude observation on task.fail', async () => {
     const adapter = new StubRuntimeAdapter('claude');
     const sent: Envelope[] = [];
