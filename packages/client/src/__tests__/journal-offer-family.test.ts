@@ -19,7 +19,7 @@ import { TestServer } from './fixtures/test-server';
 // Independent completeness oracle: the declared wire family is one type, and
 // the cases below are the variants its payload can take. Payloads still pass
 // the real EnvelopeSchema.
-// B2: the offer family was 8 types (`MESSAGE_TYPES` prefix scan); v4 has one `task.offer`, so the variants are listed here
+// B2: the offer family was 7 types (`MESSAGE_TYPES` prefix scan); v4 has one `task.offer`, so the variants are listed here
 const offerTypes = MESSAGE_TYPES.filter((type) => type.startsWith('task.offer'));
 const agentRef = { agentId: 'journal-family-agent', profileRevision: 'r1' };
 const RESUME = { mode: 'resume', sessionRef: 'resume-session' } as const;
