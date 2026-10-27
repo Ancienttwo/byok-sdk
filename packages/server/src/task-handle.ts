@@ -137,7 +137,6 @@ export interface TaskEventReadOptions {
  * `return()` aborts the read's own signal first, which wakes the queue.
  * `project` shapes each entry: `TaskHandle.events()` yields the event alone.
  */
-
 export function readTaskEvents<T = TaskEventEntry>(
   deps: EventDeps,
   taskId: string,

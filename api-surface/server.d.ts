@@ -224,10 +224,11 @@ export interface ByokServer {
          * A live task this instance did not dispatch (after a restart) gets a feed
          * that starts with its current state read back from the stores, after the
          * pending approval request while it awaits a plaintext one, and no earlier
-         * events. That state can appear twice when the read saw a commit the feed
-         * had not received yet. Once attached, the feed stays until the task's
-         * terminal plus `taskEventRetentionMs` however its readers leave, so a
-         * reconnecting reader resumes with its cursor; a read stopped before its
+         * events. Those entries can appear twice when the read saw a commit the
+         * feed had not received yet. Once attached, the feed stays until the
+         * task's terminal plus `taskEventRetentionMs` however its readers leave,
+         * so a reconnecting reader resumes with its cursor, unless the read that
+         * attached it finds the task gone or finished; a read stopped before its
          * first store read completed attaches nothing.
          *
          * The first `next()` throws, before any entry: a `TypeError` when both

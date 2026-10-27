@@ -548,7 +548,7 @@ Device IDs are globally tenant-unique. Presence, nonces and unredeemed pairing
 codes remain process-local; no runtime or TaskHandle is reconstructed. Embedded
 `tasks.events` attaches a new feed to a task that is still live after a restart;
 the feed starts with the task's current state read back from the stores, after
-its pending approval request, and does not reconstruct earlier events.
+its pending plaintext approval request, and does not reconstruct earlier events.
 
 File-backed SQLite has one owner: the actual database handle sets
 `PRAGMA locking_mode=EXCLUSIVE` before WAL initialization. A second open waits
@@ -3096,13 +3096,14 @@ receipt. `TaskHandle.events()` reads the same feed without cursors.
   sealed request. A read of a stored task that finds a feed a dispatch just
   opened (a resubmit) attaches to it the same way, so a refused dispatch hands
   the feed to the reader instead of ending it. The kernel notifies the relay
-  after the write's own await, so that state can appear twice. A read stopped
+  after the write's own await, so those entries can appear twice. A read stopped
   before its first store read completed creates nothing, a read never creates
   relay state for an unknown or terminal task, and only a Host read can create
   it: device envelopes for a task with no feed still allocate nothing.
 - Once a read attached a task's feed, the feed stays until the task's terminal
   plus `taskEventRetentionMs`, however its readers leave (`return()`, abort,
-  disconnect), so a reader that reconnects resumes with its cursor.
+  disconnect), so a reader that reconnects resumes with its cursor, unless the
+  read that attached it finds the task gone or finished.
 - While this instance's dispatch of a task is in flight, its feed buffers every
   delivery, device envelopes and Host transitions alike, including a feed a
   Host read attached, so `Offered` is the first entry of a dispatched feed. A

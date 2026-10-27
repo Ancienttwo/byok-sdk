@@ -121,8 +121,8 @@
   task whose feed was reclaimed or ended before this instance started). A
   live task that this instance did not dispatch, such as one still running
   after a SQLite restart, gets a feed that starts with its current state read
-  back from the stores, after the pending approval request while it awaits
-  one, without earlier events; that state can appear twice.
+  back from the stores, after the pending plaintext approval request while it
+  awaits one, without earlier events; those entries can appear twice.
   From then on `events.subscribe()` also reports that task's
   `task.state` changes, with no `task.created` before them.
 - **Breaking (server; #1022)** — `TaskHandle.events()` reads the same feed as
