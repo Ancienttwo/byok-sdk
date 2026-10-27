@@ -117,16 +117,12 @@ export type DaemonEvent =
    */
   | { kind: 'shutdown-complete'; ts: string; reason: string; undeliveredOutboxCount?: number }
   /**
-   * M4 Phase 3 hardening: a wire `task.approve`/`task.reject` (or this
-   * device's own redelivered copy of one) arrived for an out-of-band
-   * approval a DIFFERENT, faster path (a racing local `approvals.resolve`
-   * over the control socket, or this exact decision arriving twice) had
-   * already resolved — `TaskRunner.handleApprove`/`handleReject`
-   * (`task-runner.ts`) emit this instead of failing the task a second time.
-   * Audit-only: never gates any teardown/task-state decision, purely a
-   * record that a stale message was seen and correctly ignored — see
-   * `NoPendingApprovalError`'s own doc comment (`task-runner.ts`) for the
-   * full race this closes.
+   * A wire `task.approve`/`task.reject`, or a local `Daemon.approve`/
+   * `reject`, named an approval that is not the one pending for its task:
+   * a faster path (a racing local `approvals.resolve`, a timeout) already
+   * resolved it, the same decision arrived twice, or it targets another
+   * approval. `TaskRunner.handleApprove`/`handleReject` emit this and change
+   * nothing. Audit-only: never gates any teardown/task-state decision.
    */
   | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reason?: string }
   | { kind: 'runtime-disposal-failed'; ts: string; taskId: string; runtimeId: string; stage: 'signal' | 'quiescence' | 'cleanup'; reason: string }

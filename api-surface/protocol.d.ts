@@ -286,9 +286,6 @@ export declare const AgentEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     name: z.ZodString;
     contentType: z.ZodString;
 }, z.core.$strip>, z.ZodObject<{
-    type: z.ZodLiteral<"needs_approval">;
-    summary: z.ZodString;
-}, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"turn_end">;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"error">;
@@ -428,9 +425,6 @@ export declare const AgentEventOrUnknownSchema: z.ZodUnion<readonly [z.ZodDiscri
     type: z.ZodLiteral<"artifact">;
     name: z.ZodString;
     contentType: z.ZodString;
-}, z.core.$strip>, z.ZodObject<{
-    type: z.ZodLiteral<"needs_approval">;
-    summary: z.ZodString;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"turn_end">;
 }, z.core.$strip>, z.ZodObject<{
@@ -5887,9 +5881,6 @@ export declare const TaskProgressPayloadSchema: z.ZodUnion<readonly [z.ZodObject
         type: z.ZodLiteral<"artifact">;
         name: z.ZodString;
         contentType: z.ZodString;
-    }, z.core.$strip>, z.ZodObject<{
-        type: z.ZodLiteral<"needs_approval">;
-        summary: z.ZodString;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"turn_end">;
     }, z.core.$strip>, z.ZodObject<{

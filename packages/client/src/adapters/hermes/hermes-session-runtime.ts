@@ -221,10 +221,6 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
       }
     }
 
-    async resolveApproval(): Promise<void> {
-      throw new PolicyUnsupportedError('Hermes has no interactive approval product lane');
-    }
-
     fail(error: unknown): void {
       this.failure ??= isRuntimeExecutionFailure(error)
         ? error

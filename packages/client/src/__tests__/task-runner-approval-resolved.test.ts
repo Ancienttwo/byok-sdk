@@ -2,20 +2,11 @@ import type { RuntimeTaskInput } from '../types';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type AgentEvent, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
-import { freezeRuntimeAdapterDescriptor } from '../types';
-import type {
-  ApprovalChannel,
-  RuntimeAdapter,
-  RuntimeAdapterPrepareInput,
-  RuntimeAdapterPrepareResult,
-  RuntimeDetectResult,
-  Session,
-} from '../types';
-import { AsyncQueue } from '../util/async-queue';
+import type { RuntimeAdapter } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -84,72 +75,6 @@ function findApprovalResolved(sent: Envelope[]) {
   return envelope;
 }
 
-/**
- * A minimal `Session`/`RuntimeAdapter` double whose `resolveApproval` genuinely
- * routes through `TaskContext.approvalChannel.resolve` — deliberately
- * exercising the shared custom-adapter approval seam (bundled Claude
- * rejects `confirm`), which is what actually
- * exercises the WIRE path (`TaskRunner.handleApprove`/`handleReject` ->
- * `session.resolveApproval` -> `approvalChannel.resolve` ->
- * `ApprovalRegistry.resolve(..., 'wire')`). `StubSession`
- * (`fixtures/stub-adapter.ts`) deliberately does NOT do this (it only
- * records the call) — this file needs the real relay, so it gets its own
- * tiny double, matching `confirm-mode-approval-e2e.test.ts`'s own
- * file-local `ApprovalAwareSession`/`ApprovalAwareAdapter` precedent.
- */
-class RelayingSession implements Session {
-  readonly resolveApprovalCalls: Array<{ approved: boolean; reason?: string }> = [];
-  private readonly queue = new AsyncQueue<AgentEvent>();
-
-  constructor(
-    public readonly sessionRef: string,
-    private readonly approvalChannel: ApprovalChannel | undefined,
-  ) {}
-
-  get events(): AsyncIterable<AgentEvent> {
-    return this.queue;
-  }
-  async steer(): Promise<void> {}
-  async followUp(): Promise<void> {}
-  async interrupt(): Promise<void> {}
-  async close(): Promise<void> {
-    this.queue.end();
-  }
-  async resolveApproval(approved: boolean, reason?: string): Promise<void> {
-    this.resolveApprovalCalls.push(reason === undefined ? { approved } : { approved, reason });
-    if (!this.approvalChannel) throw new Error('no approval channel wired up for this session');
-    await this.approvalChannel.resolve(approved, reason);
-  }
-  emit(event: AgentEvent): void {
-    this.queue.push(event);
-  }
-}
-
-class RelayingAdapter implements RuntimeAdapter {
-  readonly descriptor = freezeRuntimeAdapterDescriptor({
-    id: 'claude',
-    supportsDispatchSelection: false,
-    capabilities: { steer: false, resume: true, approvalInteractive: true },
-  });
-  readonly sessions: RelayingSession[] = [];
-
-  async detect(): Promise<RuntimeDetectResult> {
-    return { kind: 'available', version: '0.0.0' };
-  }
-  async prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    return {
-      kind: 'prepared',
-      operation: {
-        start: async (input) => {
-          const session = new RelayingSession(input.manifest.sessionRef ?? `relay-session-${this.sessions.length + 1}`, input.approvalChannel);
-          this.sessions.push(session);
-          return session;
-        },
-      },
-    };
-  }
-}
-
 describe('TaskRunner: task.approval_resolved send decision', () => {
   it('local approve (approvalRegistry.resolve directly, simulating the control-socket approvals.resolve RPC) sends task.approval_resolved with the right payload', async () => {
     const adapter = new StubRuntimeAdapter();
@@ -196,34 +121,33 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
     expect(resolved?.payload.resolvedBy).toBe('local');
   });
 
-  it('wire-resolved (server-sent task.approve, routed through session.resolveApproval -> ctx.approvalChannel.resolve) does NOT send task.approval_resolved', async () => {
-    const adapter = new RelayingAdapter();
+  it('wire-resolved (server-sent task.approve, resolved in the registry as wire) does NOT send task.approval_resolved', async () => {
+    const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
     const { runner, approvalRegistry } = await makeRunner(adapter, sent);
     const taskId = 'task-wire-1';
     await offerAndActivate(runner, taskId);
+    const session = adapter.sessions[0]!;
 
-    const outcomePromise = runner.requestApproval(taskId, 'Bash: echo hi');
-    // The server's own wire task.approve — TaskRunner.handleApprove calls
-    // session.resolveApproval(true), which (only for THIS test's adapter)
-    // forwards to ctx.approvalChannel.resolve -> approvalRegistry.resolve(...,
-    // 'wire').
+    // The session asks through its approval channel; the server's own wire
+    // task.approve then resolves that registry entry with origin 'wire'.
+    const outcomePromise = session.requestApproval('Bash: echo hi');
     const approvalId = approvalRegistry.list()[0]!.approvalId;
     await runner.handleEnvelope(createEnvelope('task.approve', { approvalId }, { taskId, seq: 0 }));
-    await expect(outcomePromise).resolves.toEqual({ approved: true, reason: undefined });
+    await outcomePromise;
 
-    expect(adapter.sessions[0]?.resolveApprovalCalls).toEqual([{ approved: true }]);
+    expect(session.approvalResults).toEqual([{ approved: true }]);
     expect(sent.some((e) => e.type === 'task.approval_resolved')).toBe(false);
   });
 
   it('wire-resolved reject also does NOT send task.approval_resolved', async () => {
-    const adapter = new RelayingAdapter();
+    const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
     const { runner, approvalRegistry } = await makeRunner(adapter, sent);
     const taskId = 'task-wire-2';
     await offerAndActivate(runner, taskId);
 
-    const outcomePromise = runner.requestApproval(taskId, 'Write: /etc/shadow');
+    const outcomePromise = adapter.sessions[0]!.requestApproval('Write: /etc/shadow');
     const approvalId = approvalRegistry.list()[0]!.approvalId;
     await runner.handleEnvelope(createEnvelope('task.reject', { reason: 'server said no', approvalId }, { taskId, seq: 0 }));
     await outcomePromise;

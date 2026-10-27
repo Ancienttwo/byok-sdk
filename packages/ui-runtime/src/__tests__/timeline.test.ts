@@ -136,7 +136,7 @@ describe('Live Activity Timeline fold', () => {
     ]);
   });
 
-  it('preserves unknown and unsupported known events at their original positions', () => {
+  it('preserves unknown events, including the removed needs_approval, at their original positions', () => {
     const snapshot = replayTimeline(tail([
       timelineEvent(0, 0, { type: 'future.observation', secret: 'not projected' }),
       timelineEvent(0, 1, { type: 'needs_approval', summary: 'host-only approval' }),
@@ -147,7 +147,8 @@ describe('Live Activity Timeline fold', () => {
     expect(snapshot.items.map((item) => item.kind)).toEqual(['unknown', 'unknown', 'artifact', 'usage', 'error']);
     expect(snapshot.items[0]).toEqual(expect.objectContaining({ eventType: 'future.observation', classification: 'unknown-event' }));
     expect(snapshot.items[0]).not.toHaveProperty('secret');
-    expect(snapshot.items[1]).toEqual(expect.objectContaining({ eventType: 'needs_approval', classification: 'unsupported-known-event' }));
+    expect(snapshot.items[1]).toEqual(expect.objectContaining({ eventType: 'needs_approval', classification: 'unknown-event' }));
+    expect(snapshot.items[1]).not.toHaveProperty('summary');
   });
 
   it('projects gaps and store-owned loss, capacity, cursor and expiry separately', () => {

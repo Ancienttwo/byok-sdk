@@ -77,7 +77,6 @@ export interface DaemonTurnRecord {
   toolUses: number;
   toolResults: number;
   artifacts: number;
-  approvals: number;
   errors: number;
   /** The turn's last `usage` report, when it had one. */
   inputTokens?: number;
@@ -161,7 +160,6 @@ interface TurnTally {
   toolUses: number;
   toolResults: number;
   artifacts: number;
-  approvals: number;
   errors: number;
   usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
 }
@@ -187,9 +185,6 @@ function tally(open: TurnTally, event: AgentEvent): void {
     case 'artifact':
       open.artifacts += 1;
       return;
-    case 'needs_approval':
-      open.approvals += 1;
-      return;
     case 'error':
       open.errors += 1;
       return;
@@ -213,7 +208,6 @@ function turnRecord(ts: string, taskId: string, turn: number, open: TurnTally, c
     toolUses: open.toolUses,
     toolResults: open.toolResults,
     artifacts: open.artifacts,
-    approvals: open.approvals,
     errors: open.errors,
     ...(open.usage?.inputTokens === undefined ? {} : { inputTokens: open.usage.inputTokens }),
     ...(open.usage?.outputTokens === undefined ? {} : { outputTokens: open.usage.outputTokens }),
@@ -399,7 +393,7 @@ export function createDaemonRecordProjector(): DaemonRecordProjector {
         const { state, evicted } = track(event.taskId, event.ts);
         if (state.open === undefined) {
           state.turn += 1;
-          state.open = { progressEvents: 0, textBytes: 0, toolUses: 0, toolResults: 0, artifacts: 0, approvals: 0, errors: 0 };
+          state.open = { progressEvents: 0, textBytes: 0, toolUses: 0, toolResults: 0, artifacts: 0, errors: 0 };
         }
         tally(state.open, event.event);
         return event.event.type === 'turn_end' ? [...evicted, ...close(event.taskId, state, event.ts, 'turn_end')] : evicted;

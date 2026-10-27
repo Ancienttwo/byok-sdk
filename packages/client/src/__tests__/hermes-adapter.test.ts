@@ -341,7 +341,6 @@ describe('HermesAdapter session', () => {
     expect(session.sessionRef).toBe('fake-hermes-session-1');
     expect((await entries()).filter((entry) => entry.method === 'session/prompt').map((entry) => entry.text)).toEqual(['hello', 'second']);
     await expect(session.steer('redirect')).rejects.toBeInstanceOf(SteerUnsupportedError);
-    await expect(session.resolveApproval(true)).rejects.toThrow(/no interactive approval/);
   });
 
   it('cancels an active turn through session/cancel and ends it', async () => {
