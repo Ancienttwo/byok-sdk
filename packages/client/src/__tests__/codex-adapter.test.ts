@@ -685,9 +685,9 @@ describe('Codex persistent app-server adapter', () => {
     expect(captured).toHaveLength(1);
     const frames = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { method?: string; params?: { config?: { mcp_servers?: unknown } } });
     expect(frames.find((frame) => frame.method === 'thread/start')?.params?.config?.mcp_servers).toEqual({
-      byokagentmessage: { command: '/fixture/server', args: [], env: { SERVER_ONLY: 'secret' }, enabled: true },
+      byokagentmessage: { command: '/fixture/server', args: [], env: { SERVER_ONLY: 'secret' }, enabled: true, tools: { send_agent_message: { approval_mode: 'approve' } } },
     });
-    // No per-tool grant or per-tool approval mode is projected.
+    // Helper grants stay in thread configuration, never process arguments.
     expect(captured[0]!.some((arg) => arg.includes('mcp_servers') || arg.includes('enabled_tools') || arg.includes('approval_mode'))).toBe(false);
     expect(Object.values(envs[0]!).some((value) => value?.includes('secret'))).toBe(false);
   });
