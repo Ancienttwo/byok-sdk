@@ -315,7 +315,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
 
 export interface OfferStartInput
   extends Pick<OfferRequest, 'ordinaryMemoryMode' | 'readerAttempt'>,
-    Pick<OfferRuntime, 'env' | 'mcpEnv' | 'mcpToolsetTools' | 'pick' | 'prepared' | 'scratch'>,
+    Pick<OfferRuntime, 'env' | 'mcpEnv' | 'mcpToolsetTools' | 'mcpToolApprovals' | 'pick' | 'prepared' | 'scratch'>,
     Pick<OfferManifest, 'manifest' | 'preparedLaunch' | 'runtimeLaunch'>,
     Pick<OfferClaim, 'resolvedInstruction' | 'taskMcpServers'> {
   readonly agentBinding: OfferWorkspace['agentBinding'];
@@ -337,7 +337,7 @@ export async function startOfferRuntime(
 ): Promise<void> {
   const { taskId } = phase;
   const {
-    agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, pick, prepared, scratch, manifest,
+    agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
     preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline,
   } = input;
   const startInput: RuntimeOperationStartInput = {
@@ -373,6 +373,7 @@ export async function startOfferRuntime(
     manifest,
     env,
     ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
+    ...(mcpToolApprovals === undefined ? {} : { mcpToolApprovals }),
     ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
     approvalChannel: {
       taskId,

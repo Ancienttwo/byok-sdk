@@ -164,7 +164,7 @@ export async function handleOffer(
       readerAttempt, requiredToolsets, resolvedMcp, blobAbort,
     });
     if (runtime === undefined) return;
-    const { scratch, offered, pick, env, mcpEnv, mcpToolsetTools, prepared } = runtime;
+    const { scratch, offered, pick, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, prepared } = runtime;
     let taskMcpServers = runtime.taskMcpServers;
 
     const workspace = await bindOfferWorkspace.call(this, phase, held, {
@@ -189,7 +189,7 @@ export async function handleOffer(
     ({ taskMcpServers } = claimed);
 
     await startOfferRuntime.call(this, phase, held, {
-      agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, pick, prepared, scratch, manifest,
+      agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
       preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline,
     }, {
       agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,

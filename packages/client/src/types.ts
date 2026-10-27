@@ -104,7 +104,10 @@ export interface McpStdioServerConfig {
 
 /** A logical group of local MCP servers selectable by a wire-level toolset id. */
 export interface McpToolsetConfig {
-  mcpServers: Readonly<Record<string, McpStdioServerConfig>>;
+  mcpServers: Readonly<Record<string, McpStdioServerConfig & {
+    /** Exact Host-approved tool names; omitted or empty adds no approval. Local configuration only. */
+    readonly approveTools?: readonly string[];
+  }>>;
 }
 
 /** Lifecycle facts a device host may explicitly report for one configured toolset. */
@@ -271,6 +274,8 @@ export interface RuntimeAdapterDescriptor {
    * never makes an offer wait on one it has no use for.
    */
   readonly requiresMcpToolsetToolObservation?: boolean;
+  /** Can enforce the local Host's exact per-tool MCP approvals. Nonempty grants require this capability. */
+  readonly mcpToolApprovals?: boolean;
   /**
    * Whether each `progress` event carries one complete assistant message
    * rather than a streaming delta. Codex emits one event per completed
@@ -478,6 +483,8 @@ interface RuntimeOperationStartBase {
   readonly env: NodeJS.ProcessEnv;
   /** Local MCP authority resolved from logical wire ids. */
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
+  /** Local registry approvals copied and frozen with this attempt's servers; never sourced from wire or transcript. */
+  readonly mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
   /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
   readonly mcpToolsetTools?: McpToolsetToolObservation;
   /** Optional, adapter-agnostic out-of-band approval channel. */
@@ -544,6 +551,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     id: descriptor.id,
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
+    ...(descriptor.mcpToolApprovals === true ? { mcpToolApprovals: true } : {}),
     ...(descriptor.progressEventsAreMessages === true ? { progressEventsAreMessages: true } : {}),
     ...(descriptor.trajectoryEvidence === 'event-stream' ? { trajectoryEvidence: 'event-stream' as const } : {}),
     ...(descriptor.platforms === undefined ? {} : { platforms: Object.freeze([...descriptor.platforms]) }),

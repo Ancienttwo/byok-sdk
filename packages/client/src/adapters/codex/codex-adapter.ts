@@ -1,4 +1,4 @@
-import { withCodexReservedMcpToolGrants } from './reserved-mcp-tool-grants';
+import { withCodexMcpToolGrants } from './reserved-mcp-tool-grants';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import type { RuntimeTaskInput } from '../../types';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
@@ -113,6 +113,7 @@ export class CodexAdapter implements RuntimeAdapter {
     supportsDispatchSelection: true,
     progressEventsAreMessages: true,
     platforms: ['darwin', 'linux', 'win32'],
+    mcpToolApprovals: true,
     capabilities: {
       steer: true,
       resume: true,
@@ -277,11 +278,12 @@ export class CodexAdapter implements RuntimeAdapter {
         1000,
         {
           onReady: (id) => session.ready(id),
-          beforeOpen: async (request, params) => withCodexReservedMcpToolGrants(
+          beforeOpen: async (request, params) => withCodexMcpToolGrants(
             excludeUserMcp
               ? withCodexUserMcpServersExcluded(params, await request('config/read', { cwd, includeLayers: false }), taskServers)
               : params,
             taskServers,
+            input.mcpToolApprovals,
           ),
           ...(excludeUserMcp ? {
             afterOpen: (request, threadId) => verifyCodexUserMcpServersExcluded(request, threadId, taskServers),

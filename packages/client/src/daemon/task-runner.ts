@@ -1385,6 +1385,7 @@ export class TaskRunner {
         ok: true;
         servers: Readonly<Record<string, McpStdioServerConfig>>;
         toolsetIdByServer: ReadonlyMap<string, string>;
+        mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
       }
     | { ok: false; reason: string } {
     return resolveMcpServers.call(this, requiredToolsets);
@@ -2013,7 +2014,8 @@ export class TaskRunner {
     requestedRuntime: string | undefined,
     requiresMcpToolsets: boolean,
     signal: AbortSignal,
+    requiresMcpToolApprovals = false,
   ): Promise<PickResult> {
-    return pickAdapter.call(this, requestedRuntime, requiresMcpToolsets, signal);
+    return pickAdapter.call(this, requestedRuntime, requiresMcpToolsets, signal, requiresMcpToolApprovals);
   }
 }
