@@ -1,6 +1,6 @@
-# Lane M：发布 JS 注释清理准备
+# Lane M：发布 JS 注释清理与组合验收
 
-状态：仅配置准备；未运行 build/typecheck/tests，未测量或修改 closure budgets，未完成 lane M 验收。
+状态：配置与本地组合验收完成；GitHub 最终 CI、依赖 PR 合并和发布仍独立跟踪。
 依据：[#1008](https://github.com/Ancienttwo/byok-sdk/issues/1008) owner 2026-10-27 决定；本次任务明确允许先准备配置，统一重测留给其他车道合入后的父方。
 调查基线：`92be29d522141965c76f2ea854b4fb9763c5789b`。
 
@@ -47,3 +47,17 @@ bun run check:release-pack
 ```
 
 本次只完成源码管线调查、配置 diff 自审及 `git diff --check`；上述构建、测试和产物验证均未执行。
+
+## Parent final composition evidence — 2026-10-28
+
+Product inputs are frozen in candidate tree `ad0a16f39c3c5fa1d8c9541c704e1a0697b87046` (artifact source `04b4aa4a62b3f55b8cbc6d34af0f8dc350081acb`; merging current main produced `679f09f8e` with the identical tree). The composition includes the independently reviewed fixes and tool controls, M, and #1012. This is a development candidate whose manifests still say 0.30.2, not a republished 0.30.2 or an npm 0.31.0 release.
+
+- Root build, final typecheck, API surface and version-authority: exit 0. Full `bun run test` second run: exit 0; 20 Vitest workspace summaries total 13,551 passed / 822 skipped. Optional substrate/platform skips are not external deployment evidence.
+- The first full run exposed two stale contract assertions (forged Host env wording and exact memory module graph), now precisely aligned with the reviewed authority changes. A sealed-steer timeout was not reproduced by candidate/baseline named cases or the candidate's 69-test file; its first failure remains unattributed. No assertion or timeout was relaxed for that case.
+- Parser audit of all 38 published dist JS files found zero ordinary comments; 86 remaining comments are legal notices, shebang/map markers or semantic annotations. Fourteen copied license/provenance files match their inputs byte-for-byte. Five map samples (client, todo, sealed host, core and core sealed entry) resolve to exact source contents.
+- All public declaration goldens remain unchanged by M/#1012. In addition, cloud `cloud.d.ts` and `index.d.ts` compare byte-for-byte with the validated unchanged-cloud baseline.
+- Forty-three closure limits are pinned to measured composition sizes; non-budget policy values are unchanged. Only sealed-host codegen locations needed regenerated facts. The cloud split no longer exceeds its old limits: cloud 496237 B, cloud-dataplane 721316 B, runtime 685791 B, server 632143 B, ui-runtime 519691 B. Adapter/testing increases in the combined table account for the separately reviewed runtime controls, not extra budget headroom for the split. Coordinator wB:p4 signs this exact composition under #1008 authority.
+- Native helper build reproduces darwin-arm64, darwin-x64 and win32-x64 bytes from two independent source paths. This is build reproducibility, not Windows power-loss qualification.
+- `bun run check:release-pack -- --out-dir _ops/release-pack-04b4aa4a`: exit 0, nine tarballs. Installed root/adapters/CLI MCP tools/call and submit_result smoke pass, as do asset integrity and official Pi pin checks. The prior packed fixture was corrected to require exact SDK helper grants while rejecting default Host grants; no production code changed.
+
+Local receipts: `_ops/lane-m-{artifact-audit,map-license-audit,measured-closures}.json`, `_ops/release-pack-04b4aa4a/release-manifest.json`, and `/tmp/byok-final-composite-{build,test-r2,typecheck-final,api-final,version-final,pack-r2-run}.log`. Final CI must bind the reviewable PR head. Individual pre-M budget records in other plans are historical; `api-surface/entries.json` is the current budget authority.

@@ -36,3 +36,9 @@ Verification candidate: `504cf1b7097ed71ed713e8b3b7d8123e7829590c`, incorporatin
 - `bun run test`: exit 1 at the bot-collaboration workspace. Client: 4,930 passed / 109 skipped; cloud: 1,964 passed; cloud-do: 886 passed. Bot collaboration: 643 passed, one failed (`cross-bot-join.test.ts`, “spent 9 + fan-out 2…”), at `cross-bot.test-support.ts:11:135`. The same file on clean frozen main `2fd42d450` also exits 1 at the same assertion (two other cases pass), so this failure predates the split. The workspace command stopped there; later workspaces were not verified by this run. Baseline log: `/tmp/byok-baseline-cross-bot.log`. Local command logs: `/tmp/byok-1012-{build,typecheck,api,version,test}.log`; base API log `/tmp/byok-1012-base-api.log`.
 
 Remaining acceptance: the pre-existing cross-bot test failure and lane M budget evidence on the integrated head. New main commits do not retroactively change the pinned verification subject above.
+
+## Final composition acceptance — 2026-10-28
+
+The split is now composed with lane M and the reviewed current changes in tree `ad0a16f39c3c5fa1d8c9541c704e1a0697b87046`. Root build/typecheck/API/version checks pass; full `bun run test` passes (13,551 passed / 822 skipped across 20 Vitest workspace summaries), including the bot-collaboration workspace. This does not retroactively diagnose the earlier baseline failure. No split-owned test assertion changed. Cloud `cloud.d.ts` and `index.d.ts` remain byte-identical to the validated unchanged-cloud baseline.
+
+M's measured cloud/server closure sizes are below the old limits, so no budget increase was used to admit this refactor. Installed nine-package tarball smoke passes on the composed candidate; exact measurements, legal/source-map checks and limits are recorded in the lane M plan. Remaining work is final GitHub CI and dependency-ordered merge, not the old local declaration/budget gate. Publication and external acceptance remain separate.
