@@ -22,7 +22,6 @@ import { foldNameAliases } from '../util/fold-name-aliases';
 import { resolveDaemonConfig } from '../daemon/create-daemon/config';
 import { DeviceStore } from '../daemon/store';
 import { stableAgentHomeOwnerId } from '../agent-home';
-import { resolveStoreDir } from '../bin/config';
 import { defaultScratchRoot } from '../daemon/retention/scratch';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { TestServer } from './fixtures/test-server';
@@ -543,10 +542,10 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     expect(storeDir).not.toBe(canonical);
     // No storage.scratchRoot: the default root derives from the store.
     const config: DaemonConfig = {
-      agentHome: testAgentHomeConfig(), localAgentRelease: { version: '0.0.0-test' },
+      agentHome: testAgentHomeConfig(), agentEgress: FRESH_DAEMON_EGRESS, localAgentRelease: { version: '0.0.0-test' },
       productName: 'Acme', productId: 'acme-store-alias', serverUrl: server.url, storeDir,
     };
-    const offer = (taskId: string) => server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), instruction: taskId }, { taskId, seq: server.nextSeq() }));
+    const offer = (taskId: string) => server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), instruction: taskId, ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
 
     const first = new LaunchingAdapter('pi');
     daemon = createDaemonWithAdapters(config, [first]);
@@ -578,8 +577,8 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     second.sessions[0]!.emit({ type: 'turn_end' });
     await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'alias-second');
 
-    // A CLI resolving the same aliased config reaches this daemon's control endpoint.
-    const cli = await connectControlClient({ storeDir: resolveStoreDir(config), productId: config.productId });
+    // A CLI resolving the same aliased config (bin/config's resolveStoreDir) reaches this daemon's control endpoint.
+    const cli = await connectControlClient({ storeDir: DeviceStore.resolveDir(config.productId, config.storeDir), productId: config.productId });
     if (!cli.ok) throw new Error(`expected the CLI to reach the daemon: ${JSON.stringify(cli)}`);
     cli.client.close();
   }, 20000);
