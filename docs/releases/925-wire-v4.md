@@ -45,7 +45,7 @@ reader and no capability negotiation between the two majors.
   finished task whose feed was reclaimed (`feed_expired`); `tasks.get` gives
   the current state. `from: 'state'` starts at the task's current state; for a
   task still running after a restart, the feed starts with that state read
-  back from the stores. A submitted task runs under its egress policy, and
+  back from the stores, after the pending approval request while it awaits one. A submitted task runs under its egress policy, and
   with `activity.delivery: 'latest-value'` the daemon may send only the latest
   progress event of each batch, where a legacy dispatch sent every one.
   `TaskHandle.events()` now throws `feed_expired` after reclamation instead of

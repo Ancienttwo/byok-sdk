@@ -547,8 +547,8 @@ lookup, revoke and same-machine replacement share the durable device directory.
 Device IDs are globally tenant-unique. Presence, nonces and unredeemed pairing
 codes remain process-local; no runtime or TaskHandle is reconstructed. Embedded
 `tasks.events` attaches a new feed to a task that is still live after a restart;
-the feed starts with the task's current state read back from the stores and
-does not reconstruct earlier events.
+the feed starts with the task's current state read back from the stores, after
+its pending approval request, and does not reconstruct earlier events.
 
 File-backed SQLite has one owner: the actual database handle sets
 `PRAGMA locking_mode=EXCLUSIVE` before WAL initialization. A second open waits
@@ -3087,10 +3087,15 @@ receipt. `TaskHandle.events()` reads the same feed without cursors.
   retained feed is `feed_expired`. Terminal is judged by the `tasks.get`
   projection, so an accepted Host cancellation is terminal even while the
   attempt reads `cancel_requested`.
-- A live task with no feed in this instance (after a restart) gets one whose
-  first entry is its current state from the `tasks.get` projection (`state`,
+- A live task with no feed in this instance (after a restart) gets one that
+  starts with its current state from the `tasks.get` projection (`state`,
   `updatedAt`), unless a transition reached the feed first; earlier events are
-  not reconstructed. The kernel notifies the relay after the write's own
+  not reconstructed. While it awaits approval, the pending request read from
+  the approval timeline comes first, in the relay's own `await_approval` form:
+  only a plaintext request with an `approvalId`, since the relay announces no
+  sealed request. A read of a stored task that finds a feed a dispatch just
+  opened (a resubmit) attaches to it the same way, so a refused dispatch hands
+  the feed to the reader instead of ending it. The kernel notifies the relay after the write's own
   await, so that state can appear twice. A read stopped before it attached
   creates nothing, a read never creates relay state for an unknown or terminal
   task, and only a Host read can create it: device envelopes for a task with

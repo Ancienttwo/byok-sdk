@@ -257,9 +257,10 @@ export interface ByokServer {
      * record: read task facts with {@link tasks.get}.
      *
      * A live task this instance did not dispatch (after a restart) gets a feed
-     * whose first entry is its current state read back from the stores, and
-     * no earlier events. That state can appear twice when the read saw a
-     * commit the feed had not received yet.
+     * that starts with its current state read back from the stores, after the
+     * pending approval request while it awaits a plaintext one, and no earlier
+     * events. That state can appear twice when the read saw a commit the feed
+     * had not received yet.
      *
      * The first `next()` throws, before any entry: a `TypeError` when both
      * `after` and `from` are given, `ByokCloudError` `task_not_found` for an

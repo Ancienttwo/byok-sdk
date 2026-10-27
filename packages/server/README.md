@@ -593,8 +593,9 @@ for await (const { cursor, event } of byok.tasks.events(taskId, { ...start, sign
   terminal task whose feed is gone. After `cursor_unknown`, read again with
   `from: 'state'`; after `feed_expired`, `tasks.get` has the final state.
 - After a restart, a task that is still live gets a feed that starts with its
-  current state read back from the stores; earlier events are not
-  reconstructed, and that state can appear twice. A task whose Host
+  current state read back from the stores, after the pending approval request
+  while it awaits one; earlier events are not reconstructed, and that state can
+  appear twice. A sealed approval request is not announced, as on a live feed. A task whose Host
   cancellation was accepted counts as terminal here, as in `tasks.get`.
 - Authorization is the Host's: the feed carries raw tool input and output, so
   authenticate the user and redact before forwarding it to a browser.
