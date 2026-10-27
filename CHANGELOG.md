@@ -150,6 +150,11 @@
     non-retryably with `reason` `offer_capability_missing: this daemon does
     not advertise <flags>`, or with `sealed_key_unavailable` when the task
     seals its output (the missing flags then appear only in the device log).
+  - Latest-value Agent activity no longer coalesces `error` events. Every
+    event still passes the egress byte and quota bounds; each accepted
+    `error` of a `task.progress` batch is sent in its place, and the other
+    events coalesce to their last. A daemon artifact refusal or upload
+    failure now reaches the Host when the runtime emits more in the same batch.
   - The protocol test alias `byok-protocol-previous` pins 0.30.2, the last v3
     release, as the rejection oracle. `byok-protocol-floor` (0.27.0) and
     `published-compat.test.ts` are removed until a v4 release is published.

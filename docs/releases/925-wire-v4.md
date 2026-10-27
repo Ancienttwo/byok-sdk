@@ -99,6 +99,11 @@ capability negotiation between the two majors.
   `byok-agent workspaces` command is gone, and the `workspace` retention
   class leaves `ProtectedClassId` and `RetentionClassId`. The daemon leaves
   `<storeDir>/git-workspaces.json` and old task directories untouched.
+- Latest-value Agent activity no longer coalesces `error` events. Every
+  event still passes the egress bounds; each accepted `error` of a progress
+  batch is sent, and the other events coalesce to their last. Every v4 fresh
+  offer runs with egress, so this keeps a daemon artifact refusal or upload
+  failure from being replaced by the runtime's next event.
 - `Daemon.approve` and `Daemon.reject` take `{ approvalId }` and report the
   decision to the server as `task.approval_resolved`.
 - Runtime adapters take `RuntimeTaskInput` from `@byok-sdk/client`:
