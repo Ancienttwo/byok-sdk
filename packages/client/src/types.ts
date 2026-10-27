@@ -464,6 +464,7 @@ interface RuntimeOperationStartBase {
   /**
    * Present only when the adapter declares `approvalInteractive: true`. A
    * request made before `start()` returns waits until the task is active.
+   * `start()` must return its Session before awaiting the request's decision.
    */
   readonly approvalChannel?: ApprovalChannel;
 }

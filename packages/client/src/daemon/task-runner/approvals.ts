@@ -14,7 +14,8 @@ export async function requestApproval(
   summary: string,
 ): Promise<{ approved: boolean; reason?: string }> {
   const active = this['tasks'].get(taskId);
-  if (!active) {
+  // Teardown may retain ownership solely to retry disposal or terminal commit.
+  if (!active || active.beingTornDown) {
     return { approved: false, reason: 'task is not currently active on this device' };
   }
 

@@ -39,12 +39,13 @@ const unusedBlobClient: BlobResolver = {
 async function makeRunner(
   adapter: StubRuntimeAdapter,
   sent: Envelope[],
-  overrides: Partial<Pick<TaskRunnerDeps, 'approvalTimeoutMs' | 'approvalRegistry' | 'onApprovalDispatched'>> = {},
+  overrides: Partial<Pick<TaskRunnerDeps, 'approvalTimeoutMs' | 'approvalRegistry' | 'onApprovalDispatched' | 'awaitTerminalCommit'>> = {},
+  home = testAgentHomeDeps(),
 ): Promise<{ runner: TaskRunner; approvalRegistry: ApprovalRegistry }> {
   const approvalRegistry = overrides.approvalRegistry ?? new ApprovalRegistry();
   const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    ...testAgentHomeDeps(),
+    ...home,
     deviceId: 'device-1',
     send: (envelope) => {
       sent.push(envelope);
@@ -55,6 +56,7 @@ async function makeRunner(
     productId: 'unused-product-id',
     approvalTimeoutMs: overrides.approvalTimeoutMs,
     onApprovalDispatched: overrides.onApprovalDispatched,
+    awaitTerminalCommit: overrides.awaitTerminalCommit,
   };
   return { runner: new TaskRunner(deps), approvalRegistry };
 }
@@ -384,6 +386,57 @@ describe('TaskRunner.requestApproval', () => {
     await offering;
     await expect(early).resolves.toMatchObject({ approved: false });
     expect(approvalRegistry.list()).toEqual([]);
+  });
+
+  it.each([false, true])('refuses startup approval after cancellation when terminal commit fails = %s', async (failCommit) => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const home = testAgentHomeDeps();
+    let entered!: () => void;
+    let release!: () => void;
+    const handoffEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const releaseHandoff = new Promise<void>((resolve) => { release = resolve; });
+    const originalRecord = home.agentSessionHandoffs.record.bind(home.agentSessionHandoffs);
+    const handoff = vi.spyOn(home.agentSessionHandoffs, 'record').mockImplementation(async (input) => {
+      entered();
+      await releaseHandoff;
+      return originalRecord(input);
+    });
+    let rejectCommit = failCommit;
+    const { runner, approvalRegistry } = await makeRunner(adapter, sent, {
+      awaitTerminalCommit: async () => {
+        if (rejectCommit) throw new Error('terminal commit unavailable');
+      },
+    }, home);
+    const taskId = 'cancelled-startup-approval';
+    const offering = offerAndActivate(runner, taskId);
+    let early: Promise<{ approved: boolean; reason?: string }> | undefined;
+    try {
+      await handoffEntered;
+      expect(adapter.sessions).toHaveLength(1);
+      early = adapter.startCalls[0]!.ctx.approvalChannel!.request('early approval');
+      await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'cancel during activation' }, { taskId, seq: 2 }));
+      release();
+      await offering;
+
+      expect(sent.some((e) => e.type === 'task.cancelled')).toBe(true);
+      expect(sent.some((e) => e.type === 'task.started')).toBe(false);
+      expect(adapter.sessions[0]!.closeCalled).toBe(true);
+      expect(runner.activeTaskCount).toBe(failCommit ? 1 : 0);
+      expect(sent.some((e) => e.type === 'task.await_approval')).toBe(false);
+      await expect(early).resolves.toMatchObject({ approved: false });
+      await expect(runner.requestApproval(taskId, 'late approval')).resolves.toMatchObject({ approved: false });
+      expect(approvalRegistry.list()).toEqual([]);
+      expect(sent.some((e) => e.type === 'task.await_approval')).toBe(false);
+    } finally {
+      release();
+      await offering.catch(() => {});
+      for (const pending of approvalRegistry.list()) approvalRegistry.resolve(pending.approvalId, 'reject', 'test cleanup');
+      rejectCommit = false;
+      await runner.shutdownActiveTasks('test cleanup');
+      await early;
+      handoff.mockRestore();
+    }
   });
 
   /**
