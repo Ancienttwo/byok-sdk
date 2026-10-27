@@ -101,6 +101,8 @@ export interface ActiveTask {
   blobAbort: AbortController;
   /** True for offers carrying egressPolicy, including prepared execution. */
   egressEnabled: boolean;
+  /** The progress events this daemon made itself; latest-value never coalesces them. */
+  daemonEvents: WeakSet<AgentEvent>;
   adapter: RuntimeAdapter;
   session: Session;
   scratch: ExecutionScratch;

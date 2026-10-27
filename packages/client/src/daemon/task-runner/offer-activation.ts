@@ -60,6 +60,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
     taskId,
     blobAbort,
     egressEnabled: payload.egressPolicy !== undefined,
+    daemonEvents: new WeakSet(),
     adapter: pick.adapter,
     session,
     scratch,
@@ -86,6 +87,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
               agentRef: active.agentRef,
               taskId,
               events,
+              daemonEvents: active.daemonEvents,
             }) ?? []
           : events;
         if (projected.length > 0) this['deps'].send(createEnvelope('task.progress', { seq, events: [...projected] }, { taskId, seq }));

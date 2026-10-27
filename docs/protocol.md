@@ -789,7 +789,11 @@ refuses a payload whose `session` does not match it. The offer read back
 to the one the Host submitted.
 
 The policy has one exact `policyRevision`. Activity is `latest-value` with
-positive coalesce and event-byte bounds. The daemon sends Agent events as the
+positive coalesce and event-byte bounds: of the runtime events in one
+`task.progress` batch, only the last is sent. An `error` event the daemon makes
+itself (an artifact it refused or could not upload) is never coalesced and
+keeps its place in the batch, so the runtime event after it cannot replace the
+only report of that failure. The daemon sends Agent events as the
 runtime produced them. It does not filter, redact or omit them. Reliable quotas are positive and independently bound per Agent and
 authenticated tenant. Workspace, transcript and artifact transfers are each
 `disabled` or carry an explicit MIME/byte policy; no surface inherits another

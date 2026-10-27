@@ -52,6 +52,16 @@ describe('Agent egress goes to the Host as is', () => {
     expect(controller.status().latestValue.dropped).toBe(0);
   });
 
+  it('sends a daemon-made error and the runtime event after it in the same batch', () => {
+    const controller = new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY, tenantId: 'tenant-egress' });
+    const progress = { type: 'progress', text: 'writing the report' } as const;
+    const error = { type: 'error', message: 'artifact "../secret" escapes the workspace' } as const;
+    const artifact = { type: 'artifact', name: 'report.txt', contentType: 'text/plain' } as const;
+    expect(controller.projectLatestValue({
+      agentRef, taskId: 'task-daemon-error', events: [progress, error, artifact], daemonEvents: new WeakSet([error]),
+    })).toEqual([error, artifact]);
+  });
+
   it('appends a contentful reliable payload to the spool unchanged', async () => {
     const homeDir = await mkdtemp(path.join(os.tmpdir(), 'byok-egress-as-is-'));
     roots.push(homeDir);

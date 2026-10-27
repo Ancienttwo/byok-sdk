@@ -1962,6 +1962,10 @@ export interface AgentEgressProgressInput {
     readonly agentRef?: AgentRef;
     readonly taskId: string;
     readonly events: readonly AgentEvent[];
+    /** Events of `events` the daemon made itself rather than the runtime. */
+    readonly daemonEvents?: {
+        has(event: AgentEvent): boolean;
+    };
 }
 export interface AgentEgressReliableInput {
     readonly homeDir: string;
@@ -2009,7 +2013,10 @@ export declare class AgentEgressController {
     noteTransportDrop(reason: AgentEgressDropReason, agentRef?: AgentRef): void;
     /**
      * Coalesce to the latest value before TaskRunner builds a `task.progress`
-     * envelope. Events go to the Host as the runtime produced them.
+     * envelope. Events go to the Host as the runtime produced them. An event
+     * the daemon made itself (an artifact it refused or could not upload) is
+     * never coalesced: the runtime's next event in the same batch would
+     * otherwise replace the only report of that failure.
      */
     projectLatestValue(input: AgentEgressProgressInput): readonly AgentEvent[];
     appendReliable(input: AgentEgressReliableInput): Promise<AgentEgressReliableAppendResult>;
