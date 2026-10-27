@@ -1,75 +1,79 @@
-# Grok Bot harness spike: report
+# Grok Bot dual-mode spike: report
 
-Date: 2026-10-27. Branch `spike/grok-bot-harness` (base `origin/main@990abd60`). Not pushed.
+Date: 2026-10-27. Branch `spike/grok-bot-harness` (base `origin/main@990abd60`). Local commits only, not pushed.
+Scope: RESTEER dual-mode (Mode G = Grok Bot as MCP client; Mode A = Aiphabee frontend on byok Bot mode).
 
 ## Result
 
-**PASS (fail-closed).** Grok Bot is installed and running on this Mac, and byok cannot
-drive it: no ACP, stdio, local API or IPC surface submits a prompt and returns the
-reply. The only inbound surface, `grokbot://app/v1/prompt`, prefills the composer and never
-sends. The supported shape is the existing external-Bot MCP beta: Grok Bot calls the
-Aiphabee Host's byok MCP endpoint as an MCP client.
+**PASS.**
+
+- Mode G, server half: proven on loopback. A client built from Grok Bot's own remote-MCP entry shape
+  completes auth, version negotiation, scoped `tools/list`, the submit/status loop to `Complete`,
+  and revocation against the real `examples/byok-mcp-server` composition.
+- Mode G, Grok Bot half: not provable without a live account. Code reading of Grok Bot 0.75.8 shows
+  its custom MCP servers live in the account config and run from the Cursor backend or the Bot's
+  cloud computer, so the cloud path (public HTTPS) is the one that works by design. Loopback from the
+  Mac depends on an unverified `placement: "client"` option.
+- Mode A: existing Bot-mode surfaces and gaps are listed; no new adapter work.
+- Driving Grok Bot stays fail-closed (earlier probe), kept as negative evidence.
 
 ## Artifacts
 
 | Path | What |
 | --- | --- |
-| `docs/plans/2026-10-27-grok-bot-harness-spike.md` | Design: gap, target architecture, ranked paths, non-goals, acceptance criteria |
-| `scripts/spikes/grok-bot-probe.mjs` | Read-only probe; prints a JSON verdict (`fail-closed` / `needs-review` / `not-installed`) |
-| `scripts/spikes/grok-bot-probe.test.mjs` | Unit test of the probe's parsers and verdict rule (synthetic inputs) |
+| `docs/plans/2026-10-27-grok-bot-dual-mode-plan.md` | Dual-mode plan (renamed from `…-grok-bot-harness-spike.md`): architecture, Mode G reachability, what is proven, live-only checklist items, Mode A capabilities and gaps, non-goals, acceptance |
+| `examples/byok-mcp-server/src/grok-bot-mode-g.test.ts` | Mode G loopback spike test (Grok-Bot-shaped client, real SDK server + ledger + tools + daemon) |
+| `scripts/spikes/grok-bot-probe.mjs`, `scripts/spikes/grok-bot-probe.test.mjs` | Earlier read-only probe: Grok Bot cannot be driven (negative evidence only) |
 | `Garbage/grok-bot-harness-spike-report.md` | This report |
 
 ## Evidence (commands run)
 
-1. `node scripts/spikes/grok-bot-probe.mjs` → exit 0, `verdict: "fail-closed"`:
-   - bundle `com.anysphere.sand`, "Grok Bot" 0.75.8, URL schemes `grokbot`, `sand`
-   - `desktop-status.json`: signed in, pid alive; 14 app processes
-   - Electron fuses: `RunAsNode` off, `EnableNodeOptionsEnvironmentVariable` off,
-     `EnableNodeCliInspectArguments` off, `EnableEmbeddedAsarIntegrityValidation` on,
-     `OnlyLoadAppFromAsar` on
-   - entrypoints in `app.asar`: `dist/electron-main/main.cjs`, `dist/local-exec-daemon/main.cjs`,
-     `dist/node-agent-coordinator/main.cjs`
-   - deep-link routes: `agent`, `marketplace`, `plugin-add`, `plugin-native`, four
-     `*-connect-callback`, two `onepassword-*-callback`, `open`, `prompt`, `create-team-bot`,
-     `settings`, `thread`, `task`, `vault`, `sidebar`
-   - prompt handler outcomes `superseded`, `no-main-agent`, `found`, `added`, `kept-draft`,
-     `prefilled`; `setsDraft: true`, `submits: false`
-   - dev control server: `unpackaged-only`; ACP markers: none; TCP listeners: none
-   - `grok` CLI: `grok 1.0.62 (1474f9cbdd91)`, product "Grok Build"
-2. `node --test scripts/spikes/grok-bot-probe.test.mjs` → 5 pass, 0 fail.
-3. Manual reads of the extracted bundles (scratchpad only, not committed):
-   - `main-core.cjs`: deep-link table `schemes:["grokbot","sand"], authority:"app"`,
-     `prompt: /v1/prompt {id?, text ≤1000}`; single-instance argv goes to the same handler.
-   - renderer `index.eager-app-*.js`, function handling `prompt`: `t.drafts.setDraft(a,{prompt:e.text})`,
-     then `ingestFocusAgent`, returns `prefilled`.
-   - `main-app.cjs`: `e.isPackaged||(e.startDevControlServer??Jtt)(…)`; gate text "only served to
-     an unpackaged app started with SAND_DEV_CAPABILITY=1".
-   - `main-app.cjs`: in-app RPC `addMcpServer({name, configJson})`, `getGrokBotAgentMcpServers`;
-     agent `harness==="temporal"` / `"box"`; backend `api2.cursor.sh`.
-4. `strings ~/.grok/bin/grok-1.0.62`: one Grok Bot mention, "Link your Cursor account from the
-   Grok Bot flow on grok.com" (account linking only).
+Setup: `bun install --frozen-lockfile` (449 packages), `bun run build` (exit 0), short `TMPDIR`.
 
-Not done, by design: no `grokbot://` link was opened (it would change the user's draft), no
-secrets or transcripts were read, the app was not restarted or modified.
+1. `npx vitest run src/grok-bot-mode-g.test.ts` (in `examples/byok-mcp-server`) → 1 passed. Asserts:
+   401 + `WWW-Authenticate: Bearer realm="byok-mcp"` for missing/wrong bearer; `2025-06-18` and
+   `2025-11-25` connect, `2024-11-05` initialize → HTTP 400; session `GET` → 405 `Allow: POST, DELETE`;
+   scoped tool list (6 tools for `tasks.dispatch|read|cancel`); `byok_whoami` matches the key;
+   unknown task → `isError` `not_found`; submit → `waitSeconds: 50` status returns on the device
+   terminal → `{ state: "Complete", finalMessage: "Mode G answer", artifacts: [] }`; after
+   `revokeKey` → 401.
+2. `npx vitest run` (whole example) → 9 files, 43 tests passed. `npx tsc --noEmit` → exit 0.
+3. Grok Bot 0.75.8 `app.asar` read in place (extracts in the session scratchpad, deleted after):
+   - `configJson` schema: command entry `{type?:"stdio", command, args?, env?, envFile?, cwd?, enabledTools?, startupTimeoutSec?}`;
+     remote entry `{type?:"http"|"sse", url, headers?, auth?:{CLIENT_ID, CLIENT_SECRET?, scopes?}, tls?:{caBundle}, placement?:"server"|"client", enabledTools?}`.
+   - `addNewServer` → `writeAccountServer` → `addServersToAccount`; listing via `backendMcpExec.listTools`
+     and `listBoxServers`.
+   - `pgrep -fl "local-exec-daemon|node-agent-coordinator"` → nothing running.
+   - No code found that explains `placement`.
+4. Earlier probe `node scripts/spikes/grok-bot-probe.mjs` → `verdict: "fail-closed"` (unchanged).
 
-## Is a separate GO needed next?
+No `grokbot://` link was opened. No Grok Bot secrets, account config or transcripts were read.
 
-Yes, one of these, owner's choice:
+## B6 §8 status after this spike
 
-- **GO-A (recommended): Aiphabee Host adopts the byok MCP beta for Grok Bot.** Compose
-  `examples/byok-mcp-server` in the Aiphabee Host behind public HTTPS, issue a Grok Bot key,
-  and run the B6 §8 owner live checklist (items 1–3, item 4 if the routine nudge is wanted).
-  Acceptance criteria are in design §5.
-- **GO-B (optional UX): deep-link handoff** from an Aiphabee surface to a prefilled Grok Bot
-  composer. Small, Aiphabee-side, no SDK change.
+| Item | Local (this spike) | Still needs a human + Grok Bot account |
+| --- | --- | --- |
+| G1 `placement: "client"` loopback | — | Yes: decides whether Mode G can stay on the Mac |
+| 1 Custom MCP connection | Server side PASS (auth, versions, GET 405, scoped tools, `not_found` isError) | UI accepts URL + `headers` bearer; negotiated version; `Origin`; model sees `isError`; timeout |
+| 2 Reachability | — | Entirely live |
+| 3 50 s long poll | Server side PASS (status wait returns on terminal) | Connector holds 50 s; Bot loops to terminal |
+| 4 Routine webhook pointer | — | Entirely live |
 
-No GO for a `grok-bot` RuntimeAdapter until Anysphere ships a documented driving API and the
-probe reports `needs-review`.
+## Separate GO needed?
+
+Yes. **GO: Aiphabee Host compose + live B6 checklist.** Compose `examples/byok-mcp-server` on the
+Aiphabee Host's embedded server, decide whether Mode G keys share the Mode A Bot's `AgentRef`, expose
+the endpoint (public HTTPS or tunnel), then run G1 and B6 items 1–3 (4 if the routine nudge is wanted)
+with the owner's Grok Bot account. Acceptance: plan §5.
+
+Mode A wiring (Aiphabee chat onto K4 Bot mode, PRD A1–A4) is Aiphabee-side and can be its own GO;
+nothing in this spike blocks it.
 
 ## Residual risk
 
-- The probe reads minified bundle text; an app update can rename the markers it looks for.
-  A missing marker shows as `null`/`unknown`, not as a pass to `drivable`.
-- "Agent runs in the Cursor backend" and "no public bot-messaging API" rest on code evidence
-  and earlier research, not on a vendor statement.
-- The probe is not wired into `test:scripts` or CI; it is macOS-only and needs the app.
+- Grok Bot findings come from minified code of one version (0.75.8); the app self-updates.
+- "Remote calls come from the Cursor backend" is code-reading evidence, consistent with B6, not a
+  vendor statement.
+- The new test proves byok's half with a scripted runtime; no paid model ran.
+- This worktree now has `node_modules` and build output from the install/build; remove them when the
+  branch is done.
