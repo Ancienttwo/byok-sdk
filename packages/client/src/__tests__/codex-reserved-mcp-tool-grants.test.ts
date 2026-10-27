@@ -80,7 +80,11 @@ describe('Codex reserved MCP tool grants (#1058)', () => {
 
   it('refuses Host attempts to grant a reserved or uninjected server', () => {
     const params = { config: { mcp_servers: { byokagentresult: { command: 'helper' } } } };
-    for (const hostApprovals of [{ byokagentresult: ['extra_tool'] }, { missing: ['read'] }]) {
+    const rejectedApprovals: ReadonlyArray<Readonly<Record<string, readonly string[]>>> = [
+      { byokagentresult: ['extra_tool'] },
+      { missing: ['read'] },
+    ];
+    for (const hostApprovals of rejectedApprovals) {
       expect(() => withCodexMcpToolGrants(params, ['byokagentresult'], hostApprovals)).toThrow(/injected non-reserved server/);
     }
   });

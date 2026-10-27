@@ -360,6 +360,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
             : { id: process.env.FAKE_CODEX_REPORTED_THREAD_ID ?? threadId },
         model: params.model ?? userConfig.model ?? 'fake-model',
         reasoningEffort: null,
+        approvalPolicy: params.approvalPolicy,
       },
     });
     if (method === 'thread/resume')
