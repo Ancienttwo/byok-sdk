@@ -13,6 +13,8 @@ import { readInstalledSkillPack, skillPacksRoot } from '../skill-pack-installer'
 import type { ResolvedStorageConfig } from './config';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, RetentionRegistry, type ClassAuthority, type ClassUsage, type ExpiringClassId, type RetentionClassId, type SweepBudget } from './registry';
 import type { ScratchRoot } from './scratch';
+import { PASS_INSPECTIONS } from './runtime-accounting';
+import { RuntimeCleanup } from './runtime-cleanup';
 import { existingDirectory, measureTree, removeOwnedPath } from './usage';
 
 interface ProducerOptions {
@@ -83,11 +85,31 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     }
   }
 
+  let runtimeCleanup: { collector: RuntimeCleanup; released: number } | undefined;
   async function sweepRuntime(budget: SweepBudget): Promise<void> {
-    for await (const entry of entries('exec-runtime', execRoot, budget)) {
+    // Leaf cleanup spends one inspection per entry, so a large expired backlog takes at most half of a
+    // pass and the classes after exec-runtime still get budget. Bytes stay keyed to the pass budget.
+    let inspections = 0;
+    const available = (): boolean => { if (inspections++ >= PASS_INSPECTIONS / 2) { budget.truncate(); return false; } return budget.available(); };
+    async function resume(): Promise<boolean> {
+      const pending = runtimeCleanup!;
+      const eligible = async (): Promise<boolean> => !scratch.isLive(path.basename(pending.collector.target))
+        && await releasedAt(pending.collector.target) === pending.released
+        && budget.now.getTime() - pending.released >= config.ttlMs['exec-runtime'];
+      try {
+        if (!await eligible() || await pending.collector.resume(execRoot, eligible, budget, available)) { runtimeCleanup = undefined; return true; }
+        return false;
+      } catch (error) { runtimeCleanup = undefined; throw error; }
+    }
+    if (runtimeCleanup !== undefined && !await resume()) return;
+    for await (const entry of entries('exec-runtime', execRoot, { ...budget, available })) {
       if (!TOKEN.test(entry.name) || !entry.isDirectory() || scratch.isLive(entry.name)) continue;
       const directory = path.join(execRoot, entry.name), released = await releasedAt(directory);
-      if (released !== undefined && budget.now.getTime() - released >= config.ttlMs['exec-runtime']) await remove(execRoot, directory, budget);
+      if (released === undefined || budget.now.getTime() - released < config.ttlMs['exec-runtime']) continue;
+      const collector = await RuntimeCleanup.create(directory);
+      if (collector === undefined) continue;
+      runtimeCleanup = { collector, released };
+      if (!await resume()) return;
     }
   }
   async function sweepDaemon(budget: SweepBudget): Promise<void> {
