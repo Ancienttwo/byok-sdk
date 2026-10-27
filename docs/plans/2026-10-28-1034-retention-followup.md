@@ -6,7 +6,7 @@
 
 #1021 已修复 released exec-runtime。#1042 已合入此基线，原 `producers.ts`、`registry.ts`、`retention.test.ts` 写入冲突已解除；新增 session-ledger 是单文件删除，不扩大本问题。
 
-实现范围为 retention collector/producer/sweeper、内部 reader-run 候选选择器及专属回归文件。公开签名、旧测试断言、API golden 与预算保持不变。
+实现范围为 retention collector/producer/sweeper、内部 reader-run 候选选择器及专属回归文件。公开签名、行为断言、API golden 与预算保持不变；模块清单的精确新增见验收记录。
 
 ## P1 — 系统边界
 
@@ -75,7 +75,7 @@ bun _ops/1034-repro/repro.ts
 
 ## 实施交接
 
-新增 `retention-oversized-classes.test.ts` 覆盖三个真实大目录、每类上限、完整 byte accounting、部分回收后 registry 重建、mtime 不重置、SDK startup fail closed 与其他单文件类进展。实施代理未运行 build/typecheck/tests；父线程统一验证。此前故障复现的 JSON 与退出码保留，临时大目录已清理。没有修改公开 API golden、entry budgets、CHANGELOG 或旧测试断言。
+新增 `retention-oversized-classes.test.ts` 覆盖三个真实大目录、每类上限、完整 byte accounting、部分回收后 registry 重建、mtime 不重置、SDK startup fail closed 与其他单文件类进展。实施代理未运行 build/typecheck/tests；父线程统一验证。此前故障复现的 JSON 与退出码保留，临时大目录已清理。没有修改公开 API golden、entry budgets、CHANGELOG 或旧行为断言。
 
 ## 父线程验收记录
 
@@ -85,4 +85,8 @@ bun _ops/1034-repro/repro.ts
 - 独立只读审查发现 references 不可续扫却受 1,024 删除份额限制；`8a85f3ac9` 将完整 authority 扫描恢复为全局预算计费，保留 250ms 和不完整 references 全 home 禁删规则。
 - 第二轮仅读该修复 delta，确认 P2 已修复，无新增 finding；最后的执行条件已由新增专属文件 6 tests passed（exit 0）满足。回归使用生产 writer 建立 1,026 个真实 ledgers，检查未引用目录推进与引用目录保留。
 - `bun run build`、`bun run typecheck`、`bun run check:api-surface`、`bun run check:version-authority`：全部 exit 0。九包 declaration golden 匹配，未提高任何预算。
-- 最终 `bun run test` 在该冻结代码上运行；日志 `/tmp/byok-1034-test.log`。其终态另行记录，不以定向测试代称全绿。
+- `bun run test`：exit 1，client 为 4,935 passed / 109 skipped，唯一失败是 `agent-memory-entry-constraints.test.ts` 的精确模块名单缺少新提取的 `agent-home-reader-retention.ts`，命令在此停止，未跑后续 workspaces。
+- 名单仅增加该一个模块，保留等值断言、禁止依赖与 runtime exports 检查。原因：原 reader-run eligibility 被提取为两条实际路径共用的内部 policy；没有把 daemon/control/transport 加入 entry。新增两行原因注释。该文件随后 9/9 passed；built entry check exit 0；agent-memory 发布 JS 与冻结 base 的 `cmp` exit 0、closure 仍为 74,254 B。
+- 此清单调整发生在第二轮审查后，尚待用户决定是否进行第三轮、仅针对这三行的只读审查。不会静默追加审查轮次。
+- 同一冻结 base 的已知范围外阻塞：`examples/bot-collaboration/src/cross-bot-join.test.ts` 的 “spent 9 + fan-out 2…” 在 clean base 单独执行也 exit 1，失败于 `cross-bot.test-support.ts:11:135`。未修改该例或产品路径。日志 `/tmp/byok-baseline-cross-bot.log`。
+- 未把定向通过与公共声明通过写成全仓通过；最终 CI 和上述审查仍未完成。

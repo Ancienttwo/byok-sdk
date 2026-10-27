@@ -96,7 +96,10 @@ describe('the embedded agent-memory entry module graph', () => {
     // adds no external import, and nothing on this entry calls it.
     // #603 adds a data-only release pin: embedded helper verification must bind
     // copied assets to the same SDK build without importing daemon composition.
+    // #1034 shares reader-run eligibility with bounded retention in this inert
+    // tail; the extracted policy adds no dependency or embedded runtime export.
     expect(GRAPH.modules).toEqual([
+      'agent-home-reader-retention.ts',
       'agent-home-readers.ts',
       'agent-home.ts',
       'agent-memory/index.ts',
