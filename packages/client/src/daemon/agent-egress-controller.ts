@@ -28,7 +28,7 @@ export interface AgentEgressControllerOptions {
 }
 
 export interface AgentEgressProgressInput {
-  readonly agentRef?: AgentRef;
+  readonly agentRef: AgentRef;
   readonly taskId: string;
   readonly events: readonly AgentEvent[];
 }
@@ -113,9 +113,6 @@ export class AgentEgressController {
    * `error` is sent; the other events of the batch coalesce to their last.
    */
   projectLatestValue(input: AgentEgressProgressInput): readonly AgentEvent[] {
-    // No Agent identity means this is the established legacy task lane. The
-    // additive Agent egress contract has no authority to rewrite it.
-    if (input.agentRef === undefined) return Object.freeze([...input.events]);
     if (!this.active) {
       this.noteDrop('latest-value', 'policy_denied', input.agentRef);
       return [];
