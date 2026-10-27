@@ -108,3 +108,36 @@ it('P2: a missing pending daemon directory does not block reclaiming the next ex
   await expect(fs.lstat(next)).rejects.toMatchObject({ code: 'ENOENT' });
   expect(deleted).toBe(1);
 }, 60_000);
+
+it('startup still fails closed when a released marker coexists with unfinished SDK cleanup', async () => {
+  const f = await fixture();
+  const { scratch, registry } = await f.open();
+  const execution = await scratch.create();
+  await execution.release();
+  // A marker alone must not authorize skipping inspection of the SDK subtree.
+  await populate(execution.sdkDir, 2048);
+  const b = budget('startup');
+  await expect(registry.sweep('exec-sdk', b.value)).rejects.toThrow('retention_startup_incomplete');
+  const remaining = await fs.readdir(execution.sdkDir);
+  expect(remaining.length).toBeGreaterThan(0);
+  expect(remaining.length).toBeLessThan(2048);
+  expect(b.tally.inspections).toBeLessThanOrEqual(1024);
+  expect(b.tally.truncated).toBe(true);
+});
+
+it('a replaced pending daemon directory still fails identity validation and is not reclaimed', async () => {
+  const f = await fixture();
+  const { registry } = await f.open();
+  const target = path.join(f.store, 'tmp/daemon/diag-abc123');
+  await populate(target, 2048);
+  await registry.sweep('daemon-temp', budget().value);
+  expect((await fs.readdir(target)).length).toBeGreaterThan(0);
+  expect((await fs.readdir(target)).length).toBeLessThan(2048);
+  // Keep the original inode alive so this is a deterministic identity replacement.
+  await fs.rename(target, path.join(f.store, 'displaced-pending'));
+  await populate(target, 1);
+  for (let pass = 0; pass < 2; pass++) {
+    await expect(registry.sweep('daemon-temp', budget().value)).rejects.toThrow('retention_runtime_identity_changed');
+    expect(await fs.readFile(path.join(target, 'f0'), 'utf8')).toBe('x');
+  }
+});

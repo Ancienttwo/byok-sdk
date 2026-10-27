@@ -48,6 +48,17 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
   const cursors = new Map<string, Dir>();
   async function* entries(id: ExpiringClassId, root: string, budget: SweepBudget): AsyncGenerator<Dirent> {
     if (!await existingDirectory(root)) return;
+    if (id === 'exec-sdk' && budget.trigger === 'startup') {
+      // Startup must prove the whole SDK namespace clean, even with arbitrarily
+      // many released executions. Only enumeration bypasses the maintenance
+      // share; reclaimTree still consumes the bounded deletion budget.
+      const directory = await fs.opendir(root);
+      for await (const entry of directory) {
+        if (!await existingDirectory(root)) throw new Error('retention_root_disappeared');
+        yield entry;
+      }
+      return;
+    }
     const key = `${id}\0${root}`;
     let directory = cursors.get(key);
     if (directory === undefined) { directory = await fs.opendir(root); cursors.set(key, directory); }
@@ -58,7 +69,6 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         if (entry === null) { await directory.close(); cursors.delete(key); return; }
         yield entry;
       }
-      if (id === 'exec-sdk' && budget.trigger === 'startup') throw new Error('retention_startup_incomplete');
     } catch (error) {
       await directory.close().catch(() => undefined); cursors.delete(key); throw error;
     }
@@ -146,7 +156,15 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
   let pendingDaemon: string | undefined;
   async function sweepDaemon(budget: SweepBudget): Promise<void> {
     async function reclaim(target: string): Promise<boolean> {
-      const mtimeMs = (await fs.lstat(target)).mtimeMs;
+      const stat = await fs.lstat(target).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined;
+        throw error;
+      });
+      if (stat === undefined) {
+        if (!await existingDirectory(daemonRoot)) throw new Error('retention_runtime_root_invalid');
+        pendingTrees.delete(target); return true;
+      }
+      const mtimeMs = stat.mtimeMs;
       return reclaimTree(daemonRoot, target, async () => budget.now.getTime() - mtimeMs >= config.ttlMs['daemon-temp'], budget);
     }
     if (pendingDaemon !== undefined) {
