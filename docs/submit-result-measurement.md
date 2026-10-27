@@ -435,7 +435,7 @@ Minimum trial fields:
   "runId": "<run-id>", "cellId": "<cell-id>", "trialId": "<trial-id>",
   "caseId": "C01-small", "round": 1, "retryOf": null,
   "taskId": "<task-id>", "startedAt": "<UTC>", "finishedAt": "<UTC-or-null>",
-  "elapsedMs": null, "deadlineMs": null,
+  "admission": null, "elapsedMs": null, "deadlineMs": null,
   "submissions": [], "terminal": null, "category": "unobservable", "cause": null,
   "exactTarget": null, "firstCallValid": null,
   "replyDelivery": null, "replyDisposition": null, "usage": null,
@@ -456,6 +456,9 @@ The terminal records the SDK status (`task.complete`, `task.fail`, or
 and `model`, the model the provider served when the runtime reported one).
 Do not sum or estimate token counts, and do not fill `model` from the cell's
 requested model identifier.
+`admission` holds the claim's `admission` timings as the device sent them
+(see `docs/protocol.md` §3.1). A `not_started` row at the `decline` stage holds
+the decline's `admission`; every other row holds `null`.
 Use `null` for
 unavailable observations, not false/zero. Keep the known synthetic target for
 comparison, but sanitize diagnostic artifacts before sharing. Do not include

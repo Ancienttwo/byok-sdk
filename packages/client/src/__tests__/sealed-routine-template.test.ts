@@ -143,7 +143,7 @@ describe('a sealed routine template on the device (#654 E3d-3)', () => {
     expect(adapter.startCalls).toHaveLength(1);
     const changed = change(first.payload);
     await offer('changed', changed);
-    expect(declines('changed')).toEqual([{ reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false, agentRef: changed.agentRef }]);
+    expect(declines('changed')).toEqual([{ reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false, agentRef: changed.agentRef, admission: { totalMs: expect.any(Number) } }]);
     expect(adapter.startCalls).toHaveLength(1);
   });
 
@@ -152,7 +152,7 @@ describe('a sealed routine template on the device (#654 E3d-3)', () => {
     clockAt(expired.ts);
     const { adapter, offer, declines } = await device();
     await offer('expired', expired.payload);
-    expect(declines('expired')).toEqual([{ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, agentRef: expired.payload.agentRef }]);
+    expect(declines('expired')).toEqual([{ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, agentRef: expired.payload.agentRef, admission: { totalMs: expect.any(Number) } }]);
     expect(adapter.startCalls).toHaveLength(0);
   });
 
@@ -161,7 +161,7 @@ describe('a sealed routine template on the device (#654 E3d-3)', () => {
     const { adapter, offer, declines } = await device();
     const moved = { ...expired.payload, routineRef: { ...expired.payload.routineRef, notAfter: '2099-12-31T00:00:00.000Z' } };
     await offer('moved', moved);
-    expect(declines('moved')).toEqual([{ reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false, agentRef: moved.agentRef }]);
+    expect(declines('moved')).toEqual([{ reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false, agentRef: moved.agentRef, admission: { totalMs: expect.any(Number) } }]);
     expect(adapter.startCalls).toHaveLength(0);
   });
 
@@ -170,7 +170,7 @@ describe('a sealed routine template on the device (#654 E3d-3)', () => {
     const keyring = new NoSealingKeyring();
     const { adapter, offer, declines } = await device(keyring);
     await offer('expired-no-key', expired.payload);
-    expect(declines('expired-no-key')).toEqual([{ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, agentRef: expired.payload.agentRef }]);
+    expect(declines('expired-no-key')).toEqual([{ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, agentRef: expired.payload.agentRef, admission: { totalMs: expect.any(Number) } }]);
     expect(keyring.sealingKeyCalls).toBe(0);
     expect(adapter.startCalls).toHaveLength(0);
   });
@@ -184,7 +184,7 @@ describe('a sealed routine template on the device (#654 E3d-3)', () => {
     expect(adapter.startCalls).toHaveLength(1);
     vi.setSystemTime(Date.parse(notAfter) + 1);
     await offer('after-not-after', first.payload);
-    expect(declines('after-not-after')).toEqual([{ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, agentRef: first.payload.agentRef }]);
+    expect(declines('after-not-after')).toEqual([{ reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, agentRef: first.payload.agentRef, admission: { totalMs: expect.any(Number) } }]);
     expect(adapter.startCalls).toHaveLength(1);
   });
 });

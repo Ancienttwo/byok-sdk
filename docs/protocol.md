@@ -1948,6 +1948,39 @@ not recorded is absent: attempts stored before these fields are not backfilled, 
 a reader reports no duration that needs a missing instant. The wire is
 unchanged.
 
+**Admission timings (#1014).** The one `task.claim` or `task.decline` that
+the daemon's task runner sends for an offer carries `admission`
+(`OfferAdmissionTimings`, strict): how long the device took, in whole
+milliseconds of its monotonic clock, from receiving the `task.offer` to
+sending that message. Opening a sealed offer counts. A sealed task's decline
+carries it too, in plaintext, including a decline for a sealed offer that
+could not be opened, the offer gate self-check decline, and the closed
+`sealed_key_unavailable` decline sent when the output cannot be sealed. A
+decline sent outside the task runner carries none: the refusal of an
+over-bound offer by the inbound journal, and a decline sent while recovering
+after a restart.
+
+```ts
+interface OfferAdmissionTimings {
+  totalMs: number;                    // required
+  agentHomeWaitMs?: number;           // waiting for a finishing Attempt in the same Agent home
+  messageHelperPreflightMs?: number;  // the Agent message helper preflight
+  resultHelperPreflightMs?: number;   // the Agent result helper preflight
+  toolsetProbeMs?: number;            // the MCP toolset tools/list probes, together
+  runtimeLaunchMs?: number;           // resolving the runtime launch
+}
+```
+
+A phase is present only when it ran, whether it succeeded or failed. Each
+value is rounded down, so the phases never sum past `totalMs`; the rest of
+`totalMs` (runtime detection, `prepare()`, the workspace, `beforeClaim`) is
+the difference. Every value is a non-negative integer of at most seven days
+(`OFFER_ADMISSION_MAX_DURATION_MS`); a device whose total is past that cap
+sends no `admission`. These are device durations, never instants: they share
+no clock with the `claimedAt` above, so the gap between `offeredAt` and
+`claimedAt` minus `totalMs` is roughly transport and queueing, not an exact
+value.
+
 ### 3.2 Declined vs. Failed (M1 gap #5)
 
 `task.decline` lets a daemon fail-closed a pre-claim offer (no compatible
@@ -1978,6 +2011,10 @@ it in the canonical envelope.
 
 Landed additive minor: `task.decline.code` (#471) was an optional v2 field,
 registered as strip-safe in `WIRE_ADDITIONS`. It is part of the v3 baseline.
+
+Both decline branches accept `admission` (§3.1, which says which declines
+carry it). It is plaintext on a sealed decline: only `reason` moves into the
+ciphertext.
 
 ### 3.3 Cancelled is its own message, not `task.fail(reason:'cancelled')` (M1 gap #6)
 

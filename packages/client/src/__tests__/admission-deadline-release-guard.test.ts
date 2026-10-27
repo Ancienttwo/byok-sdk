@@ -137,6 +137,7 @@ describe('a startup-deadline decline hands the canonical Agent home back to the 
         reason: DEADLINE_DECLINE_REASON,
         retryable: true,
         agentRef: AGENT_REF,
+        admission: { totalMs: expect.any(Number) },
       });
       expect(sent.some((entry) => entry.type === 'task.claim')).toBe(false);
       expect(adapter.startCalls).toHaveLength(0);

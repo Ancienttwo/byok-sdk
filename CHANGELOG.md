@@ -138,6 +138,15 @@
   and `reject`, share their one code path over `ByokCloud.approveTask` and
   `rejectTask`, and refuse the same way: `task_not_found`,
   `task_not_awaiting_approval` or `StaleApprovalError`.
+- **Feature (protocol, client; #1014)** — `task.claim` and `task.decline`
+  gain an optional `admission` (`OfferAdmissionTimingsSchema`, strict): how
+  long the device took to admit the offer, in whole milliseconds, with a
+  required `totalMs` and optional `agentHomeWaitMs`,
+  `messageHelperPreflightMs`, `resultHelperPreflightMs`, `toolsetProbeMs` and
+  `runtimeLaunchMs`. Each value is capped at seven days
+  (`OFFER_ADMISSION_MAX_DURATION_MS`). The daemon sends it on the claim or
+  decline its task runner sends for each offer, a sealed task's decline
+  included, in plaintext; the `claimed` and `failed` `DaemonEvent`s carry it.
 - **Feature (protocol, client; #1014)** — the `usage` AgentEvent gains an
   optional `model`: the model the provider served, as the runtime reported it,
   1 to 160 characters, never the requested id. Pi sets it from pi-ai's

@@ -7,6 +7,7 @@ import type { OfferPhaseContext } from './support';
 import { settledOrWithdrawn, outboundErrorMessage } from './support';
 import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
+import type { OfferAdmissionTiming } from './offer-admission-timing';
 
 export function admitOffer(this: TaskRunner, phase: OfferPhaseContext): true | undefined {
   const { taskId, decline } = phase;
@@ -106,7 +107,7 @@ export async function reserveOfferHome(
   if (active >= limit && !this['stoppingOffers']) {
     const finishing = this['homeFinalizations'](canonicalHome, homeAccess);
     if (finishing.length > 0 && active - finishing.length < limit) {
-      await settledOrWithdrawn(finishing, admissionSignal);
+      await phase.admission.time('agentHomeWaitMs', () => settledOrWithdrawn(finishing, admissionSignal));
       if (admissionWithdrawn()) return undefined;
       active = countHome();
     }
@@ -200,7 +201,7 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
  * takes the closed sealed decline, because the Host accepts no free-text
  * reason for it.
  */
-export function declineOfferMissingCapabilities(this: TaskRunner, envelope: Extract<Envelope, { type: 'task.offer' }>): boolean {
+export function declineOfferMissingCapabilities(this: TaskRunner, envelope: Extract<Envelope, { type: 'task.offer' }>, admission: OfferAdmissionTiming): boolean {
   const taskId = envelope.task_id;
   const advertised = this['deps'].advertisedCapabilities();
   const missing = requiredReceiverCapabilities('task.offer', envelope.payload).filter((flag) => !advertised.includes(flag));
@@ -209,43 +210,43 @@ export function declineOfferMissingCapabilities(this: TaskRunner, envelope: Extr
   const { agentRef, sealing } = envelope.payload;
   console.error(`[byok/client] task.offer for task ${taskId} declined: this daemon does not advertise ${missing.join(', ')}`);
   if (sealing?.categories.includes('task-output') === true) {
-    this['declineSealedOffer'](taskId, agentRef, 'sealed_key_unavailable');
+    this['declineSealedOffer'](taskId, admission, agentRef, 'sealed_key_unavailable');
     return true;
   }
   this['addStrictDeclinedTaskId'](taskId);
-  this['decline'](taskId, `offer_capability_missing: this daemon does not advertise ${missing.join(', ')}`, false, agentRef);
+  this['decline'](taskId, admission, `offer_capability_missing: this daemon does not advertise ${missing.join(', ')}`, false, agentRef);
   return true;
 }
 
-export async function handleSealedOffer(this: TaskRunner, envelope: Envelope): Promise<void> {
+export async function handleSealedOffer(this: TaskRunner, envelope: Envelope, admission: OfferAdmissionTiming): Promise<void> {
   const taskId = envelope.task_id!;
   if (this['tasks'].has(taskId) || this['startupOwnership'].has(taskId) || this['inFlightOffers'].has(taskId) || this['finishedTaskIds'].has(taskId) || this['strictDeclinedTaskIds'].has(taskId) || this['sealedOpening'].has(taskId)) return;
   const agentRef = (envelope.payload as { agentRef?: AgentRef }).agentRef;
   const sealedTasks = this['deps'].sealedTasks;
   if (sealedTasks === undefined || !this['sealedCodesAllowed']()) {
-    this['declineSealedOffer'](taskId, agentRef, 'sealed_key_unavailable');
+    this['declineSealedOffer'](taskId, admission, agentRef, 'sealed_key_unavailable');
     return;
   }
   this['sealedOpening'].add(taskId);
   try {
     const opened = await sealedTasks.openOffer(envelope);
     if (!opened.ok) {
-      this['declineSealedOffer'](taskId, agentRef, opened.code);
+      this['declineSealedOffer'](taskId, admission, agentRef, opened.code);
       return;
     }
-    await this['handleOffer'](taskId, opened.offer.payload as AcceptedOfferPayload);
+    await this['handleOffer'](taskId, opened.offer.payload as AcceptedOfferPayload, admission);
   } finally {
     this['sealedOpening'].delete(taskId);
   }
 }
 
-export function declineSealedOffer(this: TaskRunner, taskId: string, agentRef: AgentRef | undefined, code: SealedDeclineCode): void {
+export function declineSealedOffer(this: TaskRunner, taskId: string, admission: OfferAdmissionTiming, agentRef: AgentRef | undefined, code: SealedDeclineCode): void {
   if (this['strictDeclinedTaskIds'].has(taskId)) return;
   this['addStrictDeclinedTaskId'](taskId);
   if (this['sealedCodesAllowed']()) {
-    this['decline'](taskId, code, false, agentRef, code);
+    this['decline'](taskId, admission, code, false, agentRef, code);
   } else {
     const why = this['deps'].sealedTasks === undefined ? 'this daemon does not open sealed task input' : 'the server does not accept sealed task output';
-    this['decline'](taskId, `sealed_payload_unsupported: ${why}`, false, agentRef);
+    this['decline'](taskId, admission, `sealed_payload_unsupported: ${why}`, false, agentRef);
   }
 }

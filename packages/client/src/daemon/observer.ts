@@ -5,6 +5,7 @@ import {
   type AgentEvent,
   type BlobRef,
   type Envelope,
+  type OfferAdmissionTimings,
   type TaskState,
 } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
@@ -55,7 +56,8 @@ export type DaemonEvent =
   | ({ kind: 'retention-sweep'; ts: string } & SweepReport)
   | { kind: 'retention-failure'; ts: string; trigger: RetentionTrigger; classId: RetentionClassId; count: number; code: string }
   | { kind: 'offered'; ts: string; taskId: string; runtime?: string }
-  | { kind: 'claimed'; ts: string; taskId: string; claimedRuntime?: string }
+  /** `admission`: how long this device took to admit the offer (#1014), as the claim carried it. */
+  | { kind: 'claimed'; ts: string; taskId: string; claimedRuntime?: string; admission?: OfferAdmissionTimings }
   | { kind: 'started'; ts: string; taskId: string }
   /** One per normalized `AgentEvent` (not one per `task.progress` batch) — matches "a live task feed" better than re-exposing the wire's own batching. */
   | { kind: 'progress'; ts: string; taskId: string; event: AgentEvent }
@@ -82,7 +84,7 @@ export type DaemonEvent =
    * same outcome from a dispatcher's point of view, so this module doesn't
    * invent a parallel `declined` kind the wire model itself doesn't have.
    */
-  | { kind: 'failed'; ts: string; taskId: string; reason: string; retryable: boolean; preClaim?: boolean }
+  | { kind: 'failed'; ts: string; taskId: string; reason: string; retryable: boolean; preClaim?: boolean; admission?: OfferAdmissionTimings }
   | { kind: 'cancelled'; ts: string; taskId: string; reason?: string }
   /** Issues #391/#394: every `Daemon.status().lifecycle` change, as it happens. */
   | { kind: 'lifecycle'; ts: string; lifecycle: DaemonLifecycle }
@@ -372,12 +374,14 @@ export class DaemonObserver {
     switch (envelope.type) {
       case 'task.claim': {
         const taskId = envelope.task_id;
-        const claimedRuntime = envelope.payload.runtime;
+        const { runtime: claimedRuntime, admission } = envelope.payload;
         this.upsertTask(taskId, {
           state: 'Claimed',
           ...(claimedRuntime !== undefined ? { claimedRuntime } : {}),
         });
-        this.emit({ kind: 'claimed', ts, taskId, ...(claimedRuntime !== undefined ? { claimedRuntime } : {}) });
+        this.emit({
+          kind: 'claimed', ts, taskId, ...(claimedRuntime !== undefined ? { claimedRuntime } : {}), ...(admission !== undefined ? { admission } : {}),
+        });
         return;
       }
       case 'task.started': {
@@ -454,7 +458,8 @@ export class DaemonObserver {
         const taskId = envelope.task_id;
         const retryable = envelope.payload.retryable ?? false;
         this.upsertTask(taskId, terminalTaskPatch(envelope)!);
-        this.emit({ kind: 'failed', ts, taskId, reason: envelope.payload.reason, retryable, preClaim: true });
+        const { admission } = envelope.payload;
+        this.emit({ kind: 'failed', ts, taskId, reason: envelope.payload.reason, retryable, preClaim: true, ...(admission !== undefined ? { admission } : {}) });
         return;
       }
       case 'task.cancelled': {

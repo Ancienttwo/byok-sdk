@@ -101,6 +101,7 @@ describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', 
         code: 'sealed_key_unavailable',
         retryable: false,
         agentRef: line.payload.agentRef,
+        admission: { totalMs: expect.any(Number) },
       }]);
       expect(adapter.startCalls).toHaveLength(0);
     },
