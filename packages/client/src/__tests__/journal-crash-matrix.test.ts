@@ -53,7 +53,7 @@ async function tmpDir(prefix: string): Promise<string> {
 }
 
 function offerRecord(taskId: string, seq: number): ReceivedEnvelopeRecord {
-  const bytes = JSON.stringify({ v: 1, id: `env-${taskId}`, type: 'task.offer_for_agent', task_id: taskId, seq });
+  const bytes = JSON.stringify({ v: 1, id: `env-${taskId}`, type: 'task.offer', task_id: taskId, seq });
   return {
     identity: IDENTITY,
     envelopeId: `env-${taskId}`,

@@ -1,3 +1,4 @@
+import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
@@ -48,14 +49,14 @@ describe('terminal durability and actual harness boundaries', () => {
     const candidates: LocalTerminalRecord[] = [];
     const write = journal.recordTerminal.bind(journal);
     vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => { candidates.push(record); return write(record); });
-    const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
+    const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: FRESH_DAEMON_EGRESS,  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
     cleanup.push(async () => { fail = false; await daemon.stop(); await journal.close(); });
     await daemon.pair('pairing-code');
     const record = (await createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
     await daemon.start();
     const identity = { tenantId: record.tenantId, deviceId: record.deviceId, productId: cfg.productId };
     const seq = server.nextSeq();
-    const offer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'run once' }, { taskId: 'pending-decline', seq });
+    const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'run once', ...FRESH_OFFER }, { taskId: 'pending-decline', seq });
     server.send(offer);
     await vi.waitFor(() => expect(candidates.length).toBeGreaterThan(0));
     expect((await journal.readTask('pending-decline', identity))?.localState).toBe('received');
@@ -89,12 +90,12 @@ describe('terminal durability and actual harness boundaries', () => {
     const candidates: LocalTerminalRecord[] = [];
     const write = journal.recordTerminal.bind(journal);
     vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => { candidates.push(record); return write(record); });
-    const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
+    const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: FRESH_DAEMON_EGRESS,  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
     cleanup.push(async () => { fail = false; await daemon.stop().catch(() => undefined); await journal.close(); });
     await daemon.pair('pairing-code');
     await daemon.start();
     const taskId = 'queued-past-stop';
-    server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'run once' }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'run once', ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     fail = true;
     adapter.sessions[0]!.emit({ type: 'progress', text: 'the real result' });
@@ -130,7 +131,7 @@ describe('terminal durability and actual harness boundaries', () => {
         // Never run, only recovered from the crash image: the resume lane carries an offer that may name no target.
         const agentRef = freshTestAgentRef();
         const offer = await cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: {
-          instruction: 'interrupted', agentRef, sessionRef: 'interrupted-session',
+          instruction: 'interrupted', agentRef, session: { mode: 'resume', sessionRef: 'interrupted-session' },
           ...(explicit ? { harnessId: 'acme-harness' } : {}),
         } });
         const journal = new SqliteLocalTaskJournal({ storeDir: cfg.storeDir! });

@@ -1,3 +1,4 @@
+import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -146,7 +147,7 @@ describe('daemon detection authority', () => {
     const daemon = createDaemonWithAdapters({
       storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Metadata', productId: 'metadata',
       storeDir: path.join(root, 'store'), serverUrl: server.url,
-      agentHome: testAgentHomeConfig(),
+      agentHome: testAgentHomeConfig(), agentEgress: FRESH_DAEMON_EGRESS,
     }, [refused, available]);
     daemons.push(daemon);
     const events: DaemonEvent[] = [];
@@ -165,7 +166,7 @@ describe('daemon detection authority', () => {
     expect(detected.runtimes[0]).toMatchObject({ id: 'claude', outcome: 'refused', reason: 'platform_unsupported' });
     expect(detected.runtimes[1]).toMatchObject({ id: 'codex', version: 'codex-cli 9.9.9', qualifiedVersion: '0.160.0', authPresent: true });
 
-    server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'no start', runtime: 'claude' }, { taskId: 'platform-refused', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'no start', runtime: 'claude', ...FRESH_OFFER }, { taskId: 'platform-refused', seq: server.nextSeq() }));
     const declined = await server.waitFor(e => e.type === 'task.decline');
     if (declined.type !== 'task.decline') throw new Error('wrong envelope');
     expect(declined.payload.reason).toBe(`platform_unsupported: runtime "claude" does not support ${process.platform}`);
