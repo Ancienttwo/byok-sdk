@@ -33,8 +33,9 @@ capability negotiation between the two majors.
 - One offer type. `task.offer_for_agent`, `task.offer_for_agent_with_egress`,
   `task.offer_for_agent_with_egress_fresh`, `task.offer_prepared` and the
   three `task.offer_for_agent*_sealed` types are one `task.offer`. It carries
-  a required `session`: `{ mode: 'resume', sessionRef }` (`sessionRef` 1 to
-  512 characters) or `{ mode: 'fresh' }`. A prepared offer is the one with
+  a required `session`: `{ mode: 'resume', sessionRef }` or
+  `{ mode: 'fresh' }`. `sessionRef` is 1 to 512 characters; v3
+  `task.offer_for_agent` accepted any string. A prepared offer is the one with
   `preparation`; it has no `instruction`, is fresh, needs `egressPolicy`, and
   selects a prepared `agentMemory` mode. A fresh offer needs `egressPolicy`,
   `messageEgress` needs `egressPolicy`, and `routineRef` appears only on a
@@ -51,7 +52,8 @@ capability negotiation between the two majors.
   output keeps its plaintext type as family. A prepared offer is never sealed.
 - `EnvelopeSchema` has 28 branches (47 in v3).
 - Both offer branches are strict, and so is every nested control object,
-  `limits` included. A daemon that does not know an offer field stops its
+  `limits` included, except the shared `BlobRef` inside an `instruction`
+  blob reference. A daemon that does not know an offer field stops its
   cursor instead of stripping it.
 - A daemon checks the offer's gates itself. Before it opens a sealed offer
   or starts anything, it computes the flags the offer needs and declines it
@@ -64,7 +66,8 @@ capability negotiation between the two majors.
   0.30.2 besides `harnessId` above: a prepared offer also needs
   `agent-memory-selection`. A daemon advertises it together with
   `agent-home-contract`, so a device that took prepared offers before still
-  does. No capability flag became baseline.
+  does. No other flag became baseline: the flags a daemon advertises with
+  `agent-home-contract` and the egress flags stay gates.
 
 ## Host and daemon API
 

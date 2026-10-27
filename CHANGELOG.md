@@ -111,7 +111,8 @@
     `{ mode: 'fresh' }`. A prepared offer is the one with `preparation`. A
     fresh or prepared offer needs `egressPolicy`, `messageEgress` needs
     `egressPolicy`, and `routineRef` appears only on a fresh sealed offer. Both
-    branches and `limits` are strict. The gates of the old types are field and
+    branches and `limits` are strict (the shared `BlobRef` inside
+    `instruction` still strips unknown keys). The gates of the old types are field and
     value rows on `task.offer`; a prepared offer now also needs
     `agent-memory-selection`, which a daemon advertises with
     `agent-home-contract`.

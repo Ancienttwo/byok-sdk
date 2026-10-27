@@ -201,7 +201,9 @@ way (§2.5). Against the v3 table (0.30.2), admission differs in two places:
   device that takes a prepared offer has an Agent home, so admission does not
   change in practice.
 
-No flag became baseline in v4. The v3 reset already made the v2 strip-safe
+Apart from `approval_resolved`, no flag became baseline in v4: the flags a
+daemon advertises together with `agent-home-contract` and the egress flags
+stay gates. The v3 reset already made the v2 strip-safe
 rows and the v2 `result-document` gate baseline. `WIRE_ADDITIONS` keeps the
 `gated` rows, most of which name device capabilities a daemon advertises only
 when it is configured for the surface (Agent home, readers, egress, input
@@ -209,8 +211,10 @@ preparation, provisioning, memory intents). Senders still take admission
 flags from `requiredReceiverCapabilities`.
 
 Both `task.offer` branches are strict, and so is every nested control object
-in them, `limits` included. A daemon that does not know an offer field stops
-its cursor on it (§2.0) instead of stripping it. A daemon also checks the
+in them, `limits` included. The one exception is the shared `BlobRef` inside
+an `instruction` blob reference, which strips unknown keys. A daemon that does
+not know any other offer field stops its cursor on it (§2.0) instead of
+stripping it. A daemon also checks the
 gates on its own side: before it opens a sealed offer or starts any work, it
 computes `requiredReceiverCapabilities('task.offer', payload)` on the wire
 payload and declines non-retryably when a flag is missing from its own
@@ -688,7 +692,8 @@ cross-field rules (`offerRule`, `packages/protocol/src/messages.ts`):
 - `routineRef` appears only on a fresh sealed offer.
 
 Both branches are strict, and so is every nested control object, `limits`
-included. Each optional field is gated on a device flag; the Freeze rule
+included, except the shared `BlobRef` inside `instruction`. Each optional
+field is gated on a device flag; the Freeze rule
 lists the rows and the daemon's own check of them.
 
 ### 2.0 Prepared Executions
@@ -3347,9 +3352,10 @@ Claude and Codex place their `usage` event immediately before the `turn_end`
 (or `error`) event it accompanies within the same `task.progress` batch —
 ordering is load-bearing (both adapters' own doc comments call this out
 explicitly) — so a consumer processing a batch in arrival order always sees
-a turn's usage before that turn's terminal marker. Pi's events follow each
-assistant message, so the last one before `turn_end` holds the last call's
-figures.
+a turn's usage before that turn's terminal marker. Pi's per-call events
+follow each assistant message. After the run settles, Pi also sends one
+`usage` event right before `turn_end` with context occupancy only
+(`contextSource: 'estimate'`) and no token counters.
 
 **Fresh Agent egress session.** The fresh-session repair that landed under
 v1 as a separate fresh offer type with the `agent-egress-fresh-session`
