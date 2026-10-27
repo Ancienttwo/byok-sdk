@@ -34,7 +34,7 @@ describe('TestServer scripted long-poll redelivery', () => {
   }
 
   it('retains a queued retry across read-ahead until the client rewinds to its durable cursor', async () => {
-    const retry = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), 
+    const retry = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'long-poll-session' }, 
       instruction: 'retry after failed handling',
     }, { taskId: 'retry', seq: 2 });
     server.pushLongPollEvent(retry);

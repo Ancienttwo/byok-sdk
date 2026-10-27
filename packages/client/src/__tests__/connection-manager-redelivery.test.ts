@@ -64,7 +64,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
       auth,
       cursorStore,
       onEnvelope: async (envelope) => {
-        if (envelope.type !== 'task.offer_for_agent') return;
+        if (envelope.type !== 'task.offer') return;
         offerCallCount += 1;
         if (shouldThrow) {
           shouldThrow = false; // throws exactly once
@@ -85,8 +85,8 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     // isolating.
     const offerSeq = server.nextSeq();
     const offer = createEnvelope(
-      'task.offer_for_agent',
-      { agentRef: freshTestAgentRef(),  instruction: 'x' },
+      'task.offer',
+      { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'redelivery-session' },  instruction: 'x' },
       { taskId, seq: offerSeq },
     );
     server.send(offer);
@@ -109,7 +109,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     server.send(offer);
 
     await vi.waitFor(() => expect(offerCallCount).toBe(2));
-    expect(received.map((e) => e.type)).toEqual(['task.offer_for_agent']);
+    expect(received.map((e) => e.type)).toEqual(['task.offer']);
 
     // Now that the handler succeeded, the cursor advances and persists.
     await vi.waitFor(async () => {
@@ -128,7 +128,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     connection = new ConnectionManager({ serverUrl: server.url, deviceId: record.deviceId,
       productId: 'test-product', capabilities: [], runtimes: [], auth, cursorStore,
       onEnvelope: async (envelope) => {
-        if (envelope.type !== 'task.offer_for_agent') return;
+        if (envelope.type !== 'task.offer') return;
         const n = Number(envelope.task_id);
         const count = (attempts.get(n) ?? 0) + 1;
         attempts.set(n, count);
@@ -137,7 +137,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     });
     await connection.start();
     await waitForOpen(connection);
-    const offers = [1, 2, 3].map(n => createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(), 
+    const offers = [1, 2, 3].map(n => createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'redelivery-session' }, 
       instruction: 'finite backlog',
     }, { taskId: String(n), seq: server.nextSeq() }));
     offers.forEach(offer => server.send(offer));
@@ -163,10 +163,10 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     const effect = vi.fn();
     connection = new ConnectionManager({ serverUrl: server.url, deviceId: record.deviceId,
       productId: 'test-product', capabilities: [], runtimes: [], auth, cursorStore,
-      onEnvelope: async e => { if (e.type === 'task.offer_for_agent') effect(); },
+      onEnvelope: async e => { if (e.type === 'task.offer') effect(); },
     });
     await connection.start(); await waitForOpen(connection);
-    const offer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'a', seq: server.nextSeq() });
+    const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'redelivery-session' },  instruction: 'x' }, { taskId: 'a', seq: server.nextSeq() });
     server.send(offer);
     await vi.waitFor(() => expect(effect).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(cursorStore.save).toHaveBeenCalledWith(server.url, record.deviceId, offer.seq));
