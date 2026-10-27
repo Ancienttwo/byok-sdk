@@ -15,8 +15,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import { streamSSE } from 'hono/streaming';
-import { createByokServer, type AgentExecutionInput, type ServerTaskEvent } from '@byok-sdk/server';
+import { createByokServer, type AgentExecutionInput } from '@byok-sdk/server';
+import { taskEventsRoute } from './task-events-route';
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -171,42 +171,9 @@ app.get('/api/blobs/:blobId/url', async (c) => {
     : c.json({ downloadUrl });
 });
 
-const TERMINAL = new Set(['Complete', 'Failed', 'Cancelled']);
-
-// A task that `executions.submit` created has no TaskHandle, so its stream is
-// built from the server-wide event feed: each state transition, and the
-// pending approval when the task waits for one. Subscribing before the
-// snapshot read means no transition falls between the two.
-app.get('/api/tasks/:taskId/events', async (c) => {
-  const taskId = c.req.param('taskId');
-  const feed = byok.events.subscribe()[Symbol.asyncIterator]();
-  const snapshot = await byok.tasks.get(taskId);
-  if (!snapshot) {
-    await feed.return?.();
-    return c.json({ error: 'unknown taskId' }, 404);
-  }
-  return streamSSE(c, async (stream) => {
-    const send = async (state: ServerTaskEvent & { kind: 'state' }): Promise<boolean> => {
-      await stream.writeSSE({ data: JSON.stringify(state) });
-      if (state.state === 'AwaitApproval') {
-        const pendingApprovalId = (await byok.tasks.get(taskId))?.pendingApprovalId;
-        const approval: ServerTaskEvent = { kind: 'await_approval', summary: `approval ${pendingApprovalId ?? '(unknown)'} is pending` };
-        await stream.writeSSE({ data: JSON.stringify(approval) });
-      }
-      return TERMINAL.has(state.state);
-    };
-    try {
-      if (await send({ kind: 'state', state: snapshot.state, at: snapshot.updatedAt })) return;
-      for (let next = await feed.next(); !next.done && !stream.aborted; next = await feed.next()) {
-        const event = next.value;
-        if (event.kind !== 'task.state' || event.taskId !== taskId) continue;
-        if (await send({ kind: 'state', state: event.state, at: event.at })) return;
-      }
-    } finally {
-      await feed.return?.();
-    }
-  });
-});
+// Progress, artifacts, approval requests and state, for a task `executions.submit`
+// or `dispatch` created. See task-events-route.ts.
+app.get('/api/tasks/:taskId/events', taskEventsRoute(byok));
 
 // An optional `approvalId` in the request body targets one specific pending
 // approval rather than "whichever one is currently pending" (the default when

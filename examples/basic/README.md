@@ -89,11 +89,15 @@ see `server.ts`); a mismatch is rejected by authenticated HTTP admission.
    disabled while no machine is connected. The server submits the task with
    `byok.executions.submit` as the example's one Agent (`byok-example`), so a
    machine runs one of its tasks at a time; a second waits for the Agent home
-   and is declined. The feed streams the task's state transitions via SSE, and
-   the approve/reject/cancel buttons call `byok.tasks.approve`, `reject` and
-   `cancel` by taskId. `"agentEgress": {}` gives the daemon the default egress
-   policy, which is the one the server sends; the daemon declines an offer
-   whose policy differs.
+   and is declined. The feed streams the task's state, Agent progress,
+   artifacts and approval requests via SSE from `byok.tasks.events`
+   (`task-events-route.ts`); each event's SSE `id` is its cursor, so a
+   reconnecting browser resumes where it left off. The task runs with a
+   `latest-value` egress policy, so the daemon may send only the latest
+   progress event of each batch. The approve/reject/cancel buttons call
+   `byok.tasks.approve`, `reject` and `cancel` by taskId. `"agentEgress": {}`
+   gives the daemon the default egress policy, which is the one the server
+   sends; the daemon declines an offer whose policy differs.
 
 ## Persistent storage
 
