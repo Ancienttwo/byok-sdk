@@ -251,7 +251,8 @@ describe('Issues #112/#114/#115/#116/#117/#118/#120 reference-server regressions
       terminalProjection: { mode: 'none' },
       agentMessageContext: { destinationBinding: 'conversation/issue-120' },
     });
-    expect((await nextEnvelope(daemon)).type).toBe('task.offer');
+    expect(await nextEnvelope(daemon)).toMatchObject({ type: 'task.offer',
+      payload: { session: { mode: 'resume', sessionRef: 'session-issues' }, egressPolicy: { policyRevision: 'policy-r1' } } });
     await task.cancel('cancel before first publish');
     expect((await nextEnvelope(daemon)).type).toBe('task.cancel');
 
