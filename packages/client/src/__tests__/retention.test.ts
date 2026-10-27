@@ -56,6 +56,36 @@ it('disposal deletes SDK secrets before receipt and runtime residue expires exac
  f.advance(DAY-1);await f.sweeper.runPass('periodic');expect(await exists(s.runtimeDir)).toBe(true);
  f.advance(1);await f.sweeper.runPass('periodic');expect(await exists(s.runtimeDir)).toBe(false);
 });
+it('oversized released runtimes make bounded cleanup progress across five periodic passes',async()=>{
+ const f=await fixture(),large=await f.scratch.create(),small=await f.scratch.create();
+ for(let offset=0;offset<16_384;offset+=128)await Promise.all(Array.from({length:128},(_,index)=>fs.writeFile(path.join(large.runtimeDir,`empty-${offset+index}`),'')));
+ await fs.writeFile(path.join(small.runtimeDir,'output'),'small');
+ await large.release();await small.release();f.advance(DAY);
+ const remaining:number[]=[];
+ for(let pass=0;pass<5;pass++){
+  const report=await f.sweeper.runPass('periodic');expect(report.deleted).toBeLessThanOrEqual(256);
+  remaining.push(await fs.readdir(large.runtimeDir).then(files=>files.length,()=>0));
+ }
+ expect(remaining[0]).toBeLessThan(16_384);expect(remaining[4]).toBeLessThan(remaining[0]!);
+ expect(await exists(small.runtimeDir)).toBe(false);expect(f.failures).toEqual([]);
+ expect(await fs.readFile(path.join(large.runtimeDir,'..','released'),'utf8')).toBe('2026-10-14T00:00:00.000Z');
+});
+it('partial runtime cleanup rechecks release eligibility on every later pass',async()=>{
+ const f=await fixture({max:1}),s=await f.scratch.create(),marker=path.join(s.runtimeDir,'..','released');
+ for(const name of ['one','two','three'])await fs.writeFile(path.join(s.runtimeDir,name),'payload');
+ await s.release();f.advance(DAY);expect((await f.sweeper.runPass('periodic')).deleted).toBe(1);
+ const remaining=await fs.readdir(s.runtimeDir);expect(remaining).toHaveLength(2);
+ for(const value of [undefined,'invalid','2026-10-15T00:00:00.000Z']){
+  if(value===undefined)await fs.unlink(marker);else await fs.writeFile(marker,value);
+  for(let pass=0;pass<3;pass++)expect((await f.sweeper.runPass('periodic')).deleted).toBe(0);
+  expect(await fs.readdir(s.runtimeDir)).toEqual(remaining);
+ }
+ expect(f.failures).toContain('exec-runtime:sweep_failed');
+ await fs.writeFile(marker,'2026-10-14T00:00:00.000Z');
+ for(let pass=0;pass<12&&await exists(s.runtimeDir);pass++)expect((await f.sweeper.runPass('periodic')).deleted).toBeLessThanOrEqual(1);
+ for(let pass=0;pass<3;pass++)await f.sweeper.runPass('periodic');
+ expect(await exists(path.dirname(s.runtimeDir))).toBe(false);
+});
 it('crash residue begins runtime TTL at restart, regardless of its old directory mtime',async()=>{
  const f=await fixture(),s=await f.scratch.create();f.scratch.abandon(s.token);f.advance(3*DAY);
  await f.sweeper.runPass('startup');expect(await exists(s.sdkDir)).toBe(false);expect(await exists(s.runtimeDir)).toBe(true);

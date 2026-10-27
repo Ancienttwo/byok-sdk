@@ -88,7 +88,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     for await (const entry of entries('exec-runtime', execRoot, budget)) {
       if (!TOKEN.test(entry.name) || !entry.isDirectory() || scratch.isLive(entry.name)) continue;
       const directory = path.join(execRoot, entry.name), released = await releasedAt(directory);
-      if (released !== undefined && budget.now.getTime() - released >= config.ttlMs['exec-runtime']) await remove(execRoot, directory, budget);
+      if (released !== undefined && budget.now.getTime() - released >= config.ttlMs['exec-runtime']) await removeOwnedPath(execRoot, directory, budget.now, budget);
     }
   }
   async function sweepDaemon(budget: SweepBudget): Promise<void> {
