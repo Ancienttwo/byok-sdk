@@ -545,7 +545,9 @@ The explicit SQLite composition persists device enrollment, capabilities and
 request receipts alongside six coordination interfaces. Pairing, authenticated
 lookup, revoke and same-machine replacement share the durable device directory.
 Device IDs are globally tenant-unique. Presence, nonces and unredeemed pairing
-codes remain process-local; no runtime or TaskHandle is reconstructed.
+codes remain process-local; no runtime or TaskHandle is reconstructed. Embedded
+`tasks.events` attaches a new feed to a task that is still live after a restart
+and follows it from then on; it does not reconstruct earlier events.
 
 File-backed SQLite has one owner: the actual database handle sets
 `PRAGMA locking_mode=EXCLUSIVE` before WAL initialization. A second open waits
@@ -1767,6 +1769,12 @@ and retention metadata without asserting a cross-stream order. Authentication,
 authorization, and both tenant-scoped reads happen before a 304 response. The
 reference remains GET-only and does not define an approval action, SaaS identity
 provider, public browser route, SSE lifecycle, or `ThreadMessageLike` contract.
+
+The embedded server's `tasks.events` is a different thing: an in-process
+notification feed of one task, valid within one server instance, with no
+retention claim beyond its bounded relay buffer. It is not a second projection
+authority, and it is not a host read port for the hosted activity model (see
+[Embedded per-task event feed](#embedded-per-task-event-feed)).
 
 At 10x activity volume, the first expected pressure is whole-row JSONB tail
 updates, per-task hot-row contention, and host polling—not the bounded O(events)
@@ -3051,6 +3059,43 @@ needs neither that consumer nor message context. Context without messageEgress i
 rejected. Partial initial admission can recover using exactly the
 persisted input, including any selected server-held context. Changed context cannot reuse
 the execution identity. This does not authorize a new execution after failure.
+
+### Embedded per-task event feed
+
+Embedded `tasks.events(taskId, { after?, signal? })` hands a Host the relay
+notifications of one task by taskId, so a submitted task without a TaskHandle
+has its state, Agent events, artifacts and approval requests (with the
+`approvalId` that `tasks.approve`/`reject` take). It reads the existing relay
+feed; it adds no wire message, store, SQL or Cloud port, and it is not a read
+model. Task facts stay with `tasks.get`, `tasks.attempt` and the terminal
+receipt. `TaskHandle.events()` reads the same feed without cursors.
+
+- Each entry carries an opaque cursor `<feedId>.<seq>`. `feedId` is random per
+  feed and `seq` increases within it, so a cursor is valid only for one server
+  instance's current feed of the task. Order is that instance's arrival order;
+  progress, artifacts and approvals have no protocol total order.
+- Refusals are thrown by the first `next()`, before any entry: an unknown task
+  is `task_not_found`; a cursor the feed never handed out is
+  `TaskEventsUnavailableError` `cursor_unknown`; a terminal task with no
+  retained feed is `feed_expired`. Terminal is judged by the `tasks.get`
+  projection, so an accepted Host cancellation is terminal even while the
+  attempt reads `cancel_requested`.
+- A live task with no feed in this instance (after a restart) gets one from
+  the moment of the call, without replay. A read never creates relay state for
+  an unknown or terminal task, and only a Host read can create it: device
+  envelopes for a task with no feed still allocate nothing.
+- Each feed is bounded by `taskEventBufferLimit` and drops its oldest entries.
+  A reader whose resume position was dropped receives one `events_truncated`
+  marker for that gap, whose cursor stands just before the oldest retained
+  entry. A terminal feed ends at its terminal event and is reclaimed after
+  `taskEventRetentionMs`.
+- Authorization is by taskId within the server's one tenant, as for
+  `tasks.get`, `approve`, `reject` and `cancel`. The feed carries raw tool input
+  and output; the Host authenticates users and redacts before any browser sees
+  it, as in the hosted boundary above.
+
+The hosted `ByokCloud` gains no stream. Hosted Hosts keep `readActivity`,
+`readApprovalTimeline` and `observer.onInboundCommitted`.
 
 Embedded `tasks.attempt(taskId)` returns the same canonical durable TaskAttempt
 as Cloud `readTaskAttempt(tenant, taskId)`, including the independent cancellation
