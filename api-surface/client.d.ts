@@ -3,7 +3,17 @@ import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepa
 import { type ResolvedBin } from './resolve-bin';
 import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type SpawnFn } from './process-client';
+declare const CLAUDE_AGENT_BUILTIN_TOOLS: readonly ['Agent', 'Bash', 'CronCreate', 'CronDelete', 'CronList', 'Edit', 'EnterWorktree', 'ExitWorktree', 'ListAgents', 'NotebookEdit', 'Read', 'ReportFindings', 'ScheduleWakeup', 'SendMessage', 'Skill', 'TaskCreate', 'TaskGet', 'TaskList', 'TaskStop', 'TaskUpdate', 'WebFetch', 'WebSearch', 'Workflow', 'Write'];
+export type ClaudeBuiltinToolName = typeof CLAUDE_AGENT_BUILTIN_TOOLS[number];
 export interface ClaudeAdapterOptions {
+    /**
+     * Agent operations only: select exact Claude native tools before startup.
+     * Default `inherit` leaves the CLI defaults unchanged; [] disables all native
+     * tools. MCP stays independent. Fresh/resumed sessions use this frozen set;
+     * follow-ups keep the same process policy. Settings, hooks and user-context
+     * behavior are unchanged: this is not a filesystem or extension sandbox.
+     */
+    agentBuiltinTools?: 'inherit' | readonly ClaudeBuiltinToolName[];
     /** Absolute product native asset directory; scoped to this adapter. */
     nativeAssetRoot?: string;
     /** Override bin resolution — tests substitute the fake-claude fixture script. */
@@ -54,6 +64,7 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     private readonly nativeOptions?;
+    private readonly agentBuiltinTools;
     constructor(options?: ClaudeAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
@@ -78,6 +89,7 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private probeAuthPresent;
     private resolveBin;
 }
+export {};
 // ==== @byok-sdk/client dist/adapters/claude/events.d.ts ====
 import type { McpEventIdentities } from '../../mcp/event-identity';
 import type { AgentEvent } from '@byok-sdk/protocol';
