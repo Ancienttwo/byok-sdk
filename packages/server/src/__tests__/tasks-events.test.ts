@@ -366,6 +366,54 @@ describe('ByokServer.tasks.events across a SQLite restart', () => {
   });
 });
 
+describe('ByokServer.tasks.events after a SQLite restart, when the task is submitted again', () => {
+  it('keeps a delivered task\'s attached feed as it is: the resubmit is refused before the relay hears of it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'byok-task-events-resubmit-'));
+    const options = {
+      productId: PRODUCT_ID, storage: { kind: 'sqlite' as const, path: join(root, 'sdk.sqlite') }, longPollHoldMs: 20,
+      tokenSigner: createHmacTokenSigner(randomBytes(32), { now: () => new Date() }),
+    };
+    let instance = createByokServer(options);
+    let http = await startServer(instance);
+    try {
+      const daemon = await connectFakeDaemonLongPoll(http.baseUrl, instance, { productId: PRODUCT_ID, capabilities: EXECUTION_CAPABILITIES });
+      const post = async (envelope: Envelope) => {
+        const response = await fetch(`${http.baseUrl}/byok/messages`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${daemon.accessToken}` },
+          body: JSON.stringify({ messages: [envelope] }),
+        });
+        expect(await response.json()).toMatchObject({ accepted: 1 });
+      };
+      const input = {
+        taskId: 'resubmitted', deviceId: daemon.deviceId,
+        payload: { instruction: 'outlive me', runtime: 'pi' as const, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' as const } },
+      };
+      await instance.executions.submit(input);
+      await post(createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef: AGENT }, { taskId: 'resubmitted' }));
+      await post(createEnvelope('task.started', {}, { taskId: 'resubmitted' }));
+
+      await stopServer(http.server);
+      await instance.close();
+      instance = createByokServer(options);
+      http = await startServer(instance);
+
+      const reader = instance.tasks.events('resubmitted')[Symbol.asyncIterator]();
+      const firstEntry = reader.next();
+      await instance.tasks.get('resubmitted');
+      await expect(instance.executions.submit(input)).rejects.toMatchObject({ code: 'agent_task_already_exists' });
+      await post(createEnvelope('task.progress', progress(1, 'after the refused resubmit'), { taskId: 'resubmitted' }));
+      // No `Offered` with the original timestamp lands after the live state.
+      expect((await firstEntry).value?.event).toEqual({ kind: 'agent', event: { type: 'progress', text: 'after the refused resubmit' } });
+      await reader.return!();
+    } finally {
+      await stopServer(http.server);
+      await instance.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('readTaskEvents against the relay', () => {
   it('leaves a provisional dispatch feed alone when the task is not stored yet', async () => {
     const relay = new TaskEventRelay({});
