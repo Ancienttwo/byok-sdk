@@ -170,7 +170,7 @@ describe('issues #141-#144 server reliability regressions', () => {
     relay.noteDispatched(taskId, '2026-09-05T00:00:00.000Z');
 
     const events: unknown[] = [];
-    for await (const event of relay.events(taskId)) events.push(event);
+    for await (const entry of relay.subscribe(taskId, relay.feed(taskId)!)) events.push(entry.event);
     expect(events).toMatchObject([
       { kind: 'state', state: 'Offered' },
       { kind: 'state', state: 'Complete' },

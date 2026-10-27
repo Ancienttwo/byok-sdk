@@ -12,15 +12,20 @@ async function collect(events: AsyncIterable<ServerTaskEvent>): Promise<ServerTa
   return result;
 }
 
-// A bounded fake-time race makes the original hanging next() fail immediately
-// without spending the test runner's timeout or leaving real timers behind.
+// A bounded fake-time wait makes the original hanging next() fail at once
+// without spending the test runner's timeout or leaving real timers behind. An
+// event read starts with a store read of the task, which takes a few turns.
 async function promptly<T>(pending: Promise<T>): Promise<T | 'still waiting'> {
-  const timeout = new Promise<'still waiting'>((resolve) => {
-    setTimeout(() => resolve('still waiting'), 1);
-  });
-  const result = Promise.race([pending, timeout]);
-  await vi.advanceTimersByTimeAsync(1);
-  return result;
+  let settled = false;
+  const tracked = pending.finally(() => { settled = true; });
+  // Observed by the caller after the wait; mark it handled meanwhile.
+  tracked.catch(() => {});
+  for (let tick = 0; tick < 10 && !settled; tick += 1) await vi.advanceTimersByTimeAsync(1);
+  return settled ? tracked : 'still waiting';
+}
+
+function expectFeedExpired(taskId: string) {
+  return { name: 'TaskEventsUnavailableError', reason: 'feed_expired', taskId };
 }
 
 describe('public task handle event retention', () => {
@@ -57,7 +62,7 @@ describe('public task handle event retention', () => {
     expect(() => new TaskEventRelay({ taskEventRetentionMs: 2_147_483_647 })).not.toThrow();
   });
 
-  it('ends live and retained readers, then returns empty reads after reclamation without recreating state', async () => {
+  it('ends live and retained readers, then refuses reads after reclamation without recreating state', async () => {
     const handle = await dispatch();
     const live = collect(handle.events());
     await handle.cancel('done');
@@ -75,7 +80,7 @@ describe('public task handle event retention', () => {
     // this task would resurrect its reclaimed relay bookkeeping.
     const writes = vi.spyOn(Map.prototype, 'set');
     for (let i = 0; i < 20; i += 1) {
-      expect(await promptly(collect(handle.events()))).toEqual([]);
+      await expect(promptly(collect(handle.events()))).rejects.toMatchObject(expectFeedExpired(handle.taskId));
     }
     expect(writes.mock.calls.filter(([key]) => key === handle.taskId)).toEqual([]);
     writes.mockRestore();
@@ -92,7 +97,7 @@ describe('public task handle event retention', () => {
       expect.objectContaining({ kind: 'state', state: 'Cancelled' }),
     ]);
     await vi.advanceTimersByTimeAsync(RETENTION_MS);
-    expect(await promptly(collect(handle.events()))).toEqual([]);
+    await expect(promptly(collect(handle.events()))).rejects.toMatchObject(expectFeedExpired(handle.taskId));
   });
 
   it('closes an active reader on stop and keeps subsequent event reads empty and allocation-free', async () => {

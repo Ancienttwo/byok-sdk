@@ -1,7 +1,7 @@
 import type { InboundCommitted, ByokCloudObserver } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
 import { AsyncEventQueue } from './event-queue';
-import type { ByokServerEvent, ServerTaskEvent } from './types';
+import { TaskEventsUnavailableError, type ByokServerEvent, type ServerTaskEvent, type TaskEventEntry } from './types';
 
 /** Per-task {@link ServerTaskEvent} retention before drop-oldest engages. */
 export const DEFAULT_TASK_EVENT_BUFFER_LIMIT = 1000;
@@ -11,19 +11,27 @@ export const DEFAULT_TASK_EVENT_RETENTION_MS = 5 * 60_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /**
- * The relay's own truncation marker. A single `error` entry, appended once, is
- * the whole contract: it says "entries were dropped from this feed", not what
- * they were — a reader that needs the facts reads them back
+ * The relay's own truncation marker. A single `error` entry per gap a reader
+ * fell into is the whole contract: it says "entries were dropped from this
+ * feed", not what they were — a reader that needs the facts reads them back
  * (`ByokServer.tasks.get`, `TaskHandle.result()`).
  */
 const TRUNCATION_MARKER: ServerTaskEvent = { kind: 'error', reason: 'events_truncated' };
 
-interface TaskRelayState {
+/**
+ * One task's delivery plumbing. A feed is provisional while its dispatch is
+ * in flight, dispatched once the offer is accepted, and neither when a host
+ * event read attached it to a task this instance did not dispatch (a restart).
+ */
+export interface TaskFeed {
+  /** Random per feed, so a cursor from a previous instance or a reclaimed feed is recognizably unknown. */
+  readonly feedId: string;
   readonly queue: AsyncEventQueue<ServerTaskEvent>;
   readonly terminal: Promise<void>;
   settleTerminal: () => void;
   terminalSettled: boolean;
   provisional: boolean;
+  dispatched: boolean;
   readonly early: Array<{ readonly envelope: InboundCommitted['envelope']; readonly at: string }>;
   claimedRuntime?: RuntimeId;
   claimedHarnessId?: string;
@@ -56,18 +64,19 @@ export interface TaskEventRelayOptions {
  *
  * Dispatch first {@link provision}s a known task id, then activates it with
  * {@link noteDispatched} after the kernel has accepted its offer. Envelopes
- * that arrive in that narrow interval are buffered, not dropped. An envelope
- * naming a task this server never dispatched is folded for nobody and allocates nothing —
- * otherwise a device could grow this map without bound by guessing task ids,
- * and the kernel's gate deliberately treats such an envelope as a harmless
- * store no-op rather than a rejection.
+ * that arrive in that narrow interval are buffered, not dropped. A host event
+ * read may also {@link attach} a feed for a live task this instance did not
+ * dispatch (after a restart). An envelope naming a task with no feed is folded
+ * for nobody and allocates nothing — otherwise a device could grow this map
+ * without bound by guessing task ids, and the kernel's gate deliberately treats
+ * such an envelope as a harmless store no-op rather than a rejection.
  *
  * `onInboundCommitted` runs inline on the kernel's request path and must stay
  * synchronous and cheap.
  */
 export class TaskEventRelay implements ByokCloudObserver {
   readonly #draftWakes = new Map<string, Set<() => void>>();
-  readonly #tasks = new Map<string, TaskRelayState>();
+  readonly #tasks = new Map<string, TaskFeed>();
   readonly #serverEvents: AsyncEventQueue<ByokServerEvent>;
   readonly #bufferLimit: number;
   readonly #retentionMs: number;
@@ -96,7 +105,11 @@ export class TaskEventRelay implements ByokCloudObserver {
     this.#serverEvents.push(event);
   }
 
-  /** Pre-register a task id before its offer enqueue can become observable. */
+  /**
+   * Pre-register a task id before its offer enqueue can become observable. A
+   * feed a host read already attached is kept as it is: the task exists, so
+   * nothing needs buffering, and a refused enqueue must not drop that feed.
+   */
   provision(taskId: string): void {
     this.#open(taskId, true);
   }
@@ -117,24 +130,71 @@ export class TaskEventRelay implements ByokCloudObserver {
    * so the feed preserves the original delivery time.
    */
   noteDispatched(taskId: string, at: string): void {
-    const existing = this.#tasks.get(taskId);
-    const state = existing ?? this.#open(taskId);
-    if (existing !== undefined && !state.provisional) return;
+    const state = this.#open(taskId);
+    if (state.dispatched) return;
     state.provisional = false;
+    state.dispatched = true;
     state.queue.push({ kind: 'state', state: 'Offered', at });
     this.emitServerEvent({ kind: 'task.created', taskId, at });
     const early = state.early.splice(0);
     for (const input of early) this.#handleTaskEnvelope(state, taskId, input.envelope, input.at);
   }
 
-  /** The per-task feed backing `TaskHandle.events()`, replayed from the start of what is retained. */
-  events(taskId: string): AsyncIterable<ServerTaskEvent> {
-    // Reads never create delivery plumbing: expiry and stop both remove it.
-    // Keeping a queue on the handle instead would defeat terminal reclamation.
-    const state = this.#tasks.get(taskId);
-    return state === undefined
-      ? { async *[Symbol.asyncIterator](): AsyncGenerator<ServerTaskEvent> {} }
-      : state.queue.subscribe();
+  /** True once {@link stop} ran; nothing is delivered or attached after it. */
+  get stopped(): boolean {
+    return this.#stopped;
+  }
+
+  /** The task's current feed, if this instance retains one. Never creates one. */
+  feed(taskId: string): TaskFeed | undefined {
+    return this.#tasks.get(taskId);
+  }
+
+  /**
+   * Start delivering a task this instance did not dispatch, from now on: the
+   * host named it and the store holds it live (after a restart). Earlier
+   * events are not reconstructed. `undefined` once stopped.
+   */
+  attach(taskId: string): TaskFeed | undefined {
+    return this.#stopped ? undefined : this.#open(taskId);
+  }
+
+  /**
+   * Drop a feed {@link attach} opened that turned out to have nothing to
+   * deliver. Provisional and dispatched feeds belong to their dispatch and are
+   * never touched here.
+   */
+  detach(taskId: string, feed: TaskFeed): void {
+    if (this.#tasks.get(taskId) !== feed || feed.provisional || feed.dispatched) return;
+    feed.settleTerminal();
+    feed.queue.close();
+    this.#tasks.delete(taskId);
+  }
+
+  /**
+   * Entries of `feed` after the cursor `after`, or from the start of what is
+   * retained. Throws {@link TaskEventsUnavailableError} (`cursor_unknown`)
+   * when `after` names no position this feed handed out.
+   */
+  subscribe(taskId: string, feed: TaskFeed, after?: string): AsyncIterable<TaskEventEntry> {
+    const position = after === undefined ? undefined : cursorPosition(feed, after);
+    if (position === null) throw new TaskEventsUnavailableError(taskId, 'cursor_unknown');
+    const entries = feed.queue.entries(position);
+    return {
+      [Symbol.asyncIterator](): AsyncIterator<TaskEventEntry> {
+        const inner = entries[Symbol.asyncIterator]();
+        return {
+          async next(): Promise<IteratorResult<TaskEventEntry>> {
+            const next = await inner.next();
+            return next.done ? next : { value: { cursor: `${feed.feedId}.${next.value.sequence}`, event: next.value.value }, done: false };
+          },
+          async return(): Promise<IteratorResult<TaskEventEntry>> {
+            await inner.return!();
+            return { value: undefined, done: true };
+          },
+        };
+      },
+    };
   }
 
   /** Settles when this task first reaches a terminal — the barrier `TaskHandle.result()` awaits. */
@@ -191,7 +251,7 @@ export class TaskEventRelay implements ByokCloudObserver {
   }
 
   #handleTaskEnvelope(
-    state: TaskRelayState,
+    state: TaskFeed,
     taskId: string,
     envelope: InboundCommitted['envelope'],
     at: string,
@@ -212,7 +272,7 @@ export class TaskEventRelay implements ByokCloudObserver {
         state.queue.push({ kind: 'artifact', artifact: envelope.payload });
         return;
       case 'task.await_approval':
-        state.queue.push({ kind: 'await_approval', summary: envelope.payload.summary });
+        state.queue.push({ kind: 'await_approval', summary: envelope.payload.summary, approvalId: envelope.payload.approvalId });
         this.#transition(state, taskId, 'AwaitApproval', at);
         return;
       case 'task.approval_resolved':
@@ -258,7 +318,7 @@ export class TaskEventRelay implements ByokCloudObserver {
     this.#serverEvents.close();
   }
 
-  #transition(state: TaskRelayState, taskId: string, next: TaskState, at: string): void {
+  #transition(state: TaskFeed, taskId: string, next: TaskState, at: string): void {
     // First terminal wins here for the same reason it wins in the receipt
     // store: a later stale terminal changed no durable fact, so announcing it
     // would make the feed disagree with the read model.
@@ -278,9 +338,9 @@ export class TaskEventRelay implements ByokCloudObserver {
     this.onAgentMessageDraft(taskId);
     // The feed ENDS at the terminal, right after the terminal event is pushed —
     // that transition is the last thing that will ever happen to this task, so
-    // a `for await` over `events()` completes there instead of hanging. Closing
+    // a `for await` over its events completes there instead of hanging. Closing
     // does not empty the buffer (`event-queue.ts`), so a reader that subscribes
-    // later still replays the whole history from the start and then ends;
+    // later still replays what is retained and then ends;
     // `taskEventRetentionMs` below only decides when the buffer is RECLAIMED,
     // and must never be what terminates an iterator.
     state.queue.close();
@@ -293,7 +353,7 @@ export class TaskEventRelay implements ByokCloudObserver {
    * after which the durable read model (`tasks.get`, `result()`) is the only
    * answer — which is where the facts lived all along.
    */
-  #scheduleReclaim(taskId: string, state: TaskRelayState): void {
+  #scheduleReclaim(taskId: string, state: TaskFeed): void {
     if (state.reclaimTimer !== undefined) return;
     const timer = setTimeout(() => {
       this.#tasks.delete(taskId);
@@ -302,14 +362,15 @@ export class TaskEventRelay implements ByokCloudObserver {
     state.reclaimTimer = timer;
   }
 
-  #open(taskId: string, provisional = false): TaskRelayState {
+  #open(taskId: string, provisional = false): TaskFeed {
     const existing = this.#tasks.get(taskId);
     if (existing !== undefined) return existing;
     let settleTerminal!: () => void;
     const terminal = new Promise<void>((resolve) => {
       settleTerminal = resolve;
     });
-    const created: TaskRelayState = {
+    const created: TaskFeed = {
+      feedId: globalThis.crypto.randomUUID(),
       queue: new AsyncEventQueue<ServerTaskEvent>({
         maxBuffered: this.#bufferLimit,
         truncationMarker: TRUNCATION_MARKER,
@@ -318,11 +379,24 @@ export class TaskEventRelay implements ByokCloudObserver {
       settleTerminal,
       terminalSettled: false,
       provisional,
+      dispatched: false,
       early: [],
     };
     this.#tasks.set(taskId, created);
     return created;
   }
+}
+
+/**
+ * The queue position a cursor names in `feed`, or `null` when it names none:
+ * malformed, another feed's, or a position this feed never handed out.
+ */
+function cursorPosition(feed: TaskFeed, cursor: string): number | null {
+  const dot = cursor.lastIndexOf('.');
+  const digits = cursor.slice(dot + 1);
+  if (dot < 0 || cursor.slice(0, dot) !== feed.feedId || !/^\d+$/.test(digits)) return null;
+  const sequence = Number(digits);
+  return feed.queue.isPosition(sequence) ? sequence : null;
 }
 
 function positiveLimit(value: number, name: string, max = Number.MAX_SAFE_INTEGER): number {

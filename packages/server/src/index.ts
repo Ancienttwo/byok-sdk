@@ -57,7 +57,7 @@ import {
 import { TaskEventRelay } from './relay';
 import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot';
 import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
-import { approvePendingApproval, createTaskHandle, rejectPendingApproval } from './task-handle';
+import { approvePendingApproval, createTaskHandle, readTaskEvents, rejectPendingApproval } from './task-handle';
 import type {
   ByokServerEvent,
   AgentContentReadRequest,
@@ -70,6 +70,7 @@ import type {
   DispatchInput,
   HubStats,
   MachineInfo,
+  TaskEventEntry,
   TaskHandle,
   TaskResult,
   TaskSnapshot,
@@ -88,10 +89,12 @@ export type {
   HubStats,
   MachineInfo,
   ServerTaskEvent,
+  TaskEventEntry,
   TaskHandle,
   TaskResult,
   TaskSnapshot,
 } from './types';
+export { TaskEventsUnavailableError } from './types';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
@@ -240,6 +243,20 @@ export interface ByokServer {
     approve(taskId: string, opts?: { approvalId?: string }): Promise<void>;
     /** Reject the task's pending approval; the same decision and refusals as {@link TaskHandle.reject}. */
     reject(taskId: string, reason?: string, opts?: { approvalId?: string }): Promise<void>;
+    /**
+     * Follow one task's notifications (state, Agent progress, artifacts,
+     * approval requests) in this instance's arrival order, from the entry after
+     * `after`, or from the start of what is retained. Ends after the terminal
+     * state, when `signal` aborts, or when the server closes. A notification
+     * stream, not a record: read task facts with {@link tasks.get}.
+     *
+     * The first `next()` throws, before any entry, `ByokCloudError`
+     * `task_not_found` for an unknown task, or {@link TaskEventsUnavailableError}
+     * when `after` is unknown to this instance's feed or the terminal task's
+     * feed is no longer retained. A live task this instance did not dispatch
+     * (after a restart) is followed from now on, without earlier events.
+     */
+    events(taskId: string, options?: { after?: string; signal?: AbortSignal }): AsyncIterable<TaskEventEntry>;
     /**
      * One bounded page, keyset-paged by task id. Paged rather than "all of
      * them" because the underlying store is: an unbounded `list()` would have
@@ -791,6 +808,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       },
       approve(taskId, opts) { return approvePendingApproval({ tenant, cloud, relay }, taskId, opts); },
       reject(taskId, reason, opts) { return rejectPendingApproval({ tenant, cloud, relay }, taskId, reason, opts); },
+      events(taskId, options) { return readTaskEvents({ relay, readState: readTaskState }, taskId, options); },
       async get(taskId: string): Promise<TaskSnapshot | undefined> {
         const attempt = await cloud.readTaskAttempt(tenant, taskId);
         return attempt === undefined ? undefined : projectTask(attempt);

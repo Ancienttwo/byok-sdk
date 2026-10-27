@@ -1,4 +1,5 @@
 import {
+  ByokCloudError,
   SteerRejectedError as KernelSteerRejectedError,
   type ByokCloud,
   type SteerRejectionCode,
@@ -6,7 +7,7 @@ import {
 } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
 import type { TaskEventRelay } from './relay';
-import type { ServerTaskEvent, TaskHandle, TaskResult } from './types';
+import { TaskEventsUnavailableError, type ServerTaskEvent, type TaskEventEntry, type TaskHandle, type TaskResult } from './types';
 
 function steerRejectionMessage(
   taskId: string,
@@ -107,6 +108,65 @@ export interface TaskHandleDeps {
 }
 
 type ApprovalDeps = Pick<TaskHandleDeps, 'tenant' | 'cloud' | 'relay'>;
+type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState'>;
+
+/**
+ * One task's event feed from the relay, shared by `ByokServer.tasks.events`
+ * and {@link TaskHandle.events}. Every refusal is thrown by the first `next()`,
+ * before any entry; once entries flow, the read only ends (terminal, `signal`,
+ * server close).
+ *
+ * Liveness is judged by the projection `tasks.get` answers with, never by the
+ * attempt status: an accepted host cancellation is terminal there at once
+ * while the attempt still reads `cancel_requested`, and a feed attached on that
+ * basis would wait for a device message that may never come.
+ */
+export async function* readTaskEvents(
+  deps: EventDeps,
+  taskId: string,
+  options: { after?: string; signal?: AbortSignal } = {},
+): AsyncGenerator<TaskEventEntry, void, undefined> {
+  const { relay, readState } = deps;
+  const { signal } = options;
+  if (relay.stopped || signal?.aborted) return;
+  let feed = relay.feed(taskId);
+  let state = await readState(taskId);
+  if (feed === undefined) {
+    // Refuse before attaching, so a read of a reclaimed or unknown task never
+    // recreates relay state for it.
+    if (state === undefined) throw taskNotFound(taskId);
+    if (TERMINAL_STATES.has(state)) throw new TaskEventsUnavailableError(taskId, 'feed_expired');
+    feed = relay.attach(taskId);
+    if (feed === undefined) return;
+    // A terminal committed between the read and the attach never reached the
+    // new feed, which would then never end: read again now that it listens.
+    state = await readState(taskId);
+  }
+  if (state === undefined) {
+    relay.detach(taskId, feed);
+    throw taskNotFound(taskId);
+  }
+  if (TERMINAL_STATES.has(state) && !feed.dispatched && !feed.terminalSettled) {
+    relay.detach(taskId, feed);
+    throw new TaskEventsUnavailableError(taskId, 'feed_expired');
+  }
+  const entries = relay.subscribe(taskId, feed, options.after)[Symbol.asyncIterator]();
+  // The queue's own return() also releases a pending next(), which this
+  // generator's return() could not do while it is suspended in one.
+  const stop = () => { void entries.return?.(); };
+  signal?.addEventListener('abort', stop, { once: true });
+  try {
+    if (signal?.aborted) return;
+    for (let next = await entries.next(); !next.done; next = await entries.next()) yield next.value;
+  } finally {
+    signal?.removeEventListener('abort', stop);
+    await entries.return?.();
+  }
+}
+
+function taskNotFound(taskId: string): ByokCloudError {
+  return new ByokCloudError('task_not_found', `Task ${taskId} was not found for this tenant.`);
+}
 
 /**
  * The host's approval decision, shared by {@link TaskHandle.approve} and
@@ -153,7 +213,11 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
     taskId,
 
     events(): AsyncIterable<ServerTaskEvent> {
-      return deps.relay.events(taskId);
+      return {
+        async *[Symbol.asyncIterator](): AsyncGenerator<ServerTaskEvent> {
+          for await (const entry of readTaskEvents(deps, taskId)) yield entry.event;
+        },
+      };
     },
 
     async cancel(reason?: string): Promise<void> {
