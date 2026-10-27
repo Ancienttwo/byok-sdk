@@ -104,12 +104,18 @@ export interface TaskHandleDeps {
    * derivation.
    */
   readonly readState: (taskId: string) => Promise<{ readonly state: TaskState; readonly at: string } | undefined>;
+  /**
+   * The pending approval request as the relay would have announced it: a
+   * plaintext request with an `approvalId`. A sealed request, which the relay
+   * never announces, reads as none.
+   */
+  readonly readApprovalRequest: (taskId: string) => Promise<ServerTaskEvent | undefined>;
   /** The read-back this handle's `result()` answers with. */
   readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
 }
 
 type ApprovalDeps = Pick<TaskHandleDeps, 'tenant' | 'cloud' | 'relay'>;
-type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState'>;
+type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState' | 'readApprovalRequest'>;
 
 /**
  * One task's event feed from the relay, shared by `ByokServer.tasks.events`
@@ -183,7 +189,10 @@ async function* followTaskEvents(
     // new feed, which would then never end: read again now that it listens.
     // A live task's feed starts with what this read found.
     read = await readState(taskId);
-    if (read !== undefined && !TERMINAL_STATES.has(read.state)) relay.seed(feed, { kind: 'state', state: read.state, at: read.at });
+    if (read !== undefined && !TERMINAL_STATES.has(read.state)) {
+      const request = read.state === 'AwaitApproval' ? await deps.readApprovalRequest(taskId) : undefined;
+      relay.seed(feed, [...(request === undefined ? [] : [request]), { kind: 'state', state: read.state, at: read.at }]);
+    }
   }
   if (read === undefined) {
     relay.detach(taskId, feed);

@@ -82,6 +82,7 @@ function stateRead(state: TaskState) {
 }
 
 type StateRead = ReturnType<typeof stateRead> | undefined;
+const noRequest = async () => undefined;
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -413,6 +414,59 @@ describe('ByokServer.tasks.events across a SQLite restart', () => {
   });
 });
 
+describe('ByokServer.tasks.events seeding a feed attached after a SQLite restart', () => {
+  it('starts with the approval request a device sent after the restart, then its state', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'byok-task-events-seed-'));
+    const options = {
+      productId: PRODUCT_ID, storage: { kind: 'sqlite' as const, path: join(root, 'sdk.sqlite') }, longPollHoldMs: 20,
+      tokenSigner: createHmacTokenSigner(randomBytes(32), { now: () => new Date() }),
+    };
+    let instance = createByokServer(options);
+    let http = await startServer(instance);
+    try {
+      const daemon = await connectFakeDaemonLongPoll(http.baseUrl, instance, { productId: PRODUCT_ID, capabilities: EXECUTION_CAPABILITIES });
+      const post = async (envelope: Envelope) => {
+        const response = await fetch(`${http.baseUrl}/byok/messages`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${daemon.accessToken}` },
+          body: JSON.stringify({ messages: [envelope] }),
+        });
+        expect(await response.json()).toMatchObject({ accepted: 1 });
+      };
+      await instance.executions.submit({
+        taskId: 'waiting', deviceId: daemon.deviceId,
+        payload: { instruction: 'ask first', runtime: 'pi', agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+      });
+      await post(createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef: AGENT }, { taskId: 'waiting' }));
+      await post(createEnvelope('task.started', {}, { taskId: 'waiting' }));
+
+      await stopServer(http.server);
+      await instance.close();
+      instance = createByokServer(options);
+      http = await startServer(instance);
+      // No feed exists yet: the relay drops this, the new process's timeline keeps it.
+      await post(createEnvelope('task.await_approval', { summary: 'ok to deploy?', approvalId: 'appr-restart' }, { taskId: 'waiting' }));
+
+      const snapshot = (await instance.tasks.get('waiting'))!;
+      expect(snapshot).toMatchObject({ state: 'AwaitApproval', pendingApprovalId: 'appr-restart' });
+      const reader = instance.tasks.events('waiting', { from: 'state' })[Symbol.asyncIterator]();
+      const seeded = await take(reader, 2);
+      expect(seeded.map((entry) => entry.event)).toEqual([
+        { kind: 'await_approval', summary: 'ok to deploy?', approvalId: 'appr-restart' },
+        { kind: 'state', state: 'AwaitApproval', at: snapshot.updatedAt },
+      ]);
+      expect(await take(instance.tasks.events('waiting', { from: 'state' })[Symbol.asyncIterator](), 2)).toEqual(seeded);
+      await instance.tasks.approve('waiting', { approvalId: 'appr-restart' });
+      expect((await take(reader, 1))[0]!.event).toMatchObject({ kind: 'state', state: 'Running' });
+      await reader.return!();
+    } finally {
+      await stopServer(http.server);
+      await instance.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('ByokServer.tasks.events after a SQLite restart, when the task is submitted again', () => {
   it('keeps a delivered task\'s attached feed as it is: the resubmit is refused before the relay hears of it', async () => {
     const root = mkdtempSync(join(tmpdir(), 'byok-task-events-resubmit-'));
@@ -505,7 +559,7 @@ describe('TaskEventRelay dispatch phases', () => {
       tenantId: tenantId(PRODUCT_ID), deviceId: 'device-a', outcome: 'accepted',
       envelope: createEnvelope('task.progress', progress(1, 'a', 'b', 'c'), { taskId: 'offered' }),
     });
-    const reader = readTaskEvents({ relay, readState: async () => stateRead('Offered') }, 'offered', { from: 'state' })[Symbol.asyncIterator]();
+    const reader = readTaskEvents({ relay, readState: async () => stateRead('Offered'), readApprovalRequest: noRequest }, 'offered', { from: 'state' })[Symbol.asyncIterator]();
     expect((await reader.next()).value?.event).toEqual({ kind: 'state', state: 'Offered', at: '2026-10-27T00:00:00.000Z' });
     await reader.return!();
     relay.stop();
@@ -515,7 +569,7 @@ describe('TaskEventRelay dispatch phases', () => {
     const relay = new TaskEventRelay({});
     const firstRead = deferred<StateRead>();
     const reads = [firstRead.promise, Promise.resolve<StateRead>(stateRead('Offered'))];
-    const reader = readTaskEvents({ relay, readState: () => reads.shift()! }, 'racing')[Symbol.asyncIterator]();
+    const reader = readTaskEvents({ relay, readState: () => reads.shift()!, readApprovalRequest: noRequest }, 'racing')[Symbol.asyncIterator]();
     const firstEntry = reader.next();
     relay.provision('racing');
     firstRead.resolve(stateRead('Offered'));
@@ -542,12 +596,12 @@ describe('readTaskEvents against the relay', () => {
     const relay = new TaskEventRelay({});
     relay.provision('in-flight');
     const provisional = relay.feed('in-flight');
-    const refused = await first(readTaskEvents({ relay, readState: async () => undefined }, 'in-flight')).catch((error: unknown) => error);
+    const refused = await first(readTaskEvents({ relay, readState: async () => undefined, readApprovalRequest: noRequest }, 'in-flight')).catch((error: unknown) => error);
     expect(isCloudError(refused, 'task_not_found')).toBe(true);
     expect(relay.feed('in-flight')).toBe(provisional);
 
     relay.noteDispatched('in-flight', '2026-10-27T00:00:00.000Z');
-    const reader = readTaskEvents({ relay, readState: async () => stateRead('Offered') }, 'in-flight')[Symbol.asyncIterator]();
+    const reader = readTaskEvents({ relay, readState: async () => stateRead('Offered'), readApprovalRequest: noRequest }, 'in-flight')[Symbol.asyncIterator]();
     expect((await reader.next()).value?.event).toEqual({ kind: 'state', state: 'Offered', at: '2026-10-27T00:00:00.000Z' });
     relay.stop();
   });
@@ -556,7 +610,7 @@ describe('readTaskEvents against the relay', () => {
     const relay = new TaskEventRelay({});
     const read = deferred<StateRead>();
     const abort = new AbortController();
-    const pending = first(readTaskEvents({ relay, readState: () => read.promise }, 'stopped-early', { signal: abort.signal }));
+    const pending = first(readTaskEvents({ relay, readState: () => read.promise, readApprovalRequest: noRequest }, 'stopped-early', { signal: abort.signal }));
     abort.abort();
     read.resolve(stateRead('Running'));
     expect(await pending).toEqual({ value: undefined, done: true });
@@ -567,7 +621,7 @@ describe('readTaskEvents against the relay', () => {
   it('drops the feed it attached when the task turns terminal before the feed listened', async () => {
     const relay = new TaskEventRelay({});
     const reads: StateRead[] = [stateRead('Running'), stateRead('Complete')];
-    const refused = await first(readTaskEvents({ relay, readState: async () => reads.shift() }, 'restarted')).catch((error: unknown) => error);
+    const refused = await first(readTaskEvents({ relay, readState: async () => reads.shift(), readApprovalRequest: noRequest }, 'restarted')).catch((error: unknown) => error);
     expect(refused).toMatchObject(unavailable('restarted', 'feed_expired'));
     expect(relay.feed('restarted')).toBeUndefined();
     relay.stop();
@@ -578,7 +632,7 @@ describe('readTaskEvents against the relay', () => {
     // (`handleInboundEnvelope`), so a read can see a state before its entry.
     const relay = new TaskEventRelay({});
     const reader = readTaskEvents(
-      { relay, readState: async () => stateRead('Running') }, 'gap', { from: 'state' },
+      { relay, readState: async () => stateRead('Running'), readApprovalRequest: noRequest }, 'gap', { from: 'state' },
     )[Symbol.asyncIterator]();
     const seeded = reader.next();
     await vi.waitFor(() => { expect(relay.feed('gap')?.current).toHaveLength(1); });
@@ -595,7 +649,7 @@ describe('readTaskEvents against the relay', () => {
     const relay = new TaskEventRelay({});
     const read = deferred<StateRead>();
     const reads = [Promise.resolve<StateRead>(stateRead('Running')), read.promise];
-    const reader = readTaskEvents({ relay, readState: () => reads.shift()! }, 'existing')[Symbol.asyncIterator]();
+    const reader = readTaskEvents({ relay, readState: () => reads.shift()!, readApprovalRequest: noRequest }, 'existing')[Symbol.asyncIterator]();
     const first = reader.next();
     await vi.waitFor(() => { expect(relay.feed('existing')).toBeDefined(); });
     const attached = relay.feed('existing');

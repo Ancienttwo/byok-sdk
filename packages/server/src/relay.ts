@@ -89,7 +89,7 @@ export interface TaskEventRelayOptions {
  * `attach` starts delivering a live task this instance did not dispatch (after
  * a restart) from now on, without reconstructing earlier events; only a host
  * read creates such a feed. `seed` gives an attached feed that no transition
- * has reached yet its first `state` entry, read back from the durable stores;
+ * has reached yet its starting entries, read back from the durable stores;
  * once a transition arrived, the feed already says more than that would. A
  * seed waits behind an in-flight dispatch like any delivery, so `Offered`
  * still comes first.
@@ -181,11 +181,15 @@ export class TaskEventRelay implements ByokCloudObserver {
     return this.#stopped ? undefined : this.#open(taskId);
   }
 
-  seed(feed: TaskFeed, event: ServerTaskEvent): void {
+  seed(feed: TaskFeed, events: readonly ServerTaskEvent[]): void {
     this.#deliver(feed, () => {
       if (feed.current.length > 0) return;
-      const entry = feed.queue.push(event);
-      if (entry !== undefined) feed.current = [entry];
+      const current: Array<QueueEntry<ServerTaskEvent>> = [];
+      for (const event of events) {
+        const entry = feed.queue.push(event);
+        if (entry !== undefined) current.push(entry);
+      }
+      feed.current = current;
     });
   }
 

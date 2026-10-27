@@ -141,6 +141,7 @@ describe('issues #141-#144 server reliability regressions', () => {
       cloud: {} as ByokCloud,
       relay,
       readState: async () => ({ state: 'Complete', at: '2026-09-05T00:00:00.000Z' }),
+      readApprovalRequest: async () => undefined,
       readResult: async () => ({ state: 'Complete', summary: 'durably complete' }),
     });
 

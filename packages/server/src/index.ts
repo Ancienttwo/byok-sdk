@@ -70,6 +70,7 @@ import type {
   DispatchInput,
   HubStats,
   MachineInfo,
+  ServerTaskEvent,
   TaskEventEntry,
   TaskHandle,
   TaskResult,
@@ -476,6 +477,15 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     return { state, at: updatedAt };
   }
 
+  async function readApprovalRequest(taskId: string): Promise<ServerTaskEvent | undefined> {
+    const timeline = await cloud.readApprovalTimeline(tenant, taskId);
+    const pending = pendingApproval(timeline);
+    const event = timeline?.entries.find((entry) => entry.revision === pending?.revision)?.event;
+    return event?.type === 'approval_requested' && 'summary' in event && event.approvalId !== undefined
+      ? { kind: 'await_approval', summary: event.summary, approvalId: event.approvalId }
+      : undefined;
+  }
+
   async function deviceCapabilities(deviceId: string): Promise<readonly string[] | undefined> {
     return (await composition.cloud.devices.get(tenant, deviceId))?.capabilities;
   }
@@ -645,6 +655,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       cloud,
       relay,
       readState: readTaskState,
+      readApprovalRequest,
       readResult: async (id) => toTaskResult(await readTerminal(id)),
     });
   }
@@ -820,7 +831,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       },
       approve(taskId, opts) { return approvePendingApproval({ tenant, cloud, relay }, taskId, opts); },
       reject(taskId, reason, opts) { return rejectPendingApproval({ tenant, cloud, relay }, taskId, reason, opts); },
-      events(taskId, options) { return readTaskEvents({ relay, readState: readTaskState }, taskId, options); },
+      events(taskId, options) { return readTaskEvents({ relay, readState: readTaskState, readApprovalRequest }, taskId, options); },
       async get(taskId: string): Promise<TaskSnapshot | undefined> {
         const attempt = await cloud.readTaskAttempt(tenant, taskId);
         return attempt === undefined ? undefined : projectTask(attempt);
