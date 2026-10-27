@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agentMemoryIntentOperationDigest } from '@byok-sdk/core';
 import { createEnvelope, type AgentMemoryIntentV1, type AgentMemoryIntentCompletion } from '@byok-sdk/protocol';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams, SpawnOptions } from 'node:child_process';
 
 const control = vi.hoisted(() => ({
   mode: undefined as 'applying' | 'terminal' | 'acked' | 'delete' | undefined,
@@ -16,12 +16,15 @@ const control = vi.hoisted(() => ({
 
 // Every process is the verified SDK release helper. The harness only kills a
 // real process at a protocol boundary. It never supplies a replacement binary,
-// success response, filesystem implementation or proof flag.
+// success response, filesystem implementation or proof flag. Each helper
+// starts detached, in its own process group (see the SIGSTOP case below).
 vi.mock('node:child_process', async importOriginal => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return { ...actual, spawn: (...args: Parameters<typeof actual.spawn>) => {
-    const child = actual.spawn(...args);
-    if (!String(args[0]).includes('darwin-') || !child.stdin || !child.stdout) return child;
+    const isHelper = String(args[0]).includes('darwin-');
+    const [command, argv, options] = args as [string, readonly string[], SpawnOptions];
+    const child = isHelper ? actual.spawn(command, argv, { ...options, detached: true }) : actual.spawn(...args);
+    if (!isHelper || !child.stdin || !child.stdout) return child;
     const helper = child as ChildProcessWithoutNullStreams;
     control.last = helper;
     let deleteId: string | undefined;
@@ -217,6 +220,11 @@ describe.skipIf(process.platform !== 'darwin' || !hasAgentMemoryHelperBuild())('
     const child = control.last!;
     let exited = false;
     child.once('exit', () => { exited = true; });
+    // A stopped member exposes its whole process group to the kernel's
+    // orphaned-group rule: SIGHUP and SIGCONT to every member. On macOS CI an
+    // unrelated exit in the shared vitest group set it off and the SIGHUP took
+    // down the runner, which shares that group. The detached spawn above keeps
+    // this stopped helper alone in its own group.
     child.kill('SIGSTOP');
     try {
       await expect(filesystem.read('MEMORY.md', 1024)).rejects.toThrow('timed out');
