@@ -179,8 +179,7 @@ describe('TaskRunner.requestApproval', () => {
 
     await expect(outcomePromise).resolves.toEqual({ approved: true, reason: undefined });
     // Wait past the (short) timeout window to prove it never fires a second,
-    // stray resolution — resolveApprovalCalls on the session stays untouched
-    // and no error is thrown anywhere in the process.
+    // stray resolution and no error is thrown anywhere in the process.
     await new Promise((resolve) => setTimeout(resolve, 80));
   });
 
