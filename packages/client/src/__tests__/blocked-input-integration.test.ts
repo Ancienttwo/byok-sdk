@@ -97,12 +97,12 @@ it.each([
     const taskId = `same-id-${withMessageEgress ? 'message-egress' : 'result-document'}`;
     const submit = (instruction: string) => sdk.executions.submit(withMessageEgress
       ? { taskId, deviceId, payload: {
-        instruction, runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        instruction, runtime: 'pi', agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
         terminalProjection: { mode: 'none' },
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn-0' } }
       : { taskId, deviceId, payload: {
-        instruction, runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        instruction, runtime: 'pi', agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         terminalProjection: { mode: 'none' },
       } });
 
@@ -145,7 +145,7 @@ it('declines a fresh Agent egress offer whose policy is not exactly the daemon p
   await withHarness(daemonPolicy, async ({ sdk, adapter, deviceId }) => {
     const taskId = 'policy-mismatch';
     await sdk.executions.submit({ taskId, deviceId, payload: { instruction: INSTRUCTION_A, runtime: 'pi', agentRef: AGENT_REF,
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' } } });
+      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' } } });
     await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal(taskId)).toMatchObject({
       envelope: { type: 'task.decline', payload: {
         reason: 'Agent egress offer policy is not exactly enabled by this daemon', retryable: false,
@@ -155,8 +155,8 @@ it('declines a fresh Agent egress offer whose policy is not exactly the daemon p
     expect(adapter.sessions).toHaveLength(0);
     // The offer is neither rewritten to the daemon's policy nor re-targeted.
     const offer = await sdk.tasks.offer(taskId);
-    expect(offer).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh', payload: {
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentRef: AGENT_REF,
+    expect(offer).toMatchObject({ type: 'task.offer', payload: {
+      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentRef: AGENT_REF,
     } });
     expect(Buffer.from(offeredInstruction(offer) as string)).toEqual(Buffer.from(INSTRUCTION_A));
   });
@@ -175,7 +175,7 @@ it('fails a fresh Agent egress offer whose instruction BlobRef cannot be resolve
       url: 'http://127.0.0.1:1/never-listening',
     };
     await sdk.executions.submit({ taskId, deviceId, payload: {
-      instruction: { blobRef }, runtime: 'pi', agentRef: AGENT_REF, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      instruction: { blobRef }, runtime: 'pi', agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
       terminalProjection: { mode: 'none' },
     }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn-0' } });

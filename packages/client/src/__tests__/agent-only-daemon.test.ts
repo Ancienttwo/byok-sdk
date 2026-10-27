@@ -7,6 +7,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 
 async function temp(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -32,7 +33,7 @@ describe('Agent-only daemon admission (#925)', () => {
       productId: `agent-only-${path.basename(storeDir)}`,
       serverUrl: server.url,
       storeDir,
-      ...(options.agentHome === false ? {} : { agentHome: { hostStorageRoot } }),
+      ...(options.agentHome === false ? {} : { agentHome: { hostStorageRoot }, agentEgress: FRESH_DAEMON_EGRESS }),
     }, [adapter]);
     await daemon.pair('pairing-code');
     await daemon.start();
@@ -50,8 +51,9 @@ describe('Agent-only daemon admission (#925)', () => {
   it('declines an Agent offer before claim when the daemon has no Agent home', async () => {
     const adapter = await startDaemon({ agentHome: false });
     const agentRef = { agentId: 'homeless-agent', profileRevision: 'r1' };
-    server.send(createEnvelope('task.offer_for_agent', { instruction: 'agent work', agentRef }, { taskId: 'no-home-offer', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { instruction: 'agent work', agentRef, ...FRESH_OFFER }, { taskId: 'no-home-offer', seq: server.nextSeq() }));
     const decline = await server.waitFor((entry) => entry.type === 'task.decline' && entry.task_id === 'no-home-offer');
+    // B2: declined by Agent home admission -> declined non-retryably by the advertised-flag check (this daemon advertises no agent-home-contract); the asserted outcome is the same
     expect(decline.payload).toMatchObject({ retryable: false, agentRef });
     expect(adapter.sessions).toHaveLength(0);
     expect(server.received.some((entry) => entry.type === 'task.claim')).toBe(false);
@@ -77,14 +79,14 @@ describe('Agent-only daemon admission (#925)', () => {
     const adapter = await startDaemon();
     const cancelled = 'agent-pre-cancel';
     server.send(createEnvelope('task.cancel', { reason: 'operator cancelled first' }, { taskId: cancelled, seq: server.nextSeq() }));
-    server.send(createEnvelope('task.offer_for_agent', {
-      instruction: 'agent work', agentRef: { agentId: 'pre-cancel-agent', profileRevision: 'r1' },
+    server.send(createEnvelope('task.offer', {
+      instruction: 'agent work', agentRef: { agentId: 'pre-cancel-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
     }, { taskId: cancelled, seq: server.nextSeq() }));
     const cancellationDecline = await server.waitFor((entry) => entry.type === 'task.decline' && entry.task_id === cancelled);
     expect((cancellationDecline.payload as { reason: string }).reason).toMatch(/cancelled before claim/i);
 
-    const duplicate = createEnvelope('task.offer_for_agent', {
-      instruction: 'agent work', agentRef: { agentId: 'duplicate-agent', profileRevision: 'r1' },
+    const duplicate = createEnvelope('task.offer', {
+      instruction: 'agent work', agentRef: { agentId: 'duplicate-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
     }, { taskId: 'agent-duplicate', seq: server.nextSeq() });
     server.send(duplicate);
     await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'agent-duplicate');
@@ -96,8 +98,8 @@ describe('Agent-only daemon admission (#925)', () => {
 
   it('runs an Agent offer in the Agent home (#319)', async () => {
     const adapter = await startDaemon();
-    server.send(createEnvelope('task.offer_for_agent', {
-      instruction: 'agent work', agentRef: { agentId: 'no-root-agent', profileRevision: 'r1' },
+    server.send(createEnvelope('task.offer', {
+      instruction: 'agent work', agentRef: { agentId: 'no-root-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
     }, { taskId: 'no-root-agent-offer', seq: server.nextSeq() }));
     await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'no-root-agent-offer');
     expect(adapter.sessions).toHaveLength(1);

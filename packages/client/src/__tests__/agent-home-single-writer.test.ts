@@ -18,6 +18,7 @@ import { connectControlClient } from '../bin/control-client';
 import { type ControlStatusResult } from '../daemon/control-protocol';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 
 /**
  * WP0 regression suite for the per-canonical-Agent-home single-writer gate
@@ -89,6 +90,7 @@ describe('canonical Agent home single writer (WP0)', () => {
       serverUrl: server.url,
       storeDir,
       agentHome: { hostStorageRoot },
+      agentEgress: FRESH_DAEMON_EGRESS,
       ...overrides,
     }, [pi, claude]);
     daemon = started;
@@ -103,9 +105,10 @@ describe('canonical Agent home single writer (WP0)', () => {
     agentId: string,
     runtime?: RuntimeId,
   ): Envelope {
-    return createEnvelope('task.offer_for_agent', {
+    return createEnvelope('task.offer', {
       instruction: `work for ${agentId}`,
       agentRef: { agentId, profileRevision: 'r1' },
+      ...FRESH_OFFER,
       ...(runtime === undefined ? {} : { runtime }),
     }, { taskId, seq: server.nextSeq() });
   }

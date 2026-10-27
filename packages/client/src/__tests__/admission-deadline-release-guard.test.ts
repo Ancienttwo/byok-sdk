@@ -11,6 +11,7 @@ import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 
 /**
  * The deadline-release semantics that `admission-deadline.test.ts` can only
@@ -76,8 +77,8 @@ const unusedBlobClient: BlobResolver = {
 
 function offerFor(taskId: string, seq: number): Envelope {
   return createEnvelope(
-    'task.offer_for_agent',
-    { instruction: 'work', runtime: 'pi', agentRef: AGENT_REF },
+    'task.offer',
+    { instruction: 'work', runtime: 'pi', agentRef: AGENT_REF, ...FRESH_OFFER },
     { taskId, seq },
   );
 }
@@ -108,6 +109,7 @@ describe('a startup-deadline decline hands the canonical Agent home back to the 
         storeDir,
         productId: 'deadline-release-guard',
         startupTimeoutMs: DEADLINE_MS,
+        ...freshOfferRunnerDeps(),
       };
       const runner = new TaskRunner(deps);
 

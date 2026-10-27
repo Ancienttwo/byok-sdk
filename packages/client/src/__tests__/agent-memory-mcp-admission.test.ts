@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 import { TestServer } from './fixtures/test-server';
 
 const capture = vi.hoisted(() => ({
@@ -54,11 +55,11 @@ it.skipIf(process.platform !== 'linux' && !isAgentMemoryFilesystemHelperSupporte
   'ordinary Agent admission with memory mode %s preserves the non-MCP adapter boundary', async mode => {
     server = await TestServer.start();
     const adapter = new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true });
-    daemon = createDaemonWithAdapters(await config(mode), [adapter], { longPoll: { idleDelayMs: 10, retryDelayMs: 10 } });
+    daemon = createDaemonWithAdapters({ ...await config(mode), agentEgress: FRESH_DAEMON_EGRESS }, [adapter], { longPoll: { idleDelayMs: 10, retryDelayMs: 10 } });
     await daemon.pair('pairing-code'); await daemon.start();
     await server.waitFor(envelope => envelope.type === 'conn.hello');
-    server.pushLongPollEvent(createEnvelope('task.offer_for_agent', {
-      instruction: 'No external action', runtime: 'pi', agentRef: { agentId: 'agent', profileRevision: '1' },
+    server.pushLongPollEvent(createEnvelope('task.offer', {
+      instruction: 'No external action', runtime: 'pi', agentRef: { agentId: 'agent', profileRevision: '1' }, ...FRESH_OFFER,
     }, { taskId: 'memory-admission-task', seq: server.nextSeq() }));
     const result = await server.waitFor(envelope => envelope.task_id === 'memory-admission-task'
       && (envelope.type === 'task.started' || envelope.type === 'task.decline'));

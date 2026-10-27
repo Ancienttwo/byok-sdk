@@ -12,6 +12,7 @@ import { TaskRunner } from '../daemon/task-runner';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_OFFER, freshOfferRunnerDeps, resumeSession } from './fixtures/fresh-offer';
 
 /**
  * `task.decline` and `task.fail` leave this device. Agent-home errors name the
@@ -61,12 +62,12 @@ class FixedSessionAdapter extends StubRuntimeAdapter {
 }
 
 function readerOffer(taskId: string, seq: number, sessionRef?: string): Envelope {
-  return createEnvelope('task.offer_for_agent', {
+  return createEnvelope('task.offer', {
     instruction: 'outbound reason work',
     runtime: 'pi',
     agentRef: AGENT,
     homeAccess: 'memory-reader' as const,
-    ...(sessionRef === undefined ? {} : { sessionRef }),
+    ...(sessionRef === undefined ? FRESH_OFFER : resumeSession(sessionRef)),
   }, { taskId, seq });
 }
 
@@ -92,6 +93,7 @@ async function readerRunner(adapter: StubRuntimeAdapter): Promise<{
     approvalRegistry: new ApprovalRegistry(),
     storeDir,
     productId: 'outbound-reason',
+    ...freshOfferRunnerDeps(),
   });
   return { runner, sent, hostStorageRoot, canonicalRoot: await fs.realpath(hostStorageRoot) };
 }
