@@ -3,7 +3,7 @@
  * updates itself, so another version is an advisory. This is the newest
  * version that OAR's live evidence covers for the vendored profile (the
  * prompt-option probe in OAR docs/runtimes/grok.md, read at OAR c264f17).
- * The vendored c88a514 Grok runtime is byte-identical upstream to c264f17;
+ * The vendored 51b83c9 Grok runtime is byte-identical upstream to c264f17;
  * shared/acp/profile.ts only adds an optional session-start timeout that Grok
  * does not set. Native contracts the adapter depends on are probed directly
  * (`agent stdio`).
