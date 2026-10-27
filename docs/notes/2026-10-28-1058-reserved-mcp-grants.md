@@ -31,3 +31,12 @@ Owner 已明确批准按实际变化更新 golden：`client.d.ts` 增加内部�
 ## main 集成复验（2026-10-28）
 
 两份上游提交无冲突合入；生产补丁语义保持原样。新基线 build/typecheck/API surface/version authority 均 exit 0，日志前缀 `/tmp/byok-1058-main-`。七文件完整定向命令为 122 passed / 6 skipped，exit 0；本次没有复现上轮审批启动退出。真实 Codex 0.164.0 loopback 再次通过：SDK helper 一次实际调用、host 零次调用并明确 approval denial。该结果仅覆盖本次运行，不把前一轮未诊断的进程退出宣称为已修复。
+
+
+## CI scope mapping 签字
+
+PR #1066 首轮 CI run `40578376946` 在 scope selection 拒绝新增 `packages/client/scripts/codex-reserved-mcp-loopback.mjs`，尚未执行下游测试。精确补入该文件，沿用现有 `codex-app-server-real.mjs` 的 client owner 映射；既有依赖图会继续展开其消费者与 dataplane，没有新增 wildcard 或修改未知脚本拒绝规则。
+
+签字依据：2026-10-28，协调席位 **wB:p4** 按 **#1008 已有协调代签授权** 选择「批准该精确映射」。这是该映射的协调代签，不是新的 owner 产品决定。
+
+新增回归验证两条 Codex probe 路径选择完全相同的范围，未知脚本仍被拒绝。`node --test scripts/ci/select-impact.test.mjs scripts/ci/plan-ci.test.mjs`：50 passed、exit 0，日志 `/tmp/byok-1058-ci-mapping.log`。生产源码保持冻结，最终 CI 绑定后续 head 单独核对。

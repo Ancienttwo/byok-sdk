@@ -476,8 +476,9 @@ export function selectImpact(paths, context = {}) {
     if (/^scripts\/api-surface\/(?:check-oar-bridge\.test\.mjs|oar-bridge-types\.ts|tsconfig\.oar-bridge\.json)$/.test(path)) {
       dirs.add('packages/client'); continue;
     }
-    // Manual live Codex smoke (smoke:codex-app-server); it imports the vendored session.
-    if (path === 'packages/client/scripts/codex-app-server-real.mjs') { dirs.add('packages/client'); continue; }
+    // Opt-in Codex probes select their client runtime owner; CI does not invoke the probes.
+    if (path === 'packages/client/scripts/codex-app-server-real.mjs'
+      || path === 'packages/client/scripts/codex-reserved-mcp-loopback.mjs') { dirs.add('packages/client'); continue; }
     // #701: the vendored pi-subagents factory and its provenance. Both Pi host
     // flavors inline it; the client suite binds every vendored byte and runs
     // the CommonJS single-file fixture.
