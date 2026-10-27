@@ -477,6 +477,18 @@ describe('readTaskEvents against the relay', () => {
     relay.stop();
   });
 
+  it('attaches nothing when the read is stopped during its first store read', async () => {
+    const relay = new TaskEventRelay({});
+    const read = deferred<TaskState | undefined>();
+    const abort = new AbortController();
+    const pending = first(readTaskEvents({ relay, readState: () => read.promise }, 'stopped-early', { signal: abort.signal }));
+    abort.abort();
+    read.resolve('Running');
+    expect(await pending).toEqual({ value: undefined, done: true });
+    expect(relay.feed('stopped-early')).toBeUndefined();
+    relay.stop();
+  });
+
   it('drops the feed it attached when the task turns terminal before the feed listened', async () => {
     const relay = new TaskEventRelay({});
     const reads: Array<TaskState | undefined> = ['Running', 'Complete'];

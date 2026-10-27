@@ -168,7 +168,8 @@ async function* followTaskEvents(
     // recreates relay state for it.
     if (state === undefined) throw taskNotFound(taskId);
     if (TERMINAL_STATES.has(state)) throw new TaskEventsUnavailableError(taskId, 'feed_expired');
-    feed = relay.attach(taskId);
+    // A reader stopped during that read must not leave a feed behind.
+    feed = signal.aborted ? undefined : relay.attach(taskId);
     if (feed === undefined) return;
     // A terminal committed between the read and the attach never reached the
     // new feed, which would then never end: read again now that it listens.
