@@ -426,7 +426,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/protocol` | Wire schemas and codecs; codegen negative control | `@cfworker/json-schema`, `zod` | allowed | 156720 B |
 | `@byok-sdk/protocol/constants` | Schema-free protocol values | — | forbidden | 5460 B |
 | `@byok-sdk/protocol/package.json` | Package metadata | — | forbidden | 1667 B |
-| `@byok-sdk/server` | Resident Node server | `@cfworker/json-schema`, `@hono/node-server`, `hono`, `zod` | allowed | 795655 B |
+| `@byok-sdk/server` | Resident Node server | `@cfworker/json-schema`, `@hono/node-server`, `hono`, `zod` | allowed | 800754 B |
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1609 B |
 | `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 654678 B |
 | `@byok-sdk/ui-runtime/package.json` | Package metadata | — | forbidden | 1337 B |
