@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { BlobRefSchema } from './blob';
+import { TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH } from './constants';
 
 /**
  * Maximum UTF-16 length of {@link AgentEventSpillSchema}'s `unstoredReason`.
@@ -114,6 +115,8 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
     contextTokens: z.number().int().nonnegative().optional(),
     contextWindow: z.number().int().positive().optional(),
     contextSource: z.enum(['provider', 'estimate']).optional(),
+    // Served model as the runtime reported it, never the requested id.
+    model: z.string().min(1).max(TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH).optional(),
   }),
 ]);
 

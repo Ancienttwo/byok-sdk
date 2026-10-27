@@ -282,10 +282,10 @@ export function policyRevisionMismatchPolicies(
  */
 export const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 
-export function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
+export function buildAdapter(id: RuntimeId, config: DaemonConfig, piByokLauncher: DaemonConfig['piByokLauncher']): RuntimeAdapter {
   switch (id) {
     case 'pi':
-      return new PiAdapter({ nativeAssetRoot: config.nativeAssetRoot, byokLauncher: config.piByokLauncher, ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }), ...(config.durablePi === true ? { durablePi: true } : {}) });
+      return new PiAdapter({ nativeAssetRoot: config.nativeAssetRoot, byokLauncher: piByokLauncher, ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }), ...(config.durablePi === true ? { durablePi: true } : {}) });
     case 'claude':
       return new ClaudeAdapter({ nativeAssetRoot: config.nativeAssetRoot });
     case 'codex':
@@ -302,11 +302,11 @@ export function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapte
  * already applies to an unknown *requested* runtime — and it de-duplicates
  * repeated entries for free.
  */
-export function buildDefaultAdapters(config: DaemonConfig): RuntimeAdapter[] {
+export function buildDefaultAdapters(config: DaemonConfig, piByokLauncher: DaemonConfig['piByokLauncher']): RuntimeAdapter[] {
   const ids = config.runtimeAllowlist
     ? ALL_RUNTIME_IDS.filter((id) => config.runtimeAllowlist?.includes(id))
     : ALL_RUNTIME_IDS;
-  return ids.map((id) => buildAdapter(id, config));
+  return ids.map((id) => buildAdapter(id, config, piByokLauncher));
 }
 
 /**

@@ -1459,6 +1459,22 @@ failure, a refused or changed start receipt and a protocol violation are `unknow
 Its start failures are typed and not retryable: a worker that ends on its own
 before its start receipt is `runtime_exited`, any other is `unknown`.
 
+### Offer admission timings
+
+The one `task.claim` or `task.decline` that the task runner sends for an
+offer carries `admission`; a sealed task's decline carries it in plaintext,
+including the sealed-open, gate self-check and `sealed_key_unavailable`
+declines, and a decline sent outside the task runner (the inbound journal's
+over-bound refusal, restart recovery) carries none. It holds device
+monotonic-clock durations in whole milliseconds, from the `task.offer`
+dispatch to that message, with a required `totalMs` and a key for each timed
+phase that ran (`agentHomeWaitMs`, `messageHelperPreflightMs`,
+`resultHelperPreflightMs`, `toolsetProbeMs`, `runtimeLaunchMs`). The daemon
+observer's `claimed` and `failed` (`preClaim`) events carry the same object.
+It is telemetry for admission calibration, not task state: `TaskAttempt` does
+not store it and `TerminalResult` does not project it; a decline's timings are
+read from the typed decline envelope.
+
 ### Terminal inference usage observation
 
 The three terminal messages may carry one bounded `TerminalInferenceUsage`
@@ -1479,6 +1495,10 @@ with `inputTokens = input + cacheRead + cacheWrite`, because Pi's own `input`
 already excludes both cache figures — so Pi's block carries the last call's
 figures, as telemetry like the others. A Pi run that reported no usage still
 omits the block rather than fabricating one from device facts.
+The block's `model` is the last observation's served model (`usage.model`:
+Pi's `responseModel`, Claude's single root-agent `message.model` for the turn;
+Codex reports none). A last observation with a model and no token counts still
+yields the block.
 The protocol enforces safe non-negative bounded numbers and a canonical UTC
 device timestamp. Cloud records first-terminal-wins as usual and projects the
 same typed object from the winning receipt without parsing raw receipt bytes
@@ -3552,7 +3572,9 @@ wire contracts do not change.
 
 Standalone adapter Hosts must pass `scratch: await createExecutionScratch({ root })` to operation.start and Pi launch resolution. They must await release after child disposal. Scratch roots must be short, absolute, private, canonical and exclusive. On Unix, the root must belong to the current process user before any permission change. Unix socket validation reserves 16 bytes for the runtime socket name and one terminating NUL. The root limit is 61 UTF-8 bytes on macOS and 65 on Linux.
 
-Without `storage.scratchRoot`, derive the default from the canonical store identity (#493). Resolve the deepest existing ancestor of `storeDir` to its real path, then append any missing path components. If `<canonicalStoreDir>/tmp` exceeds the platform limit, use `/private/tmp/byok-scratch-<hash>` on macOS or `/tmp/byok-scratch-<hash>` on Linux. The hash is the first 16 lowercase hexadecimal characters of SHA-256 over the UTF-8 canonical store path. All aliases of that store select the same fixed root. Otherwise, keep the lexical `path.join(path.resolve(storeDir), 'tmp')` and validate it. If that alias exceeds the limit, construction fails. Windows keeps the lexical path without a Unix socket limit.
+Each configured filesystem path is folded into its on-disk spelling once, at the boundary that owns it, and every consumer uses the folded value (#1030). `DeviceStore.resolveDir` folds `storeDir` for the daemon and every CLI, so the control socket or pipe name, the control token, the Agent-home owner identity, helper `BYOK_STORE_DIR` and every retention root derive from one spelling. The daemon config resolution folds `piByokLauncher.sessionDir` for both the Pi launcher and retention, and storage config resolution folds an explicit `storage.scratchRoot` and each `storage.skillPackDataDirs` entry. Folding resolves Windows name aliases: 8.3 short names and letter case, and letter case on a case-insensitive macOS volume. It never follows a component that lstat reports as a link (a symbolic link, or a junction to a drive-letter path): such a path keeps its configured spelling and the link checks below reject it. Volume mount points (junctions to `\??\Volume{GUID}\`), subst drives and mapped network drives look like plain directories or roots to lstat, so construction resolves them once to their final path. A missing tail keeps its spelling, and any other lookup error fails construction. Store-mutex, path-mutation-gate, Agent-home root and relocation identities stay physical: they use the real path. Retention mutates under a root only when the root's real path equals its spelling; otherwise the sweep fails closed with `retention_root_identity_invalid`.
+
+Without `storage.scratchRoot`, derive the default from the canonical store identity (#493). Resolve the deepest existing ancestor of `storeDir` to its real path, then append any missing path components. If `<canonicalStoreDir>/tmp` exceeds the platform limit, use `/private/tmp/byok-scratch-<hash>` on macOS or `/tmp/byok-scratch-<hash>` on Linux. The hash is the first 16 lowercase hexadecimal characters of SHA-256 over the UTF-8 canonical store path. All aliases of that store select the same fixed root. Otherwise, keep the lexical `<storeDir>/tmp` of the folded store and validate it. If that alias exceeds the limit, construction fails. Windows keeps the lexical path without a Unix socket limit.
 
 An explicit `storage.scratchRoot` must pass validation; an excessive length fails construction. A failed root never triggers a substitute. External roots persist their store ownership. A standalone root is exclusive to its process and must be provisioned fresh on process restart. No silent runtime or root fallback is provided.
 

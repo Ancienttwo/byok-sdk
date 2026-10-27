@@ -36,7 +36,7 @@ export interface OfferManifestInput
 
 /** Resolves the runtime launch, seals the manifest, and admits and pins a prepared Execution. */
 export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseContext, input: OfferManifestInput) {
-  const { taskId, decline, admissionWithdrawn } = phase;
+  const { taskId, decline, admissionWithdrawn, admission } = phase;
   const {
     agentBinding, agentRef, agentMemory, preparation, preparedMemorySelected, readerAttempt, sessionRef, env, mcpEnv,
     mcpToolsetTools, offered, pick, prepared, scratch, requiredToolsets, resolvedMcp, workspaceDir, blobAbort,
@@ -45,10 +45,11 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
   let runtimeLaunch: PiRuntimeLaunchResources | undefined;
   if (prepared.operation.resolveRuntimeLaunch !== undefined) {
     try {
-      runtimeLaunch = await prepared.operation.resolveRuntimeLaunch({
+      const resolveRuntimeLaunch = prepared.operation.resolveRuntimeLaunch;
+      runtimeLaunch = await admission.time('runtimeLaunchMs', () => resolveRuntimeLaunch({
         kind: preparation === undefined ? 'instruction' : 'prepared', cwd: workspaceDir, env,
         scratch,
-      });
+      }));
     } catch (error) {
       if (!admissionWithdrawn()) decline(`runtime launch admission failed: ${errorMessage(error)}`, false);
       return;
@@ -225,7 +226,7 @@ export interface OfferClaimInput
 
 /** Claims the task, resolves its instruction and binds prepared Agent memory. */
 export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, input: OfferClaimInput) {
-  const { taskId, admissionWithdrawn } = phase;
+  const { taskId, admissionWithdrawn, admission } = phase;
   const { agentBinding, agentRef, pick, manifest, preparedLaunch, blobAbort, payload } = input;
   let { taskMcpServers } = input;
   // All semantic admission is now in `prepare()` and the frozen manifest.
@@ -235,6 +236,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
   await this['deps'].beforeClaim?.(taskId, manifest.descriptor.id);
   if (admissionWithdrawn()) return;
   if (!isKnownRuntimeId(manifest.descriptor.id)) this['claimedHarnesses'].set(taskId, manifest.descriptor.id);
+  const timings = admission.snapshot();
   this['deps'].send(
     createEnvelope(
       'task.claim',
@@ -269,6 +271,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
         // adapter's own truth and leave the server fail-closing on it
         // forever.
         capabilities: toRuntimeInfoCapabilities(manifest.descriptor.capabilities),
+        ...(timings === undefined ? {} : { admission: timings }),
       },
       { taskId },
     ),
