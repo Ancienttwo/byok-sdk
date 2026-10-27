@@ -36,7 +36,7 @@ export async function existingDirectory(directory: string): Promise<boolean> {
   return true;
 }
 
-export async function removeOwnedPath(root: string, target: string, now: Date): Promise<number> {
+export async function removeOwnedPath(root: string, target: string, now: Date, maxEntries = 16_384): Promise<number> {
   const relative = path.relative(root, target);
   if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('retention_path_outside_root');
   if (!await existingDirectory(root)) return 0;
@@ -45,7 +45,7 @@ export async function removeOwnedPath(root: string, target: string, now: Date): 
     ancestor = path.join(ancestor, segment);
     if (!await existingDirectory(ancestor)) return 0;
   }
-  const bytes = (await measureTree(target, now)).bytes;
+  const bytes = (await measureTree(target, now, maxEntries)).bytes;
   // Recheck after measurement, before the irreversible operation.
   if (!await existingDirectory(root)) throw new Error('retention_root_disappeared');
   await fs.rm(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });

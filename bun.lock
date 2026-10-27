@@ -111,6 +111,7 @@
       },
       "devDependencies": {
         "@byok-sdk/client": "workspace:*",
+        "@byok-sdk/core": "workspace:*",
         "@hono/node-server": "^2.0.10",
         "@types/node": "^24",
         "@types/pg": "^8.20.4",
