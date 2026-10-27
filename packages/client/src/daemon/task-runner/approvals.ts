@@ -84,7 +84,7 @@ export function dispatchApproval(
         // `approvals.resolve`, this same method's own timeout branch above,
         // `finish()`'s fail-closed cleanup, and the registry's own
         // bounded-eviction fallback all funnel through `onResolve` here.
-        if (origin === 'local') {
+        if (origin === 'local' || active.localApprovalDecision === approvalId) {
           this['sendApprovalResolved'](taskId, approvalId, decision);
         }
         // C1: fires BEFORE `resolve(...)` below — a caller chaining
@@ -161,21 +161,23 @@ export async function handleApprove(this: TaskRunner, taskId: string, approvalId
   // can already have reassigned it to a different, queued approval by the
   // time control returns here.
   const resolvedId = approvalId;
+  if (decidedBy === 'local') active.localApprovalDecision = resolvedId;
   try {
-    await active.session.resolveApproval(true);
-  } catch (err) {
-    if (err instanceof NoPendingApprovalError) {
-      this['deps'].onStaleApprovalDecision?.(taskId, 'approve');
+    try {
+      await active.session.resolveApproval(true);
+    } catch (err) {
+      if (err instanceof NoPendingApprovalError) {
+        this['deps'].onStaleApprovalDecision?.(taskId, 'approve');
+        return;
+      }
+      await this['fail'](taskId, `failed to resume session after approval: ${errorMessage(err)}`, false);
       return;
     }
-    await this['fail'](taskId, `failed to resume session after approval: ${errorMessage(err)}`, false);
-    return;
+    // Acceptance finding 1: see `clearPendingApproval`'s own doc comment.
+    this['clearPendingApproval'](resolvedId, 'approve', undefined);
+  } finally {
+    if (active.localApprovalDecision === resolvedId) active.localApprovalDecision = undefined;
   }
-  // Acceptance finding 1: see `clearPendingApproval`'s own doc comment.
-  this['clearPendingApproval'](resolvedId, 'approve', undefined);
-  // The registry resolves every decision on this path as 'wire', which
-  // reports nothing; a local decision is new to the server.
-  if (decidedBy === 'local') this['sendApprovalResolved'](taskId, resolvedId, 'approve');
 }
 
 export async function handleReject(this: TaskRunner, taskId: string, reason: string | undefined, approvalId: string, decidedBy: ApprovalOrigin): Promise<void> {
@@ -206,23 +208,27 @@ export async function handleReject(this: TaskRunner, taskId: string, reason: str
   // still inside this await, can already have reassigned
   // `active.pendingApprovalId` to a different, queued approval).
   const resolvedId = approvalId;
+  if (decidedBy === 'local') active.localApprovalDecision = resolvedId;
   try {
-    await active.session.resolveApproval(false, reason);
-  } catch (err) {
-    if (err instanceof NoPendingApprovalError) {
-      this['deps'].onStaleApprovalDecision?.(taskId, 'reject', reason);
-      return;
+    try {
+      await active.session.resolveApproval(false, reason);
+    } catch (err) {
+      if (err instanceof NoPendingApprovalError) {
+        this['deps'].onStaleApprovalDecision?.(taskId, 'reject', reason);
+        return;
+      }
+      // best-effort — still report the rejection outcome below
     }
-    // best-effort — still report the rejection outcome below
+    // Acceptance finding 1: see `clearPendingApproval`'s own doc comment.
+    // Must run BEFORE `finish()` below — its own fail-closed cleanup
+    // defaults to origin 'local' (see `ApprovalRegistry.resolve`'s default
+    // parameter), which would incorrectly echo `task.approval_resolved`
+    // back to a server that already knows this decision (it sent this
+    // task.reject itself) if this hadn't already cleared it as 'wire' here.
+    this['clearPendingApproval'](resolvedId, 'reject', reason);
+  } finally {
+    if (active.localApprovalDecision === resolvedId) active.localApprovalDecision = undefined;
   }
-  // Acceptance finding 1: see `clearPendingApproval`'s own doc comment.
-  // Must run BEFORE `finish()` below — its own fail-closed cleanup
-  // defaults to origin 'local' (see `ApprovalRegistry.resolve`'s default
-  // parameter), which would incorrectly echo `task.approval_resolved`
-  // back to a server that already knows this decision (it sent this
-  // task.reject itself) if this hadn't already cleared it as 'wire' here.
-  this['clearPendingApproval'](resolvedId, 'reject', reason);
-  if (decidedBy === 'local') this['sendApprovalResolved'](taskId, resolvedId, 'reject');
   await this['settleSemanticTerminal'](active, async () => {
     await this['interruptBounded'](active);
     // As with cancel, the server has already closed its progress stream.

@@ -530,6 +530,42 @@ describe('daemon local observability (DaemonObserver)', () => {
       ]);
     });
 
+    it('approve() reports the local decision before the next queued approval is requested', async () => {
+      const adapter = new StubRuntimeAdapter();
+      const { daemon: d } = await setupDaemon(adapter);
+
+      server.send(
+        createEnvelope(
+          'task.offer_for_agent',
+          { agentRef: freshTestAgentRef(),  instruction: 'two approvals' },
+          { taskId: 'task-approve-local-queued', seq: server.nextSeq() },
+        ),
+      );
+      await server.waitFor((e) => e.type === 'task.started');
+      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      const [session] = adapter.sessions;
+      // Both requests reach the pump together: the second waits behind the
+      // first before the first's task.await_approval reaches the server.
+      session!.emit({ type: 'needs_approval', summary: 'first' });
+      session!.emit({ type: 'needs_approval', summary: 'second' });
+      const request = await server.waitFor((e) => e.type === 'task.await_approval' && e.task_id === 'task-approve-local-queued');
+      const first = (request.payload as { approvalId: string }).approvalId;
+
+      await d.approve('task-approve-local-queued', { approvalId: first });
+
+      const second = await server.waitFor((e) => e.type === 'task.await_approval' && e.task_id === 'task-approve-local-queued'
+        && (e.payload as { approvalId: string }).approvalId !== first);
+      const order = server.received
+        .filter((e) => e.task_id === 'task-approve-local-queued' && (e.type === 'task.await_approval' || e.type === 'task.approval_resolved'))
+        .map((e) => `${e.type}:${(e.payload as { approvalId: string }).approvalId}`);
+      // The relay moves a task to Running on task.approval_resolved, so it must not follow the next request.
+      expect(order).toEqual([
+        `task.await_approval:${first}`,
+        `task.approval_resolved:${first}`,
+        `task.await_approval:${(second.payload as { approvalId: string }).approvalId}`,
+      ]);
+    });
+
     it('reject() resolves approval(false, reason) and reports task.fail', async () => {
       const adapter = new StubRuntimeAdapter();
       const { daemon: d } = await setupDaemon(adapter);

@@ -166,6 +166,13 @@ export interface ActiveTask {
    */
   pendingApprovalId?: string;
   /**
+   * The approval a `Daemon.approve`/`reject` call is deciding right now. The
+   * registry resolves it as `'wire'`, so `dispatchApproval`'s callback reads
+   * this to report the local decision before it dispatches the next queued
+   * approval.
+   */
+  localApprovalDecision?: string;
+  /**
    * M4 Phase 4 (fold-in from the P3 gate): FIFO queue of `requestApproval`
    * calls for this SAME task that arrived while another one was already
    * dispatched (`pendingApprovalId` set) — see `requestApproval`'s own doc
