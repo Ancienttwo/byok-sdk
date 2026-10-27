@@ -6,17 +6,21 @@
   envelope is rejected; there is no v3 reader and no negotiation. Drain,
   migrate stored receipts, then upgrade server and client together; see
   [the wire v4 upgrade note](docs/releases/925-wire-v4.md).
-  - Every offer is Agent-bound. `conn.ack`, `task.offer`,
-    `task.offer_with_toolsets`, `task.offer_sealed` and
-    `task.offer_with_toolsets_sealed` are removed, with
-    `ConnAckPayloadSchema`, `TaskOfferPayloadSchema`,
-    `TaskOfferWithToolsetsPayloadSchema` and their payload types and the
+  - Every offer is Agent-bound. `conn.ack` and the runtime-only offers
+    (`task.offer`, `task.offer_with_toolsets`, `task.offer_sealed` and
+    `task.offer_with_toolsets_sealed`) are removed, with
+    `ConnAckPayloadSchema`, the runtime-only `TaskOfferPayloadSchema`,
+    `TaskOfferWithToolsetsPayloadSchema` and their payload types (v4 reuses
+    the `task.offer` and `TaskOfferPayload` names for the merged Agent
+    offer, below) and the
     `strict-agent-only` flag (`STRICT_AGENT_ONLY_CAPABILITY`, also removed
     from `@byok-sdk/server`). The daemon declines every offer when it has no
     Agent home. `DaemonConfig.strictAgentOnly` is removed and raises
     `DaemonConfigFieldRemovedError`.
     Runtime adapters take the client-owned `RuntimeTaskInput` (exported from
-    `@byok-sdk/client`) instead of the removed wire `TaskOfferPayload`.
+    `@byok-sdk/client`) instead of a wire offer payload: `instruction`,
+    `runtime`, `harnessId`, `dispatchSelection`, `limits`, and `sessionRef`
+    only when the offer resumes.
   - `approvalId` is required on `task.await_approval`, `task.approve` and
     `task.reject`; a decision resolves only the approval it names.
     `Daemon.approve(taskId, { approvalId })` and
@@ -81,7 +85,16 @@
     by default) a retry with the same messageId fails with an envelope
     decoding error and delivers nothing; after it, the retry is a new
     message. `@byok-sdk/protocol` adds `WIRE_V3_TO_V4_TYPES`,
-    `wireV4TypeOf` and `migrateWireV3Envelope`; `@byok-sdk/cloud` adds the
+    `wireV4TypeOf`, `wireV4FormOf` and `migrateWireV3Envelope`; every v3 Agent
+    offer maps to `task.offer` with its `session` derived (a resume type's
+    `sessionRef` becomes `{ mode: 'resume', sessionRef }`, a fresh or prepared
+    type gains `{ mode: 'fresh' }`, and a `task.offer_for_agent` without
+    `sessionRef` is refused `invalid_under_v4`), and each other `*_sealed`
+    type maps to its plaintext type. A stored `task.offer` with an AgentRef is
+    a v4 receipt and stays unchanged, so the migration can run again. A
+    migrated sealed offer receipt keeps ciphertext bound to its v3 type name,
+    so it no longer opens under v4; nothing in the SDK opens a stored offer
+    again. `@byok-sdk/cloud` adds the
     store-independent half (`migrateWireV3Receipt`, `wireV4ReceiptKind`,
     `assertWireV4MigrationConfirmed` and the types and errors above). All of
     it ships in 0.31.x only; 0.32.0 removes it (#1017).
@@ -90,6 +103,52 @@
     with `harnessId` needed only the device's declared harness inventory.
     Bundled daemons always advertise the flag; a third-party daemon that
     declares harnesses without it has such offers refused.
+  - One offer type. `task.offer_for_agent`,
+    `task.offer_for_agent_with_egress`,
+    `task.offer_for_agent_with_egress_fresh`, `task.offer_prepared` and their
+    three sealed twins merge into one `task.offer` with a required `session`:
+    `{ mode: 'resume', sessionRef }` (1 to 512 characters) or
+    `{ mode: 'fresh' }`. A prepared offer is the one with `preparation`. A
+    fresh or prepared offer needs `egressPolicy`, `messageEgress` needs
+    `egressPolicy`, and `routineRef` appears only on a fresh sealed offer. Both
+    branches and `limits` are strict. The gates of the old types are field and
+    value rows on `task.offer`; a prepared offer now also needs
+    `agent-memory-selection`, which a daemon advertises with
+    `agent-home-contract`.
+  - Sealed is a payload branch. `task.steer_sealed` and the seven sealed task
+    outputs are their plaintext type with a `sealed` member, and a sealed
+    offer is a `task.offer` with `sealing`. A sealed offer is bound to family
+    `task.offer`. `EnvelopeSchema` has 28 branches (47 in v3).
+    `SEALED_SPLIT_TABLE` is keyed by the plaintext type, loses `plainType` and
+    gains `marker` (`sealing` or `sealed`).
+  - `@byok-sdk/protocol` removes `TaskOfferForAgentPayloadSchema`,
+    `TaskOfferForAgentWithEgressPayloadSchema`,
+    `TaskOfferForAgentWithEgressFreshPayloadSchema`,
+    `TaskOfferPreparedPayloadSchema` and their payload types, the three
+    `TaskOfferForAgent*SealedPayload` types, `TASK_OFFER_TYPES`,
+    `isTaskOfferType`, `TaskOfferType`, `isSealedMessageType` and
+    `SealedMessageType`. It adds `TaskOfferPayloadSchema` /
+    `TaskOfferPayload` (both branches), `TaskOfferPlainPayloadSchema` /
+    `TaskOfferPlainPayload`, `TaskOfferSealedPayloadSchema` /
+    `TaskOfferSealedPayload`, `SessionSelectionSchema` / `SessionSelection`,
+    `TaskSteerSealedPayloadSchema`, `isSealableMessageType`,
+    `SealableMessageType` and `isSealedPayload(type, payload)`. The payload
+    schemas and types of `task.steer` and the seven outputs are plaintext |
+    sealed unions; narrow with `payload.sealed !== undefined`
+    (`payload.sealing !== undefined` on `task.offer`) before reading a
+    plaintext field.
+  - Host lanes keep their methods (`enqueueAgentOffer`,
+    `enqueueAgentEgressOffer`, `enqueuePreparedOffer`, `submitAgentExecution`
+    and the sealed ones). Each sends `task.offer`, takes the wire payload with
+    the Host's own `session`, and refuses a `session` that does not fit the
+    lane. `TaskOfferReadback.type` is always `'task.offer'`, and
+    `DeviceTerminal.envelope.type` is one of the four plaintext terminal
+    types. `ByokServer.dispatch` writes `session` itself.
+  - The daemon declines an offer whose gates name a flag its own
+    `conn.hello` lacks, before it opens a sealed offer or starts anything:
+    non-retryably with `reason` `offer_capability_missing: this daemon does
+    not advertise <flags>`, or with `sealed_key_unavailable` when the task
+    seals its output.
   - The protocol test alias `byok-protocol-previous` pins 0.30.2, the last v3
     release, as the rejection oracle. `byok-protocol-floor` (0.27.0) and
     `published-compat.test.ts` are removed until a v4 release is published.
