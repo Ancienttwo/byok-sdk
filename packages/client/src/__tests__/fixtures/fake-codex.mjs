@@ -24,9 +24,10 @@ if (argv.includes('--version')) {
 }
 if (argv[0] === 'login') {
   console.error(
-    process.env.FAKE_CODEX_LOGGED_IN === '0'
-      ? 'Not logged in'
-      : 'Logged in using ChatGPT',
+    process.env.FAKE_CODEX_LOGIN_STATUS_OUTPUT ??
+      (process.env.FAKE_CODEX_LOGGED_IN === '0'
+        ? 'Not logged in'
+        : 'Logged in using ChatGPT'),
   );
   process.exit(process.env.FAKE_CODEX_LOGGED_IN === '0' ? 1 : 0);
 }

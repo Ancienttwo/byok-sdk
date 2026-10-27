@@ -103,6 +103,26 @@ describe('Codex persistent app-server adapter', () => {
       authPresent: false,
     });
   });
+  it.each([
+    ['codex-cli 0.160.0', 'Logged in using an API key - sk-placeholder'],
+    ['codex-cli 0.164.0', 'API key configured - sk-placeholder\nAuthentication is checked when you send a request.'],
+  ])('detects configured API-key auth for %s from the successful status exit', async (version, output) => {
+    vi.stubEnv('FAKE_CODEX_VERSION', version);
+    vi.stubEnv('FAKE_CODEX_LOGIN_STATUS_OUTPUT', output);
+    expect(await adapter().detect()).toMatchObject({
+      kind: 'available',
+      version,
+      authPresent: true,
+    });
+  });
+  it('keeps a failed login status unauthenticated regardless of its display text', async () => {
+    vi.stubEnv('FAKE_CODEX_LOGGED_IN', '0');
+    vi.stubEnv('FAKE_CODEX_LOGIN_STATUS_OUTPUT', 'Logged in using ChatGPT');
+    expect(await adapter().detect()).toMatchObject({
+      kind: 'available',
+      authPresent: false,
+    });
+  });
   it('declares steer, resume, no interactive approval and YOLO-only auto', () => {
     expect(adapter().descriptor.capabilities).toEqual({
       steer: true,
