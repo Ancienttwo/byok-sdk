@@ -52,14 +52,20 @@ describe('Agent egress goes to the Host as is', () => {
     expect(controller.status().latestValue.dropped).toBe(0);
   });
 
-  it('sends a daemon-made error and the runtime event after it in the same batch', () => {
+  it('sends every error of a batch and coalesces the other events to their last', () => {
     const controller = new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY, tenantId: 'tenant-egress' });
     const progress = { type: 'progress', text: 'writing the report' } as const;
     const error = { type: 'error', message: 'artifact "../secret" escapes the workspace' } as const;
     const artifact = { type: 'artifact', name: 'report.txt', contentType: 'text/plain' } as const;
-    expect(controller.projectLatestValue({
-      agentRef, taskId: 'task-daemon-error', events: [progress, error, artifact], daemonEvents: new WeakSet([error]),
-    })).toEqual([error, artifact]);
+    expect(controller.projectLatestValue({ agentRef, taskId: 'task-error-kept', events: [progress, error, artifact] })).toEqual([error, artifact]);
+  });
+
+  it('drops an error over the event-byte bound like any other event', () => {
+    const policy = { ...DEFAULT_AGENT_EGRESS_POLICY, activity: { ...DEFAULT_AGENT_EGRESS_POLICY.activity, maxEventBytes: 64 } };
+    const controller = new AgentEgressController({ policy, tenantId: 'tenant-egress' });
+    const error = { type: 'error', message: 'x'.repeat(128) } as const;
+    expect(controller.projectLatestValue({ agentRef, taskId: 'task-error-bound', events: [error] })).toEqual([]);
+    expect(controller.status().latestValue).toMatchObject({ dropped: 1, lastDropReason: 'backpressure' });
   });
 
   it('appends a contentful reliable payload to the spool unchanged', async () => {

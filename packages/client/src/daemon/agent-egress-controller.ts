@@ -31,8 +31,6 @@ export interface AgentEgressProgressInput {
   readonly agentRef?: AgentRef;
   readonly taskId: string;
   readonly events: readonly AgentEvent[];
-  /** Events of `events` the daemon made itself rather than the runtime. */
-  readonly daemonEvents?: { has(event: AgentEvent): boolean };
 }
 
 export interface AgentEgressReliableInput {
@@ -110,10 +108,9 @@ export class AgentEgressController {
 
   /**
    * Coalesce to the latest value before TaskRunner builds a `task.progress`
-   * envelope. Events go to the Host as the runtime produced them. An event
-   * the daemon made itself (an artifact it refused or could not upload) is
-   * never coalesced: the runtime's next event in the same batch would
-   * otherwise replace the only report of that failure.
+   * envelope. Events go to the Host as the runtime produced them. An `error`
+   * reports a failure, not a value a later event supersedes, so every accepted
+   * `error` is sent; the other events of the batch coalesce to their last.
    */
   projectLatestValue(input: AgentEgressProgressInput): readonly AgentEvent[] {
     // No Agent identity means this is the established legacy task lane. The
@@ -125,10 +122,9 @@ export class AgentEgressController {
     }
     if (this.options.tenantId === undefined) return Object.freeze([...input.events]);
 
-    const daemonMade = input.events.map((event) => input.daemonEvents?.has(event) === true);
+    const errors = new Set<number>();
     let latest = -1;
     for (const [index, event] of input.events.entries()) {
-      if (daemonMade[index]) continue;
       const offered = this.latest.offer({ agentRef: input.agentRef, tenantId: this.options.tenantId, event }, this.options.policy);
       if (!offered.accepted) {
         this.noteDrop('latest-value', offered.reason, input.agentRef);
@@ -138,9 +134,10 @@ export class AgentEgressController {
         this.latestStatus.replaced += 1;
         this.noteDrop('latest-value', 'coalesced', input.agentRef, false);
       }
-      latest = index;
+      if (event.type === 'error') errors.add(index);
+      else latest = index;
     }
-    return Object.freeze(input.events.filter((_event, index) => index === latest || daemonMade[index]));
+    return Object.freeze(input.events.filter((_event, index) => index === latest || errors.has(index)));
   }
 
   async appendReliable(input: AgentEgressReliableInput): Promise<AgentEgressReliableAppendResult> {

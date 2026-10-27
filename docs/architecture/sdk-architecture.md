@@ -1435,7 +1435,7 @@ Agent local/cloud projection 使用 additive capability 和 distinct wire
 messages，不把 fleet placement 写进 task schema。`agent-egress-policy` 绑定
 传输上限与 content-read surface；Agent 事件原样发给 Host（ADR-037 D4）；reliable Agent evidence 在本地 Agent
 home fsync 后以 stable cursor 重试并由 exact ack 退休，latest-value activity
-保持可替换（daemon 自己生成的 artifact `error` 事件除外，不参与折叠）。Workspace、transcript、artifact read 各自 capability-gated，内容
+保持可替换（`error` 事件除外：同样过 egress 边界检查，但不参与折叠）。Workspace、transcript、artifact read 各自 capability-gated，内容
 经 explicit root/MIME/size policy 与本地 audit 后只通过 authenticated BlobRef
 投影；cloud 不成为 provider loop、runtime transcript 或 Agent-home mirror 的
 authority。

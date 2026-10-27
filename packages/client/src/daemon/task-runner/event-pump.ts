@@ -440,7 +440,5 @@ export function reportArtifactError(this: TaskRunner, active: ActiveTask, name: 
   console.error(
     `[byok/client] artifact for task ${active.taskId} dropped: nameBytes=${Buffer.byteLength(name, 'utf8')} reasonBytes=${Buffer.byteLength(reason, 'utf8')}`,
   );
-  const event: AgentEvent = { type: 'error', message: reason };
-  active.daemonEvents.add(event);
-  active.batcher.push(event);
+  active.batcher.push({ type: 'error', message: reason });
 }
