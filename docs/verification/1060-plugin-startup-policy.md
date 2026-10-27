@@ -83,3 +83,13 @@ to the observed fixture and proxy traffic. It does not prove all networking is
 blocked or all ChatGPT background services are disabled. Keep the synthetic
 credential and loopback boundaries intact. Remove the disposable copy after
 collecting evidence.
+
+## Parent checks on 8398dbf14
+
+- Root build, root typecheck and version-authority: exit 0.
+- Three focused files (`codex-plugin-startup-policy`, `codex-agent-user-mcp-servers`, `codex-adapter`): 88 passed, exit 0. Existing assertions were not changed.
+- API surface initially differed only in the option JSDoc above. Regenerated the client declaration golden alone; the full API gate then passed without changing budgets.
+- Real Codex 0.164.0 fresh-session loopback used the existing synthetic-home probe with the preconfigured plugins=false removed and only its host-server case retained. The local provider received two requests; the unapproved Host tool was advertised but never executed, and Codex returned approval-never refusal. The rejecting proxy recorded no external connection attempts in this fixture. No paid call or real credential was used.
+- This standalone case does not cover SDK helper grants (PR #1066), real-runtime resume, other Codex versions or all background services. Fresh/resume timing and unchanged default/non-Agent behavior are covered by the focused regression suite; full issue #1060 remains broader than this patch.
+
+Logs: `/tmp/byok-1060-build.log`, `byok-1060-typecheck.log`, `byok-1060-tests.log`, `byok-1060-api-final.log`, `byok-1060-version.log`, `byok-1060-real-startup.log`. Final integrated-head CI remains required.
