@@ -149,7 +149,7 @@
     `conn.hello` lacks, before it opens a sealed offer or starts anything:
     non-retryably with `reason` `offer_capability_missing: this daemon does
     not advertise <flags>`, or with `sealed_key_unavailable` when the task
-    seals its output.
+    seals its output (the missing flags then appear only in the device log).
   - The protocol test alias `byok-protocol-previous` pins 0.30.2, the last v3
     release, as the rejection oracle. `byok-protocol-floor` (0.27.0) and
     `published-compat.test.ts` are removed until a v4 release is published.

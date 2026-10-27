@@ -112,6 +112,8 @@ async function start(options: {
   policy?: readonly SealedCategory[];
   /** `false`: the Host does not declare `e2ee.member`; `'no-kem-epoch'`: only that, without `e2ee.member.kem-epoch`. Start waits for the first hello only. */
   e2ee?: false | 'no-kem-epoch';
+  /** `false`: the daemon has no Agent egress, so it advertises none of the egress flags. */
+  egress?: false;
   beforeStart?: (storeDir: string, deviceId: string, member: ScopeMember, device: { readonly memberId: string }) => Promise<void>;
 } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
@@ -125,7 +127,8 @@ async function start(options: {
   const config = {
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Sealed daemon test', productId: 'sealed-daemon-test',
-    serverUrl: server.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: FRESH_DAEMON_EGRESS,
+    serverUrl: server.url, storeDir, agentHome: testAgentHomeConfig(),
+    ...(options.egress === false ? {} : { agentEgress: FRESH_DAEMON_EGRESS }),
     ...(options.shutdown === undefined ? {} : { shutdownGraceMs: options.shutdown.graceMs }),
   };
   server.setCapabilityDeclaration(options.e2ee === false ? NO_E2EE_DECLARATION : options.e2ee === 'no-kem-epoch' ? NO_KEM_EPOCH_DECLARATION : E2EE_DECLARATION);
@@ -452,6 +455,23 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
     const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'no-flag', BUDGET_MS);
     expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_payload_unsupported: the server does not accept sealed task output', retryable: false });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('declines a sealed-output offer whose gates name a non-sealed flag it did not advertise with sealed_key_unavailable, and logs the flags only on the device (O4)', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { server, adapter, deviceId, member } = await start({ egress: false });
+    const hello = server.received.filter((envelope) => envelope.type === 'conn.hello').at(-1);
+    if (hello?.type !== 'conn.hello') throw new Error('expected conn.hello');
+    expect(hello.payload.capabilities).toContain('sealed-payload-v1');
+    expect(hello.payload.capabilities).not.toContain('agent-egress-policy');
+    server.send(await sealedOffer(member, 'missing-egress', server.nextSeq(), deviceId, 'never runs'));
+
+    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'missing-egress', BUDGET_MS);
+    expect(decline.payload).toEqual({ agentRef: agentOf('missing-egress'), reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false });
+    // The Host's inbound check reads this helper, so the decline settles the task.
+    expect(isSealedTaskPlainOutput('task.decline', decline.payload)).toBe(true);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('agent-egress-policy'));
     expect(adapter.startCalls).toHaveLength(0);
   });
 

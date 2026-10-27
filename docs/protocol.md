@@ -221,7 +221,8 @@ payload and declines non-retryably when a flag is missing from its own
 `conn.hello`. The `reason` is `offer_capability_missing: this daemon does not
 advertise <flags>`. A task whose `sealing.categories` includes `task-output`
 is declined with the sealed code `sealed_key_unavailable` instead, because a
-decline for such a task must take a closed sealed-code form (§2.5)
+decline for such a task must take a closed sealed-code form (§2.5). Its
+`reason` is that code alone; the missing flags appear only in the device log
 (`packages/client/src/daemon/task-runner/offer-admission.ts:202-216`).
 
 - Every recursive property path (array items, record values, each union

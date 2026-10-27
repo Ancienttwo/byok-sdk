@@ -60,7 +60,8 @@ capability negotiation between the two majors.
   non-retryably when its own `conn.hello` lacks one, with `reason`
   `offer_capability_missing: this daemon does not advertise <flags>`. A task
   whose `sealing` includes `task-output` is declined with the existing sealed
-  code `sealed_key_unavailable` instead. There is no new decline code.
+  code `sealed_key_unavailable` instead, and the missing flags appear only in
+  the device log. There is no new decline code.
 - Admission: the gates of the v3 Agent offer types are field and value rows
   on `task.offer` (`docs/protocol.md`, Freeze rule). The only difference from
   0.30.2 besides `harnessId` above: a prepared offer also needs
