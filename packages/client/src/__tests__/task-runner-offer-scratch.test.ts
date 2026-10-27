@@ -8,6 +8,12 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { AgentEgressController } from '../daemon/agent-egress-controller';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 // Ported from the removed git-workspace-task-runner.test.ts (#925): neither
 // behaviour depends on Git workspace mode.
@@ -19,7 +25,7 @@ const blobClient: BlobResolver = {
 
 function makeDeps(sent: Envelope[], adapter: StubRuntimeAdapter): TaskRunnerDeps {
   return {
-    getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'device',
@@ -32,7 +38,7 @@ function makeDeps(sent: Envelope[], adapter: StubRuntimeAdapter): TaskRunnerDeps
 }
 
 function offer(taskId: string, agentRef: AgentRef): Envelope {
-  return createEnvelope('task.offer_for_agent', { agentRef, instruction: 'do work' }, { taskId, seq: 1 });
+  return createEnvelope('task.offer', { ...FRESH_OFFER, agentRef, instruction: 'do work' }, { taskId, seq: 1 });
 }
 
 function terminal(sent: Envelope[], taskId: string): Envelope[] {

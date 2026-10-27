@@ -2,21 +2,43 @@
 
 ## Unreleased
 
+- **Fix (client; #1030)** — a daemon whose store is configured through a
+  Windows name alias (an 8.3 short name such as `C:\Users\RUNNER~1\…`, or a
+  letter-case variant) restarts again. The second start exited with
+  `retention_root_identity_invalid` once `<storeDir>\tmp\exec` existed, so the
+  recovery terminal was never sent. `DeviceStore.resolveDir` now folds
+  `storeDir` into its on-disk spelling for the daemon and every CLI. The daemon
+  folds `piByokLauncher.sessionDir`, `storage.scratchRoot` and
+  `storage.skillPackDataDirs` the same way. A symbolic link, or a junction to a
+  drive-letter path, is never followed. Volume mount points, subst drives and
+  mapped network drives look like plain directories to lstat, so they are
+  resolved once at construction. The root identity check is unchanged.
+  Upgrade note for a store configured through an alias: the Windows control
+  pipe name and the Agent-home owner identity change, so restart the daemon
+  after upgrading. A letter-case alias on macOS likewise changes the owner
+  identity and the hash of a long-path control socket. A lease marker that a
+  crashed older daemon left in an Agent home now reports `AgentHomeBusyError`
+  until the marker file is deleted; there is no migration.
 - **Breaking (protocol, client, server, cloud; #925)** — wire major 4. A v3
-  envelope is rejected; there is no v3 reader and no negotiation. Drain,
-  migrate stored receipts, then upgrade server and client together; see
+  envelope is rejected; there is no v3 reader and no negotiation. Drain the
+  v3 deployment, stop it, then start the v4 server side and daemons together
+  on a new store; see
   [the wire v4 upgrade note](docs/releases/925-wire-v4.md).
-  - Every offer is Agent-bound. `conn.ack`, `task.offer`,
-    `task.offer_with_toolsets`, `task.offer_sealed` and
-    `task.offer_with_toolsets_sealed` are removed, with
-    `ConnAckPayloadSchema`, `TaskOfferPayloadSchema`,
-    `TaskOfferWithToolsetsPayloadSchema` and their payload types and the
+  - Every offer is Agent-bound. `conn.ack` and the runtime-only offers
+    (`task.offer`, `task.offer_with_toolsets`, `task.offer_sealed` and
+    `task.offer_with_toolsets_sealed`) are removed, with
+    `ConnAckPayloadSchema`, the runtime-only `TaskOfferPayloadSchema`,
+    `TaskOfferWithToolsetsPayloadSchema` and their payload types (v4 reuses
+    the `task.offer` and `TaskOfferPayload` names for the merged Agent
+    offer, below) and the
     `strict-agent-only` flag (`STRICT_AGENT_ONLY_CAPABILITY`, also removed
     from `@byok-sdk/server`). The daemon declines every offer when it has no
     Agent home. `DaemonConfig.strictAgentOnly` is removed and raises
     `DaemonConfigFieldRemovedError`.
     Runtime adapters take the client-owned `RuntimeTaskInput` (exported from
-    `@byok-sdk/client`) instead of the removed wire `TaskOfferPayload`.
+    `@byok-sdk/client`) instead of a wire offer payload: `instruction`,
+    `runtime`, `harnessId`, `dispatchSelection`, `limits`, and `sessionRef`
+    only when the offer resumes.
   - `approvalId` is required on `task.await_approval`, `task.approve` and
     `task.reject`; a decision resolves only the approval it names.
     `Daemon.approve(taskId, { approvalId })` and
@@ -48,48 +70,74 @@
     `<storeDir>/git-workspaces.json` and old task directories untouched.
   - `ByokServer.dispatch` takes only `AgentResumeDispatchInput` (`agentRef`
     and `sessionRef`); `LegacyDispatchInput` is removed. Fresh work uses
-    `executions.submit`, which returns no `TaskHandle`: a submitted task has
-    no per-task stream of Agent events and artifacts yet, only the
-    `task.created` and `task.state` server events; #1022 adds one in 0.31.0. Two `dispatch` refusal
-    codes change, because the Agent lane answers them: an unknown or revoked
+    `executions.submit`, which returns no `TaskHandle`; read a submitted
+    task's events with `ByokServer.tasks.events` (#1022). Two `dispatch`
+    refusal codes change, because the Agent lane answers them: an unknown or revoked
     device is `agent_capability_missing` (was `device_not_found`), and a
     taskId that already exists is `agent_task_already_exists` (was
     `coordination_input_invalid`). A Host that matches on the old codes must
     match the new ones.
-  - One-shot wire v4 migration of stored state, in two steps per store. The
-    read-only preflight (`preflightPostgresWireV4Migration(pool)` in
-    `@byok-sdk/cloud-dataplane`, `preflightSqliteWireV4Migration(path)` in
-    `@byok-sdk/server`) lists the legacy tasks (offered on a removed offer
-    type) and every row with no v4 form. The migration
-    (`migratePostgresToWireV4(pool, confirmedLegacyTasks)`,
-    `migrateSqliteToWireV4(path, confirmedLegacyTasks)`) takes the confirmed
-    list back and, in one transaction, deletes every row of those tasks and
-    re-encodes the remaining offer and terminal receipts. It changes nothing
-    and throws `ReceiptMigrationUnmappableError` when a receipt has no v4
-    form, an approval was recorded without an id, or a pending v3 mailbox row
-    of another task could still reach a device; and
-    `WireV4LegacyTaskListMismatchError` when the confirmed list differs from
-    the store's. A legacy task's `task-redaction:<taskId>` audit receipt is
-    deleted with it, so a new Agent task may reuse the id;
-    `migratePostgresToWireV4` returns those receipts
-    (`deletedRedactionReceipts`: `redactedAt` and `counts`) for the
-    operator's records, and `@byok-sdk/cloud` exports
-    `taskRedactionReceiptKey`. Expired v3 dead letters are left in place:
-    `replayDeadLetter` refuses their v3 bytes with `cleanup_invalid_input`,
-    and `discardDeadLetter` still drops them. Replay or discard them before
-    the upgrade. Acked rows stay v3 bytes: within the acked retention (1 day
-    by default) a retry with the same messageId fails with an envelope
-    decoding error and delivers nothing; after it, the retry is a new
-    message. `@byok-sdk/protocol` adds `WIRE_V3_TO_V4_TYPES`,
-    `wireV4TypeOf` and `migrateWireV3Envelope`; `@byok-sdk/cloud` adds the
-    store-independent half (`migrateWireV3Receipt`, `wireV4ReceiptKind`,
-    `assertWireV4MigrationConfirmed` and the types and errors above). All of
-    it ships in 0.31.x only; 0.32.0 removes it (#1017).
+  - No wire v3 state carries over. A store a v3 build wrote (embedded SQLite,
+    hosted Postgres) is not supported; a v4 deployment starts from a new
+    store. The one-shot receipt migration planned for 0.31.x is not shipped
+    (owner decision 2026-10-27: no deployment holds wire v3 data; #1017).
   - `harnessId` on every Agent offer is gated on the device's `custom-harness`
     capability, the gate the removed offers carried. Before, an Agent offer
     with `harnessId` needed only the device's declared harness inventory.
     Bundled daemons always advertise the flag; a third-party daemon that
     declares harnesses without it has such offers refused.
+  - One offer type. `task.offer_for_agent`,
+    `task.offer_for_agent_with_egress`,
+    `task.offer_for_agent_with_egress_fresh`, `task.offer_prepared` and their
+    three sealed twins merge into one `task.offer` with a required `session`:
+    `{ mode: 'resume', sessionRef }` (1 to 512 characters) or
+    `{ mode: 'fresh' }`. A prepared offer is the one with `preparation`. A
+    fresh or prepared offer needs `egressPolicy`, `messageEgress` needs
+    `egressPolicy`, and `routineRef` appears only on a fresh sealed offer. Both
+    branches and `limits` are strict (the shared `BlobRef` inside
+    `instruction` still strips unknown keys). The gates of the old types are field and
+    value rows on `task.offer`; a prepared offer now also needs
+    `agent-memory-selection`, which a daemon advertises with
+    `agent-home-contract`.
+  - Sealed is a payload branch. `task.steer_sealed` and the seven sealed task
+    outputs are their plaintext type with a `sealed` member, and a sealed
+    offer is a `task.offer` with `sealing`. A sealed offer is bound to family
+    `task.offer`. `EnvelopeSchema` has 28 branches (47 in v3).
+    `SEALED_SPLIT_TABLE` is keyed by the plaintext type, loses `plainType` and
+    gains `marker` (`sealing` or `sealed`).
+  - `@byok-sdk/protocol` removes `TaskOfferForAgentPayloadSchema`,
+    `TaskOfferForAgentWithEgressPayloadSchema`,
+    `TaskOfferForAgentWithEgressFreshPayloadSchema`,
+    `TaskOfferPreparedPayloadSchema` and their payload types, the three
+    `TaskOfferForAgent*SealedPayload` types, `TASK_OFFER_TYPES`,
+    `isTaskOfferType`, `TaskOfferType`, `isSealedMessageType` and
+    `SealedMessageType`. It adds `TaskOfferPayloadSchema` /
+    `TaskOfferPayload` (both branches), `TaskOfferPlainPayloadSchema` /
+    `TaskOfferPlainPayload`, `TaskOfferSealedPayloadSchema` /
+    `TaskOfferSealedPayload`, `SessionSelectionSchema` / `SessionSelection`,
+    `TaskSteerSealedPayloadSchema`, `isSealableMessageType`,
+    `SealableMessageType` and `isSealedPayload(type, payload)`. The payload
+    schemas and types of `task.steer` and the seven outputs are plaintext |
+    sealed unions; narrow with `payload.sealed !== undefined`
+    (`payload.sealing !== undefined` on `task.offer`) before reading a
+    plaintext field.
+  - Host lanes keep their methods (`enqueueAgentOffer`,
+    `enqueueAgentEgressOffer`, `enqueuePreparedOffer`, `submitAgentExecution`
+    and the sealed ones). Each sends `task.offer`, takes the wire payload with
+    the Host's own `session`, and refuses a `session` that does not fit the
+    lane. `TaskOfferReadback.type` is always `'task.offer'`, and
+    `DeviceTerminal.envelope.type` is one of the four plaintext terminal
+    types. `ByokServer.dispatch` writes `session` itself.
+  - The daemon declines an offer whose gates name a flag its own
+    `conn.hello` lacks, before it opens a sealed offer or starts anything:
+    non-retryably with `reason` `offer_capability_missing: this daemon does
+    not advertise <flags>`, or with `sealed_key_unavailable` when the task
+    seals its output (the missing flags then appear only in the device log).
+  - Latest-value Agent activity no longer coalesces `error` events. Every
+    event still passes the egress byte and quota bounds; each accepted
+    `error` of a `task.progress` batch is sent in its place, and the other
+    events coalesce to their last. A daemon artifact refusal or upload
+    failure now reaches the Host when the runtime emits more in the same batch.
   - The protocol test alias `byok-protocol-previous` pins 0.30.2, the last v3
     release, as the rejection oracle. `byok-protocol-floor` (0.27.0) and
     `published-compat.test.ts` are removed until a v4 release is published.
@@ -107,6 +155,34 @@
   and `reject`, share their one code path over `ByokCloud.approveTask` and
   `rejectTask`, and refuse the same way: `task_not_found`,
   `task_not_awaiting_approval` or `StaleApprovalError`.
+- **Feature (server; #1022)** — `ByokServer.tasks.events(taskId, { after?,
+  from?, signal? })` follows one task's event feed by taskId, so a task
+  `executions.submit` created has its state, Agent events, artifacts and
+  approval requests again. Each `TaskEventEntry` carries an opaque `cursor`;
+  pass it back as `after` to resume after that entry. A cursor is valid only
+  for the same server instance's current feed of the task. `from: 'state'`
+  starts at the task's latest state entry, after the pending `await_approval`
+  request while it awaits approval; those entries survive the buffer's
+  drop-oldest. The first `next()` throws, before any entry: a `TypeError` for
+  `after` and `from` together, `task_not_found` for an unknown task, and the new
+  `TaskEventsUnavailableError` with `reason: 'cursor_unknown'` (a restart,
+  another feed's cursor, a malformed one) or `'feed_expired'` (a terminal
+  task whose feed was reclaimed or ended before this instance started). A
+  live task that this instance did not dispatch, such as one still running
+  after a SQLite restart, gets a feed that starts with its current state read
+  back from the stores, after the pending plaintext approval request while it
+  awaits one, without earlier events; those entries can appear twice.
+  From then on `events.subscribe()` also reports that task's
+  `task.state` changes, with no `task.created` before them.
+- **Breaking (server; #1022)** — `TaskHandle.events()` reads the same feed as
+  `tasks.events`. Its first `next()` now reads the task's snapshot once, and a
+  read after the terminal feed is reclaimed throws `TaskEventsUnavailableError`
+  (`feed_expired`) where it used to complete empty. A read after `close()`
+  still completes empty. The `await_approval` member of `ServerTaskEvent`
+  requires `approvalId`, which `tasks.approve(taskId, { approvalId })` takes;
+  code that constructs one must supply it. A reader that falls behind the
+  feed's buffer gets one `events_truncated` marker for each gap it falls into,
+  decided from where it resumes, where it used to get at most one.
 - **Breaking (client)** — `ExpiringClassId` and `RetentionClassId` gain
   `'agent-result'`, so an exhaustive switch over them no longer compiles
   until it handles the new class (#1009). `ClassUsage.truncated` is now

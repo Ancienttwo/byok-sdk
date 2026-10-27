@@ -1,3 +1,4 @@
+import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
@@ -16,7 +17,7 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
     const sent: Envelope[] = [];
     const adapter = new StubRuntimeAdapter();
     const release = adapter.blockStart();
-    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
       adapters: [adapter], deviceId: 'shutdown-device',
       send: event => { sent.push(event); },
       blobClient: {
@@ -25,8 +26,8 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
       },
       approvalRegistry: new ApprovalRegistry(), storeDir: dir, productId: 'shutdown-start',
     });
-    const offered = runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),
-      instruction: 'blocked startup',
+    const offered = runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),
+      instruction: 'blocked startup', ...FRESH_OFFER
     }, { taskId: 'starting-task', seq: 1 }));
     try {
       await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));

@@ -23,6 +23,7 @@ import {
 import { serveAgentMemoryMcpOverStdio, serveGrantedAgentMemoryMcpOverStdio } from '../bin/agent-memory-mcp-server';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
 const roots: string[] = [];
@@ -83,17 +84,19 @@ describe('Agent memory guidance', () => {
       productId: 'product-memory-guidance',
       tenantId: 'tenant-memory-guidance',
       agentMemoryMcpBin: { command: 'node', args: ['memory-mcp.js'] },
+      ...freshOfferRunnerDeps(),
     });
 
     let seq = 1;
     for (const runtime of runtimes) {
       await runner.handleEnvelope(
         createEnvelope(
-          'task.offer_for_agent',
+          'task.offer',
           {
             instruction: `agent instruction for ${runtime}`,
             runtime,
             agentRef: { agentId: `agent-${runtime}`, profileRevision: 'profile-1' },
+            ...FRESH_OFFER,
           },
           { taskId: `agent-task-${runtime}`, seq: seq++ },
         ),
@@ -195,6 +198,7 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
     storeDir,
     productId: 'product-memory-admission',
     tenantId: 'tenant-memory-admission',
+    ...freshOfferRunnerDeps(),
     // `off` resolves no helper in the daemon; `auto` models an admitted
     // secure filesystem (the macOS release helper is never opened here).
     ...(agentMemoryMcp === 'off' ? { agentMemoryMcp } : !withHelperBin ? { agentMemoryMcp: 'auto' as const } : {
@@ -205,10 +209,11 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
   });
   let seq = 1;
   const offer = (taskId: string, options: { reader?: boolean; agentId?: string; agentMemory?: AgentMemorySelection } = {}) =>
-    runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
+    runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: `instruction for ${taskId}`,
       runtime: 'pi',
       agentRef: { agentId: options.agentId ?? 'agent-admission', profileRevision: 'profile-1' },
+      ...FRESH_OFFER,
       ...(options.reader ? { homeAccess: 'memory-reader' as const } : {}),
       ...(options.agentMemory === undefined ? {} : { agentMemory: options.agentMemory }),
     }, { taskId, seq: seq++ }));

@@ -1,9 +1,13 @@
 import { z } from 'zod';
 import {
   AgentMessageServerContextSchema,
-  MESSAGE_PAYLOAD_SCHEMAS,
-  TaskOfferForAgentWithEgressFreshPayloadSchema,
+  SessionSelectionSchema,
+  TaskOfferPlainPayloadSchema,
+  TaskOfferSealedPayloadSchema,
 } from '@byok-sdk/protocol';
+
+/** An execution is a fresh `task.offer`, never a prepared one. */
+const FRESH_EXECUTION = { session: SessionSelectionSchema.options[1], preparation: z.never().optional() };
 
 /** One execution target: a built-in `runtime` or a device-advertised `harnessId`, never both. */
 function executionTargetRule(
@@ -35,21 +39,21 @@ function executionTargetRule(
 export const AgentExecutionInputSchema = z.object({
   taskId: z.string().min(1),
   deviceId: z.string().min(1),
-  payload: TaskOfferForAgentWithEgressFreshPayloadSchema.required({ terminalProjection: true }).superRefine(executionTargetRule),
+  payload: TaskOfferPlainPayloadSchema.required({ terminalProjection: true }).safeExtend(FRESH_EXECUTION).superRefine(executionTargetRule),
   agentMessageContext: AgentMessageServerContextSchema.optional(),
 }).strict();
 export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema>;
 
 /**
- * The sealed counterpart (#654): the payload is a
- * `task.offer_for_agent_with_egress_fresh_sealed` payload with the same
- * rules. Submit it through `submitSealedAgentExecution`.
+ * The sealed counterpart (#654): the payload is the sealed branch of a fresh
+ * `task.offer` with the same rules. Submit it through `submitSealedAgentExecution`.
  */
 export const SealedAgentExecutionInputSchema = z.object({
   taskId: z.string().min(1),
   deviceId: z.string().min(1),
-  payload: MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent_with_egress_fresh_sealed']
+  payload: TaskOfferSealedPayloadSchema
     .required({ terminalProjection: true })
+    .safeExtend(FRESH_EXECUTION)
     .superRefine(executionTargetRule),
   agentMessageContext: AgentMessageServerContextSchema.optional(),
 }).strict();

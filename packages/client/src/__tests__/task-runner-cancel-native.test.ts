@@ -10,6 +10,7 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { ClaudeProcessClient } from '../adapters/claude/process-client';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
@@ -18,6 +19,8 @@ import { RuntimeDisposalFailure } from '../runtime-failure';
 import { TestServer } from './fixtures/test-server';
 import { cancellationTiming } from './fixtures/task-runner-cancel-timing';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const fixture = fileURLToPath(new URL('./fixtures/task-runner-cancel-runtime.mjs', import.meta.url));
 const cases: Array<{ dir: string; gate: string; runner: TaskRunner; sessions: Session[];
@@ -131,7 +134,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   });
   const sent: Envelope[] = [];
   const terminalPublished = deferred();
-  const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter], deviceId: 't1-native-device', storeDir: dir, productId: 't1-cancel',
     send: event => {
       timing.observeTerminal(event); sent.push(event);
@@ -147,7 +150,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
     ...overrides,
   });
   const taskId = 'native-task';
-  const offer = (limits?: { maxDurationMs: number }) => runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),
+  const offer = (limits?: { maxDurationMs: number }) => runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
     instruction: 'observe native cancellation', runtime, limits,
   }, { taskId, seq: 1 }));
   const cancel = () => {
@@ -155,7 +158,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
     return runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'operator' }, { taskId, seq: 2 }));
   };
   const terminals = () => sent.filter(event => ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type));
-  const events = () => sent.flatMap(event => event.type === 'task.progress' ? event.payload.events : []);
+  const events = () => sent.flatMap(event => event.type === 'task.progress' && event.payload.sealed === undefined ? event.payload.events : []);
   const trace = async () => (await fs.readFile(traceFile, 'utf8')).trim().split('\n');
   const assertTreeReaped = async () => {
     const pids = JSON.parse(await fs.readFile(tree, 'utf8')) as Record<string, number>;
@@ -345,16 +348,17 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
       productName: 'T1 cancellation integration', productId: 't1-native-host', serverUrl: server.url,
       storeDir: path.join(c.dir, 'host-store'),
       agentHome: testAgentHomeConfig(),
+      agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       localAgentRelease: { version: '0.24.0-rc.1' },
     }, [c.adapter]);
     try {
       await daemon.pair('pairing-code'); await daemon.start();
-      server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'Host cancellation', runtime },
+      server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'Host cancellation', runtime },
         { taskId: 'host-task', seq: server.nextSeq() }));
       // Long-poll delivery, native spawn and the progress batch flush can exceed
       // the 2s default under load.
       await server.waitFor(event => event.type === 'task.progress' && event.task_id === 'host-task'
-        && event.payload.events.some(event => event.type === 'tool_use'), 5_000);
+        && event.payload.sealed === undefined && event.payload.events.some(event => event.type === 'tool_use'), 5_000);
       c.synchronizeInterruptClock();
       server.send(createEnvelope('task.cancel', { reason: 'Host stop' }, { taskId: 'host-task', seq: server.nextSeq() }));
       const terminal = await server.waitFor(event => event.type === 'task.cancelled' && event.task_id === 'host-task');

@@ -61,7 +61,7 @@ export function encodeEnvelope(env: Envelope): string {
 
 // ---------------------------------------------------------------------------
 // createEnvelope — finding F1: `taskId`/`seq` used to be uniformly optional
-// regardless of `type`, so e.g. `createEnvelope('task.offer_for_agent', payload)` (no
+// regardless of `type`, so e.g. `createEnvelope('task.offer', payload)` (no
 // `taskId`, no `seq`) type-checked cleanly and only failed much later, at
 // runtime, wherever the resulting envelope happened to get decoded — often
 // on the *other* side of the wire, several hops from the actual mistake.
@@ -82,26 +82,19 @@ export function encodeEnvelope(env: Envelope): string {
 
 interface EnvelopeShapeOptions {
   'conn.hello': { taskId?: string; seq?: number };
-  'task.offer_for_agent': { taskId: string; seq: number };
-  'task.offer_for_agent_with_egress': { taskId: string; seq: number };
-  'task.offer_for_agent_with_egress_fresh': { taskId: string; seq: number };
-  'task.offer_prepared': { taskId: string; seq: number };
-  'agent.egress.reliable': { taskId?: string; seq?: number };
+  'task.offer': { taskId: string; seq: number };
   'agent.egress.ack': { taskId?: string; seq: number };
-  'agent.message.draft': { taskId: string; seq?: number };
-  'agent.message.publish': { taskId: string; seq?: number };
   'agent.message.disposition': { taskId: string; seq: number };
   'agent.content.read': { taskId?: string; seq: number };
   'agent.home.projection': { taskId?: never; seq: number };
   'agent.input.preparation': { taskId?: never; seq: number };
   'provider.provisioning.available': { taskId?: never; seq: number };
   'agent.memory.intent.available': { taskId?: never; seq: number };
-  'e2ee.key_package.available': { taskId?: never; seq: number };
-  'agent.content.receipt': { taskId?: string; seq?: number };
   'task.approve': { taskId: string; seq: number };
   'task.reject': { taskId: string; seq: number };
   'task.cancel': { taskId: string; seq: number };
   'task.steer': { taskId: string; seq: number };
+  'e2ee.key_package.available': { taskId?: never; seq: number };
   'task.claim': { taskId: string; seq?: number };
   'task.started': { taskId: string; seq?: number };
   'task.decline': { taskId: string; seq?: number };
@@ -112,17 +105,10 @@ interface EnvelopeShapeOptions {
   'task.fail': { taskId: string; seq?: number };
   'task.cancelled': { taskId: string; seq?: number };
   'task.approval_resolved': { taskId: string; seq?: number };
-  'task.offer_for_agent_sealed': { taskId: string; seq: number };
-  'task.offer_for_agent_with_egress_sealed': { taskId: string; seq: number };
-  'task.offer_for_agent_with_egress_fresh_sealed': { taskId: string; seq: number };
-  'task.steer_sealed': { taskId: string; seq: number };
-  'task.complete_sealed': { taskId: string; seq?: number };
-  'task.fail_sealed': { taskId: string; seq?: number };
-  'task.decline_sealed': { taskId: string; seq?: number };
-  'task.cancelled_sealed': { taskId: string; seq?: number };
-  'task.progress_sealed': { taskId: string; seq?: number };
-  'task.artifact_sealed': { taskId: string; seq?: number };
-  'task.await_approval_sealed': { taskId: string; seq?: number };
+  'agent.egress.reliable': { taskId?: string; seq?: number };
+  'agent.message.draft': { taskId: string; seq?: number };
+  'agent.message.publish': { taskId: string; seq?: number };
+  'agent.content.receipt': { taskId?: string; seq?: number };
 }
 
 interface EnvelopeCommonOptions {

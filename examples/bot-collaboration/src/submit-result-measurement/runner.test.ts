@@ -137,6 +137,14 @@ it('without a confirmed label, records no missing; it records a decline as not s
   expect(manifest).toMatchObject({ completion: 'incomplete', startedTrials: 3, notStartedTrials: 1 });
 }, 180_000);
 
+it('records the admission timings that the claim and the decline carried (#1014)', async () => {
+  const { code, run } = await execute(['exact', 'exact', 'decline'], ['--cases', 'C01-small,C02-scalars', '--deadline-ms', '15000']);
+  expect(code).toBe(0);
+  const byCase = Object.fromEntries(run.trials.map(trial => [trial.caseId, trial]));
+  expect(byCase['C01-small']!.admission).toEqual(expect.objectContaining({ totalMs: expect.any(Number), resultHelperPreflightMs: expect.any(Number) }));
+  expect(run.notStarted).toEqual([expect.objectContaining({ caseId: 'C02-scalars', stage: 'decline', admission: expect.objectContaining({ totalMs: expect.any(Number) }) })]);
+}, 180_000);
+
 it('stops at max-trials and marks the cell incomplete', async () => {
   const { run } = await execute([], ['--cases', 'C01-small,C02-scalars', '--max-trials', '1', '--deadline-ms', '60000']);
   expect(run.manifest).toMatchObject({ completion: 'incomplete', startedTrials: 1, plan: { plannedTrials: 2, runtimeTasks: 2 } });

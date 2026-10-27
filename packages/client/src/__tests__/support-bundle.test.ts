@@ -18,6 +18,10 @@ import {
   MAX_SUPPORT_AUDIT_TAIL_BYTES,
   writeSupportBundle,
 } from '../diagnostics/support-bundle';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 const dirs: string[] = [];
 
@@ -41,7 +45,7 @@ function config(storeDir: string): DaemonConfig {
     productName: 'SENTINEL_PRODUCT_NAME_SECRET',
     productId: 'SENTINEL_PRODUCT_ID',
     serverUrl: 'https://user:SENTINEL_URL_SECRET@example.invalid/private/path?token=SENTINEL_QUERY_SECRET',
-    agentHome: testAgentHomeConfig(),
+    agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     storeDir,
     runtimeAllowlist: ['SENTINEL_ALLOWLIST_SECRET'],
   };
@@ -256,7 +260,7 @@ describe('outbound rejection diagnostics #397', () => {
     const { createEnvelope, encodeEnvelope } = await import('@byok-sdk/protocol');
     const dir = await tempDir();
     const journal = new SqliteLocalTaskJournal({ storeDir: dir });
-    const offer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'SECRET_PAYLOAD_BYTES' }, { taskId: 'rejected-task', seq: 1 });
+    const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'SECRET_PAYLOAD_BYTES' }, { taskId: 'rejected-task', seq: 1 });
     const bytes = encodeEnvelope(offer);
     await journal.appendEnvelope({ identity: { tenantId: 'tenant', productId: 'product', deviceId: 'device' },
       envelopeId: offer.id, seq: 1, taskId: 'rejected-task', bytes, bytesHash: journalHash(bytes), receivedAt: new Date().toISOString(), opensTask: true });

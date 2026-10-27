@@ -55,6 +55,6 @@ describe('wire v4: every dispatch is Agent-bound', () => {
       sessionRef: 'sess-resume-1',
     });
     expect((await started.byok.tasks.get(agent.taskId))?.deviceId).toBe(strict.deviceId);
-    await expect(nextEnvelope(strict)).resolves.toMatchObject({ type: 'task.offer_for_agent' });
+    await expect(nextEnvelope(strict)).resolves.toMatchObject({ type: 'task.offer' });
   });
 });

@@ -18,7 +18,7 @@ const DEVICE = 'device-裝置';
 const clock = createMutableClock();
 
 function body(seq: number, messageId = randomUUID()) {
-  const bytes = encodeEnvelope(createEnvelope('task.offer_for_agent', { instruction: 'wake', agentRef: { agentId: 'agent-wake', profileRevision: 'rev-1' } }, { id: messageId, taskId: 'task-wake', seq }));
+  const bytes = encodeEnvelope(createEnvelope('task.offer', { instruction: 'wake', agentRef: { agentId: 'agent-wake', profileRevision: 'rev-1' }, session: { mode: 'resume', sessionRef: 'session-wake' } }, { id: messageId, taskId: 'task-wake', seq }));
   return { body: bytes, bodyHash: contentHash(`sha256:${createHash('sha256').update(bytes).digest('hex')}`), byteSize: BigInt(Buffer.byteLength(bytes)) };
 }
 

@@ -22,7 +22,7 @@ function agentPayload() {
   return {
     instruction: 'remember this Agent task',
     agentRef: AGENT_REF,
-    sessionRef: 'session-resume-1',
+    session: { mode: 'resume', sessionRef: 'session-resume-1' } as const,
   };
 }
 
@@ -71,7 +71,7 @@ describe('hosted Agent-home contract', () => {
     expect(page.messages).toHaveLength(1);
     expect(decodeEnvelope(page.messages[0]!.body)).toEqual(offered.envelope);
     expect(
-      offered.envelope.type === 'task.offer_for_agent'
+      offered.envelope.type === 'task.offer'
         ? offered.envelope.payload.requiredToolsets
         : undefined,
     ).toEqual(['search', 'browser']);
@@ -177,7 +177,7 @@ describe('hosted Agent-home contract', () => {
       afterSeq: 0,
       limit: 10,
     });
-    const offers = page.messages.map((message) => decodeEnvelope(message.body)).filter((item) => item.type === 'task.offer_for_agent');
+    const offers = page.messages.map((message) => decodeEnvelope(message.body)).filter((item) => item.type === 'task.offer');
     const decisions = page.messages.map((message) => decodeEnvelope(message.body)).filter((item) => item.type === 'task.approve');
     expect(offers).toHaveLength(2);
     expect(decisions).toHaveLength(2);
@@ -287,26 +287,26 @@ describe('hosted Agent-home contract', () => {
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-oversized')).toBeUndefined();
   });
 
-  it('refuses a fresh Agent offer without an exact sessionRef before any durable write (#484)', async () => {
+  it('refuses a fresh Agent offer on the resume lane before any durable write (#484)', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
     });
-    const { sessionRef: _sessionRef, ...fresh } = agentPayload();
+    const fresh = { ...agentPayload(), session: { mode: 'fresh' } };
 
     // The required static type refuses this at compile time; a JS caller still meets the runtime guard.
     await expect(
       harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
         taskId: 'agent-fresh-refused',
-        // @ts-expect-error sessionRef is required on the resume lane (#484)
+        // @ts-expect-error a resume session is required on the resume lane (#484)
         payload: fresh,
       }),
     ).rejects.toMatchObject({
       name: 'ByokCloudError',
       code: 'coordination_input_invalid',
-      message: 'Agent resume offer requires an exact sessionRef; use submitAgentExecution for fresh execution',
+      message: 'Agent resume offer requires session.mode resume with an exact sessionRef; use submitAgentExecution for fresh execution',
     });
 
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-fresh-refused')).toBeUndefined();
@@ -335,12 +335,12 @@ describe('hosted Agent-home contract', () => {
     await expect(
       harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
         taskId: 'agent-empty-session',
-        payload: { ...agentPayload(), sessionRef: '' },
+        payload: { ...agentPayload(), session: { mode: 'resume', sessionRef: '' } },
       }),
     ).rejects.toMatchObject({
       name: 'ByokCloudError',
       code: 'coordination_input_invalid',
-      message: 'Agent resume offer requires an exact sessionRef; use submitAgentExecution for fresh execution',
+      message: 'Agent resume offer requires session.mode resume with an exact sessionRef; use submitAgentExecution for fresh execution',
     });
 
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'agent-empty-session')).toBeUndefined();
@@ -350,25 +350,29 @@ describe('hosted Agent-home contract', () => {
     ).toHaveLength(0);
   });
 
-  it('refuses a missing or empty sessionRef before capability admission (#484)', async () => {
+  it('refuses a missing session, a fresh session or an empty sessionRef before capability admission (#484)', async () => {
     const harness = createHarness();
     // Paired but has advertised no capabilities, so admission alone would refuse it.
     const bare = await harness.pairDevice(TENANT_A);
-    const { sessionRef: _sessionRef, ...fresh } = agentPayload();
+    const { session: _session, ...missing } = agentPayload();
+    const fresh = { ...agentPayload(), session: { mode: 'fresh' } };
+    const empty = { ...agentPayload(), session: { mode: 'resume', sessionRef: '' } };
     const refused = {
       name: 'ByokCloudError',
       code: 'coordination_input_invalid',
-      message: 'Agent resume offer requires an exact sessionRef; use submitAgentExecution for fresh execution',
+      message: 'Agent resume offer requires session.mode resume with an exact sessionRef; use submitAgentExecution for fresh execution',
     };
 
     for (const [deviceId, taskId, payload] of [
-      ['device-not-registered', 'agent-missing-unknown-device', fresh],
-      ['device-not-registered', 'agent-empty-unknown-device', { ...fresh, sessionRef: '' }],
-      [bare.deviceId, 'agent-missing-bare-device', fresh],
-      [bare.deviceId, 'agent-empty-bare-device', { ...fresh, sessionRef: '' }],
+      ['device-not-registered', 'agent-missing-unknown-device', missing],
+      ['device-not-registered', 'agent-fresh-unknown-device', fresh],
+      ['device-not-registered', 'agent-empty-unknown-device', empty],
+      [bare.deviceId, 'agent-missing-bare-device', missing],
+      [bare.deviceId, 'agent-fresh-bare-device', fresh],
+      [bare.deviceId, 'agent-empty-bare-device', empty],
     ] as const) {
       await expect(
-        // @ts-expect-error a JS caller may omit sessionRef on the resume lane (#484)
+        // @ts-expect-error a JS caller may omit the resume session on the resume lane (#484)
         harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { taskId, payload }),
       ).rejects.toMatchObject(refused);
       expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toBeUndefined();

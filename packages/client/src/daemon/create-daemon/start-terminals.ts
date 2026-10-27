@@ -1,5 +1,5 @@
 import type { Envelope } from '@byok-sdk/protocol';
-import { encodeEnvelope, decodeEnvelope, isTaskOfferType, createEnvelope, isSealedMessageType, requiredReceiverCapabilities } from '@byok-sdk/protocol';
+import { encodeEnvelope, decodeEnvelope, createEnvelope, isSealedPayload, requiredReceiverCapabilities } from '@byok-sdk/protocol';
 import { terminalKindOf } from './support';
 import { journalHash, JournalRecordTooLargeError, type ReceivedEnvelopeRecord } from '../journal/journal';
 import type { AgentRef } from '../../agent-home';
@@ -63,7 +63,7 @@ export function composeStartTerminals(daemonScope: DaemonScope, run: Pick<StartR
         if (!task) throw new Error(`missing durable task ${taskId}`);
         if (!('envelopeBytes' in task)) throw new Error(`task ${taskId} has a withheld offer and no result`);
         const offer = decodeEnvelope(task.envelopeBytes);
-        if (!isTaskOfferType(offer.type) || offer.task_id !== taskId) throw new Error(`invalid durable offer binding for ${taskId}`);
+        if (offer.type !== 'task.offer' || offer.task_id !== taskId) throw new Error(`invalid durable offer binding for ${taskId}`);
         const offerPayload = offer.payload as { agentRef?: AgentRef };
         const plainFailure = createEnvelope('task.fail', {
           reason: 'terminal_result_too_large', retryable: false,
@@ -182,7 +182,7 @@ export function composeStartTerminals(daemonScope: DaemonScope, run: Pick<StartR
   // envelope is dropped; for a task.cancel, the local task runs until it ends.
   const refuseOverBoundEnvelope = async (envelope: Envelope, record: ReceivedEnvelopeRecord, byteLength: number): Promise<void> => {
     const taskId = envelope.task_id;
-    if (!isTaskOfferType(envelope.type) || taskId === undefined) {
+    if (envelope.type !== 'task.offer' || taskId === undefined) {
       console.warn(`[byok/client] dropped inbound ${envelope.type} (seq=${record.seq}): ${byteLength} bytes is over the journal record bound`);
       return;
     }
@@ -192,7 +192,7 @@ export function composeStartTerminals(daemonScope: DaemonScope, run: Pick<StartR
     // closed code is a value gate on the server's `sealed-payload-v1`.
     const code = sealedRun.sealedMember === undefined ? 'sealed_key_unavailable' : 'sealed_open_failed';
     const serverCapabilities = daemonState.connection?.getServerCapabilities() ?? [];
-    const closedCode = isSealedMessageType(envelope.type)
+    const closedCode = isSealedPayload(envelope.type, envelope.payload)
       && requiredReceiverCapabilities('task.decline', { reason: code, code }).every((flag) => serverCapabilities.includes(flag));
     const decline = createEnvelope('task.decline', {
       ...(closedCode ? { reason: code, code } : { reason: 'inbound_envelope_too_large' }),

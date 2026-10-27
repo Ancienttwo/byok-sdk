@@ -10,6 +10,10 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemon, createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
@@ -49,7 +53,7 @@ describe('DaemonConfig.branding', () => {
     const branding = { displayName: 'Acme Coder', supportUrl: 'https://acme.example/support', accent: '#336699' };
 
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product', serverUrl: server.url, storeDir, branding },
+      {agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product', serverUrl: server.url, storeDir, branding },
       [new StubRuntimeAdapter('pi')],
     );
     await daemon.pair('pairing-code');
@@ -62,7 +66,7 @@ describe('DaemonConfig.branding', () => {
     const storeDir = await tmpDir('byok-branding-store-');
 
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product-nobrand', serverUrl: server.url, storeDir },
+      {agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product-nobrand', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter('pi')],
     );
     await daemon.pair('pairing-code');
@@ -111,7 +115,7 @@ describe('createDaemon — runtimeAllowlist-driven bundled adapter set', () => {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
       productId: 'test-product-claude-codex',
       serverUrl: server.url,
-      agentHome: testAgentHomeConfig(),
+      agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       storeDir,
       runtimeAllowlist: ['claude', 'codex'],
     });
@@ -131,7 +135,7 @@ describe('createDaemon — runtimeAllowlist-driven bundled adapter set', () => {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
       productId: 'test-product-default',
       serverUrl: server.url,
-      agentHome: testAgentHomeConfig(),
+      agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       storeDir,
     });
     await daemon.pair('pairing-code');
@@ -172,7 +176,7 @@ describe('runtimeAllowlist enforcement regression (TaskRunner.pickAdapter, uncha
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-enforce',
         serverUrl: server.url,
-        agentHome: testAgentHomeConfig(),
+        agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir,
         runtimeAllowlist: ['pi'],
       },
@@ -183,8 +187,8 @@ describe('runtimeAllowlist enforcement regression (TaskRunner.pickAdapter, uncha
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'x', runtime: 'claude' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'claude' },
         { taskId: 'task-disallowed', seq: server.nextSeq() },
       ),
     );

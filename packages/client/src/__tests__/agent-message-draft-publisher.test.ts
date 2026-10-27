@@ -17,6 +17,7 @@ import { freezeRuntimeAdapterDescriptor } from '../types';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const agentRef = { agentId: 'draft-agent', profileRevision: '1' };
 const frameMax = AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES;
@@ -349,10 +350,11 @@ describe('TaskRunner draft reconciliation before publish', () => {
       approvalRegistry: new ApprovalRegistry(),
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
       agentMessageMcpPreflight: async () => {},
+      advertisedCapabilities: advertiseEveryDeviceFlag,
     });
     runners.push(runner);
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'reply', runtime: 'pi', agentRef, egressPolicy: policy,
+    await runner.handleEnvelope(createEnvelope('task.offer', {
+      instruction: 'reply', runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: policy,
       messageEgress: { mode: 'required', contract: 'draft.v1', contentType: 'text/plain', maxBytes: frameMax * 3 },
     }, { taskId: 'finalize-task', seq: 1 }));
     if (wholeMessages) expect(adapter.descriptor.progressEventsAreMessages).toBe(true);

@@ -13,6 +13,8 @@ import type { RuntimeAdapter } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
+import { FRESH_OFFER } from './fixtures/fresh-offer';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
 const FAKE_CLAUDE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -36,7 +38,7 @@ describe('blob client (protocol §7)', () => {
   async function setupDaemon(adapter: RuntimeAdapter): Promise<Daemon> {
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
-      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
+      {agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
       [adapter],
     );
     await daemon.pair('code');
@@ -54,8 +56,8 @@ describe('blob client (protocol §7)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
           instruction: {
             blobRef: {
               blobId: 'instr-blob-1',
@@ -86,8 +88,8 @@ describe('blob client (protocol §7)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
           instruction: {
             blobRef: {
               blobId: 'instr-blob-bundled-prepared',
@@ -108,17 +110,11 @@ describe('blob client (protocol §7)', () => {
     await server.waitFor((event) => event.type === 'task.claim' && event.task_id === taskId, nativeWaitMs);
     expect(server.received.some((event) => event.type === 'task.decline' && event.task_id === taskId)).toBe(false);
     await server.waitFor((event) => event.type === 'task.started' && event.task_id === taskId, nativeWaitMs);
-    const progress = await server.waitFor(
-      (event) =>
-        event.type === 'task.progress' &&
-        event.task_id === taskId &&
-        (event.payload as { events: Array<{ type: string; text?: string }> }).events.some(
-          (item) => item.type === 'progress' && item.text === `reply-1:${prependAgentMemoryGuidance(resolvedInstruction)}`,
-        ),
-      nativeWaitMs,
-    );
-
-    expect(progress).toBeDefined();
+    // The fake runtime echoes its instruction. The Agent egress lane of a fresh offer may coalesce that
+    // progress batch away, so the terminal summary, which records the whole run's text, carries the echo.
+    const completed = await server.waitFor((event) => event.type === 'task.complete' && event.task_id === taskId, nativeWaitMs);
+    if (completed.type !== 'task.complete' || completed.payload.sealed !== undefined) throw new Error('expected a plaintext task.complete');
+    expect(completed.payload.summary).toContain(`reply-1:${prependAgentMemoryGuidance(resolvedInstruction)}`);
     expect(server.httpRequests.some((request) => request.method === 'GET' && request.pathname === '/byok/blobs/instr-blob-bundled-prepared/url')).toBe(true);
   });
 
@@ -128,8 +124,8 @@ describe('blob client (protocol §7)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
           instruction: {
             blobRef: {
               blobId: 'no-such-blob',
@@ -159,8 +155,8 @@ describe('blob client (protocol §7)', () => {
 
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
           instruction: {
             blobRef: {
               blobId: 'instr-blob-tampered',
@@ -186,7 +182,7 @@ describe('blob client (protocol §7)', () => {
     await setupDaemon(adapter);
 
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-artifact-small', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' }, { taskId: 'task-artifact-small', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -210,7 +206,7 @@ describe('blob client (protocol §7)', () => {
     await setupDaemon(adapter);
 
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-artifact-big', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' }, { taskId: 'task-artifact-big', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -256,8 +252,8 @@ describe('blob client (protocol §7)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(),  instruction: 'x' },
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
           { taskId: 'task-artifact-traversal', seq: server.nextSeq() },
         ),
       );
@@ -297,8 +293,8 @@ describe('blob client (protocol §7)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(),  instruction: 'x' },
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
           { taskId: 'task-artifact-absolute', seq: server.nextSeq() },
         ),
       );
@@ -337,8 +333,8 @@ describe('blob client (protocol §7)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(),  instruction: 'x' },
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
           { taskId: 'task-artifact-upload-fail', seq: server.nextSeq() },
         ),
       );
@@ -379,8 +375,8 @@ describe('blob client (protocol §7)', () => {
 
       server.send(
         createEnvelope(
-          'task.offer_for_agent',
-          { agentRef: freshTestAgentRef(),  instruction: 'x' },
+          'task.offer',
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
           { taskId: 'task-artifact-regular-ok', seq: server.nextSeq() },
         ),
       );
@@ -424,8 +420,8 @@ describe('blob client (protocol §7)', () => {
 
         server.send(
           createEnvelope(
-            'task.offer_for_agent',
-            { agentRef: freshTestAgentRef(),  instruction: 'x' },
+            'task.offer',
+            { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
             { taskId: 'task-artifact-symlink-outside', seq: server.nextSeq() },
           ),
         );
@@ -463,8 +459,8 @@ describe('blob client (protocol §7)', () => {
 
         server.send(
           createEnvelope(
-            'task.offer_for_agent',
-            { agentRef: freshTestAgentRef(),  instruction: 'x' },
+            'task.offer',
+            { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
             { taskId: 'task-artifact-intermediate-symlink', seq: server.nextSeq() },
           ),
         );
@@ -522,8 +518,8 @@ describe('blob client (protocol §7)', () => {
 
         server.send(
           createEnvelope(
-            'task.offer_for_agent',
-            { agentRef: freshTestAgentRef(),  instruction: 'x' },
+            'task.offer',
+            { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x' },
             { taskId: 'task-artifact-toctou-swap', seq: server.nextSeq() },
           ),
         );

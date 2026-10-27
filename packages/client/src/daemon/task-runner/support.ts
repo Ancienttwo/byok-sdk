@@ -16,7 +16,7 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import { RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalProjectionSelection, type TaskDeclinePayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
+import { RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalProjectionSelection, type TaskDeclinePayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, RuntimeAdapterDescriptor, Session } from '../../types';
 import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home';
 import type { AgentHomeAccessMode, AgentHomeMemoryDigest } from '../../agent-home-readers';
@@ -29,6 +29,7 @@ import { AgentMessageOutbox } from '../agent-message-outbox';
 import { AgentResultStore } from '../agent-result-store';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
 import { PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from '../task-runner';
+import type { OfferAdmissionTiming } from './offer-admission-timing';
 
 /**
  * The offer union `task-runner.ts` declares. It stays unexported there because
@@ -296,6 +297,7 @@ export interface OfferPhaseContext {
   readonly admissionSignal: AbortSignal;
   readonly releaseReservation: () => void;
   readonly reserveHome: (reservationKey: string) => void;
+  readonly admission: OfferAdmissionTiming;
 }
 
 /** The front-phase values that `prepareOfferRuntime` reads. */
@@ -406,30 +408,27 @@ export function adapterSupportsMcpToolsets(descriptor: RuntimeAdapterDescriptor)
   return descriptor.capabilities.mcpToolsets === true;
 }
 
-export function withoutRequiredToolsets(payload: AcceptedOfferPayload): RuntimeTaskInput {
-  const { requiredToolsets, egressPolicy, messageEgress, preparation, ...offer } = payload as TaskOfferForAgentPayload
-    & Partial<TaskOfferForAgentWithEgressPayload>
-    & Partial<TaskOfferForAgentWithEgressFreshPayload>
-    & Partial<TaskOfferPreparedPayload>;
+/**
+ * The runtime's view of an offer: the wire payload without the fields the
+ * daemon itself consumes, and `sessionRef` when the offer resumes a session.
+ * `prepare()` admits a RUNTIME, and a preparation reference is not a runtime
+ * input: the prepared lane carries it to `start()` as its own start variant.
+ */
+export function runtimeTaskInput(payload: AcceptedOfferPayload): RuntimeTaskInput {
+  const { requiredToolsets, egressPolicy, messageEgress, preparation, session, ...offer } = payload;
   void requiredToolsets;
   void egressPolicy;
   void messageEgress;
-  // Deliberately stripped before the adapter sees the offer: `prepare()`
-  // admits a RUNTIME, and a preparation reference is not a runtime input. The
-  // prepared lane carries it to `start()` as its own start variant instead.
   void preparation;
-  return offer as RuntimeTaskInput;
+  return { ...offer, ...(session.mode === 'resume' ? { sessionRef: session.sessionRef } : {}) } as RuntimeTaskInput;
 }
 
 /**
  * The preparation this offer names, or `undefined` for every ordinary offer.
- *
- * The presence of this value is what selects the prepared lane. It is read from
- * the parsed payload rather than from the envelope type so one branch reads one
- * fact: `task.offer_prepared` is the only message whose schema carries it.
+ * The presence of this value is what selects the prepared lane.
  */
 export function offeredPreparation(payload: AcceptedOfferPayload): InputPreparationOfferBinding | undefined {
-  return 'preparation' in payload ? payload.preparation : undefined;
+  return payload.preparation;
 }
 
 /**
@@ -441,7 +440,7 @@ export function offeredPreparation(payload: AcceptedOfferPayload): InputPreparat
  * what it is about to send.
  */
 export function offeredInstruction(payload: AcceptedOfferPayload): RuntimeTaskInput['instruction'] | undefined {
-  return 'instruction' in payload ? payload.instruction : undefined;
+  return payload.instruction;
 }
 
 export function sameEgressPolicy(left: Readonly<AgentEgressPolicy>, right: Readonly<AgentEgressPolicy>): boolean {
@@ -454,19 +453,17 @@ export function offeredAgentRef(payload: AcceptedOfferPayload): AgentRef | undef
 }
 
 /**
- * The fresh egress offer deliberately has no sessionRef. Preserve that absence
- * through admission and manifest sealing so only the legacy egress message
- * can take the exact-resume path.
+ * The session a resume offer names; a fresh offer has none. Preserve that
+ * absence through admission and manifest sealing so only a resume offer can
+ * take the exact-resume path.
  */
 export function offeredSessionRef(payload: AcceptedOfferPayload): string | undefined {
-  if (!Object.prototype.hasOwnProperty.call(payload, 'sessionRef')) return undefined;
-  const value = (payload as unknown as { sessionRef?: unknown }).sessionRef;
-  return typeof value === 'string' ? value : undefined;
+  return payload.session.mode === 'resume' ? payload.session.sessionRef : undefined;
 }
 
 /** An Agent offer without `homeAccess` is a writer. */
 export function offeredHomeAccess(payload: AcceptedOfferPayload): AgentHomeAccessMode {
-  return 'homeAccess' in payload && payload.homeAccess === 'memory-reader' ? 'memory-reader' : 'memory-writer';
+  return payload.homeAccess === 'memory-reader' ? 'memory-reader' : 'memory-writer';
 }
 
 export function errorMessage(err: unknown): string {
@@ -736,7 +733,7 @@ export async function trackOffer(runner: TaskRunner, operation: Promise<void>): 
 export function observeTerminalUsage(active: ActiveTask, event: Extract<AgentEvent, { type: 'usage' }>): void {
   if (event.contextSource === undefined || event.inputTokens !== undefined ||
       event.cachedInputTokens !== undefined || event.outputTokens !== undefined ||
-      event.reasoningTokens !== undefined || event.totalTokens !== undefined) {
+      event.reasoningTokens !== undefined || event.totalTokens !== undefined || event.model !== undefined) {
     active.lastUsage = event;
   }
 }

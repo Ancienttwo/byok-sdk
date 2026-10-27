@@ -297,7 +297,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     // Egress mismatch is a frozen offer admission failure on the running fixture.
     start('other','other-task','agent-b');
     const { deviceId, ...selection } = target('agent-b');
-    const bad = { deviceId, taskId: 'bad-egress', payload: { ...selection,egressPolicy: { ...policy,policyRevision: 'different' },instruction: 'test',terminalProjection: { mode: 'result-document' as const,contract: CLARIFICATION_CONTRACT, schema: CLARIFICATION_SCHEMA } } };
+    const bad = { deviceId, taskId: 'bad-egress', payload: { ...selection,session: { mode: 'fresh' as const },egressPolicy: { ...policy,policyRevision: 'different' },instruction: 'test',terminalProjection: { mode: 'result-document' as const,contract: CLARIFICATION_CONTRACT, schema: CLARIFICATION_SCHEMA } } };
     await byok.executions.submit(bad); await terminal('bad-egress');
     expect((await byok.tasks.deviceTerminal('bad-egress'))?.envelope.type).not.toBe('task.complete'); expect(adapter.sessions.has('bad-egress')).toBe(false);
   });

@@ -68,7 +68,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       agentMemory: 'read',
     });
     const offered = await nextEnvelope(daemon);
-    expect(offered.type).toBe('task.offer_for_agent');
+    expect(offered.type).toBe('task.offer');
     expect(offered.payload).toMatchObject({ agentRef: AGENT_REF, agentMemory: 'read' });
   });
 
@@ -101,7 +101,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       deviceId: daemon.deviceId,
       payload: {
         instruction: 'read memory', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
-        egressPolicy: POLICY, homeAccess: 'memory-reader', agentMemory: 'read-write',
+        session: { mode: 'fresh' }, egressPolicy: POLICY, homeAccess: 'memory-reader', agentMemory: 'read-write',
       },
     })).rejects.toThrow(/agentMemory read-write requires a writer/);
     expect(await started.byok.tasks.attempt('fresh-reader-read-write')).toBeUndefined();
@@ -127,7 +127,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       deviceId: daemon.deviceId,
       payload: {
         instruction: 'chat turn', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
-        egressPolicy: POLICY, agentMemory: 'read-if-admitted',
+        session: { mode: 'fresh' }, egressPolicy: POLICY, agentMemory: 'read-if-admitted',
       },
     })).rejects.toMatchObject({ code: 'agent_capability_missing' });
     expect(await started.byok.tasks.attempt('read-if-admitted-refused')).toBeUndefined();
@@ -148,7 +148,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       agentMemory: 'read-if-admitted',
     });
     const offered = await nextEnvelope(daemon);
-    expect(offered.type).toBe('task.offer_for_agent');
+    expect(offered.type).toBe('task.offer');
     expect(offered.payload).toMatchObject({ agentRef: AGENT_REF, agentMemory: 'read-if-admitted' });
   });
 
@@ -174,7 +174,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       deviceId: daemon.deviceId,
       payload: {
         instruction: 'chat turn', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
-        egressPolicy: POLICY, agentMemory: 'read-write-if-admitted',
+        session: { mode: 'fresh' }, egressPolicy: POLICY, agentMemory: 'read-write-if-admitted',
       },
     })).rejects.toMatchObject({
       code: 'agent_capability_missing',
@@ -198,7 +198,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       agentMemory: 'read-write-if-admitted',
     });
     const offered = await nextEnvelope(daemon);
-    expect(offered.type).toBe('task.offer_for_agent');
+    expect(offered.type).toBe('task.offer');
     expect(offered.payload).toMatchObject({ agentRef: AGENT_REF, agentMemory: 'read-write-if-admitted' });
   });
 
@@ -222,7 +222,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       deviceId: daemon.deviceId,
       payload: {
         instruction: 'read memory', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
-        egressPolicy: POLICY, homeAccess: 'memory-reader', agentMemory: 'read-write-if-admitted',
+        session: { mode: 'fresh' }, egressPolicy: POLICY, homeAccess: 'memory-reader', agentMemory: 'read-write-if-admitted',
       },
     })).rejects.toThrow(/agentMemory read-write-if-admitted requires a writer/);
     expect(await started.byok.tasks.attempt('reader-read-write-if-admitted')).toBeUndefined();

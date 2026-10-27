@@ -22,7 +22,8 @@ export {
   SealedTaskInputSchema,
   SealedTaskOutputSchema,
   TaskSealingSchema,
-  isSealedMessageType,
+  isSealableMessageType,
+  isSealedPayload,
   isSealedTaskPlainOutput,
   sealedBase64UrlByteLength,
   sealedPayloadPaddedLength,
@@ -30,7 +31,7 @@ export {
 export type {
   SealedDeclineCode,
   SealedDigestRule,
-  SealedMessageType,
+  SealableMessageType,
   SealedPayload,
   SealedPayloadCategory,
   SealedPayloadV1Category,
@@ -317,8 +318,6 @@ export type { TaskState } from './task-state';
 
 export {
   MESSAGE_TYPES,
-  TASK_OFFER_TYPES,
-  isTaskOfferType,
   MESSAGE_PAYLOAD_SCHEMAS,
   SERVER_TO_DAEMON_TYPES,
   DAEMON_TO_SERVER_TYPES,
@@ -340,10 +339,10 @@ export {
   ConnHelloPayloadSchema,
   AgentHomeAccessSchema,
   AgentMemorySelectionSchema,
-  TaskOfferForAgentPayloadSchema,
-  TaskOfferForAgentWithEgressPayloadSchema,
-  TaskOfferForAgentWithEgressFreshPayloadSchema,
-  TaskOfferPreparedPayloadSchema,
+  SessionSelectionSchema,
+  TaskOfferPayloadSchema,
+  TaskOfferPlainPayloadSchema,
+  TaskOfferSealedPayloadSchema,
   AgentEgressReliablePayloadSchema,
   AgentEgressAckPayloadSchema,
   AgentMessagePublishPayloadSchema,
@@ -358,7 +357,10 @@ export {
   TaskRejectPayloadSchema,
   TaskCancelPayloadSchema,
   TaskSteerPayloadSchema,
+  TaskSteerSealedPayloadSchema,
   TaskClaimPayloadSchema,
+  OfferAdmissionTimingsSchema,
+  OFFER_ADMISSION_MAX_DURATION_MS,
   TaskStartedPayloadSchema,
   TaskDeclinePayloadSchema,
   TaskProgressPayloadSchema,
@@ -382,7 +384,6 @@ export {
   TERMINAL_INFERENCE_USAGE_MAX_TOKENS,
   TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
   TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH,
-  TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH,
   TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH,
 } from './messages';
 export type {
@@ -396,13 +397,10 @@ export type {
   DispatchSelection,
   ToolsetId,
   ConnHelloPayload,
-  TaskOfferForAgentPayload,
-  TaskOfferForAgentWithEgressPayload,
-  TaskOfferForAgentWithEgressFreshPayload,
-  TaskOfferPreparedPayload,
-  TaskOfferForAgentSealedPayload,
-  TaskOfferForAgentWithEgressSealedPayload,
-  TaskOfferForAgentWithEgressFreshSealedPayload,
+  SessionSelection,
+  TaskOfferPayload,
+  TaskOfferPlainPayload,
+  TaskOfferSealedPayload,
   TaskSteerSealedPayload,
   TaskCompleteSealedPayload,
   TaskFailSealedPayload,
@@ -426,6 +424,7 @@ export type {
   TaskCancelPayload,
   TaskSteerPayload,
   TaskClaimPayload,
+  OfferAdmissionTimings,
   TaskStartedPayload,
   TaskDeclinePayload,
   TaskProgressPayload,
@@ -456,8 +455,6 @@ export {
 } from './errors';
 
 export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec';
-export { WIRE_V3_TO_V4_TYPES, migrateWireV3Envelope, wireV4TypeOf } from './wire-v4-migration';
-export type { WireV4MigrationRefusal, WireV4MigrationResult } from './wire-v4-migration';
 export type { CreateEnvelopeOptions } from './codec';
 
 export {
@@ -559,8 +556,6 @@ export type {
   InputPreparationReadback,
   InputPreparationStatusQuery,
 } from './http-api';
-
-export type { TaskOfferType } from './messages';
 
 export type { HarnessId, HarnessInfo } from './messages';
 

@@ -90,7 +90,7 @@ export function createTaskTools(options: TaskToolOptions): ScopedTool[] {
   }
   function verifyOffer(offer: NonNullable<Awaited<ReturnType<TaskToolServer['tasks']['offer']>>>, reservation: TaskReservation): void {
     const args = reservation.binding.arguments;
-    if (offer.type !== 'task.offer_for_agent_with_egress_fresh' || offer.taskId !== reservation.taskId
+    if (offer.type !== 'task.offer' || offer.payload.session.mode !== 'fresh' || offer.payload.sealing !== undefined || offer.taskId !== reservation.taskId
       || offer.deviceId !== reservation.binding.deviceId
       || canonicalJson(offer.payload.agentRef) !== canonicalJson(bindingAgent(reservation))
       || offer.payload.instruction !== args.instruction || offer.payload.runtime !== args.runtime
@@ -106,7 +106,7 @@ export function createTaskTools(options: TaskToolOptions): ScopedTool[] {
     const agentRef = bindingAgent(reservation);
     try {
       await sdk.executions.submit({ taskId: reservation.taskId, deviceId: reservation.binding.deviceId, payload: {
-        runtime: args.runtime, instruction: args.instruction, agentRef,
+        runtime: args.runtime, session: { mode: 'fresh' }, instruction: args.instruction, agentRef,
         egressPolicy: options.egressPolicy, terminalProjection: { mode: 'none' },
         ...(args.toolsets ? { requiredToolsets: [...args.toolsets] } : {}) } });
     } catch {

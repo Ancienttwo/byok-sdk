@@ -22,7 +22,6 @@ import {
   isServerToDaemonType,
   parseMessage,
   requiredReceiverCapabilities,
-  TaskOfferPreparedPayloadSchema,
   type MessageType,
   type WireAddition,
 } from '../index';
@@ -381,6 +380,22 @@ function carries(line: CorpusLine, entry: WireAddition): boolean {
   return entry.rule !== 'gated' || entry.value === undefined || value === entry.value;
 }
 
+/** The four Agent offer lanes of `task.offer`, by payload. */
+const OFFER_LANE = {
+  resume: (payload: Record<string, unknown>) => (payload.session as { mode: string }).mode === 'resume' && payload.egressPolicy === undefined,
+  'resume with egress': (payload: Record<string, unknown>) => (payload.session as { mode: string }).mode === 'resume' && payload.egressPolicy !== undefined,
+  fresh: (payload: Record<string, unknown>) => (payload.session as { mode: string }).mode === 'fresh' && payload.preparation === undefined,
+  prepared: (payload: Record<string, unknown>) => payload.preparation !== undefined,
+} as const;
+const OFFER_LANES = Object.keys(OFFER_LANE) as (keyof typeof OFFER_LANE)[];
+
+/** Whether a corpus prepared offer still parses with `agentMemory` replaced. */
+function preparedWithMemory(agentMemory: string): boolean {
+  const prepared = v4Corpus.find((line) => line.type === 'task.offer' && OFFER_LANE.prepared(line.payload))!;
+  expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(prepared.payload).success).toBe(true);
+  return MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({ ...prepared.payload, agentMemory }).success;
+}
+
 describe('compat v4: corpus coverage and WIRE_ADDITIONS', () => {
   it('declares exactly one server gate for draft frames', () => {
     expect(WIRE_ADDITIONS.filter(entry => entry.surface === 'agent.message.draft')).toEqual([
@@ -394,12 +409,12 @@ describe('compat v4: corpus coverage and WIRE_ADDITIONS', () => {
     expect(MESSAGE_TYPES.filter((type) => !seen.has(type))).toEqual([]);
   });
 
-  it('every Agent offer carrying terminalProjection has a result-document line with a schema, and a task.complete carries a document', () => {
-    for (const type of ['task.offer_for_agent', 'task.offer_for_agent_with_egress', 'task.offer_for_agent_with_egress_fresh', 'task.offer_prepared'] as const) {
+  it('every Agent offer lane carrying terminalProjection has a result-document line with a schema, and a task.complete carries a document', () => {
+    for (const lane of OFFER_LANES) {
       expect(v4Corpus.some((line) => {
         const projection = line.payload.terminalProjection as { mode?: string; schema?: unknown } | undefined;
-        return line.type === type && projection?.mode === 'result-document' && projection.schema !== undefined;
-      }), `${type} result-document line`).toBe(true);
+        return line.type === 'task.offer' && OFFER_LANE[lane](line.payload) && projection?.mode === 'result-document' && projection.schema !== undefined;
+      }), `${lane} result-document line`).toBe(true);
     }
     expect(v4Corpus.some((line) => line.type === 'task.complete' && line.payload.document !== undefined)).toBe(true);
   });
@@ -428,52 +443,48 @@ describe('compat v4: corpus coverage and WIRE_ADDITIONS', () => {
     expect(unused, 'append a v4 corpus line that carries each of these (golden/v4.envelopes.ndjson is append-only)').toEqual([]);
   });
 
-  it('gates the per-task agentMemory selection on the ordinary Agent offers only (#614)', () => {
-    for (const type of ['task.offer_for_agent', 'task.offer_for_agent_with_egress', 'task.offer_for_agent_with_egress_fresh'] as const) {
-      for (const agentMemory of ['none', 'read', 'read-write'] as const) {
-        expect(requiredReceiverCapabilities(type, { agentMemory }), `${type} ${agentMemory}`).toContain('agent-memory-selection');
-      }
-      expect(requiredReceiverCapabilities(type, {}), type).not.toContain('agent-memory-selection');
+  it('gates the per-task agentMemory selection on every offer that carries it (#614)', () => {
+    for (const agentMemory of ['none', 'read', 'read-write'] as const) {
+      expect(requiredReceiverCapabilities('task.offer', { agentMemory }), agentMemory).toContain('agent-memory-selection');
     }
-    // Every prepared offer carries its own required selection under its own gate.
-    expect(requiredReceiverCapabilities('task.offer_prepared', { agentMemory: 'read' })).not.toContain('agent-memory-selection');
+    expect(requiredReceiverCapabilities('task.offer', {})).not.toContain('agent-memory-selection');
+    // v4 has one offer type, so a prepared offer's required selection takes the same gate. A daemon
+    // advertises agent-memory-selection with agent-home-contract, so admission does not change.
+    const prepared = v4Corpus.find((line) => line.type === 'task.offer' && OFFER_LANE.prepared(line.payload))!;
+    expect(requiredReceiverCapabilities('task.offer', prepared.payload)).toContain('agent-memory-selection');
   });
 
   it('gates agentMemory read-if-admitted on its own flag, on the ordinary Agent offers only (#815)', () => {
-    for (const type of ['task.offer_for_agent', 'task.offer_for_agent_with_egress', 'task.offer_for_agent_with_egress_fresh'] as const) {
-      expect(requiredReceiverCapabilities(type, { agentMemory: 'read-if-admitted' }), type)
-        .toEqual(expect.arrayContaining(['agent-memory-selection', 'agent-memory-read-if-admitted']));
-      for (const agentMemory of ['none', 'read', 'read-write'] as const) {
-        expect(requiredReceiverCapabilities(type, { agentMemory }), `${type} ${agentMemory}`).not.toContain('agent-memory-read-if-admitted');
-      }
+    expect(requiredReceiverCapabilities('task.offer', { agentMemory: 'read-if-admitted' }))
+      .toEqual(expect.arrayContaining(['agent-memory-selection', 'agent-memory-read-if-admitted']));
+    for (const agentMemory of ['none', 'read', 'read-write'] as const) {
+      expect(requiredReceiverCapabilities('task.offer', { agentMemory }), agentMemory).not.toContain('agent-memory-read-if-admitted');
     }
     expect(AgentMemorySelectionSchema.options).toEqual(['none', 'read', 'read-write', 'read-if-admitted', 'read-write-if-admitted']);
     // The prepared offer keeps the three prepared modes.
-    expect(TaskOfferPreparedPayloadSchema.shape.agentMemory.safeParse('read-if-admitted').success).toBe(false);
+    expect(preparedWithMemory('read-if-admitted')).toBe(false);
   });
 
   it('gates agentMemory read-write-if-admitted on its own flag, on the plain and sealed ordinary Agent offers only (#833)', () => {
-    for (const type of [
-      'task.offer_for_agent', 'task.offer_for_agent_with_egress', 'task.offer_for_agent_with_egress_fresh',
-      'task.offer_for_agent_sealed', 'task.offer_for_agent_with_egress_sealed', 'task.offer_for_agent_with_egress_fresh_sealed',
-    ] as const) {
-      const required = requiredReceiverCapabilities(type, { agentMemory: 'read-write-if-admitted' });
-      expect(required, type).toEqual(expect.arrayContaining(['agent-memory-selection', 'agent-memory-read-write-if-admitted']));
-      expect(required, type).not.toContain('agent-memory-read-if-admitted');
+    const sealing = v4Corpus.find((line) => line.type === 'task.offer' && line.payload.sealing !== undefined)!.payload.sealing;
+    for (const extra of [{}, { sealing }]) {
+      const required = requiredReceiverCapabilities('task.offer', { ...extra, agentMemory: 'read-write-if-admitted' });
+      expect(required).toEqual(expect.arrayContaining(['agent-memory-selection', 'agent-memory-read-write-if-admitted']));
+      expect(required).not.toContain('agent-memory-read-if-admitted');
       for (const agentMemory of ['none', 'read', 'read-write', 'read-if-admitted'] as const) {
-        expect(requiredReceiverCapabilities(type, { agentMemory }), `${type} ${agentMemory}`).not.toContain('agent-memory-read-write-if-admitted');
+        expect(requiredReceiverCapabilities('task.offer', { ...extra, agentMemory }), agentMemory).not.toContain('agent-memory-read-write-if-admitted');
       }
     }
     // The prepared offer keeps the three prepared modes.
-    expect(TaskOfferPreparedPayloadSchema.shape.agentMemory.safeParse('read-write-if-admitted').success).toBe(false);
+    expect(preparedWithMemory('read-write-if-admitted')).toBe(false);
   });
 
   it('requiredReceiverCapabilities derives field and value gates from the table; document and the v2 strip-safe fields need none', () => {
-    expect(requiredReceiverCapabilities('task.offer_for_agent', { homeAccess: 'memory-reader' })).toEqual([
+    expect(requiredReceiverCapabilities('task.offer', { homeAccess: 'memory-reader' })).toEqual([
       'agent-home-contract',
       'agent-home-readers',
     ]);
-    expect(requiredReceiverCapabilities('task.offer_for_agent', {})).toEqual(['agent-home-contract']);
+    expect(requiredReceiverCapabilities('task.offer', {})).toEqual(['agent-home-contract']);
     expect(requiredReceiverCapabilities('agent.content.read', { surface: 'transcript' })).toContain('agent-content-transcript-read');
     expect(requiredReceiverCapabilities('agent.content.read', { surface: 'transcript' })).not.toContain('agent-content-workspace-read');
     expect(requiredReceiverCapabilities('task.progress', {})).toEqual([]);
@@ -672,6 +683,8 @@ function requiredCoverage(root: SchemaNode, prefix: string, exempt: (path: strin
 
 /** Structural acceptance, used only to attribute a value to union branches. */
 function accepts(root: SchemaNode, node: SchemaNode, value: unknown): boolean {
+  // A field that accepts no value marks the other branch, for example `sealed` on a plaintext branch.
+  if (Object.keys(node).length === 1 && JSON.stringify(node.not) === '{}') return false;
   if (node.$ref !== undefined && !accepts(root, definition(root, node.$ref).node, value)) return false;
   if (Array.isArray(node.allOf) && !node.allOf.every((part) => accepts(root, schemaNode(part)!, value))) return false;
   const options = branches(node);

@@ -32,7 +32,7 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { SEALED_INLINE_MAX_PADDED_LENGTH, isSealedMessageType } from '@byok-sdk/protocol';
+import { SEALED_INLINE_MAX_PADDED_LENGTH, isSealedPayload } from '@byok-sdk/protocol';
 import {
   journalHash,
   type JournalIdentity,
@@ -97,11 +97,11 @@ const SEALED_ENVELOPE_MARGIN_BYTES = 64 * 1024;
  */
 const ENVELOPE_RECORD_FLOOR_BYTES = Math.ceil(((SEALED_INLINE_MAX_PADDED_LENGTH + SEALED_AEAD_TAG_BYTES) * 4) / 3) + SEALED_ENVELOPE_MARGIN_BYTES;
 
-/** Whether canonical envelope bytes are a sealed message type (#654); read only for a record above `maxRecordBytes`. */
+/** Whether canonical envelope bytes carry a sealed payload (#654); read only for a record above `maxRecordBytes`. */
 function isSealedEnvelope(bytes: string): boolean {
   try {
-    const { type } = JSON.parse(bytes) as { type?: unknown };
-    return typeof type === 'string' && isSealedMessageType(type);
+    const { type, payload } = JSON.parse(bytes) as { type?: unknown; payload?: unknown };
+    return typeof type === 'string' && isSealedPayload(type, payload);
   } catch {
     return false;
   }

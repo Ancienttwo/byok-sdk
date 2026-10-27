@@ -1,7 +1,9 @@
+import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,12 +11,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../daemon/daemon-owner';
-import { controlSocketPath, controlTokenPath } from '../daemon/control-protocol';
+import { controlEndpointPath, controlSocketPath, controlTokenPath } from '../daemon/control-protocol';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { OperationalHealthTracker } from '../daemon/operational-health';
 import { connectControlClient, isControlDaemonGone } from '../bin/control-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { RuntimeDisposalFailure } from '../runtime-failure';
+import { resolveStorageConfig } from '../daemon/retention/config';
+import { foldNameAliases } from '../util/fold-name-aliases';
+import { resolveDaemonConfig } from '../daemon/create-daemon/config';
+import { DeviceStore } from '../daemon/store';
+import { stableAgentHomeOwnerId } from '../agent-home';
+import { defaultScratchRoot } from '../daemon/retention/scratch';
+import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { TestServer } from './fixtures/test-server';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -121,7 +130,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
   ): Promise<{ daemon: Daemon; config: DaemonConfig; storeDir: string }> {
     const storeDir = await tmpDir(`byok-stop-parity-${productId}-store-`);
     const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, storeDir };
-    const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } }, ...(config) }, [adapter]);
+    const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: FRESH_DAEMON_EGRESS,  storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } }, ...(config) }, [adapter]);
     await built.pair('pairing-code');
     await built.start();
     return { daemon: built, config, storeDir };
@@ -133,7 +142,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'long task' }, { taskId: 't1', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -178,8 +187,8 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     const built = await pairedAndStarted('acme-stop-runtime-disposal-barrier', adapter);
     daemon = built.daemon;
     server.send(createEnvelope(
-      'task.offer_for_agent',
-      { agentRef: freshTestAgentRef(),  instruction: 'long task' },
+      'task.offer',
+      { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER },
       { taskId: 't-disposal-barrier', seq: server.nextSeq() },
     ));
     await server.waitFor((event) => event.type === 'task.started');
@@ -212,7 +221,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'long task' }, { taskId: 't-idem', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't-idem', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -246,7 +255,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'long task' }, { taskId: 't-double', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't-double', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -264,10 +273,10 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId: 'acme-stop-barrier',
       serverUrl: server.url,
-      agentHome: testAgentHomeConfig(),
+      agentHome: testAgentHomeConfig(), agentEgress: FRESH_DAEMON_EGRESS,
       storeDir,
     };
-    daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } }, ...(config) }, [new StubRuntimeAdapter('pi')]);
+    daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: FRESH_DAEMON_EGRESS,  storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } }, ...(config) }, [new StubRuntimeAdapter('pi')]);
     await daemon.pair('pairing-code');
     await daemon.start();
 
@@ -296,7 +305,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-stop-concurrent',
         serverUrl: server.url,
-        agentHome: testAgentHomeConfig(),
+        agentHome: testAgentHomeConfig(), agentEgress: FRESH_DAEMON_EGRESS,
         storeDir,
         shutdownGraceMs: 20,
       },
@@ -305,7 +314,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     await daemon.pair('pairing-code');
     await daemon.start();
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'late writer' }, { taskId: 't-late', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'late writer', ...FRESH_OFFER }, { taskId: 't-late', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -427,5 +436,151 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     expect(samples.length).toBeGreaterThan(0);
     expect(await fileGone(controlTokenPath(built.storeDir))).toBe(true);
     expect(await fileGone(controlSocketPath(built.storeDir))).toBe(true);
+  }, 20000);
+});
+
+/** A stub whose prepared operation takes an execution scratch, so a run leaves `<scratch root>/exec`. */
+class LaunchingAdapter extends StubRuntimeAdapter {
+  override async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const base = await super.prepare(input);
+    if (base.kind !== 'prepared') return base;
+    return {
+      ...base,
+      operation: {
+        ...base.operation,
+        resolveRuntimeLaunch: async ({ cwd, scratch }) => ({
+          scratch, kind: 'pi-rpc', command: 'unused', fixedArgs: [], cwd, env: {}, sessionCwd: cwd,
+          credentialSource: 'pi-auth-store', release: async () => {},
+        }),
+      },
+    };
+  }
+}
+
+// #1030: 8.3 short names and letter case are Windows name aliases, not links.
+describe('daemon restart through a Windows name alias of the store (#1030)', () => {
+  let server: TestServer;
+  let daemon: Daemon | undefined;
+  const scratchRoots: string[] = [];
+
+  beforeEach(async () => {
+    server = await TestServer.start();
+  });
+
+  afterEach(async () => {
+    await daemon?.stop().catch(() => {});
+    daemon = undefined;
+    await server.close();
+    await Promise.all(scratchRoots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  });
+
+  it.skipIf(process.platform !== 'win32' && process.platform !== 'darwin')('folds a letter-case alias of the store and its configured retention roots', async () => {
+    // /private/tmp keeps a macOS root under the Unix socket limit.
+    const store = realpathSync.native(await fs.mkdtemp(path.join(process.platform === 'darwin' ? '/private/tmp' : os.tmpdir(), 'c-')));
+    scratchRoots.push(store);
+    const alias = path.join(path.dirname(store), path.basename(store).toUpperCase());
+    expect(alias).not.toBe(store);
+    expect(foldNameAliases(alias)).toBe(store);
+    expect(foldNameAliases(path.join(alias, 'later'))).toBe(path.join(store, 'later'));
+    expect(resolveStorageConfig(alias, { scratchRoot: path.join(alias, 's'), skillPackDataDirs: [alias] }))
+      .toMatchObject({ scratchRoot: path.join(store, 's'), skillPackDataDirs: [store] });
+    expect(resolveStorageConfig(alias)).toMatchObject({ scratchRoot: defaultScratchRoot(store), skillPackDataDirs: [store] });
+    // Every identity derived from the store uses the folded spelling.
+    expect(DeviceStore.resolveDir('acme-fold', alias)).toBe(store);
+    expect(controlEndpointPath('acme-fold', DeviceStore.resolveDir('acme-fold', alias))).toBe(controlEndpointPath('acme-fold', store));
+    expect(stableAgentHomeOwnerId(DeviceStore.resolveDir('acme-fold', alias), 'acme-fold')).toBe(stableAgentHomeOwnerId(store, 'acme-fold'));
+    const { piByokLauncher } = resolveDaemonConfig({ overrides: {}, config: {
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-fold', serverUrl: 'ws://127.0.0.1:1',
+      piByokLauncher: { command: 'byok-pi-launcher', profileDbPath: path.join(store, 'profiles.db'), sessionDir: path.join(alias, 'sessions') },
+    } });
+    expect(piByokLauncher?.sessionDir).toBe(path.join(store, 'sessions'));
+  });
+
+  it.skipIf(process.platform === 'win32')('never folds a store path through a symbolic link and keeps a missing tail', async () => {
+    const store = realpathSync.native(await tmpDir('byok-link-target-'));
+    const link = `${store}-link`;
+    await fs.symlink(store, link);
+    try {
+      expect(foldNameAliases(link)).toBe(link);
+      expect(foldNameAliases(path.join(link, 'later'))).toBe(path.join(link, 'later'));
+      expect(resolveStorageConfig(link).skillPackDataDirs).toEqual([link]);
+      expect(foldNameAliases(path.join(store, 'missing', 'tail'))).toBe(path.join(store, 'missing', 'tail'));
+    } finally {
+      await fs.rm(link, { force: true });
+    }
+  });
+
+  it.skipIf(process.platform !== 'win32')('folds the 8.3 short-name form of a store path', async (ctx) => {
+    const canonical = realpathSync.native(await tmpDir('byok-short-name-store-'));
+    // cmd's %~sI expansion prints the 8.3 form; it repeats the long name where none exists.
+    const listed = spawnSync('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${canonical}") do @echo %~sI"`],
+      { encoding: 'utf8', windowsVerbatimArguments: true });
+    expect(listed.status).toBe(0);
+    const short = listed.stdout.trim();
+    ctx.skip(short === canonical, 'this volume does not generate 8.3 short names');
+    expect(short).not.toBe(canonical);
+    expect(foldNameAliases(short)).toBe(canonical);
+    expect(DeviceStore.resolveDir('acme-short-name', short)).toBe(canonical);
+  });
+
+  it.skipIf(process.platform !== 'win32')('never folds a store path through a junction', async () => {
+    const target = realpathSync.native(await tmpDir('byok-junction-target-'));
+    const junction = path.join(path.dirname(target), `${path.basename(target)}-junction`);
+    await fs.symlink(target, junction, 'junction');
+    try {
+      expect(foldNameAliases(junction)).toBe(junction);
+      expect(foldNameAliases(path.join(junction, 'store'))).toBe(path.join(junction, 'store'));
+    } finally {
+      await fs.rm(junction, { force: true });
+    }
+  });
+
+  it.skipIf(process.platform !== 'win32' && process.platform !== 'darwin')('restarts and sweeps the default scratch root when the store is configured through a name alias', async () => {
+    const canonical = realpathSync.native(await tmpDir('byok-alias-store-'));
+    const storeDir = path.join(path.dirname(canonical), path.basename(canonical).toUpperCase());
+    expect(realpathSync.native(storeDir)).toBe(canonical);
+    expect(storeDir).not.toBe(canonical);
+    // No storage.scratchRoot: the default root derives from the store.
+    const config: DaemonConfig = {
+      agentHome: testAgentHomeConfig(), agentEgress: FRESH_DAEMON_EGRESS, localAgentRelease: { version: '0.0.0-test' },
+      productName: 'Acme', productId: 'acme-store-alias', serverUrl: server.url, storeDir,
+    };
+    const offer = (taskId: string) => server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), instruction: taskId, ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
+
+    const first = new LaunchingAdapter('pi');
+    daemon = createDaemonWithAdapters(config, [first]);
+    await daemon.pair('pairing-code');
+    await daemon.start();
+    offer('alias-first');
+    await waitFor(() => expect(first.sessions).toHaveLength(1));
+    first.sessions[0]!.emit({ type: 'turn_end' });
+    await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'alias-first');
+    await daemon.stop();
+    // A long store moves its default root to a fixed short one, so derive it.
+    const scratchRoot = defaultScratchRoot(canonical);
+    scratchRoots.push(scratchRoot);
+    const exec = path.join(scratchRoot, 'exec');
+    const tokens = await fs.readdir(exec);
+    expect(tokens).toHaveLength(1);
+    // Crash residue: a launch config left behind as if the process had been killed.
+    const residue = path.join(exec, tokens[0]!, 'sdk');
+    await fs.mkdir(residue);
+    await fs.writeFile(path.join(residue, 'mcp-config.json'), 'secret');
+
+    // A startup exec-sdk sweep failure is fatal; this one must remove the residue through the folded root.
+    const second = new LaunchingAdapter('pi');
+    daemon = createDaemonWithAdapters(config, [second]);
+    await daemon.start();
+    expect(await fileGone(residue)).toBe(true);
+    offer('alias-second');
+    await waitFor(() => expect(second.sessions).toHaveLength(1));
+    second.sessions[0]!.emit({ type: 'turn_end' });
+    await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'alias-second');
+
+    // A CLI resolves the same aliased config through DeviceStore.resolveDir, which bin/config's resolveStoreDir
+    // delegates to (bin-config.test.ts pins that wiring), and reaches this daemon's control endpoint.
+    const cli = await connectControlClient({ storeDir: DeviceStore.resolveDir(config.productId, config.storeDir), productId: config.productId });
+    if (!cli.ok) throw new Error(`expected the CLI to reach the daemon: ${JSON.stringify(cli)}`);
+    cli.client.close();
   }, 20000);
 });

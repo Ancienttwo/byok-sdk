@@ -283,7 +283,7 @@ export async function decideFinish(client: PoolClient, scope: string, turnId: st
   const published = new Map<string, Json>();
   const base = { ...given, publish: (id: string, value: Json) => { given.publish(id, value); published.set(id, structuredClone(value)); } };
   if (attempt.cancellation || envelope.type === 'task.cancelled') conclusion = 'cancelled';
-  else if (envelope.type === 'task.complete') {
+  else if (envelope.type === 'task.complete' && envelope.payload.sealed === undefined) {
     const document = envelope.payload.document;
     if (row.handler !== null) {
       applyHostOutcome(turnId, hostIntents.get(row.handler), row.handler, document, { intent: { key: turnId, taskId: row.task_id }, terminal,

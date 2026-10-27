@@ -22,6 +22,10 @@ import {
 } from '../types';
 import { AsyncQueue } from '../util/async-queue';
 import { TestServer } from './fixtures/test-server';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -128,7 +132,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
     const storeDir = await tmpDir(`byok-confirm-e2e-${productId}-store-`);
     // The approval stub projects no MCP toolsets, so the daemon must not attach the Agent memory MCP to its offers.
     const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, storeDir, agentMemoryMcp: 'off' };
-    const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter], overrides);
+    const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter], overrides);
     await built.pair('pairing-code');
     await built.start();
     return { daemon: built, config, storeDir };
@@ -141,7 +145,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-approve-1';
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -179,7 +183,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-approvalid-surfaces-1';
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -229,7 +233,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-reject-1';
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -276,7 +280,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-race-1';
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -322,7 +326,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-timeout-1';
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -349,7 +353,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-stale-approve-1';
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -404,7 +408,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-stale-reject-1';
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -476,7 +480,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-targeting-approve-1';
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -540,7 +544,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-targeting-reject-1';
     server.send(
-      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 

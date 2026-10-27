@@ -107,7 +107,10 @@ describe('issues #141-#144 server reliability regressions', () => {
   it('#141 reserves an Agent attempt before mailbox visibility and retries one stable offer only', async () => {
     const { cloud, base } = await cloudWithFirstMailboxAppendFailure();
     const taskId = 'task-legacy-retry';
-    const input = { taskId, payload: { ...TEST_AGENT_DISPATCH, instruction: 'first body' } };
+    const input = {
+      taskId,
+      payload: { agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_AGENT_DISPATCH.sessionRef } as const, instruction: 'first body' },
+    };
 
     await expect(cloud.enqueueAgentOffer(TENANT, 'device-a', input)).rejects.toMatchObject({
       code: 'task_offer_append_refused',
@@ -140,7 +143,8 @@ describe('issues #141-#144 server reliability regressions', () => {
       tenant: TENANT,
       cloud: {} as ByokCloud,
       relay,
-      readState: async () => 'Complete',
+      readState: async () => ({ state: 'Complete', at: '2026-09-05T00:00:00.000Z' }),
+      readApprovalRequest: async () => undefined,
       readResult: async () => ({ state: 'Complete', summary: 'durably complete' }),
     });
 
@@ -170,7 +174,7 @@ describe('issues #141-#144 server reliability regressions', () => {
     relay.noteDispatched(taskId, '2026-09-05T00:00:00.000Z');
 
     const events: unknown[] = [];
-    for await (const event of relay.events(taskId)) events.push(event);
+    for await (const entry of relay.entries(taskId, relay.feed(taskId)!)) events.push(entry.value);
     expect(events).toMatchObject([
       { kind: 'state', state: 'Offered' },
       { kind: 'state', state: 'Complete' },

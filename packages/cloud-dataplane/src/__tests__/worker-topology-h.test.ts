@@ -289,6 +289,7 @@ describe.skipIf(!RUN)('Topology H on a real workerd: two devices, one hosted Hos
         instruction: `h-worker turn for device ${device.name}`,
         runtime: 'codex',
         agentRef: device.agentRef,
+        session: { mode: 'fresh' },
         egressPolicy: EGRESS_POLICY,
         terminalProjection: { mode: 'none' },
         ...(withMessage
@@ -387,18 +388,18 @@ describe.skipIf(!RUN)('Topology H on a real workerd: two devices, one hosted Hos
     const offerA = await probe<{ taskId: string; type: string }>('/probe/submit', { input: execution(deviceA, taskA, true) });
     const offerB = await probe<{ taskId: string; type: string }>('/probe/submit', { input: execution(deviceB, taskB, true) });
     expect([offerA, offerB]).toMatchObject([
-      { taskId: taskA, type: 'task.offer_for_agent_with_egress_fresh' },
-      { taskId: taskB, type: 'task.offer_for_agent_with_egress_fresh' },
+      { taskId: taskA, type: 'task.offer' },
+      { taskId: taskB, type: 'task.offer' },
     ]);
 
     // Both offers are durable before either device polls, so each page holds
     // everything pending for its device: exactly its own offer.
     const [pageA, pageB] = await Promise.all([poll(deviceA), poll(deviceB)]);
     expect(pageA.events.map((event) => [event.type, event.task_id])).toEqual([
-      ['task.offer_for_agent_with_egress_fresh', taskA],
+      ['task.offer', taskA],
     ]);
     expect(pageB.events.map((event) => [event.type, event.task_id])).toEqual([
-      ['task.offer_for_agent_with_egress_fresh', taskB],
+      ['task.offer', taskB],
     ]);
     expect(pageA.events[0]?.payload).toMatchObject({ agentRef: deviceA.agentRef });
     expect(pageB.events[0]?.payload).toMatchObject({ agentRef: deviceB.agentRef });

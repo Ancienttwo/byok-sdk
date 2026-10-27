@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH } from '../constants';
 import {
   AgentEventOrUnknownSchema,
   AgentEventSchema,
@@ -35,9 +36,8 @@ describe('unknown AgentEvent variant tolerance', () => {
     const unknownEvent = { type: 'plan_update', step: 3, of: 7, nested: { detail: 'ok' } };
     const result = TaskProgressPayloadSchema.safeParse({ seq: 1, events: [unknownEvent] });
     expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.events[0]).toEqual(unknownEvent);
-    }
+    if (!result.success || result.data.sealed !== undefined) throw new Error('unreachable');
+    expect(result.data.events[0]).toEqual(unknownEvent);
   });
 
   it('a full task.progress envelope with an unknown event type parses via parseMessage without throwing', () => {
@@ -60,6 +60,7 @@ describe('unknown AgentEvent variant tolerance', () => {
     const parsed = parseMessage(raw);
     expect(parsed.type).toBe('task.progress');
     if (parsed.type === 'task.progress') {
+      if (parsed.payload.sealed !== undefined) throw new Error('unreachable');
       expect(parsed.payload.events).toEqual([
         { type: 'progress', text: 'hi' },
         { type: 'some_future_event_v2', foo: 42 },
@@ -136,11 +137,10 @@ describe('unknown AgentEvent variant tolerance', () => {
         events: [known1, unknown1, known2],
       });
       expect(result.success).toBe(true);
-      if (result.success) {
-        const { known, unknown } = partitionAgentEvents(result.data.events);
-        expect(known).toEqual([known1, known2]);
-        expect(unknown).toEqual([unknown1]);
-      }
+      if (!result.success || result.data.sealed !== undefined) throw new Error('unreachable');
+      const { known, unknown } = partitionAgentEvents(result.data.events);
+      expect(known).toEqual([known1, known2]);
+      expect(unknown).toEqual([unknown1]);
     });
   });
 });
@@ -167,6 +167,7 @@ describe('tool observation fields', () => {
         { type: 'tool_result', tool: 'bash', output: { stdout: 'ok' } },
       ],
     });
+    if (parsed.sealed !== undefined) throw new Error('unreachable');
     expect(parsed.events).toEqual([
       { type: 'tool_use', tool: 'bash', input: { command: 'ls' } },
       { type: 'tool_result', tool: 'bash', output: { stdout: 'ok' } },
@@ -223,6 +224,14 @@ describe('usage AgentEvent variant', () => {
     const result = AgentEventSchema.safeParse(event);
     expect(result.success).toBe(true);
     if (result.success) expect(result.data).toEqual(event);
+  });
+
+  it('carries the model the provider served, bounded like the terminal usage model (#1014)', () => {
+    const served = { type: 'usage', inputTokens: 10, model: 'claude-sonnet-5-5' };
+    expect(AgentEventSchema.parse(served)).toEqual(served);
+    expect(AgentEventSchema.parse({ type: 'usage', model: 'm'.repeat(TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH) })).toMatchObject({ type: 'usage' });
+    expect(AgentEventSchema.safeParse({ type: 'usage', model: '' }).success).toBe(false);
+    expect(AgentEventSchema.safeParse({ type: 'usage', model: 'm'.repeat(TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH + 1) }).success).toBe(false);
   });
 
   it('rejects a negative token count', () => {

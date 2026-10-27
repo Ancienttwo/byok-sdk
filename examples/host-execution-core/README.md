@@ -357,7 +357,7 @@ the device can read. A member seals one routine template for one routine version
 `sealRoutineTemplate`: family `routine.template`, the routine id and version
 in place of a task id, no device, the Agent, the category list and the expiry `notAfter`. The Host
 stores the template and puts it, byte for byte, in the `sealed` member of each occurrence's
-`task.offer_for_agent_with_egress_fresh_sealed`, next to the plaintext `routineRef`. It never
+`task.offer` (its sealed branch, with `session: { mode: 'fresh' }`), next to the plaintext `routineRef`. It never
 sees the scope key or the instruction.
 
 - A routine `execution` is a plain `ExecutionTemplate` or a `SealedExecutionTemplate` (the payload
@@ -389,8 +389,8 @@ sees the scope key or the instruction.
   returns or the intent expires.
 - `sealRoutineTemplate` seals exactly `['task-input']`, the only category list K4 runs. The embedded `ByokServer` has none,
   because it declares no `e2ee.member` and so no daemon paired to it advertises `sealed-payload-v1`.
-- `sameFrozenOffer` checks the offer type of the input's lane: a plain readback never matches a
-  sealed input, nor the reverse. The payload compares exactly, because the Host resubmits its
+- `sameFrozenOffer` checks the offer type (`task.offer` for both lanes) and the canonical payload: a plain
+  readback never matches a sealed input, nor the reverse, because only the sealed payload carries `sealing`. The payload compares exactly, because the Host resubmits its
   frozen bytes and the cloud keeps the first ciphertext.
 - The outcome, an outbox projection and anything else the Host derives from the terminal stay
   plaintext, even when they carry content derived from the sealed input.

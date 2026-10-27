@@ -9,6 +9,7 @@ const input: FrozenInput = {
   deviceId: 'device-1',
   payload: {
     runtime: 'pi',
+    session: { mode: 'fresh' },
     instruction: 'Reply to the room.',
     agentRef: { agentId: 'main', profileRevision: '1' },
     egressPolicy: {
@@ -23,7 +24,7 @@ const input: FrozenInput = {
 };
 
 function readback(delivered: boolean, change: Partial<FrozenOffer> = {}): FrozenOffer {
-  return { taskId: input.taskId, deviceId: input.deviceId, messageId: 'message-1', type: 'task.offer_for_agent_with_egress_fresh',
+  return { taskId: input.taskId, deviceId: input.deviceId, messageId: 'message-1', type: 'task.offer',
     payload: structuredClone(input.payload), recordedAt: 1, delivered, ...change } as FrozenOffer;
 }
 
@@ -69,7 +70,7 @@ describe('submitFrozen (#793 D2b)', () => {
   it.each([
     ['taskId', { taskId: 'task-2' }],
     ['deviceId', { deviceId: 'device-2' }],
-    ['type', { type: 'task.offer' }],
+    ['type', { type: 'task.steer' }],
     ['payload', { payload: { ...structuredClone(input.payload), instruction: 'Another turn.' } }],
   ])('refuses a readback with another %s and never submits', async (_field, change) => {
     const p = port([readback(true, change as Partial<FrozenOffer>)]);

@@ -14,8 +14,9 @@
  *
  * The hits must equal `EXPECTED_PLAINTEXT`, and the inventory table in
  * `docs/security.md` must list the same set. A new column that stores content
- * fails this test until both lists name it. When #654 seals a category, its
- * rows leave both lists and the scan stays as it is.
+ * fails this test until both lists name it. The run seals nothing. Where a
+ * sealed task's ciphertext lands is checked by
+ * `examples/hosted-bot-collaboration/src/sealed-zero-hit.test.ts` (#654 E6).
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -233,6 +234,7 @@ describe.skipIf(SKIP_DATAPLANE)(`hosted plaintext inventory — ${SKIP_REASON}`,
           instruction: `instruction ${CANARY}`,
           runtime: 'codex',
           agentRef,
+          session: { mode: 'fresh' },
           egressPolicy: EGRESS_POLICY,
           terminalProjection: { mode: 'none' },
           messageEgress: { mode: 'required', contract: MESSAGE_CONTRACT, contentType: 'text/markdown', maxBytes: 4_096 },
@@ -240,7 +242,7 @@ describe.skipIf(SKIP_DATAPLANE)(`hosted plaintext inventory — ${SKIP_REASON}`,
         agentMessageContext: { destinationBinding: 'conversation/inventory', freshnessCursor: 'turn-1' },
       });
       expect((await poll()).map((event) => [event.type, event.task_id])).toEqual([
-        ['task.offer_for_agent_with_egress_fresh', taskId],
+        ['task.offer', taskId],
       ]);
       await send(createEnvelope('task.claim', { deviceId, agentRef, runtime: 'codex' }, { taskId }));
       await send(createEnvelope('task.started', {}, { taskId }));

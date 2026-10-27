@@ -9,6 +9,7 @@ import type { TaskRunner } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import { bindOfferWorkspace } from './offer-workspace';
 import { sealOfferManifest, claimOffer, startOfferRuntime } from './offer-launch';
+import type { OfferAdmissionTiming } from './offer-admission-timing';
 
 /** What the offer's `finally` releases. The stage that acquires a lease records it here at once, so a throw still releases it. */
 export interface OfferHeld {
@@ -26,6 +27,7 @@ export async function handleOffer(
   this: TaskRunner,
   taskId: string,
   payload: AcceptedOfferPayload,
+  admission: OfferAdmissionTiming,
 ): Promise<void> {
   // Finding P2, Fix 2c (redelivered offer for an already-active/finished
   // task): checked first, ahead of everything below — a redelivered
@@ -40,7 +42,7 @@ export async function handleOffer(
     return;
   }
 
-  const request = readOfferRequest.call(this, taskId, payload);
+  const request = readOfferRequest.call(this, taskId, payload, admission);
   if (request === undefined) return;
   const {
     agentRef, decline, sessionRef, homeAccess, readerAttempt, homeBusyCode, preparation, agentMemory,
@@ -52,7 +54,7 @@ export async function handleOffer(
       // By name, not by reinterpretation. A daemon with no input-preparation
       // section holds no record this reference could mean, and running the
       // offer some other way would be running an Execution nobody counted.
-      this['decline'](taskId, 'preparation_lane_unconfigured: this daemon is not configured for input preparation', false, agentRef);
+      this['decline'](taskId, admission, 'preparation_lane_unconfigured: this daemon is not configured for input preparation', false, agentRef);
       return;
     }
     // BEFORE the first read. A restarted daemon reaches this line with a
@@ -71,6 +73,7 @@ export async function handleOffer(
     } catch (error) {
       this['decline'](
         taskId,
+        admission,
         `preparation_store_unavailable: the preparation store could not be opened: ${outboundErrorMessage(error)}`,
         false,
         agentRef,
@@ -80,13 +83,13 @@ export async function handleOffer(
       this['inFlightOffers'].delete(taskId);
     }
     if (preparationLane.store.get(preparation.reference) === undefined) {
-      this['decline'](taskId, 'preparation_not_found: no preparation record under this reference on this device', false, agentRef);
+      this['decline'](taskId, admission, 'preparation_not_found: no preparation record under this reference on this device', false, agentRef);
       return;
     }
   }
-  const messageRequirement = 'messageEgress' in payload ? payload.messageEgress : undefined;
-  const terminalProjection = 'terminalProjection' in payload ? payload.terminalProjection : undefined;
-  if ('egressPolicy' in payload) {
+  const messageRequirement = payload.messageEgress;
+  const terminalProjection = payload.terminalProjection;
+  if (payload.egressPolicy !== undefined) {
     if (this['deps'].agentEgressPolicy === undefined || !sameEgressPolicy(this['deps'].agentEgressPolicy, payload.egressPolicy)) {
       decline('Agent egress offer policy is not exactly enabled by this daemon', false);
       return;
@@ -141,7 +144,7 @@ export async function handleOffer(
     reservedHome = reservationKey;
   };
   const phase: OfferPhaseContext = {
-    taskId, decline, admissionWithdrawn, admissionSignal: blobAbort.signal, releaseReservation, reserveHome,
+    taskId, decline, admissionWithdrawn, admissionSignal: blobAbort.signal, releaseReservation, reserveHome, admission,
   };
   try {
     if (this['admitOffer'](phase) === undefined) return;
@@ -241,17 +244,18 @@ export async function handleOffer(
   }
 }
 
-function readOfferRequest(this: TaskRunner, taskId: string, payload: AcceptedOfferPayload) {
+function readOfferRequest(this: TaskRunner, taskId: string, payload: AcceptedOfferPayload, admission: OfferAdmissionTiming) {
   let agentRef: AgentRef | undefined;
   try {
     agentRef = offeredAgentRef(payload);
   } catch (error) {
-    this['decline'](taskId, `invalid AgentRef: ${errorMessage(error)}`, false);
+    this['decline'](taskId, admission, `invalid AgentRef: ${errorMessage(error)}`, false);
     return;
   }
   if (agentRef === undefined || this['deps'].agentHome === undefined || this['deps'].agentSessionHandoffs === undefined) {
     this['decline'](
       taskId,
+      admission,
       'Agent offer requires the SDK-owned agent-home-contract layout and handoff store',
       false,
       agentRef,
@@ -259,7 +263,7 @@ function readOfferRequest(this: TaskRunner, taskId: string, payload: AcceptedOff
     return;
   }
   const decline = (reason: string, retryable: boolean, code?: TaskDeclinePayload['code']): void => {
-    this['decline'](taskId, reason, retryable, agentRef, code);
+    this['decline'](taskId, admission, reason, retryable, agentRef, code);
   };
   const sessionRef = offeredSessionRef(payload);
   const homeAccess = offeredHomeAccess(payload);
@@ -269,7 +273,7 @@ function readOfferRequest(this: TaskRunner, taskId: string, payload: AcceptedOff
   // else. Absent for every ordinary offer, so every branch below that does
   // not mention it behaves exactly as it did before this lane existed.
   const preparation = offeredPreparation(payload);
-  const offeredMemory = 'agentMemory' in payload ? payload.agentMemory : undefined;
+  const offeredMemory = payload.agentMemory;
   if (preparation !== undefined && !PreparedAgentMemoryModeSchema.safeParse(offeredMemory).success) {
     decline('agent_memory_selection_invalid: prepared offers require an explicit memory selection', false);
     return;

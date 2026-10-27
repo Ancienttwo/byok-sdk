@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DispatchSelectionSchema,
-  TaskOfferForAgentPayloadSchema,
+  TaskOfferPayloadSchema,
 } from '../index';
 
 describe('DispatchSelectionSchema', () => {
@@ -53,10 +53,11 @@ describe('DispatchSelectionSchema', () => {
     expect(DispatchSelectionSchema.safeParse(selection).success).toBe(false);
   });
 
-  it('is carried by task.offer_for_agent without widening its strict nested shape', () => {
-    const result = TaskOfferForAgentPayloadSchema.safeParse({
+  it('is carried by task.offer without widening its strict nested shape', () => {
+    const result = TaskOfferPayloadSchema.safeParse({
       instruction: 'hello',
-      agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' }, 
+      agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
+      session: { mode: 'resume', sessionRef: 'session-1' },
       dispatchSelection: {
         lane: 'byok',
         runtimeId: 'pi',

@@ -28,7 +28,7 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   // Agent offer admission reads the durable capability snapshot a hello records.
   await post(createEnvelope('conn.hello', { deviceId: device.deviceId, productId: 'read-ahead', protocolVersions: [PROTOCOL_VERSION], capabilities: ['agent-home-contract'] }));
   const resume = (instruction: string, sessionRef: string, agentRef = freshTestAgentRef()) =>
-    cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: { instruction, agentRef, sessionRef } });
+    cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: { instruction, agentRef, session: { mode: 'resume', sessionRef } } });
   const agentB = freshTestAgentRef();
   const a = await resume('slow A', 'session-a');
   const b = await resume('fast B', 'session-b', agentB);
@@ -40,8 +40,8 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   const connection = new ConnectionManager({ serverUrl: cloud.url, deviceId: device.deviceId, productId: 'read-ahead',
     capabilities: ['agent-home-contract'], runtimes: [], auth, cursorStore, longPollIdleDelayMs: 5, longPollRetryDelayMs: 5,
     onEnvelope: async envelope => {
-      if (envelope.type === 'task.offer_for_agent' && envelope.task_id === a.taskId) { aCalls++; await gate; }
-      if (envelope.type === 'task.offer_for_agent' && envelope.task_id === b.taskId) bCalls++;
+      if (envelope.type === 'task.offer' && envelope.task_id === a.taskId) { aCalls++; await gate; }
+      if (envelope.type === 'task.offer' && envelope.task_id === b.taskId) bCalls++;
       if (envelope.type === 'task.approve' || envelope.type === 'task.cancel') controls.push(envelope.type);
     } });
   cleanup.push(async () => { release(); await connection.stop(); await auth.stop(); });

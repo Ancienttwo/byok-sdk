@@ -6,6 +6,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
+import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { DurableRecovery } from '../adapters/pi-durable/recovery';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeOperationStartInput } from '../types';
@@ -44,11 +45,11 @@ it.skipIf(process.platform === 'win32')('TaskRunner waits for the real durable j
   }
   const adapter = new Adapter('pi'); server = await TestServer.start();
   daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  localAgentRelease:{version:'0.0.0-test'},productName:'Test',productId:'durable-wiring',serverUrl:server.url,
-    storeDir, agentHome:{hostStorageRoot:path.join(root,'home')},durablePi:true,
+    storeDir, agentHome:{hostStorageRoot:path.join(root,'home')},agentEgress:FRESH_DAEMON_EGRESS,durablePi:true,
     piByokLauncher:{command:'unused-custody',profileDbPath:path.join(root,'profiles'),sessionDir:path.join(root,'sessions')},
   },[adapter],{journal});
   const record = await daemon.pair('pairing-code'); await daemon.start();
-  server.send(createEnvelope('task.offer_for_agent',{instruction:'Host input',runtime:'pi',agentRef:{agentId:'durable-agent',profileRevision:'1'}},{taskId:'durable-wiring-task',seq:server.nextSeq()}));
+  server.send(createEnvelope('task.offer',{instruction:'Host input',runtime:'pi',agentRef:{agentId:'durable-agent',profileRevision:'1'},...FRESH_OFFER},{taskId:'durable-wiring-task',seq:server.nextSeq()}));
   await vi.waitFor(() => expect(entered).toBe(true));
   expect(acknowledged).toBe(false);
   const db = new DatabaseSync(path.join(storeDir,'daemon.db'),{readOnly:true});

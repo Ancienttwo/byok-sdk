@@ -25,6 +25,9 @@ import { TaskRunner } from '../daemon/task-runner';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 /**
  * #317 acceptance: one canonical Agent home runs up to N `memory-reader`
@@ -77,6 +80,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
       serverUrl: server.url,
       storeDir,
       agentHome: { hostStorageRoot },
+      agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       ...overrides,
     }, [pi]);
     daemon = started;
@@ -92,12 +96,12 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
   }
 
   function offer(taskId: string, agentId: string, options: { reader?: boolean; sessionRef?: string } = {}): void {
-    server.send(createEnvelope('task.offer_for_agent', {
+    server.send(createEnvelope('task.offer', {
       instruction: `work for ${agentId}`,
       agentRef: { agentId, profileRevision: 'r1' },
       runtime: 'pi',
       ...(options.reader === true ? { homeAccess: 'memory-reader' as const } : {}),
-      ...(options.sessionRef === undefined ? {} : { sessionRef: options.sessionRef }),
+      ...(options.sessionRef === undefined ? FRESH_OFFER : { session: { mode: 'resume' as const, sessionRef: options.sessionRef } }),
     }, { taskId, seq: server.nextSeq() }));
   }
 
@@ -661,7 +665,7 @@ describe('durable Pi and memory-reader Attempts (#317)', () => {
     });
     const sent: Envelope[] = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [durable],
       agentHome,
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -676,8 +680,8 @@ describe('durable Pi and memory-reader Attempts (#317)', () => {
       productId: 'product-1',
     });
 
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
-      instruction: 'read on durable Pi', runtime: 'pi', agentRef: { agentId: 'durable-agent', profileRevision: 'r1' },
+    await runner.handleEnvelope(createEnvelope('task.offer', {
+      instruction: 'read on durable Pi', runtime: 'pi', agentRef: { agentId: 'durable-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
       homeAccess: 'memory-reader',
     }, { taskId: 'durable-reader', seq: 1 }));
 
@@ -698,7 +702,7 @@ describe('reader admission after a published reader terminal (#476)', () => {
     const pi = new StubRuntimeAdapter('pi');
     const sent: Envelope[] = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [pi],
       agentHome,
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -713,8 +717,8 @@ describe('reader admission after a published reader terminal (#476)', () => {
       productId: 'product-1',
       maxConcurrentReaderAttemptsPerAgentHome: 4,
     });
-    const readerOffer = (taskId: string, seq: number): Envelope => createEnvelope('task.offer_for_agent', {
-      instruction: 'read', runtime: 'pi', agentRef: { agentId: 'finishing-readers', profileRevision: 'r1' },
+    const readerOffer = (taskId: string, seq: number): Envelope => createEnvelope('task.offer', {
+      instruction: 'read', runtime: 'pi', agentRef: { agentId: 'finishing-readers', profileRevision: 'r1' }, ...FRESH_OFFER,
       homeAccess: 'memory-reader',
     }, { taskId, seq });
     const declinesOf = (taskId: string) => sent.filter((entry) => entry.type === 'task.decline' && entry.task_id === taskId);

@@ -72,14 +72,14 @@ describe('reference-server Agent egress contract', () => {
       'agent-message-egress', 'terminal-projection-selection', AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
     ], { agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
     const input = { taskId: 'recurring-embedded', deviceId: daemon.deviceId, payload: {
-      instruction: 'frozen context', runtime: 'codex' as const, agentRef: AGENT_REF,
+      instruction: 'frozen context', runtime: 'codex' as const, agentRef: AGENT_REF, session: { mode: 'fresh' as const },
       egressPolicy: POLICY, messageEgress: { mode: 'required' as const, contract: 'conversation-turn/v1', contentType: 'text/markdown' as const, maxBytes: 1024 },
       terminalProjection: { mode: 'none' as const },
     }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } };
     expect(await instance.tasks.attempt(input.taskId)).toBeUndefined();
     const offered = await instance.executions.submit(input);
     expect(offered.taskId).toBe(input.taskId);
-    expect(await awaitEnvelope(daemon, e => e.task_id === input.taskId)).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh', payload: input.payload });
+    expect(await awaitEnvelope(daemon, e => e.task_id === input.taskId)).toMatchObject({ type: 'task.offer', payload: input.payload });
     expect(await instance.tasks.offer(input.taskId)).toMatchObject({ delivered: true, payload: input.payload });
     await expect(instance.executions.submit(input)).rejects.toMatchObject({ code: 'agent_task_already_exists' });
     expect(await instance.tasks.attempt(input.taskId)).toMatchObject({ taskId: input.taskId, deviceId: daemon.deviceId, status: 'offered' });
@@ -95,7 +95,7 @@ describe('reference-server Agent egress contract', () => {
     ]);
     const schema = { type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'], additionalProperties: false };
     const submission = (taskId: string, resultSchema: any) => ({ taskId, deviceId: daemon.deviceId, payload: {
-      instruction: 'frozen context', runtime: 'codex' as const, agentRef: AGENT_REF, egressPolicy: POLICY,
+      instruction: 'frozen context', runtime: 'codex' as const, agentRef: AGENT_REF, session: { mode: 'fresh' as const }, egressPolicy: POLICY,
       terminalProjection: { mode: 'result-document' as const, contract: 'example.result.v1', schema: resultSchema },
     } });
     const refused: ReadonlyArray<readonly [string, unknown]> = [
@@ -115,7 +115,7 @@ describe('reference-server Agent egress contract', () => {
     const offered = await instance.executions.submit(accepted);
     expect(offered.taskId).toBe('result-schema-subset');
     // Only the admitted execution ever reaches the device mailbox.
-    const delivered = await awaitEnvelope(daemon, (e) => e.type === 'task.offer_for_agent_with_egress_fresh');
+    const delivered = await awaitEnvelope(daemon, (e) => e.type === 'task.offer');
     expect(delivered).toMatchObject({ task_id: 'result-schema-subset', payload: { terminalProjection: accepted.payload.terminalProjection } });
   });
 
@@ -254,7 +254,7 @@ describe('reference-server Agent egress contract', () => {
       taskId: 'fresh-no-policy',
       deviceId: daemon.deviceId,
       payload: { instruction: 'must not downgrade without policy', runtime: 'codex',
-        agentRef: AGENT_REF, egressPolicy: undefined, terminalProjection: { mode: 'none' } },
+        agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: undefined, terminalProjection: { mode: 'none' } },
     } as never)).rejects.toMatchObject({ name: 'ZodError', issues: expect.arrayContaining([
       expect.objectContaining({ path: ['payload', 'egressPolicy'] }),
     ]) });
@@ -262,7 +262,7 @@ describe('reference-server Agent egress contract', () => {
     await expect(instance.executions.submit({
       taskId: 'fresh-no-device',
       payload: { instruction: 'must not pick an ambient device', runtime: 'codex',
-        agentRef: AGENT_REF, egressPolicy: POLICY, terminalProjection: { mode: 'none' } },
+        agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: POLICY, terminalProjection: { mode: 'none' } },
     } as never)).rejects.toMatchObject({ name: 'ZodError', issues: expect.arrayContaining([
       expect.objectContaining({ path: ['deviceId'] }),
     ]) });
@@ -271,7 +271,7 @@ describe('reference-server Agent egress contract', () => {
       instance.executions.submit({
         taskId: 'fresh-missing-capability',
         deviceId: daemon.deviceId,
-        payload: { instruction: 'fresh Agent work', runtime: 'codex', agentRef: AGENT_REF,
+        payload: { instruction: 'fresh Agent work', runtime: 'codex', agentRef: AGENT_REF, session: { mode: 'fresh' },
           egressPolicy: POLICY, terminalProjection: { mode: 'none' } },
       }),
     ).rejects.toThrow(/agent-egress-fresh-session/);
@@ -300,16 +300,17 @@ describe('reference-server Agent egress contract', () => {
     const offered = await instance.executions.submit({
       taskId: 'fresh-agent-work',
       deviceId: daemon.deviceId,
-      payload: { instruction: 'fresh Agent work', runtime: 'codex', agentRef: AGENT_REF,
+      payload: { instruction: 'fresh Agent work', runtime: 'codex', agentRef: AGENT_REF, session: { mode: 'fresh' },
         egressPolicy: POLICY, terminalProjection: { mode: 'none' } },
     });
     const offer = await awaitEnvelope(daemon, (e) => e.task_id === offered.taskId);
     expect(offer).toMatchObject({
-      type: 'task.offer_for_agent_with_egress_fresh',
+      type: 'task.offer',
       task_id: offered.taskId,
-      payload: { agentRef: AGENT_REF, egressPolicy: POLICY },
+      payload: { agentRef: AGENT_REF, egressPolicy: POLICY, session: { mode: 'fresh' } },
     });
     expect('sessionRef' in offer.payload).toBe(false);
+    expect((offer.payload as { session: unknown }).session).toEqual({ mode: 'fresh' });
   });
 
   it('uses the strict offer and returns one exact durable receipt on reliable replay', async () => {
@@ -328,8 +329,8 @@ describe('reference-server Agent egress contract', () => {
     });
     const offer = await awaitEnvelope(daemon, (e) => e.task_id === handle.taskId);
     expect(offer).toMatchObject({
-      type: 'task.offer_for_agent_with_egress',
-      payload: { agentRef: AGENT_REF, sessionRef: 'session-server', egressPolicy: POLICY },
+      type: 'task.offer',
+      payload: { agentRef: AGENT_REF, session: { mode: 'resume', sessionRef: 'session-server' }, egressPolicy: POLICY },
     });
 
     const event = createEnvelope('agent.egress.reliable', {

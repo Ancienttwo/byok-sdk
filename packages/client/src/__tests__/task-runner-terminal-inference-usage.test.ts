@@ -13,6 +13,8 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_DAEMON_EGRESS, FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -33,7 +35,7 @@ async function makeRunner(
   withRelease = true,
 ): Promise<TaskRunner> {
   const release = Object.freeze({ version: '0.6.0' });
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-terminal-usage',
@@ -50,8 +52,8 @@ async function makeRunner(
 async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'claude' | 'codex'): Promise<void> {
   await runner.handleEnvelope(
     createEnvelope(
-      'task.offer_for_agent',
-      { agentRef: freshTestAgentRef(),
+      'task.offer',
+      { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
         instruction: 'observe terminal usage',
         runtime,
         // This requested selection must NOT become provider/model terminal
@@ -97,6 +99,44 @@ describe('TaskRunner terminal inference usage projection', () => {
     expect(completed.payload.usage?.durationMs).toEqual(expect.any(Number));
     expect(completed.payload.usage && Object.hasOwn(completed.payload.usage, 'provider')).toBe(false);
     expect(completed.payload.usage && Object.hasOwn(completed.payload.usage, 'model')).toBe(false);
+  });
+
+  it('carries the model the last observation reports as served, never the requested dispatch model (#1014)', async () => {
+    const adapter = new StubRuntimeAdapter('codex');
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent);
+    const taskId = 'terminal-served-model';
+    await startTask(runner, taskId, 'codex');
+    const session = adapter.sessions[0]!;
+
+    session.emit({ type: 'usage', inputTokens: 100, outputTokens: 20, model: 'gpt-5-served-2026-10-01' });
+    session.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(sent.some((item) => item.type === 'task.complete' && item.task_id === taskId)).toBe(true));
+    expect(terminal(sent, taskId, 'task.complete').payload.usage).toMatchObject({
+      runtime: 'codex', promptTokens: 100, completionTokens: 20, model: 'gpt-5-served-2026-10-01',
+    });
+  });
+
+  it.each([
+    { label: 'a model-only observation', event: { type: 'usage', model: 'claude-sonnet-5-5' } },
+    { label: 'a provider context observation with a model', event: { type: 'usage', contextSource: 'provider', contextWindow: 200000, model: 'claude-sonnet-5-5' } },
+  ] as const)('projects $label as terminal usage with the model and no token counts (#1014)', async ({ event }) => {
+    const adapter = new StubRuntimeAdapter('claude');
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent);
+    const taskId = `terminal-model-only-${event.contextSource ?? 'none'}`;
+    await startTask(runner, taskId, 'claude');
+    const session = adapter.sessions[0]!;
+
+    session.emit({ type: 'usage', inputTokens: 42 });
+    session.emit(event);
+    session.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(sent.some((item) => item.type === 'task.complete' && item.task_id === taskId)).toBe(true));
+    const usage = terminal(sent, taskId, 'task.complete').payload.usage;
+    expect(usage).toMatchObject({ runtime: 'claude', model: 'claude-sonnet-5-5', clientVersion: '0.6.0' });
+    expect(usage && (Object.hasOwn(usage, 'promptTokens') || Object.hasOwn(usage, 'completionTokens'))).toBe(false);
   });
 
   it('preserves a final Claude observation on task.fail', async () => {
@@ -173,6 +213,7 @@ describe('TaskRunner terminal inference usage projection', () => {
           productId: 'terminal-usage-composition-test',
           serverUrl: server.url,
           agentHome: testAgentHomeConfig(),
+          agentEgress: FRESH_DAEMON_EGRESS,
           storeDir: await tmpDir('byok-terminal-usage-daemon-store-'),
         },
         [adapter],
@@ -181,8 +222,8 @@ describe('TaskRunner terminal inference usage projection', () => {
       await daemon.start();
       const taskId = 'terminal-composition-release-identity';
       server.send(createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'finish', runtime: 'codex' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'finish', runtime: 'codex' },
         { taskId, seq: server.nextSeq() },
       ));
       await server.waitFor((event) => event.type === 'task.started' && event.task_id === taskId);

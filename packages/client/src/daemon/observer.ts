@@ -1,10 +1,11 @@
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
-import { isTaskOfferType,
+import {
   partitionAgentEvents,
   TASK_TRANSITIONS,
   type AgentEvent,
   type BlobRef,
   type Envelope,
+  type OfferAdmissionTimings,
   type TaskState,
 } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
@@ -55,7 +56,8 @@ export type DaemonEvent =
   | ({ kind: 'retention-sweep'; ts: string } & SweepReport)
   | { kind: 'retention-failure'; ts: string; trigger: RetentionTrigger; classId: RetentionClassId; count: number; code: string }
   | { kind: 'offered'; ts: string; taskId: string; runtime?: string }
-  | { kind: 'claimed'; ts: string; taskId: string; claimedRuntime?: string }
+  /** `admission`: how long this device took to admit the offer (#1014), as the claim carried it. */
+  | { kind: 'claimed'; ts: string; taskId: string; claimedRuntime?: string; admission?: OfferAdmissionTimings }
   | { kind: 'started'; ts: string; taskId: string }
   /** One per normalized `AgentEvent` (not one per `task.progress` batch) — matches "a live task feed" better than re-exposing the wire's own batching. */
   | { kind: 'progress'; ts: string; taskId: string; event: AgentEvent }
@@ -82,7 +84,7 @@ export type DaemonEvent =
    * same outcome from a dispatcher's point of view, so this module doesn't
    * invent a parallel `declined` kind the wire model itself doesn't have.
    */
-  | { kind: 'failed'; ts: string; taskId: string; reason: string; retryable: boolean; preClaim?: boolean }
+  | { kind: 'failed'; ts: string; taskId: string; reason: string; retryable: boolean; preClaim?: boolean; admission?: OfferAdmissionTimings }
   | { kind: 'cancelled'; ts: string; taskId: string; reason?: string }
   /** Issues #391/#394: every `Daemon.status().lifecycle` change, as it happens. */
   | { kind: 'lifecycle'; ts: string; lifecycle: DaemonLifecycle }
@@ -234,13 +236,17 @@ export interface DaemonTaskInfo {
 
 type TerminalTaskPatch = Partial<Pick<DaemonTaskInfo, 'summary' | 'sessionRef' | 'declined' | 'delivery'>> & { state: TaskState };
 
-/** One projection of the local terminal envelope, shared by accepted and refused delivery. */
+/**
+ * One projection of the local terminal envelope, shared by accepted and refused
+ * delivery. A sealed payload reaches the observer only when its plaintext was
+ * not kept, and has no local view.
+ */
 function terminalTaskPatch(envelope: Envelope): TerminalTaskPatch | undefined {
   switch (envelope.type) {
-    case 'task.complete': return { state: 'Complete', summary: envelope.payload.summary, sessionRef: envelope.payload.sessionRef };
-    case 'task.fail': return { state: 'Failed', summary: envelope.payload.reason };
-    case 'task.decline': return { state: 'Failed', summary: envelope.payload.reason, declined: true };
-    case 'task.cancelled': return { state: 'Cancelled', summary: envelope.payload.reason };
+    case 'task.complete': return envelope.payload.sealed !== undefined ? undefined : { state: 'Complete', summary: envelope.payload.summary, sessionRef: envelope.payload.sessionRef };
+    case 'task.fail': return envelope.payload.sealed !== undefined ? undefined : { state: 'Failed', summary: envelope.payload.reason };
+    case 'task.decline': return envelope.payload.sealed !== undefined ? undefined : { state: 'Failed', summary: envelope.payload.reason, declined: true };
+    case 'task.cancelled': return envelope.payload.sealed !== undefined ? undefined : { state: 'Cancelled', summary: envelope.payload.reason };
     default: return undefined;
   }
 }
@@ -324,8 +330,8 @@ export class DaemonObserver {
    * where those are actually reported from.
    */
   handleInboundEnvelope(envelope: Envelope): void {
-    if (!isTaskOfferType(envelope.type)) return;
-    const offer = envelope as Extract<Envelope, { type: import('@byok-sdk/protocol').TaskOfferType }>;
+    if (envelope.type !== 'task.offer') return;
+    const offer = envelope;
     const taskId = offer.task_id;
 
     // Redelivery guard (protocol §9, at-least-once delivery): this observer
@@ -359,17 +365,23 @@ export class DaemonObserver {
     this.pendingApprovalIdByTask.delete(envelope.task_id);
   }
 
+  /**
+   * A sealed payload reaches here only when its plaintext was not kept
+   * (`SealedTasks.plainOf`); it has no local view.
+   */
   handleOutboundEnvelope(envelope: Envelope): void {
     const ts = nowIso();
     switch (envelope.type) {
       case 'task.claim': {
         const taskId = envelope.task_id;
-        const claimedRuntime = envelope.payload.runtime;
+        const { runtime: claimedRuntime, admission } = envelope.payload;
         this.upsertTask(taskId, {
           state: 'Claimed',
           ...(claimedRuntime !== undefined ? { claimedRuntime } : {}),
         });
-        this.emit({ kind: 'claimed', ts, taskId, ...(claimedRuntime !== undefined ? { claimedRuntime } : {}) });
+        this.emit({
+          kind: 'claimed', ts, taskId, ...(claimedRuntime !== undefined ? { claimedRuntime } : {}), ...(admission !== undefined ? { admission } : {}),
+        });
         return;
       }
       case 'task.started': {
@@ -379,6 +391,7 @@ export class DaemonObserver {
         return;
       }
       case 'task.progress': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         this.upsertTask(taskId, { state: 'Running' });
         // `known`-only (`partitionAgentEvents`, `@byok-sdk/protocol`): an
@@ -393,6 +406,7 @@ export class DaemonObserver {
         return;
       }
       case 'task.artifact': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         this.emit({
           kind: 'artifact',
@@ -406,6 +420,7 @@ export class DaemonObserver {
         return;
       }
       case 'task.await_approval': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         // Finding F4: read-and-delete — see `pendingApprovalIdByTask`'s own
         // doc comment for why this never needs a separate eviction policy.
@@ -416,6 +431,7 @@ export class DaemonObserver {
         return;
       }
       case 'task.complete': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         this.upsertTask(taskId, terminalTaskPatch(envelope)!);
         this.emit({
@@ -429,6 +445,7 @@ export class DaemonObserver {
         return;
       }
       case 'task.fail': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         const retryable = envelope.payload.retryable ?? false;
         this.upsertTask(taskId, terminalTaskPatch(envelope)!);
@@ -437,13 +454,16 @@ export class DaemonObserver {
         return;
       }
       case 'task.decline': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         const retryable = envelope.payload.retryable ?? false;
         this.upsertTask(taskId, terminalTaskPatch(envelope)!);
-        this.emit({ kind: 'failed', ts, taskId, reason: envelope.payload.reason, retryable, preClaim: true });
+        const { admission } = envelope.payload;
+        this.emit({ kind: 'failed', ts, taskId, reason: envelope.payload.reason, retryable, preClaim: true, ...(admission !== undefined ? { admission } : {}) });
         return;
       }
       case 'task.cancelled': {
+        if (envelope.payload.sealed !== undefined) return;
         const taskId = envelope.task_id;
         this.upsertTask(taskId, terminalTaskPatch(envelope)!);
         this.emit({ kind: 'cancelled', ts, taskId, reason: envelope.payload.reason });

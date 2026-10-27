@@ -10,13 +10,13 @@ import { createEnvelope, type TaskClaimPayload } from '@byok-sdk/protocol';
 import { handleInboundEnvelope } from '../../../cloud/src/inbound';
 import { tenantStoresFor } from '../../../cloud/src/tenant-stores';
 import { createSqliteEmbeddedStores, type SqliteEmbeddedStoreOptions } from '../stores/sqlite';
-import { TEST_AGENT_DISPATCH, TEST_AGENT_REF } from './test-support';
+import { TEST_AGENT_REF, TEST_SESSION_REF } from './test-support';
 
 const tenant = tenantId('custom-harness');
 const deviceId = 'custom-device';
 const harnessId = 'acme-harness';
 const capabilities = { steer: true };
-const payload = { ...TEST_AGENT_DISPATCH, instruction: 'run custom adapter' } as const;
+const payload = { agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, instruction: 'run custom adapter' } as const;
 const agentRef = TEST_AGENT_REF;
 
 describe('SQLite custom-harness claim authority', () => {

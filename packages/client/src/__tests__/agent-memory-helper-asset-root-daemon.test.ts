@@ -15,6 +15,10 @@ import { hasAgentMemoryHelperBuild } from './fixtures/agent-memory-helper-build'
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+
+// A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 const sha = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
 
@@ -43,7 +47,7 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
       productId: 'relocated-memory', productName: 'Relocated memory', serverUrl: server.url,
       storeDir: path.join(root, 'store'), localAgentRelease: { version: '0.0.0-test' }, storage: { scratchRoot: testScratchRoot() },
       sdkHelperHost: { mode: 'self-executable', executable: process.execPath, entry },
-      agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentMemoryHelperAssetRoot: assetRoot,
+      agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, agentMemoryHelperAssetRoot: assetRoot,
       agentMemoryIntents: {
         fetch: async request => ({ disposition: request.reservation === 'none' ? 'deferred' : 'release', intent }),
         complete: async completion => {
@@ -78,7 +82,7 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
       expect(open).not.toHaveBeenCalled();
     }
     const seeded = intents ? 'intent from copied assets' : '';
-    server.pushLongPollEvent(createEnvelope('task.offer_for_agent', { instruction: 'Use local memory', runtime: 'pi', agentRef },
+    server.pushLongPollEvent(createEnvelope('task.offer', { ...FRESH_OFFER, instruction: 'Use local memory', runtime: 'pi', agentRef },
       { taskId: 'relocated-memory-task', seq: server.nextSeq() }));
     const started = await server.waitFor(event => event.task_id === 'relocated-memory-task' && (event.type === 'task.started' || event.type === 'task.decline'));
     expect(started.type, JSON.stringify(started.payload)).toBe('task.started');

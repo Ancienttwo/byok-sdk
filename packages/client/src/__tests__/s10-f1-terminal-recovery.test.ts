@@ -14,6 +14,7 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import * as mutationGate from '../daemon/path-mutation-gate';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const roots: string[] = [];
 const heldGates = new Set<string>();
@@ -53,7 +54,7 @@ async function cancellationFixture(overrides: Partial<TaskRunnerDeps> = {}) {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-cancel',
@@ -80,9 +81,9 @@ const TASK = 'active-revoke-task';
 async function activeFixture(unsent: boolean, overrides: Partial<TaskRunnerDeps> = {}) {
   const h = await cancellationFixture(overrides);
   // This fixture never spawns MCP/runtime processes.
-  await h.runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+  await h.runner.handleEnvelope(createEnvelope('task.offer', {
     instruction: 'reply', runtime: 'pi', agentRef: AGENT,
-    egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+    session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
   }, { taskId: TASK, seq: 1 }));
   expect(h.runner.activeTaskCount, JSON.stringify(h.sent)).toBe(1);
@@ -313,9 +314,9 @@ it('S10-F1 preserves cancellation selected during the durable startup handoff', 
   vi.spyOn(h.deps.agentSessionHandoffs!, 'record').mockImplementationOnce(async (...args) => {
     const result = await record(...args); recorded.resolve(); await gate.promise; return result;
   });
-  const offering = h.runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+  const offering = h.runner.handleEnvelope(createEnvelope('task.offer', {
     instruction: 'no message contract', runtime: 'pi', agentRef: AGENT,
-    egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+    session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
   }, { taskId: TASK, seq: 1 }));
   try {
     await recorded.promise;

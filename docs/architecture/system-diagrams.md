@@ -126,12 +126,12 @@ sequenceDiagram
 
 ### 2.2 派工到终态
 
-主线是新的 Agent 执行 `executions.submit`。wire v4 的每个 offer 都绑定 Agent；`dispatch()` 只做 resume。两个入口走同一条下游链路，只是入队的 wire 类型不同：
+主线是新的 Agent 执行 `executions.submit`。wire v4 的每个 offer 都绑定 Agent；`dispatch()` 只做 resume。两个入口走同一条下游链路，入队的都是 `task.offer`，只是 `session` 不同：
 
-| Host 入口 | wire 类型 |
+| Host 入口 | `task.offer` 的 `session` |
 | --- | --- |
-| `executions.submit(input)` | `task.offer_for_agent_with_egress_fresh` |
-| `dispatch(input)`，必带 `agentRef` 与 `sessionRef`，只用于 resume | `task.offer_for_agent`；再带 `egressPolicy` 时是 `task.offer_for_agent_with_egress` |
+| `executions.submit(input)` | `{ mode: 'fresh' }`，必带 `egressPolicy` |
+| `dispatch(input)`，必带 `agentRef` 与 `sessionRef`，只用于 resume | `{ mode: 'resume', sessionRef }`；可以再带 `egressPolicy` |
 
 两个入口都可以带 `requiredToolsets`；设备没有声明 `toolset-selection` 时，task 建立之前就被拒绝。入口见 `packages/server/src/index.ts` 的 `dispatchInternal` 与 `executions.submit`，入队见 `packages/cloud/src/cloud.ts` 的 `enqueueAgentOffer`、`enqueueAgentEgressOffer` 与 `submitAgentExecution`。
 

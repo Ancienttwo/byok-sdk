@@ -80,32 +80,14 @@ costs one read of the pending mailbox per composition. On Workers the
 composition is built per invocation (see below), so that read happens on every
 invocation.
 
-### Wire v4 receipt migration (0.31.x only)
+### Wire v3 stores
 
 The fence covers pending mailbox rows only. Offer receipts
 (`task-offer:<messageId>`) and terminal receipts (`task:<taskId>:terminal`) in
 `device_request_receipts` hold wire bytes that never expire, and a wire v4
-cloud reads only v4 bytes. After draining and stopping every writer, run the
-one-shot migration once before starting the v4 cloud:
-
-1. `preflightPostgresWireV4Migration(pool)` runs read-only and returns
-   `{ legacyTasks, unmappable }`: the tasks offered on a removed offer type,
-   and every row with no v4 form. A row is unmappable when it is a receipt
-   without a v4 form, an approval timeline entry without `approvalId`, or a
-   v3 mailbox row of another task that a device could still receive (pending,
-   or an expired dead letter that `replayDeadLetter` can still send).
-2. After review, `migratePostgresToWireV4(pool, preflight.legacyTasks)`
-   deletes every row of the confirmed legacy tasks and re-encodes the
-   remaining offer and terminal receipts in one serializable transaction,
-   returning `{ migrated, unchanged, deletedTasks }`.
-
-The migration changes nothing and throws `ReceiptMigrationUnmappableError`
-when any row is unmappable, or `WireV4LegacyTaskListMismatchError` when the
-confirmed list is not exactly the store's legacy tasks; both errors are
-exported by `@byok-sdk/cloud`. It ships in 0.31.x only; 0.32.0 removes it
-(#1017). See
-[the wire v4 upgrade note](../../docs/releases/925-wire-v4.md) for the
-upgrade order, including approvals without an id and v3 dead letters.
+cloud reads only v4 bytes. There is no migration: a database a wire v3 build
+wrote is not supported, so a v4 cloud starts on a new database. See
+[the wire v4 upgrade note](../../docs/releases/925-wire-v4.md).
 
 ## Deployment compositions
 

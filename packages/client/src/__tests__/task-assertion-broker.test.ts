@@ -31,6 +31,8 @@ import type { DaemonEvent } from '../daemon/observer';
 import type { RuntimeCapabilities } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { FRESH_OFFER } from './fixtures/fresh-offer';
 
 /**
  * Contract §8.1 / §8.2(1) / I12 / AC11, daemon half: the `task_assertion.issue`
@@ -127,6 +129,7 @@ describe('task assertion broker: task_assertion.issue', () => {
       serverUrl: server.url,
       storeDir,
       agentHome: { hostStorageRoot },
+      agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },
       mcpToolsets: {
         [READ_TOOLSET]: { mcpServers: { [READ_SERVER]: { command: '/opt/salesko/read', args: ['--stdio'] } } },
@@ -199,6 +202,7 @@ describe('task assertion broker: task_assertion.issue', () => {
       serverUrl: server.url,
       storeDir,
       agentHome: { hostStorageRoot },
+      agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
       deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },
       mcpToolsets: {
         [READ_TOOLSET]: { mcpServers: { [READ_SERVER]: { command: '/opt/salesko/read', args: ['--stdio'] } } },
@@ -245,11 +249,11 @@ describe('task assertion broker: task_assertion.issue', () => {
   ): Promise<Record<string, string>> {
     server.send(
       createEnvelope(
-        'task.offer_for_agent',
+        'task.offer',
         {
           instruction: 'qualify the inbound lead',
           runtime: 'pi',
-          agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION },
+          agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, ...FRESH_OFFER,
           requiredToolsets: [...requiredToolsets],
         },
         { taskId, seq: server.nextSeq() },
@@ -705,9 +709,9 @@ describe('task assertion broker: task_assertion.issue', () => {
     server.setCapabilityResponseGate(new Promise<void>((resolve) => { release = resolve; }));
     const built = await pairedAndStartedUngated('acme-cap-no-tools', {}, false);
     try {
-      server.send(createEnvelope('task.offer_for_agent', {
+      server.send(createEnvelope('task.offer', {
         instruction: 'no host tools', runtime: 'pi',
-        agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION },
+        agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, ...FRESH_OFFER,
       }, { taskId: 'task-no-host-tools', seq: server.nextSeq() }));
       await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'task-no-host-tools');
       expect(built.adapter.startCalls).toHaveLength(1);
@@ -721,9 +725,9 @@ describe('task assertion broker: task_assertion.issue', () => {
     const events: DaemonEvent[] = [];
     const unsubscribe = built.daemon.subscribe((event) => events.push(event));
     try {
-      server.send(createEnvelope('task.offer_for_agent', {
+      server.send(createEnvelope('task.offer', {
         instruction: 'wait then cancel', runtime: 'pi',
-        agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, requiredToolsets: [READ_TOOLSET],
+        agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, ...FRESH_OFFER, requiredToolsets: [READ_TOOLSET],
       }, { taskId: 'task-cancel-discovery', seq: server.nextSeq() }));
       await vi.waitFor(() => expect(events.some((event) => event.kind === 'offered')).toBe(true));
       server.send(createEnvelope('task.cancel', { reason: 'operator' }, { taskId: 'task-cancel-discovery', seq: server.nextSeq() }));
@@ -740,9 +744,9 @@ describe('task assertion broker: task_assertion.issue', () => {
     const events: DaemonEvent[] = [];
     const unsubscribe = built.daemon.subscribe((event) => events.push(event));
     try {
-      server.send(createEnvelope('task.offer_for_agent', {
+      server.send(createEnvelope('task.offer', {
         instruction: 'wait then stop', runtime: 'pi',
-        agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, requiredToolsets: [READ_TOOLSET],
+        agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, ...FRESH_OFFER, requiredToolsets: [READ_TOOLSET],
       }, { taskId: 'task-stop-during-discovery', seq: server.nextSeq() }));
       await vi.waitFor(() => expect(events.some((event) => event.kind === 'offered')).toBe(true));
       await built.daemon.stop();

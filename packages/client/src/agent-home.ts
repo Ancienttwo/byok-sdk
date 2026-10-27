@@ -587,6 +587,7 @@ interface StoredLeaseMarker {
   readonly canonicalHome: string;
 }
 
+/** `storeDir` must come from `DeviceStore.resolveDir`, so every alias of a store yields one owner. */
 export function stableAgentHomeOwnerId(storeDir: string, productId: string): string {
   const identity = `${path.resolve(storeDir)}\0${productId}`;
   return `store-product:${createHash('sha256').update(identity).digest('hex')}`;

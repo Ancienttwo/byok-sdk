@@ -164,9 +164,9 @@ request receives an exact durable readback.
 
 ## Admission and migration
 
-Agent execution uses the distinct `task.offer_for_agent` message and the
-additive `agent-home-contract` capability. Through `dispatch({ agentRef })` and
-`enqueueAgentOffer` that message is exact-resume-only and requires `sessionRef`;
+Agent execution uses `task.offer` and the `agent-home-contract` capability.
+Through `dispatch({ agentRef })` and `enqueueAgentOffer` the offer is
+exact-resume-only and requires `session: { mode: 'resume', sessionRef }`;
 a fresh execution uses `executions.submit` / `submitAgentExecution`. The daemon sends the authenticated
 `conn.hello` snapshot as the first long-poll message, before queued task
 messages. The server and hosted cloud reject an Agent dispatch before task

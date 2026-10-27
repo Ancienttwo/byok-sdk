@@ -1,9 +1,9 @@
 /**
  * Sealed payload v1 on the device (#654 E3c). A sealed task's offer carries
  * its frozen `sealing` in plaintext. This module opens the task's sealed
- * input (offer and steers) and seals its output (the 7 daemon-to-server
- * types of `SEALED_SPLIT_TABLE`) with the scope key, through the core
- * functions, fail closed.
+ * input (offer and steers) and seals its output (the sealed branch of the 7
+ * daemon-to-server types of `SEALED_SPLIT_TABLE`) with the scope key, through
+ * the core functions, fail closed. The AAD family is the wire type.
  *
  * A task that seals its output never sends plaintext content in those types:
  * each one is sealed, or it is one of the closed plaintext forms (decision
@@ -22,14 +22,14 @@ import {
   SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
   SEALED_SPLIT_TABLE,
   createEnvelope,
-  isSealedMessageType,
+  isSealedPayload,
   isSealedTaskPlainOutput,
   requiredReceiverCapabilities,
   type AgentRef,
   type BlobRef,
   type Envelope,
   type MessageType,
-  type SealedMessageType,
+  type SealableMessageType,
   type SealedSplitEntry,
   type TaskFailure,
   type TaskSealing,
@@ -95,10 +95,9 @@ interface SealedTask {
   tail: Promise<void>;
 }
 
-const SEALED_OUTPUT_TYPE: Partial<Record<MessageType, SealedMessageType>> = Object.fromEntries(
-  (Object.keys(SEALED_SPLIT_TABLE) as SealedMessageType[])
-    .filter((type) => SEALED_SPLIT_TABLE[type].category === 'task-output')
-    .map((type) => [SEALED_SPLIT_TABLE[type].plainType, type]),
+/** The types with a `task-output` sealed branch. */
+const SEALED_OUTPUT_TYPES: ReadonlySet<MessageType> = new Set(
+  (Object.keys(SEALED_SPLIT_TABLE) as SealableMessageType[]).filter((type) => SEALED_SPLIT_TABLE[type].category === 'task-output'),
 );
 
 /** The terminal types; each must reach the wire in some form, or the task never settles. */
@@ -164,9 +163,9 @@ export class SealedTasks {
    * opens under the template binding and only up to its `notAfter`.
    */
   async openOffer(envelope: Envelope): Promise<SealedOfferOpenResult> {
-    if (!isSealedMessageType(envelope.type) || envelope.task_id === undefined) return { ok: false, code: 'sealing_policy_mismatch' };
+    if (envelope.type !== 'task.offer' || envelope.payload.sealing === undefined) return { ok: false, code: 'sealing_policy_mismatch' };
     const taskId = envelope.task_id;
-    const entry = SEALED_SPLIT_TABLE[envelope.type];
+    const entry = SEALED_SPLIT_TABLE['task.offer'];
     const { sealing, sealed, routineRef, ...plain } = envelope.payload as JsonObject & { sealing: TaskSealing; sealed?: JsonObject; routineRef?: RoutineRef };
     const agentRef = (plain.agentRef as AgentRef | undefined) ?? null;
     if (routineRef !== undefined && routineTemplateExpired(routineRef, Date.now())) return { ok: false, code: 'sealing_policy_mismatch' };
@@ -175,7 +174,7 @@ export class SealedTasks {
     let payload = plain;
     if (sealed !== undefined) {
       const binding = routineRef === undefined
-        ? this.#binding(entry.plainType, 'server-to-daemon', { taskId }, sealing, agentRef)
+        ? this.#binding('task.offer', 'server-to-daemon', { taskId }, sealing, agentRef)
         : routineTemplateBinding(this.options.tenantId, routineRef, agentRef, sealing);
       const opened = await this.#open(sealed, binding, sealing);
       if (!opened.ok) return { ok: false, code: opened.code };
@@ -193,7 +192,7 @@ export class SealedTasks {
     }
     let offer: Envelope;
     try {
-      offer = createEnvelope(entry.plainType, payload as never, { taskId, ...(envelope.seq === undefined ? {} : { seq: envelope.seq }) });
+      offer = createEnvelope('task.offer', payload as never, { taskId, seq: envelope.seq });
     } catch {
       return { ok: false, code: 'sealed_open_failed' };
     }
@@ -269,7 +268,7 @@ export class SealedTasks {
    */
   async sealRecovered(offer: Envelope, terminal: Envelope, sealable = true): Promise<Envelope> {
     const { sealing, agentRef } = offer.payload as { sealing?: TaskSealing; agentRef?: AgentRef };
-    if (!isSealedMessageType(offer.type) || sealing === undefined || !sealing.categories.includes('task-output') || isSealedTaskPlainOutput(terminal.type, terminal.payload)) {
+    if (offer.type !== 'task.offer' || sealing === undefined || !sealing.categories.includes('task-output') || isSealedTaskPlainOutput(terminal.type, terminal.payload)) {
       return terminal;
     }
     if (!sealable) return this.unsealable(terminal)!;
@@ -285,7 +284,8 @@ export class SealedTasks {
   }
 
   async #sealOutbound(task: SealedTask, envelope: Envelope): Promise<Envelope | undefined> {
-    if (SEALED_OUTPUT_TYPE[envelope.type] === undefined || isSealedTaskPlainOutput(envelope.type, envelope.payload)) return envelope;
+    if (!SEALED_OUTPUT_TYPES.has(envelope.type) || isSealedPayload(envelope.type, envelope.payload)
+      || isSealedTaskPlainOutput(envelope.type, envelope.payload)) return envelope;
     const taskId = envelope.task_id!;
     const payload = envelope.payload as JsonObject;
     let sealed: Envelope | undefined;
@@ -309,12 +309,11 @@ export class SealedTasks {
     return sealed;
   }
 
-  async #seal(taskId: string, task: SealedTask, plainType: MessageType, payload: JsonObject): Promise<Envelope | undefined> {
-    const type = SEALED_OUTPUT_TYPE[plainType];
-    if (type === undefined) throw new Error(`${plainType} has no sealed form`);
-    const entry = SEALED_SPLIT_TABLE[type];
+  async #seal(taskId: string, task: SealedTask, type: MessageType, payload: JsonObject): Promise<Envelope | undefined> {
+    if (!SEALED_OUTPUT_TYPES.has(type)) throw new Error(`${type} has no sealed output branch`);
+    const entry: SealedSplitEntry = SEALED_SPLIT_TABLE[type as SealableMessageType];
     const present = entry.forbidden.filter((field) => payload[field] !== undefined);
-    if (present.length > 0) throw new Error(`${plainType} of sealed task ${taskId} carries ${present.join(', ')}, which ${type} does not carry`);
+    if (present.length > 0) throw new Error(`${type} of sealed task ${taskId} carries ${present.join(', ')}, which its sealed branch does not carry`);
     const key = await this.#sealingKey(task.sealing);
     if (key === undefined) return undefined;
     const kept = omit(payload, entry.moved);
@@ -325,7 +324,7 @@ export class SealedTasks {
       chainHead: key.chainHead,
       sender: key.sender,
       category: 'task-output',
-      binding: this.#binding(plainType, 'daemon-to-server', identity, task.sealing, task.agentRef),
+      binding: this.#binding(type, 'daemon-to-server', identity, task.sealing, task.agentRef),
       plaintext: pick(payload, entry.moved) as never,
       maxContentLength: SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
     });
@@ -335,14 +334,14 @@ export class SealedTasks {
     // Above the inline frame, the output names its ciphertext blob, but only
     // when the server holds such a blob (§2.5): never for an inline-only type,
     // and only after the server advertised every flag the member needs.
-    const inlineOnly = (entry as SealedSplitEntry).inlineOnly === true;
+    const inlineOnly = entry.inlineOnly === true;
     const advertised = inlineOnly ? [] : this.options.serverCapabilities();
     if (advertised === undefined) {
-      throw new SealedRetryError(`${plainType} of sealed task ${taskId} waits for the next session to advertise the server flags`);
+      throw new SealedRetryError(`${type} of sealed task ${taskId} waits for the next session to advertise the server flags`);
     }
     if (inlineOnly
       || !requiredReceiverCapabilities(type, { ...kept, sealed: { ciphertextRef: {} } }).every((flag) => advertised.includes(flag))) {
-      throw new Error(`${plainType} of sealed task ${taskId} seals to ${header.paddedLength} bytes, over the inline maximum`);
+      throw new Error(`${type} of sealed task ${taskId} seals to ${header.paddedLength} bytes, over the inline maximum`);
     }
     const ciphertextRef = omit(await this.#upload(ciphertext) as unknown as JsonObject, ['url']);
     return createEnvelope(type, { ...kept, sealed: { ...header, ciphertextRef } } as never, { taskId });
@@ -403,7 +402,7 @@ export class SealedTasks {
   /** The failure that replaces a refused terminal sent by `ciphertextRef` (§77b); `undefined` for any other envelope. */
   refusedReplacement(refused: Envelope): Envelope | undefined {
     const { sealed, ...kept } = refused.payload as JsonObject & { sealed?: { ciphertextRef?: unknown } };
-    if (!isSealedMessageType(refused.type) || !TERMINAL_TYPES.has(SEALED_SPLIT_TABLE[refused.type].plainType) || sealed?.ciphertextRef === undefined) return undefined;
+    if (!TERMINAL_TYPES.has(refused.type) || sealed?.ciphertextRef === undefined) return undefined;
     return createEnvelope('task.fail', this.#unsealableFailure(kept) as never, { taskId: refused.task_id! });
   }
 
@@ -419,7 +418,7 @@ export class SealedTasks {
       case 'task.cancelled':
         return createEnvelope('task.cancelled', omit(payload, ['reason']) as never, { taskId });
       case 'task.decline':
-        return createEnvelope('task.decline', { reason: code, code, retryable: false, ...pick(payload, ['agentRef']) } as never, { taskId });
+        return createEnvelope('task.decline', { reason: code, code, retryable: false, ...pick(payload, ['agentRef', 'admission']) } as never, { taskId });
       default:
         console.error(`[byok/client] ${envelope.type} for sealed task ${taskId} not sent: no sealing key`);
         return undefined;

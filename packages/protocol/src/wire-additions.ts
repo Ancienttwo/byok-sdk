@@ -22,8 +22,12 @@
  * memory intents and so on): they gate on the receiver's configuration.
  *
  * v4 baseline: every v4 server reads `task.approval_resolved`, so its
- * `approval_resolved` gate is gone. No v4 release has been published yet, so
- * no published decoder proves these rows across releases.
+ * `approval_resolved` gate is gone. One `task.offer` replaces the Agent offer
+ * types and sealed is a payload branch, so a gate that a v3 type carried is a
+ * field or value row here. The offer is strict, so a daemon that does not know
+ * one of its fields stops instead of stripping it. The daemon also refuses an offer whose rows name a flag it did not advertise. No
+ * v4 release has been published yet, so no published decoder proves these rows
+ * across releases.
  *
  * Senders derive their admission flags from {@link requiredReceiverCapabilities}
  * and nowhere else, so a gate cannot exist in one place and be missing in
@@ -31,7 +35,7 @@
  * table, so it stays free of zod.
  */
 import type { MessageType } from './messages';
-import { SEALED_SPLIT_TABLE, type SealedMessageType, type SealedSplitEntry } from './sealed-split-table';
+import { SEALED_SPLIT_TABLE, type SealableMessageType, type SealedSplitEntry } from './sealed-split-table';
 import type { CapabilityFlag } from './version';
 
 type HttpWireSurface =
@@ -51,82 +55,53 @@ export type WireAddition =
   | { readonly kind: 'envelope'; readonly rule: 'strip-safe'; readonly surface: MessageType; readonly field: string }
   | { readonly kind: 'http'; readonly rule: 'strip-safe'; readonly surface: HttpWireSurface; readonly field: string };
 
-/**
- * Fields of every Agent offer, the prepared one included. `agentMemory` is not
- * here: each ordinary offer gates it below, and the prepared offer requires its
- * own selection.
- */
-const AGENT_OFFER_FIELDS = (surface: MessageType): readonly WireAddition[] => [
-  { kind: 'envelope', rule: 'gated', surface, field: 'dispatchSelection', capability: 'dispatch-selection', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface, field: 'requiredToolsets', capability: 'toolset-selection', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface, field: 'terminalProjection', capability: 'terminal-projection-selection', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface, field: 'homeAccess', capability: 'agent-home-readers', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface, field: 'harnessId', capability: 'custom-harness', advertisedBy: 'device' },
-];
-
-const EGRESS_OFFER_FIELDS = (surface: MessageType): readonly WireAddition[] => [
-  { kind: 'envelope', rule: 'gated', surface, field: 'messageEgress', capability: 'agent-message-egress', advertisedBy: 'device' },
-  ...AGENT_OFFER_FIELDS(surface),
-];
+const offerRow = (field: string | undefined, capability: CapabilityFlag, value?: string): WireAddition => ({
+  kind: 'envelope', rule: 'gated', surface: 'task.offer',
+  ...(field === undefined ? {} : { field }), ...(value === undefined ? {} : { value }),
+  capability, advertisedBy: 'device',
+});
 
 /**
- * Sealed payload v1 (#654). Each sealed message type is gated as a whole on
- * `sealed-payload-v1`: a server-to-daemon type on the device flag, a
- * daemon-to-server type on the server flag. A decoder that does not know the
- * type refuses it. A sealed type also takes every row of its plaintext type,
- * except the rows of the fields it moves or drops, so sealing never removes a
- * gate that the same plaintext fields would need. A sealed task output that
- * may name its ciphertext blob is also gated on that field. The four sealed
- * failure codes on the plaintext `task.decline` are value gates.
+ * Sealed payload v1 (#654), one table entry at a time: the marker of each
+ * sealed branch is gated on `sealed-payload-v1`, a server-to-daemon type on
+ * the device flag, a daemon-to-server type on the server flag. The sealed
+ * branch shares every other row of its type, and a field it moves or drops is
+ * absent from it, so sealing never removes a gate that the same fields would
+ * need. A sealed task output that may name its ciphertext blob is also gated
+ * on that field. The four sealed failure codes on the plaintext
+ * `task.decline` are value gates.
  */
-function sealedRows(plainRows: readonly WireAddition[]): WireAddition[] {
-  return (Object.keys(SEALED_SPLIT_TABLE) as SealedMessageType[]).flatMap((surface) => {
-    const { plainType, moved, forbidden } = SEALED_SPLIT_TABLE[surface];
-    const dropped: readonly string[] = [...moved, ...forbidden];
-    const advertisedBy = SEALED_SPLIT_TABLE[surface].category === 'task-input' ? 'device' : 'server';
-    const inherited = plainRows.flatMap((row): WireAddition[] => {
-      if (row.kind !== 'envelope' || row.surface !== plainType) return [];
-      if (row.field !== undefined && dropped.includes(row.field.split(/[.[]/u)[0]!)) return [];
-      return [{ ...row, surface }];
-    });
+function sealedRows(): WireAddition[] {
+  return (Object.keys(SEALED_SPLIT_TABLE) as SealableMessageType[]).flatMap((surface) => {
     const entry: SealedSplitEntry = SEALED_SPLIT_TABLE[surface];
+    const advertisedBy = entry.category === 'task-input' ? 'device' : 'server';
     const byReference: WireAddition[] = advertisedBy === 'server' && entry.inlineOnly !== true
       ? [{ kind: 'envelope', rule: 'gated', surface, field: 'sealed.ciphertextRef', capability: 'sealed-output-ciphertext-ref', advertisedBy }]
       : [];
-    return [{ kind: 'envelope', rule: 'gated', surface, capability: 'sealed-payload-v1', advertisedBy }, ...inherited, ...byReference];
+    return [{ kind: 'envelope', rule: 'gated', surface, field: entry.marker, capability: 'sealed-payload-v1', advertisedBy }, ...byReference];
   });
 }
 const SEALED_DECLINE_CODE = (value: string): WireAddition =>
   ({ kind: 'envelope', rule: 'gated', surface: 'task.decline', field: 'code', value, capability: 'sealed-payload-v1', advertisedBy: 'server' });
 
 const PLAIN_ROWS: readonly WireAddition[] = [
-  // Server to daemon: offers.
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent', capability: 'agent-home-contract', advertisedBy: 'device' },
-  ...AGENT_OFFER_FIELDS('task.offer_for_agent'),
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent', field: 'agentMemory', capability: 'agent-memory-selection', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent', field: 'agentMemory', value: 'read-if-admitted', capability: 'agent-memory-read-if-admitted', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent', field: 'agentMemory', value: 'read-write-if-admitted', capability: 'agent-memory-read-write-if-admitted', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress', capability: 'agent-home-contract', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress', capability: 'agent-egress-policy', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress', capability: 'agent-egress-reliable-ack', advertisedBy: 'device' },
-  ...EGRESS_OFFER_FIELDS('task.offer_for_agent_with_egress'),
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress', field: 'agentMemory', capability: 'agent-memory-selection', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress', field: 'agentMemory', value: 'read-if-admitted', capability: 'agent-memory-read-if-admitted', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress', field: 'agentMemory', value: 'read-write-if-admitted', capability: 'agent-memory-read-write-if-admitted', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress_fresh', capability: 'agent-home-contract', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress_fresh', capability: 'agent-egress-policy', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress_fresh', capability: 'agent-egress-reliable-ack', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress_fresh', capability: 'agent-egress-fresh-session', advertisedBy: 'device' },
-  ...EGRESS_OFFER_FIELDS('task.offer_for_agent_with_egress_fresh'),
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress_fresh', field: 'agentMemory', capability: 'agent-memory-selection', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress_fresh', field: 'agentMemory', value: 'read-if-admitted', capability: 'agent-memory-read-if-admitted', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_for_agent_with_egress_fresh', field: 'agentMemory', value: 'read-write-if-admitted', capability: 'agent-memory-read-write-if-admitted', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_prepared', capability: 'agent-home-contract', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_prepared', capability: 'agent-input-preparation-v9', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_prepared', capability: 'agent-egress-policy', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_prepared', capability: 'agent-egress-reliable-ack', advertisedBy: 'device' },
-  { kind: 'envelope', rule: 'gated', surface: 'task.offer_prepared', capability: 'agent-egress-fresh-session', advertisedBy: 'device' },
-  ...EGRESS_OFFER_FIELDS('task.offer_prepared'),
+  // Server to daemon: the offer. Every offer binds an Agent; each optional
+  // field and value names the device flag a daemon advertises when it is
+  // configured for it.
+  offerRow(undefined, 'agent-home-contract'),
+  offerRow('dispatchSelection', 'dispatch-selection'),
+  offerRow('requiredToolsets', 'toolset-selection'),
+  offerRow('terminalProjection', 'terminal-projection-selection'),
+  offerRow('homeAccess', 'agent-home-readers'),
+  offerRow('harnessId', 'custom-harness'),
+  offerRow('agentMemory', 'agent-memory-selection'),
+  offerRow('agentMemory', 'agent-memory-read-if-admitted', 'read-if-admitted'),
+  offerRow('agentMemory', 'agent-memory-read-write-if-admitted', 'read-write-if-admitted'),
+  offerRow('egressPolicy', 'agent-egress-policy'),
+  offerRow('egressPolicy', 'agent-egress-reliable-ack'),
+  offerRow('messageEgress', 'agent-message-egress'),
+  offerRow('session.mode', 'agent-egress-fresh-session', 'fresh'),
+  offerRow('preparation', 'agent-input-preparation-v9'),
   // Server to daemon: Agent control messages.
   { kind: 'envelope', rule: 'gated', surface: 'agent.content.read', capability: 'agent-home-contract', advertisedBy: 'device' },
   { kind: 'envelope', rule: 'gated', surface: 'agent.content.read', capability: 'agent-egress-policy', advertisedBy: 'device' },
@@ -154,7 +129,7 @@ const PLAIN_ROWS: readonly WireAddition[] = [
 
 export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   ...PLAIN_ROWS,
-  ...sealedRows(PLAIN_ROWS),
+  ...sealedRows(),
   SEALED_DECLINE_CODE('sealed_key_unavailable'),
   SEALED_DECLINE_CODE('sealed_open_failed'),
   SEALED_DECLINE_CODE('sealed_content_mac_mismatch'),

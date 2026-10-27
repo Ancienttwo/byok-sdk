@@ -64,7 +64,7 @@ it('dispatches toolsets on the Agent execution offer and accepts a retry only th
   const client = await connect(host, key.token);
   const args = { runtime: 'pi', instruction: 'Use the docs toolset.', toolsets: ['docs', 'search.web'], clientRequestId: 'toolsets-1' };
   const submitted = (await call(client, 'byok_task_submit', args)).value;
-  expect(await host.server.tasks.offer(submitted.taskId)).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh', deviceId: host.deviceId,
+  expect(await host.server.tasks.offer(submitted.taskId)).toMatchObject({ type: 'task.offer', deviceId: host.deviceId,
     payload: { instruction: 'Use the docs toolset.', runtime: 'pi', agentRef: AGENT, terminalProjection: { mode: 'none' },
       requiredToolsets: ['docs', 'search.web'] } });
   expect((await call(client, 'byok_task_submit', args)).value).toEqual({ ...submitted, deduplicated: true });

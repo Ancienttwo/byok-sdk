@@ -8,6 +8,8 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 const SALESKO_MCP_FIXTURE = fileURLToPath(new URL('./fixtures/fake-salesko-mcp.mjs', import.meta.url));
@@ -28,7 +30,7 @@ describe('Salesko fake connector MCP end to end', () => {
     const adapter = new ClaudeAdapter({
       resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }),
     });
-    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       runtimeAllowlist: ['claude'],
       ...testAgentHomeDeps(),
@@ -54,8 +56,8 @@ describe('Salesko fake connector MCP end to end', () => {
 
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
           instruction: 'salesko:find-leads',
           runtime: 'claude',
           requiredToolsets: ['salesko'],
