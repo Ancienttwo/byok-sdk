@@ -397,6 +397,11 @@ test('the #1022 task events route selects only examples/basic', () => {
   assert.throws(() => selectImpact(['examples/basic/task-events-other.ts']));
 });
 
+test('the example page selects only examples/basic (#1036)', () => {
+  assert.deepEqual(selectImpact(['examples/basic/public/index.html']).dirs, ['examples/basic']);
+  assert.throws(() => selectImpact(['examples/basic/public/other.html']));
+});
+
 test('wire v4 (#925) reviewed paths select only their owners', () => {
   assert.deepEqual(selectImpact(['examples/packaging/launcher.ts']).families, ['packageability-smoke']);
   assert.ok(selectImpact(['examples/packaging/launcher.ts']).dirs.includes('examples/packaging'));

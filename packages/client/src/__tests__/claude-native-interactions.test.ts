@@ -81,7 +81,6 @@ describe('Claude native interactions through prepared process transport', () => 
     expect(sent[2]!.type).toBe('user');
     expect(responseFrames(sent)).toEqual([{ type: 'control_response', response: { subtype: 'success', request_id: 'native-request-1', response: { behavior: 'allow', updatedInput: { command: 'echo offline-fixture', nested: { exact: true } } } } }]);
     expect(JSON.stringify(sent)).not.toContain('updatedPermissions');
-    await expect(session.resolveApproval(true)).rejects.toThrow();
     await expect(session.steer('do this instead')).rejects.toThrow();
   });
 

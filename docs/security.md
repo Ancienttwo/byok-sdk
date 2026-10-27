@@ -451,11 +451,12 @@ the wire (`packages/client/src/daemon/control-protocol.ts`,
 
 ### 3. Shared approval path
 
-Bundled adapters do not emit `needs_approval`: ordinary sessions run YOLO
+Bundled adapters never request approval: ordinary sessions run YOLO
 (ADR-037). The local native-interaction opt-in is a separate seam
-(`docs/spec.md`, "Local native interaction contract"). The adapter-agnostic
-daemon approval registry and control methods remain for runtimes that emit
-`needs_approval` or otherwise use the shared approval channel.
+(`docs/spec.md`, "Local native interaction contract"). The daemon approval
+registry and control methods serve a custom adapter that declares
+`approvalInteractive: true` and calls its `approvalChannel.request`, or a
+custom adapter's helper calling `approvals.request`.
 
 - **Fail-closed timeout on the daemon side**: `TaskRunner.requestApproval`
   force-resolves as a rejection once `approvalTimeoutMs` elapses with no
@@ -466,7 +467,7 @@ daemon approval registry and control methods remain for runtimes that emit
   `ApprovalRegistry.resolve()` — whichever arrives first wins; the loser is
   a clean, audited no-op, never a crash or a double-resolution
   (`approvals.ts`, `task-runner.ts`'s `handleApprove`/`handleReject`
-  `NoPendingApprovalError` branch, mirrored server-side by the cloud kernel's
+  `approvalId` check, mirrored server-side by the cloud kernel's
   terminal-state guard).
 - **Per-task FIFO, not overwrite**: only one approval per task is ever
   actually dispatched at a time; a second concurrent request for the same

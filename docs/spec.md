@@ -1724,8 +1724,8 @@ activity as described below.
 
 ### Bounded approval lifecycle authority
 
-Approval observations do not enter `ActivityTail` and do not reinterpret
-`AgentEvent.needs_approval`. The protocol has no monotonic order key shared by
+Approval observations do not enter `ActivityTail`; no `AgentEvent` carries an
+approval. The protocol has no monotonic order key shared by
 `task.progress`, `task.await_approval`, and `task.approval_resolved`, so cloud
 must not fabricate a cross-stream total order. Instead, the approval store
 assigns a monotonic per-task `revision` in arrival order and preserves the
@@ -3253,7 +3253,7 @@ or complete Windows/bundled-product support requested in #608.
 
 ### Durable Pi lane (experimental, flag-gated)
 
-The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). The lane runs YOLO, as every lane does since ADR-037; there is no SDK permission policy to compute. Tool permission follows the owner's YOLO ruling: the `beforeTool` hook admits calls without Host approval and emits no `needs_approval`; a throwing hook blocks the call. The structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; needs_approval is unused; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; no SDK runtime component interprets them (see Bot turn outcome fragments and routine time points).
+The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). The lane runs YOLO, as every lane does since ADR-037; there is no SDK permission policy to compute. Tool permission follows the owner's YOLO ruling: the `beforeTool` hook admits calls without Host approval and never requests one; a throwing hook blocks the call. The structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; no SDK runtime component interprets them (see Bot turn outcome fragments and routine time points).
 
 ### Official Pi migration security and installation contract (2026-09-25 consolidation)
 
@@ -3418,14 +3418,17 @@ is the explicit local support declaration. Omission means unsupported. Its
 approval-decision list and `structuredQuestions` flag are snapshotted with the
 rest of the runtime descriptor.
 
-This local seam is distinct from the existing remote `needs_approval` /
-`resolveApproval(boolean)` contract. It does not add a daemon control command,
+This local seam is distinct from the remote task approval contract, where a
+session that declares `approvalInteractive: true` calls
+`approvalChannel.request(summary)` and the daemon's approval registry resolves
+it from a wire or local decision (`docs/protocol.md` §5.1). It does not add a daemon control command,
 wire payload, remote authorization, UI, persistent grant, or Host reconnect
 protocol. Claude and Codex wire this seam only when their local adapter is constructed
 with `nativeInteractions` Host callbacks. With that option absent, neither
 advertises native interaction support, and the session runs YOLO (ADR-037). Pi
-remains unsupported. The existing `approvalInteractive` declarations stay
-authoritative for the remote task path. Local capability metadata does not
+remains unsupported. The `approvalInteractive` declarations stay
+authoritative for the remote task path: every bundled adapter declares `false`
+and is never handed the approval channel. Local capability metadata does not
 assert that every task exposes every tool or will ask an interactive question.
 
 Each request carries an SDK `requestId`, a fresh process-lifetime `generation`,
@@ -3561,6 +3564,8 @@ wire contracts do not change.
 ### Client intermediate retention (#399)
 
 `DaemonConfig.storage` owns optional budget, scratchRoot, skillPackDataDirs and retention cadence/limits/expiring TTLs. Defaults: 15-minute sweeps, 5-minute pressure sweeps, 256 deletions, 10-second soft pass limit, runtime/old skill revisions 24 hours, daemon/home temps one hour, reader runs seven days, Agent result records seven days and 256 per home, confirmed journal receipts 30 days. Agent result records are still swept under storage pressure. Home temps cannot be configured below one hour; confirmed journal TTL must exceed the seven-day mailbox redelivery window. Input preparation retains its own absolute artifact/record horizons and pins; only its timer moves to the unified sweeper. Current skill revisions are resolved from installer lock.json under a shared publication gate. One usage measurement visits at most 65,536 entries across the store, scratch, skill, Agent-home and Pi sessionDir roots in that order. Past that bound it stops: each class whose root it did not finish reports `truncated: true` with lower-bound `bytes`/`entries`, and a class whose roots it never reached is also `measured: false`. Pressure is computed from the lower-bound used bytes and the complete free-space reading; truncation alone neither latches emergency nor fails startup, and an error-free truncated measurement can clear an emergency latch. Real I/O, root identity, journal usage and free-space errors still fail closed.
+
+Reader-run retention reads the complete session reference authority under the idle-home lease using the original pass inspection and soft-time budget. Only after a complete read does its 250 ms deletion window begin; deletion also consumes the remaining pass budget. An incomplete reference scan protects all reader runs in that home, without caching a partial map across passes. A slow home may therefore hold its maintenance lease for the remaining pass soft budget, delaying writer admission; a soft limit does not interrupt an outstanding filesystem call. Progress requires the full scan and some deletion work to fit in that budget.
 
 Standalone adapter Hosts must pass `scratch: await createExecutionScratch({ root })` to operation.start and Pi launch resolution. They must await release after child disposal. Scratch roots must be short, absolute, private, canonical and exclusive. On Unix, the root must belong to the current process user before any permission change. Unix socket validation reserves 16 bytes for the runtime socket name and one terminating NUL. The root limit is 61 UTF-8 bytes on macOS and 65 on Linux.
 

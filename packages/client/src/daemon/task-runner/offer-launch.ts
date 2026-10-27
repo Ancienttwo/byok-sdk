@@ -18,7 +18,6 @@ import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory';
 import type { PreparedExecutionObservation, ActiveTask, OfferPhaseContext } from './support';
 import { isKnownRuntimeId, offeredInstruction, errorMessage } from './support';
 import type { TaskRunner, TaskRunnerDeps } from '../task-runner';
-import { DEFAULT_APPROVAL_TIMEOUT_MS, NoPendingApprovalError } from '../task-runner';
 import type { AcceptedOfferPayload } from './support';
 import type { OfferClaim, OfferHeld, OfferLimits, OfferManifest, OfferRequest, OfferRuntime, OfferWorkspace } from './offer';
 import { activateOffer, type OfferActivationInput } from './offer-activation';
@@ -327,6 +326,11 @@ export interface OfferStartInput
  * Starts the runtime session. A start that failed or raced a cancel goes to
  * startup ownership; a started session goes to startup ownership and then to
  * {@link activateOffer} on the same synchronous path.
+ *
+ * The runtime may ask for approval while it starts or while activation is
+ * still writing. Such a request waits until this launch settles: by then the
+ * task is either active and the request is presented, or it never became
+ * active and the request is refused.
  */
 export async function startOfferRuntime(
   this: TaskRunner,
@@ -334,6 +338,26 @@ export async function startOfferRuntime(
   held: OfferHeld,
   input: OfferStartInput,
   activation: Omit<OfferActivationInput, 'session'>,
+): Promise<void> {
+  let settleLaunch!: () => void;
+  const launch: LaunchGate = { settled: false, promise: new Promise<void>((resolve) => { settleLaunch = resolve; }) };
+  try {
+    await startAndActivateRuntime.call(this, phase, held, input, activation, launch);
+  } finally {
+    launch.settled = true;
+    settleLaunch();
+  }
+}
+
+interface LaunchGate { settled: boolean; readonly promise: Promise<void> }
+
+async function startAndActivateRuntime(
+  this: TaskRunner,
+  phase: OfferPhaseContext,
+  held: OfferHeld,
+  input: OfferStartInput,
+  activation: Omit<OfferActivationInput, 'session'>,
+  launch: LaunchGate,
 ): Promise<void> {
   const { taskId } = phase;
   const {
@@ -374,27 +398,11 @@ export async function startOfferRuntime(
     env,
     ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
     ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
-    approvalChannel: {
-      taskId,
-      storeDir: this['deps'].storeDir,
-      productId: this['deps'].productId,
-      timeoutMs: this['deps'].approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS,
-      resolve: async (approved, reason) => {
-        const currentActive = this['tasks'].get(taskId);
-        const pendingId = currentActive?.pendingApprovalId;
-        if (!pendingId) {
-          throw new NoPendingApprovalError(taskId);
-        }
-        // 'wire': this closure is invoked ONLY by an adapter's own
-        // `session.resolveApproval()` on a custom adapter, which is called from
-        // `handleApprove`/`handleReject` below — i.e. a server-sent wire
-        // `task.approve`/`task.reject`. The server already knows this
-        // decision (it sent it); `task.approval_resolved` must never be
-        // sent back for it — see `ApprovalOrigin`'s own doc comment
-        // (`approvals.ts`) and `sendApprovalResolved`'s gate below.
-        this['deps'].approvalRegistry.resolve(pendingId, approved ? 'approve' : 'reject', reason, 'wire');
-      },
-    },
+    ...(pick.descriptor.capabilities.approvalInteractive
+      ? { approvalChannel: { request: (summary: string) => launch.settled
+        ? this.requestApproval(taskId, summary)
+        : launch.promise.then(() => this.requestApproval(taskId, summary)) } }
+      : {}),
   };
   let session: Session;
   try {
