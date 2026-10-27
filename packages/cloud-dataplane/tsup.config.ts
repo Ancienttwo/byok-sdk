@@ -27,6 +27,10 @@ export default defineConfig([
     clean: false,
     splitting: false,
     treeshake: true,
+    minifyWhitespace: true,
+    esbuildOptions(options) {
+      options.legalComments = 'inline';
+    },
   },
   {
     entry: { runtime: 'src/runtime.ts' },
@@ -38,5 +42,9 @@ export default defineConfig([
     clean: false,
     splitting: false,
     treeshake: true,
+    minifyWhitespace: true,
+    esbuildOptions(options) {
+      options.legalComments = 'inline';
+    },
   },
 ]);
