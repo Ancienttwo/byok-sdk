@@ -581,6 +581,21 @@ describe('TaskEventRelay dispatch phases', () => {
     relay.stop();
   });
 
+  it('keeps a stored task\'s feed for its reader when the dispatch that provisioned it is refused', async () => {
+    const relay = new TaskEventRelay({});
+    relay.provision('resubmitted-live');
+    const reader = readTaskEvents(
+      { relay, readState: async () => stateRead('Running'), readApprovalRequest: noRequest }, 'resubmitted-live', { from: 'state' },
+    )[Symbol.asyncIterator]();
+    const firstEntry = reader.next();
+    // Let the read finish its store reads while the dispatch is still in flight.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    relay.abort('resubmitted-live');
+    expect((await firstEntry).value?.event).toEqual({ kind: 'state', state: 'Running', at: '2026-10-27T00:00:00.000Z' });
+    await reader.return!();
+    relay.stop();
+  });
+
   it('holds a Host transition made while a dispatch is in flight until Offered', async () => {
     const relay = new TaskEventRelay({});
     relay.provision('cancelled-early');

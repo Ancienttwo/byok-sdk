@@ -177,7 +177,8 @@ async function* followTaskEvents(
   if (relay.stopped || signal.aborted) return;
   let feed = relay.feed(taskId);
   let read = await readState(taskId);
-  if (feed === undefined) {
+  // A feed a dispatch opened is the dispatch's until a read of the stored task attaches to it.
+  if (feed === undefined || feed.phase === 'dispatching') {
     // Refuse before attaching, so a read of a reclaimed or unknown task never
     // recreates relay state for it.
     if (read === undefined) throw taskNotFound(taskId);
