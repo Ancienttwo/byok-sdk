@@ -245,6 +245,14 @@ export interface R2ObjectMaintenance {
   ): Promise<R2ObjectPage>;
 }
 
+/**
+ * The store signs a URL string, never a Request object. aws4fetch reads a
+ * Request input only when it passes `instanceof` the global Request, and a
+ * host may replace that class (`@hono/node-server`'s `serve()` does by
+ * default); a native Request then falls through to `new URL(request)` (#1039).
+ */
+type BodilessMethod = 'HEAD' | 'GET' | 'DELETE';
+
 export class R2CloudBlobStore implements CloudBlobStore {
   readonly #objects: ObjectStore;
   readonly #signingClock: Clock;
@@ -342,22 +350,18 @@ export class R2CloudBlobStore implements CloudBlobStore {
 
     const url = this.#objectUrl(tenant, hash);
     url.searchParams.set('X-Amz-Expires', String(this.#presignTtlSeconds));
-    const signed = await this.#client.sign(
-      new Request(url, {
-        method: 'PUT',
-        headers: {
-          'content-length': String(byteSize),
-          'content-type': reservation.contentType,
-        },
-      }),
-      {
-        // `allHeaders` is load-bearing: aws4fetch treats `content-length` and
-        // `content-type` as unsignable by default (they are per-hop headers for
-        // most services), and without this the grant would bind the key and the
-        // expiry but not the SHAPE of what may be written to it.
-        aws: { signQuery: true, allHeaders: true, datetime: this.#datetime() },
+    const signed = await this.#client.sign(url.toString(), {
+      method: 'PUT',
+      headers: {
+        'content-length': String(byteSize),
+        'content-type': reservation.contentType,
       },
-    );
+      // `allHeaders` is load-bearing: aws4fetch treats `content-length` and
+      // `content-type` as unsignable by default (they are per-hop headers for
+      // most services), and without this the grant would bind the key and the
+      // expiry but not the SHAPE of what may be written to it.
+      aws: { signQuery: true, allHeaders: true, datetime: this.#datetime() },
+    });
 
     return { blobId: hash, uploadUrl: signed.url };
   }
@@ -416,7 +420,8 @@ export class R2CloudBlobStore implements CloudBlobStore {
 
     const url = this.#objectUrl(tenant, hash);
     url.searchParams.set('X-Amz-Expires', String(this.#presignTtlSeconds));
-    const signed = await this.#client.sign(new Request(url, { method: 'GET' }), {
+    const signed = await this.#client.sign(url.toString(), {
+      method: 'GET',
       aws: { signQuery: true, datetime: this.#datetime() },
     });
     return signed.url;
@@ -462,7 +467,7 @@ export class R2CloudBlobStore implements CloudBlobStore {
    */
   async #head(tenant: TenantId, hash: ContentHash): Promise<HeadResult> {
     const url = this.#objectUrl(tenant, hash);
-    const { response, attempts } = await this.#send(new Request(url, { method: 'HEAD' }));
+    const { response, attempts } = await this.#send('HEAD', url);
 
     if (response.status === 404) {
       return { present: false, byteSize: 0n, contentType: '' };
@@ -500,11 +505,12 @@ export class R2CloudBlobStore implements CloudBlobStore {
    * flapping remote from a hard refusal — so it has to be counted here, where
    * the loop is, rather than assumed to be 1 at the throw site.
    */
-  async #send(request: Request): Promise<{ readonly response: Response; readonly attempts: number }> {
+  async #send(method: BodilessMethod, url: URL): Promise<{ readonly response: Response; readonly attempts: number }> {
     const failures: string[] = [];
 
     for (let attempt = 1; attempt <= this.#maxAttempts; attempt += 1) {
-      const signed = await this.#client.sign(request.clone(), {
+      const signed = await this.#client.sign(url.toString(), {
+        method,
         aws: { datetime: this.#datetime() },
       });
 
@@ -621,7 +627,7 @@ export class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
 
   async deleteObject(tenant: TenantId, hash: ContentHash): Promise<R2DeleteResult> {
     const url = this.#objectUrl(tenant, hash);
-    const { response, attempts } = await this.#send(new Request(url, { method: 'DELETE' }));
+    const { response, attempts } = await this.#send('DELETE', url);
     if (response.status === 404) return 'absent';
     if (!response.ok) {
       throw new ObjectStoreRequestError(
@@ -665,7 +671,7 @@ export class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
       url.searchParams.set('continuation-token', continuationToken);
     }
 
-    const { response, attempts } = await this.#send(new Request(url, { method: 'GET' }));
+    const { response, attempts } = await this.#send('GET', url);
     if (!response.ok) {
       throw new ObjectStoreRequestError(
         `ListObjectsV2 on the object store answered ${response.status}.`,
@@ -677,9 +683,7 @@ export class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
   }
 
   async #head(tenant: TenantId, hash: ContentHash): Promise<HeadResult> {
-    const { response, attempts } = await this.#send(
-      new Request(this.#objectUrl(tenant, hash), { method: 'HEAD' }),
-    );
+    const { response, attempts } = await this.#send('HEAD', this.#objectUrl(tenant, hash));
     if (response.status === 404) {
       return { present: false, byteSize: 0n, contentType: '' };
     }
@@ -709,10 +713,11 @@ export class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
     );
   }
 
-  async #send(request: Request): Promise<{ readonly response: Response; readonly attempts: number }> {
+  async #send(method: BodilessMethod, url: URL): Promise<{ readonly response: Response; readonly attempts: number }> {
     const failures: string[] = [];
     for (let attempt = 1; attempt <= this.#maxAttempts; attempt += 1) {
-      const signed = await this.#client.sign(request.clone(), {
+      const signed = await this.#client.sign(url.toString(), {
+        method,
         aws: { datetime: this.#datetime() },
       });
       try {
