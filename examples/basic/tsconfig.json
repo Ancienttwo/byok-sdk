@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.json",
   "include": [
     "server.ts",
+    "task-events-route*.ts",
     "goal-btw*.ts",
     "clarification*.ts",
     "page*.ts",

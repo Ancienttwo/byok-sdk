@@ -53,10 +53,9 @@
     `<storeDir>/git-workspaces.json` and old task directories untouched.
   - `ByokServer.dispatch` takes only `AgentResumeDispatchInput` (`agentRef`
     and `sessionRef`); `LegacyDispatchInput` is removed. Fresh work uses
-    `executions.submit`, which returns no `TaskHandle`: a submitted task has
-    no per-task stream of Agent events and artifacts yet, only the
-    `task.created` and `task.state` server events; #1022 adds one in 0.31.0. Two `dispatch` refusal
-    codes change, because the Agent lane answers them: an unknown or revoked
+    `executions.submit`, which returns no `TaskHandle`; read a submitted
+    task's events with `ByokServer.tasks.events` (#1022). Two `dispatch`
+    refusal codes change, because the Agent lane answers them: an unknown or revoked
     device is `agent_capability_missing` (was `device_not_found`), and a
     taskId that already exists is `agent_task_already_exists` (was
     `coordination_input_invalid`). A Host that matches on the old codes must
@@ -139,6 +138,34 @@
   and `reject`, share their one code path over `ByokCloud.approveTask` and
   `rejectTask`, and refuse the same way: `task_not_found`,
   `task_not_awaiting_approval` or `StaleApprovalError`.
+- **Feature (server; #1022)** — `ByokServer.tasks.events(taskId, { after?,
+  from?, signal? })` follows one task's event feed by taskId, so a task
+  `executions.submit` created has its state, Agent events, artifacts and
+  approval requests again. Each `TaskEventEntry` carries an opaque `cursor`;
+  pass it back as `after` to resume after that entry. A cursor is valid only
+  for the same server instance's current feed of the task. `from: 'state'`
+  starts at the task's latest state entry, after the pending `await_approval`
+  request while it awaits approval; those entries survive the buffer's
+  drop-oldest. The first `next()` throws, before any entry: a `TypeError` for
+  `after` and `from` together, `task_not_found` for an unknown task, and the new
+  `TaskEventsUnavailableError` with `reason: 'cursor_unknown'` (a restart,
+  another feed's cursor, a malformed one) or `'feed_expired'` (a terminal
+  task whose feed was reclaimed or ended before this instance started). A
+  live task that this instance did not dispatch, such as one still running
+  after a SQLite restart, gets a feed that starts with its current state read
+  back from the stores, after the pending plaintext approval request while it
+  awaits one, without earlier events; those entries can appear twice.
+  From then on `events.subscribe()` also reports that task's
+  `task.state` changes, with no `task.created` before them.
+- **Breaking (server; #1022)** — `TaskHandle.events()` reads the same feed as
+  `tasks.events`. Its first `next()` now reads the task's snapshot once, and a
+  read after the terminal feed is reclaimed throws `TaskEventsUnavailableError`
+  (`feed_expired`) where it used to complete empty. A read after `close()`
+  still completes empty. The `await_approval` member of `ServerTaskEvent`
+  requires `approvalId`, which `tasks.approve(taskId, { approvalId })` takes;
+  code that constructs one must supply it. A reader that falls behind the
+  feed's buffer gets one `events_truncated` marker for each gap it falls into,
+  decided from where it resumes, where it used to get at most one.
 - **Breaking (client)** — `ExpiringClassId` and `RetentionClassId` gain
   `'agent-result'`, so an exhaustive switch over them no longer compiles
   until it handles the new class (#1009). `ClassUsage.truncated` is now
