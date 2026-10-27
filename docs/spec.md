@@ -1458,6 +1458,22 @@ failure, a refused or changed start receipt and a protocol violation are `unknow
 Its start failures are typed and not retryable: a worker that ends on its own
 before its start receipt is `runtime_exited`, any other is `unknown`.
 
+### Offer admission timings
+
+The one `task.claim` or `task.decline` that the task runner sends for an
+offer carries `admission`; a sealed task's decline carries it in plaintext,
+including the sealed-open, gate self-check and `sealed_key_unavailable`
+declines, and a decline sent outside the task runner (the inbound journal's
+over-bound refusal, restart recovery) carries none. It holds device
+monotonic-clock durations in whole milliseconds, from the `task.offer`
+dispatch to that message, with a required `totalMs` and a key for each timed
+phase that ran (`agentHomeWaitMs`, `messageHelperPreflightMs`,
+`resultHelperPreflightMs`, `toolsetProbeMs`, `runtimeLaunchMs`). The daemon
+observer's `claimed` and `failed` (`preClaim`) events carry the same object.
+It is telemetry for admission calibration, not task state: `TaskAttempt` does
+not store it and `TerminalResult` does not project it; a decline's timings are
+read from the typed decline envelope.
+
 ### Terminal inference usage observation
 
 The three terminal messages may carry one bounded `TerminalInferenceUsage`
@@ -1478,6 +1494,10 @@ with `inputTokens = input + cacheRead + cacheWrite`, because Pi's own `input`
 already excludes both cache figures — so Pi's block carries the last call's
 figures, as telemetry like the others. A Pi run that reported no usage still
 omits the block rather than fabricating one from device facts.
+The block's `model` is the last observation's served model (`usage.model`:
+Pi's `responseModel`, Claude's single root-agent `message.model` for the turn;
+Codex reports none). A last observation with a model and no token counts still
+yields the block.
 The protocol enforces safe non-negative bounded numbers and a canonical UTC
 device timestamp. Cloud records first-terminal-wins as usual and projects the
 same typed object from the winning receipt without parsing raw receipt bytes

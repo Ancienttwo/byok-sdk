@@ -1,6 +1,6 @@
 import { PreparedAgentMemoryModeSchema } from './input-preparation';
 import { z } from 'zod';
-import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS } from './constants';
+import { RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH } from './constants';
 import { BlobRefSchema } from './blob';
 import {
   SEALED_DECLINE_CODES,
@@ -848,6 +848,25 @@ const TaskSteerPlainPayloadSchema = z.object({
 // docs/protocol.md).
 // ---------------------------------------------------------------------------
 
+/** Maximum offer admission duration, and of each phase in it (seven days). */
+export const OFFER_ADMISSION_MAX_DURATION_MS = 604_800_000;
+const OfferAdmissionDurationSchema = z.number().int().nonnegative().max(OFFER_ADMISSION_MAX_DURATION_MS);
+/**
+ * #1014: how long this device spent admitting an offer, in milliseconds of its
+ * monotonic clock, from receiving the offer to sending the claim or decline
+ * that ends admission. A phase is present only when it ran; the time no phase
+ * names is `totalMs` minus their sum.
+ */
+export const OfferAdmissionTimingsSchema = z.object({
+  totalMs: OfferAdmissionDurationSchema,
+  agentHomeWaitMs: OfferAdmissionDurationSchema.optional(),
+  messageHelperPreflightMs: OfferAdmissionDurationSchema.optional(),
+  resultHelperPreflightMs: OfferAdmissionDurationSchema.optional(),
+  toolsetProbeMs: OfferAdmissionDurationSchema.optional(),
+  runtimeLaunchMs: OfferAdmissionDurationSchema.optional(),
+}).strict();
+export type OfferAdmissionTimings = z.infer<typeof OfferAdmissionTimingsSchema>;
+
 /**
  * daemon -> server: claim an offered task (idempotent CAS on the server
  * side). `taskId` used to be duplicated here; it is now carried only by the
@@ -891,6 +910,7 @@ export const TaskClaimPayloadSchema = z.object({
   runtime: RuntimeIdSchema.optional(),
   harnessId: HarnessIdSchema.optional(),
   capabilities: RuntimeCapabilitiesSchema.optional(),
+  admission: OfferAdmissionTimingsSchema.optional(),
 });
 export type TaskClaimPayload = z.infer<typeof TaskClaimPayloadSchema>;
 
@@ -924,6 +944,7 @@ const DeclineFields = z.object({
   retryable: z.boolean().optional(),
   agentRef: AgentRefSchema.optional(),
   code: z.enum([...HOME_DECLINE_CODES, ...SEALED_DECLINE_CODES]).optional(),
+  admission: OfferAdmissionTimingsSchema.optional(),
 });
 /**
  * #654: a sealed decline code names a fixed, non-retryable outcome and
@@ -1069,7 +1090,6 @@ export const TERMINAL_INFERENCE_USAGE_MAX_TOKENS = 1_000_000_000;
 /** Maximum device-observed elapsed duration retained in one terminal observation (seven days). */
 export const TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS = 604_800_000;
 export const TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH = 160;
-export const TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH = 160;
 export const TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH = 128;
 
 const TerminalInferenceUsageNumberSchema = z

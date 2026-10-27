@@ -248,7 +248,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     // the receiver checks the offer's `sealing` gate against the flags this daemon advertises, and it never advertises sealed-payload-v1 here.
     server.send(await sealedOffer(member, 'undeclared', server.nextSeq(), deviceId, 'run'));
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'undeclared', BUDGET_MS);
-    expect(decline.payload).toEqual({ agentRef: agentOf('undeclared'), reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf('undeclared'), reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false, admission: { totalMs: expect.any(Number) } });
     expect(adapter.sessions).toHaveLength(0);
     expect(server.received.filter(advertised)).toEqual([]);
   });
@@ -378,7 +378,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const inputOnly: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input'] };
     server.send(await sealedOffer(member, 'below-policy', server.nextSeq(), deviceId, 'never runs', inputOnly));
     const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'below-policy', BUDGET_MS);
-    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, admission: { totalMs: expect.any(Number) } });
     expect(adapter.startCalls).toHaveLength(0);
   });
 
@@ -392,7 +392,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const inputOnly: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input'] };
     server.send(await sealedOffer(member, 'policy-moved', server.nextSeq(), deviceId, 'never runs', inputOnly));
     const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'policy-moved', BUDGET_MS);
-    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, admission: { totalMs: expect.any(Number) } });
     expect(adapter.startCalls).toHaveLength(0);
   });
 
@@ -407,7 +407,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(createEnvelope('task.offer', { agentRef: agentOf('foreign-head'), ...FRESH_OFFER, sealing: BOTH, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never,
       { taskId: 'foreign-head', seq: server.nextSeq() }));
     const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'foreign-head', BUDGET_MS);
-    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false, admission: { totalMs: expect.any(Number) } });
     expect(adapter.startCalls).toHaveLength(0);
   });
 
@@ -432,7 +432,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(offer);
 
     const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'declined', BUDGET_MS);
-    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: code, code, retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: code, code, retryable: false, admission: { totalMs: expect.any(Number) } });
     await vi.waitFor(async () => expect(await cursor()).toBe(offer.seq), BUDGET_MS);
     server.send({ ...offer, id: randomUUID(), seq: server.nextSeq() });
     await vi.waitFor(async () => expect(await cursor()).toBe(offer.seq! + 1), BUDGET_MS);
@@ -446,7 +446,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(await sealedOffer(member, 'blob-instruction', server.nextSeq(), deviceId, blobRef));
 
     const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'blob-instruction', BUDGET_MS);
-    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealing_policy_mismatch', code: 'sealing_policy_mismatch', retryable: false, admission: { totalMs: expect.any(Number) } });
   });
 
   it('declines in plaintext, without a code, when the server does not accept sealed output', async () => {
@@ -454,7 +454,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(await sealedOffer(member, 'no-flag', server.nextSeq(), deviceId, 'never runs'));
 
     const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'no-flag', BUDGET_MS);
-    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_payload_unsupported: the server does not accept sealed task output', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_payload_unsupported: the server does not accept sealed task output', retryable: false, admission: { totalMs: expect.any(Number) } });
     expect(adapter.startCalls).toHaveLength(0);
   });
 
@@ -468,7 +468,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(await sealedOffer(member, 'missing-egress', server.nextSeq(), deviceId, 'never runs'));
 
     const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'missing-egress', BUDGET_MS);
-    expect(decline.payload).toEqual({ agentRef: agentOf('missing-egress'), reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf('missing-egress'), reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false, admission: { totalMs: expect.any(Number) } });
     // The Host's inbound check reads this helper, so the decline settles the task.
     expect(isSealedTaskPlainOutput('task.decline', decline.payload)).toBe(true);
     expect(log).toHaveBeenCalledWith(expect.stringContaining('agent-egress-policy'));
@@ -482,7 +482,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     server.send(await sealedOffer(member, 'downgraded', server.nextSeq(), deviceId, 'never runs', inputOnly, { boundSealing: BOTH }));
 
     const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'downgraded', BUDGET_MS);
-    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false, admission: { totalMs: expect.any(Number) } });
     expect(adapter.startCalls).toHaveLength(0);
   });
 
@@ -906,7 +906,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
     server.send(await offerOf('bad-hash', true));
     const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline' && envelope.task_id === 'bad-hash', BUDGET_MS);
-    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false });
+    expect(decline.payload).toEqual({ agentRef: agentOf(decline.task_id!), reason: 'sealed_open_failed', code: 'sealed_open_failed', retryable: false, admission: { totalMs: expect.any(Number) } });
 
     server.send(await offerOf('blob-offer', false));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);

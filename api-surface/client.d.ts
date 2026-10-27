@@ -6976,7 +6976,7 @@ export declare function prependAgentReaderResultGuidance(instruction: string): s
 export declare function prependAgentMemoryModeGuidance(instruction: string, mode: 'none' | 'read' | 'read-write', reader: boolean): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
 import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
-import { type AgentEvent, type BlobRef, type Envelope, type TaskState } from '@byok-sdk/protocol';
+import { type AgentEvent, type BlobRef, type Envelope, type OfferAdmissionTimings, type TaskState } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { ExecutionRecord } from './execution-record';
 import type { RuntimeObservation } from '../runtime-detection';
@@ -7036,11 +7036,14 @@ export type DaemonEvent = ({
     ts: string;
     taskId: string;
     runtime?: string;
-} | {
+}
+/** `admission`: how long this device took to admit the offer (#1014), as the claim carried it. */
+ | {
     kind: 'claimed';
     ts: string;
     taskId: string;
     claimedRuntime?: string;
+    admission?: OfferAdmissionTimings;
 } | {
     kind: 'started';
     ts: string;
@@ -7101,6 +7104,7 @@ export type DaemonEvent = ({
     reason: string;
     retryable: boolean;
     preClaim?: boolean;
+    admission?: OfferAdmissionTimings;
 } | {
     kind: 'cancelled';
     ts: string;

@@ -14,7 +14,7 @@ import {
   createDaemonWithAdapters, type AgentEgressPolicy, type Daemon, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
   type MessageDraftDelta, type RuntimeAdapterPrepareResult, type RuntimeOperationStartInput, type Session,
 } from '@byok-sdk/client';
-import { BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, type AgentEvent, type DispatchSelection } from '@byok-sdk/protocol';
+import { BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, type AgentEvent, type DispatchSelection, type OfferAdmissionTimings } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer } from '@byok-sdk/server';
 import { InMemoryDeviceCredentialStore } from '../../../../scripts/testing/device-credentials.mjs';
 import { CORPUS, CORPUS_REVISION, corpusCase, preflightCorpus } from './corpus';
@@ -354,8 +354,8 @@ async function runTrial(host: Host, options: RunCellOptions, planned: PlannedTri
   const offeredAt = new Date().toISOString();
   const deadline = Date.now() + options.deadlineMs;
   const base = { runId: options.runId, cellId: options.cellId, trialId: planned.trialId, caseId: planned.caseId, round: planned.round, taskId };
-  const notStarted = (stage: NotStartedRow['stage'], reason: string | null, code: string | null = null): TrialOutcome =>
-    ({ kind: 'not_started', row: { ...base, stage, reason, code, at: new Date().toISOString() } });
+  const notStarted = (stage: NotStartedRow['stage'], reason: string | null, code: string | null = null, admission: OfferAdmissionTimings | null = null): TrialOutcome =>
+    ({ kind: 'not_started', row: { ...base, stage, reason, code, admission, at: new Date().toISOString() } });
   try {
     await host.server.executions.submit({
       taskId, deviceId: host.deviceId,
@@ -383,7 +383,10 @@ async function runTrial(host: Host, options: RunCellOptions, planned: PlannedTri
   const decline = find('task.decline');
   if (!claim) {
     await waitForIdle(host);
-    if (decline) return notStarted('decline', String(decline.envelope.payload.reason ?? ''), (decline.envelope.payload.code as string | undefined) ?? null);
+    if (decline) {
+      const { reason, code, admission } = decline.envelope.payload as { reason?: unknown; code?: string; admission?: OfferAdmissionTimings };
+      return notStarted('decline', String(reason ?? ''), code ?? null, admission ?? null);
+    }
     return terminalOf() ? notStarted('terminal_before_claim', String(terminalOf()!.envelope.payload.reason ?? '')) : notStarted('unclaimed', 'no claim before the deadline');
   }
   const terminalEntry = terminalOf();
@@ -405,7 +408,8 @@ async function runTrial(host: Host, options: RunCellOptions, planned: PlannedTri
   return {
     kind: 'started', events,
     record: {
-      ...base, retryOf: null, offeredAt, claimedAt: claim.at, startedAt,
+      ...base, retryOf: null, offeredAt, claimedAt: claim.at,
+      admission: (claim.envelope.payload as { admission?: OfferAdmissionTimings }).admission ?? null, startedAt,
       finishedAt: terminal?.at ?? null,
       elapsedMs: terminal && !afterDeadline ? Date.parse(terminal.at) - Date.parse(startedAt) : null,
       deadlineMs: options.deadlineMs, submissions: classified.submissions, submissionSeen: classified.submissionSeen,
