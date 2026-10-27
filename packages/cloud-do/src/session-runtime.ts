@@ -629,10 +629,8 @@ export class SessionRuntime {
 
   #sessionSchema(): void {
     this.state.storage.sql.exec(`CREATE TABLE IF NOT EXISTS cloud_session (
-      id INTEGER PRIMARY KEY CHECK(id=1), configJson TEXT, staleJson TEXT NOT NULL DEFAULT '[]'
+      id INTEGER PRIMARY KEY CHECK(id=1), configJson TEXT, staleJson TEXT NOT NULL DEFAULT '[]', dispatcherDigest TEXT
     ); INSERT OR IGNORE INTO cloud_session(id) VALUES(1)`);
-    const columns = this.state.storage.sql.exec<{ name: string }>('PRAGMA table_info(cloud_session)').toArray();
-    if (!columns.some(row => row.name === 'dispatcherDigest')) this.state.storage.sql.exec('ALTER TABLE cloud_session ADD COLUMN dispatcherDigest TEXT');
   }
 
   #storedDispatcherDigest(): string | null {

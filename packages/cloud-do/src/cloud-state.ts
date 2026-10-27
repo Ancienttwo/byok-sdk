@@ -166,7 +166,8 @@ export class CloudState {
         source TEXT NOT NULL CHECK(source IN ('message','schedule','invocation')), profile TEXT NOT NULL, payloadJson TEXT,
         availableAt INTEGER NOT NULL, expiresAt INTEGER NOT NULL,
         state TEXT NOT NULL CHECK(state IN ('queued','running','done','failed','interrupted','cancelled','expired')),
-        runId INTEGER, attempts INTEGER NOT NULL DEFAULT 0, errorCode TEXT, createdAt INTEGER NOT NULL, settledAt INTEGER);
+        runId INTEGER, attempts INTEGER NOT NULL DEFAULT 0, errorCode TEXT, createdAt INTEGER NOT NULL, settledAt INTEGER,
+        inputDurable INTEGER NOT NULL DEFAULT 0, revision INTEGER);
         CREATE INDEX IF NOT EXISTS cloud_inbox_runnable ON cloud_inbox(state,availableAt,seq);
         CREATE TABLE IF NOT EXISTS cloud_events (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,eventKey TEXT NOT NULL UNIQUE,type TEXT NOT NULL,
@@ -177,29 +178,12 @@ export class CloudState {
         INSERT INTO cloud_event_meta(singleton) VALUES(1) ON CONFLICT DO NOTHING;
         CREATE TABLE IF NOT EXISTS cloud_projections (
         key TEXT PRIMARY KEY,invocationId TEXT NOT NULL,state TEXT NOT NULL,payloadDigest TEXT NOT NULL,
-        dataJson TEXT NOT NULL,errorCode TEXT,createdAt INTEGER NOT NULL)`);
-      const legacyMembership = !this.rows<{name:string}>('PRAGMA table_info(cloud_executions)').some(row => row.name === 'membershipPending');
-      this.migrate('cloud_inbox', { inputDurable: 'INTEGER NOT NULL DEFAULT 0', revision: 'INTEGER' });
-      this.storage.sql.exec(`CREATE TABLE IF NOT EXISTS cloud_run_turns (
+        dataJson TEXT NOT NULL,errorCode TEXT,createdAt INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS cloud_run_turns (
         runId INTEGER NOT NULL, seq INTEGER NOT NULL, claimEvent INTEGER, releaseEvent INTEGER,
         PRIMARY KEY (runId,seq));
         CREATE INDEX IF NOT EXISTS cloud_run_turns_by_seq ON cloud_run_turns(seq,runId)`);
-      this.migrate('cloud_executions', {
-        trigger: "TEXT NOT NULL DEFAULT 'submit'", requestId: 'TEXT', submissionId: 'INTEGER',
-        state: "TEXT NOT NULL DEFAULT 'interrupted'", errorCode: 'TEXT', startedAt: 'INTEGER', settledAt: 'INTEGER',
-        reservation: "TEXT NOT NULL DEFAULT 'none'", eligibilityJson: 'TEXT',
-        admissionDigest: 'TEXT', admittedSeqs: 'TEXT', settlementAck: 'INTEGER', revision: 'INTEGER', membershipPending: 'INTEGER',
-      });
-      if (legacyMembership) {
-        this.storage.sql.exec('INSERT OR IGNORE INTO cloud_run_turns(runId,seq) SELECT runId,seq FROM cloud_inbox WHERE runId IS NOT NULL');
-        this.storage.sql.exec("UPDATE cloud_executions SET membershipPending=1 WHERE trigger='wake'");
-      }
-      this.migrate('cloud_invocations', { deliveredState: "TEXT NOT NULL DEFAULT 'undelivered'", taskId: 'INTEGER', resultEntryId: 'INTEGER' });
     });
-  }
-  private migrate(table: string, columns: Record<string, string>): void {
-    const existing = new Set(this.rows<{ name: string }>(`PRAGMA table_info(${table})`).map(row => row.name));
-    for (const [name, type] of Object.entries(columns)) if (!existing.has(name)) this.storage.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
   }
   readInboxItem(seq: number): InboxRow | undefined { return this.rows<InboxRow>('SELECT * FROM cloud_inbox WHERE seq=?', seq)[0]; }
   run(conversationId: number): RunRow | undefined { return this.rows<RunRow>('SELECT * FROM cloud_executions WHERE conversationId=?', conversationId)[0]; }
