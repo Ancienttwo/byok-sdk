@@ -74,7 +74,7 @@ it('creates a routine on K4, runs one due occurrence on the real daemon, reports
   await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1), { timeout: 5000 });
   const taskId = host.adapter.starts[0]!.manifest.taskId;
   const offer = await host.server.tasks.offer(taskId);
-  expect(offer).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh', deviceId: host.deviceId, payload: {
+  expect(offer).toMatchObject({ type: 'task.offer', deviceId: host.deviceId, payload: {
     runtime: 'pi', instruction: 'Write the daily report.', agentRef: { agentId: 'main', profileRevision: '1' },
     terminalProjection: { mode: 'result-document', contract: 'byok-mcp-routine-v1', schema: resultSchema } } });
   host.adapter.sessions.get(taskId)!.finish({ text: 'Report sent.' });

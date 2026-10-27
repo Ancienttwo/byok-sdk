@@ -179,7 +179,7 @@ Dispatch uses `sdk.executions.submit`: a fresh Agent execution with the saved ta
 ID, device, runtime, instruction and toolsets, the binding's AgentRef, the Host's
 egress policy and terminal projection `none`. If an offer already exists, or the
 submit fails, submit reads the offer back and accepts it only when it is a
-`task.offer_for_agent_with_egress_fresh` whose device, AgentRef, runtime,
+plaintext `task.offer` with a fresh session whose device, AgentRef, runtime,
 instruction and toolsets match the binding exactly. Otherwise the call fails, and a retry of the
 same call dispatches again. A reservation whose slot is released only reads back.
 
