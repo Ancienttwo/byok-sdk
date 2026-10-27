@@ -1,4 +1,4 @@
-import { runtimeReclaimedBytes } from '../daemon/retention/runtime-accounting';
+import { PASS_INSPECTIONS, runtimeReclaimedBytes } from '../daemon/retention/runtime-accounting';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../daemon/path-mutation-gate';
 import { projectSkillPack } from '../daemon/skill-pack-installer';
 import { promises as fs } from 'node:fs';
@@ -311,6 +311,8 @@ it('reclaims a released runtime larger than the measurement limit across periodi
   observations.push({pass,largeExists:await exists(large.runtimeDir),largeFiles:await fs.readdir(large.runtimeDir).then(x=>x.length,()=>0),smallExists:await exists(small.runtimeDir),errors:f.failures.filter(x=>x==='exec-runtime:sweep_failed').length});
  }
  expect(observations.some(item=>item.largeFiles<16_384)).toBe(true);
+ // The first pass makes progress but spends at most the runtime share of the pass budget.
+ expect(observations[0]!.largeFiles).toBeLessThan(16_384);expect(observations[0]!.largeFiles).toBeGreaterThanOrEqual(16_384-PASS_INSPECTIONS/2);
  expect(f.failures).not.toContain('exec-runtime:sweep_failed');
  expect(await exists(small.runtimeDir)).toBe(false);
  expect(await exists(large.runtimeDir)).toBe(false);
@@ -404,4 +406,15 @@ it('keeps bytes already removed when a later unlink fails mid-pass, then complet
  let retried=0;for(let pass=0;pass<3&&tally.deleted===0;pass++){const retry=runtimeBudget(f,tally);await f.registry.sweep('exec-runtime',retry);retried+=runtimeReclaimedBytes.get(retry)??0;}
  expect(tally.deleted).toBe(1);expect(5+retried+tally.bytes).toBe(15+Buffer.byteLength(released));
  expect(await exists(target)).toBe(false);
+});
+it('a large expired runtime backlog leaves pass budget for agent-result in the same pass',async()=>{
+ const {home,binding,results}=await idleHome();await fs.mkdir(results,{recursive:true});
+ const record=path.join(results,resultName(0));await fs.writeFile(record,'{}');await old(record);await binding.lease.release();
+ const f=await fixture({home}),s=await f.scratch.create();
+ for(let start=0;start<9_216;start+=128) await Promise.all(Array.from({length:128},(_,offset)=>fs.writeFile(path.join(s.runtimeDir,`empty-${start+offset}`),'')));
+ await s.release();f.advance(DAY);
+ await f.sweeper.runPass('periodic');
+ expect(await exists(record)).toBe(false);
+ expect((await fs.readdir(s.runtimeDir)).length).toBeGreaterThan(0);
+ expect(f.failures).toEqual([]);
 });

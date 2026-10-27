@@ -31,8 +31,8 @@ export class RuntimeCleanup {
       if (!await existingDirectory(directory)) throw new Error('retention_runtime_missing');
     }
   }
-  /** Each descend, unlink, rmdir or final removal costs one budget inspection. */
-  async resume(root: string, eligible: () => Promise<boolean>, budget: SweepBudget): Promise<boolean> {
+  /** Each descend, unlink, rmdir or final removal costs one `available` inspection; bytes accrue to `budget`. */
+  async resume(root: string, eligible: () => Promise<boolean>, budget: SweepBudget, available: () => boolean): Promise<boolean> {
     for (;;) {
       // Identity is checked once per opened directory, then the directory's entries are removed as one batch.
       await this.validate(root, eligible);
@@ -41,7 +41,7 @@ export class RuntimeCleanup {
       try {
         for (let entry = await directory.read(); entry !== null; entry = await directory.read()) {
           if (this.current === this.target && entry.name === 'released') continue;
-          if (!budget.available()) return false;
+          if (!available()) return false;
           const file = path.join(this.current, entry.name), stat = await fs.lstat(file);
           if (stat.isDirectory() && !stat.isSymbolicLink()) { child = file; break; }
           await fs.unlink(file); removedAny = true;
@@ -51,7 +51,7 @@ export class RuntimeCleanup {
       if (child !== undefined) { this.current = child; continue; }
       // Removing entries while reading can hide others, so only an untouched read proves the directory empty.
       if (removedAny) continue;
-      if (!budget.available()) return false;
+      if (!available()) return false;
       if (this.current !== this.target) { await fs.rmdir(this.current); this.current = path.dirname(this.current); continue; }
       await this.validate(root, eligible);
       // Reuse the existing finalization semantics, but cap verification to the

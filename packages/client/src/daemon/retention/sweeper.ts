@@ -1,4 +1,4 @@
-import { runtimeReclaimedBytes } from './runtime-accounting';
+import { PASS_INSPECTIONS, runtimeReclaimedBytes } from './runtime-accounting';
 import type { ResolvedStorageConfig } from './config';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, type ClassUsage, type RetentionClassId, type RetentionTrigger, type SweepBudget, type SweepReport, RetentionRegistry } from './registry';
 import { StoragePressure } from './pressure';
@@ -62,7 +62,7 @@ export class RetentionSweeper {
     const budget: SweepBudget = {
       trigger, now,
       available: () => {
-        const allowed = ++inspections <= 8192 && deleted < this.options.config.maxDeletionsPerPass && performance.now() - started < this.options.config.maxPassDurationMs;
+        const allowed = ++inspections <= PASS_INSPECTIONS && deleted < this.options.config.maxDeletionsPerPass && performance.now() - started < this.options.config.maxPassDurationMs;
         if (!allowed) truncated = true;
         return allowed;
       },
