@@ -2544,7 +2544,10 @@ authorized. The additive Agent egress path consumes one exact, revisioned
 `AgentEgressPolicy`. The policy sets transport limits and the content-read
 surfaces. Agent events, results and artifacts go to the Host as the runtime
 produced them. The SDK does not filter, redact or omit them (owner decision
-D4, 2026-10-07, following OAR "nothing gated, nothing dropped").
+D4, 2026-10-07, following OAR "nothing gated, nothing dropped"). Latest-value
+activity coalesces within one progress batch: every event passes the same
+`latest.offer` bounds, each `error` is sent in its place, and the other events
+coalesce to their last.
 
 The tenant used by Agent egress and hosted local journaling is not editable
 host configuration. Pairing projects the required opaque non-secret tenant

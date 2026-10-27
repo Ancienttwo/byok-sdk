@@ -11,6 +11,7 @@ import { RuntimeExecutionFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON } fr
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
+import { resumeSession } from './fixtures/fresh-offer';
 
 // A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
 const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
@@ -57,46 +58,57 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     const adapter = new StubRuntimeAdapter();
     await setupDaemon(adapter);
 
+    // A resume offer without an egress policy reaches the Host event by event;
+    // a fresh offer's latest-value lane would coalesce the batch below. The
+    // session it resumes comes from a first, fresh task.
+    const agentRef = freshTestAgentRef();
+    server.send(createEnvelope('task.offer', { agentRef, ...FRESH_OFFER, instruction: 'start the session' }, { taskId: 'task-seed', seq: server.nextSeq() }));
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-seed');
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    const seed = adapter.sessions[0]!;
+    seed.emit({ type: 'turn_end' });
+    await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-seed');
+
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do the thing' },
+        { agentRef, ...resumeSession(seed.sessionRef), instruction: 'do the thing' },
         { taskId: 'task-1', seq: server.nextSeq() },
       ),
     );
 
-    const claim = await server.waitFor((e) => e.type === 'task.claim');
+    const claim = await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-1');
     expect(claim.payload).toMatchObject({ deviceId: 'device-1' });
     expect('taskId' in claim.payload).toBe(false);
     expect(claim.payload).toMatchObject({ runtime: 'pi' });
 
     // M1 gap #2: `task.claim` no longer implies `Running` — `task.started`
     // is the explicit, separate signal the adapter session actually started.
-    const started = await server.waitFor((e) => e.type === 'task.started');
+    const started = await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-1');
     expect(started.task_id).toBe('task-1');
 
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
-    const [session] = adapter.sessions;
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2));
+    const session = adapter.sessions[1];
     expect(session).toBeDefined();
     // An Agent offer runs in its Agent home, <hostStorageRoot>/agents/<agentId>.
-    const workspaceDir = adapter.startCalls[0]!.ctx.workspaceDir;
+    const workspaceDir = adapter.startCalls[1]!.ctx.workspaceDir;
     expect(path.basename(workspaceDir)).toMatch(/^test-agent-\d+$/);
     expect(path.basename(path.dirname(workspaceDir))).toBe('agents');
 
     session?.emit({ type: 'progress', text: 'working...' });
     session?.emit({ type: 'turn_end' });
 
-    const progress = await server.waitFor((e) => e.type === 'task.progress');
-    // The final batch includes the terminal `turn_end` event itself, not just
-    // what the separate task.complete that follows implies.
-    // A fresh task.offer carries the egress policy, whose latest-value delivery reduces each progress batch to its last event.
+    const progress = await server.waitFor((e) => e.type === 'task.progress' && e.task_id === 'task-1');
+    // The final batch includes the terminal `turn_end` event itself (full
+    // AgentEvent history is preserved in progress, not just implied by the
+    // separate task.complete that follows).
     expect(progress.payload).toMatchObject({
       seq: 1,
-      events: [{ type: 'turn_end' }],
+      events: [{ type: 'progress', text: 'working...' }, { type: 'turn_end' }],
     });
     expect(progress.task_id).toBe('task-1');
 
-    const complete = await server.waitFor((e) => e.type === 'task.complete');
+    const complete = await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-1');
     expect(complete.payload).toMatchObject({ summary: 'working...', sessionRef: session?.sessionRef });
     expect(session?.closeCalled).toBe(true);
 

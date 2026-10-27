@@ -122,6 +122,7 @@ export class AgentEgressController {
     }
     if (this.options.tenantId === undefined) return Object.freeze([...input.events]);
 
+    const accepted: number[] = [];
     const errors = new Set<number>();
     let latest = -1;
     for (const [index, event] of input.events.entries()) {
@@ -130,14 +131,17 @@ export class AgentEgressController {
         this.noteDrop('latest-value', offered.reason, input.agentRef);
         continue;
       }
-      if (offered.replaced) {
-        this.latestStatus.replaced += 1;
-        this.noteDrop('latest-value', 'coalesced', input.agentRef, false);
-      }
+      accepted.push(index);
       if (event.type === 'error') errors.add(index);
       else latest = index;
     }
-    return Object.freeze(input.events.filter((_event, index) => index === latest || errors.has(index)));
+    const sent = (index: number): boolean => index === latest || errors.has(index);
+    for (const index of accepted) {
+      if (sent(index)) continue;
+      this.latestStatus.replaced += 1;
+      this.noteDrop('latest-value', 'coalesced', input.agentRef, false);
+    }
+    return Object.freeze(input.events.filter((_event, index) => sent(index)));
   }
 
   async appendReliable(input: AgentEgressReliableInput): Promise<AgentEgressReliableAppendResult> {

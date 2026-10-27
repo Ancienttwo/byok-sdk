@@ -1,4 +1,4 @@
-import { FRESH_DAEMON_EGRESS, FRESH_OFFER } from './fixtures/fresh-offer';
+import { FRESH_DAEMON_EGRESS, FRESH_OFFER, resumeSession } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
@@ -91,22 +91,33 @@ describe('daemon local observability (DaemonObserver)', () => {
     expect(events.some((e) => e.kind === 'runtimes-detected')).toBe(true);
     expect(events.some((e) => e.kind === 'lifecycle')).toBe(true);
 
+    // A resume offer without an egress policy reaches the Host event by event;
+    // a fresh offer's latest-value lane would coalesce the batch below. The
+    // session it resumes comes from a first, fresh task.
+    const agentRef = freshTestAgentRef();
+    server.send(createEnvelope('task.offer', { agentRef, instruction: 'start the session', ...FRESH_OFFER }, { taskId: 'task-seed', seq: server.nextSeq() }));
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-seed');
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    const seed = adapter.sessions[0]!;
+    seed.emit({ type: 'turn_end' });
+    await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-seed');
+
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(),  instruction: 'do the thing', ...FRESH_OFFER },
+        { agentRef, instruction: 'do the thing', ...resumeSession(seed.sessionRef) },
         { taskId: 'task-seq-1', seq: server.nextSeq() },
       ),
     );
 
-    await server.waitFor((e) => e.type === 'task.started');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
-    const [session] = adapter.sessions;
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-seq-1');
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2));
+    const session = adapter.sessions[1];
 
     session?.emit({ type: 'progress', text: 'working...' });
     session?.emit({ type: 'turn_end' });
 
-    await server.waitFor((e) => e.type === 'task.complete');
+    await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-seq-1');
 
     // `progress` + `turn_end` land in the SAME flushed task.progress batch
     // (matches daemon-task-loop.test.ts's identical assertion) — the
@@ -116,8 +127,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     // Octop ③ (#553): a started task's execution record follows its terminal event.
     await vi.waitFor(() => expect(taskEvents(events, 'task-seq-1').some((event) => event.kind === 'execution-record')).toBe(true));
     const kinds = taskEvents(events, 'task-seq-1').map((e) => e.kind);
-    // A fresh offer runs with Agent egress, whose latest-value lane forwards one event (the last) per flushed batch.
-    expect(kinds).toEqual(['offered', 'claimed', 'started', 'progress', 'completed', 'execution-record']);
+    expect(kinds).toEqual(['offered', 'claimed', 'started', 'progress', 'progress', 'completed', 'execution-record']);
 
     const completed = events.find((e) => e.kind === 'completed' && e.taskId === 'task-seq-1');
     if (completed?.kind !== 'completed') throw new Error('unreachable');

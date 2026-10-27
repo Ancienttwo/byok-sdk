@@ -195,9 +195,10 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
  * the wire offer must be a subset of the flags this daemon advertises, or the
  * offer is declined non-retryably before it is opened, claimed or run. The
  * sender checks the same rows, so a sender that misses one cannot run an offer
- * here. A redelivered offer of a task this daemon already holds is left to
- * the offer handlers. A task that seals its output takes the closed sealed
- * decline, because the Host accepts no free-text reason for it.
+ * here. A redelivered offer of a task this daemon already holds, ran or
+ * declined is dropped without a second decline. A task that seals its output
+ * takes the closed sealed decline, because the Host accepts no free-text
+ * reason for it.
  */
 export function declineOfferMissingCapabilities(this: TaskRunner, envelope: Extract<Envelope, { type: 'task.offer' }>): boolean {
   const taskId = envelope.task_id;

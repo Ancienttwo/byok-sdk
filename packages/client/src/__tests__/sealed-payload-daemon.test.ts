@@ -852,8 +852,6 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       adapter.sessions[0]!.emit({ type: 'artifact', name: 'huge.bin', contentType: 'application/octet-stream' });
-      // The Agent egress lane of a fresh offer forwards the last event of a batch, so the turn ends only after the progress envelope under test was sent.
-      await server.waitFor((envelope) => wireForm(envelope) === 'task.progress_sealed' && envelope.task_id === 'too-big', BUDGET_MS);
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'too-big', BUDGET_MS);
     } finally {
@@ -875,8 +873,6 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       adapter.sessions[0]!.emit({ type: 'artifact', name: 'large.bin', contentType: 'application/octet-stream' });
-      // The Agent egress lane of a fresh offer forwards the last event of a batch, so the turn ends only after the progress envelope under test was sent.
-      await server.waitFor((envelope) => wireForm(envelope) === 'task.progress_sealed' && envelope.task_id === 'large', BUDGET_MS);
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       await server.waitFor((envelope) => wireForm(envelope) === 'task.complete_sealed' && envelope.task_id === 'large', BUDGET_MS);
     } finally {

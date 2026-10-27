@@ -15,17 +15,13 @@ export interface FrozenSubmitPort {
 export type FrozenInput = AgentExecutionInput;
 export type FrozenOffer = NonNullable<Awaited<ReturnType<FrozenSubmitPort['offer']>>>;
 
-/** The wire type of every frozen input. The plain and the sealed lane share it; the payload (its `sealing` marker) tells them apart. */
-export function frozenOfferType(): 'task.offer' {
-  return 'task.offer';
-}
-
 /**
- * The recorded offer is the frozen input: the same task, device, offer type and canonical payload. A plain offer never
+ * The recorded offer is the frozen input: the same task, device, offer type and canonical payload. The plain and the
+ * sealed lane share the `task.offer` type. A plain offer never
  * matches a sealed input, nor the reverse: the sealed payload carries `sealing`, the plain one does not. The Host resubmits its frozen bytes, so a sealed payload compares exactly.
  */
 export function sameFrozenOffer(offer: FrozenOffer, input: FrozenExecutionInput): boolean {
-  return offer.taskId === input.taskId && offer.deviceId === input.deviceId && offer.type === frozenOfferType()
+  return offer.taskId === input.taskId && offer.deviceId === input.deviceId && offer.type === 'task.offer'
     && canonical(offer.payload) === canonical(input.payload);
 }
 

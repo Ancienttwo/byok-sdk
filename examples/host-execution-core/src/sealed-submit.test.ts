@@ -2,7 +2,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { createInMemoryByokCloud, tenantId } from '@byok-sdk/cloud';
 import { requiredReceiverCapabilities } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { FrozenOfferMismatchError, SealedDispatchUnavailableError, frozenOfferType, sameFrozenOffer, submitFrozen, type FrozenInput, type FrozenOffer,
+import { FrozenOfferMismatchError, SealedDispatchUnavailableError, sameFrozenOffer, submitFrozen, type FrozenInput, type FrozenOffer,
   type FrozenSubmitPort, type SealedAgentExecutionInput } from './index';
 import { sealRoutineTemplate, type RoutineRef } from './sealed-routine';
 import { template as plainTemplate } from './test-support';
@@ -29,7 +29,7 @@ function plain(input: SealedAgentExecutionInput): FrozenInput {
   const { sealing: _, sealed: __, routineRef: ___, ...payload } = input.payload;
   return { ...input, payload: { ...payload, instruction: 'Check the watchlist.' } };
 }
-function readback(input: SealedAgentExecutionInput | FrozenInput, delivered: boolean, type = frozenOfferType()): FrozenOffer {
+function readback(input: SealedAgentExecutionInput | FrozenInput, delivered: boolean, type: FrozenOffer['type'] = 'task.offer'): FrozenOffer {
   return { taskId: input.taskId, deviceId: input.deviceId, messageId: 'message-1', type, payload: structuredClone(input.payload), recordedAt: '1',
     delivered } as FrozenOffer;
 }
@@ -37,7 +37,6 @@ function readback(input: SealedAgentExecutionInput | FrozenInput, delivered: boo
 describe('a sealed frozen input (#953)', () => {
   it('reads back only the offer of its own lane', async () => {
     const sealed = await sealedInput('task-1', 'device-1'), open = plain(sealed);
-    expect(frozenOfferType()).toBe('task.offer');
     expect(sameFrozenOffer(readback(sealed, true), sealed)).toBe(true);
     // A plain offer recorded for a sealed input, or the reverse, is never the frozen input.
     expect(sameFrozenOffer(readback(open, true), sealed)).toBe(false);
