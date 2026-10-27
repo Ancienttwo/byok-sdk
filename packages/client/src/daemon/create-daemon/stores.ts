@@ -4,7 +4,7 @@ import type { ProgressBatcherOptions } from '../progress-batcher';
 import { DEFAULT_PRESENCE_HEARTBEAT_INTERVAL_MS, DEFAULT_PRESENCE_TTL_MS, DEFAULT_PRESENCE_MINIMUM_INTERVAL_MS, assertPresenceHeartbeatCadence } from '../presence-publisher';
 import { resolveDeviceAssertionAudiences, resolveDeviceAssertionTtlMs } from './support';
 import { DeviceStore, type DeviceRecord } from '../store';
-import { foldNameAliases, resolveStorageConfig } from '../retention/config';
+import { resolveStorageConfig } from '../retention/config';
 import { ScratchRoot } from '../retention/scratch';
 import { StoragePressure } from '../retention/pressure';
 import { validateInputPreparationLimits } from '../../input-preparation';
@@ -65,9 +65,7 @@ export function composeDaemonStores(input: Pick<DaemonInputs & DaemonConfigScope
   const deviceAssertionTtlMs = resolveDeviceAssertionTtlMs(config.deviceAssertion);
 
   const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
-  // Retention derives its roots from this spelling and checks their identity.
-  const retentionStoreDir = foldNameAliases(storeDir);
-  const storageConfig = resolveStorageConfig(retentionStoreDir, config.storage);
+  const storageConfig = resolveStorageConfig(storeDir, config.storage);
   const retentionClock = overrides.retention?.clock ?? (() => new Date());
   const scratchRoot = new ScratchRoot(storageConfig.scratchRoot, retentionClock);
   const storagePressure = new StoragePressure(storageConfig.budget);
@@ -125,7 +123,7 @@ export function composeDaemonStores(input: Pick<DaemonInputs & DaemonConfigScope
   };
   return {
     agentHomeReaderLimit, egressPolicy, egressBatcherOptions, presenceCadence, deviceAssertionAudiences,
-    deviceAssertionTtlMs, storeDir, retentionStoreDir, storageConfig, retentionClock, scratchRoot, storagePressure,
+    deviceAssertionTtlMs, storeDir, storageConfig, retentionClock, scratchRoot, storagePressure,
     inputPreparationLimits, preparedToolSurface, teamWorkspaces, store, memberRecords, sealIdentityOf,
   };
 }

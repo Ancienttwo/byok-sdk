@@ -1,36 +1,7 @@
 import { EXPIRING_CLASS_IDS, type ExpiringClassId } from './registry';
 import { defaultScratchRoot, validateScratchRoot } from './scratch';
-import { lstatSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-
-/**
- * Retention accepts a root only when `realpath(root) === root`. A Windows name
- * alias (an 8.3 short name or a letter-case variant) is not a link, so the
- * configured spelling is folded into the on-disk one here, once. Links are not
- * followed: a path whose existing part has a symbolic link or junction keeps
- * its configured spelling, and the link checks downstream reject it. A missing
- * tail keeps its spelling; any other lookup failure throws.
- */
-export function foldNameAliases(configured: string): string {
-  const resolved = path.resolve(configured);
-  const missing: string[] = [];
-  let existing = resolved;
-  for (;;) {
-    try { lstatSync(existing); break; }
-    catch (error) {
-      const parent = path.dirname(existing);
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || parent === existing) throw error;
-      missing.unshift(path.basename(existing));
-      existing = parent;
-    }
-  }
-  let ancestor = path.parse(existing).root;
-  for (const component of existing.slice(ancestor.length).split(path.sep).filter(Boolean)) {
-    ancestor = path.join(ancestor, component);
-    if (lstatSync(ancestor).isSymbolicLink()) return resolved;
-  }
-  return path.join(realpathSync.native(existing), ...missing);
-}
+import { foldNameAliases } from '../../util/fold-name-aliases';
 
 export class LocalStorageConfigError extends Error {
   constructor(field: string, reason?: string) { super(`DaemonConfig.storage.${field} ${reason ?? 'is invalid'}`); this.name = 'LocalStorageConfigError'; }

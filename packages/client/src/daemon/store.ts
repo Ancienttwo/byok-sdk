@@ -20,6 +20,7 @@ import {
   type DeviceRecord,
 } from './device-credential-store';
 import { createDeviceCredentialStore } from './device-credential-provider';
+import { foldNameAliases } from '../util/fold-name-aliases';
 
 export type { DeviceMetadata, DeviceRecord } from './device-credential-store';
 
@@ -213,10 +214,13 @@ export class DeviceStore {
    * Resolve the one store pathname every daemon/CLI component must share.
    * A configured relative path is anchored once at process entry rather than
    * being reinterpreted after a diagnostics operation temporarily changes
-   * cwd to pin a quarantine directory inode.
+   * cwd to pin a quarantine directory inode. Name aliases (8.3 short names,
+   * letter case) are folded into the on-disk spelling here, so the daemon and
+   * every CLI derive the same control endpoint, Agent-home owner and retention
+   * roots from one spelling.
    */
   static resolveDir(productId: string, configured?: string): string {
-    return path.resolve(configured ?? DeviceStore.defaultDir(productId));
+    return foldNameAliases(configured ?? DeviceStore.defaultDir(productId));
   }
 
   async load(): Promise<DeviceMetadata | undefined> {

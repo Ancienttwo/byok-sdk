@@ -6,10 +6,15 @@
   Windows name alias (an 8.3 short name such as `C:\Users\RUNNER~1\…`, or a
   letter-case variant) restarts again. The second start exited with
   `retention_root_identity_invalid` once `<storeDir>\tmp\exec` existed, so the
-  recovery terminal was never sent. The daemon now folds name aliases of
-  `storeDir`, an explicit `storage.scratchRoot` and `storage.skillPackDataDirs`
-  into the on-disk spelling before retention derives its roots. Links are
-  still never followed, and the root identity check is unchanged.
+  recovery terminal was never sent. `DeviceStore.resolveDir` now folds
+  `storeDir` into its on-disk spelling for the daemon and every CLI. The daemon
+  folds `piByokLauncher.sessionDir`, `storage.scratchRoot` and
+  `storage.skillPackDataDirs` the same way. Links are never followed, and the
+  root identity check is unchanged. Upgrade note for a store configured
+  through an alias: the Windows control pipe name and the Agent-home owner
+  identity change, so restart the daemon after upgrading. A lease marker that
+  a crashed older daemon left in an Agent home now reports
+  `AgentHomeBusyError` until the marker file is deleted; there is no migration.
 - **Breaking (protocol, client, server, cloud; #925)** — wire major 4. A v3
   envelope is rejected; there is no v3 reader and no negotiation. Drain,
   migrate stored receipts, then upgrade server and client together; see

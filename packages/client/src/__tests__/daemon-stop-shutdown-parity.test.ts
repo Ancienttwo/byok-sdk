@@ -9,13 +9,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../daemon/daemon-owner';
-import { controlSocketPath, controlTokenPath } from '../daemon/control-protocol';
+import { controlEndpointPath, controlSocketPath, controlTokenPath } from '../daemon/control-protocol';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { OperationalHealthTracker } from '../daemon/operational-health';
 import { connectControlClient, isControlDaemonGone } from '../bin/control-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { RuntimeDisposalFailure } from '../runtime-failure';
-import { foldNameAliases, resolveStorageConfig } from '../daemon/retention/config';
+import { resolveStorageConfig } from '../daemon/retention/config';
+import { foldNameAliases } from '../util/fold-name-aliases';
+import { resolveDaemonConfig } from '../daemon/create-daemon/config';
+import { DeviceStore } from '../daemon/store';
+import { stableAgentHomeOwnerId } from '../agent-home';
+import { resolveStoreDir } from '../bin/config';
 import { defaultScratchRoot } from '../daemon/retention/scratch';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { TestServer } from './fixtures/test-server';
@@ -478,6 +483,15 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     expect(foldNameAliases(path.join(alias, 'later'))).toBe(path.join(store, 'later'));
     expect(resolveStorageConfig(alias, { scratchRoot: path.join(alias, 's'), skillPackDataDirs: [alias] }))
       .toMatchObject({ scratchRoot: path.join(store, 's'), skillPackDataDirs: [store] });
+    // Every identity derived from the store uses the folded spelling.
+    expect(DeviceStore.resolveDir('acme-fold', alias)).toBe(store);
+    expect(controlEndpointPath('acme-fold', DeviceStore.resolveDir('acme-fold', alias))).toBe(controlEndpointPath('acme-fold', store));
+    expect(stableAgentHomeOwnerId(DeviceStore.resolveDir('acme-fold', alias), 'acme-fold')).toBe(stableAgentHomeOwnerId(store, 'acme-fold'));
+    const { piByokLauncher } = resolveDaemonConfig({ overrides: {}, config: {
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-fold', serverUrl: 'ws://127.0.0.1:1',
+      piByokLauncher: { command: 'byok-pi-launcher', profileDbPath: path.join(store, 'profiles.db'), sessionDir: path.join(alias, 'sessions') },
+    } });
+    expect(piByokLauncher?.sessionDir).toBe(path.join(store, 'sessions'));
   });
 
   it.skipIf(process.platform === 'win32')('never folds a store path through a symbolic link and keeps a missing tail', async () => {
@@ -547,5 +561,10 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     await waitFor(() => expect(second.sessions).toHaveLength(1));
     second.sessions[0]!.emit({ type: 'turn_end' });
     await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'alias-second');
+
+    // A CLI resolving the same aliased config reaches this daemon's control endpoint.
+    const cli = await connectControlClient({ storeDir: resolveStoreDir(config), productId: config.productId });
+    if (!cli.ok) throw new Error(`expected the CLI to reach the daemon: ${JSON.stringify(cli)}`);
+    cli.client.close();
   }, 20000);
 });
