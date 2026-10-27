@@ -107,7 +107,10 @@ describe('issues #141-#144 server reliability regressions', () => {
   it('#141 reserves an Agent attempt before mailbox visibility and retries one stable offer only', async () => {
     const { cloud, base } = await cloudWithFirstMailboxAppendFailure();
     const taskId = 'task-legacy-retry';
-    const input = { taskId, payload: { ...TEST_AGENT_DISPATCH, instruction: 'first body' } };
+    const input = {
+      taskId,
+      payload: { agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_AGENT_DISPATCH.sessionRef } as const, instruction: 'first body' },
+    };
 
     await expect(cloud.enqueueAgentOffer(TENANT, 'device-a', input)).rejects.toMatchObject({
       code: 'task_offer_append_refused',

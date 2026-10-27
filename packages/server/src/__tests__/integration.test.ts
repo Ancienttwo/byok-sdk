@@ -349,7 +349,7 @@ describe('redelivery from a stale cursor (§9)', () => {
       { type: 'task.cancel', taskId: handle2.taskId },
     ]);
     const steer = redelivered[0];
-    if (steer?.type !== 'task.steer') throw new Error('unreachable');
+    if (steer?.type !== 'task.steer' || steer.payload.sealed !== undefined) throw new Error('unreachable');
     expect(steer.payload.text).toBe('keep going');
   });
 });

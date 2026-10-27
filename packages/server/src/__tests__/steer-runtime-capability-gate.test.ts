@@ -133,7 +133,7 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
     const envelope = await nextEnvelope(harness.daemon);
     expect(envelope.type).toBe('task.steer');
     expect(envelope.task_id).toBe(handle.taskId);
-    if (envelope.type !== 'task.steer') throw new Error('unreachable');
+    if (envelope.type !== 'task.steer' || envelope.payload.sealed !== undefined) throw new Error('unreachable');
     expect(envelope.payload.text).toBe('keep going');
   });
 
