@@ -7737,6 +7737,15 @@ export declare function resultReplyFailureReason(kind: ResultReplyFailure, contr
 export declare function resultReplyFailureFromState(value: string): ResultReplyFailure | undefined;
 // ==== @byok-sdk/client dist/daemon/retention/config.d.ts ====
 import { type ExpiringClassId } from './registry';
+/**
+ * Retention accepts a root only when `realpath(root) === root`. A Windows name
+ * alias (an 8.3 short name or a letter-case variant) is not a link, so the
+ * configured spelling is folded into the on-disk one here, once. Links are not
+ * followed: a path whose existing part has a symbolic link or junction keeps
+ * its configured spelling, and the link checks downstream reject it. A missing
+ * tail keeps its spelling; any other lookup failure throws.
+ */
+export declare function foldNameAliases(configured: string): string;
 export declare class LocalStorageConfigError extends Error {
     constructor(field: string, reason?: string);
 }
@@ -7787,7 +7796,7 @@ export declare function resolveStorageBudget(input: StorageBudgetInput): Storage
 export declare function resolveStorageConfig(storeDir: string, input?: StorageConfig): Readonly<{
     scratchRoot: string;
     budget: StorageBudget | undefined;
-    skillPackDataDirs: readonly any[];
+    skillPackDataDirs: readonly string[];
     sweepIntervalMs: number;
     pressureSweepIntervalMs: number;
     maxDeletionsPerPass: number;

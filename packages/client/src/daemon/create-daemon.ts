@@ -744,7 +744,7 @@ export function buildDaemonWithAdapters(
   } = resolveDaemonConfig({ overrides, config });
   const {
     agentHomeReaderLimit, egressPolicy, egressBatcherOptions, presenceCadence, deviceAssertionAudiences,
-    deviceAssertionTtlMs, storeDir, storageConfig, retentionClock, scratchRoot, storagePressure,
+    deviceAssertionTtlMs, storeDir, retentionStoreDir, storageConfig, retentionClock, scratchRoot, storagePressure,
     inputPreparationLimits, preparedToolSurface, teamWorkspaces, store, memberRecords, sealIdentityOf,
   } = composeDaemonStores({ config, overrides, agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, toolsetRegistry, agentMemoryDescribeBin });
 
@@ -755,7 +755,7 @@ export function buildDaemonWithAdapters(
   } = composeDaemonWorkspaces({ storeDir, config, egressPolicy });
 
   const retentionRegistry = createRetentionRegistry({
-    storeDir, scratch: scratchRoot, config: storageConfig, clock: retentionClock,
+    storeDir: retentionStoreDir, scratch: scratchRoot, config: storageConfig, clock: retentionClock,
     journal: () => daemonState.journal, identity: () => daemonState.retentionIdentity, preparation: () => daemonState.inputPreparationService,
     ...(agentHomeManager === undefined ? {} : { home: agentHomeManager }),
     ...(agentSessionHandoffs === undefined ? {} : { handoffs: agentSessionHandoffs }),
@@ -884,7 +884,7 @@ export function buildDaemonWithAdapters(
     resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin, agentMemoryDescribeBin,
     agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, agentHomeReaderLimit, egressPolicy,
     egressBatcherOptions, presenceCadence, deviceAssertionAudiences, deviceAssertionTtlMs, storeDir,
-    storageConfig, retentionClock, scratchRoot, storagePressure, inputPreparationLimits,
+    retentionStoreDir, storageConfig, retentionClock, scratchRoot, storagePressure, inputPreparationLimits,
     preparedToolSurface, teamWorkspaces, store, memberRecords, sealIdentityOf, memberStatus,
     logMember, operationalHealth, ownedProcessLedger, cursorStore,
     agentHomeManager, agentSessionHandoffs, agentContentReadPolicies, initialAgentEgress,

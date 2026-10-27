@@ -1,6 +1,36 @@
 import { EXPIRING_CLASS_IDS, type ExpiringClassId } from './registry';
 import { defaultScratchRoot, validateScratchRoot } from './scratch';
+import { lstatSync, realpathSync } from 'node:fs';
 import path from 'node:path';
+
+/**
+ * Retention accepts a root only when `realpath(root) === root`. A Windows name
+ * alias (an 8.3 short name or a letter-case variant) is not a link, so the
+ * configured spelling is folded into the on-disk one here, once. Links are not
+ * followed: a path whose existing part has a symbolic link or junction keeps
+ * its configured spelling, and the link checks downstream reject it. A missing
+ * tail keeps its spelling; any other lookup failure throws.
+ */
+export function foldNameAliases(configured: string): string {
+  const resolved = path.resolve(configured);
+  const missing: string[] = [];
+  let existing = resolved;
+  for (;;) {
+    try { lstatSync(existing); break; }
+    catch (error) {
+      const parent = path.dirname(existing);
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || parent === existing) throw error;
+      missing.unshift(path.basename(existing));
+      existing = parent;
+    }
+  }
+  let ancestor = path.parse(existing).root;
+  for (const component of existing.slice(ancestor.length).split(path.sep).filter(Boolean)) {
+    ancestor = path.join(ancestor, component);
+    if (lstatSync(ancestor).isSymbolicLink()) return resolved;
+  }
+  return path.join(realpathSync.native(existing), ...missing);
+}
 
 export class LocalStorageConfigError extends Error {
   constructor(field: string, reason?: string) { super(`DaemonConfig.storage.${field} ${reason ?? 'is invalid'}`); this.name = 'LocalStorageConfigError'; }
@@ -80,13 +110,14 @@ export function resolveStorageConfig(storeDir: string, input: StorageConfig = {}
   if (ttlMs['home-temp'] < 3_600_000) throw new LocalStorageConfigError('retention.ttlMs.home-temp');
   // Journal idempotency must outlive the cloud's maximum unacknowledged window.
   if (ttlMs['confirmed-journal'] <= 7 * 86_400_000) throw new LocalStorageConfigError('retention.ttlMs.confirmed-journal');
-  const roots = input.skillPackDataDirs ?? [storeDir];
-  if (!Array.isArray(roots) || roots.some(root => typeof root !== 'string' || !path.isAbsolute(root))) throw new LocalStorageConfigError('skillPackDataDirs');
+  const configuredRoots = input.skillPackDataDirs ?? [storeDir];
+  if (!Array.isArray(configuredRoots) || configuredRoots.some(root => typeof root !== 'string' || !path.isAbsolute(root))) throw new LocalStorageConfigError('skillPackDataDirs');
+  const roots = configuredRoots.map(foldNameAliases);
   const sweepIntervalMs = integer(retention.sweepIntervalMs ?? 900_000, 'retention.sweepIntervalMs');
   const pressureSweepIntervalMs = integer(retention.pressureSweepIntervalMs ?? 300_000, 'retention.pressureSweepIntervalMs');
   if (sweepIntervalMs > 2_147_483_647 || pressureSweepIntervalMs > sweepIntervalMs) throw new LocalStorageConfigError('retention.intervals');
   return Object.freeze({
-    scratchRoot: validateScratchRoot(input.scratchRoot ?? defaultScratchRoot(storeDir)),
+    scratchRoot: validateScratchRoot(input.scratchRoot === undefined ? defaultScratchRoot(storeDir) : foldNameAliases(validateScratchRoot(input.scratchRoot))),
     budget: input.budget === undefined ? undefined : resolveStorageBudget(input.budget),
     skillPackDataDirs: Object.freeze([...roots]),
     sweepIntervalMs,
