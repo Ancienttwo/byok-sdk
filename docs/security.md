@@ -919,7 +919,6 @@ The run seals nothing, so the table lists where each category lands in plaintext
 The device is a real daemon, paired with `pv` and kept in the OS credential custody.
 A web client member creates one scope of task input and task output with the device.
 The sealed task goes through the offer, a steer, progress, an approval request, an artifact and the result return.
-Its closing reply is large enough that the device uploads the terminal's ciphertext as an object.
 Its texts carry one canary.
 A plaintext twin of the same shape carries a second canary, and so does the device name.
 The test runs the scan of [Measured inventory](#measured-inventory) on every table, every object, the console output and what the product's observer receives.
@@ -927,7 +926,7 @@ The test runs the scan of [Measured inventory](#measured-inventory) on every tab
 - **Zero hits.** The sealed canary is in no location, in none of the encodings that the scan looks for.
 - **Scanner coverage.** Every location that holds the sealed task's ciphertext also holds the twin's canary. So the scan did read the column that the sealed content went to.
 - **The table below.** The locations that hold the sealed task's ciphertext must equal it.
-- **Liveness.** The member opens the sealed progress and approval request that the Host read interfaces return, and the sealed terminal, and gets the canary back. The runtime receives the sealed instruction and steer in plaintext. `ByokCloud` has no method that returns object bytes, so the test reads the terminal's ciphertext object from the bucket itself.
+- **Liveness.** The member opens the sealed terminal, progress and approval request that the Host read interfaces return, and gets the canary back. The runtime receives the sealed instruction and steer in plaintext.
 
 <!-- hosted-sealed-inventory:start -->
 | Location | Holds |
@@ -936,11 +935,11 @@ The test runs the scan of [Measured inventory](#measured-inventory) on every tab
 | `approval_timeline_tail.entries` | The sealed `task.await_approval` request |
 | `device_request_receipts.body` | `task-offer:` (the offer with its sealed `instruction`), `task:<id>:terminal` (the sealed terminal envelope) |
 | `outbox.body` | The sealed offer and the sealed `task.steer` |
-| `r2:tenants/<tenant>/objects/sha256/<hex>` | The ciphertext of a sealed terminal above the inline frame, which the terminal names as `ciphertextRef` |
 <!-- hosted-sealed-inventory:end -->
 
 The sealed `task.artifact` is in no store: the Host passes it to the observer only.
-The run sends no sealed input by reference.
+The run keeps every sealed member inline, so the table has no R2 row yet.
+A sealed member above the inline frame names a ciphertext blob in R2, but on this composition the R2 store cannot sign an object request until [#1039](https://github.com/Ancienttwo/byok-sdk/issues/1039) is fixed.
 Agent messages and memory projections are not sealed in v1, and this run does not send them. [Measured inventory](#measured-inventory) covers where they land.
 
 ### Plaintext that the canary run does not reach
