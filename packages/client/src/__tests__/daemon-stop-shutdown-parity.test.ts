@@ -15,7 +15,7 @@ import { OperationalHealthTracker } from '../daemon/operational-health';
 import { connectControlClient, isControlDaemonGone } from '../bin/control-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { RuntimeDisposalFailure } from '../runtime-failure';
-import { resolveStorageConfig } from '../daemon/retention/config';
+import { foldNameAliases } from '../daemon/retention/config';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { TestServer } from './fixtures/test-server';
 
@@ -463,6 +463,18 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     await daemon?.stop().catch(() => {});
     daemon = undefined;
     await server.close();
+  });
+
+  it.runIf(process.platform === 'win32')('never folds a store path through a junction', async () => {
+    const target = realpathSync.native(await tmpDir('byok-junction-target-'));
+    const junction = path.join(path.dirname(target), `${path.basename(target)}-junction`);
+    await fs.symlink(target, junction, 'junction');
+    try {
+      expect(foldNameAliases(junction)).toBe(junction);
+      expect(foldNameAliases(path.join(junction, 'store'))).toBe(path.join(junction, 'store'));
+    } finally {
+      await fs.rm(junction, { force: true });
+    }
   });
 
   it.runIf(process.platform === 'win32' || process.platform === 'darwin')('restarts and sweeps the default scratch root when the store is configured through a name alias', async () => {
