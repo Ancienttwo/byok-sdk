@@ -57,13 +57,11 @@ export class HooksDO extends SessionAuditDO {
     else { this.release?.(); this.pauseGate = undefined; this.release = undefined; }
     return { ok: true };
   }
-  async trim(input: { now?: number; count?: boolean; legacySchema?: boolean; legacySession?: boolean }) {
+  async trim(input: { now?: number; count?: boolean }) {
     const runtime = this.sessionRuntime();
     const guard = await runtime.prepareGuard();
     try {
       if (input.count) for (let i = 0; i < 10_010; i++) runtime.cloud.appendEvent({ eventKey: `count:${i}`, type: 'fixture', data: {} }, guard);
-      if (input.legacySchema) this.ctx.storage.sql.exec('ALTER TABLE cloud_invocations DROP COLUMN settledAt; ALTER TABLE cloud_invocations DROP COLUMN settledEventSeq');
-      if (input.legacySession) this.ctx.storage.sql.exec('ALTER TABLE cloud_session DROP COLUMN dispatcherDigest');
       runtime.cloud.retention(input.now);
       return { ok: true };
     } finally { guard.dispose(); }

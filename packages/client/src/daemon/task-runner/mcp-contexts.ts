@@ -99,7 +99,7 @@ export function withHostToolsetContext(
   this: TaskRunner,
   servers: Readonly<Record<string, McpStdioServerConfig>>,
   taskId: string,
-  agentRef: AgentRef | undefined,
+  agentRef: AgentRef,
   toolsetIdByServer: ReadonlyMap<string, string>,
 ): Readonly<Record<string, McpStdioServerConfig>> {
   // §8.1's capability gate, asked before anything is minted. An undeclared
@@ -108,7 +108,6 @@ export function withHostToolsetContext(
   // explicitly for want of a token (§8.2(1)), which is the visible outcome
   // §8.3 asks for when a device or a deployment cannot serve this lane.
   if (this['deps'].hostTaskContextAvailable?.() !== true) return servers;
-  if (agentRef === undefined) return servers;
   // A re-offer of the same taskId must not leave the previous attempt's
   // nonces mintable: the old child is gone, so its tokens are authority
   // nobody holds any more.

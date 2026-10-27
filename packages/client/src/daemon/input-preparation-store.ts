@@ -98,13 +98,13 @@ import {
  *
  * 9 is the first version without a permission mode: `PermissionPolicy` left
  * the protocol, so the binding no longer carries `permissionMode`. A
- * version-8 record digests a field this build no longer has; retire it with
- * `byok-agent retire-input-preparation` instead of reading it forward.
+ * version-8 record digests a field this build no longer has, so it is refused,
+ * never read forward.
  *
  * 10 is the first version without tool implementation identities: the
  * attestation stack left the SDK, so the artifact summary names tools, not
  * implementation kinds, and the digests carry no identity. A version-9 record
- * digests fields this build no longer has; retire it the same way.
+ * digests fields this build no longer has and is refused the same way.
  *
  * 11 binds the optional frozen result selection in the request/receipt and
  * counts submit_result in the model-visible manifest. Version-10 records

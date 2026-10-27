@@ -15,9 +15,6 @@ export function activeMemoryContext(this: TaskRunner, contextToken: string): Age
   if (
     active === undefined ||
     active.finalizationStarted ||
-    active.agentBinding === undefined ||
-    active.agentRef === undefined ||
-    active.agentHandoff === undefined ||
     this['deps'].tenantId === undefined ||
     active.agentRef.agentId !== registered.agentRef.agentId ||
     active.agentRef.profileRevision !== registered.agentRef.profileRevision ||
@@ -65,7 +62,6 @@ export async function runMemoryOperation<T>(this: TaskRunner, contextToken: stri
 }
 
 export async function quiesceAndSnapshotAgentMemory(this: TaskRunner, active: ActiveTask): Promise<void> {
-  if (active.agentBinding === undefined || active.agentRef === undefined || active.agentHandoff === undefined) return;
   if (!isAgentMemorySecureFilesystemAvailable(this['deps'].resolveAgentMemoryFilesystemHelperBin !== undefined)) return;
   if (this['deps'].tenantId === undefined) {
     console.error(`[byok/client] Agent memory quiescent snapshot skipped for ${active.taskId}: exact tenant context is unavailable`);

@@ -19,8 +19,8 @@ describe('file-backed wake authority and adoption', { timeout: 20000 }, () => {
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
   function file() { const root = mkdtempSync(join(tmpdir(), 'byok-wakes-')); roots.push(root); return join(root, 'server.sqlite'); }
-  function open(path: string, migration?: 'v4-to-v5', consume: (wake: DueWake, signal: AbortSignal) => Promise<void> = async () => {}) {
-    return createByokServer({ productId: 'wake-file', storage: { kind: 'sqlite', path, ...(migration ? { migration } : {}) }, wake: { consume } });
+  function open(path: string, consume: (wake: DueWake, signal: AbortSignal) => Promise<void> = async () => {}) {
+    return createByokServer({ productId: 'wake-file', storage: { kind: 'sqlite', path }, wake: { consume } });
   }
   function child(path: string, mode: 'schedule' | 'reopen') {
     const processChild = spawn(process.execPath, ['--no-warnings', childFixture, path, mode], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -71,7 +71,7 @@ describe('file-backed wake authority and adoption', { timeout: 20000 }, () => {
   it('close aborts an unfinished delivery, rejects hook writes, and reopen delivers #2', async () => {
     const path = file(); let delivered!: () => void; const begun = new Promise<void>(r => { delivered = r; });
     let late: Promise<unknown> | undefined; let signal!: AbortSignal;
-    const first = open(path, undefined, async (_, current) => {
+    const first = open(path, async (_, current) => {
       signal = current;
       current.addEventListener('abort', () => { late = first.wakes.schedule({ dedupKey: 'late', availableAt: Date.now() }).catch(error => error); });
       delivered(); await new Promise(() => {});
@@ -79,7 +79,7 @@ describe('file-backed wake authority and adoption', { timeout: 20000 }, () => {
     await first.wakes.schedule({ dedupKey: 'close', availableAt: Date.now() - 1 }); await begun;
     await first.close(); expect(signal.aborted).toBe(true); expect(late).toBeDefined(); expect((await late as Error).name).toBe('WakeClosedError');
     let recovered!: (wake: DueWake) => void; const replay = new Promise<DueWake>(r => { recovered = r; });
-    const second = open(path, undefined, async wake => { recovered(wake); });
+    const second = open(path, async wake => { recovered(wake); });
     try { expect(await replay).toMatchObject({ dedupKey: 'close', delivery: 2 }); } finally { await second.close(); }
   });
   it('missing hook rejects queued reopen and releases ownership; done-only reopen needs no hook', async () => {
@@ -90,42 +90,8 @@ describe('file-backed wake authority and adoption', { timeout: 20000 }, () => {
     expect(await next.wakes.cancel('future')).toBe(true); await next.close();
     const noHook = createByokServer({ productId: 'wake-file', storage: { kind: 'sqlite', path } }); await noHook.close();
   });
-  async function legacy4(path: string) {
-    await open(path).close();
-    const db = new DatabaseSync(path);
-    try {
-      db.exec("DROP TABLE wake; UPDATE byok_sqlite_meta SET value = '4' WHERE key = 'schema_version'; INSERT INTO request_receipt VALUES ('product:wake-file', 'preserved', '{\"exact\":true}', '2026-01-01T00:00:00.000Z')");
-    } finally { db.close(); }
-  }
-  it('requires v4-to-v5 adoption and preserves existing receipt bytes and all claim columns', async () => {
-    const path = file(); await legacy4(path);
-    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '4', requiredVersion: '5' }));
-    const before = new DatabaseSync(path, { readOnly: true });
-    const receipt = before.prepare('SELECT * FROM request_receipt').all(); const columns = before.prepare('PRAGMA table_info(task_attempt)').all(); before.close();
-    const adopted = open(path, 'v4-to-v5'); expect(await adopted.wakes.pending()).toEqual([]); await adopted.close();
-    const after = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect(after.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('5');
-      expect(after.prepare('SELECT * FROM request_receipt').all()).toEqual(receipt);
-      expect(after.prepare('PRAGMA table_info(task_attempt)').all()).toEqual(columns);
-    } finally { after.close(); }
-  });
-  it('rejects unexpected pre-v5 wake authority and atomically rolls back failed adoption', async () => {
-    const path = file(); await legacy4(path);
-    const db = new DatabaseSync(path); db.exec('CREATE TABLE wake (unexpected TEXT)'); db.close();
-    expect(() => open(path, 'v4-to-v5')).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID' }));
-    const repair = new DatabaseSync(path);
-    expect(repair.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('4');
-    repair.exec("DROP TABLE wake; CREATE TRIGGER fail_wake_version BEFORE UPDATE ON byok_sqlite_meta BEGIN SELECT RAISE(ABORT, 'version failure'); END"); repair.close();
-    expect(() => open(path, 'v4-to-v5')).toThrow('version failure');
-    const check = new DatabaseSync(path);
-    expect(check.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('4');
-    expect(check.prepare("SELECT name FROM sqlite_master WHERE name = 'wake'").get()).toBeUndefined();
-    check.exec('DROP TRIGGER fail_wake_version'); check.close(); await open(path, 'v4-to-v5').close();
-  });
-  it('refuses a current database with missing wake authority and old target-v4 selectors', async () => {
+  it('refuses a current database with missing wake authority', async () => {
     const path = file(); await open(path).close();
-    expect(() => createByokServer({ productId: 'wake-file', storage: { kind: 'sqlite', path, migration: 'v3-to-v4' as never } })).toThrow('Target-v4 migration selectors are no longer supported');
     const db = new DatabaseSync(path); db.exec('DROP TABLE wake'); db.close();
     expect(() => open(path)).toThrow(SqliteSchemaError);
     const check = new DatabaseSync(path, { readOnly: true });

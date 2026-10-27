@@ -323,7 +323,7 @@ export interface ByokServer {
  * one, an in-process notification relay, and the observability an embedder used
  * to get from the hub.
  *
- * State is in-memory by default. Explicit SQLite mode persists request receipts, the device directory and six
+ * State is in-memory by default. Explicit SQLite mode persists approval timelines, request receipts, the device directory and six
  * coordination interfaces whose contracts cross a process restart; all other
  * ports remain process-local.
  */
@@ -682,11 +682,12 @@ export declare class SqliteUnavailableError extends Error {
 /**
  * Why a SQLite file was refused at open, so a host can tell the user what to do
  * without parsing the message:
- * - `SQLITE_SCHEMA_UNSUPPORTED`: the stored version is not this build's and no
- *   matching `migration` selector was given (an older file needs one; a newer
- *   file needs a newer build).
- * - `SQLITE_MIGRATION_REFUSED`: the selected migration would lose durable
- *   authority; preserve the file for reconciliation.
+ * - `SQLITE_SCHEMA_UNSUPPORTED`: the stored version is not this build's. An
+ *   older file is not adopted (start on a new database); a newer file needs a
+ *   newer build.
+ * - `SQLITE_MIGRATION_REFUSED`: opening the file would need durable authority
+ *   it does not hold (member chain rotate entries from before the KEM floor);
+ *   preserve the file for reconciliation.
  * - `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox rows do not use
  *   the current wire major. Drain with the previous SDK before upgrading.
  * - `SQLITE_SCHEMA_INVALID`: the file contradicts its declared BYOK schema or
@@ -910,8 +911,6 @@ export type ByokServerStorage = {
     readonly path: string;
     /** Lifetime of signed blob upload/download URLs. Default 15 minutes. */
     readonly urlTtlMs?: number;
-    /** One-shot schema adoption: v1/v2 require no task history; v3 requires no ambiguous claimed identity. Stop all writers and back up first; old builds cannot reopen v5. v4 adoption only adds the wake queue. */
-    readonly migration?: 'v1-to-v5' | 'v2-to-v5' | 'v3-to-v5' | 'v4-to-v5';
 };
 /** Options for {@link createByokServer}. */
 export interface CreateByokServerOptions {
@@ -1471,8 +1470,8 @@ export interface HubStats {
     /**
      * Store-aggregated settled counts plus active task/approval projections.
      * Exact at quiescence; a task settling between reads can be temporarily absent.
-     * This is not a transaction snapshot. SQLite persists attempts/cancellation;
-     * its in-memory approval timeline resets at reopen, so AwaitApproval resets.
+     * This is not a transaction snapshot. SQLite persists attempts, cancellation
+     * and approval timelines; unexpired approvals survive reopen without extending TTL.
      */
     taskCountsByState: Record<TaskState, number>;
     /** Total inbound daemon->server envelopes since this server instance was created (every outcome, including rejected/rate-limited), counted at the gate's own step 0. Resets on SQLite reopen. */

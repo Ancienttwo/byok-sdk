@@ -108,9 +108,9 @@ export interface ActiveTask {
   /** One consumer; teardown drains its final usage within the existing interrupt deadline. */
   eventPump?: Promise<void>;
   workspaceDir: string;
-  agentBinding?: AgentHomeExecutionBinding;
-  agentRef?: AgentRef;
-  agentHandoff?: {
+  agentBinding: AgentHomeExecutionBinding;
+  agentRef: AgentRef;
+  agentHandoff: {
     sessionRef: string;
     runtimeId: string;
     /** Canonical Agent home; the handoff ledger lives under it. */
@@ -304,7 +304,7 @@ export interface OfferPhaseContext {
 export interface OfferRuntimeInput {
   readonly acquireScratch: () => Promise<ExecutionScratch>;
   readonly payload: AcceptedOfferPayload;
-  readonly agentRef: AgentRef | undefined;
+  readonly agentRef: AgentRef;
   readonly preparation: InputPreparationOfferBinding | undefined;
   readonly preparedMemorySelected: boolean;
   /** The memory mode of an ordinary Agent offer; the prepared lane does not read it. */

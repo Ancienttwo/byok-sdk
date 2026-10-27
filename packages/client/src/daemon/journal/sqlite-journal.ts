@@ -203,7 +203,9 @@ CREATE TABLE IF NOT EXISTS journal_envelope (
   bytes_hash    TEXT NOT NULL,
   received_at   TEXT NOT NULL,
   committed_at  TEXT NOT NULL,
-  acked_at      TEXT
+  acked_at      TEXT,
+  -- #826: the length of a withheld offer's bytes; NULL for a stored envelope.
+  withheld_bytes INTEGER
 );
 CREATE INDEX IF NOT EXISTS journal_envelope_seq ON journal_envelope (device_id, seq);
 
@@ -414,18 +416,12 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       db.close();
       throw new JournalUnavailableError('hash-only journal format cannot replay terminals; preserve/export this journal and resolve it before starting the new execution-recovery format');
     }
-    // #826: the length of a withheld offer's bytes; NULL for a stored
-    // envelope. The one declaration of the column, so a journal written before
-    // it existed and a new one take the same path. A failed ALTER leaves a
-    // valid older journal, so it is not quarantined.
+    // A journal written before #826 has no `withheld_bytes`. It is refused here,
+    // not altered, so it never fails on its first write.
     const envelopeColumns = db.prepare('PRAGMA table_info(journal_envelope)').all() as Array<{ name: string }>;
     if (!envelopeColumns.some((column) => column.name === 'withheld_bytes')) {
-      try {
-        db.exec('ALTER TABLE journal_envelope ADD COLUMN withheld_bytes INTEGER');
-      } catch (err) {
-        db.close();
-        throw err;
-      }
+      db.close();
+      throw new JournalUnavailableError('journal written before the withheld-offer column (#826); preserve/export this journal and resolve it before starting this build');
     }
     this.#db = db;
     try {

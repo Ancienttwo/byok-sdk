@@ -11,11 +11,8 @@ import {
   DeviceProofSignerError,
   readDeviceEnrollmentIdentity,
   readDeviceEnrollmentStatus,
-  retireInputPreparation,
   type CreateStoredDeviceProofSignerOptions,
   type DeviceProofRequest,
-  type RetireInputPreparationInput,
-  type RetireInputPreparationTarget,
 } from '../index';
 import { exportPrivateKeyPem } from '../daemon/device-keys';
 import { clearDeviceEnrollment, seedDeviceEnrollment } from './fixtures/device-enrollment';
@@ -273,7 +270,7 @@ describe('host device-proof signer: preserved closed paths', () => {
   });
 });
 
-describe('enrollment reads and retirement: option snapshot', () => {
+describe('enrollment reads: option snapshot', () => {
   it('reads productId/storeDir once as plain data and refuses accessors and Proxies without a cause', async () => {
     const { storeDir } = await pairedStore();
     const trapCalls: string[] = [];
@@ -291,32 +288,5 @@ describe('enrollment reads and retirement: option snapshot', () => {
     const config = { productId: PRODUCT, storeDir, adapters: [new (class Adapter {})()] };
     Object.defineProperty(config, 'unrelated', { enumerable: true, get: () => { throw markerError(); } });
     expect(await readDeviceEnrollmentIdentity(config)).toMatchObject({ state: 'paired', deviceId: 'device-snapshot' });
-  });
-
-  it('retirement refuses accessor and Proxy targets and inputs with a TypeError and no cause', async () => {
-    const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-input-snapshot-retire-'));
-    cleanups.push(() => fs.rm(storeDir, { recursive: true, force: true }));
-    const trapCalls: string[] = [];
-    const getterTarget = { storeDir } as Record<string, unknown>;
-    Object.defineProperty(getterTarget, 'productId', { enumerable: true, get: () => { throw markerError(); } });
-    for (const target of [getterTarget, hostileProxy({ productId: PRODUCT, storeDir }, trapCalls)]) {
-      await closedPlainFailure(
-        () => retireInputPreparation(target as unknown as RetireInputPreparationTarget, { mode: 'preview' }),
-        TypeError,
-      );
-    }
-    let reads = 0;
-    const flippingMode = {} as Record<string, unknown>;
-    Object.defineProperty(flippingMode, 'mode', { enumerable: true, get: () => (reads++ === 0 ? 'preview' : 'execute') });
-    const confirmedGetter = { mode: 'execute' } as Record<string, unknown>;
-    Object.defineProperty(confirmedGetter, 'confirmed', { enumerable: true, get: () => { throw markerError(); } });
-    for (const input of [flippingMode, confirmedGetter, hostileProxy({ mode: 'preview' }, trapCalls)]) {
-      await closedPlainFailure(
-        () => retireInputPreparation({ productId: PRODUCT, storeDir }, input as unknown as RetireInputPreparationInput),
-        TypeError,
-      );
-    }
-    expect(trapCalls).toEqual([]);
-    await expect(fs.readdir(storeDir)).resolves.toEqual([]);
   });
 });

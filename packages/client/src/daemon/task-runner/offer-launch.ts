@@ -28,7 +28,7 @@ export interface OfferManifestInput
     Pick<OfferRuntime, 'env' | 'mcpEnv' | 'mcpToolsetTools' | 'offered' | 'pick' | 'prepared' | 'scratch'>,
     Pick<OfferLimits, 'requiredToolsets' | 'resolvedMcp'>,
     Pick<OfferWorkspace, 'workspaceDir'> {
-  readonly agentBinding: OfferHeld['agentBinding'];
+  readonly agentBinding: OfferWorkspace['agentBinding'];
   readonly blobAbort: AbortController;
   readonly preparationLane: TaskRunnerDeps['inputPreparationLane'];
   readonly terminalProjection: ActiveTask['terminalProjection'];
@@ -68,16 +68,13 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
     requiredToolsetIds: requiredToolsets ?? [],
     ...(offered.dispatchSelection === undefined ? {} : { dispatchSelection: offered.dispatchSelection }),
     ...(sessionRef === undefined ? {} : { sessionRef }),
-    ...(agentBinding === undefined ? {} : {
-      agentRef: agentBinding.resolution.agentRef,
-      cwd: agentBinding.lease.cwd,
-      ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
-      lease: {
-        leaseId: agentBinding.lease.leaseId,
-        canonicalHome: agentBinding.resolution.canonicalHome,
-      },
-    }),
+    agentRef: agentBinding.resolution.agentRef,
     cwd: workspaceDir,
+    ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
+    lease: {
+      leaseId: agentBinding.lease.leaseId,
+      canonicalHome: agentBinding.resolution.canonicalHome,
+    },
     workspace: { workspaceDir },
     forwardedEnvironmentNames: Object.freeze(Object.keys(env).sort()),
   });
@@ -218,7 +215,7 @@ export interface OfferClaimInput
   extends Pick<OfferRequest, 'agentRef'>,
     Pick<OfferRuntime, 'pick'>,
     Pick<OfferManifest, 'manifest' | 'preparedLaunch'> {
-  readonly agentBinding: OfferHeld['agentBinding'];
+  readonly agentBinding: OfferWorkspace['agentBinding'];
   readonly blobAbort: AbortController;
   readonly payload: AcceptedOfferPayload;
   readonly taskMcpServers: OfferRuntime['taskMcpServers'];
@@ -289,14 +286,10 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
       : await this['resolveInstruction'](offeredInstructionValue, blobAbort.signal);
   } catch (err) {
     const reason = `failed to resolve instruction blob: ${errorMessage(err)}`;
-    if (agentBinding === undefined) {
-      await this['fail'](taskId, reason, true);
-    } else {
-      await this['failClaimedAgent'](taskId, reason, true, {
-        binding: agentBinding,
-        runtimeId: pick.descriptor.id,
-      });
-    }
+    await this['failClaimedAgent'](taskId, reason, true, {
+      binding: agentBinding,
+      runtimeId: pick.descriptor.id,
+    });
     return;
   }
 
@@ -306,18 +299,14 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
     // context token minted for it and releases the pin.
     try {
       const helper = this['deps'].agentMemoryMcpBin;
-      if (preparedLaunch.memory === null || agentRef === undefined || helper === undefined) throw new Error('prepared Agent memory execution state missing');
+      if (preparedLaunch.memory === null || helper === undefined) throw new Error('prepared Agent memory execution state missing');
       taskMcpServers = this['withAgentMemoryMcp'](taskMcpServers, taskId, agentRef, preparedLaunch.agentMemory, helper, 'complete');
     } catch {
       const reason = 'agent_memory_unavailable: the sealed Agent memory helper could not be bound for launch';
-      if (agentBinding === undefined) {
-        await this['fail'](taskId, reason, false);
-      } else {
-        await this['failClaimedAgent'](taskId, reason, false, {
-          binding: agentBinding,
-          runtimeId: pick.descriptor.id,
-        });
-      }
+      await this['failClaimedAgent'](taskId, reason, false, {
+        binding: agentBinding,
+        runtimeId: pick.descriptor.id,
+      });
       return;
     }
   }
@@ -329,7 +318,7 @@ export interface OfferStartInput
     Pick<OfferRuntime, 'env' | 'mcpEnv' | 'mcpToolsetTools' | 'pick' | 'prepared' | 'scratch'>,
     Pick<OfferManifest, 'manifest' | 'preparedLaunch' | 'runtimeLaunch'>,
     Pick<OfferClaim, 'resolvedInstruction' | 'taskMcpServers'> {
-  readonly agentBinding: OfferHeld['agentBinding'];
+  readonly agentBinding: OfferWorkspace['agentBinding'];
   readonly blobAbort: AbortController;
   readonly startupDeadline: number;
 }
@@ -351,18 +340,17 @@ export async function startOfferRuntime(
     agentBinding, ordinaryMemoryMode, readerAttempt, env, mcpEnv, mcpToolsetTools, pick, prepared, scratch, manifest,
     preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline,
   } = input;
-  const durableBinding = agentBinding;
   const startInput: RuntimeOperationStartInput = {
     scratch,
     ...(runtimeLaunch?.kind !== 'pi-durable' ? {} : { durableContext: {
       tenantId: this['deps'].tenantId!, replicaRoot: path.join(this['deps'].storeDir, 'durable-replicas'), lifecycle: {
-        ownsLease: () => durableBinding !== undefined && !blobAbort.signal.aborted && !this['pendingCancelled'].has(taskId),
+        ownsLease: () => !blobAbort.signal.aborted && !this['pendingCancelled'].has(taskId),
         record: async (kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number) => {
-          if (!durableBinding || !this['deps'].recordDurableTransition || !this['deps'].tenantId) throw new Error('durable parent authority unavailable');
-          await this['deps'].agentHome!.executionLeaseManager.mutate(durableBinding, () => {
+          if (!this['deps'].recordDurableTransition || !this['deps'].tenantId) throw new Error('durable parent authority unavailable');
+          await this['deps'].agentHome!.executionLeaseManager.mutate(agentBinding, () => {
             // Do not overwrite a persisted normal-turn failure intent.
             if (this['tasks'].get(taskId)?.resultReplyFailure !== undefined) return Promise.resolve();
-            return this['deps'].recordDurableTransition!(taskId, durableBinding.lease.leaseId, kind, ordinal);
+            return this['deps'].recordDurableTransition!(taskId, agentBinding.lease.leaseId, kind, ordinal);
           });
         },
       },
@@ -379,9 +367,7 @@ export async function startOfferRuntime(
     ...(preparedLaunch === undefined
       ? {
         kind: 'instruction' as const,
-        instruction: agentBinding === undefined
-          ? resolvedInstruction
-          : prependAgentMemoryModeGuidance(resolvedInstruction, ordinaryMemoryMode, readerAttempt),
+        instruction: prependAgentMemoryModeGuidance(resolvedInstruction, ordinaryMemoryMode, readerAttempt),
       }
       : { kind: 'prepared' as const, preparation: preparedLaunch }),
     manifest,
@@ -422,11 +408,10 @@ export async function startOfferRuntime(
         this['revokeAgentMessageContext'](taskId);
         this['revokeAgentResultContext'](taskId);
       }
-      const ownedBinding = agentBinding;
       const cancellation = createEnvelope('task.cancelled', {
         reason: this['pendingCancelled'].get(taskId),
         ...terminalIdentity(this['claimedHarnesses'].get(taskId)),
-        ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
+        agentRef: agentBinding.resolution.agentRef,
       }, { taskId });
       let cancellationSettled = false;
       const abortedStart = abortedStartOf(err);
@@ -445,7 +430,7 @@ export async function startOfferRuntime(
           this['addFinishedTaskId'](taskId);
         } } : {}),
         release: async () => {
-          await ownedBinding?.lease.release();
+          await agentBinding.lease.release();
           await this['releasePreparationPin'](taskId);
         },
       });
@@ -458,8 +443,7 @@ export async function startOfferRuntime(
       if (!cancelled) {
         const reason = this['stoppingOffers'] ? 'daemon shutting down during runtime startup' : errorMessage(err);
         const retryable = this['stoppingOffers'];
-        if (agentBinding === undefined) await this['fail'](taskId, reason, retryable);
-        else await this['failClaimedAgent'](taskId, reason, retryable, {
+        await this['failClaimedAgent'](taskId, reason, retryable, {
           binding: agentBinding, runtimeId: pick.descriptor.id,
         });
       }
@@ -471,23 +455,18 @@ export async function startOfferRuntime(
       // adapter's error can carry runtime output (issue #395).
       console.error(`[byok/client] runtime adapter ${pick.descriptor.id} start() returned an untyped failure for task ${taskId}`);
     }
-    if (agentBinding === undefined) {
-      await this['fail'](taskId, failure.reason, failure.retryable, failure.failure);
-    } else {
-      await this['failClaimedAgent'](taskId, failure.reason, failure.retryable, {
-        binding: agentBinding,
-        runtimeId: pick.descriptor.id,
-      }, failure.failure);
-    }
+    await this['failClaimedAgent'](taskId, failure.reason, failure.retryable, {
+      binding: agentBinding,
+      runtimeId: pick.descriptor.id,
+    }, failure.failure);
     return;
   }
 
-  const ownedBinding = agentBinding;
   this['startupOwnership'].register(taskId, {
     runtimeId: pick.descriptor.id,
     dispose: async () => { await session.close(); await scratch.release(); },
     release: async () => {
-      await ownedBinding?.lease.release();
+      await agentBinding.lease.release();
       await this['releasePreparationPin'](taskId);
     },
   });
