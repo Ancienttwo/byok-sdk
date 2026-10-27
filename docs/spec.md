@@ -1517,6 +1517,35 @@ lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without
 publishing a second `task.complete`, `task.fail`, or `task.cancelled`.
 
+## Hosted sealed payload (#654)
+
+A hosted Host can run a task whose task input, task output or both are sealed
+end to end. The categories are frozen on the offer as `sealing`
+([protocol §2.5](./protocol.md#25-sealed-payload-v1-654-gated-addition)). A web client member
+seals the input before it calls `submitSealedAgentExecution` or
+`steerSealedTask`. The device opens it, runs the task and seals the output.
+The Host stores and returns the sealed members and the plaintext metadata
+next to them. It holds no scope key in plaintext, so it cannot open them.
+
+- A missing key, a member that does not open and a policy mismatch are
+  refused. Nothing falls back to plaintext. A device that cannot open a sealed
+  offer declines it with one of the four sealed decline codes.
+- v1 seals only `task-input` and `task-output`. Agent messages, memory
+  projections, input preparation and drafts stay plaintext. A sealed task
+  streams no draft.
+- `@byok-sdk/server` has no sealed dispatch: it refuses `sealing` and
+  `sealed` with `coordination_input_invalid`. A sealed task must not go to
+  `@byok-sdk/cloud-do`, which reads task content in plaintext.
+- The Host's truth route stores a `task.terminal` record as the product
+  writes it and does not check sealing. A product that records a sealed
+  task's terminal there must write sealed content only.
+- [security.md, Sealed tasks](./security.md#sealed-tasks) lists what a sealed
+  task still shows the Host (for example the artifact name, the changed memory
+  file paths and the model in `usage`) and what sealing does not protect.
+  `examples/hosted-bot-collaboration/src/sealed-zero-hit.test.ts` measures it:
+  a sealed task's content has zero hits in every store, object, log line and
+  observer call that the run writes.
+
 ## Hosted task cancellation authority
 
 The hosted cloud exposes one tenant-scoped `cancelTask(taskId, reason?)`
@@ -2724,7 +2753,8 @@ logs, or a second file authority.
 member (#654 E2d-1, [protocol §2.6](./protocol.md)). The member keys, `pv` and
 the member state are three more entries of the same OS credential provider,
 cleared at a re-pair and at unpair. A daemon with an injected enrollment
-backend refuses an E2EE pairing.
+backend refuses an E2EE pairing. What a hosted sealed task protects is in
+[Hosted sealed payload](#hosted-sealed-payload-654).
 Copy the complete command from the Host's pairing page. A string used once
 without `--e2ee` is burned: start a new registration at the Host and do not
 retry it (protocol §2.6, device enrollment).
@@ -3504,7 +3534,9 @@ wire contracts do not change.
 
 Standalone adapter Hosts must pass `scratch: await createExecutionScratch({ root })` to operation.start and Pi launch resolution. They must await release after child disposal. Scratch roots must be short, absolute, private, canonical and exclusive. On Unix, the root must belong to the current process user before any permission change. Unix socket validation reserves 16 bytes for the runtime socket name and one terminating NUL. The root limit is 61 UTF-8 bytes on macOS and 65 on Linux.
 
-Without `storage.scratchRoot`, derive the default from the canonical store identity (#493). Resolve the deepest existing ancestor of `storeDir` to its real path, then append any missing path components. If `<canonicalStoreDir>/tmp` exceeds the platform limit, use `/private/tmp/byok-scratch-<hash>` on macOS or `/tmp/byok-scratch-<hash>` on Linux. The hash is the first 16 lowercase hexadecimal characters of SHA-256 over the UTF-8 canonical store path. All aliases of that store select the same fixed root. Otherwise, keep the lexical `path.join(path.resolve(storeDir), 'tmp')` and validate it. If that alias exceeds the limit, construction fails. Windows keeps the lexical path without a Unix socket limit.
+Each configured filesystem path is folded into its on-disk spelling once, at the boundary that owns it, and every consumer uses the folded value (#1030). `DeviceStore.resolveDir` folds `storeDir` for the daemon and every CLI, so the control socket or pipe name, the control token, the Agent-home owner identity, helper `BYOK_STORE_DIR` and every retention root derive from one spelling. The daemon config resolution folds `piByokLauncher.sessionDir` for both the Pi launcher and retention, and storage config resolution folds an explicit `storage.scratchRoot` and each `storage.skillPackDataDirs` entry. Folding resolves Windows name aliases: 8.3 short names and letter case, and letter case on a case-insensitive macOS volume. It never follows a component that lstat reports as a link (a symbolic link, or a junction to a drive-letter path): such a path keeps its configured spelling and the link checks below reject it. Volume mount points (junctions to `\??\Volume{GUID}\`), subst drives and mapped network drives look like plain directories or roots to lstat, so construction resolves them once to their final path. A missing tail keeps its spelling, and any other lookup error fails construction. Store-mutex, path-mutation-gate, Agent-home root and relocation identities stay physical: they use the real path. Retention mutates under a root only when the root's real path equals its spelling; otherwise the sweep fails closed with `retention_root_identity_invalid`.
+
+Without `storage.scratchRoot`, derive the default from the canonical store identity (#493). Resolve the deepest existing ancestor of `storeDir` to its real path, then append any missing path components. If `<canonicalStoreDir>/tmp` exceeds the platform limit, use `/private/tmp/byok-scratch-<hash>` on macOS or `/tmp/byok-scratch-<hash>` on Linux. The hash is the first 16 lowercase hexadecimal characters of SHA-256 over the UTF-8 canonical store path. All aliases of that store select the same fixed root. Otherwise, keep the lexical `<storeDir>/tmp` of the folded store and validate it. If that alias exceeds the limit, construction fails. Windows keeps the lexical path without a Unix socket limit.
 
 An explicit `storage.scratchRoot` must pass validation; an excessive length fails construction. A failed root never triggers a substitute. External roots persist their store ownership. A standalone root is exclusive to its process and must be provisioned fresh on process restart. No silent runtime or root fallback is provided.
 

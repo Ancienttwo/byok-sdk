@@ -1211,8 +1211,14 @@ Host stores only ciphertext for these categories. The design is
 [docs/plans/2026-10-22-654-hosted-wire-e2ee.md](plans/2026-10-22-654-hosted-wire-e2ee.md).
 `@byok-sdk/core/sealed-payload` seals and opens the bytes.
 `packages/protocol/src/sealed-payload.ts` and `sealed-split-table.ts` hold the
-wire rules. This section states the wire rules only. The Host stores, the
-daemon and the read interfaces come in later slices.
+wire rules. This section states the wire rules.
+The Host keeps each sealed member as it gets it and returns it from its read
+interfaces. What a sealed task still shows the Host, and what sealing does not
+protect, is in [security.md, Sealed tasks](security.md#sealed-tasks).
+`SEALED_PAYLOAD_CATEGORIES` also names `agent-message` and
+`memory-projection`, but they are reserved values: `TaskSealingSchema` accepts
+only `task-input` and `task-output` (`SEALED_PAYLOAD_V1_CATEGORIES`), so v1
+seals no Agent message and no memory projection.
 
 **Sealed branches.** Sealed is a branch of a message type's payload, not a
 message type. Each sealable type's payload schema is the union of a

@@ -692,7 +692,7 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
 
 ### 13.1 切片
 
-以下是建议的交付物。它们都还没有实现。
+以下是设计时建议的交付物。各切片的合入状态以 #654 issue 为准。
 
 - S0（0.28.3）：现状威胁模型和 canary 明文清单测试。不改 wire（§13.6）。
 - E1 字节规则：`@byok-sdk/core` 的封装对象、AAD、MAC、成员链条目、key package 和测试向量。同一组向量在 Chromium、WebKit、Gecko、Node 和 Bun 上运行。
@@ -770,7 +770,7 @@ identity receipt 是防重放的 fence，同时保存了正文，而且永不过
   - 查找 canary 的 UTF-8、JSON 转义和 hex 形式。base64 和 base64url 形式按三种字节偏移各生成一次；也可以先解码能解码的列，再查找。
   - 测试有一份期望清单，它断言两件事：扫描命中的 `(表, 列)` 集合等于清单；`docs/security.md` 的表格列出同一个集合。以后新增存内容的列而不更新清单和文档，测试就失败。
   - 摘要列不会命中 canary。`docs/security.md` 把它们单独列出（§9.3）。
-  - E6 只把加密类别的期望改为零命中，扫描代码不变。这是 #654 需求 5 的测量部分。
+  - S0-b 的清单只记明文任务，以后也不改。E6 另跑一次加密任务：`examples/hosted-bot-collaboration/src/sealed-zero-hit.test.ts` 用真 daemon 经 E2EE 配对，跑加密任务和同形状的明文孪生，复用 S0 的扫描器。加密 canary 必须零命中，密文落点要等于 `docs/security.md` 的 `hosted-sealed-inventory` 块，成员要能打开 Host 读接口返回的密文。这是 #654 需求 5 的测量部分。
 
 S0-b 是已有测试目录里的一个新文件，预计不改 CI 映射。实现时在 PR 里确认。
 

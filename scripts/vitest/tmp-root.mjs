@@ -42,8 +42,10 @@ export function claimEmptyDirectory(directory) {
 export function setup() {
   if (state) throw new Error('tmp-root globalSetup ran twice without teardown');
   // POSIX: /tmp is short and always present. Windows has no such path, so keep
-  // the OS temp dir there (no Unix sockets are involved).
-  const base = realpathSync(process.platform === 'win32' ? os.tmpdir() : '/tmp');
+  // the OS temp dir there (no Unix sockets are involved). Fixtures need its
+  // canonical spelling: the JS realpath keeps 8.3 names such as RUNNER~1, which
+  // the SDK folds. The #1030 tests configure aliases explicitly.
+  const base = process.platform === 'win32' ? realpathSync.native(os.tmpdir()) : realpathSync('/tmp');
   const root = mkdtempSync(path.join(base, 'byok-t-'));
   let releaseGateRoot;
   try {

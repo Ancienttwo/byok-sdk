@@ -1278,6 +1278,7 @@ export declare class AgentHomeLayout {
     private resolveRoot;
     private acquireRootMutationGate;
 }
+/** `storeDir` must come from `DeviceStore.resolveDir`, so every alias of a store yields one owner. */
 export declare function stableAgentHomeOwnerId(storeDir: string, productId: string): string;
 /** One-writer lease backed by both a process registry and an exclusive marker. */
 export declare class AgentHomeLeaseManager {
@@ -3663,6 +3664,8 @@ export declare function controlSocketPath(storeDir: string): string;
  * from the same `storeDir` alone. Impostor servers are defeated by the
  * mutual HMAC handshake below, not by pipe-name secrecy — keying by user
  * was security theater that broke the service-account topology.
+ * `storeDir` must come from `DeviceStore.resolveDir`, so the daemon and every
+ * client derive the name from the same folded spelling.
  */
 export declare function controlPipeName(productId: string, storeDir: string): string;
 /**
@@ -7596,7 +7599,7 @@ export declare function resolveStorageBudget(input: StorageBudgetInput): Storage
 export declare function resolveStorageConfig(storeDir: string, input?: StorageConfig): Readonly<{
     scratchRoot: string;
     budget: StorageBudget | undefined;
-    skillPackDataDirs: readonly any[];
+    skillPackDataDirs: readonly string[];
     sweepIntervalMs: number;
     pressureSweepIntervalMs: number;
     maxDeletionsPerPass: number;
@@ -8175,7 +8178,10 @@ export declare class DeviceStore {
      * Resolve the one store pathname every daemon/CLI component must share.
      * A configured relative path is anchored once at process entry rather than
      * being reinterpreted after a diagnostics operation temporarily changes
-     * cwd to pin a quarantine directory inode.
+     * cwd to pin a quarantine directory inode. Name aliases (8.3 short names,
+     * letter case) are folded into the on-disk spelling here, so the daemon and
+     * every CLI derive the same control endpoint, Agent-home owner and retention
+     * roots from one spelling.
      */
     static resolveDir(productId: string, configured?: string): string;
     load(): Promise<DeviceMetadata | undefined>;
