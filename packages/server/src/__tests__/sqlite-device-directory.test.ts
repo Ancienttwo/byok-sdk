@@ -69,11 +69,11 @@ describe('SQLite durable device authority', () => {
     } finally { await stores.close(); }
   });
 
-  it.each(['1', '2', '3', '4'])('refuses a schema %s database at open and leaves it unchanged', async (version) => {
+  it.each(['1', '2', '3', '4', '5'])('refuses a schema %s database at open and leaves it unchanged', async (version) => {
     const path = database(); await open(path).close();
     const old = new DatabaseSync(path);
     old.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(version); old.close();
-    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '5' }));
+    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '6' }));
     expect(() => open(path)).toThrow('start on a new database');
     const read = new DatabaseSync(path, { readOnly: true });
     expect(read.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe(version);

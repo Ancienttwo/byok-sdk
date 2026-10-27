@@ -542,7 +542,7 @@ projection below is not a release gate.
 ## Embedded SQLite device and receipt authority
 
 The explicit SQLite composition persists device enrollment, capabilities and
-request receipts alongside six coordination interfaces. Pairing, authenticated
+request receipts and bounded approval timelines alongside six coordination interfaces. Pairing, authenticated
 lookup, revoke and same-machine replacement share the durable device directory.
 Device IDs are globally tenant-unique. Presence, nonces and unredeemed pairing
 codes remain process-local; no runtime or TaskHandle is reconstructed. Embedded
@@ -561,12 +561,24 @@ before open because their WAL paths cannot share recovery authority.
 `close()` is the only server shutdown API; the synchronous `stop()` is removed.
 The upgrade must stop all older owners and external SQLite connections before
 starting this owner, with no parallel sibling-lock path. Schema and wire formats
-were unchanged by the owner-lock refactor.
+were unchanged by the owner-lock refactor; see the schema version policy below and the server README.
 
-Schema v5 retains nullable claimed harness identity in the ownership CAS and
-adds the server-local wake table. There is no adoption of an older file: a
-schema 1–4 database is refused at open (`SQLITE_SCHEMA_UNSUPPORTED`), unchanged,
-and v5 starts on a new database. Old builds refuse schema 5.
+Schema v6 adds a durable approval timeline. Only newly created databases and
+existing v6 files are supported; versions 1–5 and unknown versions fail closed
+without adoption. There is no migration selector. Preserve an old database and
+explicitly choose a new state path and enrollment; never rewrite version markers
+or delete history to bypass the fence. Required approval columns and composite
+primary key are checked on open; missing authority is an error, not an empty tail.
+
+SQLite persists the existing `ApprovalTimelineStore` authority with the same
+capacity and absolute expiry (defaults: 50 observations, ten minutes). Requests,
+resolutions, source IDs, revisions and dropped count survive reopen. Reopen and
+exact replay do not renew TTL. Snapshots, statistics, host decisions and the
+`tasks.events` state seed read this same authority, without startup reconstruction
+or device resend. Expired tails remain absent; this is not indefinite pending
+approval retention or a durable audit log. Host resolve compares the observed
+source/revision and appends its decision within the same SQLite transaction.
+
 Receipts use tenant/key first-write-wins and have no TTL/deletion path; mailbox
 retention cannot remove the delivered/immutable/terminal facts. Receipt columns
 and composite primary key are validated on open. Capacity exhaustion is an
@@ -2980,8 +2992,7 @@ An explicitly selected harness must match the immutable offer receipt. Old peers
 without the capability are refused; no identity is inferred from display names
 or provider/model fields. Business scheduling and device choice stay with the
 host. Deploy migration `0021_custom_harness_identity.sql` for PostgreSQL before
-this server code; embedded SQLite requires schema v5 and its explicit adoption
-rules above.
+this server code; embedded SQLite requires schema v6 under the new-database policy above.
 
 ### Terminal boundary acceptance follow-up (#163 / #167)
 
