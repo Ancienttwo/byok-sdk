@@ -65,17 +65,6 @@ describe('bin/format: formatDaemonEventLine', () => {
       { kind: 'shutdown-complete', ts: 'T', reason: 'operator' },
       { kind: 'shutdown-complete', ts: 'T', reason: 'operator', undeliveredOutboxCount: 0 },
       { kind: 'shutdown-complete', ts: 'T', reason: 'operator', undeliveredOutboxCount: 2 },
-      {
-        kind: 'git-workspace',
-        ts: 'T',
-        taskId: 't1',
-        workspaceId: 'opaque-w1',
-        phase: 'active',
-        headChanged: true,
-        commitsSinceBaseline: 2,
-        dirty: { staged: 1, unstaged: 0, untracked: 3, conflicted: 0 },
-        errorCategory: 'git-command-failed',
-      },
     ];
 
     expect(cases.map((event) => formatDaemonEventLine(event))).toEqual([
@@ -99,23 +88,9 @@ describe('bin/format: formatDaemonEventLine', () => {
       '[T] shutdown-complete reason="operator"',
       '[T] shutdown-complete reason="operator" undeliveredOutboxCount=0',
       '[T] shutdown-complete reason="operator" undeliveredOutboxCount=2',
-      '[T] git-workspace taskId=t1 workspaceId=opaque-w1 phase=active headChanged=true commits=2 dirty=1/0/3/0 errorCategory=git-command-failed',
     ]);
   });
 
-  it('formats Git workspace progress without exposing sensitive metadata or free-form errors', () => {
-    const sentinels = ['SENTINEL-WORKSPACE-PATH', 'SENTINEL-COMMIT-ID', 'SENTINEL-FILENAME', 'SENTINEL-COMMIT-MESSAGE', 'SENTINEL-GIT-STDERR', 'SENTINEL-FREEFORM-ERROR'];
-    const line = formatDaemonEventLine({
-      kind: 'git-workspace',
-      ts: 'T',
-      taskId: 'task-git',
-      workspaceId: 'opaque-w1',
-      phase: 'failed',
-      errorCategory: 'SENTINEL-FREEFORM-ERROR',
-    });
-    expect(line).toBe('[T] git-workspace taskId=task-git workspaceId=opaque-w1 phase=failed');
-    for (const sentinel of sentinels) expect(line).not.toContain(sentinel);
-  });
   it('never emits ANSI escape sequences (plain/headless-safe by construction)', () => {
     const events: DaemonEvent[] = [
       { kind: 'offered', ts: 'T', taskId: 't1', runtime: 'pi' },
@@ -148,31 +123,6 @@ describe('bin/format: formatTaskLine / formatTaskListLines', () => {
     expect(formatTaskLine(task)).toBe('t2 Offered updatedAt=T');
   });
 
-  it('renders concise coarse Git status on normal task output without sensitive metadata', () => {
-    const task = {
-      taskId: 't-git',
-      state: 'Running' as const,
-      updatedAt: 'T',
-      git: {
-        workspaceId: 'opaque-w1',
-        phase: 'active',
-        commitsSinceBaseline: 2,
-        dirty: { staged: 1, unstaged: 0, untracked: 3, conflicted: 0 },
-      },
-    };
-    const line = formatTaskLine(task);
-    expect(line).toBe('t-git Running git=active commits=2 dirty=1/0/3/0 updatedAt=T');
-    expect(line).not.toMatch(/\/tmp|commit-id|filename|message|stderr|SENTINEL/i);
-  });
-
-  it('renders Git phase even when counts are absent, without inventing values', () => {
-    expect(formatTaskLine({
-      taskId: 't-git',
-      state: 'Failed',
-      updatedAt: 'T',
-      git: { workspaceId: 'opaque-w1', phase: 'failed' },
-    })).toBe('t-git Failed git=failed updatedAt=T');
-  });
   it('renders a recorded task (from the audit log) with its summary size, never text', () => {
     expect(formatTaskLine({ taskId: 't1', state: 'Complete', updatedAt: 'T', sessionRef: 's', summaryBytes: 42 })).toBe(
       't1 Complete updatedAt=T sessionRef=s summaryBytes=42',
@@ -354,6 +304,12 @@ describe('bin/format: formatLiveStatusLines', () => {
       ...overrides,
     };
   }
+
+  it('renders each storage class with whether its measurement was truncated', () => {
+    const lines = formatLiveStatusLines(baseLive({ storage: { measuredAt: 'T', usedBytes: 5, freeBytes: 9, lastSweep: null,
+      classes: [{ classId: 'agent-result', protected: false, measured: true, truncated: true, bytes: 5, entries: 1, oldestAgeMs: 0 }] } }));
+    expect(lines).toContain('live-storage-class: agent-result bytes=5 entries=1 protected=false measured=true truncated=true');
+  });
 
   it('renders pid/uptime/lifecycle, paired+deviceId, and runtimes on their own lines', () => {
     const lines = formatLiveStatusLines(baseLive({ deviceId: 'dev-1', runtimes: ['pi', 'claude'].map(id => ({ id, present: true, outcome: 'available' as const, steer: true, resume: true })) }));

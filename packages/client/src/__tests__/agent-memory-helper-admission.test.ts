@@ -37,7 +37,7 @@ async function root() {
 }
 
 function config(directory: string) {
-  return { strictAgentOnly: true, productName: 'Availability', productId: 'availability', serverUrl: 'http://localhost:1',
+  return { productName: 'Availability', productId: 'availability', serverUrl: 'http://localhost:1',
     storeDir: path.join(directory, 'store'), localAgentRelease: { version: '0.0.0-test' }, storage: { scratchRoot: testScratchRoot() },
     agentHome: { hostStorageRoot: path.join(directory, 'homes') } };
 }

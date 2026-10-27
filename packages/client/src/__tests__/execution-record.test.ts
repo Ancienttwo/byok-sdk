@@ -1,3 +1,4 @@
+import { freshTestAgentRef } from './fixtures/test-agent';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -205,7 +206,7 @@ describe('execution record as a DaemonEvent, an audit record and a live-view lin
     const observer = new DaemonObserver();
     const events: DaemonEvent[] = [];
     observer.subscribe(event => events.push(event));
-    const offer = (taskId: string) => observer.handleInboundEnvelope(createEnvelope('task.offer', { instruction: 'run' }, { taskId, seq: 1 }));
+    const offer = (taskId: string) => observer.handleInboundEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'run' }, { taskId, seq: 1 }));
     // Only the order is under test here, so every record has the same content.
     const record = (taskId: string): ExecutionRecord => ({ taskId, terminal: 'complete', status: 'complete', source: 'event-stream', gaps: [] });
     return { observer, events, offer, record };

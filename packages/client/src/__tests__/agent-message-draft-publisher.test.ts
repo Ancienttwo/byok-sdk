@@ -12,7 +12,6 @@ import { AgentHomeManager } from '../agent-home';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { freezeRuntimeAdapterDescriptor } from '../types';
 import { testIngressBudget } from './fixtures/activity-ingress';
@@ -341,13 +340,13 @@ describe('TaskRunner draft reconciliation before publish', () => {
       activity: { ...DEFAULT_AGENT_EGRESS_POLICY.activity, maxCoalesceMs: 10 } };
     const runner = new TaskRunner({
       getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-      adapters: [adapter], workspaceRoot: path.join(root, 'workspace'),
+      adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot: path.join(root, 'home') }),
       agentEgressPolicy: policy, agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'draft-device', tenantId: 'draft-tenant', productId: 'draft-finalize', storeDir,
       getServerCapabilities: () => ['agent-message-draft'], send: envelope => { sent.push(envelope); },
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+      approvalRegistry: new ApprovalRegistry(),
       agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
       agentMessageMcpPreflight: async () => {},
     });

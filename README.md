@@ -7,20 +7,18 @@ composition over Postgres and R2.
 
 ## Release status
 
-The source candidate is **0.30.2** for all nine packages. It is not
-published. See the
-[candidate notes](docs/releases/v0.30.2.md) and
+The current stable release is **0.30.2** for all nine packages. From 0.28.2,
+keys uses the release train version instead of its own version line. See the
+[release notes](docs/releases/v0.30.2.md) and
 [release process](docs/releases/README.md). A Host that moves to 0.30.2 from
 0.29.x, 0.30.0 or 0.30.1 follows the
-[Host upgrade checklist](docs/releases/host-upgrade-0.30.2.md).
+[Host upgrade checklist](docs/releases/host-upgrade-0.30.2.md). The release
+notes do not say that 0.30.2, or a Host on it, is ready for production; the
+product loop gate (#977) is evaluated after release.
 
-The current stable release is **0.30.1** for all nine packages. From 0.28.2,
-keys uses the release train version instead of its own version line. See the
-[release notes](docs/releases/v0.30.1.md).
-
-Public npm metadata read on 2026-10-24 at 19:19 UTC reports `latest` **0.30.1**
-for all nine packages. The registry lists 0.30.0 (2026-10-24, UTC), 0.29.0
-(2026-10-23, UTC), 0.28.3 and 0.28.2 (2026-10-22, UTC),
+Public npm metadata read on 2026-10-26 at 13:36 UTC reports `latest` **0.30.2**
+for all nine packages. The registry lists 0.30.1 and 0.30.0 (2026-10-24, UTC),
+0.29.0 (2026-10-23, UTC), 0.28.3 and 0.28.2 (2026-10-22, UTC),
 0.28.1 / keys 0.13.1 (2026-10-21, UTC) and 0.28.0 / keys 0.13.0 (2026-10-20,
 UTC) as the earlier published versions. This read confirms registry
 availability, not isolated-install qualification.
@@ -37,8 +35,7 @@ changes server, cloud, client and keys APIs.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1
 and the Host upgrade and migration steps.
 
-Versioned install examples below name the unpublished source candidate.
-Use the stable 0.30.1 until this candidate is published.
+Versioned install examples below name the current stable release, 0.30.2.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 
@@ -250,8 +247,8 @@ The host supplies an absolute branded `hostStorageRoot` plus an exact
 `AgentRef`; the SDK alone composes `<hostStorageRoot>/agents/<agentId>`,
 initializes and preserves `MEMORY.md`/`notes/`, enforces one writer, and seals
 that canonical home as the Pi/Claude/Codex cwd. An Agent dispatch requires the
-target daemon's durable `agent-home-contract` capability and never falls back
-to `workspaceRoot/<taskId>`.
+target daemon's durable `agent-home-contract` capability. Since wire v4 the
+Agent home is the only task cwd.
 
 Profile projection content and every non-`.byok` Agent file remain downstream
 owned and opaque. In particular, `artifacts` is not an SDK schema or a required
@@ -399,7 +396,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 
 | Import / command | Purpose | Third-party dependencies | Zod | Budget |
 | --- | --- | --- | --- | ---: |
-| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2354862 B |
+| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2357735 B |
 | `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 419739 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 74349 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 171848 B |
@@ -412,34 +409,35 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/client#byok-pi-runtime-host` | Private Pi runtime host | `@cfworker/json-schema`, `@earendil-works/chord`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-codemode`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-durable`, `@earendil-works/pi-mcp`, `@earendil-works/pi-telemetry`, `@earendil-works/pi-tui`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `@mozilla/readability`, `balanced-match`, `boolbase`, `brace-expansion`, `chalk`, `cross-spawn`, `css-select`, `css-what`, `cssom`, `diff`, `dom-serializer`, `domelementtype`, `domhandler`, `domutils`, `entities`, `eventsource`, `eventsource-parser`, `get-east-asian-width`, `graceful-fs`, `grok-mermaid`, `highlight.js`, `hosted-git-info`, `htmlparser2`, `ignore`, `isexe`, `linkedom`, `lru-cache`, `marked`, `marked-cjk-friendly`, `minimatch`, `nth-check`, `openai`, `p-limit`, `partial-json`, `path-key`, `pkce-challenge`, `proper-lockfile`, `retry`, `semver`, `shebang-command`, `shebang-regex`, `signal-exit`, `turndown`, `typebox`, `uhyphen`, `undici`, `which`, `yaml`, `yocto-queue`, `zod` | allowed | 5441036 B |
 | `@byok-sdk/client#byok-pi-runtime-host-sealed` | Private sealed Pi runtime host | `@cfworker/json-schema`, `@earendil-works/chord`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-codemode`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-durable`, `@earendil-works/pi-mcp`, `@earendil-works/pi-telemetry`, `@earendil-works/pi-tui`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `@mozilla/readability`, `balanced-match`, `boolbase`, `brace-expansion`, `chalk`, `cross-spawn`, `css-select`, `css-what`, `cssom`, `diff`, `dom-serializer`, `domelementtype`, `domhandler`, `domutils`, `entities`, `eventsource`, `eventsource-parser`, `get-east-asian-width`, `graceful-fs`, `grok-mermaid`, `highlight.js`, `hosted-git-info`, `htmlparser2`, `ignore`, `isexe`, `linkedom`, `lru-cache`, `marked`, `marked-cjk-friendly`, `minimatch`, `nth-check`, `openai`, `p-limit`, `partial-json`, `path-key`, `pkce-challenge`, `proper-lockfile`, `retry`, `semver`, `shebang-command`, `shebang-regex`, `signal-exit`, `turndown`, `typebox`, `uhyphen`, `undici`, `which`, `yaml`, `yocto-queue`, `zod` | allowed | 5386681 B |
 | `@byok-sdk/client#byok-pi-todo-runtime` | Private pure todo runtime | — | forbidden | 431889 B |
-| `@byok-sdk/cloud` | Cloud coordination and HTTP handlers | `@cfworker/json-schema`, `hono`, `zod` | allowed | 621663 B |
-| `@byok-sdk/cloud-dataplane` | Postgres stores and Node operations | `@cfworker/json-schema`, `@nodable/entities`, `anynum`, `aws4fetch`, `fast-xml-builder`, `fast-xml-parser`, `hono`, `is-unsafe`, `path-expression-matcher`, `pg`, `pg-connection-string`, `pg-int8`, `pg-pool`, `pg-protocol`, `pg-types`, `postgres-array`, `postgres-bytea`, `postgres-date`, `postgres-interval`, `strnum`, `xml-naming`, `xtend`, `zod` | allowed | 899478 B |
+| `@byok-sdk/cloud` | Cloud coordination and HTTP handlers | `@cfworker/json-schema`, `hono`, `zod` | allowed | 626349 B |
+| `@byok-sdk/cloud-dataplane` | Postgres stores and Node operations | `@cfworker/json-schema`, `@nodable/entities`, `anynum`, `aws4fetch`, `fast-xml-builder`, `fast-xml-parser`, `hono`, `is-unsafe`, `path-expression-matcher`, `pg`, `pg-connection-string`, `pg-int8`, `pg-pool`, `pg-protocol`, `pg-types`, `postgres-array`, `postgres-bytea`, `postgres-date`, `postgres-interval`, `strnum`, `xml-naming`, `xtend`, `zod` | allowed | 915977 B |
 | `@byok-sdk/cloud-dataplane/package.json` | Package metadata | — | forbidden | 1941 B |
-| `@byok-sdk/cloud-dataplane/runtime` | Worker online stores; pg requires nodejs_compat | `@cfworker/json-schema`, `@nodable/entities`, `anynum`, `aws4fetch`, `fast-xml-builder`, `fast-xml-parser`, `hono`, `is-unsafe`, `path-expression-matcher`, `pg`, `pg-connection-string`, `pg-int8`, `pg-pool`, `pg-protocol`, `pg-types`, `postgres-array`, `postgres-bytea`, `postgres-date`, `postgres-interval`, `strnum`, `xml-naming`, `xtend`, `zod` | allowed | 854646 B |
+| `@byok-sdk/cloud-dataplane/runtime` | Worker online stores; pg requires nodejs_compat | `@cfworker/json-schema`, `@nodable/entities`, `anynum`, `aws4fetch`, `fast-xml-builder`, `fast-xml-parser`, `hono`, `is-unsafe`, `path-expression-matcher`, `pg`, `pg-connection-string`, `pg-int8`, `pg-pool`, `pg-protocol`, `pg-types`, `postgres-array`, `postgres-bytea`, `postgres-date`, `postgres-interval`, `strnum`, `xml-naming`, `xtend`, `zod` | allowed | 860850 B |
 | `@byok-sdk/cloud-do` | Durable Object session runtime | `@earendil-works/chord`, `@earendil-works/pi-ai`, `@earendil-works/pi-durable`, `@earendil-works/pi-telemetry`, `typebox` | forbidden | 196394 B |
 | `@byok-sdk/cloud-do/package.json` | Package metadata | — | forbidden | 1752 B |
 | `@byok-sdk/cloud/package.json` | Package metadata | — | forbidden | 1400 B |
 | `@byok-sdk/core` | Shared contracts and validation | `zod` | allowed | 126523 B |
 | `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1403 B |
 | `@byok-sdk/core/sealed-payload` | Sealed payload v1 byte rules | `zod` | allowed | 196627 B |
-| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 288693 B |
-| `@byok-sdk/keys/package.json` | Package metadata | — | forbidden | 1466 B |
-| `@byok-sdk/keys/pi-catalog` | Pinned pi-ai catalog lookup for pi_model | `zod` | allowed | 173028 B |
-| `@byok-sdk/protocol` | Wire schemas and codecs; codegen negative control | `@cfworker/json-schema`, `zod` | allowed | 155792 B |
+| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 318049 B |
+| `@byok-sdk/keys/model-route` | Headless Pi model route: choices, linkage, field errors and submission | `zod` | allowed | 388981 B |
+| `@byok-sdk/keys/package.json` | Package metadata | — | forbidden | 1553 B |
+| `@byok-sdk/keys/pi-catalog` | Pinned pi-ai catalog lookup for pi_model | `zod` | allowed | 354516 B |
+| `@byok-sdk/protocol` | Wire schemas and codecs; codegen negative control | `@cfworker/json-schema`, `zod` | allowed | 156720 B |
 | `@byok-sdk/protocol/constants` | Schema-free protocol values | — | forbidden | 5460 B |
 | `@byok-sdk/protocol/package.json` | Package metadata | — | forbidden | 1667 B |
-| `@byok-sdk/server` | Resident Node server | `@cfworker/json-schema`, `@hono/node-server`, `hono`, `zod` | allowed | 785566 B |
+| `@byok-sdk/server` | Resident Node server | `@cfworker/json-schema`, `@hono/node-server`, `hono`, `zod` | allowed | 795655 B |
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1609 B |
-| `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 649992 B |
+| `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 654678 B |
 | `@byok-sdk/ui-runtime/package.json` | Package metadata | — | forbidden | 1337 B |
-| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2290262 B |
+| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2293164 B |
 | `bin:byok-agent-memory-mcp` | Agent memory MCP helper | — | forbidden | 51028 B |
 | `bin:byok-agent-message-mcp` | Agent message MCP helper | — | forbidden | 51033 B |
 | `bin:byok-agent-result-mcp` | Task-bound structured outcome MCP helper | — | forbidden | 52457 B |
 | `bin:byok-agent-team-mcp` | Agent team MCP helper | — | forbidden | 51018 B |
 | `bin:byok-pi-durable` | Pi durable launcher; host loads lazily | — | forbidden | 471 B |
 | `bin:byok-pi-prepared` | Pi prepared launcher; host loads lazily | — | forbidden | 554 B |
-| `bin:byok-pi-provider-launcher` | Provider credential custody launcher | `zod` | allowed | 215928 B |
+| `bin:byok-pi-provider-launcher` | Provider credential custody launcher | `zod` | allowed | 237748 B |
 | `bin:byok-pi-rpc` | Pi RPC launcher; host loads lazily | — | forbidden | 526 B |
 
 <!-- END generated: api-surface/entries.json -->

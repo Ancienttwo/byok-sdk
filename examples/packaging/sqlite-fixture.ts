@@ -24,7 +24,7 @@ async function main() {
 
     const storeDir = join(root, 'daemon');
     const daemon = createDaemonWithAdapters({ productId: 'sqlite-bundle', productName: 'SQLite bundle probe',
-      localAgentRelease: { version: '0.0.0-test' }, serverUrl: 'http://127.0.0.1:0', storeDir, workspaceRoot: root,
+      localAgentRelease: { version: '0.0.0-test' }, serverUrl: 'http://127.0.0.1:0', storeDir,
       storage: { scratchRoot: join(root, 'scratch') },
     }, [], { deviceCredentials: new InMemoryDeviceCredentialStore() });
     try {

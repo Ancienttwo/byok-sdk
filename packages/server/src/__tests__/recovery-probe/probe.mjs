@@ -17,6 +17,18 @@ import { createTestKeychain } from '../../../../../scripts/testing/macos-keychai
 process.umask(0o077);
 const hash = value => createHash('sha256').update(value).digest('hex');
 const terminal = event => ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type);
+// Wire v4 runs Agent executions only. The daemon consumes exactly the egress
+// policy it is configured with, so the submission names the same one.
+const EGRESS_POLICY = {
+  policyRevision: 'default-v1',
+  activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 256 * 1024 },
+  reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4 * 1024 * 1024, maxPendingBytesPerTenant: 16 * 1024 * 1024 },
+  transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
+};
+// Each submission is its own Agent, so task B never meets task A's home writer.
+const submitExecution = async (byok, deviceId) => (await byok.executions.submit({ taskId: randomUUID(), deviceId,
+  payload: { instruction: 'attribution fixture', runtime: 'pi', agentRef: { agentId: `probe-agent-${randomUUID()}`, profileRevision: 'rev-1' },
+    egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } } })).taskId;
 // Every daemon journals (#924), so a restart never runs task A again.
 const scenarios = [
   { name: 'fixed-acked', changeUrl: false, barrier: 'acked', dispatchB: false },
@@ -146,7 +158,8 @@ async function child(stage, root) {
   const daemonConfig = { productId: config.productId, productName: 'BYOK attribution probe',
     deviceCredentials: config.deviceCredentials,
     localAgentRelease: { version: '0.0.0-attribution' }, serverUrl,
-    storeDir: path.join(root, 'device'), workspaceRoot: path.join(root, 'workspace'),
+    storeDir: path.join(root, 'device'),
+    agentHome: { hostStorageRoot: path.join(root, 'agent-home') }, agentEgress: { policy: EGRESS_POLICY },
     allowedRuntimes: ['pi'] };
   let byok, http, daemon, diagnosticDeviceId, selectServer;
   try {
@@ -226,8 +239,7 @@ async function child(stage, root) {
     await until(() => checked(async () => (await byok.machines.list()).some(machine => machine.deviceId === enrollment.deviceId && machine.connected)), 'connected (not recovery barrier)');
     const snap = () => observation(root, config, serverUrl, enrollment.deviceId, selectServer);
     if (stage === 'first') {
-      const handle = await byok.dispatch({ deviceId: enrollment.deviceId, instruction: 'attribution fixture', runtime: 'pi' });
-      taskA = handle.taskId;
+      taskA = await submitExecution(byok, enrollment.deviceId);
       await log({ kind: 'dispatch', taskId: taskA, hostRequestId: config.hostRequestId, submission: 'A' });
       await until(() => checked(async () => {
         const state = await snap(); const offer = state.mailbox.find(row => row.taskId === taskA && row.type.startsWith('task.offer'));
@@ -263,8 +275,7 @@ async function child(stage, root) {
     await log({ kind: 'recovery-barrier', taskId: taskA, completedPolls, emptyPolls });
     let taskB;
     if (config.dispatchB) {
-      const handle = await byok.dispatch({ deviceId: enrollment.deviceId, instruction: 'attribution fixture', runtime: 'pi' });
-      taskB = handle.taskId;
+      taskB = await submitExecution(byok, enrollment.deviceId);
       await log({ kind: 'dispatch', taskId: taskB, hostRequestId: config.hostRequestId, submission: 'B' });
       assert.notEqual(taskB, taskA);
       await until(() => checked(async () => {
@@ -318,6 +329,7 @@ async function runScenarioWithCustody(scenario, outDir, deviceCredentials) {
     recoverUrl: scenario.changeUrl ? alternateUrl : firstUrl };
   await fs.writeFile(path.join(root, 'config.json'), JSON.stringify(config), { mode: 0o600 });
   await fs.writeFile(path.join(root, 'signer.key'), randomBytes(32), { mode: 0o600 });
+  await fs.mkdir(path.join(root, 'agent-home'), { mode: 0o700 });
   const report = { scenario, startedAt: new Date().toISOString(), failureDomain: 'combined server + daemon child process', result: 'failed' };
   let active;
   try {

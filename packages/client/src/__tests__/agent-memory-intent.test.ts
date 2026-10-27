@@ -2129,7 +2129,6 @@ describe('WP2I-S2 daemon routing', () => {
     const server = await TestServer.start();
     servers.push(server);
     const storeDir = await tempRoot('bk-s2-store-');
-    const workspaceRoot = await tempRoot('bk-s2-ws-');
     const hostStorageRoot = await tempRoot('bk-s2-agents-');
     const daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
@@ -2137,7 +2136,6 @@ describe('WP2I-S2 daemon routing', () => {
         productName: 'Test',
         productId: 'test-product',
         serverUrl: server.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
         ...(transport === undefined ? {} : { agentMemoryIntents: transport }),

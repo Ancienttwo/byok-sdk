@@ -16,7 +16,7 @@ import {
 
 const TYPE = 'e2ee.key_package.available';
 const envelopeBase = {
-  v: 3,
+  v: 4,
   id: '20000000-0000-4000-8000-0000000000e2',
   ts: '2026-10-24T00:00:00.000Z',
   type: TYPE,

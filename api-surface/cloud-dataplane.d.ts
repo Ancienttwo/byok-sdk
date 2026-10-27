@@ -116,6 +116,8 @@ export { TENANT_ERASURE_ERROR_CODES, TENANT_ERASURE_TABLES, PostgresTenantErasur
 export type { PostgresTenantErasureCompositionOptions, PostgresTenantErasureOptions, TenantErasureConflict, TenantErasureErrorCode, TenantErasureReadback, TenantErasureResult, TenantErasureStatus, } from './tenant-erasure';
 export { createPostgresMailboxWake } from './mailbox-wake';
 export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake';
+export { migratePostgresToWireV4, preflightPostgresWireV4Migration } from './wire-v4-receipt-migration';
+export type { PostgresWireV4MigrationResult, WireV4DeletedRedactionReceipt } from './wire-v4-receipt-migration';
 // ==== @byok-sdk/cloud-dataplane dist/mailbox-wake.d.ts ====
 import { type MailboxWake } from '@byok-sdk/cloud';
 export interface PostgresMailboxWakeOptions {
@@ -1455,9 +1457,13 @@ export interface TaskRow {
     readonly claimed_harness_id: string | null;
     readonly claimed_runtime: string | null;
     readonly claimed_runtime_capabilities: RuntimeCapabilities | null;
+    readonly offered_at: Date | null;
+    readonly claimed_at: Date | null;
+    readonly first_output_at: Date | null;
+    readonly terminal_at: Date | null;
     readonly updated_at: Date;
 }
-export declare const TASK_SELECT_COLUMNS = "tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_runtime, claimed_harness_id, claimed_runtime_capabilities, updated_at";
+export declare const TASK_SELECT_COLUMNS = "tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_runtime, claimed_harness_id, claimed_runtime_capabilities, offered_at, claimed_at, first_output_at, terminal_at, updated_at";
 export declare function taskRowToAttempt(row: TaskRow): TaskAttempt;
 export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     #private;
@@ -1481,6 +1487,10 @@ export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
         readonly messageId: string;
         readonly payloadBody: string;
     }): Promise<'reserved' | 'pending' | 'rejected'>;
+    recordFirstOutput(tenant: TenantId, input: {
+        readonly taskId: string;
+        readonly deviceId: string;
+    }): Promise<TaskAttempt | undefined>;
     readTaskAgentMessage(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
@@ -1657,3 +1667,40 @@ export declare class PostgresTruthCommitter implements TruthCommitter {
     listManifest(tenant: TenantId, query: Parameters<TruthCommitter['listManifest']>[1]): Promise<readonly import("@byok-sdk/core").TruthManifestEntry[]>;
     commit(tenant: TenantId, input: TruthCommitInput): Promise<TruthCommitResult>;
 }
+// ==== @byok-sdk/cloud-dataplane dist/wire-v4-receipt-migration.d.ts ====
+/**
+ * The Postgres runner of the one-shot wire v3 -> v4 migration (#925). An
+ * operator runs it once, after draining v3 work and before starting a v4
+ * cloud: {@link preflightPostgresWireV4Migration} lists, read-only, the legacy
+ * tasks and every row with no v4 form; {@link migratePostgresToWireV4} takes
+ * the confirmed legacy task list back and changes the store in one
+ * transaction, or not at all. It ships in 0.31.x only; 0.32.0 removes it
+ * (#1017).
+ */
+import { type TaskRedactionCounts, type WireV3LegacyTask, type WireV4MigrationPreflight, type WireV4ReceiptMigrationResult } from '@byok-sdk/cloud';
+import type { Pool } from 'pg';
+/** The redaction audit receipt of a deleted legacy task, as the redaction store recorded it. */
+export interface WireV4DeletedRedactionReceipt {
+    readonly tenantId: string;
+    readonly taskId: string;
+    readonly redactedAt: string;
+    readonly counts: TaskRedactionCounts;
+}
+export interface PostgresWireV4MigrationResult extends WireV4ReceiptMigrationResult {
+    /**
+     * The redaction audit receipt of every deleted legacy task that was
+     * redacted. The migration deletes the receipt with the task, so the
+     * operator keeps this list as the audit record.
+     */
+    readonly deletedRedactionReceipts: readonly WireV4DeletedRedactionReceipt[];
+}
+/** Lists the legacy tasks and every unmappable row. Changes nothing. */
+export declare function preflightPostgresWireV4Migration(pool: Pool): Promise<WireV4MigrationPreflight>;
+/**
+ * Migrates the store when the preflight finds no unmappable row and
+ * `confirmedLegacyTasks` is exactly the preflight's legacy task list: deletes
+ * every row of those tasks, then re-encodes the remaining offer and terminal
+ * receipts, in one transaction. Otherwise it throws and changes nothing.
+ * Writers must be stopped while it runs.
+ */
+export declare function migratePostgresToWireV4(pool: Pool, confirmedLegacyTasks: readonly WireV3LegacyTask[]): Promise<PostgresWireV4MigrationResult>;

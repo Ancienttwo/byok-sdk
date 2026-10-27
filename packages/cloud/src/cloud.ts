@@ -80,7 +80,6 @@ import {
   BYOK_SKILL_PACKS_PATH,
   BYOK_TOKEN_PATH,
   AGENT_HOME_PROJECTION_CAPABILITY,
-  STRICT_AGENT_ONLY_CAPABILITY,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
@@ -123,8 +122,6 @@ import {
   type AgentMemoryProjectionCommitRequest,
   type AgentMemoryProjectionCommitResponse,
   type AgentMemoryProjectionEraseResult,
-  type TaskOfferPayload,
-  type TaskOfferSealedPayload,
   type TaskSteerPayload,
   type TaskSteerSealedPayload,
   type TaskOfferForAgentPayload,
@@ -132,8 +129,6 @@ import {
   type TaskOfferPreparedPayload,
   type TaskOfferForAgentWithEgressPayload,
   type TaskOfferForAgentWithEgressSealedPayload,
-  type TaskOfferWithToolsetsPayload,
-  type TaskOfferWithToolsetsSealedPayload,
   type E2eeClientPairingMac,
   type E2eeKeyPackageAvailablePayload,
   type E2eeMemberChainEntry,
@@ -433,19 +428,6 @@ export type PublicRouteLimiter = (
   request: Request,
 ) => boolean | Promise<boolean>;
 
-export interface EnqueueOfferInput {
-  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
-  readonly taskId?: string;
-  readonly payload: TaskOfferPayload;
-}
-
-export interface EnqueueToolsetOfferInput {
-  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
-  readonly taskId?: string;
-  /** Strict control payload containing logical ids only; executable MCP definitions are not part of this type. */
-  readonly payload: TaskOfferWithToolsetsPayload;
-}
-
 /**
  * Strict Agent dispatch input. The device path is intentionally a separate
  * argument on {@link ByokCloud.enqueueAgentOffer}; no legacy offer field is
@@ -492,25 +474,12 @@ export interface AgentEgressDispatchInput {
 }
 
 /**
- * Sealed offer inputs (#654). Each sealed wire type has its own entry, as
+ * The sealed lane of {@link AgentDispatchInput} (#654). Resume-only, as the
+ * plaintext lane is. Each sealed wire type has its own input, as
  * {@link PreparedDispatchInput} does: a plaintext lane refuses `sealing` and
  * `sealed`, so a caller cannot reach the plaintext lane by a missing field,
  * and no lane strips a sealing policy.
  */
-export interface EnqueueSealedOfferInput {
-  /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
-  readonly taskId?: string;
-  readonly payload: TaskOfferSealedPayload;
-}
-
-/** The sealed lane of {@link EnqueueToolsetOfferInput} (#654). */
-export interface EnqueueSealedToolsetOfferInput {
-  /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
-  readonly taskId?: string;
-  readonly payload: TaskOfferWithToolsetsSealedPayload;
-}
-
-/** The sealed lane of {@link AgentDispatchInput} (#654). Resume-only, as the plaintext lane is. */
 export interface SealedAgentDispatchInput {
   /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
   readonly taskId?: string;
@@ -650,10 +619,6 @@ export interface ByokCloud {
   readonly capabilities: CapabilityDeclaration;
   /** Host control plane: mint a single-use pairing code for a tenant/product. */
   createPairingCode(tenant: TenantId, input: { readonly productId: string; readonly ttlMs?: number }): Promise<PairingCodeInfo>;
-  /** Host control plane: hand a device a frozen-v1 `task.offer`. The hosted replacement for `dispatch()` — a function, not a handle. */
-  enqueueOffer(tenant: TenantId, deviceId: string, input: EnqueueOfferInput): Promise<EnqueuedOffer>;
-  /** Host control plane: enqueue the additive fail-closed offer variant that requires local MCP toolsets. */
-  enqueueToolsetOffer(tenant: TenantId, deviceId: string, input: EnqueueToolsetOfferInput): Promise<EnqueuedOffer>;
   /**
    * Host control plane: enqueue a strict Agent resume offer to an explicit
    * device. Resume-only: the payload must carry an exact `sessionRef`, and one
@@ -700,8 +665,6 @@ export interface ByokCloud {
    * The plaintext siblings refuse `sealing` and `sealed` with
    * `coordination_input_invalid`.
    */
-  enqueueSealedOffer(tenant: TenantId, deviceId: string, input: EnqueueSealedOfferInput): Promise<EnqueuedOffer>;
-  enqueueSealedToolsetOffer(tenant: TenantId, deviceId: string, input: EnqueueSealedToolsetOfferInput): Promise<EnqueuedOffer>;
   enqueueSealedAgentOffer(tenant: TenantId, deviceId: string, input: SealedAgentDispatchInput): Promise<EnqueuedOffer>;
   enqueueSealedAgentEgressOffer(tenant: TenantId, deviceId: string, input: SealedAgentEgressDispatchInput): Promise<EnqueuedOffer>;
   submitSealedAgentExecution(tenant: TenantId, input: SealedAgentExecutionInput): Promise<EnqueuedOffer>;
@@ -893,17 +856,17 @@ export interface ByokCloud {
    *      terminal attempt, an unclaimed one, and a timeline with no unresolved
    *      request (expired or never written). Checked BEFORE targeting, so it
    *      still wins when both would apply;
-   *   3. `opts.approvalId` names an approval this task has already superseded
-   *      -> {@link StaleApprovalError}. When the daemon never reported an id
-   *      at all, the call proceeds untargeted, exactly as on the server.
+   *   3. the pending request has no `approvalId` (recorded before wire v4)
+   *      -> `task_not_awaiting_approval`;
+   *   4. `opts.approvalId` names an approval this task has already superseded
+   *      -> {@link StaleApprovalError}.
    *
    * Delivery is a best-effort notification, the same contract the wire message
    * has always had (`TaskApprovePayloadSchema`, `@byok-sdk/protocol`): the
    * enqueued envelope is durable, the runtime's response to it is observable
    * only through that task's own later messages. The outgoing `approvalId` is
-   * the pending request's id, else omitted; `opts.approvalId` is only compared
-   * against it (gate 3) and is never sent, even when the pending request has
-   * no id.
+   * the pending request's id; `opts.approvalId` is only compared against it
+   * (gate 4) and is never sent.
    */
   approveTask(
     tenant: TenantId,
@@ -1370,7 +1333,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     tenant: TenantId,
     deviceId: string,
     requestedTaskId: string | undefined,
-    agentRef: AgentRef | undefined,
+    agentRef: AgentRef,
     buildEnvelope: (taskId: string, seq: number, messageId: string) => Envelope,
     beforeMailbox?: (stores: TenantStores, taskId: string) => Promise<void>,
   ): Promise<EnqueuedOffer> {
@@ -1391,24 +1354,14 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     // observable in a mailbox.  The stable message identity then makes an
     // append failure retry converge on the one offer rather than allocating a
     // second executable body.
-    const reservation =
-      agentRef === undefined
-        ? undefined
-        : await stores.tasks.reserveAgentOffer({ taskId, deviceId, agentRef });
-    const openedBeforeAppend =
-      reservation?.attempt ??
-      (agentRef === undefined ? await stores.tasks.open({ taskId, deviceId }) : undefined);
+    const reservation = await stores.tasks.reserveAgentOffer({ taskId, deviceId, agentRef });
+    const openedBeforeAppend = reservation.attempt;
     if (
-      openedBeforeAppend === undefined ||
       openedBeforeAppend.deviceId !== deviceId ||
-      (agentRef === undefined
-        ? openedBeforeAppend.agentRef !== undefined
-        : openedBeforeAppend.agentRef === undefined || !sameAgentRef(agentRef, openedBeforeAppend.agentRef))
+      openedBeforeAppend.agentRef === undefined ||
+      !sameAgentRef(agentRef, openedBeforeAppend.agentRef)
     ) {
-      throw new ByokCloudError(
-        agentRef === undefined ? 'coordination_input_invalid' : 'agent_ref_mismatch',
-        `Task ${taskId} already has a different durable target or Agent identity.`,
-      );
+      throw new ByokCloudError('agent_ref_mismatch', `Task ${taskId} already has a different durable target or Agent identity.`);
     }
 
     const offerReceiptKey = `task-offer:${messageId}`;
@@ -1421,7 +1374,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       (await stores.receipts.get(deliveryReceiptKey)) !== undefined
     ) {
       throw new ByokCloudError(
-        agentRef === undefined ? 'coordination_input_invalid' : 'agent_task_already_exists',
+        'agent_task_already_exists',
         `Task ${taskId} already has a durable delivered attempt and cannot be enqueued again.`,
       );
     }
@@ -1495,7 +1448,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       );
     }
     const delivered = await stores.receipts.record({ key: deliveryReceiptKey, body: messageId });
-    if (agentRef !== undefined && reservation?.created === false && !delivered.created) {
+    if (!reservation.created && !delivered.created) {
       throw new ByokCloudError(
         'agent_task_already_exists',
         `Task ${taskId} already has a durable Agent attempt and cannot be enqueued again.`,
@@ -1535,25 +1488,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       throw new ByokCloudError(
         'agent_capability_missing',
         `Device ${deviceId} lacks durable Agent capabilities (${missing.join(', ')}); refusing before mailbox append.`,
-      );
-    }
-  }
-
-  /**
-   * Producer-side scheduling defence for explicit legacy delivery. The daemon
-   * remains the final authority for stale connections and already-queued
-   * offers, but this durable read avoids creating a task/mailbox fact that a
-   * strict device is guaranteed to decline.
-   */
-  async function assertLegacyAdmission(tenant: TenantId, deviceId: string): Promise<void> {
-    const device = await options.cloud.devices.get(tenant, deviceId);
-    if (device === undefined || device.revoked) {
-      throw new ByokCloudError('device_not_found', `Device ${deviceId} is not registered in this tenant.`);
-    }
-    if (device.capabilities?.includes(STRICT_AGENT_ONLY_CAPABILITY) === true) {
-      throw new ByokCloudError(
-        'agent_capability_missing',
-        `Device ${deviceId} advertises strict-agent-only; refusing legacy offer before mailbox append.`,
       );
     }
   }
@@ -1685,6 +1619,15 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   }
 
   /**
+   * Wire v4 names every approval, so a decision cannot reach a request that
+   * has no `approvalId`. Only a request recorded before v4 lacks one; the
+   * upgrade drains those executions first.
+   */
+  function unnamedApproval(taskId: string, decision: 'approve' | 'reject'): ByokCloudError {
+    return new ByokCloudError('task_not_awaiting_approval', `Task ${taskId} has no named pending approval to ${decision}.`);
+  }
+
+  /**
    * The shared body of `approveTask`/`rejectTask` — one gate order, two
    * decisions, so the two host calls cannot drift apart. See
    * {@link ByokCloud.approveTask} for what each gate refuses and why the whole
@@ -1736,8 +1679,9 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
               `Task ${taskId} has no owning device to receive its recorded ${decision}.`,
             );
           }
+          if (recorded.approvalId === undefined) throw unnamedApproval(taskId, decision);
           const messageId = await approvalDecisionSource(tenant, taskId, attempt, latestRequest, decision);
-          const targeting = recorded.approvalId === undefined ? {} : { approvalId: recorded.approvalId };
+          const targeting = { approvalId: recorded.approvalId };
           const recordedReason = recorded.decision === 'reject' ? recorded.reason : undefined;
           return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
             decision === 'approve'
@@ -1755,13 +1699,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         `Task ${taskId} has no pending approval to ${decision}.`,
       );
     }
-    // Untargeted when the daemon never reported an id: there is nothing to
-    // disagree with, and the pending approval is the only one there is.
-    if (
-      opts?.approvalId !== undefined &&
-      pending.approvalId !== undefined &&
-      opts.approvalId !== pending.approvalId
-    ) {
+    if (pending.approvalId === undefined) throw unnamedApproval(taskId, decision);
+    if (opts?.approvalId !== undefined && opts.approvalId !== pending.approvalId) {
       throw new StaleApprovalError(taskId, opts.approvalId, pending.approvalId);
     }
     // The claiming device, not the offered one: an approval belongs to the
@@ -1773,18 +1712,13 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         `Task ${taskId} has no owning device; no runtime is paused on an approval to ${decision}.`,
       );
     }
-    // A pre-M5 request has no native id to validate or deliver. A caller may
-    // supply a target because the public option is shared with M5 peers, but
-    // it cannot manufacture protocol identity: both the durable event and the
-    // control payload remain id-less. Decision identity is the request
-    // source/revision.
     const approvalId = pending.approvalId;
     const messageId = await approvalDecisionSource(tenant, taskId, attempt, pending, decision);
     const event =
       decision === 'reject'
         ? {
             type: 'approval_resolved' as const,
-            ...(approvalId === undefined ? {} : { approvalId }),
+            approvalId,
             decision: 'reject' as const,
             resolvedBy: 'host' as const,
             reason: opts?.reason ?? null,
@@ -1792,7 +1726,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
           }
         : {
             type: 'approval_resolved' as const,
-            ...(approvalId === undefined ? {} : { approvalId }),
+            approvalId,
             decision: 'approve' as const,
             resolvedBy: 'host' as const,
             at: new Date().toISOString(),
@@ -1804,7 +1738,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       expectedRevision: pending.revision,
       event,
     });
-    let deliveredApprovalId = approvalId;
     let deliveredReason: string | null | undefined = decision === 'reject' ? opts?.reason ?? null : undefined;
     if (resolved.status === 'conflict' || resolved.status === 'superseded' || resolved.status === 'absent') {
       const currentTail = resolved.tail ?? (await stores.approvals.read(taskId));
@@ -1814,7 +1747,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         // A concurrent identical resolver won first. Its event timestamp is
         // intentionally not a competing identity; the stable decision source
         // is, and mailbox append below replays that source exactly once.
-        deliveredApprovalId = recorded.approvalId;
         if (recorded.decision === 'reject') {
           if (recorded.reason !== deliveredReason) {
             throw new ByokCloudError(
@@ -1832,7 +1764,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       } else if (
         currentPending !== undefined &&
         opts?.approvalId !== undefined &&
-        currentPending.approvalId !== undefined &&
         currentPending.approvalId !== opts.approvalId
       ) {
         throw new StaleApprovalError(taskId, opts.approvalId, currentPending.approvalId);
@@ -1843,7 +1774,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         );
       }
     }
-    const targeting = deliveredApprovalId === undefined ? {} : { approvalId: deliveredApprovalId };
+    const targeting = { approvalId };
     return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
       decision === 'approve'
         ? createEnvelope('task.approve', targeting, { id: messageId, taskId, seq })
@@ -1873,8 +1804,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   }
 
   /**
-   * The four sealed enqueue lanes (#654). Each follows its plaintext sibling:
-   * the legacy admission or the resume check, the gate of its sealed type and
+   * The two sealed enqueue lanes (#654). Each follows its plaintext sibling:
+   * the resume check, the gate of its sealed type and
    * the same task envelope path. The strict parse comes first, and every
    * later step reads that copy, so a caller that changes its object during
    * an await cannot make the checks and the enqueue see different payloads.
@@ -1882,7 +1813,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   async function enqueueSealedTaskOffer(
     tenant: TenantId,
     deviceId: string,
-    type: 'task.offer_sealed' | 'task.offer_with_toolsets_sealed' | 'task.offer_for_agent_sealed' | 'task.offer_for_agent_with_egress_sealed',
+    type: 'task.offer_for_agent_sealed' | 'task.offer_for_agent_with_egress_sealed',
     input: { readonly taskId?: string; readonly payload: object; readonly agentMessageContext?: AgentMessageServerContext },
   ): Promise<EnqueuedOffer> {
     const { taskId } = input;
@@ -1891,15 +1822,13 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     if (payload.sealed !== undefined && (typeof taskId !== 'string' || taskId === '')) {
       throw new ByokCloudError('coordination_input_invalid', 'a sealed instruction needs its taskId');
     }
-    if (type === 'task.offer_sealed' || type === 'task.offer_with_toolsets_sealed') await assertLegacyAdmission(tenant, deviceId);
     if (type === 'task.offer_for_agent_sealed') assertResumeSessionRef(payload);
     await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(type, payload));
-    const agentRef = 'agentRef' in payload ? payload.agentRef : undefined;
     return enqueueTaskEnvelope(
       tenant,
       deviceId,
       taskId,
-      agentRef,
+      payload.agentRef,
       (id, seq, messageId) => createEnvelope(type, payload as never, { id: messageId, taskId: id, seq }),
       type === 'task.offer_for_agent_with_egress_sealed'
         ? agentMessageOfferWriter(deviceId, payload as never, input.agentMessageContext)
@@ -2413,22 +2342,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       return auth.createPairingCode(tenant, input);
     },
 
-    async enqueueOffer(tenant, deviceId, input) {
-      refuseSealedFields(input.payload, ['sealing', 'sealed'], 'enqueueSealedOffer');
-      await assertLegacyAdmission(tenant, deviceId);
-      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, undefined, (taskId, seq, messageId) =>
-        createEnvelope('task.offer', input.payload, { id: messageId, taskId, seq }),
-      );
-    },
-
-    async enqueueToolsetOffer(tenant, deviceId, input) {
-      refuseSealedFields(input.payload, ['sealing', 'sealed'], 'enqueueSealedToolsetOffer');
-      await assertLegacyAdmission(tenant, deviceId);
-      return enqueueTaskEnvelope(tenant, deviceId, input.taskId, undefined, (taskId, seq, messageId) =>
-        createEnvelope('task.offer_with_toolsets', input.payload, { id: messageId, taskId, seq }),
-      );
-    },
-
     async enqueueAgentOffer(tenant, deviceId, input) {
       // Resume-only: the wire keeps `sessionRef` optional, but this lane never
       // starts a fresh Agent execution; that has exactly one authority,
@@ -2478,8 +2391,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     submitAgentExecution,
 
-    enqueueSealedOffer: (tenant, deviceId, input) => enqueueSealedTaskOffer(tenant, deviceId, 'task.offer_sealed', input),
-    enqueueSealedToolsetOffer: (tenant, deviceId, input) => enqueueSealedTaskOffer(tenant, deviceId, 'task.offer_with_toolsets_sealed', input),
     enqueueSealedAgentOffer: (tenant, deviceId, input) => enqueueSealedTaskOffer(tenant, deviceId, 'task.offer_for_agent_sealed', input),
     enqueueSealedAgentEgressOffer: (tenant, deviceId, input) => enqueueSealedTaskOffer(tenant, deviceId, 'task.offer_for_agent_with_egress_sealed', input),
     submitSealedAgentExecution,

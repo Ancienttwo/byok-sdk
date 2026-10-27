@@ -20,6 +20,7 @@ import {
   TENANT_A,
   createHarness,
   decodeEventsPage,
+  grantAgentHome,
   offerPayload,
   type CloudHarness,
   type DecodedEventsPage,
@@ -91,10 +92,11 @@ describe('mailbox admission at the cloud surface', () => {
   it('refuses an offer into a full mailbox and converges when the same taskId is retried', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
     await limitMailbox(harness, TENANT_A, 2n, 0n);
 
     const refused = await captureError(
-      harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
         taskId: 'admission-retry',
         payload: offerPayload('wait for room'),
       }),
@@ -103,7 +105,7 @@ describe('mailbox admission at the cloud surface', () => {
     expect((await harness.core.mailbox.readUsage(TENANT_A)).bytes).toBe(0n);
 
     await limitMailbox(harness, TENANT_A, 3n, 100_000_000n);
-    const retried = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    const retried = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       taskId: 'admission-retry',
       payload: offerPayload('wait for room'),
     });
@@ -112,21 +114,22 @@ describe('mailbox admission at the cloud surface', () => {
 
     const page = await poll(harness, device);
     expect(page.events.map((event) => [event.type, event.task_id])).toEqual([
-      ['task.offer', 'admission-retry'],
+      ['task.offer_for_agent', 'admission-retry'],
     ]);
   });
 
   it('cancels a task while the mailbox is full and counts the cancellation', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('stop me'),
     });
     await fillMailbox(harness, TENANT_A, 2n);
     const before = (await harness.core.mailbox.readUsage(TENANT_A)).bytes;
 
     const blocked = await captureError(
-      harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('no room') }),
+      harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload('no room') }),
     );
     const orphan = expectQuotaRefusal(blocked).taskId;
     expect(orphan).not.toBe(offer.taskId);
@@ -142,14 +145,15 @@ describe('mailbox admission at the cloud surface', () => {
   it('names a cloud-allocated task on refusal so the Host can retry it into one offer or cancel it', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
     await limitMailbox(harness, TENANT_A, 2n, 0n);
 
     // No taskId: the cloud allocates one and opens its attempt before the append.
     const refusedRetry = expectQuotaRefusal(
-      await captureError(harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('retry me') })),
+      await captureError(harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload('retry me') })),
     );
     const refusedCancel = expectQuotaRefusal(
-      await captureError(harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('cancel me') })),
+      await captureError(harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload('cancel me') })),
     );
     expect(refusedRetry.taskId).not.toBe(refusedCancel.taskId);
     for (const taskId of [refusedRetry.taskId, refusedCancel.taskId]) {
@@ -166,7 +170,7 @@ describe('mailbox admission at the cloud surface', () => {
     expect(reserved).toMatchObject({ taskId: refusedRetry.taskId, delivered: false });
 
     await limitMailbox(harness, TENANT_A, 3n, 100_000_000n);
-    const retried = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    const retried = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       taskId: refusedRetry.taskId,
       payload: offerPayload('retry me'),
     });
@@ -182,7 +186,7 @@ describe('mailbox admission at the cloud surface', () => {
     const page = await poll(harness, device);
     expect(page.events.map((event) => [event.type, event.task_id])).toEqual([
       ['task.cancel', refusedCancel.taskId],
-      ['task.offer', refusedRetry.taskId],
+      ['task.offer_for_agent', refusedRetry.taskId],
     ]);
   });
 

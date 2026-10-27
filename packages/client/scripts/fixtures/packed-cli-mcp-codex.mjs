@@ -128,9 +128,9 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   if (method === 'turn/start') {
     assert.ok(opened); assert.equal(params.threadId, threadId); assert.equal(active, false);
-    // Only the Agent execution leg carries the result server; the daemon
-    // prefixes an Agent task's instruction with its memory guidance.
-    const instruction = resultServer ? `${AGENT_MEMORY_GUIDANCE}\n\ncall echo` : 'call echo';
+    // Every v4 task is an Agent task, so the daemon prefixes each
+    // instruction with its memory guidance.
+    const instruction = `${AGENT_MEMORY_GUIDANCE}\n\ncall echo`;
     assert.ok(params.input.some(item => item.type === 'text' && item.text === instruction));
     active = true; const turnId = `turn-${++turn}`;
     send({ jsonrpc: '2.0', id, result: { turn: { id: turnId } } });

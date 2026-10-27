@@ -2,7 +2,186 @@
 
 ## Unreleased
 
-## 0.30.2 — source candidate
+- **Breaking (protocol, client, server, cloud; #925)** — wire major 4. A v3
+  envelope is rejected; there is no v3 reader and no negotiation. Drain,
+  migrate stored receipts, then upgrade server and client together; see
+  [the wire v4 upgrade note](docs/releases/925-wire-v4.md).
+  - Every offer is Agent-bound. `conn.ack`, `task.offer`,
+    `task.offer_with_toolsets`, `task.offer_sealed` and
+    `task.offer_with_toolsets_sealed` are removed, with
+    `ConnAckPayloadSchema`, `TaskOfferPayloadSchema`,
+    `TaskOfferWithToolsetsPayloadSchema` and their payload types and the
+    `strict-agent-only` flag (`STRICT_AGENT_ONLY_CAPABILITY`, also removed
+    from `@byok-sdk/server`). The daemon declines every offer when it has no
+    Agent home. `DaemonConfig.strictAgentOnly` is removed and raises
+    `DaemonConfigFieldRemovedError`.
+    Runtime adapters take the client-owned `RuntimeTaskInput` (exported from
+    `@byok-sdk/client`) instead of the removed wire `TaskOfferPayload`.
+  - `approvalId` is required on `task.await_approval`, `task.approve` and
+    `task.reject`; a decision resolves only the approval it names.
+    `Daemon.approve(taskId, { approvalId })` and
+    `Daemon.reject(taskId, { approvalId, reason? })` require it.
+    `task.approval_resolved` is baseline: the daemon reports every approval it
+    resolves locally, including a `Daemon.approve` or `Daemon.reject`
+    decision, and the `approval_resolved` server flag is gone. The
+    server no longer infers a resolution from later task activity: the
+    `task.approval_resolved_implicit` server event and the `targeted` field of
+    `task.approval_resolved` events are removed, and activity while a task
+    awaits approval leaves it awaiting approval.
+  - Git workspace mode and the daemon's task workspace root are removed
+    (ADR-034): every task runs in its Agent home. `DaemonConfig.gitWorkspace`,
+    `DaemonOverrides.gitWorkspace` and `DaemonConfig.workspaceRoot` raise
+    `DaemonConfigFieldRemovedError`; delete them from daemon configs.
+    `@byok-sdk/client` no longer exports `GitWorkspaceManager`,
+    `GitWorkspaceError`, `isGitWorkspaceConfig`,
+    `prependGitWorkspaceGuidance`, `GitWorkspaceStore`, `GitWorkspaceConfig`,
+    `GitWorkspaceObservation`, `GitWorkspaceLease`, `GitWorkspaceOptions`,
+    `GitErrorCategory`, `GitWorkspaceLedger`, `GitWorkspaceLedgerRecord` or
+    `GitWorkspacePhase`. `RuntimeOperationManifest.workspace` loses
+    `workspaceId` and `baseline`. The `byok-agent workspaces` command, the
+    `git-workspace` daemon event and audit record, the doctor `workspace`
+    check and the support bundle's `workspace` field are removed; an older
+    audit log's `git-workspace` lines are skipped as an unknown kind.
+    `ProtectedClassId` and `RetentionClassId` lose `'workspace'`: storage
+    usage no longer reports a workspace class, and an older audit log's
+    `retention-failure` line for it is skipped. The daemon leaves
+    `<storeDir>/git-workspaces.json` and old task directories untouched.
+  - `ByokServer.dispatch` takes only `AgentResumeDispatchInput` (`agentRef`
+    and `sessionRef`); `LegacyDispatchInput` is removed. Fresh work uses
+    `executions.submit`, which returns no `TaskHandle`: a submitted task has
+    no per-task stream of Agent events and artifacts yet, only the
+    `task.created` and `task.state` server events; #1022 adds one in 0.31.0. Two `dispatch` refusal
+    codes change, because the Agent lane answers them: an unknown or revoked
+    device is `agent_capability_missing` (was `device_not_found`), and a
+    taskId that already exists is `agent_task_already_exists` (was
+    `coordination_input_invalid`). A Host that matches on the old codes must
+    match the new ones.
+  - One-shot wire v4 migration of stored state, in two steps per store. The
+    read-only preflight (`preflightPostgresWireV4Migration(pool)` in
+    `@byok-sdk/cloud-dataplane`, `preflightSqliteWireV4Migration(path)` in
+    `@byok-sdk/server`) lists the legacy tasks (offered on a removed offer
+    type) and every row with no v4 form. The migration
+    (`migratePostgresToWireV4(pool, confirmedLegacyTasks)`,
+    `migrateSqliteToWireV4(path, confirmedLegacyTasks)`) takes the confirmed
+    list back and, in one transaction, deletes every row of those tasks and
+    re-encodes the remaining offer and terminal receipts. It changes nothing
+    and throws `ReceiptMigrationUnmappableError` when a receipt has no v4
+    form, an approval was recorded without an id, or a pending v3 mailbox row
+    of another task could still reach a device; and
+    `WireV4LegacyTaskListMismatchError` when the confirmed list differs from
+    the store's. A legacy task's `task-redaction:<taskId>` audit receipt is
+    deleted with it, so a new Agent task may reuse the id;
+    `migratePostgresToWireV4` returns those receipts
+    (`deletedRedactionReceipts`: `redactedAt` and `counts`) for the
+    operator's records, and `@byok-sdk/cloud` exports
+    `taskRedactionReceiptKey`. Expired v3 dead letters are left in place:
+    `replayDeadLetter` refuses their v3 bytes with `cleanup_invalid_input`,
+    and `discardDeadLetter` still drops them. Replay or discard them before
+    the upgrade. Acked rows stay v3 bytes: within the acked retention (1 day
+    by default) a retry with the same messageId fails with an envelope
+    decoding error and delivers nothing; after it, the retry is a new
+    message. `@byok-sdk/protocol` adds `WIRE_V3_TO_V4_TYPES`,
+    `wireV4TypeOf` and `migrateWireV3Envelope`; `@byok-sdk/cloud` adds the
+    store-independent half (`migrateWireV3Receipt`, `wireV4ReceiptKind`,
+    `assertWireV4MigrationConfirmed` and the types and errors above). All of
+    it ships in 0.31.x only; 0.32.0 removes it (#1017).
+  - `harnessId` on every Agent offer is gated on the device's `custom-harness`
+    capability, the gate the removed offers carried. Before, an Agent offer
+    with `harnessId` needed only the device's declared harness inventory.
+    Bundled daemons always advertise the flag; a third-party daemon that
+    declares harnesses without it has such offers refused.
+  - The protocol test alias `byok-protocol-previous` pins 0.30.2, the last v3
+    release, as the rejection oracle. `byok-protocol-floor` (0.27.0) and
+    `published-compat.test.ts` are removed until a v4 release is published.
+- **Breaking (examples; #925)** — byok-mcp-server submits each task as a
+  fresh Agent execution of the key's AgentRef. A `tasks.dispatch` key without
+  an AgentRef fails authentication with `invalid_input`; revoke it and issue
+  a new key with one. An Agent home has one writer, so a device runs one task
+  of a key at a time, whatever the key's `runningTasks` quota allows. The
+  basic example submits fresh executions and decides approvals with
+  `ByokServer.tasks.approve` and `reject`.
+- **Feature (server; #925)** — `ByokServer.tasks.approve(taskId, opts?)` and
+  `tasks.reject(taskId, reason?, opts?)` decide a pending approval by taskId,
+  so a task that `executions.submit` created can be approved without a
+  `TaskHandle`. They take the same `opts.approvalId` as `TaskHandle.approve`
+  and `reject`, share their one code path over `ByokCloud.approveTask` and
+  `rejectTask`, and refuse the same way: `task_not_found`,
+  `task_not_awaiting_approval` or `StaleApprovalError`.
+- **Breaking (client)** — `ExpiringClassId` and `RetentionClassId` gain
+  `'agent-result'`, so an exhaustive switch over them no longer compiles
+  until it handles the new class (#1009). `ClassUsage.truncated` is now
+  required. `storage.retention.ttlMs['agent-result']` defaults to 7 days and
+  accepts any integer from 0.
+- **Fixed (client)** — staged `submit_result` records under an Agent home's
+  `.byok/results/` no longer accumulate forever (#1009). Once the home is
+  idle, retention removes records and crashed-stage temps at least
+  `ttlMs['agent-result']` old, then the oldest records beyond 256 per home,
+  also under storage pressure. A usage measurement that passes its entry
+  limit stops and reports lower bounds with `truncated: true`; it no longer
+  latches emergency or fails startup. Real I/O, root
+  identity, journal usage and free-space errors still fail closed.
+- **Feature (cloud, cloud-dataplane, server)** — `TaskAttempt`
+  (`ByokCloud.readTaskAttempt`) records four write-once phase instants:
+  `offeredAt`, `claimedAt`, `firstOutputAt` and `terminalAt` (#980). Each is written by the store operation that makes
+  its transition and never again: a redelivered or losing claim and a
+  terminal retry leave them as they are. `firstOutputAt` is the first Agent
+  message draft with text or message body after the claim; `task.progress`
+  does not count. Postgres adds migration 0030 (four nullable `timestamptz`
+  columns on `task`); a SQLite store adds the columns when it opens, with no
+  schema version change. Apply `0030_task_attempt_phase_times.sql` before
+  deploying the new Postgres stores: their `TASK_SELECT_COLUMNS` reads the
+  four columns, so every task query fails on an unmigrated database. The
+  exported `TaskRow` and `TASK_SELECT_COLUMNS` gain the four columns; a Host
+  that writes its own select list for `taskRowToAttempt` must add them.
+  Attempts stored before this are not backfilled, so their instants are
+  absent. No duration fields are derived.
+- **Breaking (cloud)** — `TaskAttemptStore` gains the required
+  `recordFirstOutput(tenant, { taskId, deviceId })`, the write-once
+  `firstOutputAt` for an Agent message draft (#980). A Host that implements
+  its own `TenantStores` or `TaskAttemptStore` must add it. Its other methods
+  report the instants only if they write them as the bundled stores do; a
+  cancellation of an unclaimed attempt also sets `terminalAt`.
+- **Feature (keys)** — add `@byok-sdk/keys/model-route`, the headless logic
+  of a Pi model route page (#986 S2). It loads in a browser: no Node builtins,
+  no custody module, no network. `listPiCatalogModels` lists the pinned
+  catalog entries of a vendor; `createModelRouteDraft`,
+  `applyModelRouteChange`, `modelRouteView`, `validateModelRoute` and
+  `modelRouteSubmission` give a Host the choices, field linkage, field error
+  codes and the submission, and the Host renders the page. Catalog and Host
+  policy entries apply only at the vendor's own base URL, because the pinned
+  Pi fills undeclared `compat` keys from the endpoint URL.
+  A Host entry is offered only when its config passes `PiModelConfigSchema`,
+  projects the api it is listed under and meets the vendor adapter's profile
+  rules; `modelRouteContext` throws on a repeated Host entry or one whose
+  model id a profile cannot hold.
+  `PI_DEFAULT_THINKING_LEVEL` (`medium`) is generated from the pinned
+  pi-coding-agent. A model whose only level is `off` gets `off`; another
+  model without the default level needs an explicit level.
+  `providerSecretReusable` reuses a stored key only while the profile ref,
+  kind, adapter, auth mode and normalized base URL are unchanged. JSON fixture
+  vectors cover the functions for Hosts in other languages.
+  `exactProviderProfileBinding` moves to its own module so the profile schema
+  has no `node:crypto` dependency; the root exports are unchanged.
+
+- **Fixed (client)** — the prepared lane now accepts a tool schema whose
+  object root defines its fields only in `oneOf` branches, such as a result
+  document schema that `checkResultSchema` admits (#1003). Each branch must
+  be an object with its own `properties`, and the schema reaches the
+  provider unchanged: nothing is flattened or added. A tool schema with no
+  root `properties` and no such branches, or with malformed `properties`,
+  is still refused with `prepared_transcript_invalid`. Before, every tool
+  schema without root `properties` was refused.
+- **Feature (keys)** — `PiModelConfigSchema.compat` accepts
+  `sendSessionAffinityHeaders` (`openai-completions` and `anthropic-messages`)
+  and `allowEmptySignature` (`anthropic-messages`), both booleans, as pinned
+  pi-ai 1.4.0 reads them; `openai-responses` refuses both. The regenerated
+  `@byok-sdk/keys/pi-catalog` table returns 752 of 1,019 pinned entries (178
+  before): 324 more OpenRouter, 238 more Vercel AI Gateway and 12 more
+  Baseten entries. The prepared entry still refuses
+  `sendSessionAffinityHeaders`, which its frozen wire does not carry, and
+  compiles no `anthropic-messages` request.
+
+## 0.30.2 — 2026-10-26 (published)
 
 0.30.2 is a PATCH release under a one-release exception to the pre-1.0
 policy, as 0.30.1 was. The owner chose 0.30.2 instead of 0.31.0 (issues #978
@@ -15,9 +194,14 @@ declares `e2ee.member.kem-epoch`, so the Host upgrades first. Migration 0029,
 and the first 0.30.2 open of a SQLite store, refuse a member chain that
 already holds a `rotate` entry. The examples changes of #793 S9, #794 H3 and
 #975 slice 5b are also breaking for a Host that copies the hosted
-collaboration example. The envelope wire stays v3. This candidate is not
-published. See the [release notes](docs/releases/v0.30.2.md) for scope, what
-is not in 0.30.2 and the known limits, and the
+collaboration example. The envelope wire stays v3. The npm registry lists
+all nine public packages at 0.30.2. The registry publication times fall on
+2026-10-26 (UTC). The registry read on 2026-10-26 at 13:36 UTC reports
+0.30.2 as `latest` for all nine. The tag `v0.30.2` and its GitHub Release
+point to `b1469e5a`. This release does not say that 0.30.2, or a Host on
+it, is ready for production; the product loop gate (#977) is evaluated
+after release. See the [release notes](docs/releases/v0.30.2.md) for scope,
+what is not in 0.30.2 and the known limits, and the
 [Host upgrade checklist](docs/releases/host-upgrade-0.30.2.md) for the
 upgrade steps. All nine public manifests and their lock records move to
 0.30.2.
@@ -628,7 +812,7 @@ upgrade steps. All nine public manifests and their lock records move to
   start of any generation of an imported intent, as K8 `intentFacts`. No
   SDK or wire change.
 
-## 0.30.1 — 2026-10-24 (published)
+## 0.30.1 — 2026-10-24 (published; superseded by 0.30.2)
 
 0.30.1 is a PATCH release under a one-release exception to the pre-1.0
 policy. On 2026-10-24 the owner chose 0.30.x instead of 0.31.0 (issue #872),
@@ -640,9 +824,9 @@ SQLite migration of #909 means that a migrated store cannot go back to Pi
 1.3.0. The examples changes of #882 and #884 are also breaking for a Host
 that copies the K8 example. The npm registry lists all nine public packages
 at 0.30.1. The registry publication times fall on 2026-10-24 (UTC). The
-registry read on 2026-10-24 at 19:19 UTC reports 0.30.1 as `latest` for all
-nine. The tag `v0.30.1` and its GitHub Release point to
-`142acbe2`. A 0.30.1 daemon paired as an E2EE member advertises
+registry read on 2026-10-24 at 19:19 UTC reported 0.30.1 as `latest` for all
+nine. The read on 2026-10-26 at 13:36 UTC reports 0.30.2 as `latest`. The
+tag `v0.30.1` and its GitHub Release point to `142acbe2`. A 0.30.1 daemon paired as an E2EE member advertises
 `sealed-payload-v1` while its member is verified and the deployment declares
 `e2ee.member`. See the [release notes](docs/releases/v0.30.1.md) for scope,
 the release rule of `sealed-payload-v1`, the upgrade notes and the
@@ -1066,7 +1250,7 @@ of #783, #784, #831 and #834. The examples changes of #820, #823 and #852 are
 also breaking for a Host that copies the K8 example. The npm registry lists
 all nine public packages at 0.30.0. The registry publication times fall on
 2026-10-24 (UTC). The registry read on 2026-10-24 at 07:39 UTC reported
-0.30.0 as `latest` for all nine. The read on 2026-10-24 at 19:19 UTC reports
+0.30.0 as `latest` for all nine. The read on 2026-10-24 at 19:19 UTC reported
 0.30.1 as `latest`. The tag `v0.30.0` and its GitHub Release point to
 `6b779cff`. A default 0.30.0 daemon does not advertise `sealed-payload-v1`.
 See the [release notes](docs/releases/v0.30.0.md) for scope, the release rule

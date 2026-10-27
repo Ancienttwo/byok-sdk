@@ -1705,18 +1705,6 @@ interface EnvelopeShapeOptions {
         taskId?: string;
         seq?: number;
     };
-    'conn.ack': {
-        taskId?: string;
-        seq: number;
-    };
-    'task.offer': {
-        taskId: string;
-        seq: number;
-    };
-    'task.offer_with_toolsets': {
-        taskId: string;
-        seq: number;
-    };
     'task.offer_for_agent': {
         taskId: string;
         seq: number;
@@ -1836,14 +1824,6 @@ interface EnvelopeShapeOptions {
     'task.approval_resolved': {
         taskId: string;
         seq?: number;
-    };
-    'task.offer_sealed': {
-        taskId: string;
-        seq: number;
-    };
-    'task.offer_with_toolsets_sealed': {
-        taskId: string;
-        seq: number;
     };
     'task.offer_for_agent_sealed': {
         taskId: string;
@@ -2150,7 +2130,7 @@ type EnvelopeShape<T extends MessageType, TaskId extends z.ZodTypeAny, Seq exten
  *   optional for daemon -> server types (M1 redelivery cursor; see
  *   `conn.hello.cursor` in `messages.ts`).
  */
-export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[EnvelopeShape<"conn.hello", z.ZodOptional<z.ZodString>, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"conn.ack", z.ZodOptional<z.ZodString>, z.ZodNumber>, EnvelopeShape<"task.offer", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_with_toolsets", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress_fresh", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_prepared", z.ZodString, z.ZodNumber>, EnvelopeShape<"agent.egress.ack", z.ZodOptional<z.ZodString>, z.ZodNumber>, EnvelopeShape<"agent.message.disposition", z.ZodString, z.ZodNumber>, EnvelopeShape<"agent.content.read", z.ZodOptional<z.ZodString>, z.ZodNumber>, EnvelopeShape<"agent.home.projection", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"agent.input.preparation", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"provider.provisioning.available", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"agent.memory.intent.available", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"task.approve", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.reject", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.cancel", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.steer", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.claim", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.started", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.decline", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.progress", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.artifact", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.await_approval", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.complete", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.fail", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.cancelled", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.approval_resolved", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.egress.reliable", z.ZodOptional<z.ZodString>, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.message.draft", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.message.publish", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.content.receipt", z.ZodOptional<z.ZodString>, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.offer_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_with_toolsets_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress_fresh_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.steer_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.complete_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.fail_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.decline_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.cancelled_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.progress_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.artifact_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.await_approval_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"e2ee.key_package.available", z.ZodOptional<z.ZodNever>, z.ZodNumber>], "type">;
+export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[EnvelopeShape<"conn.hello", z.ZodOptional<z.ZodString>, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.offer_for_agent", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress_fresh", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_prepared", z.ZodString, z.ZodNumber>, EnvelopeShape<"agent.egress.ack", z.ZodOptional<z.ZodString>, z.ZodNumber>, EnvelopeShape<"agent.message.disposition", z.ZodString, z.ZodNumber>, EnvelopeShape<"agent.content.read", z.ZodOptional<z.ZodString>, z.ZodNumber>, EnvelopeShape<"agent.home.projection", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"agent.input.preparation", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"provider.provisioning.available", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"agent.memory.intent.available", z.ZodOptional<z.ZodNever>, z.ZodNumber>, EnvelopeShape<"task.approve", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.reject", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.cancel", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.steer", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.claim", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.started", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.decline", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.progress", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.artifact", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.await_approval", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.complete", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.fail", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.cancelled", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.approval_resolved", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.egress.reliable", z.ZodOptional<z.ZodString>, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.message.draft", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.message.publish", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"agent.content.receipt", z.ZodOptional<z.ZodString>, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.offer_for_agent_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.offer_for_agent_with_egress_fresh_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.steer_sealed", z.ZodString, z.ZodNumber>, EnvelopeShape<"task.complete_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.fail_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.decline_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.cancelled_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.progress_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.artifact_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"task.await_approval_sealed", z.ZodString, z.ZodOptional<z.ZodNumber>>, EnvelopeShape<"e2ee.key_package.available", z.ZodOptional<z.ZodNever>, z.ZodNumber>], "type">;
 export type Envelope = z.infer<typeof EnvelopeSchema>;
 /** `true` for every message type the server sends to the daemon (envelope `seq` is required for these). */
 export declare function isServerToDaemonType(type: MessageType): boolean;
@@ -2939,7 +2919,7 @@ export declare function byokBlobContentPath(blobId: string): string;
 // ==== @byok-sdk/protocol dist/index.d.ts ====
 export * from './constants';
 export { MAILBOX_READ_AHEAD_MAX_SEQS, MAILBOX_READ_AHEAD_CAPABILITY } from './version';
-export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY, AGENT_HOME_READERS_CAPABILITY } from './version';
+export { PROTOCOL_VERSION, CAPABILITY_FLAGS, AGENT_HOME_READERS_CAPABILITY } from './version';
 export type { CapabilityFlag } from './version';
 export { WIRE_ADDITIONS, requiredReceiverCapabilities } from './wire-additions';
 export type { WireAddition } from './wire-additions';
@@ -2969,12 +2949,14 @@ export { RESULT_SCHEMA_MAX_BYTES, RESULT_OUTCOME_MAX_BYTES, RESULT_SCHEMA_MAX_DE
 export type { ResultSchema, ResultSchemaKeyword, ResultSchemaInstanceType, ResultIssue, ResultDocumentFailureReason, ResultSchemaCheck, ResultOutcomeCheck, } from './result-schema';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, TaskOfferSealedPayload, TaskOfferWithToolsetsSealedPayload, TaskOfferForAgentSealedPayload, TaskOfferForAgentWithEgressSealedPayload, TaskOfferForAgentWithEgressFreshSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, TaskFailure, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
+export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, AgentHomeAccessSchema, AgentMemorySelectionSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, RuntimeFailureClassSchema, TaskFailureSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, TaskOfferForAgentSealedPayload, TaskOfferForAgentWithEgressSealedPayload, TaskOfferForAgentWithEgressFreshSealedPayload, TaskSteerSealedPayload, TaskCompleteSealedPayload, TaskFailSealedPayload, TaskDeclineSealedPayload, TaskCancelledSealedPayload, TaskProgressSealedPayload, TaskArtifactSealedPayload, TaskAwaitApprovalSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDraftPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, RuntimeFailureClass, TaskFailure, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
 export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec';
+export { WIRE_V3_TO_V4_TYPES, migrateWireV3Envelope, wireV4TypeOf } from './wire-v4-migration';
+export type { WireV4MigrationRefusal, WireV4MigrationResult } from './wire-v4-migration';
 export type { CreateEnvelopeOptions } from './codec';
 export { PairRequestSchema, PairResponseTenantIdSchema, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH, PairResponseSchema, ChallengeRequestSchema, ChallengeResponseSchema, TokenRequestSchema, TokenResponseSchema, PresencePublishRequestSchema, CreateBlobRequestSchema, CreateBlobResponseSchema, BlobDownloadUrlResponseSchema, EventsPollQuerySchema, ActivityIngressSchema, MessageSendOutcomeSchema, OUTBOUND_REFUSAL_REASONS, EventsPollResponseSchema, MessagesSendRequestSchema, MessagesSendResponseSchema, AgentHomeProjectionCompletionRequestSchema, AgentHomeProjectionStatusSchema, AgentHomeProjectionReadbackSchema, AgentMemoryProjectionCommitRequestSchema, AgentMemoryProjectionCommitResponseSchema, MAX_MESSAGES_PER_BATCH, MESSAGES_SEND_MAX_BODY_BYTES, BYOK_PAIR_PATH, BYOK_CHALLENGE_PATH, BYOK_TOKEN_PATH, BYOK_CAPABILITIES_PATH, BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, BYOK_AGENT_HOME_PROJECTIONS_PATH, BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE, byokAgentHomeProjectionCompletionPath, BYOK_AGENT_MEMORY_PROJECTIONS_PATH, BYOK_PRESENCE_PATH, BYOK_ACTIVITY_PATH, BYOK_BOARD_PATH, BYOK_BOARD_STREAM_PATH, BYOK_BOARD_CLAIM_ROUTE, BYOK_BOARD_UNCLAIM_ROUTE, BYOK_BOARD_STATUS_ROUTE, BYOK_RECORDS_PATH, BYOK_RECORD_ROUTE, byokRecordPath, BYOK_E2EE_MEMBER_KEY_PATH, BYOK_E2EE_CHAIN_PATH, BYOK_E2EE_KEY_PACKAGES_PATH, BYOK_E2EE_PAIRING_MAC_PATH, BYOK_SKILL_PACKS_PATH, BYOK_SKILL_PACK_FILE_ROUTE, byokSkillPackFilePath, BYOK_BLOBS_PATH, BYOK_BLOB_FINALIZE_ROUTE, BYOK_BLOB_URL_ROUTE, BYOK_BLOB_CONTENT_ROUTE, byokBlobFinalizePath, byokBlobUrlPath, byokBlobContentPath, BYOK_INPUT_PREPARATIONS_PATH, BYOK_INPUT_PREPARATION_COMPLETION_ROUTE, BYOK_INPUT_PREPARATION_STATUS_ROUTE, byokInputPreparationCompletionPath, byokInputPreparationStatusPath, InputPreparationCompletionRequestSchema, InputPreparationStatusSchema, InputPreparationReadbackSchema, InputPreparationStatusQuerySchema, } from './http-api';
 export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, TokenRequest, TokenResponse, PresencePublishRequest, CreateBlobRequest, CreateBlobResponse, BlobDownloadUrlResponse, EventsPollQuery, ActivityIngress, MessageSendOutcome, OutboundRefusalReason, EventsPollResponse, MessagesSendRequest, MessagesSendResponse, AgentHomeProjectionCompletionRequest, AgentHomeProjectionStatus, AgentHomeProjectionReadback, AgentMemoryProjectionCommitRequest, AgentMemoryProjectionCommitResponse, InputPreparationCompletionRequest, InputPreparationStatus, InputPreparationReadback, InputPreparationStatusQuery, } from './http-api';
@@ -3954,13 +3936,6 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
     cursor: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type ConnHelloPayload = z.infer<typeof ConnHelloPayloadSchema>;
-/** server -> daemon: handshake acknowledgement. */
-export declare const ConnAckPayloadSchema: z.ZodObject<{
-    protocolVersion: z.ZodNumber;
-    capabilities: z.ZodArray<z.ZodString>;
-    serverTime: z.ZodISODateTime;
-}, z.core.$strip>;
-export type ConnAckPayload = z.infer<typeof ConnAckPayloadSchema>;
 /**
  * The web-selected runtime/model target carried end to end with a task.
  *
@@ -3995,128 +3970,8 @@ export declare const DispatchSelectionSchema: z.ZodDiscriminatedUnion<[z.ZodObje
     }, z.core.$strict>;
 }, z.core.$strict>], "lane">;
 export type DispatchSelection = z.infer<typeof DispatchSelectionSchema>;
-/**
- * server -> daemon: offer a task for a device to claim.
- *
- * `taskId` used to be duplicated here; it is now carried only by the
- * envelope's `task_id` (M1 gap #7 — single source of truth for routing).
- */
-export declare const TaskOfferPayloadSchema: z.ZodObject<{
-    sealed: z.ZodOptional<z.ZodNever>;
-    sealing: z.ZodOptional<z.ZodNever>;
-    instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
-        blobRef: z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-            url: z.ZodOptional<z.ZodString>;
-        }, z.core.$strip>;
-    }, z.core.$strict>]>;
-    runtime: z.ZodOptional<z.ZodEnum<{
-        claude: "claude";
-        codex: "codex";
-        pi: "pi";
-    }>>;
-    harnessId: z.ZodOptional<z.ZodString>;
-    dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
-        lane: z.ZodLiteral<"subscription">;
-        runtimeId: z.ZodEnum<{
-            claude: "claude";
-            codex: "codex";
-        }>;
-        providerId: z.ZodNull;
-        modelId: z.ZodString;
-    }, z.core.$strict>, z.ZodObject<{
-        lane: z.ZodLiteral<"byok">;
-        runtimeId: z.ZodLiteral<"pi">;
-        providerId: z.ZodString;
-        modelId: z.ZodString;
-    }, z.core.$strict>, z.ZodObject<{
-        lane: z.ZodLiteral<"byok-profile">;
-        runtimeId: z.ZodLiteral<"pi">;
-        providerProfile: z.ZodObject<{
-            profileRef: z.ZodString;
-            profileRevision: z.ZodString;
-            profileHash: z.ZodString;
-            modelId: z.ZodString;
-            requiredCapabilities: z.ZodArray<z.ZodEnum<{
-                "image-input": "image-input";
-            }>>;
-        }, z.core.$strict>;
-    }, z.core.$strict>], "lane">>;
-    sessionRef: z.ZodOptional<z.ZodString>;
-    workspaceHint: z.ZodOptional<z.ZodString>;
-    limits: z.ZodOptional<z.ZodObject<{
-        maxDurationMs: z.ZodOptional<z.ZodNumber>;
-        maxTokens: z.ZodOptional<z.ZodNumber>;
-    }, z.core.$strip>>;
-}, z.core.$strip>;
-export type TaskOfferPayload = z.infer<typeof TaskOfferPayloadSchema>;
 /** Every named toolset is required; duplicates are rejected instead of silently de-duplicated. */
 export declare const RequiredToolsetsSchema: z.ZodArray<z.ZodString>;
-/**
- * Additive v1 offer variant for tasks whose semantics require local MCP
- * tools. This is a distinct message type rather than an optional field on
- * `task.offer`, so an older daemon can never strip an unknown optional control
- * field and run the task without its required tools. An unknown type is not
- * silently skipped either: on long-poll it freezes the cursor, so the enqueue
- * capability gate is the real compatibility boundary. The whole payload is
- * strict because every field here affects execution authority.
- */
-export declare const TaskOfferWithToolsetsPayloadSchema: z.ZodObject<{
-    sealed: z.ZodOptional<z.ZodNever>;
-    sealing: z.ZodOptional<z.ZodNever>;
-    instruction: z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
-        blobRef: z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-            url: z.ZodOptional<z.ZodString>;
-        }, z.core.$strip>;
-    }, z.core.$strict>]>;
-    runtime: z.ZodOptional<z.ZodEnum<{
-        claude: "claude";
-        codex: "codex";
-        pi: "pi";
-    }>>;
-    harnessId: z.ZodOptional<z.ZodString>;
-    dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
-        lane: z.ZodLiteral<"subscription">;
-        runtimeId: z.ZodEnum<{
-            claude: "claude";
-            codex: "codex";
-        }>;
-        providerId: z.ZodNull;
-        modelId: z.ZodString;
-    }, z.core.$strict>, z.ZodObject<{
-        lane: z.ZodLiteral<"byok">;
-        runtimeId: z.ZodLiteral<"pi">;
-        providerId: z.ZodString;
-        modelId: z.ZodString;
-    }, z.core.$strict>, z.ZodObject<{
-        lane: z.ZodLiteral<"byok-profile">;
-        runtimeId: z.ZodLiteral<"pi">;
-        providerProfile: z.ZodObject<{
-            profileRef: z.ZodString;
-            profileRevision: z.ZodString;
-            profileHash: z.ZodString;
-            modelId: z.ZodString;
-            requiredCapabilities: z.ZodArray<z.ZodEnum<{
-                "image-input": "image-input";
-            }>>;
-        }, z.core.$strict>;
-    }, z.core.$strict>], "lane">>;
-    sessionRef: z.ZodOptional<z.ZodString>;
-    workspaceHint: z.ZodOptional<z.ZodString>;
-    limits: z.ZodOptional<z.ZodObject<{
-        maxDurationMs: z.ZodOptional<z.ZodNumber>;
-        maxTokens: z.ZodOptional<z.ZodNumber>;
-    }, z.core.$strip>>;
-    requiredToolsets: z.ZodArray<z.ZodString>;
-}, z.core.$strict>;
-export type TaskOfferWithToolsetsPayload = z.infer<typeof TaskOfferWithToolsetsPayloadSchema>;
 /**
  * How an Agent Attempt uses its Agent home. `memory-reader` runs the Attempt
  * in its own run directory, `<home>/.byok/runs/<taskId>/`, beside other
@@ -4835,7 +4690,7 @@ export type AgentMemoryIntentAvailablePayload = z.infer<typeof AgentMemoryIntent
  * Server -> daemon: one task-free, exact-device remote input preparation.
  *
  * Distinct message type rather than an optional field on an existing one, for
- * the same N/N-1 reason `task.offer_with_toolsets` is: an optional field could be
+ * the same N/N-1 reason the Agent offers are: an optional field could be
  * legally STRIPPED by a daemon that predates this contract, which would then
  * answer as though a preparation it never performed had somehow been handled.
  * An unknown type (`parseMessage` -> `UnknownMessageTypeError`) is not skipped
@@ -4982,18 +4837,15 @@ export type AgentInputPreparationPayload = z.infer<typeof AgentInputPreparationP
  * `task.fail`/`task.cancelled` if resuming turns out to be impossible) — no
  * new ack message type is introduced. See docs/protocol.md "Approval flow".
  *
- * `approvalId` (M5, additive-minor — docs/protocol.md §5.3): OPTIONAL target
- * identity for the SPECIFIC pending approval this decision resolves, rather
- * than "whichever one is currently pending" (the pre-M5 behavior, and still
- * what happens when this field is absent — a legacy server that never
- * learned an id, or one talking to a legacy daemon). When present, the
- * daemon compares it against its own currently-dispatched approval id
- * (`ActiveTask.pendingApprovalId`, `packages/client`'s `task-runner.ts`) and
- * treats a mismatch as a stale, audit-only no-op instead of resolving
- * whatever happens to be pending right now — see `TaskRunner.handleApprove`.
+ * `approvalId` (required since v4): the SPECIFIC pending approval this
+ * decision resolves. The daemon compares it against its own
+ * currently-dispatched approval id (`ActiveTask.pendingApprovalId`,
+ * `packages/client`'s `task-runner.ts`) and treats a mismatch as a stale,
+ * audit-only no-op, so a late decision never lands on the task's next
+ * approval — see `TaskRunner.handleApprove`.
  */
 export declare const TaskApprovePayloadSchema: z.ZodObject<{
-    approvalId: z.ZodOptional<z.ZodString>;
+    approvalId: z.ZodString;
 }, z.core.$strip>;
 export type TaskApprovePayload = z.infer<typeof TaskApprovePayloadSchema>;
 /**
@@ -5004,13 +4856,13 @@ export type TaskApprovePayload = z.infer<typeof TaskApprovePayloadSchema>;
  * message just tells the daemon to stop, and the daemon reports the outcome
  * via its existing `task.fail` terminal message.
  *
- * `approvalId` (M5, additive-minor — docs/protocol.md §5.3): same optional
- * targeting semantics as `TaskApprovePayloadSchema.approvalId` above, applied
- * to the reject path (`TaskRunner.handleReject`).
+ * `approvalId` (required since v4): same targeting as
+ * `TaskApprovePayloadSchema.approvalId` above, applied to the reject path
+ * (`TaskRunner.handleReject`).
  */
 export declare const TaskRejectPayloadSchema: z.ZodObject<{
     reason: z.ZodOptional<z.ZodString>;
-    approvalId: z.ZodOptional<z.ZodString>;
+    approvalId: z.ZodString;
 }, z.core.$strip>;
 export type TaskRejectPayload = z.infer<typeof TaskRejectPayloadSchema>;
 /**
@@ -5042,18 +4894,17 @@ export type TaskSteerPayload = z.infer<typeof TaskSteerPayloadSchema>;
  * `task.started`.
  *
  * `runtime` (M5, additive-minor — docs/protocol.md §3.1): the ACTUAL
- * adapter this device selected for the task, distinct from `task.offer`'s
- * own `runtime` (the merely REQUESTED one, `TaskOfferPayloadSchema.runtime`
+ * adapter this device selected for the task, distinct from the offer's
+ * own `runtime` (the merely REQUESTED one, `TaskOfferForAgentPayloadSchema.runtime`
  * above). When an offer names no runtime the daemon auto-selects (pi-first —
  * `TaskRunner.pickAdapter`, `packages/client`'s `task-runner.ts`), and before
  * this field existed the server had no way to learn which adapter actually
  * ran — `TaskSnapshot.runtime` (`packages/server`'s `types.ts`) only ever
  * recorded what was requested. Plain optional property on this already-
  * tolerant `z.object()`: an old server simply never reads it, so this needed
- * no version bump and no emission gating (same shape as `approvalId` on
- * `task.await_approval`/`task.approve`/`task.reject`, §5.3) — a new daemon
- * sends it unconditionally, regardless of whether the connected server is
- * new enough to store it.
+ * no version bump and no emission gating — a new daemon sends it
+ * unconditionally, regardless of whether the connected server is new enough
+ * to store it.
  *
  * `capabilities` (S0/D-4, additive-minor — docs/protocol.md §2.4): the
  * TASK-level capability authority — what the claiming adapter reported about
@@ -5243,24 +5094,16 @@ export type TaskArtifactPayload = z.infer<typeof TaskArtifactPayloadSchema>;
 /**
  * daemon -> server: task is blocked on an out-of-band approval.
  *
- * `approvalId` (M5, additive-minor — docs/protocol.md §5.3): the daemon's own
- * locally-generated identity for THIS SPECIFIC pending approval
- * (`ApprovalRegistry`, `packages/client`'s `approvals.ts`) — included
- * unconditionally by an M5+ daemon, regardless of whether the connected
- * server has advertised the `approval-targeting` capability flag
- * (`version.ts`; see that flag's own doc comment for why no emission gating
- * is needed here — it's a tolerant `z.object()` field, so an older server
- * simply ignores it). Optional purely for wire tolerance with a pre-M5
- * daemon build that never set it at all: a server that never learns an id
- * for a task's current approval can't target a later `approve`/`reject`
- * decision and falls back to resolving "whichever approval is currently
- * pending" — the same behavior every server had before this field existed.
+ * `approvalId` (required since v4): the daemon's own locally-generated
+ * identity for THIS SPECIFIC pending approval (`ApprovalRegistry`,
+ * `packages/client`'s `approvals.ts`). The server echoes it on the
+ * `task.approve`/`task.reject` that decides this approval.
  */
 export declare const TaskAwaitApprovalPayloadSchema: z.ZodObject<{
     sealed: z.ZodOptional<z.ZodNever>;
     sealing: z.ZodOptional<z.ZodNever>;
     summary: z.ZodString;
-    approvalId: z.ZodOptional<z.ZodString>;
+    approvalId: z.ZodString;
 }, z.core.$strip>;
 export type TaskAwaitApprovalPayload = z.infer<typeof TaskAwaitApprovalPayloadSchema>;
 /**
@@ -5705,21 +5548,9 @@ export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
  * a fail-closed `requestApproval` timeout, or a fail-closed eviction/finish
  * rejection (see `packages/client`'s `task-runner.ts`/`approvals.ts`) —
  * *without* a wire `task.approve`/`task.reject` ever having been exchanged
- * for it. This is the additive-minor answer to a gap the M4 Phase 3 approval
- * work left open (see the "Deferred additive candidate" note this schema
- * resolves, `docs/protocol.md`): today the server only learns of a local
- * resolution IMPLICITLY, after the fact, once the daemon's next
- * `task.progress`/`task.artifact`/`task.complete` proves the task already
- * moved on (the `relay.onTaskActivity` hook in
- * `packages/server/src/index.ts`) — a window in which a SaaS-side
- * `TaskHandle.approve()`/`.reject()` can independently decide (and win) the
- * server's own authoritative record before that evidence ever arrives. This
- * message lets the daemon report the local resolution explicitly and
- * immediately, narrowing that window from "until the next progress message"
- * down to ordinary network latency; the implicit-inference path stays as-is,
- * unconditionally, as the compatibility fallback for an old server that
- * never advertises the `approval_resolved` capability flag (`version.ts`) or
- * an old daemon that predates this message entirely.
+ * for it. Baseline since v4: the daemon reports every local resolution, and
+ * this report is the server's only source for one; the server does not infer
+ * a resolution from later task activity.
  *
  * Observability-class tolerance applies (not control/security — see the
  * freeze rule's asymmetry, `docs/protocol.md`): this is a daemon reporting
@@ -5730,10 +5561,8 @@ export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
  * non-control payload in this file.
  *
  * `resolvedBy` is a single-value enum (`'local'`) rather than a bare string:
- * deliberately future-proof (a later wave could add e.g. `'operator-cli'` as
- * a DISTINCT value without a version bump — a new enum member is additive,
- * same as a new message type or capability flag), while still being a closed,
- * typed shape today rather than an open string a typo could silently widen.
+ * a later wave could add a DISTINCT value as a gated addition, while the
+ * shape stays closed and typed today.
  */
 export declare const TaskApprovalResolvedPayloadSchema: z.ZodObject<{
     approvalId: z.ZodString;
@@ -5747,177 +5576,6 @@ export declare const TaskApprovalResolvedPayloadSchema: z.ZodObject<{
     at: z.ZodISODateTime;
 }, z.core.$strip>;
 export type TaskApprovalResolvedPayload = z.infer<typeof TaskApprovalResolvedPayloadSchema>;
-/** server -> daemon: `task.offer` of a sealed task. */
-export declare const TaskOfferSealedPayloadSchema: z.ZodObject<{
-    runtime: z.ZodOptional<z.ZodEnum<{
-        claude: "claude";
-        codex: "codex";
-        pi: "pi";
-    }>>;
-    harnessId: z.ZodOptional<z.ZodString>;
-    dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
-        lane: z.ZodLiteral<"subscription">;
-        runtimeId: z.ZodEnum<{
-            claude: "claude";
-            codex: "codex";
-        }>;
-        providerId: z.ZodNull;
-        modelId: z.ZodString;
-    }, z.core.$strict>, z.ZodObject<{
-        lane: z.ZodLiteral<"byok">;
-        runtimeId: z.ZodLiteral<"pi">;
-        providerId: z.ZodString;
-        modelId: z.ZodString;
-    }, z.core.$strict>, z.ZodObject<{
-        lane: z.ZodLiteral<"byok-profile">;
-        runtimeId: z.ZodLiteral<"pi">;
-        providerProfile: z.ZodObject<{
-            profileRef: z.ZodString;
-            profileRevision: z.ZodString;
-            profileHash: z.ZodString;
-            modelId: z.ZodString;
-            requiredCapabilities: z.ZodArray<z.ZodEnum<{
-                "image-input": "image-input";
-            }>>;
-        }, z.core.$strict>;
-    }, z.core.$strict>], "lane">>;
-    sessionRef: z.ZodOptional<z.ZodString>;
-    workspaceHint: z.ZodOptional<z.ZodString>;
-    limits: z.ZodOptional<z.ZodObject<{
-        maxDurationMs: z.ZodOptional<z.ZodNumber>;
-        maxTokens: z.ZodOptional<z.ZodNumber>;
-    }, z.core.$strip>>;
-    instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
-        blobRef: z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-            url: z.ZodOptional<z.ZodString>;
-        }, z.core.$strip>;
-    }, z.core.$strict>]>>;
-    sealing: z.ZodObject<{
-        scopeId: z.ZodString;
-        epoch: z.ZodNumber;
-        categories: z.ZodArray<z.ZodEnum<{
-            "task-input": "task-input";
-            "task-output": "task-output";
-        }>>;
-    }, z.core.$strict>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-input">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
-}, z.core.$strict>;
-export type TaskOfferSealedPayload = z.infer<typeof TaskOfferSealedPayloadSchema>;
-/** server -> daemon: `task.offer_with_toolsets` of a sealed task. */
-export declare const TaskOfferWithToolsetsSealedPayloadSchema: z.ZodObject<{
-    runtime: z.ZodOptional<z.ZodEnum<{
-        claude: "claude";
-        codex: "codex";
-        pi: "pi";
-    }>>;
-    harnessId: z.ZodOptional<z.ZodString>;
-    dispatchSelection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
-        lane: z.ZodLiteral<"subscription">;
-        runtimeId: z.ZodEnum<{
-            claude: "claude";
-            codex: "codex";
-        }>;
-        providerId: z.ZodNull;
-        modelId: z.ZodString;
-    }, z.core.$strict>, z.ZodObject<{
-        lane: z.ZodLiteral<"byok">;
-        runtimeId: z.ZodLiteral<"pi">;
-        providerId: z.ZodString;
-        modelId: z.ZodString;
-    }, z.core.$strict>, z.ZodObject<{
-        lane: z.ZodLiteral<"byok-profile">;
-        runtimeId: z.ZodLiteral<"pi">;
-        providerProfile: z.ZodObject<{
-            profileRef: z.ZodString;
-            profileRevision: z.ZodString;
-            profileHash: z.ZodString;
-            modelId: z.ZodString;
-            requiredCapabilities: z.ZodArray<z.ZodEnum<{
-                "image-input": "image-input";
-            }>>;
-        }, z.core.$strict>;
-    }, z.core.$strict>], "lane">>;
-    sessionRef: z.ZodOptional<z.ZodString>;
-    workspaceHint: z.ZodOptional<z.ZodString>;
-    limits: z.ZodOptional<z.ZodObject<{
-        maxDurationMs: z.ZodOptional<z.ZodNumber>;
-        maxTokens: z.ZodOptional<z.ZodNumber>;
-    }, z.core.$strip>>;
-    requiredToolsets: z.ZodArray<z.ZodString>;
-    instruction: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
-        blobRef: z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-            url: z.ZodOptional<z.ZodString>;
-        }, z.core.$strip>;
-    }, z.core.$strict>]>>;
-    sealing: z.ZodObject<{
-        scopeId: z.ZodString;
-        epoch: z.ZodNumber;
-        categories: z.ZodArray<z.ZodEnum<{
-            "task-input": "task-input";
-            "task-output": "task-output";
-        }>>;
-    }, z.core.$strict>;
-    sealed: z.ZodOptional<z.ZodObject<{
-        v: z.ZodLiteral<1>;
-        suite: z.ZodLiteral<"byok-sealed-v1.hkdf-sha256.aes-256-gcm">;
-        category: z.ZodLiteral<"task-input">;
-        scope: z.ZodObject<{
-            id: z.ZodString;
-            epoch: z.ZodNumber;
-            keyId: z.ZodString;
-        }, z.core.$strict>;
-        chainHead: z.ZodObject<{
-            seq: z.ZodNumber;
-            hash: z.ZodString;
-        }, z.core.$strict>;
-        sender: z.ZodString;
-        salt: z.ZodString;
-        nonce: z.ZodString;
-        paddedLength: z.ZodNumber;
-        contentMac: z.ZodString;
-        ciphertext: z.ZodOptional<z.ZodString>;
-        ciphertextRef: z.ZodOptional<z.ZodObject<{
-            blobId: z.ZodString;
-            contentHash: z.ZodString;
-            size: z.ZodNumber;
-            contentType: z.ZodString;
-        }, z.core.$strict>>;
-    }, z.core.$strict>>;
-}, z.core.$strict>;
-export type TaskOfferWithToolsetsSealedPayload = z.infer<typeof TaskOfferWithToolsetsSealedPayloadSchema>;
 /** server -> daemon: `task.offer_for_agent` of a sealed task. */
 export declare const TaskOfferForAgentSealedPayloadSchema: z.ZodObject<{
     agentRef: z.ZodObject<{
@@ -6723,14 +6381,10 @@ export type TaskAwaitApprovalSealedPayload = z.infer<typeof TaskAwaitApprovalSea
  * the published `.d.ts` small. Every new entry follows this rule.
  */
 declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
-    readonly 'task.offer': typeof TaskOfferPayloadSchema;
-    readonly 'task.offer_with_toolsets': typeof TaskOfferWithToolsetsPayloadSchema;
     readonly 'task.offer_for_agent': typeof TaskOfferForAgentPayloadSchema;
     readonly 'task.offer_for_agent_with_egress': typeof TaskOfferForAgentWithEgressPayloadSchema;
     readonly 'task.offer_for_agent_with_egress_fresh': typeof TaskOfferForAgentWithEgressFreshPayloadSchema;
     readonly 'task.offer_prepared': typeof TaskOfferPreparedPayloadSchema;
-    readonly 'task.offer_sealed': typeof TaskOfferSealedPayloadSchema;
-    readonly 'task.offer_with_toolsets_sealed': typeof TaskOfferWithToolsetsSealedPayloadSchema;
     readonly 'task.offer_for_agent_sealed': typeof TaskOfferForAgentSealedPayloadSchema;
     readonly 'task.offer_for_agent_with_egress_sealed': typeof TaskOfferForAgentWithEgressSealedPayloadSchema;
     readonly 'task.offer_for_agent_with_egress_fresh_sealed': typeof TaskOfferForAgentWithEgressFreshSealedPayloadSchema;
@@ -6740,19 +6394,14 @@ export declare const TASK_OFFER_TYPES: readonly TaskOfferType[];
 /** Classify task-opening offers without duplicating the protocol registry in consumers. */
 export declare function isTaskOfferType(type: string): type is TaskOfferType;
 export declare const MESSAGE_PAYLOAD_SCHEMAS: {
-    readonly 'task.offer': typeof TaskOfferPayloadSchema;
-    readonly 'task.offer_with_toolsets': typeof TaskOfferWithToolsetsPayloadSchema;
     readonly 'task.offer_for_agent': typeof TaskOfferForAgentPayloadSchema;
     readonly 'task.offer_for_agent_with_egress': typeof TaskOfferForAgentWithEgressPayloadSchema;
     readonly 'task.offer_for_agent_with_egress_fresh': typeof TaskOfferForAgentWithEgressFreshPayloadSchema;
     readonly 'task.offer_prepared': typeof TaskOfferPreparedPayloadSchema;
-    readonly 'task.offer_sealed': typeof TaskOfferSealedPayloadSchema;
-    readonly 'task.offer_with_toolsets_sealed': typeof TaskOfferWithToolsetsSealedPayloadSchema;
     readonly 'task.offer_for_agent_sealed': typeof TaskOfferForAgentSealedPayloadSchema;
     readonly 'task.offer_for_agent_with_egress_sealed': typeof TaskOfferForAgentWithEgressSealedPayloadSchema;
     readonly 'task.offer_for_agent_with_egress_fresh_sealed': typeof TaskOfferForAgentWithEgressFreshSealedPayloadSchema;
     readonly 'conn.hello': typeof ConnHelloPayloadSchema;
-    readonly 'conn.ack': typeof ConnAckPayloadSchema;
     readonly 'agent.egress.reliable': typeof AgentEgressReliablePayloadSchema;
     readonly 'agent.egress.ack': typeof AgentEgressAckPayloadSchema;
     readonly 'agent.message.draft': typeof AgentMessageDraftPayloadSchema;
@@ -6795,7 +6444,7 @@ export declare const MESSAGE_TYPES: MessageType[];
  * (`envelope.ts`) to decide which branches require envelope `seq` (M1
  * redelivery cursor).
  */
-export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "task.offer_prepared", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "provider.provisioning.available", "agent.memory.intent.available", "task.approve", "task.reject", "task.cancel", "task.steer", "task.offer_sealed", "task.offer_with_toolsets_sealed", "task.offer_for_agent_sealed", "task.offer_for_agent_with_egress_sealed", "task.offer_for_agent_with_egress_fresh_sealed", "task.steer_sealed", "e2ee.key_package.available"];
+export declare const SERVER_TO_DAEMON_TYPES: readonly ["task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "task.offer_prepared", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "provider.provisioning.available", "agent.memory.intent.available", "task.approve", "task.reject", "task.cancel", "task.steer", "task.offer_for_agent_sealed", "task.offer_for_agent_with_egress_sealed", "task.offer_for_agent_with_egress_fresh_sealed", "task.steer_sealed", "e2ee.key_package.available"];
 /**
  * Message types the daemon sends to the server — the flip side of
  * {@link SERVER_TO_DAEMON_TYPES}. `conn.hello` is deliberately excluded: the
@@ -7670,8 +7319,6 @@ export interface SealedSplitEntry {
  * takes up to 2 MiB instead of the plaintext 64 KB (decision 12b).
  */
 export declare const SEALED_SPLIT_TABLE: Readonly<{
-    readonly 'task.offer_sealed': SealedSplitEntry;
-    readonly 'task.offer_with_toolsets_sealed': SealedSplitEntry;
     readonly 'task.offer_for_agent_sealed': SealedSplitEntry;
     readonly 'task.offer_for_agent_with_egress_sealed': SealedSplitEntry;
     readonly 'task.offer_for_agent_with_egress_fresh_sealed': SealedSplitEntry;
@@ -7815,14 +7462,25 @@ export type TerminalProjectionSelection = z.infer<typeof TerminalProjectionSelec
 export declare const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
 export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
 /**
- * Wire protocol version. Every v3 change is a version bump, a gated addition
+ * Wire protocol version. Every v4 change is a version bump, a gated addition
  * or a strip-safe addition: see docs/protocol.md "Freeze rule", which is the
  * one statement of the rule, and `src/wire-additions.ts`, which declares the
- * receiver-capability gates and additions. No v3 release has been published
- * yet, so `src/__tests__/compat.test.ts` has no published v3 decoder to prove
+ * receiver-capability gates and additions. No v4 release has been published
+ * yet, so `src/__tests__/compat.test.ts` has no published v4 decoder to prove
  * additions against; cross-release gates stay unproven until one exists.
  *
- * v3 makes `schema` required on the `terminalProjection.mode:
+ * v4 completes the ADR-034 cutover and retires the approval paths kept for
+ * pre-M5 peers. It removes the v3 handshake answer, the runtime-only offers
+ * (with and without toolsets) with their sealed twins, and the
+ * `strict-agent-only` flag: every offer is Agent-bound. `approvalId` is
+ * required on `task.await_approval`, `task.approve` and `task.reject`, so a
+ * decision resolves only the approval it names. `task.approval_resolved` is
+ * baseline: the daemon reports every locally resolved approval, and the
+ * server no longer infers one from later task activity. The three approval
+ * capability flags of v3 are gone. A v3 envelope is rejected; there is no v3 reader. Drain, then
+ * upgrade server and client together.
+ *
+ * v3 made `schema` required on the `terminalProjection.mode:
  * 'result-document'` arm (`terminal-projection.ts`, `result-schema.ts`): the
  * offer freezes the outcome schema, and the outcome reaches the Host only as
  * `task.complete.document`. That narrows a strict shape, so it is a wire
@@ -7844,9 +7502,7 @@ export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
  * attest tool executables. The artifact names its counted tools in
  * `toolNames`.
  */
-export declare const PROTOCOL_VERSION = 3;
-/** Host declares that this device accepts only Agent-bound offer variants. */
-export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
+export declare const PROTOCOL_VERSION = 4;
 /**
  * The device runs `homeAccess: 'memory-reader'` Agent offers: each reader
  * Attempt gets its own run directory under the Agent home, and readers are
@@ -7861,67 +7517,26 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
  * flags may be introduced without a protocol version bump; unrecognized flags
  * must be ignored by both sides.
  *
- * `interactive-approval` is RESERVED as of this addition: it gates the
- * (currently unexercised) approval seam — a server must not route an
- * approval-requiring policy to a daemon that hasn't advertised this flag. No
- * bundled runtime adapter emits it yet; that's expected until interactive
- * approval is actually wired up in a later wave.
- *
- * `approval_resolved` (additive-minor): a SERVER-advertised flag meaning
- * "I understand the `task.approval_resolved` message" (`messages.ts`). This
- * is the N/N-1 answer for that new daemon -> server message: an old server's
- * advertised capabilities never include it, so a new daemon talking to an old
- * server never sends `task.approval_resolved` at all (see `packages/client`'s
- * `task-runner.ts`) and falls back to the pre-existing implicit-resume inference
- * (the `relay.onTaskActivity` hook in `packages/server/src/index.ts`)
- * unconditionally, exactly as before this flag existed. Unlike
- * `interactive-approval`, this one IS exercised the moment both sides
- * support it — there is no reserved/dormant period for it.
- */
-/**
- * `approval-targeting` (M5, additive-minor): unlike `approval_resolved`
- * above, this flag is purely INFORMATIONAL/semantic, not a functional gate.
- * `task.await_approval`/`task.approve`/`task.reject` all carry their new
- * `approvalId` field UNCONDITIONALLY on both sides once each peer is
- * upgraded -- the wire is tolerant (a plain, non-`.strict()` `z.object()`
- * field, `messages.ts`), so no version/capability negotiation is needed just
- * to send it safely; an older peer that doesn't recognize the field simply
- * never reads it. Receivers decide whether to apply exact-match targeting
- * by FIELD PRESENCE on the specific message at hand (does this particular
- * `task.approve`/`task.reject`/`onApprovalResolved` payload carry an
- * `approvalId`, and does a stored one exist to compare it against?), never
- * by checking this flag -- see `approveTask`/`rejectTask` (`@byok-sdk/cloud`)
- * and `TaskRunner.handleApprove`/`handleReject` (`packages/client`'s
- * `task-runner.ts`). This flag exists only so each side can advertise
- * whether the OTHER side is new enough to participate in targeting at all (an
- * embedder could observe it through the old
- * reference server's `ConnectionHub.getDeviceCapabilities`; `@byok-sdk/server`
- * now reads it only internally) -- the same N/N-1-safe shape as every other
- * flag here, just consumed for observability instead of gating.
- */
-/**
  * `dispatch-selection` (additive-minor) is a correctness gate for the
- * optional `task.offer.dispatchSelection` control field. An older v1 daemon
+ * optional offer `dispatchSelection` control field. An older v1 daemon
  * legally strips unknown optional fields, so a server must never send an
  * authoritative provider/model selection unless the target connection
  * advertises this flag. Absence means reject before task creation, not send
- * a legacy runtime-only offer that could reach a different provider.
+ * an offer that could reach a different provider.
  *
- * `toolset-selection` (additive-minor) means the daemon understands
- * `task.offer_with_toolsets` and can resolve its logical ids against local
- * MCP configuration. The distinct message type is also the N/N-1 safety
- * boundary for long-poll: an older daemon skips it as unknown and therefore
- * cannot accidentally execute the instruction without the required tools.
+ * `toolset-selection` (additive-minor) means the daemon understands an
+ * offer's `requiredToolsets` and can resolve its logical ids against local
+ * MCP configuration.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", 'agent-message-draft', "sealed-payload-v1", "sealed-output-ciphertext-ref", "runtime-failure-class"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", 'agent-message-draft', "sealed-payload-v1", "sealed-output-ciphertext-ref", "runtime-failure-class"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 /**
  * The one table of receiver-capability gates and wire additions
  * (docs/protocol.md "Freeze rule").
  *
- * A v3 change takes exactly one of three paths: a version bump, a gated
+ * A v4 change takes exactly one of three paths: a version bump, a gated
  * addition, or a strip-safe addition. Envelope and HTTP rows have explicit
  * kinds. The last two are declared here.
  *
@@ -7938,11 +7553,11 @@ export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
  * strip-safe rows and the v2 `result-document` gate are gone. The device
  * gates kept below name capabilities a daemon advertises only when it is
  * configured for them (Agent home, egress, input preparation, provisioning,
- * memory intents and so on): they gate on the receiver's configuration. The
- * server-advertised `approval_resolved` gate is kept as the daemon's sending
- * condition for `task.approval_resolved`. The first stable v3 decoder is
- * 0.27.0. Cross-release checks use its actual registry tarball
- * (`src/__tests__/published-compat.test.ts`).
+ * memory intents and so on): they gate on the receiver's configuration.
+ *
+ * v4 baseline: every v4 server reads `task.approval_resolved`, so its
+ * `approval_resolved` gate is gone. No v4 release has been published yet, so
+ * no published decoder proves these rows across releases.
  *
  * Senders derive their admission flags from {@link requiredReceiverCapabilities}
  * and nowhere else, so a gate cannot exist in one place and be missing in
@@ -7979,3 +7594,34 @@ export declare const WIRE_ADDITIONS: readonly WireAddition[];
  */
 export declare function requiredReceiverCapabilities(type: MessageType, payload: unknown): CapabilityFlag[];
 export {};
+// ==== @byok-sdk/protocol dist/wire-v4-migration.d.ts ====
+import { type MessageType } from './messages';
+/**
+ * Every wire v3 message type and its v4 type. `null` marks a v3 type that v4
+ * does not carry: a stored body of that type cannot be migrated.
+ */
+export declare const WIRE_V3_TO_V4_TYPES: Readonly<Record<string, MessageType | null>>;
+/** Why a stored v3 body cannot be migrated. */
+export type WireV4MigrationRefusal = 
+/** Not JSON, not an envelope object, or not `v: 3`. */
+'not_wire_v3'
+/** A v3 type that {@link WIRE_V3_TO_V4_TYPES} maps to `null`, or does not list. */
+ | 'type_without_v4_form'
+/** The mapped envelope does not parse under v4. */
+ | 'invalid_under_v4';
+export type WireV4MigrationResult = {
+    readonly ok: true;
+    readonly type: MessageType;
+    readonly body: string;
+} | {
+    readonly ok: false;
+    readonly type?: string;
+    readonly refusal: WireV4MigrationRefusal;
+};
+/** The v4 type of a v3 type, or `undefined` when v4 does not carry it. */
+export declare function wireV4TypeOf(v3Type: string): MessageType | undefined;
+/**
+ * Re-encodes one stored wire v3 envelope as v4. The result is the canonical
+ * v4 encoding, so its bytes and hash differ from the v3 body.
+ */
+export declare function migrateWireV3Envelope(body: string): WireV4MigrationResult;

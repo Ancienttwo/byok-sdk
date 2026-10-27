@@ -54,13 +54,15 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
     return this.#state.mutate(key, () => {
       const existing = this.#state.attempts.get(key);
       if (existing !== undefined) return existing;
+      const now = this.#now();
       const attempt: TaskAttempt = {
         tenantId: tenant,
         taskId: input.taskId,
         deviceId: input.deviceId,
         ...(input.agentRef === undefined ? {} : { agentRef: { ...input.agentRef } }),
         status: 'offered',
-        updatedAt: this.#now(),
+        offeredAt: now,
+        updatedAt: now,
       };
       this.#state.attempts.set(key, attempt);
       return attempt;
@@ -75,13 +77,15 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
     return this.#state.mutate(key, () => {
       const existing = this.#state.attempts.get(key);
       if (existing !== undefined) return { attempt: existing, created: false };
+      const now = this.#now();
       const attempt: TaskAttempt = {
         tenantId: tenant,
         taskId: input.taskId,
         deviceId: input.deviceId,
         agentRef: { ...input.agentRef },
         status: 'offered',
-        updatedAt: this.#now(),
+        offeredAt: now,
+        updatedAt: now,
       };
       this.#state.attempts.set(key, attempt);
       return { attempt, created: true };
@@ -114,7 +118,29 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
         messageId: input.messageId,
         payloadBody: input.payloadBody,
       });
+      if (attempt.ownerDeviceId !== undefined && attempt.firstOutputAt === undefined) {
+        this.#state.attempts.set(key, { ...attempt, firstOutputAt: this.#now() });
+      }
       return 'reserved';
+    });
+  }
+
+  async recordFirstOutput(
+    tenant: TenantId, input: { readonly taskId: string; readonly deviceId: string },
+  ): Promise<TaskAttempt | undefined> {
+    const key = tenantKey(tenant, input.taskId);
+    return this.#state.mutate(key, () => {
+      const attempt = this.#state.attempts.get(key);
+      if (
+        attempt === undefined ||
+        attempt.deviceId !== input.deviceId ||
+        attempt.ownerDeviceId === undefined ||
+        attempt.firstOutputAt !== undefined ||
+        ['complete', 'failed', 'cancelled'].includes(attempt.status)
+      ) return attempt;
+      const stamped: TaskAttempt = { ...attempt, firstOutputAt: this.#now() };
+      this.#state.attempts.set(key, stamped);
+      return stamped;
     });
   }
 
@@ -232,6 +258,7 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
       // The claim snapshot is written here and nowhere else: this branch is
       // reached only by the claim that actually takes the ownership, so a
       // re-claim (which returned above) can never restamp it.
+      const now = this.#now();
       const claimed: TaskAttempt = {
         ...existing,
         ownerDeviceId: input.deviceId,
@@ -241,7 +268,8 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
           ? {}
           : { claimedRuntimeCapabilities: { ...input.capabilities } }),
         status: 'claimed',
-        updatedAt: this.#now(),
+        claimedAt: now,
+        updatedAt: now,
       };
       this.#state.attempts.set(key, claimed);
       return claimed;
@@ -274,11 +302,13 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
       ) {
         return existing;
       }
+      const updatedAt = this.#now();
       const updated: TaskAttempt = {
         ...existing,
         status: input.status,
         ...(input.terminalCause === undefined ? {} : { terminalCause: input.terminalCause }),
-        updatedAt: this.#now(),
+        ...(existing.terminalAt === undefined && ['complete', 'failed', 'cancelled'].includes(input.status) ? { terminalAt: updatedAt } : {}),
+        updatedAt,
       };
       this.#state.attempts.set(key, updated);
       return updated;

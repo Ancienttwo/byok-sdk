@@ -12,7 +12,7 @@ import { Hono } from 'hono';
 import { type AgentExecutionInput, type AgentMemoryIntentNoticeInput, type EnqueuedAgentControl, type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
-export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, LegacyDispatchInput, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
+export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
@@ -44,6 +44,7 @@ export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenS
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
 export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
 export type { SqliteSchemaErrorCode } from './sqlite-support';
+export { migrateSqliteToWireV4, preflightSqliteWireV4Migration } from './stores/sqlite/wire-v4-receipt-migration';
 export type { RateLimiterOptions } from './rate-limiter';
 export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 /** Page size `tasks.list()` uses when the caller names none. */
@@ -134,6 +135,18 @@ export interface ByokServer {
         messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
         /** Request cancellation through the kernel without a process-owned TaskHandle. */
         cancel(taskId: string, reason?: string): Promise<void>;
+        /**
+         * Approve the task's pending approval without a process-owned TaskHandle,
+         * such as a task `executions.submit` created. The same decision and
+         * refusals as {@link TaskHandle.approve}.
+         */
+        approve(taskId: string, opts?: {
+            approvalId?: string;
+        }): Promise<void>;
+        /** Reject the task's pending approval; the same decision and refusals as {@link TaskHandle.reject}. */
+        reject(taskId: string, reason?: string, opts?: {
+            approvalId?: string;
+        }): Promise<void>;
         /**
          * One bounded page, keyset-paged by task id. Paged rather than "all of
          * them" because the underlying store is: an unbounded `list()` would have
@@ -448,18 +461,10 @@ export interface TaskEventRelayOptions {
  * store no-op rather than a rejection.
  *
  * `onInboundCommitted` runs inline on the kernel's request path and must stay
- * synchronous and cheap; anything needing a store read goes through
- * {@link onTaskActivity}, which the composition sets and which owns its own
- * failure handling.
+ * synchronous and cheap.
  */
 export declare class TaskEventRelay implements ByokCloudObserver {
     #private;
-    /**
-     * Called once per committed task-progress observation for a dispatched task.
-     * The composition uses it to run the implicit-approval-resume check, which
-     * needs a store read and therefore cannot happen inline here.
-     */
-    onTaskActivity: ((taskId: string, pendingRequestSourceEnvelopeId: string | undefined, activitySourceEnvelopeId: string, activityAt: string) => void) | undefined;
     constructor(options: TaskEventRelayOptions);
     /** The cross-task embedder feed backing `ByokServer.events.subscribe()`. */
     serverEvents(): AsyncIterable<ByokServerEvent>;
@@ -491,8 +496,6 @@ export declare class TaskEventRelay implements ByokCloudObserver {
     onAgentMessageDraft(taskId: string): void;
     watchAgentMessageDraft(taskId: string, wake: () => void): () => void;
     onInboundCommitted(input: InboundCommitted): void;
-    /** Publish an implicit resolution the composition inferred from later task traffic. */
-    emitImplicitApprovalResolved(taskId: string, at: string): void;
     /** Close every feed and drop every timer. Safe to call more than once. */
     stop(): void;
 }
@@ -635,6 +638,17 @@ export declare function openSqliteDatabase(path: string, options?: DatabaseSyncO
  * treated as an error. No-op for `:memory:`.
  */
 export declare function secureSqliteFilePermissions(dbPath: string): void;
+// ==== @byok-sdk/server dist/stores/sqlite/wire-v4-receipt-migration.d.ts ====
+import { type WireV3LegacyTask, type WireV4MigrationPreflight, type WireV4ReceiptMigrationResult } from '@byok-sdk/cloud';
+/** Lists the legacy tasks and every unmappable row of the store at `path`. Changes nothing. */
+export declare function preflightSqliteWireV4Migration(path: string): Promise<WireV4MigrationPreflight>;
+/**
+ * Migrates the store at `path` when the preflight finds no unmappable row and
+ * `confirmedLegacyTasks` is exactly the preflight's legacy task list: deletes
+ * every row of those tasks, then re-encodes the remaining offer and terminal
+ * receipts, in one transaction. Otherwise it throws and changes nothing.
+ */
+export declare function migrateSqliteToWireV4(path: string, confirmedLegacyTasks: readonly WireV3LegacyTask[]): Promise<WireV4ReceiptMigrationResult>;
 // ==== @byok-sdk/server dist/task-handle.d.ts ====
 import { type ByokCloud, type SteerRejectionCode, type TenantId } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
@@ -686,6 +700,20 @@ export interface TaskHandleDeps {
     /** The read-back this handle's `result()` answers with. */
     readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
 }
+type ApprovalDeps = Pick<TaskHandleDeps, 'tenant' | 'cloud' | 'relay'>;
+/**
+ * The host's approval decision, shared by {@link TaskHandle.approve} and
+ * `ByokServer.tasks.approve`. Cloud atomically records it in the one approval
+ * timeline before this notification is enqueued; the relay remains a
+ * notification projection, never a second writer for that authority.
+ */
+export declare function approvePendingApproval(deps: ApprovalDeps, taskId: string, opts?: {
+    approvalId?: string;
+}): Promise<void>;
+/** The rejection counterpart of {@link approvePendingApproval}. */
+export declare function rejectPendingApproval(deps: ApprovalDeps, taskId: string, reason?: string, opts?: {
+    approvalId?: string;
+}): Promise<void>;
 /**
  * One in-flight task's control surface.
  *
@@ -697,6 +725,7 @@ export interface TaskHandleDeps {
  * cached here.
  */
 export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHandle;
+export {};
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclinePayload, TaskFailure, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
@@ -839,7 +868,7 @@ interface DispatchInputBase {
     instruction: string;
     /**
      * Authoritative web-selected target. When present, `runtime` is derived
-     * from `runtimeId`; supplying a different legacy `runtime` is rejected.
+     * from `runtimeId`; supplying a different `runtime` is rejected.
      */
     dispatchSelection?: DispatchSelection;
     runtime?: RuntimeId;
@@ -849,8 +878,8 @@ interface DispatchInputBase {
     /** Logical device-local MCP toolsets required for this task; never executable definitions. */
     requiredToolsets?: ToolsetId[];
     /**
-     * An explicit, consumed Agent egress policy. This may only travel with an
-     * Agent-bound offer on the distinct egress-aware wire message.
+     * An explicit, consumed Agent egress policy. It travels on the distinct
+     * egress-aware Agent offer.
      */
     egressPolicy?: AgentEgressPolicy;
     /** Distinct user-visible message lane; independent of activity egress. */
@@ -879,11 +908,6 @@ interface DispatchInputBase {
     /** Host-only product destination/freshness authority; never serialized to the daemon. */
     agentMessageContext?: AgentMessageServerContext;
 }
-/** Legacy or toolset dispatch: no Agent identity. */
-export interface LegacyDispatchInput extends DispatchInputBase {
-    agentRef?: undefined;
-    sessionRef?: string;
-}
 /**
  * Agent resume dispatch: an explicit durable Agent identity plus the exact
  * session being resumed, via task.offer_for_agent (or its egress variant). A
@@ -896,7 +920,7 @@ export interface AgentResumeDispatchInput extends DispatchInputBase {
     sessionRef: string;
 }
 /** Input to {@link ByokServer.dispatch}. */
-export type DispatchInput = LegacyDispatchInput | AgentResumeDispatchInput;
+export type DispatchInput = AgentResumeDispatchInput;
 /** Host control-plane input for one exact content-read request. */
 export interface AgentContentReadRequest {
     readonly deviceId: string;
@@ -1016,8 +1040,8 @@ export interface TaskHandle {
     /**
      * M5 (approval targeting, docs/protocol.md §5.3): `opts.approvalId`
      * targets a SPECIFIC pending approval rather than "whichever one is
-     * currently pending" (the default when `opts` is omitted, unchanged from
-     * pre-M5). Thin wrapper over `ByokCloud.approveTask` (`@byok-sdk/cloud`) —
+     * currently pending" (the default when `opts` is omitted: the decision then
+     * names the pending approval's own id). Thin wrapper over `ByokCloud.approveTask` (`@byok-sdk/cloud`) —
      * see that method's own doc comment for the full targeting/staleness
      * semantics, including when this throws `StaleApprovalError` (re-exported
      * from this package's index for a caller to catch/inspect). The host's
@@ -1084,8 +1108,7 @@ export interface TaskSnapshot {
     /**
      * M5 (approval targeting, docs/protocol.md §5.3): the daemon-reported
      * `approvalId` for the CURRENT `AwaitApproval` cycle, if one is pending —
-     * `undefined` whenever the task isn't currently awaiting approval, OR it is
-     * but no id was ever reported for it (a legacy daemon).
+     * `undefined` whenever the task isn't currently awaiting approval.
      *
      * DERIVED, not stored: it is `pendingApproval()`'s fold over the task's
      * durable approval timeline (`@byok-sdk/cloud`), the same single authority
@@ -1193,56 +1216,18 @@ export type ByokServerEvent = {
     claimedHarnessId?: string;
 }
 /**
- * M4 Phase 3 hardening (orchestrator-directed): the daemon resolved a
- * pending approval entirely locally (M4 Phase 3's local `approvals.resolve`
- * control-socket path) — no wire `task.approve`/`task.reject` ever reached
- * the server for it. This fires when daemon-originated task traffic
- * (`task.progress`/`task.artifact`) for a task whose approval timeline still
- * shows an unresolved request proves, after the fact, that the approval was
- * resolved on the device. The façade records that resolution on the same
- * timeline, so the read model resumes from the one authority.
- * Deliberately NOT a wire message (no `packages/protocol` change) — a
- * first-class `task.approval_resolved` wire notification is a deferred
- * v1.1 candidate; this is purely an embedder-facing observability signal
- * so a SaaS UI can distinguish "approved server-side" from "the device
- * says it was approved locally" if it cares to.
- */
- | {
-    kind: 'task.approval_resolved_implicit';
-    taskId: string;
-    at: string;
-}
-/**
- * M4 (additive-minor): the EXPLICIT counterpart to
- * `task.approval_resolved_implicit` above — fires when the daemon reports
- * a locally-resolved approval via the wire `task.approval_resolved`
- * message rather than the server having to infer it from later task
- * traffic. Carries the same
- * `approvalId`/`decision`/`resolvedBy` the daemon reported, so an embedder
- * can render/audit exactly what was resolved and by which path, not just
- * that a resolution happened. `resolvedBy` is currently always `'local'`
- * (`@byok-sdk/protocol`'s `TaskApprovalResolvedPayloadSchema` — a single-value
- * enum today, future-proofed for an additional value later without a
- * version bump). Mutually exclusive with `task.approval_resolved_implicit`
- * for the same resolution: whichever mechanism the server processes first
- * clears the pending slot on the approval timeline, and the other finds
- * nothing left to clear by the time it would otherwise run.
+ * The daemon reported a locally-resolved approval with the wire
+ * `task.approval_resolved` message. Carries the `approvalId`/`decision`/
+ * `resolvedBy` the daemon reported, so an embedder can render or audit
+ * exactly what was resolved. `resolvedBy` is currently always `'local'`
+ * (`@byok-sdk/protocol`'s `TaskApprovalResolvedPayloadSchema`). This report
+ * is the only way the server learns of a local resolution; it does not
+ * infer one from later task traffic.
  */
  | ({
     kind: 'task.approval_resolved';
     taskId: string;
     at: string;
-    /**
-     * M5 (hello-capability plumbing, docs/protocol.md §5.3): whether the
-     * REPORTING device advertised the `approval-targeting` capability flag
-     * (`version.ts`) in its `conn.hello` — an observability-only signal
-     * (see that flag's own doc comment: it never gates matching, which is
-     * always decided by field presence on the specific message). Always
-     * `false` now: that flag was a property of the device's LIVE WebSocket
-     * registration, which no longer exists, and the durable capability list
-     * is a device-BUILD fact rather than a per-report one.
-     */
-    targeted: boolean;
 } & Pick<TaskApprovalResolvedPayload, 'approvalId' | 'decision' | 'resolvedBy'>)
 /**
  * M4 Phase 4 (part A): `deviceId` exceeded its inbound-envelope rate limit

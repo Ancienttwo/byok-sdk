@@ -1,4 +1,4 @@
-import { runMaintenanceAt } from './test-support';
+import { runMaintenanceAt, TEST_AGENT_DISPATCH } from './test-support';
 import { createHash } from 'node:crypto';
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -200,7 +200,7 @@ describe('Issues #112/#114/#115/#116/#117/#118/#120 reference-server regressions
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const owed = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'never acked' });
+    const owed = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'never acked' });
     // Read it (reading does not ack) so the row is genuinely undelivered work,
     // then retire it: the recoverable floor moves ONLY on expiry, never on
     // volume — the count-bounded replay ring that used to move it is deleted,

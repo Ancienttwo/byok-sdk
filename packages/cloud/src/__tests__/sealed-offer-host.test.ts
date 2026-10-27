@@ -11,41 +11,63 @@
  * Every blob here goes through the device blob routes. No store is mocked.
  */
 import type { ContentHash } from '@byok-sdk/core';
+import { sealContent } from '@byok-sdk/core/sealed-payload';
 import { decodeEnvelope, requiredReceiverCapabilities } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { TENANT_A, TENANT_B, createHarness, type CloudHarness, type PairedDevice } from './support/harness';
+import { TENANT_A, TENANT_B, TEST_AGENT_REF, createHarness, offerPayload, type CloudHarness, type PairedDevice } from './support/harness';
 import {
   BY_REFERENCE_TEXT_LENGTH,
   CIPHERTEXT_CONTENT_TYPE,
   SEALING,
   inlineMember,
   referenceMember,
-  sealInput,
   sha256Hash,
   uploadCiphertext,
   type CiphertextRef,
 } from './support/sealed';
 
 const TASK_ID = 'sealed-host-task';
-const TYPE = 'task.offer_sealed';
+const TYPE = 'task.offer_for_agent_sealed';
+/** The plaintext fields of the sealed Agent resume offer. */
+const RESUME = { runtime: 'pi', agentRef: TEST_AGENT_REF, sessionRef: offerPayload().sessionRef } as const;
+const SCOPE_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 
 async function sealedDevice(): Promise<{ harness: CloudHarness; device: PairedDevice }> {
   const harness = createHarness();
   const device = await harness.pairDevice(TENANT_A);
-  const capabilities = requiredReceiverCapabilities(TYPE, { sealing: SEALING, sealed: {} });
+  const capabilities = requiredReceiverCapabilities(TYPE, { ...RESUME, sealing: SEALING, sealed: {} });
   await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities });
   return { harness, device };
 }
 
+/** The sealed instruction. `sealInput` binds no Agent; an Agent offer's instruction binds the offer's Agent. */
 function seal(device: PairedDevice, instruction: string) {
-  return sealInput({ tenant: TENANT_A, deviceId: device.deviceId, type: TYPE, identity: { taskId: TASK_ID }, plaintext: { instruction } });
+  return sealContent({
+    scopeKey: SCOPE_KEY,
+    scope: { id: SEALING.scopeId, epoch: SEALING.epoch },
+    chainHead: { seq: 1, hash: `sha256:${'a'.repeat(64)}` },
+    sender: 'A'.repeat(43),
+    category: 'task-input',
+    binding: {
+      tenantId: TENANT_A,
+      family: 'task.offer_for_agent',
+      direction: 'server-to-daemon',
+      identity: { taskId: TASK_ID },
+      deviceId: device.deviceId,
+      agentRef: { ...TEST_AGENT_REF },
+      categories: [...SEALING.categories],
+      notAfter: null,
+    },
+    plaintext: { instruction },
+    maxContentLength: 2 * 1024 * 1024,
+  });
 }
 
 /** `plain` holds more plaintext fields of the offer. */
 function offer(harness: CloudHarness, device: PairedDevice, sealed: object, plain: object = {}) {
-  return harness.cloud.enqueueSealedOffer(TENANT_A, device.deviceId, {
+  return harness.cloud.enqueueSealedAgentOffer(TENANT_A, device.deviceId, {
     taskId: TASK_ID,
-    payload: { runtime: 'pi', ...plain, sealing: SEALING, sealed } as never,
+    payload: { ...RESUME, ...plain, sealing: SEALING, sealed } as never,
   });
 }
 
@@ -79,7 +101,7 @@ describe('a sealed offer retry keeps the first ciphertext (#654 §9.2)', () => {
     expect(retried.envelope.payload).toMatchObject({ sealed: inlineMember(first) });
     expect(await mailbox(harness, device)).toEqual([retried.envelope]);
     await expect(offer(harness, device, inlineMember(again)), 'a delivered offer is not offered again').rejects.toMatchObject({
-      code: 'coordination_input_invalid',
+      code: 'agent_task_already_exists',
     });
   });
 
@@ -99,12 +121,12 @@ describe('a sealed offer retry keeps the first ciphertext (#654 §9.2)', () => {
   it('refuses a plaintext field change under the same task id and the same sealed member, and keeps the first offer', async () => {
     const { harness, device } = await sealedDevice();
     const sealed = inlineMember(await seal(device, 'review the patch'));
-    await failedFirstOffer(harness, device, sealed, { workspaceHint: 'repo-a' });
+    await failedFirstOffer(harness, device, sealed, { sessionRef: 'session-a' });
 
-    await expect(offer(harness, device, sealed, { workspaceHint: 'repo-b' })).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    await expect(offer(harness, device, sealed, { sessionRef: 'session-b' })).rejects.toMatchObject({ code: 'coordination_input_invalid' });
     expect(await mailbox(harness, device)).toEqual([]);
-    const retried = await offer(harness, device, sealed, { workspaceHint: 'repo-a' });
-    expect(retried.envelope.payload).toMatchObject({ workspaceHint: 'repo-a', sealed });
+    const retried = await offer(harness, device, sealed, { sessionRef: 'session-a' });
+    expect(retried.envelope.payload).toMatchObject({ sessionRef: 'session-a', sealed });
     expect(await mailbox(harness, device)).toEqual([retried.envelope]);
   });
 });

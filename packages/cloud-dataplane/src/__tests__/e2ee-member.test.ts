@@ -328,11 +328,13 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres 0029 and the rotate entries stored bef
       await migrate(scope.pool, before);
       await scope.pool.query('INSERT INTO e2ee_member_chain_entry (tenant_id, seq, entry) VALUES ($1, 1, $2)', [TENANT_A, entry]);
       const floorTable = async () => (await scope.pool.query("SELECT to_regclass('e2ee_member_kem_floor') AS name")).rows[0].name;
+      // Add only 0029, so later migrations do not change what this run applies.
+      await copyFile(join(DEPLOY_SQL, '0029_e2ee_member_kem_floor.sql'), join(before, '0029_e2ee_member_kem_floor.sql'));
       if (outcome === 'refuses') {
-        await expect(migrate(scope.pool, DEPLOY_SQL)).rejects.toThrow(/holds rotate entries/u);
+        await expect(migrate(scope.pool, before)).rejects.toThrow(/holds rotate entries/u);
         expect(await floorTable()).toBeNull();
       } else {
-        await expect(migrate(scope.pool, DEPLOY_SQL)).resolves.toMatchObject({ applied: ['0029_e2ee_member_kem_floor.sql'] });
+        await expect(migrate(scope.pool, before)).resolves.toMatchObject({ applied: ['0029_e2ee_member_kem_floor.sql'] });
         expect(await floorTable()).toBe('e2ee_member_kem_floor');
       }
     } finally {

@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -12,6 +13,7 @@ import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { startRealCloud } from './fixtures/real-cloud';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const fn of cleanup.reverse()) await fn(); cleanup.length = 0; });
@@ -19,7 +21,7 @@ async function config(serverUrl: string): Promise<DaemonConfig> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'byok-terminal-boundaries-'));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   return { serverUrl, productId: 'terminal-boundaries', productName: 'Terminal boundaries',
-    localAgentRelease: { version: '0.0.0-test' }, workspaceRoot: path.join(root, 'work'),
+    localAgentRelease: { version: '0.0.0-test' },
     storeDir: path.join(root, 'store'), storage: { journal: { maxRecordBytes: 2048 } } };
 }
 async function post(url: string, token: string, envelope: Envelope) {
@@ -46,14 +48,14 @@ describe('terminal durability and actual harness boundaries', () => {
     const candidates: LocalTerminalRecord[] = [];
     const write = journal.recordTerminal.bind(journal);
     vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => { candidates.push(record); return write(record); });
-    const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
+    const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
     cleanup.push(async () => { fail = false; await daemon.stop(); await journal.close(); });
     await daemon.pair('pairing-code');
     const record = (await createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
     await daemon.start();
     const identity = { tenantId: record.tenantId, deviceId: record.deviceId, productId: cfg.productId };
     const seq = server.nextSeq();
-    const offer = createEnvelope('task.offer', { instruction: 'run once' }, { taskId: 'pending-decline', seq });
+    const offer = createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'run once' }, { taskId: 'pending-decline', seq });
     server.send(offer);
     await vi.waitFor(() => expect(candidates.length).toBeGreaterThan(0));
     expect((await journal.readTask('pending-decline', identity))?.localState).toBe('received');
@@ -87,12 +89,12 @@ describe('terminal durability and actual harness boundaries', () => {
     const candidates: LocalTerminalRecord[] = [];
     const write = journal.recordTerminal.bind(journal);
     vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => { candidates.push(record); return write(record); });
-    const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
+    const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
     cleanup.push(async () => { fail = false; await daemon.stop().catch(() => undefined); await journal.close(); });
     await daemon.pair('pairing-code');
     await daemon.start();
     const taskId = 'queued-past-stop';
-    server.send(createEnvelope('task.offer', { instruction: 'run once' }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'run once' }, { taskId, seq: server.nextSeq() }));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     fail = true;
     adapter.sessions[0]!.emit({ type: 'progress', text: 'the real result' });
@@ -117,16 +119,19 @@ describe('terminal durability and actual harness boundaries', () => {
         const cloud = await startRealCloud({ productId: 'terminal-boundaries' }); cleanup.push(() => cloud.close());
         const cfg = await config(cloud.url);
         const adapter = new StubRuntimeAdapter('acme-harness');
-        const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter]); cleanup.push(() => daemon.stop());
+        const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter]); cleanup.push(() => daemon.stop());
         const pairing = await cloud.createPairingCode();
         await daemon.pair(pairing.code);
         const device = (await createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
         await post(cloud.url, device.accessToken, createEnvelope('conn.hello', {
           deviceId: device.deviceId, productId: cfg.productId, protocolVersions: [PROTOCOL_VERSION],
-          capabilities: ['custom-harness'], runtimes: [], harnesses: [{ id: 'acme-harness', capabilities: { ...adapter.descriptor.capabilities } }],
+          capabilities: ['custom-harness', 'agent-home-contract'], runtimes: [], harnesses: [{ id: 'acme-harness', capabilities: { ...adapter.descriptor.capabilities } }],
         }));
-        const offer = await cloud.cloud.enqueueOffer(cloud.tenant, device.deviceId, { payload: {
-          instruction: 'interrupted', ...(explicit ? { harnessId: 'acme-harness' } : {}),
+        // Never run, only recovered from the crash image: the resume lane carries an offer that may name no target.
+        const agentRef = freshTestAgentRef();
+        const offer = await cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: {
+          instruction: 'interrupted', agentRef, sessionRef: 'interrupted-session',
+          ...(explicit ? { harnessId: 'acme-harness' } : {}),
         } });
         const journal = new SqliteLocalTaskJournal({ storeDir: cfg.storeDir! });
         const bytes = encodeEnvelope(offer.envelope);
@@ -134,7 +139,7 @@ describe('terminal durability and actual harness boundaries', () => {
           taskId: offer.taskId, envelopeId: offer.envelope.id, seq: offer.seq, bytes, bytesHash: journalHash(bytes),
           opensTask: true, receivedAt: new Date().toISOString() });
         await journal.recordAdmission({ taskId: offer.taskId, admitted: true, claimedRuntime: 'acme-harness', decidedAt: new Date().toISOString() });
-        if (claimed) await post(cloud.url, device.accessToken, createEnvelope('task.claim', { deviceId: device.deviceId, harnessId: 'acme-harness' }, { taskId: offer.taskId }));
+        if (claimed) await post(cloud.url, device.accessToken, createEnvelope('task.claim', { deviceId: device.deviceId, harnessId: 'acme-harness', agentRef }, { taskId: offer.taskId }));
         await journal.close(); // Persisted crash image; no graceful task finalization.
         await daemon.start();
         await vi.waitFor(async () => expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('failed'), { timeout: 4000 });
@@ -145,24 +150,23 @@ describe('terminal durability and actual harness boundaries', () => {
         expect(adapter.startCalls).toHaveLength(0);
       });
     }
-    it(`R3: oversized custom terminal accepted by cloud explicit=${explicit}`, async () => {
-      const cloud = await startRealCloud({ productId: 'terminal-boundaries' }); cleanup.push(() => cloud.close());
-      const cfg = await config(cloud.url);
-      const adapter = new StubRuntimeAdapter('acme-harness');
-      const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter]); cleanup.push(() => daemon.stop());
-      const device = await daemon.pair((await cloud.createPairingCode()).code); await daemon.start();
-      await vi.waitFor(async () => expect((await cloud.cloud.listDevices(cloud.tenant))[0]?.harnesses?.[0]?.id).toBe('acme-harness'));
-      const offer = await cloud.cloud.enqueueOffer(cloud.tenant, device.deviceId, { payload: {
-        instruction: 'large result', ...(explicit ? { harnessId: 'acme-harness' } : {}),
-      } });
-      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
-      adapter.sessions[0]!.emit({ type: 'progress', text: 'x'.repeat(8192) });
-      adapter.sessions[0]!.emit({ type: 'turn_end' });
-      await vi.waitFor(async () => expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('failed'), { timeout: 4000 });
-      expect(decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!).payload).toMatchObject({ reason: 'terminal_result_too_large', retryable: false, harnessId: 'acme-harness' });
-      expect(adapter.startCalls).toHaveLength(1);
-    });
   }
+  // A fresh hosted execution always names its target (`submitAgentExecution`), so only the explicit harness remains.
+  it('R3: oversized custom terminal accepted by cloud', async () => {
+    const cloud = await startRealCloud({ productId: 'terminal-boundaries' }); cleanup.push(() => cloud.close());
+    const cfg = await config(cloud.url);
+    const adapter = new StubRuntimeAdapter('acme-harness');
+    const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter]); cleanup.push(() => daemon.stop());
+    const device = await daemon.pair((await cloud.createPairingCode()).code); await daemon.start();
+    await vi.waitFor(async () => expect((await cloud.cloud.listDevices(cloud.tenant))[0]?.harnesses?.[0]?.id).toBe('acme-harness'));
+    const offer = await cloud.submitFreshAgent(device.deviceId, { instruction: 'large result', harnessId: 'acme-harness' });
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'x'.repeat(8192) });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(async () => expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('failed'), { timeout: 4000 });
+    expect(decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!).payload).toMatchObject({ reason: 'terminal_result_too_large', retryable: false, harnessId: 'acme-harness' });
+    expect(adapter.startCalls).toHaveLength(1);
+  });
 });
 
 it('R1/R6: committed decline settles its failed receipt after cancellation filters the offer', async () => {
@@ -178,11 +182,17 @@ it('R1/R6: committed decline settles its failed receipt after cancellation filte
   const candidates: LocalTerminalRecord[] = [];
   const recordTerminal = journal.recordTerminal.bind(journal);
   vi.spyOn(journal, 'recordTerminal').mockImplementation(async record => { candidates.push(record); return recordTerminal(record); });
-  const daemon = createDaemonWithAdapters({ ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 5, idleDelayMs: 5 } });
+  const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },  ...cfg, storage: { ...cfg.storage, scratchRoot: testScratchRoot() } }, [adapter], { journal, longPoll: { retryDelayMs: 5, idleDelayMs: 5 } });
   cleanup.push(async () => { fail = false; await daemon.stop(); await journal.close(); });
   const device = await daemon.pair((await cloud.createPairingCode()).code);
-  const a = await cloud.enqueueOffer(device.deviceId, 'declined while temporarily unavailable');
-  const b = await cloud.enqueueOffer(device.deviceId, 'second offer');
+  // Both offers precede the daemon's first poll, so the capability snapshot fresh Agent admission reads is posted by hand.
+  const credentials = (await createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
+  await post(cloud.url, credentials.accessToken, createEnvelope('conn.hello', {
+    deviceId: device.deviceId, productId: cfg.productId, protocolVersions: [PROTOCOL_VERSION],
+    capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection'],
+  }));
+  const a = await cloud.submitFreshAgent(device.deviceId, { instruction: 'declined while temporarily unavailable' });
+  const b = await cloud.submitFreshAgent(device.deviceId, { instruction: 'second offer' });
   await daemon.start();
   await vi.waitFor(() => expect(candidates.some(record => record.taskId === a.taskId)).toBe(true));
   const first = candidates.find(record => record.taskId === a.taskId)!.bytes;

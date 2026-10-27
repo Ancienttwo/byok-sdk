@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -47,7 +48,6 @@ function eventsPolls(): number {
 }
 
 async function startDaemon(config: Record<string, unknown> = {}): Promise<{ lifecycles: DaemonLifecycle[] }> {
-  const workspaceRoot = await tmpDir('byok-lifecycle-workspace-');
   const storeDir = await tmpDir('byok-lifecycle-store-');
   daemon = createDaemonWithAdapters(
     { storage: { scratchRoot: testScratchRoot() },
@@ -55,7 +55,7 @@ async function startDaemon(config: Record<string, unknown> = {}): Promise<{ life
       productName: 'Lifecycle test',
       productId: 'lifecycle-test',
       serverUrl: server!.url,
-      workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
       ...config,
     },
@@ -117,7 +117,6 @@ describe('daemon lifecycle (#391)', () => {
     const agentRef = { agentId: 'lifecycle-egress-agent', profileRevision: 'profile-r1' } as const;
     const taskId = 'lifecycle-egress-task';
     const adapter = new StubRuntimeAdapter('pi');
-    const workspaceRoot = await tmpDir('byok-lifecycle-workspace-');
     const storeDir = await tmpDir('byok-lifecycle-store-');
     daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
@@ -125,7 +124,6 @@ describe('daemon lifecycle (#391)', () => {
         productName: 'Lifecycle test',
         productId: 'lifecycle-test',
         serverUrl: server.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
         agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
@@ -186,10 +184,9 @@ describe('daemon lifecycle (#391)', () => {
 
   it('a start failure that is not a halt is a crash: start() throws it and operational health records a lifecycle failure (#394)', async () => {
     server = await TestServer.start();
-    const workspaceRoot = await tmpDir('byok-lifecycle-workspace-');
     const storeDir = await tmpDir('byok-lifecycle-store-');
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-lifecycle-test' }, productName: 'Lifecycle test', productId: 'lifecycle-test', serverUrl: server.url, workspaceRoot, storeDir },
+      {agentHome: testAgentHomeConfig(), storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-lifecycle-test' }, productName: 'Lifecycle test', productId: 'lifecycle-test', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter('pi')],
     );
     const { deviceId } = await daemon.pair('lifecycle-pair-code');
@@ -219,10 +216,9 @@ describe('daemon lifecycle (#391)', () => {
     });
     try {
       server = await TestServer.start();
-      const workspaceRoot = await tmpDir('byok-lifecycle-workspace-');
       const storeDir = await tmpDir('byok-lifecycle-store-');
       daemon = createDaemonWithAdapters(
-        { localAgentRelease: { version: '0.0.0-lifecycle-test' }, productName: 'Lifecycle test', productId: 'lifecycle-test', serverUrl: server.url, workspaceRoot, storeDir },
+        {agentHome: testAgentHomeConfig(), localAgentRelease: { version: '0.0.0-lifecycle-test' }, productName: 'Lifecycle test', productId: 'lifecycle-test', serverUrl: server.url, storeDir },
         [new StubRuntimeAdapter('pi')],
         { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } },
       );

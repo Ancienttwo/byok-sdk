@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ConnAckPayloadSchema,
   ConnHelloPayloadSchema,
   createEnvelope,
   decodeEnvelope,
   MESSAGE_PAYLOAD_SCHEMAS,
-  parseMessage,
   RuntimeInfoSchema,
 } from '../index';
 
@@ -64,9 +62,7 @@ import {
  *      failure, not a hang. The SCHEMA half (this file): `conn.hello`
  *      accepts a multi-entry `protocolVersions` array either way (the
  *      schema itself never referees which entries "count" — that's a
- *      semantic decision, not a shape constraint), and `conn.ack` can only
- *      ever express a SINGLE agreed-upon `protocolVersion`, which is what
- *      makes "agrees on 1" a well-formed reply at all. Runtime transport
+ *      semantic decision, not a shape constraint). Runtime transport
  *      admission is outside this schema-only drill; after WP3B Step 4b the
  *      daemon has no socket handshake and sends its connection snapshot over
  *      the authenticated long-poll message path.
@@ -96,26 +92,6 @@ describe('M4 Phase 4 version-negotiation drill', () => {
       expect('futureArtifactMeta' in result.data).toBe(false);
     });
 
-    it("an unknown field on conn.ack (simulating a future minor SERVER's handshake reply against today's daemon) is silently stripped, through the REAL end-to-end decode entrypoint", () => {
-      const envelope = createEnvelope(
-        'conn.ack',
-        { protocolVersion: 1, capabilities: ['steer'], serverTime: '2026-01-01T00:00:00.000Z' },
-        { seq: 1 },
-      );
-      const withFutureField = { ...envelope, payload: { ...envelope.payload, serverBuildId: 'v1.1.0-hypothetical' } };
-
-      const parsed = parseMessage(withFutureField);
-      expect(parsed.type).toBe('conn.ack');
-      if (parsed.type !== 'conn.ack') throw new Error('unreachable');
-      expect('serverBuildId' in parsed.payload).toBe(false);
-      expect(parsed.payload.protocolVersion).toBe(1);
-
-      // decodeEnvelope (the actual wire-bytes entrypoint, not just parseMessage
-      // on an in-memory object) tolerates it identically.
-      const wireLine = `${JSON.stringify(withFutureField)}\n`;
-      expect(() => decodeEnvelope(wireLine)).not.toThrow();
-    });
-
     it('an unknown field on a per-runtime RuntimeInfo.capabilities entry (conn.hello.runtimes[], simulating a future daemon reporting to today\'s server) is silently stripped', () => {
       const result = RuntimeInfoSchema.safeParse({
         id: 'claude',
@@ -129,10 +105,11 @@ describe('M4 Phase 4 version-negotiation drill', () => {
   });
 
   describe('item 3: unknown fields on control/security-class schemas are REJECTED, fail-closed (already established in freeze-guard.test.ts — restated here through the real end-to-end decode entrypoint)', () => {
-    it('a task.offer with an unrecognized field alongside an otherwise well-formed `instruction.blobRef`, decoded through the REAL wire entrypoint, is rejected', () => {
+    it('a task.offer_for_agent with an unrecognized field alongside an otherwise well-formed `instruction.blobRef`, decoded through the REAL wire entrypoint, is rejected', () => {
       const envelope = createEnvelope(
-        'task.offer',
+        'task.offer_for_agent',
         {
+          agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
           instruction: {
             blobRef: { blobId: 'blob-1', contentHash: `sha256:${'a'.repeat(64)}`, size: 10, contentType: 'text/plain' },
           },
@@ -151,13 +128,13 @@ describe('M4 Phase 4 version-negotiation drill', () => {
     });
 
     it('sanity: the identical offer WITHOUT the unknown field still decodes fine through the same real entrypoint (isolates the rejection to the unknown field, not something else in the fixture)', () => {
-      const envelope = createEnvelope('task.offer', { instruction: 'do it' }, { taskId: 'task-1', seq: 1 });
+      const envelope = createEnvelope('task.offer_for_agent', { instruction: 'do it', agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } }, { taskId: 'task-1', seq: 1 });
       const wireLine = `${JSON.stringify(envelope)}\n`;
       expect(() => decodeEnvelope(wireLine)).not.toThrow();
     });
   });
 
-  describe('item 4 (schema half): conn.hello/conn.ack shapes support "advertise several, agree on one" — the actual accept/reject DECISION is server-side (see packages/server/src/__tests__/version-negotiation.test.ts)', () => {
+  describe('item 4 (schema half): the conn.hello shape supports "advertise several" — the actual accept/reject DECISION is server-side (see packages/server/src/__tests__/version-negotiation.test.ts)', () => {
     it('conn.hello.protocolVersions accepts a multi-entry array overlapping the server\'s version (e.g. a daemon simulating "I can also speak a hypothetical v2, but still list today\'s v1 too")', () => {
       const result = ConnHelloPayloadSchema.safeParse({
         protocolVersions: [1, 2],
@@ -178,17 +155,6 @@ describe('M4 Phase 4 version-negotiation drill', () => {
         productId: 'acme-agent',
       });
       expect(result.success).toBe(true); // well-formed shape; NOT a claim that a real server would accept this connection
-    });
-
-    it('conn.ack.protocolVersion can only ever express a SINGLE resolved version (not a range) — this is what makes "agrees on 1" a well-formed reply at all', () => {
-      const result = ConnAckPayloadSchema.safeParse({
-        protocolVersion: 1,
-        capabilities: [],
-        serverTime: '2026-01-01T00:00:00.000Z',
-      });
-      expect(result.success).toBe(true);
-      if (!result.success) throw new Error('unreachable');
-      expect(typeof result.data.protocolVersion).toBe('number');
     });
   });
 

@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs, readdirSync, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
@@ -182,7 +183,6 @@ async function startDaemon(options: {
   const server = await TestServer.start();
   servers.push(server);
   const storeDir = await tmpDir('byok-provisioning-store-');
-  const workspaceRoot = await tmpDir('byok-provisioning-workspace-');
   let bound: ProviderProvisioningHandler | undefined;
   const build = options.handler;
   const handler: ProviderProvisioningHandler | undefined =
@@ -199,7 +199,7 @@ async function startDaemon(options: {
       productName: 'Test',
       productId: 'test-product',
       serverUrl: server.url,
-      workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
       ...(handler === undefined ? {} : { providerProvisioning: handler }),
     },
@@ -266,7 +266,7 @@ describe('createDaemon providerProvisioning seam', () => {
           productName: 'Test',
           productId: 'test-product',
           serverUrl: 'http://127.0.0.1:1',
-          workspaceRoot: os.tmpdir(),
+          agentHome: testAgentHomeConfig(),
           storeDir: path.join(os.tmpdir(), 'byok-provisioning-never-created'),
           providerProvisioning: { handle: () => undefined } as unknown as ProviderProvisioningHandler,
         },

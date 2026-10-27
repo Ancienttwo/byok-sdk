@@ -93,7 +93,7 @@ describe('Agent egress goes to the Host as is', () => {
   it('refuses the removed agentEgress.sanitizer key instead of ignoring it', () => {
     const config = {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product',
-      serverUrl: 'http://localhost:3000', workspaceRoot: '/tmp/byok-test-workspace',
+      serverUrl: 'http://localhost:3000',
       agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY, sanitizer: (value: unknown) => value },
     } as DaemonConfig;
     expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('claude', { kind: 'available' })]))

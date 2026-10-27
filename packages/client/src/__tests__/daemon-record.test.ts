@@ -33,7 +33,6 @@ const EVERY_KIND: DaemonEvent[] = [
   },
   { kind: 'awaiting-approval', ts: 'T', taskId: 't1', approvalId: 'ap-1', summary: SENTINEL },
   { kind: 'stale-approval-decision', ts: 'T', taskId: 't1', decision: 'reject', reason: SENTINEL },
-  { kind: 'git-workspace', ts: 'T', taskId: 't1', workspaceId: 'w1', phase: 'failed', errorCategory: SENTINEL },
   { kind: 'runtime-disposal-failed', ts: 'T', taskId: 't1', runtimeId: 'pi', stage: 'cleanup', reason: SENTINEL },
   { kind: 'completed', ts: 'T', taskId: 't1', summary: SENTINEL, sessionRef: 'sess-1' },
   { kind: 'failed', ts: 'T', taskId: 't2', reason: SENTINEL, retryable: false, preClaim: true },
@@ -135,7 +134,6 @@ describe('daemon-record: createDaemonRecordProjector', () => {
       inlineBytes: Buffer.byteLength(Buffer.from(SENTINEL).toString('base64')),
     });
     expect(records).toContainEqual({ kind: 'runtimes-detected', ts: 'T', runtimes: [{ id: 'pi', present: true, outcome: 'available', steer: true, resume: true }] });
-    expect(records).toContainEqual({ kind: 'git-workspace', ts: 'T', taskId: 't1', workspaceId: 'w1', phase: 'failed' });
     expect(records).toContainEqual({ kind: 'device-assertion', ts: 'T', result: 'denied', lane: 'task', taskId: 't1', reason: 'audience_denied', audienceBytes: 9 });
   });
 });

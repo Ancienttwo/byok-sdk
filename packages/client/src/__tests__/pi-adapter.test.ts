@@ -1,3 +1,4 @@
+import type { RuntimeTaskInput } from '../types';
 import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
 import { spawn as realSpawn } from 'node:child_process';
@@ -5,7 +6,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
@@ -43,11 +44,11 @@ async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<PreparedOp
   return { workspaceDir, env };
 }
 
-async function startAdapter(adapter: PiAdapter, task: TaskOfferPayload, resources: PreparedOperationResources): Promise<Session> {
+async function startAdapter(adapter: PiAdapter, task: RuntimeTaskInput, resources: PreparedOperationResources): Promise<Session> {
   return startPreparedOperation(adapter, task, resources);
 }
 
-const baseTask: TaskOfferPayload = {
+const baseTask: RuntimeTaskInput = {
   instruction: 'say hi',
 };
 
@@ -169,7 +170,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
         sessionDir: '/private/pi-sessions',
       },
     });
-    const task: TaskOfferPayload = {
+    const task: RuntimeTaskInput = {
       ...baseTask,
       dispatchSelection: {
         lane: 'byok',
@@ -235,7 +236,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
         macosKeychainPath: '/Users/test/Library/Keychains/login.keychain-db',
       },
     });
-    const task: TaskOfferPayload = {
+    const task: RuntimeTaskInput = {
       ...baseTask,
       dispatchSelection: {
         lane: 'byok',
@@ -311,7 +312,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       sdkHelperHost: { mode: 'self-executable', executable: '/product/runtime', entry: '/product/release/sdk.js' },
       byokLauncher: { command: '/opt/byok-pi-provider-launcher', profileDbPath: '/private/providers.sqlite', sessionDir: '/private/pi-sessions' },
     });
-    const task: TaskOfferPayload = { ...baseTask, dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' } };
+    const task: RuntimeTaskInput = { ...baseTask, dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' } };
     const ctx = await makeCtx({ ...process.env, PI_PACKAGE_DIR: PRODUCT_ASSETS });
     const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
@@ -394,7 +395,7 @@ const __executionScratch = await testExecutionScratch();
   });
 
   it('fails closed before spawn when a BYOK selection has no credential launcher', async () => {
-    const task: TaskOfferPayload = {
+    const task: RuntimeTaskInput = {
       ...baseTask,
       dispatchSelection: {
         lane: 'byok',
@@ -540,7 +541,7 @@ const __executionScratch = await testExecutionScratch();
   });
 
   it('marks pi exiting before it answers the initial prompt runtime_exited (#869)', async () => {
-    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
+    const task: RuntimeTaskInput = { ...baseTask, sessionRef: 'some-other-unknown-id' };
     await expect(startAdapter(fakePiAdapter(), task, await makeCtx())).rejects.toMatchObject({
       phase: 'start', message: expect.stringMatching(/No session found matching/), failure: { class: 'runtime_exited' },
     });
@@ -558,7 +559,7 @@ const __executionScratch = await testExecutionScratch();
   it('a task.offer carrying a known sessionRef resumes it via the real `--session <id>` flag', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_PI_SESSION_ID: 'resume-me-123' });
-    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
+    const task: RuntimeTaskInput = { ...baseTask, sessionRef: 'resume-me-123' };
     const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
     expect(session.sessionRef).toBe('resume-me-123');
@@ -568,7 +569,7 @@ const __executionScratch = await testExecutionScratch();
     const adapter = fakePiAdapter();
     // FAKE_PI_SESSION_ID defaults to 'fake-session-1' — this ref never matches it.
     const ctx = await makeCtx();
-    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
+    const task: RuntimeTaskInput = { ...baseTask, sessionRef: 'some-other-unknown-id' };
     await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/No session found matching/);
   });
 
@@ -753,7 +754,7 @@ const __executionScratch = await testExecutionScratch();
       resolveBin: () => { throw new Error('resolveBin must not be reached'); },
       spawnFn: (() => { throw new Error('spawn must not be reached'); }) as never,
     });
-    const offer: TaskOfferPayload = { ...baseTask };
+    const offer: RuntimeTaskInput = { ...baseTask };
     const rejection = await adapter.prepare({
       offer,
       descriptor: adapter.descriptor,
@@ -774,7 +775,7 @@ const __executionScratch = await testExecutionScratch();
       resolveBin: () => { throw new Error('resolveBin must not be reached'); },
       spawnFn: (() => { throw new Error('spawn must not be reached'); }) as never,
     });
-    const offer: TaskOfferPayload = { ...baseTask };
+    const offer: RuntimeTaskInput = { ...baseTask };
     const rejection = await adapter.prepare({
       offer,
       descriptor: adapter.descriptor,
@@ -789,7 +790,7 @@ const __executionScratch = await testExecutionScratch();
 
   it('accepts a toolset offer and hands the observation to the extension', async () => {
     const adapter = fakePiAdapter();
-    const offer: TaskOfferPayload = { ...baseTask };
+    const offer: RuntimeTaskInput = { ...baseTask };
     await expect(adapter.prepare({
       offer,
       descriptor: adapter.descriptor,
@@ -801,7 +802,7 @@ const __executionScratch = await testExecutionScratch();
 
   it('prepares a valid blob-ref without fetching it; TaskRunner resolves its string after claim', async () => {
     const adapter = fakePiAdapter();
-    const task: TaskOfferPayload = {
+    const task: RuntimeTaskInput = {
       ...baseTask,
       instruction: { blobRef: { blobId: 'b1', contentHash: `sha256:${'0'.repeat(64)}`, size: 10, contentType: 'text/plain' } },
     };

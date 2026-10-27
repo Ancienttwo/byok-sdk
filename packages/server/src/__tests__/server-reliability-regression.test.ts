@@ -22,6 +22,8 @@ import {
   stopServer,
   waitFor,
   type FakeLongPollDaemon,
+  TEST_AGENT_DISPATCH,
+  TEST_AGENT_REF,
 } from './test-support';
 
 const PRODUCT_ID = 'server-reliability';
@@ -50,6 +52,7 @@ async function cloudWithFirstMailboxAppendFailure() {
     productId: PRODUCT_ID, deviceId: 'device-a', deviceName: 'mailbox-retry-fixture',
     devicePublicKey: 'fixture-key', proofKeyId: 'fixture-proof', proofKeyEpoch: 1,
   });
+  await composition.stores.devices.recordCapabilities(TENANT, { deviceId: 'device-a', capabilities: ['agent-home-contract'] });
   let fail = true;
   const mailbox: MailboxStore = {
     append: async (tenant, input) => {
@@ -101,12 +104,12 @@ describe('issues #141-#144 server reliability regressions', () => {
     return { byok: instance, daemon };
   }
 
-  it('#141 reserves a legacy attempt before mailbox visibility and retries one stable offer only', async () => {
+  it('#141 reserves an Agent attempt before mailbox visibility and retries one stable offer only', async () => {
     const { cloud, base } = await cloudWithFirstMailboxAppendFailure();
     const taskId = 'task-legacy-retry';
-    const input = { taskId, payload: { instruction: 'first body' } };
+    const input = { taskId, payload: { ...TEST_AGENT_DISPATCH, instruction: 'first body' } };
 
-    await expect(cloud.enqueueOffer(TENANT, 'device-a', input)).rejects.toMatchObject({
+    await expect(cloud.enqueueAgentOffer(TENANT, 'device-a', input)).rejects.toMatchObject({
       code: 'task_offer_append_refused',
       taskId,
       cause: new Error('injected mailbox append failure'),
@@ -114,19 +117,19 @@ describe('issues #141-#144 server reliability regressions', () => {
     expect(await cloud.readTaskAttempt(TENANT, taskId)).toMatchObject({ taskId, deviceId: 'device-a' });
 
     await expect(
-      cloud.enqueueOffer(TENANT, 'device-a', {
+      cloud.enqueueAgentOffer(TENANT, 'device-a', {
         taskId,
-        payload: { instruction: 'changed before retry' },
+        payload: { ...input.payload, instruction: 'changed before retry' },
       }),
     ).rejects.toMatchObject({ code: 'coordination_input_invalid' });
 
-    await cloud.enqueueOffer(TENANT, 'device-a', input);
+    await cloud.enqueueAgentOffer(TENANT, 'device-a', input);
     await expect(
-      cloud.enqueueOffer(TENANT, 'device-a', {
+      cloud.enqueueAgentOffer(TENANT, 'device-a', {
         taskId,
-        payload: { instruction: 'changed body' },
+        payload: { ...input.payload, instruction: 'changed body' },
       }),
-    ).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    ).rejects.toMatchObject({ code: 'agent_task_already_exists' });
 
     expect((await base.mailbox.readAfter(TENANT, { deviceId: 'device-a', afterSeq: 0 })).messages).toHaveLength(1);
   });
@@ -159,7 +162,7 @@ describe('issues #141-#144 server reliability regressions', () => {
       deviceId: 'device-a',
       envelope: createEnvelope(
         'task.complete',
-        { summary: 'completed before enqueue returned', sessionRef: 'session-provisional' },
+        { agentRef: TEST_AGENT_REF, summary: 'completed before enqueue returned', sessionRef: 'session-provisional' },
         { taskId },
       ),
       outcome: 'accepted',
@@ -177,7 +180,7 @@ describe('issues #141-#144 server reliability regressions', () => {
 
   it('#143 retries the same host rejection payload and does not enqueue another executable control', async () => {
     const { byok: instance, daemon } = await start();
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'approval retry' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'approval retry' });
     await claimAndStart(instance, daemon, handle);
     await moveToAwaitApproval(instance, daemon, handle, { approvalId: 'approval-retry' });
 
@@ -190,38 +193,5 @@ describe('issues #141-#144 server reliability regressions', () => {
     const controls = (await daemon.next()).filter((envelope) => envelope.type === 'task.approve' || envelope.type === 'task.reject');
     expect(controls).toHaveLength(1);
     expect(controls[0]).toMatchObject({ type: 'task.reject', payload: { approvalId: 'approval-retry', reason: 'first reason' } });
-  });
-
-  it('#144 keeps host approval id-less when a pre-M5 request had no native approvalId', async () => {
-    const { byok: instance, daemon } = await start();
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'id-less host approval' });
-    await claimAndStart(instance, daemon, handle);
-    await moveToAwaitApproval(instance, daemon, handle);
-
-    await handle.approve({ approvalId: 'caller-only-id' });
-
-    const controls = (await daemon.next()).filter((envelope) => envelope.type === 'task.approve');
-    expect(controls).toHaveLength(1);
-    expect(controls[0]?.payload).toEqual({});
-  });
-
-  it('#144 resolves an id-less pending approval only after a later committed activity', async () => {
-    const { byok: instance, daemon } = await start();
-    const handle: TaskHandle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'id-less approval' });
-    await claimAndStart(instance, daemon, handle);
-    await moveToAwaitApproval(instance, daemon, handle);
-
-    await daemon.send(
-      createEnvelope(
-        'task.progress',
-        { seq: 1, events: [{ type: 'progress', text: 'continued after local approval' }] },
-        { taskId: handle.taskId },
-      ),
-    );
-
-    await waitFor(async () => (await instance.tasks.get(handle.taskId))?.state === 'Running', 1_000);
-    const snapshot = await instance.tasks.get(handle.taskId);
-    expect(snapshot?.state).toBe('Running');
-    expect(snapshot?.pendingApprovalId).toBeUndefined();
   });
 });

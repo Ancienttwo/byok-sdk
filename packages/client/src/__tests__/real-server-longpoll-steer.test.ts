@@ -1,3 +1,5 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -5,7 +7,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
+import { dispatchResumedAgentTask, startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -47,7 +49,6 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
   it('a steer-capable adapter claiming over long-poll is steerable: the capability rides task.claim and the steer reaches the session', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 150 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     // Default stub capabilities include `steer: true` — an honest self-report
     // from an adapter that really does implement `Session.steer`.
@@ -55,7 +56,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
     expect(adapter.descriptor.capabilities.steer).toBe(true);
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
@@ -72,10 +73,8 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     const machines = await real.byok.machines.list();
     expect(machines.find(m => m.deviceId === record.deviceId)?.harnesses).toEqual([expect.objectContaining({ id: 'acme-harness', version: '0.0.0' })]);
-    const handle = await real.byok.dispatch({ deviceId: record.deviceId, harnessId: 'acme-harness', instruction: 'run over long-poll' });
+    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, harnessId: 'acme-harness', instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
-    const session = adapter.sessions[0]!;
 
     // The claim really did carry the adapter's self-report across the long-poll
     // round trip — and it is the adapter's own value, not a server-side guess:
@@ -114,16 +113,17 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
     // and refuses when that report says `steer: false`.
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 150 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter('acme-harness', { kind: 'available', version: '0.0.0' }, {
       steer: false,
       resume: true,
       approvalInteractive: false,
+      // As the steerable adapter above: an Agent offer carries the Agent memory MCP whenever the daemon admits it.
+      mcpToolsets: true,
     });
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
@@ -140,10 +140,8 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     const machines = await real.byok.machines.list();
     expect(machines.find(m => m.deviceId === record.deviceId)?.harnesses).toEqual([expect.objectContaining({ id: 'acme-harness', version: '0.0.0' })]);
-    const handle = await real.byok.dispatch({ deviceId: record.deviceId, harnessId: 'acme-harness', instruction: 'run over long-poll' });
+    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, harnessId: 'acme-harness', instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
-    const session = adapter.sessions[0]!;
 
     expect((await real.byok.tasks.get(handle.taskId))?.claimedRuntimeCapabilities?.steer).toBe(false);
 

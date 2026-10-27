@@ -321,8 +321,7 @@
         "zod": "^4.4.3",
       },
       "devDependencies": {
-        "byok-protocol-floor": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.27.0.tgz",
-        "byok-protocol-previous": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.26.1.tgz",
+        "byok-protocol-previous": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.30.2.tgz",
       },
     },
     "packages/server": {
@@ -932,9 +931,7 @@
 
     "bundle-require": ["bundle-require@5.1.0", "", { "dependencies": { "load-tsconfig": "0.2.5" }, "peerDependencies": { "esbuild": "0.27.7" } }, "sha512-3WrrOuZiyaaZPWiEt4G3+IffISVC9HYlWueJEBWED4ZH4aIAC2PnkdnuRrR94M+w6yGWn4AglWtJtBI8YqvgoA=="],
 
-    "byok-protocol-floor": ["@byok-sdk/protocol@https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.27.0.tgz", { "dependencies": { "@cfworker/json-schema": "4.1.1", "zod": "^4.4.3" } }, "sha512-fJvgAq/C1RKlb7QL+4yrrZvKP/Gn9ltw+kO0b0BFaBycHZmViid6hlOl0yMOHRHIusHMU1cudaiUqaC+uAfCZA=="],
-
-    "byok-protocol-previous": ["@byok-sdk/protocol@https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.26.1.tgz", { "dependencies": { "zod": "^4.4.3" } }, "sha512-eUucLQqUNWtOn43Iv+8ZYiWzpf+yd8+M/wNIGWJdVQKOODyXBknxWDd/7Mmp/TPKfkl5BH0hfZ6Jl1xwx9NMXg=="],
+    "byok-protocol-previous": ["@byok-sdk/protocol@https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.30.2.tgz", { "dependencies": { "@cfworker/json-schema": "4.1.1", "zod": "^4.4.3" } }, "sha512-K3efRUJqxXo0F/reaZQU0LyOn3AsUwwh7zP4xkMda7J/NwfnRjPHX3EyWdVhFn504z21QqLWKwac2Tw/Rk5VZQ=="],
 
     "cac": ["cac@6.7.14", "", {}, "sha512-b6Ilus+c3RrdDk+JhLKUAQfzzgLEPy6wcXqS7f/xe1EETvsDP6GORG7SFuOs6cID5YkqchW/LXZbX5bc8j7ZcQ=="],
 

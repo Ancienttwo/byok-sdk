@@ -2,7 +2,7 @@ import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TaskEventRelay } from '../relay';
 import { createByokServer, type ByokServer, type ServerTaskEvent } from '../index';
-import { connectFakeDaemonLongPoll, startServer, stopServer } from './test-support';
+import { connectFakeDaemonLongPoll, startServer, stopServer, TEST_AGENT_DISPATCH } from './test-support';
 
 const RETENTION_MS = 100;
 
@@ -45,7 +45,7 @@ describe('public task handle event retention', () => {
     const started = await startServer(byok);
     server = started.server;
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, byok, { productId: 'event-retention' });
-    const handle = await byok.dispatch({ deviceId: daemon.deviceId, instruction: 'retention fixture' });
+    const handle = await byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'retention fixture' });
     // Pairing/dispatch use real local HTTP. Only the subsequent host-side
     // cancellation and relay reclamation run under controlled timers.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });

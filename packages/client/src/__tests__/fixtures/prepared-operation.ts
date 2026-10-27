@@ -1,7 +1,7 @@
+import type { RuntimeTaskInput } from '../../types';
 import { isRuntimeStartupDisposalFailure } from '../../runtime-failure';
 import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
 import { testExecutionScratch } from './execution-scratch';
-import type { TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   sealRuntimeOperationManifest,
   type ApprovalChannel,
@@ -26,7 +26,6 @@ export interface PreparedOperationResources {
    * authority and this is the swapped-in one.
    */
   startMcpToolsetTools?: McpToolsetToolObservation;
-  gitWorkspace?: { workspaceId: string; baseline?: string };
   approvalChannel?: ApprovalChannel;
   /** Seals a `memory-reader` Agent manifest whose run directory is `workspaceDir`. */
   reader?: { canonicalHome: string };
@@ -37,7 +36,7 @@ export interface PreparedOperationResources {
 /** Exercise the public descriptor → prepare → sealed-manifest → operation path in adapter unit tests. */
 export async function startPreparedOperation(
   adapter: RuntimeAdapter,
-  offer: TaskOfferPayload,
+  offer: RuntimeTaskInput,
   resources: PreparedOperationResources,
 ): Promise<Session> {
   const prepared = await adapter.prepare({
@@ -67,12 +66,7 @@ export async function startPreparedOperation(
       homeAccess: 'memory-reader' as const,
       lease: { leaseId: 'adapter-unit-lease', canonicalHome: resources.reader.canonicalHome },
     }),
-    workspace: {
-      workspaceDir: resources.workspaceDir,
-      ...(resources.gitWorkspace === undefined
-        ? {}
-        : { workspaceId: resources.gitWorkspace.workspaceId, baseline: resources.gitWorkspace.baseline }),
-    },
+    workspace: { workspaceDir: resources.workspaceDir },
     forwardedEnvironmentNames: Object.keys(resources.env).sort(),
   });
   const scratch = resources.scratch ?? await testExecutionScratch();

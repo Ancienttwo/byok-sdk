@@ -1,12 +1,9 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import {
   DEFAULT_MAX_TASK_OUTPUT_BYTES,
   MAX_DURATION_EXCEEDED_REASON_PREFIX,
@@ -38,10 +35,6 @@ import { testIngressBudget } from './fixtures/activity-ingress';
  * (`retryable: true`, `daemon shutting down: ...`).
  */
 
-async function tmpDir(prefix: string): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
-}
-
 const unusedBlobClient: BlobResolver = {
   resolveInstruction: async () => {
     throw new Error('not used in this test');
@@ -58,13 +51,14 @@ async function makeRunner(
 ): Promise<TaskRunner> {
   const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: await tmpDir('byok-taskrunner-limits-workspace-'),
+    ...testAgentHomeDeps(),
+    // An enrolled daemon always passes its tenant; without it a closing Agent task logs a skipped memory snapshot on Linux.
+    tenantId: 'tenant-1',
     deviceId: 'device-1',
     send: (envelope) => {
       sent.push(envelope);
     },
     blobClient: unusedBlobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-taskrunner-limits-store-')),
     approvalRegistry: new ApprovalRegistry(),
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
@@ -92,8 +86,8 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
 
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer',
-        { instruction: 'x', limits: { maxDurationMs: 5000 } },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 5000 } },
         { taskId: 'task-1', seq: 1 },
       ),
     );
@@ -121,8 +115,8 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
 
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer',
-        { instruction: 'x', limits: { maxDurationMs: limitMs } },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: limitMs } },
         { taskId: 'task-long', seq: 1 },
       ),
     );
@@ -152,8 +146,8 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
 
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer',
-        { instruction: 'x', limits: { maxDurationMs: 1000 } },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 1000 } },
         { taskId: 'task-hang', seq: 1 },
       ),
     );
@@ -185,8 +179,8 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
 
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer',
-        { instruction: 'x', limits: { maxDurationMs: 5000 } },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'x', limits: { maxDurationMs: 5000 } },
         { taskId: 'task-ok', seq: 1 },
       ),
     );
@@ -199,7 +193,8 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
     // configured limit.
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(sent.some((e) => e.type === 'task.complete' && e.task_id === 'task-ok')).toBe(true);
+    // The Agent home finish does real filesystem work before the terminal.
+    await vi.waitFor(() => expect(sent.some((e) => e.type === 'task.complete' && e.task_id === 'task-ok')).toBe(true));
     await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
 
     await vi.advanceTimersByTimeAsync(5000);
@@ -213,7 +208,7 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
     const runner = await makeRunner(adapter, sent);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-nolimit', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-nolimit', seq: 1 }),
     );
     expect(runner.activeTaskCount).toBe(1);
 
@@ -231,7 +226,7 @@ describe('TaskRunner: maxTaskOutputBytes enforcement (M5 batch-3, workstream 2)'
     const runner = await makeRunner(adapter, sent, { maxTaskOutputBytes: 200 });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-flood', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-flood', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();
@@ -257,7 +252,7 @@ describe('TaskRunner: maxTaskOutputBytes enforcement (M5 batch-3, workstream 2)'
     const runner = await makeRunner(adapter, sent, { maxTaskOutputBytes: 1_000_000 });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-small', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-small', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();
@@ -278,7 +273,7 @@ describe('TaskRunner: maxTaskOutputBytes enforcement (M5 batch-3, workstream 2)'
     expect(DEFAULT_MAX_TASK_OUTPUT_BYTES).toBe(64 * 1024 * 1024);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-default-cap', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-default-cap', seq: 1 }),
     );
     const session = adapter.sessions[0];
     session!.emit({ type: 'progress', text: 'a small amount of output' });
@@ -296,7 +291,7 @@ describe('TaskRunner: server activity ingress enforcement', () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
     const runner = await makeRunner(adapter, sent);
-    await runner.handleEnvelope(createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'text-split', seq: 1 }));
+    await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'text-split', seq: 1 }));
     const text = 'x'.repeat(100 * 1024);
     adapter.sessions[0]!.emit({ type: 'progress', text });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
@@ -321,7 +316,7 @@ describe('TaskRunner: server activity ingress enforcement', () => {
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-batch-bytes', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-batch-bytes', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();
@@ -374,7 +369,7 @@ describe('TaskRunner: clean custom Session termination', () => {
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-crash', seq: 1 }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: 'task-crash', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();

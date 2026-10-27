@@ -1,9 +1,10 @@
 import { execFile, spawn, type spawn as nodeSpawn } from 'node:child_process';
+import type { RuntimeTaskInput } from '../../types';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { AgentEvent, TaskFailure, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import {
   freezeRuntimeAdapterDescriptor,
@@ -370,7 +371,7 @@ class GrokSession implements Session {
       throw error;
     }
   }
-  async followUp(task: TaskOfferPayload): Promise<void> {
+  async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string') throw new PolicyUnsupportedError('grok requires a string instruction');
     if (task.dispatchSelection !== undefined) throw new PolicyUnsupportedError(`grok persistent session runs ${this.model ?? 'the default model'} and takes no dispatch selection`);
     await this.prompt(task.instruction);

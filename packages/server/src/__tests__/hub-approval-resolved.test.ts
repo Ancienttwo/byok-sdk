@@ -9,6 +9,8 @@ import {
   waitForServerEvent,
   waitForTaskEvent,
   type FakeLongPollDaemon,
+  TEST_AGENT_DISPATCH,
+  TEST_AGENT_REF,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -17,7 +19,7 @@ const SHORT_HOLD_MS = 150;
 
 /** Offered -> Claimed -> Running over the long-poll send path. */
 async function claimAndStart(daemon: FakeLongPollDaemon, handle: TaskHandle): Promise<void> {
-  await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+  await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
   await daemon.send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }
@@ -42,17 +44,12 @@ function approvalResolved(taskId: string, approvalId: string, decision: 'approve
 }
 
 /**
- * M4 (additive-minor): the EXPLICIT wire `task.approval_resolved` message — the
- * daemon reporting a LOCALLY-resolved approval immediately, instead of the
- * server only inferring it after the fact once evidence arrives (that
- * inference path is exercised by this file's sibling
- * `hub-implicit-approval-resume.test.ts`).
- *
- * Both paths now write onto the SAME durable approval timeline the read model
- * and the host-decision gate read, so "which one got there first" is settled by
- * that one authority rather than by a mutable slot on a task record.
+ * The wire `task.approval_resolved` message: the daemon reporting a
+ * LOCALLY-resolved approval. Since wire v4 it is the only way a daemon-side
+ * resolution reaches the server — the server never infers one from later
+ * activity (`hub-approval-pending-activity.test.ts` pins that).
  */
-describe('M4 (additive-minor): explicit task.approval_resolved handling', () => {
+describe('task.approval_resolved handling', () => {
   let server: HttpServer | undefined;
   let byok: ByokServer | undefined;
 
@@ -72,26 +69,10 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     return { byok: instance, daemon };
   }
 
-  // 2d gap: the pre-fold pin read the WS handshake's `conn.ack.capabilities`.
-  // The long-poll equivalent is `EventsPollResponse.capabilities`, whose list
-  // is the kernel's `CLOUD_PROTOCOL_CAPABILITIES`
-  // (`packages/cloud/src/handlers/events.ts`) — and `approval_resolved` is NOT
-  // in it, even though the kernel's inbound gate handles the message
-  // (`inbound.ts:576`). A daemon that gates on the advertised flag
-  // (`packages/protocol/src/version.ts` documents it as functionally gating)
-  // would therefore never send one. Proposed one-line cloud patch is in the
-  // notes. Orchestrator decision: patch `CLOUD_PROTOCOL_CAPABILITIES`, or
-  // declare the flag dead and document the break in Step 5.
-  it.skip('advertises the approval_resolved capability flag on the long-poll transport', async () => {
-    const { daemon } = await start();
-    const body = (await (await daemon.replay(0)).json()) as { capabilities?: string[] };
-    expect(body.capabilities).toContain('approval_resolved');
-  });
-
   it('AwaitApproval -> Running on task.approval_resolved, and emits a task.approval_resolved embedder event carrying approvalId/decision/resolvedBy', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-1');
 
@@ -105,17 +86,6 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
 
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
-
-    // The implicit-inference path must NOT ALSO have fired for this same
-    // resolution — the explicit message already cleared the pending slot on the
-    // timeline, so the inference finds nothing left to clear.
-    const implicitFired = await Promise.race([
-      waitForServerEvent(instance, (e) => e.kind === 'task.approval_resolved_implicit' && e.taskId === handle.taskId).then(
-        () => true,
-      ),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 200)),
-    ]);
-    expect(implicitFired).toBe(false);
   });
 
   it('AwaitApproval -> Running on task.approval_resolved with decision: reject moves the task through Running (approval flow only decides resume vs stop the runtime side; the wire decision itself does not change server state here)', async () => {
@@ -126,7 +96,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     // treating the task as AwaitApproval.
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-2');
 
@@ -138,28 +108,25 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
 
     // The daemon follows up with task.fail (as it would after a local reject) —
     // proving the task was left in a state that legally accepts it.
-    await daemon.send(createEnvelope('task.fail', { reason: 'rejected locally' }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'rejected locally' }, { taskId: handle.taskId }));
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Failed');
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Failed');
   });
 
-  it('idempotent no-op when the task already resumed (the implicit path beat the message to it)', async () => {
+  it('idempotent no-op when the same approval is reported resolved twice', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-3');
 
-    // The implicit path resumes it first (task.progress arriving while the read
-    // model still says AwaitApproval).
-    await daemon.send(createEnvelope('task.progress', { seq: 1, events: [] }, { taskId: handle.taskId }));
-    await waitForServerEvent(instance, (e) => e.kind === 'task.approval_resolved_implicit' && e.taskId === handle.taskId);
+    await daemon.send(approvalResolved(handle.taskId, 'appr-3'));
+    await waitForServerEvent(instance, (e) => e.kind === 'task.approval_resolved' && e.taskId === handle.taskId);
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
 
-    // The explicit message now arrives late (a redelivered/racing report for
-    // the SAME approval the implicit path already resolved) — an idempotent
-    // no-op. The awaited send is the barrier: `POST /byok/messages` applies its
-    // envelopes synchronously inside the request.
+    // A fresh envelope re-reporting the SAME approval arrives late — an
+    // idempotent no-op. The awaited send is the barrier: `POST /byok/messages`
+    // applies its envelopes synchronously inside the request.
     await daemon.send(approvalResolved(handle.taskId, 'appr-3'));
 
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running'); // unchanged
@@ -168,7 +135,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
   it('stale no-op when the task is already terminal — never force-failed, never resurrected', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-4');
     // A server-side decision crosses in flight and wins first (the residual
@@ -176,7 +143,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     // reports the terminal that decision produced, BEFORE the daemon's own
     // local-resolution report ever arrives.
     await handle.reject('SaaS decided first');
-    await daemon.send(createEnvelope('task.fail', { reason: 'SaaS decided first' }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'SaaS decided first' }, { taskId: handle.taskId }));
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Failed');
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Failed');
 
@@ -188,8 +155,8 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
   it('stale no-op when the task never reached AwaitApproval at all (e.g. still Claimed) — a genuinely out-of-sequence report', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
-    await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x' });
+    await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
 
     await daemon.send(approvalResolved(handle.taskId, 'appr-5'));
@@ -203,7 +170,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
   it('M5 (approval targeting): await_approval(A) stored, await_approval(B) re-delivered for the SAME task while still AwaitApproval, then approval_resolved(A) arrives — task stays AwaitApproval, never Running', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
 
     // A: the first await_approval, the task's pending approval.
@@ -231,7 +198,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
   it("S2 (cross-model review finding, P1): await_approval(B) re-delivered while already AwaitApproval re-emits the await_approval ServerTaskEvent carrying B's summary — previously the same-state branch updated the stored id and returned silently, leaving an operator watching TaskHandle.events() still showing A's summary", async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-A', 'first (A)');
 
@@ -257,7 +224,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
   it.skip('a redelivery carrying the SAME approvalId does not re-emit another await_approval event', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-B', 'second (B)');
 
@@ -279,37 +246,8 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     // A second, real task used only to prove the transport and the gate are
     // still alive and processing traffic normally after the unknown-taskId
     // message.
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'still alive' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'still alive' });
     await claimAndStart(daemon, handle);
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
-  });
-
-  /**
-   * M5 (hello-capability plumbing): the `targeted` field on the emitted
-   * `task.approval_resolved` `ByokServerEvent`.
-   *
-   * The `targeted: true` case is DELETED, not skipped: it reported whether the
-   * reporting device's LIVE WebSocket registration advertised
-   * `approval-targeting`, and that registration no longer exists at all. The
-   * durable capability list is a device-BUILD fact rather than a per-report
-   * one, so the field is now always `false` by construction (2a deviation 4,
-   * `types.ts`). What remains testable is exactly that.
-   */
-  describe('M5 (hello-capability plumbing): targeted field on the emitted task.approval_resolved event', () => {
-    it('a daemon reporting a locally-resolved approval produces targeted: false on the emitted event', async () => {
-      const { byok: instance, daemon } = await start();
-
-      const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
-      await claimAndStart(daemon, handle);
-      await moveToAwaitApproval(daemon, handle, 'appr-legacy');
-      expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
-
-      await daemon.send(approvalResolved(handle.taskId, 'appr-legacy'));
-
-      const event = await waitForServerEvent(instance, (e) => e.kind === 'task.approval_resolved' && e.taskId === handle.taskId);
-      if (event.kind !== 'task.approval_resolved') throw new Error('unreachable');
-      expect(event.targeted).toBe(false);
-      expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
-    });
   });
 });

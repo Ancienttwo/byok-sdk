@@ -1,10 +1,11 @@
+import type { RuntimeTaskInput } from '../types';
 import { fileURLToPath } from 'node:url';
 import { spawn, type SpawnOptions } from 'node:child_process';
 import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
 import { SteerUnsupportedError, type Session } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
@@ -32,7 +33,7 @@ async function ctx(env: NodeJS.ProcessEnv = {}): Promise<PreparedOperationResour
 function facts(log: string): Array<Record<string, any>> {
   return readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
 }
-async function open(a: GrokAdapter, offer: TaskOfferPayload, resources: PreparedOperationResources): Promise<Session> {
+async function open(a: GrokAdapter, offer: RuntimeTaskInput, resources: PreparedOperationResources): Promise<Session> {
   const session = await startPreparedOperation(a, offer, resources);
   sessions.push(session);
   return session;

@@ -1,3 +1,4 @@
+import { freshTestAgentRef } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -11,7 +12,6 @@ import { preflightAgentMessageMcp } from '../daemon/agent-message-mcp-preflight'
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { DurableJsonlFile } from '../util/durable-jsonl';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -79,24 +79,21 @@ async function runner(adapter: StubRuntimeAdapter, extra: Partial<TaskRunnerDeps
 }> {
   const storeDir = await temporary('byok outbound offer store-');
   const hostStorageRoot = await temporary('byok outbound offer home-');
-  const workspaceRoot = await temporary('byok outbound offer workspace-');
   const agentHome = new AgentHomeManager({ hostStorageRoot });
   const sent: Envelope[] = [];
   const taskRunner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot,
     agentHome,
     agentSessionHandoffs: new AgentSessionHandoffStore(),
     deviceId: 'device-outbound-offer',
     send: (envelope) => sent.push(envelope),
     blobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(storeDir),
     approvalRegistry: new ApprovalRegistry(),
     storeDir,
     productId: 'outbound-offer',
     ...extra,
   });
-  const localRoots = [storeDir, hostStorageRoot, workspaceRoot];
+  const localRoots = [storeDir, hostStorageRoot];
   localRoots.push(...await Promise.all(localRoots.map((root) => fs.realpath(root))));
   return { runner: taskRunner, agentHome, sent, localRoots };
 }
@@ -168,7 +165,7 @@ describe('local paths in outbound handleOffer reasons', () => {
     });
     localRoots.push(path.dirname(path.dirname(missingServer)));
 
-    await taskRunner.handleEnvelope(createEnvelope('task.offer_with_toolsets', {
+    await taskRunner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),
       instruction: 'outbound offer work', runtime: 'pi', requiredToolsets: ['team'],
     }, { taskId: 'toolset-path', seq: 1 }));
 
@@ -225,7 +222,7 @@ describe('local paths in outbound handleOffer reasons', () => {
     const { runner: taskRunner, sent, localRoots } = await runner(adapter);
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    await taskRunner.handleEnvelope(createEnvelope('task.offer', { instruction: 'outbound offer work' }, { taskId: 'artifact-path', seq: 1 }));
+    await taskRunner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'outbound offer work' }, { taskId: 'artifact-path', seq: 1 }));
     adapter.sessions[0]!.emit({ type: 'artifact', name: 'missing report.txt', contentType: 'text/plain' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some((entry) => entry.type === 'task.complete' && entry.task_id === 'artifact-path')).toBe(true));

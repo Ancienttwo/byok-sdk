@@ -14,6 +14,8 @@ import {
   startServer,
   stopServer,
   type FakeLongPollDaemon,
+  TEST_AGENT_DISPATCH,
+  TEST_AGENT_REF,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -79,9 +81,9 @@ async function dispatchClaimedRunning(
   capabilities: RuntimeCapabilities | undefined,
   instruction = 'long running task',
 ): Promise<TaskHandle> {
-  const handle = await h.byok.dispatch({ deviceId: h.daemon.deviceId, instruction });
+  const handle = await h.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: h.daemon.deviceId, instruction });
   const offer = await nextEnvelope(h.daemon);
-  expect(offer.type).toBe('task.offer');
+  expect(offer.type).toBe('task.offer_for_agent');
   await claimAndStart(h.byok, h.daemon, handle, runtime, capabilities);
   return handle;
 }
@@ -210,12 +212,12 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
 
   it('a Claimed (not yet started) task is task_not_running — the state gate fires before the capability gate even for a steerable runtime', async () => {
     harness = await startHarness([PI_RUNTIME_INFO]);
-    const handle = await harness.byok.dispatch({ deviceId: harness.daemon.deviceId, instruction: 'claimed but not started' });
+    const handle = await harness.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: harness.daemon.deviceId, instruction: 'claimed but not started' });
     const claim = await sendOne(
       harness.daemon,
       createEnvelope(
         'task.claim',
-        { deviceId: harness.daemon.deviceId, runtime: 'pi', capabilities: PI_RUNTIME_INFO.capabilities },
+        { agentRef: TEST_AGENT_REF, deviceId: harness.daemon.deviceId, runtime: 'pi', capabilities: PI_RUNTIME_INFO.capabilities },
         { taskId: handle.taskId },
       ),
     );
@@ -356,12 +358,12 @@ describe('S0 (GAP-002): claim-time capability snapshot on the task record', () =
 
   it("the Offered -> Claimed transition records the claim's own reported capabilities verbatim, alongside claimedRuntime", async () => {
     harness = await startHarness([PI_RUNTIME_INFO, CLAUDE_RUNTIME_INFO]);
-    const handle = await harness.byok.dispatch({ deviceId: harness.daemon.deviceId, instruction: 'snapshot me' });
+    const handle = await harness.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: harness.daemon.deviceId, instruction: 'snapshot me' });
     const claim = await sendOne(
       harness.daemon,
       createEnvelope(
         'task.claim',
-        { deviceId: harness.daemon.deviceId, runtime: 'pi', capabilities: PI_RUNTIME_INFO.capabilities },
+        { agentRef: TEST_AGENT_REF, deviceId: harness.daemon.deviceId, runtime: 'pi', capabilities: PI_RUNTIME_INFO.capabilities },
         { taskId: handle.taskId },
       ),
     );

@@ -180,7 +180,6 @@ let root: string;
 let serverCommand: string;
 let storeDir: string;
 let runnerStoreDir: string;
-let workspaceRoot: string;
 let agentHomeDir: string;
 const children: DaemonProcess[] = [];
 
@@ -190,7 +189,6 @@ async function spawnLifetime(name: string): Promise<DaemonProcess> {
     storeDir,
     runnerStoreDir,
     scratchRoot: testScratchRoot(),
-    workspaceRoot,
     agentHomeDir,
     serverCommand,
   }), { mode: 0o600 });
@@ -213,7 +211,6 @@ beforeAll(async () => {
   root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-prepared-restart-')));
   storeDir = path.join(root, 'preparation-store');
   runnerStoreDir = path.join(root, 'runner-store');
-  workspaceRoot = path.join(root, 'workspace');
   agentHomeDir = path.join(root, 'agent-home');
   await fs.mkdir(storeDir, { recursive: true });
   serverCommand = path.join(root, 'teamserver');

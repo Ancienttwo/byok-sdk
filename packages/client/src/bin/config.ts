@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import { DeviceStore } from '../daemon/store';
-import { GitWorkspaceManager } from '../daemon/git-workspace';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from './official-release';
 
 /**
@@ -62,21 +61,10 @@ export function loadConfig(configPath: string | undefined, overrides: Partial<Cl
     throw new ConfigError('config field "localAgentRelease" is distribution-owned and must not be supplied');
   }
   const merged: Partial<CliConfigInput> = { ...base, ...overrides };
-  if (merged.gitWorkspace !== undefined) {
-    try {
-      GitWorkspaceManager.validateConfig(merged.gitWorkspace);
-    } catch (error) {
-      throw new ConfigError(error instanceof Error ? error.message : 'invalid gitWorkspace configuration');
-    }
-  }
   for (const field of REQUIRED_FIELDS) {
     if (!merged[field]) {
       throw new ConfigError(`config is missing required field "${field}"`);
     }
-  }
-  // A strict Agent daemon never uses workspaceRoot (DaemonConfig.workspaceRoot).
-  if (merged.strictAgentOnly !== true && !merged.workspaceRoot) {
-    throw new ConfigError('config is missing required field "workspaceRoot"');
   }
   return { ...merged, localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE } as DaemonConfig;
 }

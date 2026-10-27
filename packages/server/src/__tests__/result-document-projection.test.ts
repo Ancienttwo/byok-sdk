@@ -7,6 +7,8 @@ import {
   startServer,
   stopServer,
   type FakeLongPollDaemon,
+  TEST_AGENT_DISPATCH,
+  TEST_AGENT_REF,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -15,7 +17,7 @@ const SHORT_HOLD_MS = 150;
 
 /** Offered -> Claimed -> Running over the long-poll send path, asserting each hop landed. */
 async function claimAndStart(byok: ByokServer, daemon: FakeLongPollDaemon, handle: TaskHandle): Promise<void> {
-  const claim = await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+  const claim = await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
   expect(await claim.json()).toMatchObject({ accepted: 1 });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
   const started = await daemon.send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
@@ -61,11 +63,11 @@ describe('additive-minor: task.complete.document projection', () => {
 
   it('projects payload.document verbatim into TaskResult.document', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'produce a structured result' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'produce a structured result' });
     await claimAndStart(instance, daemon, handle);
 
     const document = { kind: 'invoice', lines: [{ sku: 'a', qty: 2 }], total: 42.5, note: null, nested: { deep: [1, 2] } };
-    await daemon.send(createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_1', document }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_1', document }, { taskId: handle.taskId }));
 
     const result = await handle.result();
     expect(result).toEqual({ state: 'Complete', summary: 'done', sessionRef: 'sess_1', document });
@@ -75,10 +77,11 @@ describe('additive-minor: task.complete.document projection', () => {
 
   it('projects payload.finalMessage into TaskResult.finalMessage, apart from the joined summary (#322)', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'reply with exactly: CONSOLIDATED' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'reply with exactly: CONSOLIDATED' });
     await claimAndStart(instance, daemon, handle);
 
     await daemon.send(createEnvelope('task.complete', {
+      agentRef: TEST_AGENT_REF,
       summary: 'I will consolidate memory.CONSOLIDATED',
       finalMessage: 'CONSOLIDATED',
       sessionRef: 'sess_1',
@@ -96,11 +99,11 @@ describe('additive-minor: task.complete.document projection', () => {
 
   it('projects a non-object JSON root unchanged — the channel is schema-neutral', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'produce an array' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'produce an array' });
     await claimAndStart(instance, daemon, handle);
 
     await daemon.send(
-      createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_1', document: [1, 'two', null] }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_1', document: [1, 'two', null] }, { taskId: handle.taskId }),
     );
 
     const result = await handle.result();
@@ -109,10 +112,10 @@ describe('additive-minor: task.complete.document projection', () => {
 
   it('leaves TaskResult.document absent when the daemon sends no document (an offer with no result-document terminal projection) — byte-identical to the pre-change result', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'no structured result' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'no structured result' });
     await claimAndStart(instance, daemon, handle);
 
-    await daemon.send(createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_1' }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_1' }, { taskId: handle.taskId }));
 
     const result = await handle.result();
     expect(result.document).toBeUndefined();
@@ -125,10 +128,10 @@ describe('additive-minor: task.complete.document projection', () => {
 
   it('never attaches a document to a non-Complete terminal result (task.fail is untouched by this change)', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'will fail' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'will fail' });
     await claimAndStart(instance, daemon, handle);
 
-    await daemon.send(createEnvelope('task.fail', { reason: 'boom', retryable: false }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'boom', retryable: false }, { taskId: handle.taskId }));
 
     const result = await handle.result();
     expect(result).toEqual({ state: 'Failed', reason: 'boom', retryable: false });
@@ -137,7 +140,7 @@ describe('additive-minor: task.complete.document projection', () => {
 
   it('drops an over-cap task.complete at the inbound boundary — the task does not complete with a truncated or partial document', async () => {
     const { byok: instance, baseUrl, daemon } = await startWithDaemon();
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'oversized result' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'oversized result' });
     await claimAndStart(instance, daemon, handle);
 
     const framing = JSON.stringify({ a: '' }).length;
@@ -185,7 +188,7 @@ describe('additive-minor: task.complete.document projection', () => {
 
     // A well-formed completion afterwards still lands normally, proving the
     // transport survived — and it is THIS one's values that win.
-    await daemon.send(createEnvelope('task.complete', { summary: 'real done', sessionRef: 'sess_valid' }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'real done', sessionRef: 'sess_valid' }, { taskId: handle.taskId }));
     const result = await handle.result();
     expect(result).toEqual({ state: 'Complete', summary: 'real done', sessionRef: 'sess_valid' });
     expect(result.document).toBeUndefined();

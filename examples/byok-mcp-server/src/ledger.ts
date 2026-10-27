@@ -237,7 +237,8 @@ export class BetaLedger {
     const instruction = 'instruction' in offer.payload ? offer.payload.instruction : undefined;
     const offeredAgent = 'agentRef' in offer.payload ? offer.payload.agentRef : undefined;
     if (offer.taskId !== taskId || offer.deviceId !== saved.binding.deviceId || instruction !== saved.binding.arguments.instruction
-      || offer.payload.runtime !== saved.binding.arguments.runtime || offeredAgent !== undefined && canonicalJson(offeredAgent) !== canonicalJson(saved.binding.agentRef ?? null)
+      || offer.payload.runtime !== saved.binding.arguments.runtime
+      || offeredAgent === undefined || saved.binding.agentRef === undefined || canonicalJson(offeredAgent) !== canonicalJson(saved.binding.agentRef)
       || terminal.envelope.task_id !== taskId || !['task.complete', 'task.fail', 'task.cancelled', 'task.decline'].includes(terminal.envelope.type)) {
       throw new Error('SDK task binding or terminal mismatch');
     }

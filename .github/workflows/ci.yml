@@ -798,15 +798,15 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.test.yml down -v
 
-  # Windows Git workspace guarantee: runs the real Git executable through the
-  # client workspace manager and exercises the secure recovery ledger/privacy
-  # surfaces without duplicating the full cross-platform suite above. TEMP/TMP
-  # are redirected to a path containing spaces and non-ASCII characters so the
-  # real init/status and ledger file operations cross that boundary on Windows.
-  windows-git-workspace:
+  # Windows filesystem and security guarantee: exercises the secure directory
+  # and privacy surfaces without duplicating the full cross-platform suite
+  # above. TEMP/TMP are redirected to a path containing spaces and non-ASCII
+  # characters so the real file operations cross that boundary on Windows.
+  # The Git workspace suites it was named for were removed in wire v4 (#925).
+  windows-client:
     needs: select
-    if: ${{ contains(fromJSON(needs.select.outputs.families), 'windows-git-workspace') }}
-    name: Windows Git workspace, store, and security tests (fixed Node)
+    if: ${{ contains(fromJSON(needs.select.outputs.families), 'windows-client') }}
+    name: Windows client store, security and Hermes tests (fixed Node)
     runs-on: windows-latest
     defaults:
       run:
@@ -829,19 +829,13 @@ jobs:
       - name: Build client dependencies
         run: bun run build
 
-      - name: Verify installed Git
-        run: git --version
-
-      - name: Run Git workspace/store/security tests in special-character paths
+      - name: Run security tests in special-character paths
         run: |
-          $specialTemp = Join-Path $env:RUNNER_TEMP "byok git workspace 空間"
+          $specialTemp = Join-Path $env:RUNNER_TEMP "byok windows client 空間"
           New-Item -ItemType Directory -Force -Path $specialTemp | Out-Null
           $env:TEMP = $specialTemp
           $env:TMP = $specialTemp
           bun run --filter @byok-sdk/client test -- `
-            src/__tests__/git-workspace.test.ts `
-            src/__tests__/git-workspace-store.test.ts `
-            src/__tests__/bin-workspaces.test.ts `
             src/__tests__/secure-dir.test.ts
 
       - name: Run diagnostics and lifecycle lease safety tests on Windows
@@ -1784,7 +1778,7 @@ jobs:
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["select", "targeted", "build-test", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-git-workspace", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows"]
+    needs: ["select", "targeted", "build-test", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "npm-release-pack", "release-pack-migrate", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "hermes-real-windows"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

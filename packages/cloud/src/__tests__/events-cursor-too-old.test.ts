@@ -17,24 +17,25 @@
  */
 import { createMutableClock } from '@byok-sdk/core';
 import { describe, expect, it } from 'vitest';
-import { TENANT_A, createHarness, decodeEventsPage, offerPayload } from './support/harness';
+import { TENANT_A, createHarness, decodeEventsPage, grantAgentHome, offerPayload } from './support/harness';
 
 describe('GET /byok/events cursor_too_old', () => {
   it('refuses a cursor below rows lost to expiry, and serves the one at the floor', async () => {
     const clock = createMutableClock();
     const harness = createHarness({ clock });
     const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
 
-    const one = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    const one = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('one'),
     });
-    await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('two') });
+    await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload('two') });
     clock.advance(1_000);
     const cutoff = clock.now().toISOString();
-    const three = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    const three = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('three'),
     });
-    const four = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    const four = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('four'),
     });
 
@@ -69,10 +70,11 @@ describe('GET /byok/events cursor_too_old', () => {
   it('never refuses a cursor merely because the rows past it were acked and retired', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const one = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const one = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('one'),
     });
-    const two = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    const two = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('two'),
     });
 
@@ -114,7 +116,8 @@ describe('GET /byok/events cursor_too_old', () => {
   it('leaves a poll inside the window untouched', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload(),
     });
 

@@ -6,24 +6,28 @@ import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type {
   AgentEgressPolicy,
   AgentEvent,
-  TaskOfferPayload,
+  TaskOfferForAgentPayload,
 } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
 import type { AgentRef } from './agent-home';
 import type { McpToolsetServerObservation } from './mcp/observation';
 
 export type { AgentRef } from './agent-home';
+
+/**
+ * The offer fields a runtime adapter receives. The client owns this shape;
+ * the daemon projects each wire offer onto it.
+ */
+export type RuntimeTaskInput = Pick<
+  TaskOfferForAgentPayload,
+  'instruction' | 'runtime' | 'harnessId' | 'dispatchSelection' | 'sessionRef' | 'limits'
+>;
 export type {
   McpServerObservation,
   McpToolDescriptor,
   McpToolsetServerObservation,
 } from './mcp/observation';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
-
-
-export interface GitWorkspaceConfig {
-  mode: 'local-checkpoints';
-}
 
 /**
  * Failure vocabulary shared by the detection contract and local diagnostics.
@@ -196,7 +200,7 @@ export interface Session {
   /** Inject steering text into a running turn (mid-stream). */
   steer(text: string): Promise<void>;
   /** Send a new instruction on the same session after it has gone idle. */
-  followUp(task: TaskOfferPayload): Promise<void>;
+  followUp(task: RuntimeTaskInput): Promise<void>;
   /** Best-effort abort of the current turn (used for `task.cancel`). */
   interrupt(): Promise<void>;
   /**
@@ -297,7 +301,7 @@ export interface RuntimeAdapterDescriptor {
 export interface RuntimeAdapterPrepareInput {
   /** Admission cancellation; late pure results are discarded and never started. */
   signal?: AbortSignal;
-  offer: TaskOfferPayload;
+  offer: RuntimeTaskInput;
   descriptor: RuntimeAdapterDescriptor;
   requiredToolsetIds: readonly string[];
   /** Locally resolved MCP authority; available for pure admission validation only. */
@@ -354,7 +358,7 @@ export interface RuntimeOperationManifest {
   readonly descriptor: RuntimeAdapterDescriptor;
   readonly requiredToolsetIds: readonly string[];
   /** The credential-free runtime/lane/provider/model authority for this operation. */
-  readonly dispatchSelection?: TaskOfferPayload['dispatchSelection'];
+  readonly dispatchSelection?: RuntimeTaskInput['dispatchSelection'];
   readonly sessionRef?: string;
   /** Strict Agent identity, present only for task.offer_for_agent. */
   readonly agentRef?: AgentRef;
@@ -377,8 +381,6 @@ export interface RuntimeOperationManifest {
   };
   readonly workspace: {
     readonly workspaceDir: string;
-    readonly workspaceId?: string;
-    readonly baseline?: string;
   };
   /** Names are audit-safe; credential values intentionally never enter the manifest. */
   readonly forwardedEnvironmentNames: readonly string[];
@@ -574,7 +576,7 @@ export function sealRuntimeOperationManifest(manifest: RuntimeOperationManifest)
               ...manifest.dispatchSelection.providerProfile.requiredCapabilities,
             ]),
           }),
-        }) as TaskOfferPayload['dispatchSelection']
+        }) as RuntimeTaskInput['dispatchSelection']
       : Object.freeze({ ...manifest.dispatchSelection });
   return Object.freeze({
     ...(manifest.agentMemory === undefined ? {} : {agentMemory: manifest.agentMemory}),

@@ -24,7 +24,7 @@ import {
 } from '../inbound';
 import type { InboundRateLimiter } from '../stores/ports';
 import { tenantStoresFor, type TenantStores } from '../tenant-stores';
-import { TENANT_A, createHarness, offerPayload, type CloudHarness } from './support/harness';
+import { TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
 const KIB = 1024;
 
@@ -67,7 +67,8 @@ describe('observer.onInboundRefused', () => {
     const device = await harness.pairDevice(TENANT_A);
     const stores = storesFor(harness, device.deviceId);
     const { refused, observer } = refusalRecorder();
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload(),
     });
     const envelope = oversizedProgress(taskId);
@@ -91,12 +92,13 @@ describe('observer.onInboundRefused', () => {
     const device = await harness.pairDevice(TENANT_A);
     const deviceId = device.deviceId;
     const stores = storesFor(harness, deviceId);
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
+    await grantAgentHome(harness, TENANT_A, deviceId);
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
     // Claimed without a harness, so a terminal echoing one is a mismatch.
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId }, { taskId })).then((result) => result.outcome)).toBe(
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId })).then((result) => result.outcome)).toBe(
       'accepted',
     );
-    const unclaimed = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload('second') });
+    const unclaimed = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload('second') });
     const hello = (payload: Record<string, unknown>): Envelope =>
       createEnvelope('conn.hello', {
         deviceId,
@@ -144,8 +146,9 @@ describe('observer.onInboundRefused', () => {
     const device = await harness.pairDevice(TENANT_A);
     const stores = storesFor(harness, device.deviceId);
     const { refused, observer } = refusalRecorder();
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId });
 
     expect(await handleInboundEnvelope(stores, device.deviceId, claim, undefined, undefined, observer).then((result) => result.outcome)).toBe('accepted');
     expect(await handleInboundEnvelope(stores, device.deviceId, claim, undefined, undefined, observer).then((result) => result.outcome)).toBe('duplicate');
@@ -205,8 +208,9 @@ describe('observer.onInboundRefused', () => {
     for (const candidate of [undefined, thrower, observer]) {
       const harness = createHarness(candidate === undefined ? {} : { observer: candidate });
       const device = await harness.pairDevice(TENANT_A);
-      const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-      const messages = [oversizedProgress(taskId), createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId })];
+      await grantAgentHome(harness, TENANT_A, device.deviceId);
+      const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+      const messages = [oversizedProgress(taskId), createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId })];
       const response = await harness.request('/byok/messages', {
         method: 'POST',
         headers: { ...device.authorization, 'content-type': 'application/json' },
@@ -233,7 +237,8 @@ it('hides missing tasks and another device target behind not_permitted and adver
   const harness = createHarness({ activityMaxEvents: 7, activityMaxBytes: 4096 });
   const device = await harness.pairDevice(TENANT_A);
   const other = await harness.pairDevice(TENANT_A);
-  const foreign = await harness.cloud.enqueueOffer(TENANT_A, other.deviceId, { payload: offerPayload() });
+  await grantAgentHome(harness, TENANT_A, other.deviceId);
+  const foreign = await harness.cloud.enqueueAgentOffer(TENANT_A, other.deviceId, { payload: offerPayload() });
   const messages = [createEnvelope('task.started', {}, { taskId: 'missing' }), createEnvelope('task.started', {}, { taskId: foreign.taskId })];
   const response = await harness.request('/byok/messages', { method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' }, body: JSON.stringify({ messages }) });
   expect(await response.json()).toEqual({ accepted: 0, rejected: 2, outcomes: messages.map((message) => ({ id: message.id, outcome: 'rejected', reason: 'not_permitted' })) });

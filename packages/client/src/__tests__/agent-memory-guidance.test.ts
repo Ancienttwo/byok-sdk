@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchOwner, testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -12,8 +13,6 @@ import { resolveAgentMemoryMcpBin } from '../daemon/resolve-agent-memory-mcp-bin
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { GitWorkspaceManager } from '../daemon/git-workspace';
-import { GitWorkspaceStore } from '../daemon/git-workspace-store';
 import {
   AGENT_MEMORY_GUIDANCE,
   AGENT_MEMORY_READER_GUIDANCE,
@@ -22,7 +21,6 @@ import {
   prependAgentReaderResultGuidance,
 } from '../daemon/memory-guidance';
 import { serveAgentMemoryMcpOverStdio, serveGrantedAgentMemoryMcpOverStdio } from '../bin/agent-memory-mcp-server';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
@@ -55,9 +53,8 @@ describe('Agent memory guidance', () => {
     expect(prependAgentMemoryGuidance(instruction)).toBe(`${expected}\n\n${instruction}`);
   });
 
-  it('injects guidance and the reserved MCP only for strict Agent tasks across the shared runtime seam', async () => {
+  it('injects guidance and the reserved MCP into Agent tasks across the shared runtime seam', async () => {
     const hostStorageRoot = await makeRoot();
-    const workspaceRoot = await makeRoot();
     const storeDir = await makeRoot();
     const runtimes = ['pi', 'claude', 'codex'] as const;
     const adapters = runtimes.map((runtime) => new StubRuntimeAdapter(runtime, undefined, {
@@ -66,10 +63,6 @@ describe('Agent memory guidance', () => {
       approvalInteractive: true,
       mcpToolsets: true,
     }));
-    const gitWorkspaceStore = new GitWorkspaceStore(storeDir);
-    await gitWorkspaceStore.initialize();
-    const gitWorkspaceManager = new GitWorkspaceManager(workspaceRoot, { ownerId: 'agent-memory-guidance-test' });
-    await gitWorkspaceManager.preflight();
     const blobClient: BlobResolver = {
       resolveInstruction: async () => {
         throw new Error('not used in this test');
@@ -80,15 +73,11 @@ describe('Agent memory guidance', () => {
     };
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters,
-      workspaceRoot,
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
       deviceId: 'device-memory-guidance',
       send: () => {},
       blobClient,
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
-      gitWorkspaceManager,
-      gitWorkspaceStore,
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'product-memory-guidance',
@@ -111,26 +100,11 @@ describe('Agent memory guidance', () => {
       );
     }
 
-    for (const runtime of runtimes) {
-      await runner.handleEnvelope(
-        createEnvelope(
-          'task.offer',
-          {
-            instruction: `ordinary instruction for ${runtime}`,
-            runtime,
-          },
-          { taskId: `ordinary-task-${runtime}`, seq: seq++ },
-        ),
-      );
-    }
-
     for (const [index, runtime] of runtimes.entries()) {
       const adapter = adapters[index]!;
       expect(adapter.startCalls[0]?.task.instruction).toBe(
         prependAgentMemoryGuidance(`agent instruction for ${runtime}`),
       );
-      expect(adapter.startCalls[1]?.task.instruction).toContain(`ordinary instruction for ${runtime}`);
-      expect(adapter.startCalls[1]?.task.instruction).not.toContain('At the start of this Agent task');
       const strictMcp = adapter.startCalls[0]?.ctx.mcpServers?.byokagentmemory;
       if (isAgentMemorySecureFilesystemAvailable()) {
         expect(strictMcp).toMatchObject({ command: 'node', args: ['memory-mcp.js'] });
@@ -138,8 +112,6 @@ describe('Agent memory guidance', () => {
       } else {
         expect(strictMcp).toBeUndefined();
       }
-      expect(adapter.startCalls[1]?.ctx.mcpServers).toBeUndefined();
-      expect(adapter.startCalls[1]?.ctx.gitWorkspace).toBeDefined();
     }
 
     const piToken = adapters[0]?.startCalls[0]?.ctx.mcpServers?.byokagentmemory?.env?.BYOK_AGENT_MEMORY_CONTEXT;
@@ -156,10 +128,7 @@ describe('Agent memory guidance', () => {
     for (const adapter of adapters) {
       for (const session of adapter.sessions) session.emit({ type: 'turn_end' });
     }
-    // Ordinary tasks finish only after their Git observation, which spawns
-    // serial git processes and is bounded at 5s in TaskRunner. The 1s
-    // waitFor default is below that bound and fails on slow spawn hosts.
-    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0), { timeout: 5_000 });
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
     expect(consoleError).not.toHaveBeenCalled();
     if (isAgentMemorySecureFilesystemAvailable()) {
       await expect(runner.recallAgentMemory({ contextToken: piToken!, path: 'MEMORY.md' })).rejects.toThrow('invalid');
@@ -169,14 +138,12 @@ describe('Agent memory guidance', () => {
   it('rejects explicit hosted Agent memory configuration where the secure filesystem primitive is unavailable', async () => {
     if (isAgentMemorySecureFilesystemAvailable(process.platform === 'darwin')) return;
     const hostStorageRoot = await makeRoot();
-    const workspaceRoot = await makeRoot();
 
     expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Agent memory unsupported platform test',
       productId: 'agent-memory-unsupported-platform-test',
       serverUrl: 'http://localhost:1',
-      workspaceRoot,
       agentHome: { hostStorageRoot },
       agentMemory: {},
     }, [new StubRuntimeAdapter('pi')])).toThrow('requires a platform with safe descriptor-relative filesystem operations');
@@ -186,14 +153,12 @@ describe('Agent memory guidance', () => {
   it('rejects the removed product-owned helper configuration', async () => {
     if (isAgentMemorySecureFilesystemAvailable()) return;
     const hostStorageRoot = await makeRoot();
-    const workspaceRoot = await makeRoot();
     const helperBin = path.join(await makeRoot(), 'byok-agent-memory-fs');
     const config = {
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Agent memory external helper test',
       productId: 'agent-memory-external-helper-test',
       serverUrl: 'http://localhost:1',
-      workspaceRoot,
       agentHome: { hostStorageRoot },
       agentMemory: {},
       agentMemoryFilesystem: { helperBin },
@@ -213,17 +178,11 @@ describe('Agent memory guidance', () => {
 // `withHelperBin: false` under `auto` leaves out the memory MCP helper, which is admission `unavailable`.
 async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mcpToolsets = true, withHelperBin = true) {
   const hostStorageRoot = await makeRoot();
-  const workspaceRoot = await makeRoot();
   const storeDir = await makeRoot();
   const adapter = new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true, mcpToolsets });
   const sent: Envelope[] = [];
-  const gitWorkspaceStore = new GitWorkspaceStore(storeDir);
-  await gitWorkspaceStore.initialize();
-  const gitWorkspaceManager = new GitWorkspaceManager(workspaceRoot, { ownerId: 'agent-memory-admission-test' });
-  await gitWorkspaceManager.preflight();
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot,
     agentHome: new AgentHomeManager({ hostStorageRoot }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),
     deviceId: 'device-memory-admission',
@@ -232,9 +191,6 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
       resolveInstruction: async () => { throw new Error('not used in this test'); },
       uploadArtifact: async () => { throw new Error('not used in this test'); },
     },
-    sessionWorkspaces: new SessionWorkspaceStore(storeDir),
-    gitWorkspaceManager,
-    gitWorkspaceStore,
     approvalRegistry: new ApprovalRegistry(),
     storeDir,
     productId: 'product-memory-admission',

@@ -22,10 +22,10 @@ import { checkProviderKey, type ProviderKeyCheckOptions } from './provider-key-c
 import {
   ProviderModelCapabilitySchema,
   ProviderProfileRefSchema,
-  exactProviderProfileBinding,
   type ModelProviderProfile,
   type ProviderProfileRef,
 } from './provider-profile';
+import { exactProviderProfileBinding } from './provider-profile-binding';
 import type { ProviderProfileStore } from './profile-store';
 import { buildConfiguredProfile } from './registry';
 import {
@@ -34,17 +34,12 @@ import {
   assertSharedSecretValue,
   modelProviderSecretName,
 } from './secret-store';
+import { PROVIDER_PROVISIONING_SECRET_MAX_BYTES } from './secret-value';
 import { normalizeProviderUrl } from './url';
 
 /** Largest issuedAt-in-the-future a device tolerates (bounded clock skew, A9). */
 export const PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
-/**
- * The smaller of the two OS backends' secret ceilings (Windows Credential
- * Manager: 2560 UTF-8 bytes), so a too-large key is a deterministic rejection
- * on every platform instead of a store failure that leaves a pending marker.
- */
-export const PROVIDER_PROVISIONING_SECRET_MAX_BYTES = 2560;
 
 /** Persistence cut points of one applied operation, in order. */
 export type ProviderProvisioningCutPoint = 'after-pending' | 'after-secret-write' | 'after-commit';

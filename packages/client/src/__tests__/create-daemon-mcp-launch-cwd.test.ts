@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -19,7 +20,7 @@ describe('createDaemonWithAdapters: removed DaemonConfig.mcpLaunchCwd', () => {
       productName: 'Test Product',
       productId: 'test-product-mcp-launch-cwd',
       serverUrl: 'http://localhost:1',
-      workspaceRoot: await fs.mkdtemp(path.join(os.tmpdir(), 'byok-launch-cwd-workspace-')),
+      agentHome: testAgentHomeConfig(),
       storeDir: await fs.mkdtemp(path.join(os.tmpdir(), 'byok-launch-cwd-store-')),
       mcpLaunchCwd: { dir: '/' },
     } as DaemonConfig;
@@ -27,7 +28,6 @@ describe('createDaemonWithAdapters: removed DaemonConfig.mcpLaunchCwd', () => {
       expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi', { kind: 'available' })]))
         .toThrow('DaemonConfig.mcpLaunchCwd was removed: MCP servers start in the session cwd, as the agent runtime does');
     } finally {
-      await fs.rm(config.workspaceRoot!, { recursive: true, force: true });
       await fs.rm(config.storeDir!, { recursive: true, force: true });
     }
   });

@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -44,7 +45,7 @@ function config(storeDir: string): DaemonConfig {
     productName: 'Acme',
     productId: 'acme-stdout',
     serverUrl: 'http://127.0.0.1:9',
-    workspaceRoot: storeDir,
+    agentHome: testAgentHomeConfig(),
     storeDir,
   };
 }

@@ -1,9 +1,10 @@
-import { promises as fs, type Dir, type Dirent } from 'node:fs';
+import { promises as fs, type Dir, type Dirent, type Stats } from 'node:fs';
 import path from 'node:path';
 import type { AgentHomeManager } from '../../agent-home';
 import { AGENT_HOME_READER_RUN_MAX_RETAINED, pruneReaderRuns } from '../../agent-home-readers';
 import { acquireReplicaLock, resetReplica } from '../../adapters/pi-durable/replica';
 import { atomicWriteFile } from '../../util/atomic-write';
+import { AGENT_RESULT_DIRECTORY, AGENT_RESULT_MAX_RETAINED, AGENT_RESULT_RECORD_NAME, AGENT_RESULT_TEMP_NAME, pruneAgentResults } from '../agent-result-store';
 import type { AgentSessionHandoffStore } from '../agent-session-handoff-store';
 import type { InputPreparationService } from '../input-preparation-service';
 import type { JournalIdentity, LocalTaskJournal } from '../journal/journal';
@@ -23,9 +24,10 @@ interface ProducerOptions {
   readonly preparation: () => InputPreparationService | undefined;
   readonly home?: AgentHomeManager;
   readonly handoffs?: AgentSessionHandoffStore;
-  readonly workspaceRoot?: string;
   readonly piSessionDir?: string;
   readonly clock: () => Date;
+  /** Entries one usage walk visits before it stops and reports truncated classes. */
+  readonly usageScanLimit?: number;
 }
 const inside = (root: string, target: string): boolean => target === root || target.startsWith(`${root}${path.sep}`);
 const TOKEN = /^[a-f0-9]{12}$/u;
@@ -136,7 +138,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     const result = await service.collectExpired(budget.now.getTime(), budget.remaining());
     for (let index = 0; index < result.artifactsRemoved + result.recordsRemoved; index++) budget.removed(index === 0 ? result.bytesReclaimed : 0);
   }
-  async function sweepHome(id: 'reader-run' | 'home-temp', budget: SweepBudget): Promise<void> {
+  async function sweepHome(id: 'reader-run' | 'agent-result' | 'home-temp', budget: SweepBudget): Promise<void> {
     const manager = options.home;
     if (manager === undefined) return;
     const root = path.join(manager.layout.hostRootInput(), 'agents');
@@ -154,6 +156,12 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
             maxDeletions: budget.remaining(), canRemove: homeBudget.available, entries: entries('reader-run', path.join(home, '.byok', 'runs'), homeBudget),
             beforeRemove: async directory => { bytes.set(directory, (await measureTree(directory, budget.now)).bytes); },
             afterRemove: directory => budget.removed(bytes.get(directory)!),
+          });
+        } else if (id === 'agent-result') {
+          const results = path.join(home, AGENT_RESULT_DIRECTORY);
+          await pruneAgentResults({ resultsRoot: results, entries: entries('agent-result', results, homeBudget),
+            nowMs: budget.now.getTime(), maxAgeMs: config.ttlMs['agent-result'],
+            remove: async file => { if (!homeBudget.available()) return false; await remove(home, file, budget); return true; },
           });
         } else {
           async function visit(directory: string, internal: boolean): Promise<void> {
@@ -196,31 +204,37 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
   const sweep: Record<ExpiringClassId, (budget: SweepBudget) => Promise<void>> = {
     'exec-sdk': sweepExecSdk, 'exec-runtime': sweepRuntime, 'daemon-temp': sweepDaemon, 'durable-replica': sweepReplicas,
     'confirmed-journal': sweepJournal, 'input-preparation': sweepPreparation, 'skill-pack-old': sweepSkills,
-    'reader-run': budget => sweepHome('reader-run', budget), 'home-temp': budget => sweepHome('home-temp', budget),
+    'reader-run': budget => sweepHome('reader-run', budget), 'agent-result': budget => sweepHome('agent-result', budget),
+    'home-temp': budget => sweepHome('home-temp', budget),
   };
 
   let measurement: Promise<Map<RetentionClassId, ClassUsage>> | undefined;
   async function collectUsage(): Promise<Map<RetentionClassId, ClassUsage>> {
     const now = clock(), all = [...EXPIRING_CLASS_IDS, ...PROTECTED_CLASS_IDS];
     const result = new Map<RetentionClassId, ClassUsage>(all.map(classId => [classId,
-      { classId, protected: PROTECTED_CLASS_IDS.includes(classId as typeof PROTECTED_CLASS_IDS[number]), measured: false, bytes: 0, entries: 0, oldestAgeMs: null }]));
+      { classId, protected: PROTECTED_CLASS_IDS.includes(classId as typeof PROTECTED_CLASS_IDS[number]), measured: false, truncated: false, bytes: 0, entries: 0, oldestAgeMs: null }]));
     const currentSkills = new Set<string>();
-    let scanned = 0;
+    // Host-owned roots can hold any number of entries, so one walk stops at a bound
+    // and reports lower bounds instead of failing measurement and latching emergency.
+    const limit = options.usageScanLimit ?? 65_536;
+    let scanned = 0, exhausted = false;
+    const admit = (): boolean => { if (scanned >= limit) exhausted = true; else scanned++; return !exhausted; };
     for (const root of config.skillPackDataDirs) {
+      if (exhausted) break;
       const directory = await fs.opendir(skillPacksRoot(root)).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
       if (directory === undefined) continue;
       for await (const entry of directory) {
-        if (++scanned > 65_536) throw new Error('retention_usage_scan_limit');
+        if (!admit()) break;
         if (!entry.isDirectory()) continue;
         const pack = await readInstalledSkillPack(root, entry.name);
         if (pack !== undefined) currentSkills.add(pack.directory);
       }
     }
     const homes = options.home === undefined ? undefined : path.join(options.home.layout.hostRootInput(), 'agents');
-    const roots = [...new Set([storeDir, scratch.root, ...config.skillPackDataDirs.map(skillPacksRoot), homes, options.workspaceRoot, options.piSessionDir].filter((root): root is string => root !== undefined))];
+    const roots = [...new Set([storeDir, scratch.root, ...config.skillPackDataDirs.map(skillPacksRoot), homes, options.piSessionDir].filter((root): root is string => root !== undefined))];
     const topRoots = roots.filter(root => !roots.some(other => other !== root && inside(other, root)));
     const replicaStates = new Map<string, Promise<boolean>>();
-    async function classify(file: string): Promise<RetentionClassId> {
+    async function classify(file: string, stat: Stats): Promise<RetentionClassId> {
       if (options.piSessionDir !== undefined && inside(options.piSessionDir, file)) return 'pi-session-dir';
       if (inside(execRoot, file)) return file.includes(`${path.sep}sdk${path.sep}`) ? 'exec-sdk' : file.includes(`${path.sep}runtime${path.sep}`) ? 'exec-runtime' : 'store-authority';
       if (inside(daemonRoot, file)) return 'daemon-temp';
@@ -249,54 +263,71 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       if (homes !== undefined && inside(homes, file)) {
         const relative = path.relative(homes, file).split(path.sep).slice(1).join('/');
         if (relative.startsWith('.byok/runs/')) return 'reader-run';
+        const name = path.basename(file);
+        if (stat.isFile() && relative === `.byok/results/${name}` && (AGENT_RESULT_RECORD_NAME.test(name) || AGENT_RESULT_TEMP_NAME.test(name))) return 'agent-result';
         if (relative === '.byok/agent-home.lease') return 'agent-home-lease';
         if (relative.startsWith('.byok/runtime-sessions/') && path.basename(file).includes('-task-')) return 'terminal-evidence';
         if (HOME_TEMP.test(path.basename(file)) && !relative.startsWith('.byok/runtime-sessions/')) return 'home-temp';
         return relative.startsWith('.byok/') ? 'byok-authority' : 'agent-content';
       }
-      if (options.workspaceRoot !== undefined && inside(options.workspaceRoot, file)) return 'workspace';
       return 'store-authority';
     }
     async function walk(file: string): Promise<void> {
       const stat = await fs.lstat(file).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
-      if (stat === undefined) return;
-      if (++scanned > 65_536) throw new Error('retention_usage_scan_limit');
-      if (stat.isDirectory()) { const directory = await fs.opendir(file); for await (const entry of directory) await walk(path.join(file, entry.name)); }
-      else {
-        const id = await classify(file), previous = result.get(id)!;
+      if (stat === undefined || !admit()) return;
+      if (stat.isDirectory()) {
+        const directory = await fs.opendir(file);
+        for await (const entry of directory) { await walk(path.join(file, entry.name)); if (exhausted) break; }
+      } else {
+        const id = await classify(file, stat), previous = result.get(id)!;
         result.set(id, { ...previous, measured: true, bytes: previous.bytes + stat.size, entries: previous.entries + 1,
           oldestAgeMs: Math.max(previous.oldestAgeMs ?? 0, Math.max(0, now.getTime() - stat.mtimeMs)) });
       }
     }
-    for (const root of topRoots) await walk(root);
-    // Empty SDK-owned classes were measured too; external unconfigured scopes stay explicit.
-    for (const id of all) if (!['workspace', 'pi-session-dir', 'agent-content', 'byok-authority', 'agent-home-lease', 'terminal-evidence', 'retired-namespace', 'confirmed-journal'].includes(id)) result.set(id, { ...result.get(id)!, measured: true });
+    // An unfinished top root maps to whether the walk entered it before stopping.
+    const unfinished = new Map<string, boolean>();
+    for (const root of topRoots) {
+      const before = scanned;
+      if (!exhausted) await walk(root);
+      if (exhausted) unfinished.set(root, scanned > before);
+    }
+    for (const id of all) {
+      // confirmed-journal counts journal rows, not walked files. Exec residue that
+      // matches no exec class is store authority even when scratch is outside the store.
+      const covered = id === 'confirmed-journal' ? [] : id === 'store-authority' ? [storeDir, scratch.root] : authority(id).roots;
+      const related = topRoots.filter(root => covered.some(other => inside(root, other) || inside(other, root)));
+      const truncated = related.some(root => unfinished.has(root));
+      const unreached = truncated && related.every(root => unfinished.get(root) === false);
+      // Empty SDK-owned classes were measured too; external unconfigured scopes and unreached roots stay explicit.
+      const previous = result.get(id)!;
+      result.set(id, { ...previous, truncated, measured: !unreached && (previous.measured || !['pi-session-dir', 'agent-content', 'byok-authority', 'agent-home-lease', 'terminal-evidence', 'retired-namespace', 'confirmed-journal'].includes(id)) });
+    }
     const journal = options.journal();
     if (journal !== undefined) { const usage = await journal.measureUsage();
       for (const field of ['journalBytes','quarantineBytes','journalEntries','confirmedEntries'] as const) if (!Number.isSafeInteger(usage[field]) || usage[field] < 0) throw new Error('retention_journal_usage_invalid');
       if (usage.oldestConfirmedAt !== undefined && !Number.isFinite(Date.parse(usage.oldestConfirmedAt))) throw new Error('retention_journal_usage_invalid');
-      result.set('confirmed-journal', { classId: 'confirmed-journal', protected: false, measured: true,
+      result.set('confirmed-journal', { classId: 'confirmed-journal', protected: false, measured: true, truncated: false,
       bytes: 0, entries: usage.confirmedEntries, oldestAgeMs: usage.oldestConfirmedAt === undefined ? null : Math.max(0, now.getTime() - Date.parse(usage.oldestConfirmedAt)) }); }
     return result;
   }
   const measure = async (id: RetentionClassId): Promise<ClassUsage> => (await (measurement ??= collectUsage())).get(id)!;
   function authority(id: RetentionClassId): ClassAuthority {
     const expiring = EXPIRING_CLASS_IDS.includes(id as ExpiringClassId);
-    const homeScoped = ['reader-run','home-temp','agent-content','byok-authority','agent-home-lease','terminal-evidence'].includes(id);
+    const homeScoped = ['reader-run','agent-result','home-temp','agent-content','byok-authority','agent-home-lease','terminal-evidence'].includes(id);
     const replicaScoped = id === 'durable-replica' || id === 'durable-replica-live';
     const skillScoped = id === 'skill-pack-old' || id === 'skill-pack-current';
     const roots = id === 'exec-sdk' || id === 'exec-runtime' ? [execRoot]
       : id === 'daemon-temp' ? [daemonRoot] : replicaScoped ? [replicas]
       : homeScoped ? (options.home === undefined ? [] : [path.join(options.home.layout.hostRootInput(), 'agents')])
       : skillScoped ? config.skillPackDataDirs.map(skillPacksRoot)
-      : id === 'workspace' ? (options.workspaceRoot === undefined ? [] : [options.workspaceRoot])
       : id === 'pi-session-dir' ? (options.piSessionDir === undefined ? [] : [options.piSessionDir])
       : id === 'input-preparation' ? [path.join(storeDir, 'input-preparation')]
       : id === 'quarantine' ? [path.join(storeDir, 'quarantine')]
       : id === 'owned-processes' ? [path.join(storeDir, 'owned-processes')] : [storeDir];
-    return Object.freeze({ roots: Object.freeze(roots), owner: ['workspace','pi-session-dir','agent-content'].includes(id) ? 'host' : 'sdk',
-      scope: homeScoped ? 'agent-home' : replicaScoped ? 'replica' : ['workspace','pi-session-dir'].includes(id) ? 'host' : 'store',
-      ...(expiring ? { ttlMs: config.ttlMs[id as ExpiringClassId] } : {}), ...(id === 'reader-run' ? { maxEntries: AGENT_HOME_READER_RUN_MAX_RETAINED } : {}) });
+    return Object.freeze({ roots: Object.freeze(roots), owner: ['pi-session-dir','agent-content'].includes(id) ? 'host' : 'sdk',
+      scope: homeScoped ? 'agent-home' : replicaScoped ? 'replica' : id === 'pi-session-dir' ? 'host' : 'store',
+      ...(expiring ? { ttlMs: config.ttlMs[id as ExpiringClassId] } : {}), ...(id === 'reader-run' ? { maxEntries: AGENT_HOME_READER_RUN_MAX_RETAINED } : {}),
+      ...(id === 'agent-result' ? { maxEntries: AGENT_RESULT_MAX_RETAINED } : {}) });
   }
   let lastCompactionMs: number | undefined;
   const registry = new RetentionRegistry([

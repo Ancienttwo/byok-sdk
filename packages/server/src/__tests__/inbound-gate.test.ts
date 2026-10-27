@@ -12,6 +12,8 @@ import {
   testPairingClaims,
   waitForTaskEvent,
   type FakeLongPollDaemon,
+  TEST_AGENT_DISPATCH,
+  TEST_AGENT_REF,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -33,7 +35,7 @@ async function claimAndStart(
   capabilities?: RuntimeCapabilities,
 ): Promise<void> {
   await daemon.send(
-    createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime, capabilities }, { taskId: handle.taskId }),
+    createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, runtime, capabilities }, { taskId: handle.taskId }),
   );
   await daemon.send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
@@ -79,7 +81,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-      const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+      const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
       const iter = handle.events()[Symbol.asyncIterator]();
       const offered = await iter.next();
       expect(offered.value).toMatchObject({ kind: 'state', state: 'Offered' });
@@ -87,7 +89,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       // One fixed batch, reused verbatim (same `id`s) across both POSTs —
       // this is what makes the second POST a genuine wire-level retry, not a
       // fresh set of envelopes that merely happen to target the same task.
-      const claim = createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId });
+      const claim = createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId });
       const startedEnv = createEnvelope('task.started', {}, { taskId: handle.taskId });
       const progress = createEnvelope(
         'task.progress',
@@ -96,7 +98,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       );
       const awaitApproval = createEnvelope(
         'task.await_approval',
-        { summary: 'about to do something risky' },
+        { summary: 'about to do something risky', approvalId: 'appr-retry' },
         { taskId: handle.taskId },
       );
       const batch = [claim, startedEnv, progress, awaitApproval];
@@ -146,9 +148,9 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-      const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
+      const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x' });
       await claimAndStart(daemon, handle);
-      await daemon.send(createEnvelope('task.await_approval', { summary: 'first' }, { taskId: handle.taskId }));
+      await daemon.send(createEnvelope('task.await_approval', { summary: 'first', approvalId: 'appr-first' }, { taskId: handle.taskId }));
       await waitForTaskEvent(handle, (e) => e.kind === 'await_approval');
       expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
 
@@ -156,7 +158,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       // task.await_approval, arriving while the task is already
       // AwaitApproval. `POST /byok/messages` applies its envelopes
       // synchronously, so the awaited send is itself the barrier.
-      await daemon.send(createEnvelope('task.await_approval', { summary: 'second, redundant' }, { taskId: handle.taskId }));
+      await daemon.send(createEnvelope('task.await_approval', { summary: 'second, redundant', approvalId: 'appr-first' }, { taskId: handle.taskId }));
 
       expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // NOT Failed
     });
@@ -176,15 +178,15 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-      const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
+      const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x' });
       await claimAndStart(daemon, handle);
-      await daemon.send(createEnvelope('task.await_approval', { summary: 'first' }, { taskId: handle.taskId }));
+      await daemon.send(createEnvelope('task.await_approval', { summary: 'first', approvalId: 'appr-first' }, { taskId: handle.taskId }));
       await waitForTaskEvent(handle, (e) => e.kind === 'await_approval');
 
       const iter = handle.events()[Symbol.asyncIterator]();
       for (let i = 0; i < 5; i++) await iter.next();
 
-      await daemon.send(createEnvelope('task.await_approval', { summary: 'second, redundant' }, { taskId: handle.taskId }));
+      await daemon.send(createEnvelope('task.await_approval', { summary: 'second, redundant', approvalId: 'appr-first' }, { taskId: handle.taskId }));
 
       await expectNoMoreEvents(iter);
     });
@@ -202,7 +204,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const { code } = await started.byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
       const deviceB = await pairFakeDaemon(started.baseUrl, code, { deviceName: 'device-b' });
 
-      const handle = await started.byok.dispatch({ instruction: 'owned by A', deviceId: deviceA.deviceId });
+      const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, instruction: 'owned by A', deviceId: deviceA.deviceId });
       await claimAndStart(deviceA, handle);
       expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Running');
 
@@ -217,10 +219,10 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
         ),
         createEnvelope(
           'task.complete',
-          { summary: 'stolen', sessionRef: 'sess_evil' },
+          { agentRef: TEST_AGENT_REF, summary: 'stolen', sessionRef: 'sess_evil' },
           { taskId: handle.taskId },
         ),
-        createEnvelope('task.await_approval', { summary: 'injected' }, { taskId: handle.taskId }),
+        createEnvelope('task.await_approval', { summary: 'injected', approvalId: 'appr-injected' }, { taskId: handle.taskId }),
       ];
 
       const res = await fetch(`${started.baseUrl}/byok/messages`, {
@@ -240,42 +242,62 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
   });
 
   describe('POST /byok/messages restricts to daemon->server task.* types (P2)', () => {
-    it('a task.offer or conn.ack in the batch is rejected, not counted accepted, and has no side effect', async () => {
+    it('a server->daemon task.offer_for_agent in the batch is rejected, not counted accepted, and has no side effect', async () => {
       const started = await start();
       const { code } = await started.byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
       const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
 
-      const connAck = createEnvelope(
-        'conn.ack',
-        { protocolVersion: PROTOCOL_VERSION, capabilities: [], serverTime: new Date().toISOString() },
-        { seq: 99 },
-      );
       const taskOffer = createEnvelope(
-        'task.offer',
-        { instruction: 'do the thing' },
+        'task.offer_for_agent',
+        { instruction: 'do the thing', ...TEST_AGENT_DISPATCH, runtime: 'pi' },
         { taskId: 'task_forged', seq: 100 },
       );
 
       const res = await fetch(`${started.baseUrl}/byok/messages`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ messages: [connAck, taskOffer] }),
+        body: JSON.stringify({ messages: [taskOffer] }),
       });
 
       expect(res.status).toBe(200); // tolerant batch parsing (P2): wrong-direction types are per-envelope rejected, not a whole-batch 400
-      expect(await res.json()).toMatchObject({ accepted: 0, rejected: 2 });
+      expect(await res.json()).toMatchObject({ accepted: 0, rejected: 1 });
       expect(await started.byok.tasks.get('task_forged')).toBeUndefined(); // never reached the task store at all
+    });
+
+    it('a conn.ack, which is not a v4 message type, is refused as a malformed batch and has no side effect', async () => {
+      const started = await start();
+      const { code } = await started.byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
+      const { accessToken } = await pairFakeDaemon(started.baseUrl, code);
+
+      // Only raw JSON can carry a type the v4 schema does not know.
+      const connAck = {
+        v: PROTOCOL_VERSION,
+        id: '00000000-0000-4000-8000-0000000000aa',
+        ts: new Date().toISOString(),
+        type: 'conn.ack',
+        seq: 99,
+        payload: { protocolVersion: PROTOCOL_VERSION, capabilities: [], serverTime: new Date().toISOString() },
+      };
+
+      const res = await fetch(`${started.baseUrl}/byok/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ messages: [connAck] }),
+      });
+
+      expect(res.status).toBe(400);
+      expect((await started.byok.stats()).taskCountsByState.Offered).toBe(0);
     });
 
     it('a valid daemon->server envelope alongside a rejected one is partially accepted (per-envelope, not whole-batch)', async () => {
       const started = await start();
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-      const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
-      const claim = createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId });
+      const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x' });
+      const claim = createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId });
       const forgedOffer = createEnvelope(
-        'task.offer',
-        { instruction: 'forged' },
+        'task.offer_for_agent',
+        { instruction: 'forged', ...TEST_AGENT_DISPATCH, runtime: 'pi' },
         { taskId: 'task_forged_2', seq: 999 },
       );
 
@@ -304,7 +326,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       });
 
       // task1: Running -> steer (non-exempt, non-terminal at send time) -> cancel (exempt, terminal at send time).
-      const handle1 = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'task one' });
+      const handle1 = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'task one' });
       await claimAndStart(daemon, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
       await handle1.steer('keep going');
       await handle1.cancel('changed my mind');
@@ -316,7 +338,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       // approve's exemption would be moot (it's never sent on an
       // already-terminal task) while still confirming it doesn't survive the
       // filter once the task later goes terminal for an unrelated reason.
-      const handle2 = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'task two' });
+      const handle2 = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'task two' });
       await claimAndStart(daemon, handle2);
       await daemon.send(
         createEnvelope('task.await_approval', { summary: 'need ok', approvalId: 'appr-task2' }, { taskId: handle2.taskId }),
@@ -358,13 +380,13 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
         runtimes: [PI_RUNTIME_INFO],
       });
 
-      const handle1 = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'task one' });
+      const handle1 = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'task one' });
       await claimAndStart(daemon, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
       await handle1.steer('keep going');
       await handle1.cancel('changed my mind');
       await handle1.result();
 
-      const handle2 = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'task two' });
+      const handle2 = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'task two' });
       await claimAndStart(daemon, handle2);
       await daemon.send(
         createEnvelope('task.await_approval', { summary: 'need ok', approvalId: 'appr-task2' }, { taskId: handle2.taskId }),

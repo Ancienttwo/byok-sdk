@@ -27,7 +27,7 @@ beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-device-doctor-'));
   config = {
     productId: 'doctor-test', productName: 'Doctor test', localAgentRelease: { version: '0.0.0-test' },
-    storeDir: root, workspaceRoot: root, serverUrl: 'https://unused.invalid',
+    storeDir: root, serverUrl: 'https://unused.invalid',
   };
   store = createTestDeviceStore(root, undefined, config.productId);
   vi.mocked(connectControlClient).mockReset();

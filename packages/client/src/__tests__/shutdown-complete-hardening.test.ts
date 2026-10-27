@@ -46,10 +46,9 @@ describe('shutdown-complete fires even when TaskRunner.shutdownActiveTasks throw
   it('emits shutdown-complete despite shutdownActiveTasks rejecting, so a caller waiting on it is never left hanging', async () => {
     server = await TestServer.start();
     const adapter = new StubRuntimeAdapter();
-    const workspaceRoot = await tmpDir('byok-shutdown-hardening-ws-');
     const storeDir = await tmpDir('byok-shutdown-hardening-store-');
     const built = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-shutdown-hardening', serverUrl: server.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-shutdown-hardening', serverUrl: server.url, storeDir },
       [adapter],
     );
     daemon = built;

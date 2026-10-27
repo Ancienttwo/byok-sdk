@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
 import {
+  AGENT_HOME_CONTRACT_CAPABILITY,
   CLOUD_CAPABILITIES,
   createByokCloud,
   createHmacTokenSigner,
@@ -44,6 +45,7 @@ import {
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const OFFER_TENANT = tenantId('tenant-offer-sequence');
+const OFFER_AGENT = { agentRef: { agentId: 'offer-sequence-agent', profileRevision: 'rev-1' }, sessionRef: 'offer-sequence-session' };
 
 const postgresFactory: CloudCompositionFactory = {
   async create() {
@@ -144,6 +146,10 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
         proofKeyId: 'fixture-proof',
         proofKeyEpoch: 1,
       });
+      await stores.devices.recordCapabilities(OFFER_TENANT, {
+        deviceId: 'device-offer-sequence',
+        capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
+      });
 
       // A limited append is admitted against the tenant entitlement (#411).
       await core.quota.writeEntitlement(OFFER_TENANT, {
@@ -154,11 +160,11 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
         mailboxLimitBytes: 100_000_000n,
         retentionPolicyId: 'test',
       });
-      const first = await cloud.enqueueOffer(OFFER_TENANT, 'device-offer-sequence', {
-        payload: { instruction: 'prove the sequence boundary' },
+      const first = await cloud.enqueueAgentOffer(OFFER_TENANT, 'device-offer-sequence', {
+        payload: { ...OFFER_AGENT, instruction: 'prove the sequence boundary' },
       });
-      const second = await cloud.enqueueOffer(OFFER_TENANT, 'device-offer-sequence', {
-        payload: { instruction: 'prove the next sequence too' },
+      const second = await cloud.enqueueAgentOffer(OFFER_TENANT, 'device-offer-sequence', {
+        payload: { ...OFFER_AGENT, instruction: 'prove the next sequence too' },
       });
       const page = await core.mailbox.readAfter(OFFER_TENANT, {
         deviceId: 'device-offer-sequence',

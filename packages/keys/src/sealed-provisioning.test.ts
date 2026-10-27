@@ -24,7 +24,8 @@ import {
 } from './fixtures/provisioning-requests';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import { readProviderCustodySnapshot } from './pi-provider-launcher-core';
-import { exactProviderProfileBinding, parseModelProviderProfile } from './provider-profile';
+import { parseModelProviderProfile } from './provider-profile';
+import { exactProviderProfileBinding } from './provider-profile-binding';
 import { ProviderRegistry } from './registry';
 import { applySealedProviderProvisioning, type ApplySealedProviderProvisioningOptions } from './sealed-provisioning';
 import { InMemorySecretStore, modelProviderSecretName } from './secret-store';

@@ -22,6 +22,8 @@ the only Agent-home composition rule:
           <runtime>-task-<task-hash>.jsonl
         runs/
           <taskId>/                    memory-reader runtime cwd, kept after the terminal
+        results/
+          result-<task-hash>.json      staged submit_result outcome; 7 days / 256 per home once the home is idle
       ...                             opaque Agent files
 ```
 
@@ -51,9 +53,10 @@ marker be reclaimed. If a group survives SIGKILL, start is refused and the
 error names the record file: verify the processes are gone, then delete that
 file.
 
-`agentHome` and legacy `gitWorkspace` are mutually exclusive daemon
-authorities. Agent execution never silently inherits task-scoped Git workspace
-semantics or creates a second durable workspace owner.
+The Agent home is the only workspace authority. Wire v4 removed Git
+workspace mode and `DaemonConfig.workspaceRoot` (#925); the daemon leaves an
+older daemon's `<storeDir>/git-workspaces.json`,
+`<storeDir>/session-workspaces.json` and task directories untouched.
 
 `agentId` is also rejected when it is not a portable Windows pathname segment
 (reserved device names or a trailing dot/space). A strict Agent `taskId` is a
@@ -96,7 +99,7 @@ The store lease covers scratch recovery; the shared home base lease plus the
 agents-root mutation gate covers readers and exact memory/projection temp
 names. Gate acquisition is per home with a bounded walk and round-robin
 cursor, so maintenance does not reserve the entire root for a full pass.
-Memory-delete tombstones, opaque Agent files and `.byok` records are protected.
+Memory-delete tombstones, opaque Agent files and `.byok` records other than reader runs (`.byok/runs/`) and staged result records (`.byok/results/`) are protected.
 Skill-pack roots outside the store must be listed in `storage.skillPackDataDirs`;
 only non-current hash revisions past 24h are deleted under the install gate.
 
@@ -115,6 +118,7 @@ only non-current hash revisions past 24h are deleted under the install gate.
 | Egress | Send Agent events as the runtime produced them (ADR-037 D4); own the per-Agent reliable spool, cursor/ack/retry, quota and typed drop facts | Select one exact policy revision; decide what to store and show |
 | Explicit reads | Own per-surface capability, canonical path policy, per-Agent audit journal and BlobRef receipt fidelity | Author tenant/actor authz plus narrower root/MIME/text/size policy; never infer authorization from file presence |
 | Concurrency | Enforce one writer Attempt per canonical Agent home, and at most `maxConcurrentReaderAttemptsPerAgentHome` (default 4) `memory-reader` Attempts, each in its own `.byok/runs/<taskId>/`; report reader memory changes in `agentHomeMemoryChange` without enforcing read-only memory; remove reader run directories by retention (32 per home, 7 days, never an active one or one a recent reader handoff points to) | Send concurrent memory-reading work as reader offers and keep memory writes in the writer; do not write memory files while readers run if the attribution matters; do not schedule around or bypass a busy decline |
+| Results | Stage each `submit_result` outcome in `.byok/results/`; remove records from an idle home by retention (7 days by default, 256 per home) | Read structured outcomes from the terminal result document; do not read or delete `.byok/results/`; tune only `storage.retention.ttlMs['agent-result']` |
 | Credentials | Never persist credential bytes in Agent home | Store secrets in SDK-owned macOS Keychain, Windows Credential Manager, or Linux Secret Service entries; project references/configured state only |
 
 ## Host-root relocation authority
@@ -171,13 +175,12 @@ declaration of that capability; the hosted composition persists the
 declaration in the device row. `workspaceHint` remains reserved and ignored;
 it is not an Agent-home input.
 
-Cutover is explicit and one-shot. Existing task workspaces and legacy
-`SessionWorkspaceStore` records are not adopted, copied, or searched. A
+Cutover is explicit and one-shot. Task directories and session workspace
+records an older daemon left are not adopted, copied, or searched. A
 Salesko migration may enable Agent dispatch only after the target daemon has
 the capability and the branded root has been selected. An old daemon, missing
 AgentRef, profile revision mismatch, session/cwd/runtime mismatch, or busy
-Agent home fails closed; none silently falls back to
-`workspaceRoot/<taskId>`.
+Agent home fails closed; none falls back to another directory.
 
 Egress enablement is a second explicit admission step. Salesko first authors
 one exact policy revision, then waits for the daemon's durable

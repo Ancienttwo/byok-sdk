@@ -7,7 +7,7 @@ import {
   RuntimeInfoSchema,
   TaskApprovalResolvedPayloadSchema,
   TaskClaimPayloadSchema,
-  TaskOfferPayloadSchema,
+  TaskOfferForAgentPayloadSchema,
   createEnvelope,
   decodeEnvelope,
   parseMessage,
@@ -251,15 +251,13 @@ describe('task.claim.capabilities (additive-minor optional field)', () => {
 });
 
 describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)', () => {
-  it('task.offer payload no longer has a taskId field (stripped if present)', () => {
-    const result = TaskOfferPayloadSchema.safeParse({
+  it('an offer payload has no taskId field (the strict Agent offer refuses one)', () => {
+    const result = TaskOfferForAgentPayloadSchema.safeParse({
       taskId: 'task-1', // M0 shape — payload-level duplicate, now meaningless
       instruction: 'do it',
+      agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' }, 
     });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect('taskId' in result.data).toBe(false);
-    }
+    expect(result.success).toBe(false);
   });
 
   it('task.claim payload no longer has a taskId field (stripped if present)', () => {
@@ -278,7 +276,7 @@ describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)
     // payload, and the envelope never sets task_id. M1 requires the envelope
     // field, so this must now be rejected rather than silently unroutable.
     const raw = {
-      v: 3,
+      v: 4,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.claim',
@@ -410,7 +408,7 @@ describe('runtime messageDraft capability', () => {
   it('is optional discovery data in hello and claim', () => {
     const capabilities = { messageDraft: true };
     const hello = MESSAGE_PAYLOAD_SCHEMAS['conn.hello'].parse({
-      protocolVersions: [3], capabilities: [], deviceId: 'device-1', productId: 'app',
+      protocolVersions: [4], capabilities: [], deviceId: 'device-1', productId: 'app',
       runtimes: [{ id: 'pi', version: '1', authPresent: true, capabilities }],
     });
     expect(hello.runtimes?.[0]?.capabilities).toEqual(capabilities);

@@ -24,7 +24,7 @@ import {
 import { InMemoryPairingCodeStore } from '../../../../cloud/src/stores/in-memory/pairing-codes';
 import { createSqliteEmbeddedStores } from '../../../../server/src/stores/sqlite/index';
 import { assertCanonicalTimestamp, assertCollectExpiredInput, PRESENCE_LEVELS, type CollectExpiredResult, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
-import type { AgentRef } from '@byok-sdk/protocol';
+import { AGENT_EGRESS_FRESH_SESSION_CAPABILITY, type AgentRef } from '@byok-sdk/protocol';
 
 interface Config {
   readonly dbPath: string;
@@ -407,6 +407,17 @@ const httpServer = serve({
   },
 }) as HttpServer;
 
+/** Fresh Agent admission reads the capability snapshot the daemon's long-poll `conn.hello` records. */
+async function waitForAgentEgressCapabilities(deviceId: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const device = (await cloud.listDevices(tenant)).find((candidate) => candidate.deviceId === deviceId);
+    if (device?.capabilities?.includes(AGENT_EGRESS_FRESH_SESSION_CAPABILITY)) return;
+    if (Date.now() >= deadline) throw new Error(`device ${deviceId} never advertised ${AGENT_EGRESS_FRESH_SESSION_CAPABILITY}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 function respond(id: number, result?: unknown, error?: unknown): void {
   process.stdout.write(`${JSON.stringify(error === undefined ? { id, result } : { id, error: String(error) })}\n`);
 }
@@ -419,19 +430,16 @@ lines.on('line', (line) => {
     switch (request.method) {
       case 'createPairingCode':
         return cloud.createPairingCode(tenant, { productId: config.productId });
-      case 'enqueueOffer':
-        return cloud.enqueueOffer(tenant, String(params.deviceId), {
-          ...(params.taskId === undefined ? {} : { taskId: String(params.taskId) }),
-          payload: { instruction: String(params.instruction), ...(params.agentRef === undefined ? {} : { agentRef: params.agentRef }) },
-        });
       case 'enqueueFreshOffer':
         // Fresh Agent execution has one entry (#470/#484): submitAgentExecution.
+        // Without an agentRef each offer runs as its own Agent, so no two tasks share a home.
+        await waitForAgentEgressCapabilities(String(params.deviceId));
         return cloud.submitAgentExecution(tenant, AgentExecutionInputSchema.parse({
-          taskId: params.taskId,
+          taskId: params.taskId ?? globalThis.crypto.randomUUID(),
           deviceId: params.deviceId,
           payload: {
             instruction: String(params.instruction), runtime: 'pi',
-            agentRef: params.agentRef,
+            agentRef: params.agentRef ?? { agentId: `recovery-${globalThis.crypto.randomUUID()}`, profileRevision: '1' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
             terminalProjection: { mode: 'none' },
           },

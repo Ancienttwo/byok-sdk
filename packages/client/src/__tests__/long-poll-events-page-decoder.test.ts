@@ -93,10 +93,10 @@ describe('LongPollClient decodes the events page with EventsPollResponseSchema (
     v: PROTOCOL_VERSION,
     id: 'ffffffff-ffff-4fff-8fff-ffffffffff40',
     ts: new Date().toISOString(),
-    type: 'task.offer',
+    type: 'task.offer_for_agent',
     task_id: 'good-task',
     seq: 1,
-    payload: { instruction: 'do it' },
+    payload: { agentRef: { agentId: 'agent-long-poll', profileRevision: 'rev-1' }, instruction: 'do it' },
   };
 
   it.each([
