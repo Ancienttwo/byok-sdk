@@ -144,17 +144,31 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     expect(server.received.some((e) => e.type === 'task.fail' && e.task_id === 'task-2')).toBe(false);
   });
 
+  /**
+   * The batch interval is min(progressBatch.flushIntervalMs, the egress
+   * policy's activity.maxCoalesceMs), and a fresh offer must carry the
+   * daemon's exact policy. A case that needs a longer interval sets both.
+   */
+  function batchingFor(intervalMs: number) {
+    const egressPolicy = { ...DEFAULT_AGENT_EGRESS_POLICY, activity: { ...DEFAULT_AGENT_EGRESS_POLICY.activity, maxCoalesceMs: intervalMs } };
+    return {
+      config: { progressBatch: { flushIntervalMs: intervalMs }, agentEgress: { policy: egressPolicy } },
+      offer: { ...FRESH_OFFER, egressPolicy },
+    };
+  }
+
   it('cancel does not flush/send buffered-but-unsent progress (unobservable server-side anyway — M1-4 e2e finding)', async () => {
     const adapter = new StubRuntimeAdapter();
     // Keep the batching deadline well outside the long-poll delivery window so
     // the test controls the intended precondition instead of racing the
     // transport scheduler.
-    await setupDaemon(adapter, { progressBatch: { flushIntervalMs: 5_000 } });
+    const batching = batchingFor(5_000);
+    await setupDaemon(adapter, batching.config);
 
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'buffer some progress then cancel' },
+        { agentRef: freshTestAgentRef(), ...batching.offer, instruction: 'buffer some progress then cancel' },
         { taskId: 'task-cancel-buffered', seq: server.nextSeq() },
       ),
     );
@@ -176,6 +190,85 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     // buffered progress can never reach an embedder — sending it would only
     // be logged server-side as a dropped/illegal-transition task.progress.
     expect(server.received.some((e) => e.type === 'task.progress' && e.task_id === 'task-cancel-buffered')).toBe(false);
+  });
+
+  it('the batch timer never sends buffered progress while a cancel is tearing the task down (#1055)', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const batching = batchingFor(2_000);
+    await setupDaemon(adapter, batching.config);
+
+    server.send(
+      createEnvelope(
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...batching.offer, instruction: 'buffer, cancel, then outlast the batch deadline' },
+        { taskId: 'task-cancel-teardown', seq: server.nextSeq() },
+      ),
+    );
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-cancel-teardown');
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    const session = adapter.sessions[0]!;
+    // Hold the cancel inside interrupt() past the batch deadline, so the
+    // timer comes due while the daemon is already tearing the task down.
+    let releaseInterrupt!: () => void;
+    const interruptHeld = new Promise<void>((resolve) => { releaseInterrupt = resolve; });
+    session.interrupt = async () => {
+      session.interruptCalled = true;
+      await interruptHeld;
+    };
+
+    const bufferedAt = Date.now();
+    session.emit({ type: 'progress', text: 'partial work before cancel' });
+    server.send(
+      createEnvelope('task.cancel', { reason: 'cancel during teardown' }, { taskId: 'task-cancel-teardown', seq: server.nextSeq() }),
+    );
+    await vi.waitFor(() => expect(session.interruptCalled).toBe(true), { timeout: 1_500 });
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, bufferedAt + 2_500 - Date.now())));
+    releaseInterrupt();
+
+    const cancelled = await server.waitFor((e) => e.type === 'task.cancelled' && e.task_id === 'task-cancel-teardown');
+    expect(cancelled.payload).toMatchObject({ reason: 'cancel during teardown' });
+    expect(server.received.some((e) => e.type === 'task.progress' && e.task_id === 'task-cancel-teardown')).toBe(false);
+  });
+
+  it('progress buffered before turn_end still reaches the server ahead of task.complete (#1055)', async () => {
+    const adapter = new StubRuntimeAdapter();
+    // No timer flush can happen within this case: only the turn_end flush
+    // can send the batch.
+    const batching = batchingFor(5_000);
+    await setupDaemon(adapter, batching.config);
+
+    // A resume offer reaches the Host event by event; a fresh offer's
+    // latest-value lane would coalesce the batch. The resumed session comes
+    // from a first, fresh task.
+    const agentRef = freshTestAgentRef();
+    server.send(createEnvelope('task.offer', { agentRef, ...batching.offer, instruction: 'start the session' }, { taskId: 'task-complete-seed', seq: server.nextSeq() }));
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-complete-seed');
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    const seed = adapter.sessions[0]!;
+    seed.emit({ type: 'turn_end' });
+    await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-complete-seed');
+
+    server.send(
+      createEnvelope(
+        'task.offer',
+        { agentRef, ...resumeSession(seed.sessionRef), instruction: 'buffer progress then finish' },
+        { taskId: 'task-complete-buffered', seq: server.nextSeq() },
+      ),
+    );
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-complete-buffered');
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(2));
+    const session = adapter.sessions[1]!;
+
+    session.emit({ type: 'progress', text: 'final words' });
+    session.emit({ type: 'turn_end' });
+    await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-complete-buffered');
+
+    const ours = server.received.filter((e) => e.task_id === 'task-complete-buffered');
+    const progressAt = ours.findIndex((e) => e.type === 'task.progress');
+    expect(progressAt).toBeGreaterThanOrEqual(0);
+    expect(progressAt).toBeLessThan(ours.findIndex((e) => e.type === 'task.complete'));
+    const events = ours.filter((e) => e.type === 'task.progress').flatMap((e) => (e.payload as { events: Array<{ type: string }> }).events);
+    expect(events.map((e) => e.type)).toEqual(['progress', 'turn_end']);
   });
 
   it('a turn_end racing a concurrent cancel does not resurrect the task with a stray task.complete/task.progress (M1-4 e2e finding)', async () => {
