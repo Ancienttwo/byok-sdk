@@ -18,7 +18,6 @@ import { R2ObjectMaintenanceStore, type R2ObjectMaintenanceOptions } from '../r2
  * either a sleep or a flake.
  */
 import type { Clock, CoreStores } from '@byok-sdk/core';
-import type { Pool } from 'pg';
 import type { ByokPool } from '../../pool';
 import { assertByokPool } from '../../pool-brand';
 import { PostgresPresenceStore } from './presence';

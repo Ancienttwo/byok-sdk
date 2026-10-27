@@ -342,11 +342,11 @@ export type { CloudCleanupErrorCode } from './maintenance-errors';
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import { type ActivityAppendInput, type ActivityStore, type ActivityTail } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 export declare class PostgresActivityStore implements ActivityStore {
     private readonly pool;
     private readonly clock;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     append(tenant: TenantId, input: ActivityAppendInput): Promise<ActivityTail>;
     read(tenant: TenantId, taskId: string): Promise<ActivityTail | undefined>;
@@ -355,12 +355,12 @@ export declare class PostgresActivityStore implements ActivityStore {
 import { type AgentEgressReliablePayload } from '@byok-sdk/protocol';
 import type { AgentEgressRecord, AgentEgressStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 /** Postgres implementation of the immutable reliable Agent egress receipt fact. */
 export declare class PostgresAgentEgressStore implements AgentEgressStore {
     private readonly pool;
     private readonly clock;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     record(tenant: TenantId, input: Omit<AgentEgressRecord, 'tenantId' | 'recordedAt'>): Promise<{
         readonly record: AgentEgressRecord;
         readonly created: boolean;
@@ -405,11 +405,11 @@ export declare function createPostgresAgentMemoryProjectionStore(options: Postgr
 // ==== @byok-sdk/cloud-dataplane dist/stores/agent-message-draft.d.ts ====
 import type { Clock, TenantId } from '@byok-sdk/core';
 import { type AgentMessageDraftStore, type AgentMessageDraftApplyInput, type AgentMessageDraftApplyResult, type AgentMessageDraftRow } from '@byok-sdk/cloud';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 export declare class PostgresAgentMessageDraftStore implements AgentMessageDraftStore {
     private readonly pool;
     private readonly clock;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     apply(tenant: TenantId, input: AgentMessageDraftApplyInput): Promise<AgentMessageDraftApplyResult>;
     read(tenant: TenantId, taskId: string): Promise<AgentMessageDraftRow | undefined>;
     delete(tenant: TenantId, taskId: string): Promise<void>;
@@ -419,11 +419,11 @@ export declare class PostgresAgentMessageDraftStore implements AgentMessageDraft
 import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import { type ApprovalTimelineAppendInput, type ApprovalTimelineResolvePendingInput, type ApprovalTimelineResolvePendingResult, type ApprovalTimelineStore, type ApprovalTimelineTail } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 export declare class PostgresApprovalTimelineStore implements ApprovalTimelineStore {
     private readonly pool;
     private readonly clock;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
     resolvePending(tenant: TenantId, input: ApprovalTimelineResolvePendingInput): Promise<ApprovalTimelineResolvePendingResult>;
@@ -457,10 +457,10 @@ export declare class PostgresApprovalTimelineStore implements ApprovalTimelineSt
  * incremental feed reads `> afterSeq` either way.
  */
 import { type BoardClaimInput, type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type BoardStatusUpdateInput, type BoardStore, type BoardUnclaimInput, type Clock, type TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../../pool';
 export declare class PostgresBoardStore implements BoardStore {
     #private;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     create(tenant: TenantId, input: BoardItemInput): Promise<BoardItem>;
     get(tenant: TenantId, itemId: string): Promise<BoardItem | undefined>;
     list(tenant: TenantId, query: BoardListQuery): Promise<BoardPage>;
@@ -535,7 +535,7 @@ export declare function createPostgresCoreStores(options: PostgresCoreStoreOptio
  * accidentally query.
  */
 import { type Clock, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type MailboxCollectExpiredInput, type CollectExpiredResult, type MailboxStore, type MailboxUsage, type TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../../pool';
 export declare const OUTBOX_COLUMNS = "tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at";
 export interface OutboxRow {
     readonly tenant_id: string;
@@ -551,7 +551,7 @@ export interface OutboxRow {
 export declare function toMailboxMessage(row: OutboxRow): MailboxMessage;
 export declare class PostgresMailboxStore implements MailboxStore {
     #private;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage>;
     readUsage(tenant: TenantId): Promise<MailboxUsage>;
     readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage>;
@@ -600,11 +600,11 @@ import type { R2ObjectMaintenance } from '../r2-blobs';
  *   (§12.7.7 step 4).
  */
 import { type Clock, type ContentHash, type ObjectCommitInput, type ObjectListQuery, type ObjectManifestEntry, type ObjectManifestInput, type ObjectReferenceInput, type ObjectStore, type TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../../pool';
 export declare class PostgresObjectStore implements ObjectStore {
     #private;
     private readonly objectStorage;
-    constructor(pool: Pool, clock: Clock, objectStorage: Pick<R2ObjectMaintenance, 'deleteObject'>);
+    constructor(pool: ByokPool, clock: Clock, objectStorage: Pick<R2ObjectMaintenance, 'deleteObject'>);
     collectExpired(tenant: TenantId, input: ObjectCollectExpiredInput): Promise<CollectExpiredResult>;
     putManifest(tenant: TenantId, input: ObjectManifestInput): Promise<ObjectManifestEntry>;
     commit(tenant: TenantId, input: ObjectCommitInput): Promise<ObjectManifestEntry>;
@@ -637,10 +637,10 @@ import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/c
  * and the composition supplies the clock.
  */
 import { type Clock, type PresenceHint, type PresenceHintInput, type PresenceStore, type TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../../pool';
 export declare class PostgresPresenceStore implements PresenceStore {
     #private;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     publish(tenant: TenantId, input: PresenceHintInput): Promise<PresenceHint>;
     read(tenant: TenantId, deviceId: string): Promise<PresenceHint | undefined>;
@@ -689,10 +689,10 @@ import { type QuotaCollectExpiredInput, type CollectExpiredResult } from '@byok-
  * `__tests__/constraints.test.ts` scans this directory to keep it that way.
  */
 import { type Clock, type QuotaStore, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type StorageStatus, type TenantId, type TenantStorageEntitlement, type TenantStorageEntitlementInput, type TenantStorageUsage } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../../pool';
 export declare class PostgresQuotaStore implements QuotaStore {
     #private;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     readEntitlement(tenant: TenantId): Promise<TenantStorageEntitlement | undefined>;
     writeEntitlement(tenant: TenantId, input: TenantStorageEntitlementInput): Promise<TenantStorageEntitlement>;
     readUsage(tenant: TenantId): Promise<TenantStorageUsage>;
@@ -736,10 +736,10 @@ export declare class PostgresQuotaStore implements QuotaStore {
  * clock either.
  */
 import { type SkillPackFileContent, type SkillPackListQuery, type SkillPackManifest, type SkillPackPublishInput, type SkillPackStore, type TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../../pool';
 export declare class PostgresSkillPackStore implements SkillPackStore {
     #private;
-    constructor(pool: Pool);
+    constructor(pool: ByokPool);
     publish(tenant: TenantId, input: SkillPackPublishInput): Promise<SkillPackManifest>;
     get(tenant: TenantId, name: string): Promise<SkillPackManifest | undefined>;
     list(tenant: TenantId, query: SkillPackListQuery): Promise<readonly SkillPackManifest[]>;
@@ -769,10 +769,10 @@ export declare class PostgresSkillPackStore implements SkillPackStore {
  * decide what the merged truth should be (§12.3).
  */
 import { type Clock, type SnapshotWriteInput, type TenantId, type TerminalWriteInput, type TruthManifestEntry, type TruthManifestQuery, type TruthRecord, type TruthRecordSelector, type TruthStore } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../../pool';
 export declare class PostgresTruthStore implements TruthStore {
     #private;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     writeTerminal(tenant: TenantId, input: TerminalWriteInput): Promise<TruthRecord>;
     writeSnapshot(tenant: TenantId, input: SnapshotWriteInput): Promise<TruthRecord>;
     getRecord(tenant: TenantId, selector: TruthRecordSelector): Promise<TruthRecord | undefined>;
@@ -797,21 +797,21 @@ export declare class PostgresTruthStore implements TruthStore {
 import { type InboundDedupStore } from '@byok-sdk/cloud';
 import type { TenantId } from '@byok-sdk/core';
 import type { AgentRef } from '@byok-sdk/protocol';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 export declare class PostgresInboundDedupStore implements InboundDedupStore {
     #private;
-    constructor(pool: Pool, capacity?: number);
+    constructor(pool: ByokPool, capacity?: number);
     checkAndRecord(tenant: TenantId, deviceId: string, envelopeId: string): Promise<boolean>;
     checkAndRecordAgent(tenant: TenantId, deviceId: string, agentRef: AgentRef, envelopeId: string): Promise<boolean>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/device-assertion-replay.d.ts ====
 import { type CollectExpiredInput, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
 import type { DeviceAssertionReplayAuthority, DeviceAssertionReplayConsumeInput } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 /** Durable atomic replay authority for hosted device-assertion exchange. */
 export declare class PostgresDeviceAssertionReplayAuthority implements DeviceAssertionReplayAuthority {
     #private;
-    constructor(pool: Pool);
+    constructor(pool: ByokPool);
     consume(input: DeviceAssertionReplayConsumeInput): Promise<boolean>;
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
@@ -838,7 +838,8 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  */
 import { type Clock, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
-import type { Pool, PoolClient } from 'pg';
+import type { PoolClient } from 'pg';
+import type { ByokPool } from '../pool';
 /**
  * The client-scoped registration mutation shared by standalone device
  * registration and pairing enrollment. Its caller owns the transaction so the
@@ -850,7 +851,7 @@ export declare function registerDeviceOnClient(client: PoolClient, tenant: Tenan
 export declare function getDeviceOnClient(client: PoolClient, tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
 export declare class PostgresDeviceDirectory implements DeviceDirectory {
     #private;
-    constructor(pool: Pool, clock?: Clock);
+    constructor(pool: ByokPool, clock?: Clock);
     register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
     get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
     /**
@@ -875,7 +876,7 @@ export declare class PostgresDeviceDirectory implements DeviceDirectory {
 // ==== @byok-sdk/cloud-dataplane dist/stores/e2ee-member.d.ts ====
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { E2eeMemberChainAppendInput, E2eeMemberChainAppendResult, E2eeMemberChainRow, E2eeMemberRegisterResult, E2eeMemberRegistrationInput, E2eeMemberRegistrationRow, E2eeMemberStore, E2eeScopeKeyPackagePutInput, E2eeScopeKeyPackagePutResult, E2eeScopeKeyPackageRow } from '@byok-sdk/cloud';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 /**
  * Postgres E2EE member store (`deploy/sql/0027_e2ee_member.sql`,
  * `0028_e2ee_scope_shred.sql`, `0029_e2ee_member_kem_floor.sql`). Device
@@ -887,7 +888,7 @@ export declare class PostgresE2eeMemberStore implements E2eeMemberStore {
     #private;
     private readonly pool;
     private readonly clock;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     appendChainEntries(tenant: TenantId, input: E2eeMemberChainAppendInput): Promise<E2eeMemberChainAppendResult>;
     readChainEntries(tenant: TenantId, input: {
         readonly afterSeq: number;
@@ -1057,10 +1058,10 @@ import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/c
 import { type NonceStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { CloudCrypto } from '@byok-sdk/cloud';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 export declare class PostgresNonceStore implements NonceStore {
     #private;
-    constructor(pool: Pool, clock: Clock, crypto: CloudCrypto, ttlMs?: number);
+    constructor(pool: ByokPool, clock: Clock, crypto: CloudCrypto, ttlMs?: number);
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     issue(tenant: TenantId, deviceId: string): Promise<string>;
     consumeIfValid(tenant: TenantId, deviceId: string, nonce: string): Promise<boolean>;
@@ -1085,10 +1086,10 @@ import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/c
  */
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { DeviceRecord, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore } from '@byok-sdk/cloud';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 export declare class PostgresPairingCodeStore implements PairingCodeStore {
     #private;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     issue(tenant: TenantId, input: PairingCodeIssueInput): Promise<PairingCodeInfo>;
     redeemAndRegister(input: {
@@ -1104,10 +1105,10 @@ export declare class PostgresPairingCodeStore implements PairingCodeStore {
 // ==== @byok-sdk/cloud-dataplane dist/stores/proof-receipts.d.ts ====
 import type { ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore } from '@byok-sdk/cloud';
 import { type Clock, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 export declare class PostgresProofRequestReceiptStore implements ProofRequestReceiptStore {
     #private;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     record(tenant: TenantId, input: ProofRequestReceiptInput): Promise<{
         readonly receipt: ProofRequestReceipt;
         readonly created: boolean;
@@ -1122,7 +1123,7 @@ export declare class PostgresProofRequestReceiptStore implements ProofRequestRec
  */
 export declare class PostgresProofReceiptRetentionAuthority implements ProofReceiptRetentionAuthority {
     #private;
-    constructor(pool: Pool);
+    constructor(pool: ByokPool);
     collectExpired(tenant: TenantId, input: ProofReceiptCollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/r2-blobs.d.ts ====
@@ -1392,10 +1393,10 @@ import { type CollectExpiredResult } from '@byok-sdk/core';
  */
 import type { RequestReceipt, RequestReceiptStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 export declare class PostgresRequestReceiptStore implements RequestReceiptStore {
     #private;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     collectExpired(tenant: TenantId, input: ReceiptCollectExpiredInput): Promise<CollectExpiredResult>;
     record(tenant: TenantId, input: {
         readonly key: string;
@@ -1409,7 +1410,7 @@ export declare class PostgresRequestReceiptStore implements RequestReceiptStore 
 // ==== @byok-sdk/cloud-dataplane dist/stores/retention-policy.d.ts ====
 import type { RetentionPolicy } from '@byok-sdk/cloud';
 import { type Clock, type TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 export interface TenantRetentionPolicyInput extends RetentionPolicy {
     readonly policyId: string;
 }
@@ -1421,7 +1422,7 @@ export interface TenantRetentionPolicy extends TenantRetentionPolicyInput {
 export declare class PostgresRetentionPolicyStore {
     #private;
     private readonly clock;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     writeRetentionPolicy(tenant: TenantId, input: TenantRetentionPolicyInput): Promise<TenantRetentionPolicy>;
     readRetentionPolicy(tenant: TenantId): Promise<TenantRetentionPolicy>;
 }
@@ -1445,7 +1446,7 @@ export declare class PostgresRetentionPolicyStore {
 import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptCounts, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 export interface TaskRow {
     readonly tenant_id: string;
     readonly task_id: string;
@@ -1471,7 +1472,7 @@ export declare const TASK_SELECT_COLUMNS = "tenant_id, task_id, device_id, agent
 export declare function taskRowToAttempt(row: TaskRow): TaskAttempt;
 export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     #private;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     open(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;
@@ -1533,11 +1534,11 @@ export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
 // ==== @byok-sdk/cloud-dataplane dist/stores/task-cancellations.d.ts ====
 import type { TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 /** PostgreSQL atomic authority for host cancellation state plus mailbox delivery. */
 export declare class PostgresTaskCancellationStore implements TaskCancellationStore {
     #private;
-    constructor(pool: Pool, clock: Clock);
+    constructor(pool: ByokPool, clock: Clock);
     request(tenant: TenantId, input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/task-redaction.d.ts ====

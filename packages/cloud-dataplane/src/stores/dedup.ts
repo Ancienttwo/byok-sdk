@@ -17,12 +17,13 @@ import { DEDUP_RING_CAPACITY, type InboundDedupStore } from '@byok-sdk/cloud';
 import type { TenantId } from '@byok-sdk/core';
 import type { AgentRef } from '@byok-sdk/protocol';
 import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 
 export class PostgresInboundDedupStore implements InboundDedupStore {
   readonly #pool: Pool;
   readonly #capacity: number;
 
-  constructor(pool: Pool, capacity: number = DEDUP_RING_CAPACITY) {
+  constructor(pool: ByokPool, capacity: number = DEDUP_RING_CAPACITY) {
     this.#pool = pool;
     this.#capacity = capacity;
   }

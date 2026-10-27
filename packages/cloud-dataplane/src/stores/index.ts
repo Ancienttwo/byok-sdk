@@ -24,7 +24,6 @@ export { PostgresAgentMessageDraftStore } from './agent-message-draft';
 import { AllowAllRateLimiter, type CloudStores } from '@byok-sdk/cloud';
 import type { CloudCrypto } from '@byok-sdk/cloud';
 import type { Clock } from '@byok-sdk/core';
-import type { Pool } from 'pg';
 import type { ByokPool } from '../pool';
 import { assertByokPool } from '../pool-brand';
 import { PostgresObjectStore } from './core/objects';

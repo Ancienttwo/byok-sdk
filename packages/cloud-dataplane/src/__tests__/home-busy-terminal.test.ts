@@ -1,5 +1,4 @@
 import { fileURLToPath } from 'node:url';
-import type { Pool } from 'pg';
 import type { ByokPool } from '../pool';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
 import { createByokCloud, createHmacTokenSigner, createInProcessMailboxWake, createWebCrypto, fullCapabilityDeclaration } from '@byok-sdk/cloud';

@@ -13,7 +13,7 @@ import {
 } from '@byok-sdk/core';
 import type { BlobObservation } from '@byok-sdk/cloud';
 import { createEnvelope, decodeEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
-import type { Pool, PoolClient } from 'pg';
+import type { PoolClient } from 'pg';
 import type { ByokPool } from '../pool';
 import { PostgresCloudCleanup } from '../cleanup';
 import { PostgresRetentionPolicyStore } from '../stores/retention-policy';
@@ -177,7 +177,7 @@ async function seedCommittedObject(
   });
 }
 
-async function configurePolicy(pool: Pool, clock: Clock): Promise<void> {
+async function configurePolicy(pool: ByokPool, clock: Clock): Promise<void> {
   await new PostgresRetentionPolicyStore(pool, clock).writeRetentionPolicy(TENANT, {
     policyId: 'default',
     mailboxAckedRetentionMs: 1_000n,

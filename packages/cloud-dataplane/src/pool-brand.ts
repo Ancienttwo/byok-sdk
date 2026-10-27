@@ -10,7 +10,5 @@ export const BYOK_POOL = Symbol.for('@byok-sdk/cloud-dataplane.pool');
 /** Refuses, at composition, a pool that `createByokPool` did not build. */
 export function assertByokPool(pool: Pool, owner: string): void {
   if ((pool as Pool & Record<symbol, unknown>)[BYOK_POOL] === true) return;
-  throw new TypeError(
-    `${owner} needs a pool from createByokPool: a bare pg.Pool reads bigint columns as strings and lets an idle-client reset crash the process.`,
-  );
+  throw new TypeError(`${owner} needs a pool from createByokPool.`);
 }

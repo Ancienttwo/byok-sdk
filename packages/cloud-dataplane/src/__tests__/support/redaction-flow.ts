@@ -6,7 +6,6 @@
  * canary: it belongs to the device, not to a task.
  */
 import { randomUUID } from 'node:crypto';
-import type { Pool } from 'pg';
 import type { ByokPool } from '../../pool';
 import { expect } from 'vitest';
 import { createMutableClock, type CoreStores, type TenantId } from '@byok-sdk/core';
