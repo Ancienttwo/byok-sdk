@@ -3095,11 +3095,14 @@ receipt. `TaskHandle.events()` reads the same feed without cursors.
   only a plaintext request with an `approvalId`, since the relay announces no
   sealed request. A read of a stored task that finds a feed a dispatch just
   opened (a resubmit) attaches to it the same way, so a refused dispatch hands
-  the feed to the reader instead of ending it. The kernel notifies the relay after the write's own
-  await, so that state can appear twice. A read stopped before it attached
-  creates nothing, a read never creates relay state for an unknown or terminal
-  task, and only a Host read can create it: device envelopes for a task with
-  no feed still allocate nothing.
+  the feed to the reader instead of ending it. The kernel notifies the relay
+  after the write's own await, so that state can appear twice. A read stopped
+  before its first store read completed creates nothing, a read never creates
+  relay state for an unknown or terminal task, and only a Host read can create
+  it: device envelopes for a task with no feed still allocate nothing.
+- Once a read attached a task's feed, the feed stays until the task's terminal
+  plus `taskEventRetentionMs`, however its readers leave (`return()`, abort,
+  disconnect), so a reader that reconnects resumes with its cursor.
 - While this instance's dispatch of a task is in flight, its feed buffers every
   delivery, device envelopes and Host transitions alike, including a feed a
   Host read attached, so `Offered` is the first entry of a dispatched feed. A
