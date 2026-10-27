@@ -808,17 +808,17 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 18249,
+          "line": 245,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 88316,
+          "line": 5109,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 96524,
+          "line": 5167,
           "rule": "opaque import()"
         },
         {

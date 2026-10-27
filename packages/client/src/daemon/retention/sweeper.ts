@@ -31,6 +31,8 @@ export interface RetentionSweeperOptions {
   readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string) => void;
 }
 
+const nextClass = new WeakMap<RetentionSweeper, number>();
+
 /** All maintenance has this one lifecycle owner, including daemons without a journal. */
 export class RetentionSweeper {
   private timer: unknown;
@@ -98,7 +100,10 @@ export class RetentionSweeper {
       try { await registry.prepare(budget, pressure.state !== 'normal'); }
       catch { failures++; this.options.onFailure?.(trigger, 'confirmed-journal', 'sweep_failed'); }
     }
-    for (const id of EXPIRING_CLASS_IDS) {
+    const offset = trigger === 'startup' ? 0 : (nextClass.get(this) ?? 0);
+    if (trigger !== 'startup') nextClass.set(this, (offset + 1) % EXPIRING_CLASS_IDS.length);
+    const order = [...EXPIRING_CLASS_IDS.slice(offset), ...EXPIRING_CLASS_IDS.slice(0, offset)];
+    for (const id of order) {
       if (startupFailure !== undefined) break;
       if (trigger === 'startup' && id === 'exec-sdk') continue;
       if (pressure.state !== 'normal' && ['confirmed-journal', 'reader-run', 'home-temp', 'skill-pack-old'].includes(id)) continue;

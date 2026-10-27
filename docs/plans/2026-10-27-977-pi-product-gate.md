@@ -23,10 +23,12 @@ cell 按方法文档冻结：runtime、provider/模型、平台、语料、是�
 | # | Cell | 语料 | 状态 | 结果 | 来源 |
 | --- | --- | --- | --- | --- | --- |
 | 1 | `pi.zai_glm-5.3-flash.darwin-arm64`，Pi 1.4.0，无 `messageEgress` | `submit-result-v1` | 已跑，数据集未入仓 | valid 76/120（95% CI 54.4–71.4%），exact 65/120；C01–C03 各 20/20；C04-union 1/20（18 次 `terminal_failure`）；C05-unicode valid 15/20、exact 4/20；C06-large 20/20 在 600 s 超时 `[unverified: dataset not attached]` | [#977 评论](https://github.com/Ancienttwo/byok-sdk/issues/977#issuecomment-6433620715)，run `m977-pi140-glm53flash-v0302-20261027-r2` |
-| 2 | `pi-1.4.0/proxy/zai/glm-5.3-flash/darwin-arm64/reply`，`messageEgress` `aiphabee.bot-chat.reply.v1` maxBytes 65536 | `aiphabee-bot-chat-ask-user.v1`（扩展语料） | 已跑，导出在 AiphaBee 本机 | valid 40/40（Wilson 91.2–100%），first-call-valid 40/40，A02 exact 20/20；其余分类 0；回复 sent 40；A01 耗时中位数 38.9 s / p95 58.4 s，A02 29.3 s / 41.7 s | AiphaBee 导出 `m977-count-proxy-zai_glm-5.3-flash-20261026T210918Z` 的 `summary.md`（本 worker 上读过） |
-| 3 | `pi-1.4.0/zai/glm-5.3-flash/darwin-arm64/reply`（原生 provider） | 同上 | 只有校准（不计数） | 1 个校准 turn：`Complete`，标签 `submit_result`，回复 accepted，交了单选题；耗时 73.5 s | AiphaBee 导出 `m977-calibration-zai-glm-5.3-flash-20261027T035319Z`；计数 `[blocked: paid Pi runs / owner auth]` |
+| 2 | `pi-1.4.0/proxy/zai/glm-5.3-flash/darwin-arm64/reply`，`messageEgress` `aiphabee.bot-chat.reply.v1` maxBytes 65536 | `aiphabee-bot-chat-ask-user.v1`（扩展语料） | 已跑，导出在 AiphaBee 本机 | valid 40/40（Wilson 91.2–100%），first-call-valid 40/40，A02 exact 20/20；其余分类 0；回复 sent 40；A01 耗时中位数 38.9 s / p95 58.4 s，A02 29.3 s / 41.7 s | AiphaBee 导出 `m977-count-proxy-zai_glm-5.3-flash-20261026T210918Z` 的 `summary.md`（本 worker 上读过）；**不代表产品条件**，见下方更正 |
+| 3 | `pi-1.4.0/zai/glm-5.3-flash/darwin-arm64/reply`（原生 provider） | 同上 | 只有校准（不计数） | 1 个校准 turn：`Complete`，标签 `submit_result`，回复 accepted，交了单选题；耗时 73.5 s | AiphaBee 导出 `m977-calibration-zai-glm-5.3-flash-20261027T035319Z`；计数 `[blocked: paid Pi runs / owner auth]`；**不代表产品条件**，见下方更正 |
 | 4 | 同 2 或 3，`win32-x64` | 同上 | NOT RUN | — | `[blocked: no Windows seat on this worker]` |
 | 5 | Claude / Codex / Grok 各 cell | `submit-result-v1` | NOT RUN | — | PRD Q8 定 v1 只用 Pi，不挡本门禁 |
+
+**更正（2026-10-28）：第 2、3 行没有产品条件。** AiphaBee 的测量 runner 当时把 bot 的 Agent home 放在 AiphaBee 仓库目录里。Pi 从 cwd 往上读 context 文件，每次请求都带上了仓库根目录的 `AGENTS.md` 和 `CLAUDE.md`（给编码 agent 的指令）。产品里 bot 的 Agent home 不在任何仓库里，没有这段指令。受影响的 run：第 2 行的 40/40 计数 `m977-count-proxy-zai_glm-5.3-flash-20261026T210918Z`（[#977 评论 6428287503](https://github.com/Ancienttwo/byok-sdk/issues/977#issuecomment-6428287503)）、第 3 行的校准 `m977-calibration-zai-glm-5.3-flash-20261027T035319Z`，以及未入本文的 8 个模型代理校准和一次已作废的计数。第 1 行是本仓库自己的 `submit-result-v1` run，不受影响。runner 已改为在仓库外的临时目录里跑，更正见 [#977 评论](https://github.com/Ancienttwo/byok-sdk/issues/977#issuecomment-6450158833)。第 2、3 行需要在新 runner 上重新测量，两行的数字在那之前不能当作产品门禁证据。
 
 第 1 行和 0.30.2 发布前 `ebcb8d96` 那次（valid 73/120，exact 63/120，[评论](https://github.com/Ancienttwo/byok-sdk/issues/977#issuecomment-6414261055)）在误差范围内一致。两次都不合并计数。
 
@@ -91,7 +93,7 @@ runner 是 AiphaBee 的 `apps/local-agent/src/bot-chat-outcome-live.test.ts`，�
 **待测量（pending measurement）。** 现在不能写「通过」或「不通过」：
 
 1. 第 1 行的数据集没有入仓，C04 的 `terminal_failure` 原因没定位。
-2. AiphaBee 路径在 macOS 上只有代理 cell 的计数（40/40）；原生 provider 只有 1 个校准 turn。
+2. AiphaBee 路径在 macOS 上只有代理 cell 的计数（40/40）；原生 provider 只有 1 个校准 turn。这些 run 的 Pi 上下文带着 AiphaBee 仓库的编码 agent 指令，不代表产品条件，需要在新 runner 上重测。
 3. Windows 没跑。
 
-要下结论，至少还要：第 3 行原生计数（40 个 trial，`[blocked: paid Pi runs / owner auth]`）；第 4 行 Windows 计数（`[blocked: no Windows seat on this worker]`）；第 1、2 行的脱敏数据集入仓。通过的阈值由 owner 定，方法文档不给阈值。
+要下结论，至少还要：第 2 行代理计数在新 runner 上重测；第 3 行原生计数（40 个 trial，`[blocked: paid Pi runs / owner auth]`）；第 4 行 Windows 计数（`[blocked: no Windows seat on this worker]`）；第 1、2 行的脱敏数据集入仓。通过的阈值由 owner 定，方法文档不给阈值。
