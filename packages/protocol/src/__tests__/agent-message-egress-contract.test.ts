@@ -7,8 +7,7 @@ import {
   AgentMessageDispositionPayloadSchema,
   AgentMessagePublishPayloadSchema,
   AgentMessageServerContextSchema,
-  TaskOfferForAgentWithEgressFreshPayloadSchema,
-  TaskOfferForAgentWithEgressPayloadSchema,
+  TaskOfferPayloadSchema,
 } from '../index';
 
 const agentRef = { agentId: '11111111-1111-4111-8111-111111111111', profileRevision: '7' } as const;
@@ -18,6 +17,7 @@ const egressPolicy = {
   reliable: { maxPendingEventsPerAgent: 8, maxPendingBytesPerAgent: 262144, maxPendingBytesPerTenant: 524288 },
   transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
 } as const;
+const FRESH = { mode: 'fresh' } as const;
 const messageEgress = {
   mode: 'required',
   contract: 'salesko.private_agent_chat_message.v1',
@@ -26,6 +26,7 @@ const messageEgress = {
 } as const;
 
 describe('Agent-initiated message egress protocol', () => {
+  // B2: two distinct egress offer types (fresh, resume) -> the fresh and resume session variants of task.offer
   test('admits the frozen fresh and resume consumer shape under a distinct capability', () => {
     expect(AGENT_MESSAGE_EGRESS_CAPABILITY).toBe('agent-message-egress');
     const shared = {
@@ -36,8 +37,8 @@ describe('Agent-initiated message egress protocol', () => {
       messageEgress,
       terminalProjection: { mode: 'none' },
     } as const;
-    expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse(shared).success).toBe(true);
-    expect(TaskOfferForAgentWithEgressPayloadSchema.safeParse({ ...shared, sessionRef: 'native-session-1' }).success).toBe(true);
+    expect(TaskOfferPayloadSchema.safeParse({ ...shared, session: FRESH }).success).toBe(true);
+    expect(TaskOfferPayloadSchema.safeParse({ ...shared, session: { mode: 'resume', sessionRef: 'native-session-1' } }).success).toBe(true);
   });
 
   test('treats required-message offers as message-only unless a second terminal projection is explicit', () => {
@@ -48,13 +49,14 @@ describe('Agent-initiated message egress protocol', () => {
       runtime: 'codex',
       egressPolicy,
       messageEgress,
+      session: FRESH,
     } as const;
-    expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse(shared).success).toBe(true);
-    expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse({
+    expect(TaskOfferPayloadSchema.safeParse(shared).success).toBe(true);
+    expect(TaskOfferPayloadSchema.safeParse({
       ...shared,
       terminalProjection: { mode: 'none' },
     }).success).toBe(true);
-    expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse({
+    expect(TaskOfferPayloadSchema.safeParse({
       ...shared,
       terminalProjection: {
         mode: 'result-document',
@@ -63,7 +65,7 @@ describe('Agent-initiated message egress protocol', () => {
       },
     }).success).toBe(true);
     // Wire v3: the result-document arm carries its frozen outcome schema.
-    expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse({
+    expect(TaskOfferPayloadSchema.safeParse({
       ...shared,
       terminalProjection: { mode: 'result-document', contract: 'example.research.v1' },
     }).success).toBe(false);
@@ -71,12 +73,12 @@ describe('Agent-initiated message egress protocol', () => {
 
   test('keeps model-authored routing and unknown message contracts out of the strict declaration', () => {
     const base = { mode: 'required', contract: 'chat.v1', contentType: 'text/plain', maxBytes: 1000 } as const;
-    expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse({
-      instruction: 'send', agentRef, egressPolicy,
+    expect(TaskOfferPayloadSchema.safeParse({
+      instruction: 'send', agentRef, egressPolicy, session: FRESH,
       messageEgress: { ...base, target: 'conversation-1' },
     }).success).toBe(false);
-    expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse({
-      instruction: 'send', agentRef, egressPolicy,
+    expect(TaskOfferPayloadSchema.safeParse({
+      instruction: 'send', agentRef, egressPolicy, session: FRESH,
       messageEgress: { ...base, maxBytes: 262145 },
     }).success).toBe(false);
   });
