@@ -2,7 +2,7 @@ import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 /**
  * #654 E3a: this daemon does not open sealed content, and it does not
  * advertise `sealed-payload-v1`. A Host that skips the gate can still send it
- * a sealed offer type or a sealed steer. The daemon never runs such an offer,
+ * a sealed offer or a sealed steer. The daemon never runs such an offer,
  * even when the task seals only its output and the instruction is plaintext:
  * it declines non-retryably. It drops the steer. The payloads are the golden
  * corpus lines.
@@ -17,21 +17,25 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; payload: Record<string, unknown> });
-const SEALED_OFFER_TYPES = [
-  'task.offer_for_agent_sealed',
-  'task.offer_for_agent_with_egress_sealed',
-  'task.offer_for_agent_with_egress_fresh_sealed',
+// B2: the three sealed offer types are the sealed `task.offer` of each session form: resume, resume with egress, fresh
+const SEALED_OFFER_FORMS = [
+  ['sealed resume', (payload: Record<string, unknown>) => (payload.session as { mode: string }).mode === 'resume' && payload.egressPolicy === undefined],
+  ['sealed resume+egress', (payload: Record<string, unknown>) => (payload.session as { mode: string }).mode === 'resume' && payload.egressPolicy !== undefined],
+  ['sealed fresh', (payload: Record<string, unknown>) => (payload.session as { mode: string }).mode === 'fresh'],
 ] as const;
-const sealedOffers = SEALED_OFFER_TYPES.flatMap((type) => [
-  ['sealed input', corpus.find((line) => line.type === type && line.payload.sealed !== undefined)!],
-  ['sealed output only', corpus.find((line) => line.type === type && line.payload.sealed === undefined)!],
+const sealedOffers = SEALED_OFFER_FORMS.flatMap(([form, matches]) => [
+  [form, 'sealed input', corpus.find((line) => line.type === 'task.offer' && line.payload.sealing !== undefined && line.payload.sealed !== undefined && matches(line.payload))!],
+  [form, 'sealed output only', corpus.find((line) => line.type === 'task.offer' && line.payload.sealing !== undefined && line.payload.sealed === undefined && matches(line.payload))!],
 ] as const);
-const sealedSteer = corpus.find((line) => line.type === 'task.steer_sealed')!.payload;
+// B2: task.steer_sealed -> the task.steer line that carries `sealed`
+const sealedSteer = corpus.find((line) => line.type === 'task.steer' && line.payload.sealed !== undefined)!.payload;
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -41,7 +45,10 @@ afterEach(async () => {
 async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[], serverCapabilities: readonly string[] = []): Promise<TaskRunner> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-refusal-'));
   dirs.push(dir);
-  return new TaskRunner({...testAgentHomeDeps(),
+  // The Host skipped the gate in these tests, and the daemon's own advertised-flag
+  // check is not the subject: advertise every flag so the offer reaches the sealed decline.
+  return new TaskRunner({...testAgentHomeDeps(), ...freshOfferEgressDeps(),
+    advertisedCapabilities: advertiseEveryDeviceFlag,
     getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     deviceId: 'sealed-refusal-device', send: (event) => { sent.push(event); },
@@ -56,13 +63,13 @@ async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[], serverC
 }
 
 describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', () => {
-  it.each(sealedOffers.map(([label, line]) => [line.type, label, line] as const))(
-    'declines %s (%s) non-retryably and never starts a session',
-    async (_type, _label, line) => {
+  it.each(sealedOffers)(
+    'declines a %s task.offer (%s) non-retryably and never starts a session',
+    async (_form, _label, line) => {
       const adapter = new StubRuntimeAdapter('pi');
       const sent: Envelope[] = [];
       const runner = await runnerWith(adapter, sent);
-      const offer = createEnvelope(line.type as (typeof SEALED_OFFER_TYPES)[number], line.payload as never, { taskId: 'sealed-task', seq: 1 });
+      const offer = createEnvelope('task.offer', line.payload as never, { taskId: 'sealed-task', seq: 1 });
 
       await runner.handleEnvelope(offer);
       await runner.handleEnvelope(offer);
@@ -81,14 +88,14 @@ describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', 
     },
   );
 
-  it.each(sealedOffers.map(([label, line]) => [line.type, label, line] as const))(
-    'declines %s (%s) with the closed code sealed_key_unavailable to a server with sealed-payload-v1',
-    async (_type, _label, line) => {
+  it.each(sealedOffers)(
+    'declines a %s task.offer (%s) with the closed code sealed_key_unavailable to a server with sealed-payload-v1',
+    async (_form, _label, line) => {
       const adapter = new StubRuntimeAdapter('pi');
       const sent: Envelope[] = [];
       const runner = await runnerWith(adapter, sent, ['sealed-payload-v1']);
 
-      await runner.handleEnvelope(createEnvelope(line.type as (typeof SEALED_OFFER_TYPES)[number], line.payload as never, { taskId: 'sealed-task', seq: 1 }));
+      await runner.handleEnvelope(createEnvelope('task.offer', line.payload as never, { taskId: 'sealed-task', seq: 1 }));
 
       const declines = sent.filter((envelope) => envelope.type === 'task.decline');
       expect(declines.map((envelope) => envelope.payload)).toEqual([{
@@ -107,10 +114,10 @@ describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', 
     const runner = await runnerWith(adapter, sent);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'plain task', runtime: 'pi' }, { taskId: 'plain-task', seq: 1 }));
+      await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'plain task', runtime: 'pi' }, { taskId: 'plain-task', seq: 1 }));
       const session = adapter.sessions[0]!;
 
-      await runner.handleEnvelope(createEnvelope('task.steer_sealed', sealedSteer as never, { taskId: 'plain-task', seq: 2 }));
+      await runner.handleEnvelope(createEnvelope('task.steer', sealedSteer as never, { taskId: 'plain-task', seq: 2 }));
       expect(session.steerCalls).toEqual([]);
       expect(diagnostic).toHaveBeenCalledWith(expect.stringContaining('sealed task.steer'));
 

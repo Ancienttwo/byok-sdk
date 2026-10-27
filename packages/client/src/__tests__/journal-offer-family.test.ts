@@ -16,9 +16,67 @@ import { openJournalDatabase } from '../daemon/journal/sqlite-support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
-// Independent completeness oracle: enumerate the declared wire family, not the
-// implementation's classifier. Payloads still pass the real EnvelopeSchema.
-const offerTypes = MESSAGE_TYPES.filter((type) => type === 'task.offer_for_agent' || type.startsWith('task.offer_'));
+// Independent completeness oracle: the declared wire family is one type, and
+// the cases below are the variants its payload can take. Payloads still pass
+// the real EnvelopeSchema.
+// B2: the offer family was 8 types (`MESSAGE_TYPES` prefix scan); v4 has one `task.offer`, so the variants are listed here
+const offerTypes = MESSAGE_TYPES.filter((type) => type.startsWith('task.offer'));
+const agentRef = { agentId: 'journal-family-agent', profileRevision: 'r1' };
+const RESUME = { mode: 'resume', sessionRef: 'resume-session' } as const;
+const SEALING = { scopeId: 'journal-family-scope', epoch: 1, categories: ['task-output'] } as const;
+const PREPARED_AGENT_MEMORY = 'none';
+
+interface OfferCase {
+  readonly name: string;
+  readonly payload: Record<string, unknown>;
+  /** The fixture's daemon declines this variant instead of starting it. */
+  readonly declined: boolean;
+}
+
+/**
+ * One case per variant of the old offer family: resume (the old
+ * `task.offer_for_agent`), resume with egress, fresh, prepared, and the three
+ * sealed forms (sealed resume, sealed resume with egress, sealed fresh).
+ *
+ * The declined variants are not a gap in the journal contract; they ARE the
+ * journal contract for a declined offer, which is why the first test still
+ * runs for every one of them: the durable `journal_task` row and the
+ * redelivery absorption are what an acknowledged offer owes regardless of
+ * whether it was admitted. The second test needs a started task to interrupt,
+ * so it enumerates the rest.
+ *
+ * - resume names a toolset this device has not configured. The daemon does not
+ *   advertise `toolset-selection`, so the advertised-flag check declines it
+ *   `offer_capability_missing` before any adapter is picked.
+ * - prepared names a preparation record on a daemon configured with no
+ *   `inputPreparation` section at all. The daemon does not advertise
+ *   `agent-input-preparation-v9`, so the advertised-flag check declines it
+ *   `offer_capability_missing` before any adapter is picked.
+ * - Each sealed variant (#654) seals only the task output here, so its
+ *   instruction stays plaintext; this daemon does not advertise
+ *   `sealed-payload-v1`, so the advertised-flag check declines it with the
+ *   closed code `sealed_key_unavailable`.
+ */
+const offerCases: readonly OfferCase[] = [
+  // B2: task.offer_for_agent carried no sessionRef and was declined for its missing toolset -> a resume offer, declined by the advertised-flag check (toolset-selection) before the toolset lookup
+  { name: 'resume', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: RESUME, requiredToolsets: ['test-missing'] }, declined: true },
+  { name: 'resume+egress', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: RESUME, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY }, declined: false },
+  { name: 'fresh', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY }, declined: false },
+  {
+    // The one offer that carries no instruction: the request is already inside
+    // the frozen envelope the referenced record retained.
+    name: 'prepared',
+    payload: {
+      runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      agentMemory: PREPARED_AGENT_MEMORY,
+      preparation: { reference: 'journal-family-record', requestDigest: 'journal-family-request-digest' },
+    },
+    declined: true,
+  },
+  { name: 'sealed resume', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: RESUME, sealing: SEALING }, declined: true },
+  { name: 'sealed resume+egress', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: RESUME, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, sealing: SEALING }, declined: true },
+  { name: 'sealed fresh', payload: { instruction: 'journal lifecycle', runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, sealing: SEALING }, declined: true },
+];
 
 /**
  * Observation budget for this file's eventual-state polls: the durable cursor
@@ -37,25 +95,6 @@ const offerTypes = MESSAGE_TYPES.filter((type) => type === 'task.offer_for_agent
  */
 const EVENTUAL_STATE_BUDGET_MS = 4_000;
 
-/**
- * Offer types this fixture's daemon declines rather than starts.
- *
- * Not a gap in the journal contract — it IS the journal contract for a declined
- * offer, which is why the first test still runs for every one of them: the
- * durable `journal_task` row and the redelivery absorption are what an
- * acknowledged offer owes regardless of whether it was admitted. The second
- * test needs a started task to interrupt, so it enumerates the rest.
- *
- * `task.offer_with_toolsets` names a toolset this device has not configured.
- * `task.offer_prepared` names a preparation record on a daemon configured with
- * no `inputPreparation` section at all, so it declines
- * `preparation_lane_unconfigured` before any adapter is picked.
- * Each sealed offer type (#654) seals only the task output here, so its
- * instruction stays plaintext; this daemon does not advertise
- * `sealed-payload-v1` and declines it `sealed_payload_unsupported`.
- */
-const declinedByThisFixture = new Set(['task.offer_for_agent', 'task.offer_prepared', ...offerTypes.filter((type) => type.endsWith('_sealed'))]);
-const agentRef = { agentId: 'journal-family-agent', profileRevision: 'r1' };
 let daemon: Daemon | undefined;
 let server: TestServer;
 let root: string;
@@ -72,7 +111,7 @@ function rows(storeDir: string, sql: string): Record<string, unknown>[] {
   finally { db.close(); }
 }
 
-async function setup(type: string) {
+async function setup(offerCase: OfferCase) {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-147-'));
   server = await TestServer.start();
   server.setAckCapabilities(['agent-egress-reliable-ack']);
@@ -84,7 +123,7 @@ async function setup(type: string) {
     agentHome: { hostStorageRoot },
     agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
   };
-  if (type === 'task.offer_for_agent_with_egress') {
+  if (offerCase.payload.session === RESUME) {
     const manager = new AgentHomeManager({ hostStorageRoot });
     const binding = await manager.prepare(agentRef);
     try {
@@ -95,33 +134,20 @@ async function setup(type: string) {
   daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
   const device = await daemon.pair('pair-code');
   await daemon.start();
-  const payload = type === 'task.offer_prepared'
-    // The one offer that carries no instruction: the request is already inside
-    // the frozen envelope the referenced record retained.
-    ? {
-      runtime: 'pi', agentRef,
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      agentMemory: 'none',
-      preparation: { reference: 'journal-family-record', requestDigest: 'journal-family-request-digest' },
-    }
-    : {
-      instruction: 'journal lifecycle', runtime: 'pi',
-      ...(type.includes('for_agent') ? { agentRef } : {}),
-      ...(type.includes('with_egress') ? { egressPolicy: DEFAULT_AGENT_EGRESS_POLICY } : {}),
-      ...(type === 'task.offer_for_agent_with_egress' || type === 'task.offer_for_agent_with_egress_sealed' ? { sessionRef: 'resume-session' } : {}),
-      ...(type === 'task.offer_for_agent' || type === 'task.offer_with_toolsets_sealed' ? { requiredToolsets: ['test-missing'] } : {}),
-      ...(type.endsWith('_sealed') ? { sealing: { scopeId: 'journal-family-scope', epoch: 1, categories: ['task-output'] } } : {}),
-    };
   const seq = server.nextSeq();
-  const envelope: Envelope = EnvelopeSchema.parse({ v: PROTOCOL_VERSION, id: randomUUID(), ts: new Date().toISOString(), type, task_id: 'task-147', seq, payload });
+  const envelope: Envelope = EnvelopeSchema.parse({ v: PROTOCOL_VERSION, id: randomUUID(), ts: new Date().toISOString(), type: 'task.offer', task_id: 'task-147', seq, payload: offerCase.payload });
   server.send(envelope);
   await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, device.deviceId)).toBe(seq), EVENTUAL_STATE_BUDGET_MS);
   return { config, adapter, storeDir, envelope, device };
 }
 
 describe('issue #147 protocol offer family through real hosted SQLite journal', () => {
-  it.each(offerTypes)('%s has one durable journal_task at cursor acknowledgement and absorbs redelivery', async (type) => {
-    const { storeDir, envelope, adapter, device } = await setup(type);
+  it('declares one offer type, so the cases below are the variants of its payload', () => {
+    expect(offerTypes).toEqual(['task.offer']);
+  });
+
+  it.each(offerCases)('$name task.offer has one durable journal_task at cursor acknowledgement and absorbs redelivery', async (offerCase) => {
+    const { storeDir, envelope, adapter, device } = await setup(offerCase);
     expect(rows(storeDir, 'SELECT task_id FROM journal_task')).toEqual([{ task_id: 'task-147' }]);
     server.send(envelope);
     // A later acknowledged frame proves the duplicate has passed the ordered inbound chain.
@@ -130,11 +156,11 @@ describe('issue #147 protocol offer family through real hosted SQLite journal', 
     await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, device.deviceId)).toBe(laterSeq), EVENTUAL_STATE_BUDGET_MS);
     await vi.waitFor(() => expect(rows(storeDir, 'SELECT count(*) AS n FROM journal_envelope WHERE task_id IS NOT NULL')[0]?.n).toBe(2), EVENTUAL_STATE_BUDGET_MS);
     expect(rows(storeDir, 'SELECT task_id FROM journal_task')).toHaveLength(1);
-    expect(adapter.startCalls).toHaveLength(declinedByThisFixture.has(type) ? 0 : 1);
+    expect(adapter.startCalls).toHaveLength(offerCase.declined ? 0 : 1);
   });
 
-  it.each(offerTypes.filter((type) => !declinedByThisFixture.has(type)))('%s records the exact interrupted terminal before transport confirmation on restart', async (type) => {
-    const { config, adapter, storeDir } = await setup(type);
+  it.each(offerCases.filter((offerCase) => !offerCase.declined))('$name task.offer records the exact interrupted terminal before transport confirmation on restart', async (offerCase) => {
+    const { config, adapter, storeDir } = await setup(offerCase);
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-147');
     expect(rows(storeDir, 'SELECT task_id, recovery_marker FROM journal_task')).toEqual([{ task_id: 'task-147', recovery_marker: null }]);
     // Capture a real SQLite-consistent crash boundary after ack and before terminal.
