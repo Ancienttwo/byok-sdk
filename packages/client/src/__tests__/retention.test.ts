@@ -14,7 +14,7 @@ import { defaultScratchRoot, ScratchRoot, ScratchRootPathError, validateScratchR
 import { createRetentionRegistry } from '../daemon/retention/producers';
 import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { StoragePressure } from '../daemon/retention/pressure';
-import { foldNameAliases, resolveStorageConfig, type StorageBudgetInput } from '../daemon/retention/config';
+import { resolveStorageConfig, type StorageBudgetInput } from '../daemon/retention/config';
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, RetentionRegistry, type RetentionClassId, type ClassUsage, type ClassAuthority } from '../daemon/retention/registry';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { createSupportBundle } from '../diagnostics/support-bundle';
@@ -277,17 +277,6 @@ it.skipIf(process.platform==='win32')('a short canonical store keeps its natural
  expect(()=>defaultScratchRoot(alias)).toThrow(/is too long for runtime Unix sockets/u);
  const shortAlias=path.join(testScratchRoot(),'alias');await fs.symlink(store,shortAlias);
  await expect(new ScratchRoot(defaultScratchRoot(shortAlias)).open(shortAlias)).rejects.toThrow(/symbolic link/u);
-});
-it.skipIf(process.platform==='win32')('folding a retention root never follows a link and keeps a missing tail',async()=>{
- const store=testScratchRoot(),link=path.join(testScratchRoot(),'link');await fs.symlink(store,link);
- expect(foldNameAliases(link)).toBe(link);expect(foldNameAliases(path.join(link,'later'))).toBe(path.join(link,'later'));
- expect(resolveStorageConfig(link)).toMatchObject({scratchRoot:path.join(link,'tmp'),skillPackDataDirs:[link]});
- expect(foldNameAliases(path.join(store,'missing','tail'))).toBe(path.join(store,'missing','tail'));
-});
-it.runIf(process.platform==='darwin')('folds a letter-case alias of configured retention roots into the on-disk spelling',()=>{
- const store=testScratchRoot(),alias=path.join(path.dirname(store),path.basename(store).toUpperCase());
- expect(alias).not.toBe(store);expect(foldNameAliases(alias)).toBe(store);expect(foldNameAliases(path.join(alias,'later'))).toBe(path.join(store,'later'));
- expect(resolveStorageConfig(alias,{scratchRoot:path.join(alias,'scratch'),skillPackDataDirs:[alias]})).toMatchObject({scratchRoot:path.join(store,'scratch'),skillPackDataDirs:[store]});
 });
 it.skipIf(process.platform==='win32')('restart through a long store alias reclaims the original scratch secrets and runtime residue',async()=>{
  const store=path.join(testScratchRoot(),'s'.repeat(64)),alias=path.join(testScratchRoot(),'alias');await fs.mkdir(store);await fs.symlink(store,alias);

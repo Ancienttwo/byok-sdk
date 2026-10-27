@@ -15,7 +15,8 @@ import { OperationalHealthTracker } from '../daemon/operational-health';
 import { connectControlClient, isControlDaemonGone } from '../bin/control-client';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { RuntimeDisposalFailure } from '../runtime-failure';
-import { foldNameAliases } from '../daemon/retention/config';
+import { foldNameAliases, resolveStorageConfig } from '../daemon/retention/config';
+import { defaultScratchRoot } from '../daemon/retention/scratch';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { TestServer } from './fixtures/test-server';
 
@@ -454,6 +455,7 @@ class LaunchingAdapter extends StubRuntimeAdapter {
 describe('daemon restart through a Windows name alias of the store (#1030)', () => {
   let server: TestServer;
   let daemon: Daemon | undefined;
+  const scratchRoots: string[] = [];
 
   beforeEach(async () => {
     server = await TestServer.start();
@@ -463,9 +465,36 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     await daemon?.stop().catch(() => {});
     daemon = undefined;
     await server.close();
+    await Promise.all(scratchRoots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
   });
 
-  it.runIf(process.platform === 'win32')('never folds a store path through a junction', async () => {
+  it.skipIf(process.platform !== 'win32' && process.platform !== 'darwin')('folds a letter-case alias of the store and its configured retention roots', async () => {
+    // /private/tmp keeps a macOS root under the Unix socket limit.
+    const store = realpathSync.native(await fs.mkdtemp(path.join(process.platform === 'darwin' ? '/private/tmp' : os.tmpdir(), 'c-')));
+    scratchRoots.push(store);
+    const alias = path.join(path.dirname(store), path.basename(store).toUpperCase());
+    expect(alias).not.toBe(store);
+    expect(foldNameAliases(alias)).toBe(store);
+    expect(foldNameAliases(path.join(alias, 'later'))).toBe(path.join(store, 'later'));
+    expect(resolveStorageConfig(alias, { scratchRoot: path.join(alias, 's'), skillPackDataDirs: [alias] }))
+      .toMatchObject({ scratchRoot: path.join(store, 's'), skillPackDataDirs: [store] });
+  });
+
+  it.skipIf(process.platform === 'win32')('never folds a store path through a symbolic link and keeps a missing tail', async () => {
+    const store = realpathSync.native(await tmpDir('byok-link-target-'));
+    const link = `${store}-link`;
+    await fs.symlink(store, link);
+    try {
+      expect(foldNameAliases(link)).toBe(link);
+      expect(foldNameAliases(path.join(link, 'later'))).toBe(path.join(link, 'later'));
+      expect(resolveStorageConfig(link).skillPackDataDirs).toEqual([link]);
+      expect(foldNameAliases(path.join(store, 'missing', 'tail'))).toBe(path.join(store, 'missing', 'tail'));
+    } finally {
+      await fs.rm(link, { force: true });
+    }
+  });
+
+  it.skipIf(process.platform !== 'win32')('never folds a store path through a junction', async () => {
     const target = realpathSync.native(await tmpDir('byok-junction-target-'));
     const junction = path.join(path.dirname(target), `${path.basename(target)}-junction`);
     await fs.symlink(target, junction, 'junction');
@@ -477,7 +506,7 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     }
   });
 
-  it.runIf(process.platform === 'win32' || process.platform === 'darwin')('restarts and sweeps the default scratch root when the store is configured through a name alias', async () => {
+  it.skipIf(process.platform !== 'win32' && process.platform !== 'darwin')('restarts and sweeps the default scratch root when the store is configured through a name alias', async () => {
     const canonical = realpathSync.native(await tmpDir('byok-alias-store-'));
     const storeDir = path.join(path.dirname(canonical), path.basename(canonical).toUpperCase());
     expect(realpathSync.native(storeDir)).toBe(canonical);
@@ -498,12 +527,22 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     first.sessions[0]!.emit({ type: 'turn_end' });
     await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'alias-first');
     await daemon.stop();
-    expect(await fs.readdir(path.join(canonical, 'tmp', 'exec'))).toHaveLength(1);
+    // A long store moves its default root to a fixed short one, so derive it.
+    const scratchRoot = defaultScratchRoot(canonical);
+    scratchRoots.push(scratchRoot);
+    const exec = path.join(scratchRoot, 'exec');
+    const tokens = await fs.readdir(exec);
+    expect(tokens).toHaveLength(1);
+    // Crash residue: a launch config left behind as if the process had been killed.
+    const residue = path.join(exec, tokens[0]!, 'sdk');
+    await fs.mkdir(residue);
+    await fs.writeFile(path.join(residue, 'mcp-config.json'), 'secret');
 
-    // The startup exec-sdk sweep is fatal, so a resolved start proves it read the existing exec root.
+    // A startup exec-sdk sweep failure is fatal; this one must remove the residue through the folded root.
     const second = new LaunchingAdapter('pi');
     daemon = createDaemonWithAdapters(config, [second]);
     await daemon.start();
+    expect(await fileGone(residue)).toBe(true);
     offer('alias-second');
     await waitFor(() => expect(second.sessions).toHaveLength(1));
     second.sessions[0]!.emit({ type: 'turn_end' });
