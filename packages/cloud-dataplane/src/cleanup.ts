@@ -19,6 +19,8 @@ import {
 } from '@byok-sdk/core';
 import { decodeEnvelope, encodeEnvelope, EnvelopeSchema, isServerToDaemonType } from '@byok-sdk/protocol';
 import type { Pool, PoolClient } from 'pg';
+import type { ByokPool } from './pool';
+import { assertByokPool } from './pool-brand';
 import {
   R2ObjectMaintenanceStore,
   type R2ObjectMaintenance,
@@ -72,14 +74,14 @@ export interface ObjectUsageRebuildResult {
 }
 
 export interface PostgresCloudCleanupOptions {
-  readonly pool: Pool;
+  readonly pool: ByokPool;
   readonly clock: Clock;
   readonly objectStorage: R2ObjectMaintenance;
   readonly batchSize?: number;
 }
 
 export interface PostgresCloudMaintenanceOptions {
-  readonly pool: Pool;
+  readonly pool: ByokPool;
   readonly clock: Clock;
   readonly objectStorage: R2ObjectMaintenanceOptions;
   readonly batchSize?: number;
@@ -124,6 +126,7 @@ export class PostgresCloudCleanup {
   readonly #batchSize: number;
 
   constructor(options: PostgresCloudCleanupOptions) {
+    assertByokPool(options.pool, 'PostgresCloudCleanup');
     this.#pool = options.pool;
     this.#clock = options.clock;
     this.#objectStorage = options.objectStorage;

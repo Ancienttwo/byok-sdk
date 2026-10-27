@@ -45,6 +45,7 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import type { Pool } from 'pg';
+import type { ByokPool } from '../../pool';
 import { BEGIN_OUTBOX_WRITE, insertOutboxRow, readMailboxBytes } from './outbox-writer';
 
 const DEFAULT_READ_LIMIT = 50;
@@ -97,7 +98,7 @@ export class PostgresMailboxStore implements MailboxStore {
   readonly #pool: Pool;
   readonly #clock: Clock;
 
-  constructor(pool: Pool, clock: Clock) {
+  constructor(pool: ByokPool, clock: Clock) {
     this.#pool = pool;
     this.#clock = clock;
   }

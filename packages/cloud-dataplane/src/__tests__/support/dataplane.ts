@@ -26,8 +26,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { AwsClient } from 'aws4fetch';
-import type { Pool } from 'pg';
-import { createByokPool } from '../../pool';
+import { createByokPool, type ByokPool } from '../../pool';
 
 export const POSTGRES_URL_ENV = 'BYOK_TEST_POSTGRES_URL';
 export const S3_ENDPOINT_ENV = 'BYOK_TEST_S3_ENDPOINT';
@@ -98,7 +97,7 @@ export const SKIP_DATAPLANE = POSTGRES_URL === undefined || S3_ENDPOINT === unde
 
 /** A pool plus the throwaway schema it is pinned to. */
 export interface DataplaneScope {
-  readonly pool: Pool;
+  readonly pool: ByokPool;
   readonly schema: string;
   /** Database-scoped role that owns `schema` and supplies its search path. */
   readonly role: string;
@@ -120,7 +119,7 @@ export interface DataplaneScope {
    * this to prove durable readback through a restarted store composition,
    * without sharing adapter instances or in-memory state.
    */
-  openRestartPool(poolSize?: number): Pool;
+  openRestartPool(poolSize?: number): ByokPool;
   dispose(): Promise<void>;
 }
 

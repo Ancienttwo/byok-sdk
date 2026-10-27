@@ -60,6 +60,7 @@ import {
   type TenantStorageUsage,
 } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
+import type { ByokPool } from '../../pool';
 
 /** Warning threshold from §12.7.8: 80% of the hard limit. */
 const WARNING_NUMERATOR = 80n;
@@ -167,7 +168,7 @@ export class PostgresQuotaStore implements QuotaStore {
   readonly #pool: Pool;
   readonly #clock: Clock;
 
-  constructor(pool: Pool, clock: Clock) {
+  constructor(pool: ByokPool, clock: Clock) {
     this.#pool = pool;
     this.#clock = clock;
   }

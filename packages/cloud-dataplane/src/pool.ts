@@ -17,6 +17,7 @@
  */
 import pg from 'pg';
 import type { Pool, PoolClient, PoolConfig } from 'pg';
+import { BYOK_POOL } from './pool-brand';
 
 /**
  * `pg`'s default parser for every other oid, so this config ADDS one decoding
@@ -48,6 +49,11 @@ export interface ByokPoolOptions extends Omit<PoolConfig, 'types'> {
   readonly onPoolError?: (err: Error, client?: PoolClient) => void;
 }
 
+declare const byokPoolBrand: unique symbol;
+
+/** A pool from {@link createByokPool}: the only pool the SDK's store compositions accept. */
+export type ByokPool = Pool & { readonly [byokPoolBrand]: true };
+
 /**
  * Creates a pool wired with the int8 parser above.
  *
@@ -69,7 +75,7 @@ export interface ByokPoolOptions extends Omit<PoolConfig, 'types'> {
  * so the reset is never invisible. It does not paper over live query errors —
  * those still reject their own `await`; this is only the idle-client path.
  */
-export function createByokPool(options: ByokPoolOptions): Pool {
+export function createByokPool(options: ByokPoolOptions): ByokPool {
   // `onPoolError` is ours, not `pg`'s: strip it before the config reaches
   // `pg.Pool`, the same discipline `types` gets.
   const { onPoolError, ...poolConfig } = options;
@@ -86,5 +92,6 @@ export function createByokPool(options: ByokPoolOptions): Pool {
     console.error('[byok-sdk] idle pg pool client error (handled, not fatal)', err);
   });
 
-  return pool;
+  Object.defineProperty(pool, BYOK_POOL, { value: true });
+  return pool as ByokPool;
 }

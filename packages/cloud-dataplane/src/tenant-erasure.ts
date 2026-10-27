@@ -9,6 +9,8 @@
 import { randomUUID } from 'node:crypto';
 import { tenantId, type Clock, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
+import type { ByokPool } from './pool';
+import { assertByokPool } from './pool-brand';
 import {
   R2ObjectMaintenanceStore,
   type R2BlobStoreOptions,
@@ -117,7 +119,7 @@ export type TenantErasureResult = TenantErasureReadback | TenantErasureConflict;
 
 export interface PostgresTenantErasureOptions {
   /** A Node direct-DSN pool. The host owns pool lifetime and write quiescence. */
-  readonly pool: Pool;
+  readonly pool: ByokPool;
   readonly clock: Clock;
   readonly objectStorage: R2ObjectMaintenance;
   /** ListObjectsV2 and one SQL DELETE use this bound; valid range is 1..1000. */
@@ -129,7 +131,7 @@ export interface PostgresTenantErasureOptions {
 }
 
 export interface PostgresTenantErasureCompositionOptions {
-  readonly pool: Pool;
+  readonly pool: ByokPool;
   readonly clock: Clock;
   readonly objectStorage: Omit<R2BlobStoreOptions, 'objects'>;
   readonly batchSize?: number;
@@ -186,6 +188,7 @@ export class PostgresTenantErasure {
   readonly #leaseMs: number;
 
   constructor(options: PostgresTenantErasureOptions) {
+    assertByokPool(options.pool, 'PostgresTenantErasure');
     this.#pool = options.pool;
     this.#clock = options.clock;
     this.#objectStorage = options.objectStorage;

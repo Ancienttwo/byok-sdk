@@ -1,6 +1,7 @@
 import type { RetentionPolicy } from '@byok-sdk/cloud';
 import { tenantId, type Clock, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 import { CloudCleanupError } from '../maintenance-errors';
 
 export interface TenantRetentionPolicyInput extends RetentionPolicy {
@@ -25,7 +26,7 @@ interface RetentionPolicyRow {
 /** Tenant-owned policy on the Worker-loadable maintenance surface; no defaults. */
 export class PostgresRetentionPolicyStore {
   readonly #pool: Pool;
-  constructor(pool: Pool, private readonly clock: Clock) { this.#pool = pool; }
+  constructor(pool: ByokPool, private readonly clock: Clock) { this.#pool = pool; }
 
   async writeRetentionPolicy(
     tenant: TenantId,
