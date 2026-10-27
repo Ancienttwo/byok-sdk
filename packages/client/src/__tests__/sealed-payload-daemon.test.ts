@@ -242,9 +242,12 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const info = vi.spyOn(console, 'info');
     const { server, adapter, deviceId, member } = await start({ e2ee: false });
     await vi.waitFor(() => expect(info).toHaveBeenCalledWith(expect.stringMatching(/^\[byok\/client\] E2EE member \S+ verified/u)), BUDGET_MS);
-    // The verified member opens a sealed offer and runs it, and still no hello carries the flag.
+    // B2: the verified member opens a sealed offer and runs it -> the offer is declined sealed_key_unavailable before it is opened:
+    // the receiver checks the offer's `sealing` gate against the flags this daemon advertises, and it never advertises sealed-payload-v1 here.
     server.send(await sealedOffer(member, 'undeclared', server.nextSeq(), deviceId, 'run'));
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), BUDGET_MS);
+    const decline = await server.waitFor((envelope) => envelope.type === 'task.decline' && envelope.task_id === 'undeclared', BUDGET_MS);
+    expect(decline.payload).toEqual({ agentRef: agentOf('undeclared'), reason: 'sealed_key_unavailable', code: 'sealed_key_unavailable', retryable: false });
+    expect(adapter.sessions).toHaveLength(0);
     expect(server.received.filter(advertised)).toEqual([]);
   });
 
