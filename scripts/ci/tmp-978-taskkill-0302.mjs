@@ -27,7 +27,8 @@ const EGRESS_POLICY = {
   transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
 };
 const TERMINAL_TYPES = new Set(['task.complete', 'task.fail', 'task.cancelled']);
-// Wire v4 removed DaemonConfig.workspaceRoot, which 0.30.2 (wire v3) requires.
+// Wire v4 removed DaemonConfig.workspaceRoot, which 0.30.2 (wire v3) requires,
+// and requires an explicit session selection on each execution.
 const WIRE_V4 = PROTOCOL_VERSION >= 4;
 
 function fileCredentials(path) {
@@ -148,6 +149,7 @@ async function hostMain() {
   taskId = randomBytes(32).toString('hex');
   await server.executions.submit({ taskId, deviceId: running.deviceId, payload: {
     runtime: 'claude', instruction: '#978 taskkill smoke', agentRef: AGENT_REF, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' },
+    ...(WIRE_V4 ? { session: { mode: 'fresh' } } : {}),
   } });
   await until('runtime start', () => events.find((e) => e.run === 1 && e.event === 'runtime_started'));
   await until('Running snapshot', async () => ((await server.tasks.get(taskId))?.state === 'Running' ? true : undefined));
