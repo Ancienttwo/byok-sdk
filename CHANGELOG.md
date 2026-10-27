@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Breaking (client; #1016)** — a new expiring retention class
+  `session-ledger` removes `.byok/runtime-sessions/<runtime>-<session-hash>.jsonl`
+  session ledgers from an idle Agent home once their last append is
+  `storage.retention.ttlMs['session-ledger']` old (default 30 days, minimum 0).
+  `-task-` terminal evidence stays protected. `EXPIRING_CLASS_IDS`,
+  `ExpiringClassId`, `RetentionClassId`, `DEFAULT_RETENTION_TTL_MS` and the
+  resolved `ttlMs` gain `'session-ledger'`, so status and support bundles
+  report 23 classes. A resume, or an `agent.content.read`, with a sessionRef
+  whose ledger was removed fails closed as before; the decline reason now says
+  the handoff does not exist on this device. The class sweeps last in each
+  pass, so a device upgrading with a large backlog of old ledgers drains it
+  over many passes without delaying the other classes.
+
 - **Breaking (protocol, client, server, cloud; #925)** — wire major 4. A v3
   envelope is rejected; there is no v3 reader and no negotiation. Drain the
   v3 deployment, stop it, then start the v4 server side and daemons together
