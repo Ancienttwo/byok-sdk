@@ -208,11 +208,11 @@ it('agent-result TTL defaults to seven days and accepts any non-negative integer
 });
 it('a daemon runs a jittered retention timer and reports path-free classes in status and support bundle',async()=>{
  const server=await TestServer.start();cleanups.push(()=>server.close());let handler:(()=>void)|undefined;const delays:number[]=[];
- const config={localAgentRelease:{version:'0.0.0-test'},productName:'Retention',productId:'retention',serverUrl:server.url,storeDir:testScratchRoot(),workspaceRoot:testScratchRoot(),storage:{scratchRoot:testScratchRoot()}};
+ const config={localAgentRelease:{version:'0.0.0-test'},productName:'Retention',productId:'retention',serverUrl:server.url,storeDir:testScratchRoot(),storage:{scratchRoot:testScratchRoot()}};
  const daemon=createDaemonWithAdapters(config,[new StubRuntimeAdapter()],{retention:{timers:{setTimeout:(h,ms)=>{handler=h;delays.push(ms);return 'timer';},clearTimeout:()=>{}}}});
  cleanups.push(()=>daemon.stop());await daemon.pair('pairing-code');await daemon.start();expect(delays[0]).toBeGreaterThanOrEqual(675_000);expect(delays[0]).toBeLessThanOrEqual(1_125_000);
- expect(daemon.status().storage.classes).toHaveLength(23);handler!();await vi.waitFor(()=>expect(daemon.status().storage.lastSweep?.trigger).toBe('periodic'));
- const bundle=await createSupportBundle(config,config.storeDir);expect(bundle.storage.classes).toHaveLength(23);expect(bundle.storage.lastSweep?.trigger).toBe('periodic');
+ expect(daemon.status().storage.classes).toHaveLength(22);handler!();await vi.waitFor(()=>expect(daemon.status().storage.lastSweep?.trigger).toBe('periodic'));
+ const bundle=await createSupportBundle(config,config.storeDir);expect(bundle.storage.classes).toHaveLength(22);expect(bundle.storage.lastSweep?.trigger).toBe('periodic');
  expect(JSON.stringify(bundle.storage)).not.toContain(config.storeDir);expect(JSON.stringify(bundle.storage)).not.toContain(config.storage.scratchRoot);
 });
 it('uses newly measured pressure for maintenance even when the timer fired as periodic',async()=>{

@@ -12,7 +12,6 @@ export async function fail(this: TaskRunner, taskId: string, reason: string, ret
   const active = this['tasks'].get(taskId);
   if (active !== undefined) {
     await this['settleSemanticTerminal'](active, async () => {
-      await this['observeGit'](active, 'salvage');
       await this['persistAgentTerminalEvidence'](active, 'failed', reason);
       return createEnvelope('task.fail', {
         reason,
@@ -197,7 +196,6 @@ export async function finishOnce(this: TaskRunner, taskId: string): Promise<bool
       console.error(`[byok/client] Agent home lease could not be released for ${taskId}: ${errorMessage(error)}`);
       leaseReleased = false;
     }
-    active.gitLease?.release();
     await this['releasePreparationPin'](taskId);
     this['tasks'].delete(taskId);
     this['revokeAgentMessageContext'](taskId);
@@ -206,7 +204,6 @@ export async function finishOnce(this: TaskRunner, taskId: string): Promise<bool
     this['deleteHostToolsetContexts'](taskId);
     return leaseReleased;
   }
-  active.gitLease?.release();
   await this['releasePreparationPin'](taskId);
   this['tasks'].delete(taskId);
   this['revokeAgentMessageContext'](taskId);

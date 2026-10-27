@@ -9,7 +9,7 @@ const credentials = new InMemoryDeviceCredentialStore();
 if (enrollment.record) await credentials.replace(enrollment.record);
 const daemon = createDaemon({
   localAgentRelease:{version:'0.0.0-durable-recovery-test'},productName:'Durable recovery',productId:config.productId,serverUrl:config.serverUrl,
-  storage:{scratchRoot:config.scratchRoot},storeDir:config.storeDir, workspaceRoot:config.workspaceRoot, runtimeAllowlist:['pi'],durablePi:true,
+  storage:{scratchRoot:config.scratchRoot},storeDir:config.storeDir, runtimeAllowlist:['pi'],durablePi:true,
   agentHome:{hostStorageRoot:config.homeRoot},
   piByokLauncher:{command:process.execPath,args:[config.launcherEntry],profileDbPath:config.profilePath,sessionDir:config.sessionDir},
 }, { deviceCredentials: credentials });

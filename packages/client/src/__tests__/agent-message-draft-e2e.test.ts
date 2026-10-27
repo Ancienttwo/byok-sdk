@@ -79,7 +79,7 @@ async function setup(options: { adapter?: RuntimeAdapter; oldServer?: boolean; g
   daemon = createDaemonWithAdapters({
     storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-draft-test' },
     productName: 'Draft test', productId, serverUrl: server.url,
-    workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'store'),
+    storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy },
   }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialStore() });
   const { deviceId } = await daemon.pair((await server.createPairingCode()).code);

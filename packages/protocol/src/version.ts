@@ -3,14 +3,25 @@ export const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
 export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
 
 /**
- * Wire protocol version. Every v3 change is a version bump, a gated addition
+ * Wire protocol version. Every v4 change is a version bump, a gated addition
  * or a strip-safe addition: see docs/protocol.md "Freeze rule", which is the
  * one statement of the rule, and `src/wire-additions.ts`, which declares the
- * receiver-capability gates and additions. No v3 release has been published
- * yet, so `src/__tests__/compat.test.ts` has no published v3 decoder to prove
+ * receiver-capability gates and additions. No v4 release has been published
+ * yet, so `src/__tests__/compat.test.ts` has no published v4 decoder to prove
  * additions against; cross-release gates stay unproven until one exists.
  *
- * v3 makes `schema` required on the `terminalProjection.mode:
+ * v4 completes the ADR-034 cutover and retires the approval paths kept for
+ * pre-M5 peers. It removes the v3 handshake answer, the runtime-only offers
+ * (with and without toolsets) with their sealed twins, and the
+ * `strict-agent-only` flag: every offer is Agent-bound. `approvalId` is
+ * required on `task.await_approval`, `task.approve` and `task.reject`, so a
+ * decision resolves only the approval it names. `task.approval_resolved` is
+ * baseline: the daemon reports every locally resolved approval, and the
+ * server no longer infers one from later task activity. The three approval
+ * capability flags of v3 are gone. A v3 envelope is rejected; there is no v3 reader. Drain, then
+ * upgrade server and client together.
+ *
+ * v3 made `schema` required on the `terminalProjection.mode:
  * 'result-document'` arm (`terminal-projection.ts`, `result-schema.ts`): the
  * offer freezes the outcome schema, and the outcome reaches the Host only as
  * `task.complete.document`. That narrows a strict shape, so it is a wire
@@ -32,10 +43,7 @@ export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
  * attest tool executables. The artifact names its counted tools in
  * `toolNames`.
  */
-export const PROTOCOL_VERSION = 3;
-
-/** Host declares that this device accepts only Agent-bound offer variants. */
-export const STRICT_AGENT_ONLY_CAPABILITY = 'strict-agent-only' as const;
+export const PROTOCOL_VERSION = 4;
 
 /**
  * The device runs `homeAccess: 'memory-reader'` Agent offers: each reader
@@ -52,72 +60,27 @@ export const AGENT_HOME_READERS_CAPABILITY = 'agent-home-readers' as const;
  * flags may be introduced without a protocol version bump; unrecognized flags
  * must be ignored by both sides.
  *
- * `interactive-approval` is RESERVED as of this addition: it gates the
- * (currently unexercised) approval seam — a server must not route an
- * approval-requiring policy to a daemon that hasn't advertised this flag. No
- * bundled runtime adapter emits it yet; that's expected until interactive
- * approval is actually wired up in a later wave.
- *
- * `approval_resolved` (additive-minor): a SERVER-advertised flag meaning
- * "I understand the `task.approval_resolved` message" (`messages.ts`). This
- * is the N/N-1 answer for that new daemon -> server message: an old server's
- * advertised capabilities never include it, so a new daemon talking to an old
- * server never sends `task.approval_resolved` at all (see `packages/client`'s
- * `task-runner.ts`) and falls back to the pre-existing implicit-resume inference
- * (the `relay.onTaskActivity` hook in `packages/server/src/index.ts`)
- * unconditionally, exactly as before this flag existed. Unlike
- * `interactive-approval`, this one IS exercised the moment both sides
- * support it — there is no reserved/dormant period for it.
- */
-/**
- * `approval-targeting` (M5, additive-minor): unlike `approval_resolved`
- * above, this flag is purely INFORMATIONAL/semantic, not a functional gate.
- * `task.await_approval`/`task.approve`/`task.reject` all carry their new
- * `approvalId` field UNCONDITIONALLY on both sides once each peer is
- * upgraded -- the wire is tolerant (a plain, non-`.strict()` `z.object()`
- * field, `messages.ts`), so no version/capability negotiation is needed just
- * to send it safely; an older peer that doesn't recognize the field simply
- * never reads it. Receivers decide whether to apply exact-match targeting
- * by FIELD PRESENCE on the specific message at hand (does this particular
- * `task.approve`/`task.reject`/`onApprovalResolved` payload carry an
- * `approvalId`, and does a stored one exist to compare it against?), never
- * by checking this flag -- see `approveTask`/`rejectTask` (`@byok-sdk/cloud`)
- * and `TaskRunner.handleApprove`/`handleReject` (`packages/client`'s
- * `task-runner.ts`). This flag exists only so each side can advertise
- * whether the OTHER side is new enough to participate in targeting at all (an
- * embedder could observe it through the old
- * reference server's `ConnectionHub.getDeviceCapabilities`; `@byok-sdk/server`
- * now reads it only internally) -- the same N/N-1-safe shape as every other
- * flag here, just consumed for observability instead of gating.
- */
-/**
  * `dispatch-selection` (additive-minor) is a correctness gate for the
- * optional `task.offer.dispatchSelection` control field. An older v1 daemon
+ * optional offer `dispatchSelection` control field. An older v1 daemon
  * legally strips unknown optional fields, so a server must never send an
  * authoritative provider/model selection unless the target connection
  * advertises this flag. Absence means reject before task creation, not send
- * a legacy runtime-only offer that could reach a different provider.
+ * an offer that could reach a different provider.
  *
- * `toolset-selection` (additive-minor) means the daemon understands
- * `task.offer_with_toolsets` and can resolve its logical ids against local
- * MCP configuration. The distinct message type is also the N/N-1 safety
- * boundary for long-poll: an older daemon skips it as unknown and therefore
- * cannot accidentally execute the instruction without the required tools.
+ * `toolset-selection` (additive-minor) means the daemon understands an
+ * offer's `requiredToolsets` and can resolve its logical ids against local
+ * MCP configuration.
  */
 export const CUSTOM_HARNESS_CAPABILITY = 'custom-harness' as const;
 
 export const CAPABILITY_FLAGS = [
   'steer',
   'blob-upload',
-  'interactive-approval',
-  'approval_resolved',
-  'approval-targeting',
   'dispatch-selection',
   PROVIDER_PROFILE_BINDING_CAPABILITY,
   'toolset-selection',
   'agent-home-contract',
   AGENT_HOME_READERS_CAPABILITY,
-  STRICT_AGENT_ONLY_CAPABILITY,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
   AGENT_MESSAGE_EGRESS_CAPABILITY,

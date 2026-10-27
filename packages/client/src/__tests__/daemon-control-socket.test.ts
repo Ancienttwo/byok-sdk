@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
@@ -61,10 +62,9 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     adapter: StubRuntimeAdapter,
     overrides: DaemonOverrides = {},
   ): Promise<{ daemon: Daemon; config: DaemonConfig; storeDir: string }> {
-    const workspaceRoot = await tmpDir(`byok-ctl-e2e-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-ctl-e2e-${productId}-store-`);
-    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
-    const built = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter], overrides);
+    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, storeDir };
+    const built = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter], overrides);
     await built.pair('pairing-code');
     await built.start();
     // #391: start() no longer waits for the server; these tests drive an open session.
@@ -74,18 +74,17 @@ describe('M4 Phase 2: control socket end-to-end', () => {
 
   it('service enrollment pairs under the running daemon identity, then converges to normal startup', async () => {
     const adapter = new StubRuntimeAdapter('pi');
-    const workspaceRoot = await tmpDir('byok-ctl-service-enroll-ws-');
     const storeDir = await tmpDir('byok-ctl-service-enroll-store-');
     const config: DaemonConfig = {
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Acme',
       productId: 'acme-ctl-service-enroll',
       serverUrl: server.url,
-      workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
       serviceEnrollment: { enabled: true },
     };
-    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
+    daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
 
     await daemon.start();
     const enrollment = await connectControlClient({ storeDir, productId: config.productId });
@@ -187,7 +186,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'do work' }, { taskId: 't1', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do work' }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
 
@@ -218,7 +217,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'do work' }, { taskId: 't1', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do work' }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -263,7 +262,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     const subscription = conn.client.subscribe('tasks.subscribe', {}, (event) => viaSocket.push(event));
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'do work' }, { taskId: 't1', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do work' }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -286,7 +285,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'long task' }, { taskId: 't1', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'long task' }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -332,7 +331,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     // `pushLongPollEvent` queues the inbound offer for the daemon's next
     // events response.
     server.pushLongPollEvent(
-      createEnvelope('task.offer', { instruction: 'long task' }, { taskId: 't-stalled', seq: server.nextSeq() }),
+      createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'long task' }, { taskId: 't-stalled', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -369,10 +368,9 @@ describe('M4 Phase 2: control socket end-to-end', () => {
 
   it('runStartCommand exits cleanly when the control socket shutdown RPC fires, with no external abort signal ever sent', async () => {
     const adapter = new StubRuntimeAdapter('pi');
-    const workspaceRoot = await tmpDir('byok-ctl-e2e-startcmd-ws-');
     const storeDir = await tmpDir('byok-ctl-e2e-startcmd-store-');
-    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-ctl-startcmd', serverUrl: server.url, workspaceRoot, storeDir };
-    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
+    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-ctl-startcmd', serverUrl: server.url, storeDir };
+    daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
     await daemon.pair('pairing-code');
 
     const lines: string[] = [];
@@ -403,16 +401,15 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     // runStartCommand (not a direct daemon.shutdownActiveTasks call, which
     // bypasses the race entirely) with a genuinely active task.
     const adapter = new StubRuntimeAdapter('pi');
-    const workspaceRoot = await tmpDir('byok-ctl-e2e-startcmd-active-ws-');
     const storeDir = await tmpDir('byok-ctl-e2e-startcmd-active-store-');
     const config: DaemonConfig = {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
       productId: 'acme-ctl-startcmd-active',
       serverUrl: server.url,
-      workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
     };
-    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
+    daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
     await daemon.pair('pairing-code');
 
     const lines: string[] = [];
@@ -423,8 +420,8 @@ describe('M4 Phase 2: control socket end-to-end', () => {
 
     server.send(
       createEnvelope(
-        'task.offer',
-        { instruction: 'long task' },
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),  instruction: 'long task' },
         { taskId: 'race-task', seq: server.nextSeq() },
       ),
     );
@@ -484,7 +481,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
         if (linesLive.some((l) => /started taskId=t-live-\d+/.test(l))) return;
         attempt += 1;
         server.send(
-          createEnvelope('task.offer', { instruction: 'x' }, { taskId: `t-live-${attempt}`, seq: server.nextSeq() }),
+          createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'x' }, { taskId: `t-live-${attempt}`, seq: server.nextSeq() }),
         );
         throw new Error('live subscription not yet active');
       },

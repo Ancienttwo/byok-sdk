@@ -64,7 +64,7 @@ pending mailbox (`outbox`) row and rejects with
 `PostgresMailboxProtocolUnsupportedError` (`code`
 `POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`, plus `requiredVersion`, `tenantId`,
 `deviceId` and `seq` of the first offending row) if any body is not a wire
-envelope of the build's `PROTOCOL_VERSION` (3). Acked and expired rows are
+envelope of the build's `PROTOCOL_VERSION` (4). Acked and expired rows are
 history and are not inspected. The check is read-only: no row is rewritten,
 reclassified or deleted, and there is no synchronous variant that skips it.
 
@@ -79,6 +79,33 @@ The scan walks the pending rows of every tenant in primary-key pages, so it
 costs one read of the pending mailbox per composition. On Workers the
 composition is built per invocation (see below), so that read happens on every
 invocation.
+
+### Wire v4 receipt migration (0.31.x only)
+
+The fence covers pending mailbox rows only. Offer receipts
+(`task-offer:<messageId>`) and terminal receipts (`task:<taskId>:terminal`) in
+`device_request_receipts` hold wire bytes that never expire, and a wire v4
+cloud reads only v4 bytes. After draining and stopping every writer, run the
+one-shot migration once before starting the v4 cloud:
+
+1. `preflightPostgresWireV4Migration(pool)` runs read-only and returns
+   `{ legacyTasks, unmappable }`: the tasks offered on a removed offer type,
+   and every row with no v4 form. A row is unmappable when it is a receipt
+   without a v4 form, an approval timeline entry without `approvalId`, or a
+   v3 mailbox row of another task that a device could still receive (pending,
+   or an expired dead letter that `replayDeadLetter` can still send).
+2. After review, `migratePostgresToWireV4(pool, preflight.legacyTasks)`
+   deletes every row of the confirmed legacy tasks and re-encodes the
+   remaining offer and terminal receipts in one serializable transaction,
+   returning `{ migrated, unchanged, deletedTasks }`.
+
+The migration changes nothing and throws `ReceiptMigrationUnmappableError`
+when any row is unmappable, or `WireV4LegacyTaskListMismatchError` when the
+confirmed list is not exactly the store's legacy tasks; both errors are
+exported by `@byok-sdk/cloud`. It ships in 0.31.x only; 0.32.0 removes it
+(#1017). See
+[the wire v4 upgrade note](../../docs/releases/925-wire-v4.md) for the
+upgrade order, including approvals without an id and v3 dead letters.
 
 ## Deployment compositions
 

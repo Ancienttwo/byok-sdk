@@ -25,14 +25,17 @@ if (authenticated === undefined) throw new Error('unauthorized');
 await connectorProfiles.bind(authenticated.device, providerLogin);
 ```
 
-Hosted compositions enqueue the distinct toolset offer message explicitly:
+Hosted compositions name the toolsets on an Agent offer, which the device must
+admit with `toolset-selection`:
 
 ```ts
-await cloud.enqueueToolsetOffer(tenantId, deviceId, {
+await cloud.enqueueAgentOffer(tenantId, deviceId, {
   taskId,
   payload: {
     instruction: 'Research the account and prepare the next sales action.',
     runtime: 'claude',
+    agentRef,
+    sessionRef,
     requiredToolsets: ['salesko.prospecting'],
   },
 });

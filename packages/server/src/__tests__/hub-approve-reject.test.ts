@@ -9,6 +9,8 @@ import {
   stopServer,
   waitForTaskEvent,
   type FakeLongPollDaemon,
+  TEST_AGENT_DISPATCH,
+  TEST_AGENT_REF,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -17,7 +19,7 @@ const SHORT_HOLD_MS = 150;
 
 /** Offered -> Claimed -> Running over the long-poll send path. */
 async function claimAndStart(daemon: FakeLongPollDaemon, handle: TaskHandle): Promise<void> {
-  await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+  await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
   await daemon.send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }
@@ -74,13 +76,13 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
   it('approve() on a task currently AwaitApproval moves it to Running and notifies the daemon over the wire', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-1');
 
     await handle.approve();
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
-    expect(await drainTypes(daemon)).toEqual(['task.offer', 'task.approve']);
+    expect(await drainTypes(daemon)).toEqual(['task.offer_for_agent', 'task.approve']);
   });
 
   // 2d gap: the old `ConnectionHub.rejectTask` was authoritative over the TASK,
@@ -95,7 +97,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
   it.skip('reject (with a reason) on a task currently AwaitApproval moves it to Failed with that reason', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-1');
 
@@ -105,25 +107,12 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
     expect(snapshot?.result?.state === 'Failed' ? snapshot.result.reason : undefined).toBe('looked risky');
   });
 
-  // 2d gap: three cases the pre-fold file expressed by constructing a
-  // `ConnectionHub` and calling `approveTask('no-such-task')`/
-  // `rejectTask('no-such-task')` directly — "unknown taskId throws
-  // UnknownTaskError (404-equivalent)", its `rejectTask` twin, and
-  // "UnknownTaskError carries taskId". There is no public way to name an
-  // arbitrary taskId on this surface: a `TaskHandle` only ever comes from
-  // `dispatch()`, so the task it names always exists. The kernel's own gate
-  // does fail closed (`ByokCloudError('task_not_found')`,
-  // `packages/cloud/src/cloud.ts`) and `packages/cloud`'s suite owns that pin.
-  // Orchestrator decision: leave it to the cloud suite, or add a
-  // taskId-addressed approval surface to `ByokServer`.
-  it.skip('approve/reject on an unknown taskId fails closed with a typed error carrying the taskId', async () => {
-    expect.fail('no public surface names an arbitrary taskId — see the 2d gap note above');
-  });
+  // An unknown taskId is refused through ByokServer.tasks.approve/reject, which names an arbitrary taskId: tasks-approval.test.ts.
 
   it('approve() on a task NOT currently AwaitApproval (e.g. still Running) fails closed with task_not_awaiting_approval, leaving state unchanged', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'still running' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'still running' });
     await claimAndStart(daemon, handle);
 
     const refused = await handle.approve().catch((error: unknown) => error);
@@ -134,7 +123,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
   it('reject() on a task not currently AwaitApproval fails closed with task_not_awaiting_approval', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'still running' });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'still running' });
     await claimAndStart(daemon, handle);
 
     const refused = await handle.reject('too late').catch((error: unknown) => error);
@@ -151,7 +140,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
     it('replays the same targeted host decision after response loss without enqueuing a second control', async () => {
       const { byok: instance, daemon } = await start();
 
-      const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+      const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
       await claimAndStart(daemon, handle);
       await moveToAwaitApproval(daemon, handle, 'appr-1');
       expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
@@ -165,7 +154,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
     it('approve({approvalId: A}) while a DIFFERENT approval (B) is now the recorded pending one throws StaleApprovalError, changes no state, and sends no wire message', async () => {
       const { byok: instance, daemon } = await start();
 
-      const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+      const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
       await claimAndStart(daemon, handle);
       await moveToAwaitApproval(daemon, handle, 'appr-A', 'first (A)');
       // B supersedes A while the task is STILL AwaitApproval (a re-delivered /
@@ -181,13 +170,13 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
 
       expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // unchanged
       expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B'); // unchanged
-      expect(await drainTypes(daemon)).toEqual(['task.offer']); // no task.approve was enqueued
+      expect(await drainTypes(daemon)).toEqual(['task.offer_for_agent']); // no task.approve was enqueued
     });
 
     it('reject(reason, {approvalId: A}) while a DIFFERENT approval (B) is now the recorded pending one throws StaleApprovalError, changes no state, and sends no wire message', async () => {
       const { byok: instance, daemon } = await start();
 
-      const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+      const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
       await claimAndStart(daemon, handle);
       await moveToAwaitApproval(daemon, handle, 'appr-A', 'first (A)');
       await daemon.send(
@@ -200,13 +189,13 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
 
       expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval'); // unchanged
       expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-B'); // unchanged
-      expect(await drainTypes(daemon)).toEqual(['task.offer']); // no task.reject was enqueued
+      expect(await drainTypes(daemon)).toEqual(['task.offer_for_agent']); // no task.reject was enqueued
     });
 
     it('StaleApprovalError carries taskId/requestedApprovalId/currentApprovalId fields for programmatic handling', async () => {
       const { byok: instance, daemon } = await start();
 
-      const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
+      const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x' });
       await claimAndStart(daemon, handle);
       await moveToAwaitApproval(daemon, handle, 'appr-current');
 
@@ -226,7 +215,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
     it('composed second cycle: AwaitApproval(A) -> approve -> Running -> await_approval(B) -> AwaitApproval — pendingApprovalId is B; A is now stale (StaleApprovalError), B still works', async () => {
       const { byok: instance, daemon } = await start();
 
-      const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs two humans' });
+      const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs two humans' });
       await claimAndStart(daemon, handle);
 
       // First cycle: AwaitApproval(A) -> approve -> Running.
@@ -262,13 +251,13 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
       expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
       // Exactly one `task.approve` per successful approval reached the device
       // (the stale attempt contributed none).
-      expect(await drainTypes(daemon)).toEqual(['task.offer', 'task.approve', 'task.approve']);
+      expect(await drainTypes(daemon)).toEqual(['task.offer_for_agent', 'task.approve', 'task.approve']);
     });
 
     it('compat: approve with NO opts still resolves whichever approval is currently pending — untargeted behavior is unchanged from pre-M5', async () => {
       const { byok: instance, daemon } = await start();
 
-      const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
+      const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x' });
       await claimAndStart(daemon, handle);
       await moveToAwaitApproval(daemon, handle, 'appr-untargeted');
       expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBe('appr-untargeted');
@@ -278,23 +267,6 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
       // Resolving clears the derived slot regardless of whether this decision
       // was targeted.
       expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBeUndefined();
-    });
-
-    // The durable timeline preserves this as an explicit id-less resolution;
-    // it never invents a native approval identity for the pre-M5 peer.
-    it('compat: a legacy task.await_approval with NO approvalId stores nothing, and an untargeted approve still works normally', async () => {
-      const { byok: instance, daemon } = await start();
-
-      const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
-      await claimAndStart(daemon, handle);
-      // A pre-M5 daemon's task.await_approval carries no approvalId at all.
-      await daemon.send(createEnvelope('task.await_approval', { summary: 'legacy' }, { taskId: handle.taskId }));
-
-      expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
-      expect((await instance.tasks.get(handle.taskId))?.pendingApprovalId).toBeUndefined();
-
-      await handle.approve(); // untargeted — nothing to compare against, proceeds exactly as before M5.
-      expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
     });
   });
 
@@ -308,7 +280,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
     it('approve({approvalId}) targets the CURRENT pending approval, read back off the publicly-exposed TaskSnapshot.pendingApprovalId, end to end through dispatch()', async () => {
       const { byok: instance, daemon } = await start();
 
-      const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+      const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
       await claimAndStart(daemon, handle);
       await moveToAwaitApproval(daemon, handle, 'appr-A', 'first (A)');
 
@@ -328,7 +300,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
     it.skip('reject(reason, {approvalId}) targets the CURRENT pending approval end to end through dispatch()', async () => {
       const { byok: instance, daemon } = await start();
 
-      const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+      const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
       await claimAndStart(daemon, handle);
       await moveToAwaitApproval(daemon, handle, 'appr-A', 'first (A)');
 
@@ -341,7 +313,7 @@ describe('TaskHandle.approve/reject (published API + typed errors)', () => {
     it("approve({approvalId}) against a STALE (superseded) approval throws StaleApprovalError — importable/catchable from the package's public entry point — leaving state unchanged; the CURRENT approval still works through the same handle", async () => {
       const { byok: instance, daemon } = await start();
 
-      const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+      const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'needs a human ok' });
       await claimAndStart(daemon, handle);
       await moveToAwaitApproval(daemon, handle, 'appr-A', 'first (A)');
 

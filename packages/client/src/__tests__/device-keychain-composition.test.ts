@@ -20,7 +20,7 @@ it.runIf(process.platform === 'darwin')('shares explicit custody across pair, co
   const server = await TestServer.start();
   const config = {
     productId: randomUUID(), productName: 'Keychain isolation', localAgentRelease: { version: '0.0.0-test' },
-    serverUrl: server.url, storeDir: root, workspaceRoot: root,
+    serverUrl: server.url, storeDir: root,
     storage: { scratchRoot: testScratchRoot() }, deviceCredentials: { macosKeychainPath: keychain.path },
   };
   const daemon = createDaemonWithAdapters(config, []);

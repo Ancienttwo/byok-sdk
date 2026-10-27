@@ -4,8 +4,11 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer, type TaskHandle } from '../index';
 import {
   connectFakeDaemonLongPoll,
+  sendOne,
   startServer,
   stopServer,
+  TEST_AGENT_DISPATCH,
+  TEST_AGENT_REF,
   waitForServerEvent,
   waitForTaskEvent,
   type FakeLongPollDaemon,
@@ -22,13 +25,7 @@ async function claimAndStart(daemon: FakeLongPollDaemon, handle: TaskHandle): Pr
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }
 
-/**
- * Running -> AwaitApproval over the long-poll send path.
- *
- * `approvalId` is optional: the timeline's request source/revision, rather
- * than a synthesized approval id, pins the exact pending request an activity
- * may resolve.
- */
+/** Running -> AwaitApproval over the long-poll send path. */
 async function moveToAwaitApproval(
   daemon: FakeLongPollDaemon,
   handle: TaskHandle,
@@ -40,16 +37,11 @@ async function moveToAwaitApproval(
 }
 
 /**
- * M4 Phase 3 hardening: a task the daemon resolved entirely LOCALLY (M4 Phase
- * 3's `approvals.resolve` control-socket path, `packages/client`) never sends a
- * wire `task.approve`/`task.reject`, so the server's own read model still shows
- * `AwaitApproval` when the daemon's next `task.progress`/`task.artifact`/
- * `task.complete` arrives. That traffic must implicitly resume the task
- * (recording the resolution on the same durable approval timeline every other
- * resolution is recorded on) and process the message normally, exactly as if a
- * real wire `task.approve` had arrived first.
+ * Wire v4: the daemon reports every approval it resolves locally with
+ * `task.approval_resolved`, and that report is the server's only source for
+ * one. Later task activity never resolves a pending approval.
  */
-describe('M4 Phase 3: implicit approval resume (daemon traffic while the read model still says AwaitApproval)', () => {
+describe('a pending approval is resolved only by a decision or a daemon report, never by later task activity', () => {
   let server: HttpServer | undefined;
   let byok: ByokServer | undefined;
 
@@ -69,12 +61,12 @@ describe('M4 Phase 3: implicit approval resume (daemon traffic while the read mo
     return { byok: instance, daemon };
   }
 
-  it('(a) task.progress arriving while AwaitApproval implicitly resumes to Running, applies the progress, and emits task.approval_resolved_implicit — NOT force-failed', async () => {
+  it('(a) task.progress and task.artifact while AwaitApproval are applied, but the approval stays pending', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok', ...TEST_AGENT_DISPATCH });
     await claimAndStart(daemon, handle);
-    await moveToAwaitApproval(daemon, handle, 'appr-implicit-a');
+    await moveToAwaitApproval(daemon, handle, 'appr-pending-a');
 
     await daemon.send(
       createEnvelope(
@@ -83,29 +75,29 @@ describe('M4 Phase 3: implicit approval resume (daemon traffic while the read mo
         { taskId: handle.taskId },
       ),
     );
-
-    const implicitEvent = await waitForServerEvent(
-      instance,
-      (e) => e.kind === 'task.approval_resolved_implicit' && e.taskId === handle.taskId,
+    await daemon.send(
+      createEnvelope('task.artifact', { name: 'notes.txt', contentType: 'text/plain', inline: 'aGk=' }, { taskId: handle.taskId }),
     );
-    expect(implicitEvent).toBeDefined();
 
     const agentEvent = await waitForTaskEvent(handle, (e) => e.kind === 'agent');
     expect(agentEvent).toMatchObject({ kind: 'agent', event: { type: 'progress', text: 'still working' } });
+    await waitForTaskEvent(handle, (e) => e.kind === 'artifact');
 
-    // The whole point: this must be Running, never Failed.
-    expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
+    // A resolution would clear the pending slot on the approval timeline.
+    const snapshot = await instance.tasks.get(handle.taskId);
+    expect(snapshot?.state).toBe('AwaitApproval');
+    expect(snapshot?.pendingApprovalId).toBe('appr-pending-a');
   });
 
   it('(b) task.complete arriving directly while AwaitApproval completes normally — NOT force-failed', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok', ...TEST_AGENT_DISPATCH });
     await claimAndStart(daemon, handle);
-    await moveToAwaitApproval(daemon, handle, 'appr-implicit-b');
+    await moveToAwaitApproval(daemon, handle, 'appr-pending-b');
 
     await daemon.send(
-      createEnvelope('task.complete', { summary: 'done after local approval', sessionRef: 'sess-1' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done after local approval', sessionRef: 'sess-1' }, { taskId: handle.taskId }),
     );
 
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Complete');
@@ -116,44 +108,37 @@ describe('M4 Phase 3: implicit approval resume (daemon traffic while the read mo
     expect(snapshot?.result?.state === 'Complete' ? snapshot.result.sessionRef : undefined).toBe('sess-1');
   });
 
-  it('(c) a second task.await_approval after an implicit resume transitions cleanly back to AwaitApproval', async () => {
+  it('(c) after the daemon reports the local resolution, a second task.await_approval transitions cleanly back to AwaitApproval', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs two human oks' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs two human oks', ...TEST_AGENT_DISPATCH });
     await claimAndStart(daemon, handle);
-    await moveToAwaitApproval(daemon, handle, 'appr-implicit-c1', 'first approval needed');
+    await moveToAwaitApproval(daemon, handle, 'appr-pending-c1', 'first approval needed');
 
-    // Implicit resume, as (a) proves in isolation — synchronize on the
-    // implicit-resolve SERVER event (unique to this one resume), not a bare
-    // "state === Running" task-event predicate: this task already passed
-    // through Running once (claimAndStart's own Claimed -> Running), and
-    // waitForTaskEvent always replays from the start of the task's whole
-    // history, so re-waiting on the same predicate would just re-match that
-    // EARLIER event instead of waiting for this one.
     await daemon.send(
       createEnvelope(
-        'task.progress',
-        { seq: 1, events: [{ type: 'progress', text: 'continued after local approval' }] },
+        'task.approval_resolved',
+        { approvalId: 'appr-pending-c1', decision: 'approve', resolvedBy: 'local', at: new Date().toISOString() },
         { taskId: handle.taskId },
       ),
     );
-    await waitForServerEvent(instance, (e) => e.kind === 'task.approval_resolved_implicit' && e.taskId === handle.taskId);
+    await waitForServerEvent(instance, (e) => e.kind === 'task.approval_resolved' && e.taskId === handle.taskId);
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
 
-    // A genuinely NEW await_approval for the same task, after the implicit
-    // resume, must still work cleanly.
     await daemon.send(
-      createEnvelope('task.await_approval', { summary: 'second approval needed', approvalId: 'appr-implicit-c2' }, { taskId: handle.taskId }),
+      createEnvelope('task.await_approval', { summary: 'second approval needed', approvalId: 'appr-pending-c2' }, { taskId: handle.taskId }),
     );
     await waitForTaskEvent(handle, (e) => e.kind === 'await_approval' && e.summary === 'second approval needed');
 
-    expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
+    const snapshot = await instance.tasks.get(handle.taskId);
+    expect(snapshot?.state).toBe('AwaitApproval');
+    expect(snapshot?.pendingApprovalId).toBe('appr-pending-c2');
   });
 
-  it('(d) existing behavior preserved: task.progress on an already-terminal task is still dropped, not force-failed and not implicitly resumed', async () => {
+  it('(d) task.progress on an already-terminal task is still dropped, not force-failed and not resumed', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle1 = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'task one' });
+    const handle1 = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'task one', ...TEST_AGENT_DISPATCH });
     await claimAndStart(daemon, handle1);
     await handle1.cancel('server decided');
     expect((await instance.tasks.get(handle1.taskId))?.state).toBe('Cancelled');
@@ -166,19 +151,16 @@ describe('M4 Phase 3: implicit approval resume (daemon traffic while the read mo
     expect((await instance.tasks.get(handle1.taskId))?.state).toBe('Cancelled'); // unchanged, not resumed/re-failed
   });
 
-  it('(a-legacy) task.progress arriving while AwaitApproval with NO reported approvalId still implicitly resumes to Running', async () => {
+  it('(e) a task.await_approval without approvalId is refused at the wire, so no unnamed approval can be pending', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'legacy daemon, no approvalId' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'no approval id', ...TEST_AGENT_DISPATCH });
     await claimAndStart(daemon, handle);
-    await daemon.send(createEnvelope('task.await_approval', { summary: 'needs a human ok' }, { taskId: handle.taskId }));
-    await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'AwaitApproval');
-
-    await daemon.send(
-      createEnvelope('task.progress', { seq: 1, events: [{ type: 'progress', text: 'still working' }] }, { taskId: handle.taskId }),
-    );
-
-    await waitForServerEvent(instance, (e) => e.kind === 'task.approval_resolved_implicit' && e.taskId === handle.taskId);
+    const response = await sendOne(daemon, {
+      ...createEnvelope('task.await_approval', { summary: 'needs a human ok', approvalId: 'x' }, { taskId: handle.taskId }),
+      payload: { summary: 'needs a human ok' },
+    } as never);
+    expect(response.body).not.toMatchObject({ accepted: 1 });
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
   });
 });

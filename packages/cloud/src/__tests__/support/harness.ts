@@ -18,6 +18,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { tenantId, type Clock, type TenantId } from '@byok-sdk/core';
 import { EventsPollResponseSchema, parseMessage, type Envelope, type EventsPollResponse, type PairResponse } from '@byok-sdk/protocol';
 import { NONCE_SIGNING_DOMAIN } from '../../auth/verify';
+import { AGENT_HOME_CONTRACT_CAPABILITY } from '../../cloud';
 import { createInMemoryByokCloud, type InMemoryByokCloud, type InMemoryByokCloudOptions } from '../../composition/in-memory';
 
 export const TENANT_A = tenantId('tenant-a');
@@ -113,9 +114,22 @@ export function createHarness(options: InMemoryByokCloudOptions = {}): CloudHarn
   };
 }
 
-/** The minimal valid `task.offer` payload — an instruction plus an auto policy. */
+/** The Agent of {@link offerPayload}. Wire v4 offers are Agent-bound. */
+export const TEST_AGENT_REF = { agentId: 'test-agent', profileRevision: 'rev-1' } as const;
+
+/**
+ * The minimal Host Agent resume payload for `enqueueAgentOffer`. Cloud admits
+ * any `sessionRef`; only a daemon checks that the session exists.
+ */
 export function offerPayload(instruction = 'do the thing') {
-  return { instruction };
+  return { instruction, agentRef: TEST_AGENT_REF, sessionRef: 'test-session' };
+}
+
+/** Adds the Agent-home capability to the device's recorded capabilities, which `enqueueAgentOffer` admits on. */
+export async function grantAgentHome(harness: CloudHarness, tenant: TenantId, deviceId: string): Promise<void> {
+  const current = (await harness.stores.devices.get(tenant, deviceId))?.capabilities ?? [];
+  if (current.includes(AGENT_HOME_CONTRACT_CAPABILITY)) return;
+  await harness.stores.devices.recordCapabilities(tenant, { deviceId, capabilities: [...current, AGENT_HOME_CONTRACT_CAPABILITY] });
 }
 
 /** An events page whose entries were each decoded on their own, as the daemon does (#386). */

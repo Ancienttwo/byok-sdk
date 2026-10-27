@@ -1,14 +1,11 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
@@ -24,10 +21,6 @@ const unusedBlobClient: BlobResolver = {
   },
 };
 
-async function tmpDir(prefix: string): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
-}
-
 describe('Salesko fake connector MCP end to end', () => {
   it('offer id -> local registry -> strict Claude config -> stdio MCP tool call -> terminal result', async () => {
     const sent: Envelope[] = [];
@@ -38,11 +31,10 @@ describe('Salesko fake connector MCP end to end', () => {
     const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       runtimeAllowlist: ['claude'],
-      workspaceRoot: await tmpDir('byok-salesko-e2e-workspace-'),
+      ...testAgentHomeDeps(),
       deviceId: 'device-salesko',
       send: (envelope) => sent.push(envelope),
       blobClient: unusedBlobClient,
-      sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-salesko-e2e-store-')),
       approvalRegistry: new ApprovalRegistry(),
       storeDir: 'unused-store-dir',
       productId: 'salesko',
@@ -62,8 +54,8 @@ describe('Salesko fake connector MCP end to end', () => {
 
     await runner.handleEnvelope(
       createEnvelope(
-        'task.offer_with_toolsets',
-        {
+        'task.offer_for_agent',
+        { agentRef: freshTestAgentRef(),
           instruction: 'salesko:find-leads',
           runtime: 'claude',
           requiredToolsets: ['salesko'],

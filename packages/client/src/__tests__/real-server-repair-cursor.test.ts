@@ -1,3 +1,5 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -5,7 +7,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
+import { type RealServerHandle, startRealServer, submitAgentTask, waitForTaskResult } from './fixtures/real-server';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -41,12 +43,11 @@ describe('re-pair does not inherit a stale cursor from the previous device (find
 
   it('a fresh device (new deviceId from the server) receives its own low-seq envelopes after re-pairing, on the same storeDir', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-'); // shared across both pair()/start() cycles below
     const adapterA = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapterA],
       LONG_POLL_DAEMON_OPTIONS,
     );
@@ -60,11 +61,10 @@ describe('re-pair does not inherit a stale cursor from the previous device (find
 
     // Advance this device's cursor well past 1 so a later "did it inherit
     // this?" check is unambiguous — dispatch a task through claim/complete.
-    const handleA = await real.byok.dispatch({ deviceId: recordA.deviceId, instruction: 'first device task' });
-    await waitForTaskEvent(handleA, (e) => e.kind === 'state' && e.state === 'Claimed');
+    const taskA = await submitAgentTask(real, { taskId: 'task-first-device', deviceId: recordA.deviceId, instruction: 'first device task' });
     await vi.waitFor(() => expect(adapterA.sessions).toHaveLength(1));
     adapterA.sessions[0]!.emit({ type: 'turn_end' });
-    await handleA.result();
+    await waitForTaskResult(real, taskA);
 
     await daemon.stop();
 
@@ -77,7 +77,7 @@ describe('re-pair does not inherit a stale cursor from the previous device (find
 
     const adapterB = new StubRuntimeAdapter();
     const daemon2 = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapterB],
       LONG_POLL_DAEMON_OPTIONS,
     );
@@ -90,11 +90,10 @@ describe('re-pair does not inherit a stale cursor from the previous device (find
     // The new device's own server-side mailbox starts fresh (nextSeq=1), so
     // its very first task.offer gets a LOW seq — exactly what the bug would
     // drop if this daemon had inherited device A's (higher) stale cursor.
-    const handleB = await real.byok.dispatch({ deviceId: recordB.deviceId, instruction: 'second device task' });
-    await waitForTaskEvent(handleB, (e) => e.kind === 'state' && e.state === 'Claimed');
+    const taskB = await submitAgentTask(real, { taskId: 'task-second-device', deviceId: recordB.deviceId, instruction: 'second device task' });
     await vi.waitFor(() => expect(adapterB.sessions).toHaveLength(1));
     adapterB.sessions[0]!.emit({ type: 'turn_end' });
-    const resultB = await handleB.result();
+    const resultB = await waitForTaskResult(real, taskB);
     expect(resultB.state).toBe('Complete');
   }, 15000);
 });

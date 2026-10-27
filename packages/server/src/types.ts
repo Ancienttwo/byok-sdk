@@ -162,7 +162,7 @@ interface DispatchInputBase {
   instruction: string;
   /**
    * Authoritative web-selected target. When present, `runtime` is derived
-   * from `runtimeId`; supplying a different legacy `runtime` is rejected.
+   * from `runtimeId`; supplying a different `runtime` is rejected.
    */
   dispatchSelection?: DispatchSelection;
   runtime?: RuntimeId;
@@ -172,8 +172,8 @@ interface DispatchInputBase {
   /** Logical device-local MCP toolsets required for this task; never executable definitions. */
   requiredToolsets?: ToolsetId[];
   /**
-   * An explicit, consumed Agent egress policy. This may only travel with an
-   * Agent-bound offer on the distinct egress-aware wire message.
+   * An explicit, consumed Agent egress policy. It travels on the distinct
+   * egress-aware Agent offer.
    */
   egressPolicy?: AgentEgressPolicy;
   /** Distinct user-visible message lane; independent of activity egress. */
@@ -203,12 +203,6 @@ interface DispatchInputBase {
   agentMessageContext?: AgentMessageServerContext;
 }
 
-/** Legacy or toolset dispatch: no Agent identity. */
-export interface LegacyDispatchInput extends DispatchInputBase {
-  agentRef?: undefined;
-  sessionRef?: string;
-}
-
 /**
  * Agent resume dispatch: an explicit durable Agent identity plus the exact
  * session being resumed, via task.offer_for_agent (or its egress variant). A
@@ -222,7 +216,7 @@ export interface AgentResumeDispatchInput extends DispatchInputBase {
 }
 
 /** Input to {@link ByokServer.dispatch}. */
-export type DispatchInput = LegacyDispatchInput | AgentResumeDispatchInput;
+export type DispatchInput = AgentResumeDispatchInput;
 
 /** Host control-plane input for one exact content-read request. */
 export interface AgentContentReadRequest {
@@ -337,8 +331,8 @@ export interface TaskHandle {
   /**
    * M5 (approval targeting, docs/protocol.md §5.3): `opts.approvalId`
    * targets a SPECIFIC pending approval rather than "whichever one is
-   * currently pending" (the default when `opts` is omitted, unchanged from
-   * pre-M5). Thin wrapper over `ByokCloud.approveTask` (`@byok-sdk/cloud`) —
+   * currently pending" (the default when `opts` is omitted: the decision then
+   * names the pending approval's own id). Thin wrapper over `ByokCloud.approveTask` (`@byok-sdk/cloud`) —
    * see that method's own doc comment for the full targeting/staleness
    * semantics, including when this throws `StaleApprovalError` (re-exported
    * from this package's index for a caller to catch/inspect). The host's
@@ -403,8 +397,7 @@ export interface TaskSnapshot {
   /**
    * M5 (approval targeting, docs/protocol.md §5.3): the daemon-reported
    * `approvalId` for the CURRENT `AwaitApproval` cycle, if one is pending —
-   * `undefined` whenever the task isn't currently awaiting approval, OR it is
-   * but no id was ever reported for it (a legacy daemon).
+   * `undefined` whenever the task isn't currently awaiting approval.
    *
    * DERIVED, not stored: it is `pendingApproval()`'s fold over the task's
    * durable approval timeline (`@byok-sdk/cloud`), the same single authority
@@ -505,52 +498,18 @@ export type ByokServerEvent =
   claimedHarnessId?: string;
     }
   /**
-   * M4 Phase 3 hardening (orchestrator-directed): the daemon resolved a
-   * pending approval entirely locally (M4 Phase 3's local `approvals.resolve`
-   * control-socket path) — no wire `task.approve`/`task.reject` ever reached
-   * the server for it. This fires when daemon-originated task traffic
-   * (`task.progress`/`task.artifact`) for a task whose approval timeline still
-   * shows an unresolved request proves, after the fact, that the approval was
-   * resolved on the device. The façade records that resolution on the same
-   * timeline, so the read model resumes from the one authority.
-   * Deliberately NOT a wire message (no `packages/protocol` change) — a
-   * first-class `task.approval_resolved` wire notification is a deferred
-   * v1.1 candidate; this is purely an embedder-facing observability signal
-   * so a SaaS UI can distinguish "approved server-side" from "the device
-   * says it was approved locally" if it cares to.
-   */
-  | { kind: 'task.approval_resolved_implicit'; taskId: string; at: string }
-  /**
-   * M4 (additive-minor): the EXPLICIT counterpart to
-   * `task.approval_resolved_implicit` above — fires when the daemon reports
-   * a locally-resolved approval via the wire `task.approval_resolved`
-   * message rather than the server having to infer it from later task
-   * traffic. Carries the same
-   * `approvalId`/`decision`/`resolvedBy` the daemon reported, so an embedder
-   * can render/audit exactly what was resolved and by which path, not just
-   * that a resolution happened. `resolvedBy` is currently always `'local'`
-   * (`@byok-sdk/protocol`'s `TaskApprovalResolvedPayloadSchema` — a single-value
-   * enum today, future-proofed for an additional value later without a
-   * version bump). Mutually exclusive with `task.approval_resolved_implicit`
-   * for the same resolution: whichever mechanism the server processes first
-   * clears the pending slot on the approval timeline, and the other finds
-   * nothing left to clear by the time it would otherwise run.
+   * The daemon reported a locally-resolved approval with the wire
+   * `task.approval_resolved` message. Carries the `approvalId`/`decision`/
+   * `resolvedBy` the daemon reported, so an embedder can render or audit
+   * exactly what was resolved. `resolvedBy` is currently always `'local'`
+   * (`@byok-sdk/protocol`'s `TaskApprovalResolvedPayloadSchema`). This report
+   * is the only way the server learns of a local resolution; it does not
+   * infer one from later task traffic.
    */
   | ({
       kind: 'task.approval_resolved';
       taskId: string;
       at: string;
-      /**
-       * M5 (hello-capability plumbing, docs/protocol.md §5.3): whether the
-       * REPORTING device advertised the `approval-targeting` capability flag
-       * (`version.ts`) in its `conn.hello` — an observability-only signal
-       * (see that flag's own doc comment: it never gates matching, which is
-       * always decided by field presence on the specific message). Always
-       * `false` now: that flag was a property of the device's LIVE WebSocket
-       * registration, which no longer exists, and the durable capability list
-       * is a device-BUILD fact rather than a per-report one.
-       */
-      targeted: boolean;
     } & Pick<TaskApprovalResolvedPayload, 'approvalId' | 'decision' | 'resolvedBy'>)
   /**
    * M4 Phase 4 (part A): `deviceId` exceeded its inbound-envelope rate limit

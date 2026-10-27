@@ -1,4 +1,5 @@
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { RuntimeTaskInput } from '../../types';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import {
   freezeRuntimeAdapterDescriptor,
   type RuntimeAdapter,
@@ -21,7 +22,7 @@ export class StubSession implements Session {
   interruptCalled = false;
   closeCalled = false;
   readonly steerCalls: string[] = [];
-  readonly followUpCalls: TaskOfferPayload[] = [];
+  readonly followUpCalls: RuntimeTaskInput[] = [];
   readonly resolveApprovalCalls: Array<{ approved: boolean; reason?: string }> = [];
   /**
    * Test hook: when set, the NEXT `steer()` call throws this instead of
@@ -119,7 +120,7 @@ export class StubSession implements Session {
     this.steerCalls.push(text);
   }
 
-  async followUp(task: TaskOfferPayload): Promise<void> {
+  async followUp(task: RuntimeTaskInput): Promise<void> {
     this.followUpCalls.push(task);
   }
 
@@ -181,13 +182,12 @@ const DEFAULT_STUB_CAPABILITIES: RuntimeCapabilities = {
 export class StubRuntimeAdapter implements RuntimeAdapter {
   readonly descriptor;
   readonly startCalls: Array<{
-    task: TaskOfferPayload;
+    task: RuntimeTaskInput;
     ctx: {
       workspaceDir: string;
       env: NodeJS.ProcessEnv;
       mcpServers?: RuntimeOperationStartInput['mcpServers'];
       mcpToolsetTools?: RuntimeOperationStartInput['mcpToolsetTools'];
-      gitWorkspace?: { workspaceId: string; baseline?: string };
       approvalChannel?: RuntimeOperationStartInput['approvalChannel'];
     };
   }> = [];
@@ -298,9 +298,6 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
         env: startInput.env,
         ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
         ...(startInput.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: startInput.mcpToolsetTools }),
-        ...(startInput.manifest.workspace.workspaceId === undefined
-          ? {}
-          : { gitWorkspace: { workspaceId: startInput.manifest.workspace.workspaceId, baseline: startInput.manifest.workspace.baseline } }),
         ...(startInput.approvalChannel === undefined ? {} : { approvalChannel: startInput.approvalChannel }),
       },
     });

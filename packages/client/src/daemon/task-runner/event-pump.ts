@@ -296,7 +296,6 @@ async function pumpTurnEnd(this: TaskRunner, active: ActiveTask, event: Extract<
   const failureReason = outcome.failure === undefined ? undefined
     : resultReplyFailureReason(outcome.failure, active.terminalProjection!.mode === 'result-document' ? active.terminalProjection!.contract : '');
   if (outcome.failure !== undefined) active.resultReplyFailure = outcome.failure;
-  else await this['observeGit'](active, 'completed');
   if (!this['canPublishAgentMessage'](active)) return;
   const recordFailure = async () => {
     if (outcome.failure === undefined) return;

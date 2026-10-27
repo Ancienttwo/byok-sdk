@@ -67,7 +67,6 @@ async function main(): Promise<void> {
       // Deliberately unroutable (port 0) -- start()/pair() are never called,
       // so this is never dialed. Present only because DaemonConfig requires it.
       serverUrl: 'http://127.0.0.1:0',
-      workspaceRoot: process.cwd(),
       // Hermetic: never touch a real ~/.byok on whatever machine/CI runner
       // this compiled binary happens to execute on.
       storeDir: path.join(os.tmpdir(), 'byok-packaging-smoke', String(process.pid)),

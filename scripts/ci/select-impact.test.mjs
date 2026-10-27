@@ -116,7 +116,7 @@ test('a platform family is selected only by a path it owns', () => {
     'agent-memory-helper': 'packages/client/src/daemon/agent-memory-intent.ts',
     'execution-recovery-native': 'packages/client/src/daemon/journal/sqlite-journal.ts',
     'adapter-lifecycle-smoke': 'packages/client/src/adapters/codex/codex-adapter.ts',
-    'windows-git-workspace': 'packages/client/src/daemon/git-workspace.ts',
+    'windows-client': 'packages/client/src/daemon/auth-manager.ts',
     'packageability-smoke': 'packages/client/src/sdk-native-assets.ts',
     'windows-service-smoke': 'packages/client/src/lifecycle/winsw.ts',
     'ipc-smoke': 'packages/client/src/daemon/control-server.ts',
@@ -136,8 +136,8 @@ test('a platform family is selected only by a path it owns', () => {
 });
 
 test('shared Windows filesystem helpers select their real Windows consumers', () => {
-  assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['dataplane', 'windows-git-workspace', 'windows-service-smoke']);
-  assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['dataplane', 'ipc-smoke', 'windows-git-workspace']);
+  assert.deepEqual(selectImpact(['packages/client/src/util/secure-dir.ts']).families, ['dataplane', 'windows-client', 'windows-service-smoke']);
+  assert.deepEqual(selectImpact(['packages/client/src/util/atomic-write.ts']).families, ['dataplane', 'ipc-smoke', 'windows-client']);
 });
 
 test('Hermes adapter, fake and custody launcher paths select the Windows Hermes suites', () => {
@@ -149,10 +149,10 @@ test('Hermes adapter, fake and custody launcher paths select the Windows Hermes 
     'packages/client/src/__tests__/fixtures/fake-hermes-command.ts',
     'packages/keys/src/hermes-provider-launcher.ts',
     'packages/keys/src/__tests__/hermes-provider-launcher.test.ts',
-  ]) assert.ok(selectImpact([path]).families.includes('windows-git-workspace'), path);
+  ]) assert.ok(selectImpact([path]).families.includes('windows-client'), path);
   // The job does not run these, so a change to them does not select it.
   for (const path of ['packages/client/src/adapters/codex/codex-adapter.ts', 'packages/keys/src/pi-provider-launcher.ts', 'packages/client/src/__tests__/hermes-pipe-open-errors.test.ts']) {
-    assert.ok(!selectImpact([path]).families.includes('windows-git-workspace'), path);
+    assert.ok(!selectImpact([path]).families.includes('windows-client'), path);
   }
 });
 
@@ -387,4 +387,22 @@ test('#794 D3: a direct Worker example path selects only that example and the da
     assert.deepEqual(selectImpact([path]), { dirs: ['examples/hosted-bot-collaboration-worker'], files: [path], families: ['dataplane'], reason: 'impacted' });
   }
   assert.throws(() => selectImpact(['examples/hosted-bot-collaboration-worker/wrangler.json']), /reviewed CI mapping required/i);
+});
+
+test('wire v4 (#925) reviewed paths select only their owners', () => {
+  assert.deepEqual(selectImpact(['examples/packaging/launcher.ts']).families, ['packageability-smoke']);
+  assert.ok(selectImpact(['examples/packaging/launcher.ts']).dirs.includes('examples/packaging'));
+  for (const path of ['examples/basic/quickstart-smoke.test.ts', 'examples/basic/server.ts']) {
+    assert.deepEqual(selectImpact([path]).dirs, ['examples/basic'], path);
+  }
+  for (const path of ['scripts/integration/salesko-recurring.test.ts', 'packages/client/scripts/fixtures/packed-cli-mcp-codex.mjs']) {
+    assert.ok(selectImpact([path]).dirs.includes('packages/client'), path);
+  }
+  assert.ok(selectImpact(['packages/client/scripts/fixtures/packed-cli-mcp-codex.mjs']).families.includes('npm-release-pack'));
+  for (const path of ['templates/service/README.md', 'examples/byok-mcp-server/docs/hermes.md']) {
+    assert.deepEqual(selectImpact([path]), { dirs: [], files: [path], families: [], reason: 'docs-only' }, path);
+  }
+  for (const path of ['templates/service/notes.md', 'examples/byok-mcp-server/docs/nested/hermes.md', 'scripts/integration/other.test.ts']) {
+    assert.throws(() => selectImpact([path]), /reviewed CI mapping required/i, path);
+  }
 });

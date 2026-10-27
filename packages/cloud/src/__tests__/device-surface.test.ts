@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest';
 import { fullCapabilityDeclaration } from '../capabilities';
 import { BLOB_URL_TTL_MS } from '../stores/in-memory/blobs';
 import type { InboundRateLimiter } from '../stores/ports';
-import { TENANT_A, TENANT_B, createHarness, offerPayload } from './support/harness';
+import { TENANT_A, TENANT_B, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload } from './support/harness';
 
 function send(
   harness: ReturnType<typeof createHarness>,
@@ -36,20 +36,21 @@ function sha256(data: Uint8Array): string {
   return `sha256:${createHash('sha256').update(data).digest('hex')}`;
 }
 
-describe('explicit legacy offer admission', () => {
+describe('explicit Agent offer admission', () => {
   it('refuses unknown, wrong-tenant and revoked devices without task or mailbox writes', async () => {
     const h = createHarness();
     const device = await h.pairDevice(TENANT_A);
+    await grantAgentHome(h, TENANT_A, device.deviceId);
     for (const [tenant, deviceId, taskId] of [
       [TENANT_A, 'dev_ghost', 'unknown'],
       [TENANT_B, device.deviceId, 'wrong-tenant'],
     ] as const) {
-      await expect(h.cloud.enqueueOffer(tenant, deviceId, { taskId, payload: offerPayload() })).rejects.toMatchObject({ code: 'device_not_found' });
+      await expect(h.cloud.enqueueAgentOffer(tenant, deviceId, { taskId, payload: offerPayload() })).rejects.toMatchObject({ code: 'agent_capability_missing' });
       expect(await h.cloud.readTaskAttempt(tenant, taskId)).toBeUndefined();
       expect((await h.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toEqual([]);
     }
     await h.cloud.revokeDevice(TENANT_A, device.deviceId);
-    await expect(h.cloud.enqueueOffer(TENANT_A, device.deviceId, { taskId: 'revoked', payload: offerPayload() })).rejects.toMatchObject({ code: 'device_not_found' });
+    await expect(h.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId: 'revoked', payload: offerPayload() })).rejects.toMatchObject({ code: 'agent_capability_missing' });
     expect(await h.cloud.readTaskAttempt(TENANT_A, 'revoked')).toBeUndefined();
     expect((await h.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages).toEqual([]);
   });
@@ -59,10 +60,11 @@ describe('POST /byok/messages', () => {
   it('counts accepted envelopes and omits `rejected` entirely when nothing was rejected', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
 
     const response = await send(harness, device.authorization, [
-      createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId }),
       createEnvelope('task.started', {}, { taskId }),
     ]);
 
@@ -74,8 +76,9 @@ describe('POST /byok/messages', () => {
   it('counts a duplicate as accepted and a gate rejection separately', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId });
 
     await send(harness, device.authorization, [claim]);
     const response = await send(harness, device.authorization, [
@@ -100,9 +103,10 @@ describe('POST /byok/messages', () => {
     // Swap the limiter on the store bundle the running cloud reads.
     Object.assign(harness.stores, { rateLimiter: limiter });
 
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     const response = await send(harness, device.authorization, [
-      createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId }),
       createEnvelope('task.started', {}, { taskId }),
     ]);
 
@@ -129,7 +133,8 @@ describe('POST /byok/messages', () => {
   it('accepts a full-sized batch', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('full batch'),
     });
     const batch: Envelope[] = Array.from({ length: MAX_MESSAGES_PER_BATCH }, () =>

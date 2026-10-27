@@ -582,6 +582,16 @@ retention cannot remove the delivered/immutable/terminal facts. Receipt columns
 and composite primary key are validated on open. Capacity exhaustion is an
 error; deleting identity fences is not a quota strategy.
 
+Offer and terminal receipts hold wire bytes, and a wire v4 build reads only v4
+bytes. A store written by a v3 build needs the one-shot wire v4 migration
+(0.31.x only; 0.32.0 removes it, #1017) after draining and before a v4 server
+starts. On a stopped embedded store, `preflightSqliteWireV4Migration(path)`
+(`@byok-sdk/server`) lists the legacy tasks (offered on a removed offer type)
+and every row with no v4 form; `migrateSqliteToWireV4(path, confirmedLegacyTasks)`
+takes the confirmed list back, deletes those tasks' rows and re-encodes the
+rest in one transaction, or changes nothing. See
+[the wire v4 upgrade note](releases/925-wire-v4.md).
+
 ### Bot turn outcome fragments and routine time points
 
 `@byok-sdk/protocol` publishes the `bot-turn-outcome.v1` action fragments. Each
@@ -1520,7 +1530,7 @@ that read. A process whose parent exited before the read is re-parented to init
 and is not ended. For example, Claude and Pi run each shell command in a session
 of its own, so a background job (`cmd &`) outlives `close()` and
 `daemon.stop()`. OAR has the same limit. TaskRunner records
-the semantic terminal once, but retains its active entry and Git workspace
+the semantic terminal once, but retains its active entry and Agent home
 lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without
 publishing a second `task.complete`, `task.fail`, or `task.cancelled`.
@@ -1534,8 +1544,8 @@ atomically records a cancellation tombstone and appends the existing frozen-v1
 task id fails closed. Retrying cannot change the first reason, timestamp, or
 mailbox delivery identity.
 
-An unleased offer becomes `cancelled` immediately and the original
-`task.offer` is suppressed from later long-poll delivery. A leased attempt
+An unleased offer becomes `cancelled` immediately and the original offer
+envelope is suppressed from later long-poll delivery. A leased attempt
 becomes `cancel_requested` until its device processes the durable command,
 interrupts the active Session, and returns `task.cancelled`; that acknowledgement
 moves the attempt to `cancelled`. The tombstone remains authoritative while a
@@ -1689,17 +1699,16 @@ Approval observations do not enter `ActivityTail` and do not reinterpret
 `task.progress`, `task.await_approval`, and `task.approval_resolved`, so cloud
 must not fabricate a cross-stream total order. Instead, the approval store
 assigns a monotonic per-task `revision` in arrival order and preserves the
-source envelope ID, host receive time, request summary and optional native
+source envelope ID, host receive time, request summary and native
 `approvalId`, or the exact resolution decision, resolver and resolution time.
 
 `readApprovalTimeline()` is a host control-plane read returning a bounded,
 lossy tail with `dropped`, `capacity`, `expiresAt`, and its revision cursor. It
 is observation authority, not a durable audit log and not an approval action
 surface. `CloudStores` therefore gains one required `approvals` port in the
-coordinated SDK release; there is no optional no-op store or dual authority. A
-request from an older peer with no `approvalId` remains explicit
-unpaired source data. Frozen wire v1 still parses its existing string field,
-but the cloud persistence authority rejects empty or whitespace-only IDs.
+coordinated SDK release; there is no optional no-op store or dual authority.
+Wire v4 requires a non-empty `approvalId` on `task.await_approval`, and the
+cloud persistence authority also rejects empty or whitespace-only IDs.
 Cloud does not infer `pending`, `approved`, or `rejected`, pair by adjacency, or
 associate an approval with a tool call. The separate pure UI fold projects
 `approval-requested | approval-responded`, `pending | approved | rejected`, and
@@ -1929,11 +1938,12 @@ relay adds no authentication to them. The Pi RPC binding is specified below; Cla
 ## Task-scoped host MCP toolsets
 
 A SaaS task may require one or more host-integrated tools without making the
-SaaS an execution or credential authority. It uses the distinct additive
-`task.offer_with_toolsets` message and carries 1–16 bounded logical ids. It does
-not widen `task.offer`: an older daemon must skip an unknown offer type rather
-than strip an optional field and execute the instruction without its required
-tools.
+SaaS an execution or credential authority. The Agent offer names them in its
+optional `requiredToolsets` field, 1–16 bounded logical ids. The field is a
+gated wire addition: the server and hosted cloud send it only to a device that
+advertises `toolset-selection` and refuse the task before it exists otherwise,
+so a daemon that would strip the field never executes the instruction without
+its required tools.
 
 The device operator configures each id in `DaemonConfig.mcpToolsets` as one or
 more stdio MCP servers. This first slice accepts only `command` and `args`;
@@ -2225,10 +2235,8 @@ execute against a terminal attempt. Task-attempt stores never attach or
 overwrite AgentRef through lifecycle updates.
 
 Daemon startup materializes and write-probes the canonical Agent root before
-advertising `agent-home-contract`. `agentHome` and legacy `gitWorkspace` are
-mutually exclusive configuration authorities; strict Agent execution never
-inherits task-scoped Git workspace semantics or creates a second durable
-workspace owner.
+advertising `agent-home-contract`. The Agent home is the only durable
+workspace owner; Git workspace mode was removed in wire v4.
 
 Profile projection is a separate task-free control. A daemon advertises
 `agent-home-projection` only when the host supplied an opaque projection hook.
@@ -2577,9 +2585,9 @@ path. The hook alone decides whether and how to write a product file such as
 `profile.json`; the SDK neither interprets its fields nor defines deletion/UI
 sync semantics. Credentials
 remain in an OS credential store; only non-secret references/configured state
-may be projected. Legacy task offers retain their existing
-`workspaceRoot/<taskId>` behavior as a separate API, never as a fallback for an
-Agent offer. Migration is an explicitly enabled one-shot cutover with no dual
+may be projected. Since wire v4 every offer is an Agent offer, and the Agent
+home is the only workspace authority for one; no other directory is a
+fallback. Migration is an explicitly enabled one-shot cutover with no dual
 read, dual write, or implicit adoption of task workspaces.
 
 See [host local storage](host-local-storage-layout.md) for the responsibility
@@ -2640,41 +2648,20 @@ aligned RC is **not published**. Rollback is limited to reverting/deleting the
 isolated source branch. No publish, merge, push, deploy, production migration,
 secret change, or Agent-home deletion is part of this contract.
 
-## Local Git task workspaces
+## Local Git task workspaces (removed in wire v4)
 
-The client optionally provides local Git checkpoint workspaces for operators who want a consistent, recoverable code-state convention around connected coding agents. The feature is disabled by default and is enabled only by the local daemon configuration:
-
-```ts
-{
-  gitWorkspace: { mode: 'local-checkpoints' }
-}
-```
-
-With the option absent, the daemon preserves the existing plain `workspaceRoot/<taskId>` behavior and performs no Git subprocesses. With the option enabled, the daemon preflights Git before accepting offers, initializes each fresh daemon-owned task directory as a local repository, and records coarse recovery state in a private local ledger. The server protocol still owns task lifecycle: offer, claim, approval, cancellation, completion, and failure. Git records code state and human-reviewable checkpoints only; a commit or dirty status never transitions a protocol task.
-
-### Operator configuration and workspace contract
-
-The operator supplies the same ordinary daemon configuration fields as before, plus the optional `gitWorkspace` object. This MVP does not attach an existing user checkout or search parent directories. Git-enabled work is limited to daemon-owned `workspaceRoot/<taskId>` directories, or the exact directory already mapped to a compatible `sessionRef`. A workspace-root ownership marker prevents another Git-enabled daemon from claiming the root, and an in-process lease provides one-writer semantics for a canonical workspace and requested session. A busy or incompatible workspace is declined before claim so it can be retried without mutating task state.
-
-The fixed runtime guidance asks the agent to work only in the provided directory, inspect status before and after edits, make small ordinary checkpoint commits after coherent verified units when an identity is already configured, avoid changing identity, avoid network/destructive/history Git operations, and leave incomplete work visible. This is operational guidance, not a sandbox or OS-level enforcement boundary.
-
-The daemon never makes automatic commits, runs `git add`, configures or changes identity, performs network Git (`clone`, `fetch`, `pull`, `push`), rewrites history (`rebase`, `merge`, `reset`, `stash`, or branch switching), cleans files, deletes branches, or deletes workspaces. It preserves task files and `.git` through failure, cancellation, shutdown, and interruption. Git observations are bounded and reduced to commit IDs/counts and dirty counts; raw Git output, filenames, commit messages, and paths do not enter server envelopes or ordinary audit output.
-
-### Recovery and redispatch
-
-The private `<storeDir>/git-workspaces.json` ledger records opaque identifiers, the local workspace directory, optional session reference, phase, baseline/current IDs when available, commits since baseline, coarse dirty counts, timestamps, and stable error categories. It is atomically written, serialized, bounded, and secured with the existing private-store controls; corrupt or future-version data fails closed. On startup, old `preparing`/`active` records become `interrupted` after read-only reconciliation. This does not revive a protocol task or emit a wire message. A later valid redispatch can reuse the preserved exact workspace only when its session mapping and matching Git ledger record are present; a legacy plain session is incompatible while Git mode is enabled.
-
-`SessionWorkspaceStore.workspaceKind` has one bounded migration meaning: records written before Git workspaces omit it, and omission is read as `plain`. This tolerance is owned by the client persistence format, not product semantics or the wire. Its removal trigger is a versioned store migration that rewrites every surviving entry with an explicit kind and ships for one supported release; after readback shows no unversioned entries, `workspaceKind` becomes required and the missing-field branch is deleted. Until that migration exists, Git mode continues to reject an omitted/`plain` record rather than converting it.
-
-The local read-only operator view is:
-
-```text
-byok-agent workspaces [--show-paths] [--config <path>]
-```
-
-It reads the private ledger without refreshing or mutating repositories. Paths are hidden unless `--show-paths` is explicitly supplied. On Windows, private storage depends on restrictive DACL hardening and fails closed before writing if that hardening cannot be applied.
-
-Operational rollback is deliberately simple: remove `gitWorkspace` from the local configuration and restart the daemon. Existing Git directories, task files, and private ledger records are preserved for manual salvage; no cleanup or deletion command is part of this MVP.
+Wire v4 removed Git workspace mode and the daemon's task workspace root (#925,
+ADR-034). Every offer is an Agent offer and runs in its SDK-owned Agent home, so
+no task runs in a `workspaceRoot/<taskId>` directory or a Git checkpoint
+workspace. `DaemonConfig.gitWorkspace`, `DaemonOverrides.gitWorkspace` and
+`DaemonConfig.workspaceRoot` raise `DaemonConfigFieldRemovedError`. The
+`byok-agent workspaces` command, the local `git-workspace` daemon event and
+audit record, the doctor `workspace` check and the `workspace` retention class
+are gone; an older audit log's `git-workspace` lines and `retention-failure`
+lines for the `workspace` class are skipped. The daemon no longer
+reads or writes `<storeDir>/git-workspaces.json` or the session workspace
+mapping. Directories and ledgers an older daemon left behind are not touched;
+an operator salvages or deletes them by hand.
 
 ## Gate A: device credential custody and strict Agent-only admission
 
@@ -2751,19 +2738,15 @@ Copy the complete command from the Host's pairing page. A string used once
 without `--e2ee` is burned: start a new registration at the Host and do not
 retry it (protocol §2.6, device enrollment).
 
-`DaemonConfig.strictAgentOnly` is an additive local-security gate. It requires
-successful construction-time Agent-home preflight and only then advertises
-`strict-agent-only` in addition to `agent-home-contract`. The local runner is
-the final authority: after durable receive, dedup, and pre-cancel precedence,
-legacy `task.offer` and `task.offer_with_toolsets` receive only `task.decline`;
-they perform no admission/prepare/workspace/claim/start/process/terminal
-receipt work and do not enter `finishedTaskIds`. Agent offer variants remain
-normal. Server/cloud explicit dispatch rejects legacy work to a strict device
-before task/mailbox mutation, and implicit legacy selection skips strict
-devices. Those producer gates are scheduling defenses only; stale connections
-remain covered by the local gate. A strict daemon never reads
-`DaemonConfig.workspaceRoot`, so the field is optional there; every other
-daemon must still supply it at construction.
+Agent-only admission is the wire itself since v4: every offer type is
+Agent-bound (`task.offer_for_agent`, its egress and fresh-egress variants,
+their `_sealed` twins, and `task.offer_prepared`), and the runtime-only offers
+are gone from the protocol. The local runner is the final authority: a daemon
+without `DaemonConfig.agentHome` advertises no `agent-home-contract` and
+declines every offer before admission, workspace, claim or start. The
+`strict-agent-only` flag is removed, and `DaemonConfig.strictAgentOnly` raises
+`DaemonConfigFieldRemovedError`, as do the removed `DaemonConfig.gitWorkspace`
+and `DaemonConfig.workspaceRoot`.
 
 
 ### Owned Pi RPC team member and GUI interaction
@@ -2895,7 +2878,7 @@ Closed DeviceOperatorError codes carry no raw OS errors or secrets. Hosts own
 supervisor stop/restore and independent readiness verification. The SDK does not
 create a remote maintenance channel or automatically replay tasks.
 
-The journal owns one immutable terminal byte record, including pre-claim declines. ConnectionManager uses its existing authenticated POST queue and retries the exact original envelope. Accepted transport disposition is durably recorded as confirmed before local delivery state is retired; an acknowledgement write failure retains the original batch. Every rejected envelope emits a payload-free `outbound-rejected` event and increments `status().outbound` (also control status). A rejected terminal is durably failed with its coarse wire reason in `last_error` before retirement; support bundles report `journal.failedTerminalCount` and live outbound counts. `byok-agent tasks` marks refused terminal rows `delivery=rejected`, preserving the local terminal state even after restart; its rejection record carries a closed `taskState` and no payload. A refused progress batch is counted and reported without marking terminal delivery. Progress and terminal observer events follow successful settlement. Rejection is a delivery fact, separate from operational liveness health. On wire v3 every answer correlates each envelope with its own outcome, and a rejected outcome carries its reason. Confirmation records delivery acceptance; the cloud's immutable first terminal and cancellation authority remain product truth.
+The journal owns one immutable terminal byte record, including pre-claim declines. ConnectionManager uses its existing authenticated POST queue and retries the exact original envelope. Accepted transport disposition is durably recorded as confirmed before local delivery state is retired; an acknowledgement write failure retains the original batch. Every rejected envelope emits a payload-free `outbound-rejected` event and increments `status().outbound` (also control status). A rejected terminal is durably failed with its coarse wire reason in `last_error` before retirement; support bundles report `journal.failedTerminalCount` and live outbound counts. `byok-agent tasks` marks refused terminal rows `delivery=rejected`, preserving the local terminal state even after restart; its rejection record carries a closed `taskState` and no payload. A refused progress batch is counted and reported without marking terminal delivery. Progress and terminal observer events follow successful settlement. Rejection is a delivery fact, separate from operational liveness health. Since wire v3 every answer correlates each envelope with its own outcome, and a rejected outcome carries its reason. Confirmation records delivery acceptance; the cloud's immutable first terminal and cancellation authority remain product truth.
 
 Unknown or invalid executable messages cannot silently advance the mailbox cursor. The observer consumes the protocol offer classifier. The new journal format requires complete terminal bytes: a valid hash-only predecessor is preserved and rejected with an explicit format error, never silently upgraded, quarantined as corruption, or synthesized into replayable evidence.
 
@@ -3039,7 +3022,7 @@ Hosts never parse `reason` for classification. A failed task's runtime
 failure class is copied the same way, as `TerminalResult.failure` and
 `TaskResult.failure` (#869). The `task.decline.code` field
 landed as an additive optional field on wire v2 and is carried unchanged on
-wire v3 (K7 moved `PROTOCOL_VERSION` to 3).
+wires v3 and v4.
 Host cancellation alone returns no device terminal.
 A terminal stored under a different task key or with a non-terminal type is an
 error. This observation does not prove native Session.close or home release.
@@ -3247,8 +3230,8 @@ these optional fields.
 
 The draft lane is display-only. The accepted Agent message is the only product
 truth. Draft frames do not enter the reliable spool, mailbox or activity tail.
-The wire major remains 3. A daemon sends `agent.message.draft` only when the
-server advertises `agent-message-draft`. `RuntimeCapabilities.messageDraft` is
+The lane is a gated wire addition, not a wire major. A daemon sends
+`agent.message.draft` only when the server advertises `agent-message-draft`. `RuntimeCapabilities.messageDraft` is
 optional discovery and claim data. A runtime without this capability sends no
 draft frames.
 
@@ -3466,7 +3449,7 @@ wire contracts do not change.
 
 ### Client intermediate retention (#399)
 
-`DaemonConfig.storage` owns optional budget, scratchRoot, skillPackDataDirs and retention cadence/limits/expiring TTLs. Defaults: 15-minute sweeps, 5-minute pressure sweeps, 256 deletions, 10-second soft pass limit, runtime/old skill revisions 24 hours, daemon/home temps one hour, reader runs seven days, Agent result records seven days and 256 per home, confirmed journal receipts 30 days. Agent result records are still swept under storage pressure. Home temps cannot be configured below one hour; confirmed journal TTL must exceed the seven-day mailbox redelivery window. Input preparation retains its own absolute artifact/record horizons and pins; only its timer moves to the unified sweeper. Current skill revisions are resolved from installer lock.json under a shared publication gate. One usage measurement visits at most 65,536 entries across the store, scratch, skill, Agent-home, workspace and Pi sessionDir roots in that order. Past that bound it stops: each class whose root it did not finish reports `truncated: true` with lower-bound `bytes`/`entries`, and a class whose roots it never reached is also `measured: false`. Pressure is computed from the lower-bound used bytes and the complete free-space reading; truncation alone neither latches emergency nor fails startup, and an error-free truncated measurement can clear an emergency latch. Real I/O, root identity, journal usage and free-space errors still fail closed.
+`DaemonConfig.storage` owns optional budget, scratchRoot, skillPackDataDirs and retention cadence/limits/expiring TTLs. Defaults: 15-minute sweeps, 5-minute pressure sweeps, 256 deletions, 10-second soft pass limit, runtime/old skill revisions 24 hours, daemon/home temps one hour, reader runs seven days, Agent result records seven days and 256 per home, confirmed journal receipts 30 days. Agent result records are still swept under storage pressure. Home temps cannot be configured below one hour; confirmed journal TTL must exceed the seven-day mailbox redelivery window. Input preparation retains its own absolute artifact/record horizons and pins; only its timer moves to the unified sweeper. Current skill revisions are resolved from installer lock.json under a shared publication gate. One usage measurement visits at most 65,536 entries across the store, scratch, skill, Agent-home and Pi sessionDir roots in that order. Past that bound it stops: each class whose root it did not finish reports `truncated: true` with lower-bound `bytes`/`entries`, and a class whose roots it never reached is also `measured: false`. Pressure is computed from the lower-bound used bytes and the complete free-space reading; truncation alone neither latches emergency nor fails startup, and an error-free truncated measurement can clear an emergency latch. Real I/O, root identity, journal usage and free-space errors still fail closed.
 
 Standalone adapter Hosts must pass `scratch: await createExecutionScratch({ root })` to operation.start and Pi launch resolution. They must await release after child disposal. Scratch roots must be short, absolute, private, canonical and exclusive. On Unix, the root must belong to the current process user before any permission change. Unix socket validation reserves 16 bytes for the runtime socket name and one terminating NUL. The root limit is 61 UTF-8 bytes on macOS and 65 on Linux.
 

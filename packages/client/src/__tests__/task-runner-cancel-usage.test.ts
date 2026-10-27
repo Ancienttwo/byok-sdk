@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -5,33 +6,29 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
 
-const dirs: Array<{ dir: string; store: SessionWorkspaceStore }> = [];
+const dirs: string[] = [];
 afterEach(async () => {
-  for (const { dir, store } of dirs.splice(0)) {
-    await store.get('cleanup-barrier'); // queued record() writes must finish before deleting their directory
-    await fs.rm(dir, { recursive: true, force: true });
-  }
+  for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
 });
 
 describe('TaskRunner metering at the cancellation boundary', () => {
   it.each((['claude', 'codex', 'pi'] as const).flatMap(runtime =>
     (['idle', 'spill'] as const).map(stage => ({ runtime, stage }))))('$runtime retains interrupt usage at $stage without trailing output or errors', async ({ runtime, stage }) => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-cancel-usage-'));
-    const store = new SessionWorkspaceStore(path.join(dir, 'sessions'));
-    dirs.push({ dir, store });
+    dirs.push(dir);
     const adapter = new StubRuntimeAdapter(runtime);
     const diagnostic = vi.spyOn(console, 'error');
     const sent: Envelope[] = [];
     let enteredUpload!: () => void;
     const uploading = new Promise<void>(resolve => { enteredUpload = resolve; });
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-      adapters: [adapter], workspaceRoot: path.join(dir, 'workspace'),
-      deviceId: 'cancel-usage-device', send: event => { sent.push(event); },
+    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+      adapters: [adapter],
+      // An enrolled daemon always passes its tenant; without it a closing Agent task logs a skipped memory snapshot on Linux.
+      tenantId: 'cancel-usage-tenant', deviceId: 'cancel-usage-device', send: event => { sent.push(event); },
       blobClient: {
         resolveInstruction: async () => { throw new Error('unexpected blob resolution'); },
         uploadArtifact: async (_content, _type, options) => {
@@ -40,13 +37,12 @@ describe('TaskRunner metering at the cancellation boundary', () => {
           return new Promise<never>((_, reject) => options.signal!.addEventListener('abort', () => reject(new Error('cancelled spill upload')), { once: true }));
         },
       },
-      sessionWorkspaces: store,
       approvalRegistry: new ApprovalRegistry(), storeDir: dir, productId: 'cancel-usage',
       localAgentRelease: Object.freeze({ version: '0.24.0-rc.1' }),
       shutdownInterruptTimeoutMs: 20,
       maxInlineEventBytes: 4096,
     });
-    await runner.handleEnvelope(createEnvelope('task.offer', {
+    await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),
       instruction: 'cancel while metering settles', runtime,
     }, { taskId: 'metered-task', seq: 1 }));
     const session = adapter.sessions[0]!;

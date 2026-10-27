@@ -17,7 +17,6 @@ interface ChildConfig {
   readonly productId: string;
   readonly serverUrl: string;
   readonly storeDir: string;
-  readonly workspaceRoot: string;
   readonly controlDir: string;
   readonly pairingCode?: string;
   readonly action?: 'run' | 'unpair';
@@ -345,8 +344,9 @@ beforeEach(async () => {
       productId,
       serverUrl: `http://127.0.0.1:${port}`,
       storeDir: path.join(root, 'daemon-store'),
-      workspaceRoot: path.join(root, 'workspace'),
       controlDir: path.join(root, 'control'),
+      // Wire v4 runs Agent offers only: every daemon of the suite has an Agent home and egress.
+      agentHome: true,
     },
     children: [],
   };
@@ -378,7 +378,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('publishes completion input atomically while the compiled runtime polls during a paused write', async () => {
     const cloud = await startCloud();
     const { deviceId } = await pair(cloud);
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'read a complete fixture command' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'read a complete fixture command' }) as { taskId: string };
     await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
     const writeFile = fs.writeFile.bind(fs);
     const pausedWrite = vi.spyOn(fs, 'writeFile').mockImplementationOnce(async (file, data, options) => {
@@ -400,7 +400,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('#384/#393: ends a SIGKILLed run\u2019s owned runtime processes before its daemon_interrupted terminal is sent', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { ownedRuntimeTree: true });
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'own a runtime process group' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'own a runtime process group' }) as { taskId: string };
     const tree = await runtimeTree();
     await waitForAttempt(cloud, offer.taskId, 'running');
     const recorded = await ownedProcessRecords();
@@ -445,7 +445,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('#384/#393: a normally stopped daemon leaves the owned-process ledger empty', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { ownedRuntimeTree: true });
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'dispose an owned runtime process group' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'dispose an owned runtime process group' }) as { taskId: string };
     const tree = await runtimeTree();
     await waitForAttempt(cloud, offer.taskId, 'running');
     expect(await ownedProcessRecords()).toHaveLength(1);
@@ -552,7 +552,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('terminal:before-commit restarts as one non-retryable daemon_interrupted failure without runtime re-execution', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { journalFault: 'terminal:before-commit' });
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'crash before terminal commit' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'crash before terminal commit' }) as { taskId: string };
     await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
     await finish(offer.taskId, 'must roll back');
     expect((await daemon.exited()).signal).toBe('SIGKILL');
@@ -577,7 +577,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('terminal:after-commit replays the original canonical terminal bytes', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { journalFault: 'terminal:after-commit' });
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'commit exact terminal bytes' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'commit exact terminal bytes' }) as { taskId: string };
     await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
     await finish(offer.taskId, 'original summary bytes');
     expect((await daemon.exited()).signal).toBe('SIGKILL');
@@ -705,7 +705,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     async (faultStep, terminalCommittedAfterSecond, confirmedAfterSecond) => {
       const cloud = await startCloud();
       const { daemon, deviceId } = await pair(cloud);
-      const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: `external kill then ${faultStep}` }) as { taskId: string };
+      const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: `external kill then ${faultStep}` }) as { taskId: string };
       await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
       await waitForAttempt(cloud, offer.taskId, 'running');
       daemon.kill();
@@ -742,7 +742,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('a terminal queued only in the memory outbox survives SIGKILL before POST', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { recoveryFault: 'terminal:queued' });
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'kill after queue' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'kill after queue' }) as { taskId: string };
     await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
     // Runtime start precedes the cloud's task.started receipt. Establish the
     // running precondition before SIGKILL can discard that in-memory envelope.
@@ -762,7 +762,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('reconstructs attempts, devices and receipts after cloud receipt commit precedes its response and local confirmation', async () => {
     const cloud = await startCloud();
     const { deviceId } = await pair(cloud);
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'cloud dies after durable receipt' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'cloud dies after durable receipt' }) as { taskId: string };
     await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
     writeFileSync(path.join(current!.root, 'cloud-after-commit.arm'), 'armed\n');
     await finish(offer.taskId, 'receipt survived cloud restart');
@@ -791,7 +791,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('reconstructs a first receipt committed inside the store before attempt status and HTTP response', async () => {
     const cloud = await startCloud();
     const { deviceId } = await pair(cloud);
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'receipt insert is the first durable cloud fact' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'receipt insert is the first durable cloud fact' }) as { taskId: string };
     await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
     writeFileSync(path.join(current!.root, 'cloud-receipt-insert.arm'), 'armed\n');
     await finish(offer.taskId, 'resume cloud apply after receipt insert');
@@ -809,7 +809,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('replays exact bytes when SIGKILL lands after an accepted response but before local confirmation', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { recoveryFault: 'outbound:after-ack' });
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'kill after authenticated ack' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'kill after authenticated ack' }) as { taskId: string };
     await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
     await arm('outbound:after-ack');
     await finish(offer.taskId, 'accepted before local confirmation');
@@ -827,7 +827,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('preserves a cancellation tombstone over a late original terminal across repeated daemon deaths', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { recoveryFault: 'terminal:queued' });
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'cancel across restarts' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'cancel across restarts' }) as { taskId: string };
     await waitForFile(path.join(current!.daemonBase.controlDir, 'runtime-starts.jsonl'));
     await arm('terminal:queued');
     await finish(offer.taskId, 'late completion cannot erase cancellation');
@@ -927,7 +927,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('redelivers an offer killed before local append commit and starts runtime exactly once', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { journalFault: 'append:before-commit' });
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'redeliver unacked offer' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'redeliver unacked offer' }) as { taskId: string };
     expect((await daemon.exited()).signal).toBe('SIGKILL');
     expect(starts()).toHaveLength(0);
     expect((await cloud.rpc('readCursor', { deviceId }) as { ackedSeq: number }).ackedSeq).toBe(0);
@@ -943,7 +943,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('redelivers an offer killed after durable append but before execution and starts runtime exactly once', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { journalFault: 'append:after-commit' });
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'durable append precedes execution' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'durable append precedes execution' }) as { taskId: string };
     expect((await daemon.exited()).signal).toBe('SIGKILL');
     expect(starts()).toHaveLength(0);
     expect((await cloud.rpc('readCursor', { deviceId }) as { ackedSeq: number }).ackedSeq).toBe(0);
@@ -961,7 +961,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('fails a claimed task with daemon_interrupted after a SIGKILL and restart with the default config', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud);
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'default config kill' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'default config kill' }) as { taskId: string };
     await waitForAttempt(cloud, offer.taskId, 'running');
     daemon.kill();
     expect((await daemon.exited()).signal).toBe('SIGKILL');
@@ -977,7 +977,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('ends a task the Host cancelled while its daemon was down, with the default config', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud);
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'cancel while down' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'cancel while down' }) as { taskId: string };
     await waitForAttempt(cloud, offer.taskId, 'running');
     daemon.kill();
     expect((await daemon.exited()).signal).toBe('SIGKILL');
@@ -995,7 +995,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
   it('does not run a claimed offer again when the daemon died before it saved the cursor past it', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { holdCursorSave: true });
-    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'claimed before cursor save' }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueFreshOffer', { deviceId, instruction: 'claimed before cursor save' }) as { taskId: string };
     await waitForAttempt(cloud, offer.taskId, 'running');
     await waitForFile(path.join(current!.daemonBase.controlDir, 'cursor-save-held.reached'));
     daemon.kill();

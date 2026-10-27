@@ -7,7 +7,7 @@ import { tenantId } from '@byok-sdk/core';
 const receipt = (envelope: Envelope) => ({ tenantId: tenantId('tenant-a'), key: 'terminal', body: encodeEnvelope(envelope), recordedAt: '2026-10-24T00:00:00.000Z' });
 
 /** The golden task.fail_sealed line that carries a quota class (#869). */
-const sealedQuota = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
+const sealedQuota = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd().split('\n').map((raw) => JSON.parse(raw) as Envelope)
   .find((line) => line.type === 'task.fail_sealed' && (line.payload as { failure?: { class: string } }).failure?.class === 'quota')!;
 

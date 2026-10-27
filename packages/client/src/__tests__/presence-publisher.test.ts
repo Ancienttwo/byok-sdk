@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -10,6 +11,7 @@ import { PresencePublisher } from '../daemon/presence-publisher';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startRealCloud, type RealCloudHandle } from './fixtures/real-cloud';
 import { TestServer } from './fixtures/test-server';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -281,7 +283,6 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
   async function startDaemon(
     handle: RealCloudHandle,
   ): Promise<{ daemon: Daemon; adapter: StubRuntimeAdapter; deviceId: string }> {
-    const workspaceRoot = await tmpDir('byok-presence-workspace-');
     const storeDir = await tmpDir('byok-presence-store-');
     const adapter = new StubRuntimeAdapter();
     const started = createDaemonWithAdapters(
@@ -289,7 +290,8 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
         productId: 'test-product',
         serverUrl: handle.url,
-        workspaceRoot,
+        agentHome: testAgentHomeConfig(),
+        agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir,
         presence: { intervalMs: 50, minimumIntervalMs: 10, ttlMs: 2_000 },
       },
@@ -380,7 +382,7 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
     // full offer -> claim -> complete round trip still travels while discovery
     // is broken, because nothing on the task path ever consults a declaration.
     const handle = cloud;
-    const offer = await handle.enqueueOffer(started.deviceId, 'work while discovery is broken');
+    const offer = await handle.submitFreshAgent(started.deviceId, { instruction: 'work while discovery is broken' });
     await vi.waitFor(() => expect(started.adapter.sessions).toHaveLength(1));
     const session = started.adapter.sessions[0]!;
     session.emit({ type: 'progress', text: 'still working' });
@@ -456,14 +458,13 @@ describe('presence re-discovery on reconnect', () => {
   }
 
   async function startDaemon(url: string): Promise<Daemon> {
-    const workspaceRoot = await tmpDir('byok-presence-reconnect-workspace-');
     const storeDir = await tmpDir('byok-presence-reconnect-store-');
     const started = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
         productId: 'test-product',
         serverUrl: url,
-        workspaceRoot,
+        agentHome: testAgentHomeConfig(),
         storeDir,
         presence: { intervalMs: 50, minimumIntervalMs: 10, ttlMs: 2_000 },
       },

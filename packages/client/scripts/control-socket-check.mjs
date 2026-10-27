@@ -77,15 +77,12 @@ const { serve } = await import('@hono/node-server');
 
 const workDir = await fs.realpath(await fs.mkdtemp(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'byok-ctlsocket-check-')));
 const storeDir = path.join(workDir, 'store');
-const workspaceRoot = path.join(workDir, 'workspace');
 const logDir = path.join(workDir, 'logs');
 const configPath = path.join(workDir, 'config.json');
 // The OS credential provider is intentionally outside `workDir`. Give every
 // smoke run its own product authority so a prior interrupted run cannot make
 // this nominally-unpaired service start from a retained credential.
 const productId = `${name}-${randomUUID()}`;
-await fs.mkdir(workspaceRoot, { recursive: true });
-
 // Default long-poll hold: this façade serves the wire over HTTP only (WP3B
 // Step 2 removed the WS attachment), so the service-launched daemon runs the
 // protocol §8 long-poll transport. Stopping the daemon aborts its in-flight
@@ -113,7 +110,6 @@ try {
       productName: 'Control Socket Check',
       productId,
       serverUrl,
-      workspaceRoot,
       storeDir,
       serviceEnrollment: { enabled: true },
     }, null, 2),

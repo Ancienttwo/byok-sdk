@@ -50,7 +50,7 @@ describe('protocol-version admission at real long-poll receive', () => {
       if (!url.startsWith(`${real!.url}/byok/events`) || !response.ok) return response;
       const page = await response.json() as { events: Array<Record<string, unknown>>; cursor: number; capabilities?: string[] };
       const events = page.events.map((event) => {
-        if (!rewriteStale || event.type !== 'task.offer') return event;
+        if (!rewriteStale || event.type !== 'task.offer_for_agent') return event;
         rewroteKnownOffer = true;
         return { ...event, v: 1 };
       });
@@ -64,19 +64,22 @@ describe('protocol-version admission at real long-poll receive', () => {
       serverUrl: real.url,
       deviceId: record.deviceId,
       productId: 'version-admission-client',
-      capabilities: [],
+      capabilities: ['agent-home-contract'],
       runtimes: [],
       auth,
       cursorStore,
       onEnvelope: (envelope) => {
-        if (envelope.type === 'task.offer') received.push(envelope.v);
+        if (envelope.type === 'task.offer_for_agent') received.push(envelope.v);
       },
       longPollRetryDelayMs: 10,
       longPollIdleDelayMs: 10,
     });
     await connection.start();
     await waitForOpen(connection);
-    await real.byok.dispatch({ deviceId: record.deviceId, instruction: 'known v1 offer must not run' });
+    await real.byok.dispatch({
+      deviceId: record.deviceId, instruction: 'known v1 offer must not run',
+      agentRef: { agentId: 'version-admission-agent', profileRevision: 'rev-1' }, sessionRef: 'version-admission-session',
+    });
 
     await vi.waitFor(() => expect(rewroteKnownOffer).toBe(true));
     // The next poll starts only after LongPollClient has completed the prior

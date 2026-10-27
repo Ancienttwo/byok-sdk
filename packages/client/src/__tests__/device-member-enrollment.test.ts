@@ -37,7 +37,7 @@ async function setup() {
   const config = {
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Member test', productId,
-    serverUrl: server.url, storeDir: path.join(root, 'store'), workspaceRoot: path.join(root, 'workspace'),
+    serverUrl: server.url, storeDir: path.join(root, 'store'),
   };
   const daemon = (overrides = {}) => {
     const created = createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')], overrides);

@@ -7,6 +7,7 @@ import {
   EventsPollResponseSchema,
   parseMessage,
   PROTOCOL_VERSION,
+  type AgentRef,
   type Envelope,
   type RuntimeCapabilities,
   type RuntimeId,
@@ -22,6 +23,14 @@ import type {
   ServerTaskEvent,
   TaskHandle,
 } from '../index';
+
+/**
+ * Wire v4 has no runtime-only offer, so every dispatch names an Agent and the
+ * session it resumes. Tests that do not exercise Agent identity use these.
+ */
+export const TEST_AGENT_REF: AgentRef = { agentId: 'agent-test', profileRevision: 'rev-1' };
+export const TEST_SESSION_REF = 'sess-test';
+export const TEST_AGENT_DISPATCH = { agentRef: TEST_AGENT_REF, sessionRef: TEST_SESSION_REF } as const;
 
 /**
  * Start `byok.hono` on an ephemeral port.
@@ -252,7 +261,11 @@ export interface FakeLongPollDaemonOptions {
   deviceName?: string;
   identity?: FakeDeviceIdentity;
   clientVersion?: string;
-  /** Connection-level capability flags, published in the `conn.hello` this fixture posts. */
+  /**
+   * Connection-level capability flags, published in the `conn.hello` this
+   * fixture posts. Default `['agent-home-contract']`: every v4 offer is an
+   * Agent offer, which the kernel admits only to a device advertising it.
+   */
   capabilities?: string[];
   /** Connection-level runtime discovery block — see {@link PI_RUNTIME_INFO} and friends. */
   runtimes?: RuntimeInfo[];
@@ -316,7 +329,7 @@ export async function connectFakeDaemonLongPoll(
     const helloRes = await send(
       createEnvelope('conn.hello', {
         protocolVersions: [PROTOCOL_VERSION],
-        capabilities: opts.capabilities ?? [],
+        capabilities: opts.capabilities ?? ['agent-home-contract'],
         deviceId,
         productId: opts.productId,
         clientVersion: opts.clientVersion,
@@ -402,7 +415,7 @@ export async function announceHello(
   const res = await daemon.send(
     createEnvelope('conn.hello', {
       protocolVersions: [PROTOCOL_VERSION],
-      capabilities: opts.capabilities ?? [],
+      capabilities: opts.capabilities ?? ['agent-home-contract'],
       deviceId: daemon.deviceId,
       productId: opts.productId,
       clientVersion: opts.clientVersion,
@@ -474,7 +487,7 @@ export async function expectNoMoreEnvelopes(daemon: FakeLongPollDaemon): Promise
  *
  * `runtime` (S0) is the actual adapter the claim reports and `capabilities`
  * (S0/D-4) is that adapter's own self-report — the ONLY input the steer gate
- * reads. Both omitted matches a legacy `task.claim`.
+ * reads.
  */
 export async function claimAndStart(
   byok: ByokServer,
@@ -483,9 +496,11 @@ export async function claimAndStart(
   runtime?: RuntimeId,
   capabilities?: RuntimeCapabilities,
 ): Promise<void> {
+  // An Agent task's claim echoes the Agent the offer named.
+  const agentRef = (await byok.tasks.get(handle.taskId))?.agentRef;
   const claim = await sendOne(
     daemon,
-    createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime, capabilities }, { taskId: handle.taskId }),
+    createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime, capabilities, agentRef }, { taskId: handle.taskId }),
   );
   expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
@@ -506,10 +521,7 @@ export async function moveToAwaitApproval(
     daemon,
     createEnvelope(
       'task.await_approval',
-      {
-        summary: opts.summary ?? 'needs a human ok',
-        ...(opts.approvalId === undefined ? {} : { approvalId: opts.approvalId }),
-      },
+      { summary: opts.summary ?? 'needs a human ok', approvalId: opts.approvalId ?? 'approval-test' },
       { taskId: handle.taskId },
     ),
   );

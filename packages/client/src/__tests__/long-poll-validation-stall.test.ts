@@ -92,7 +92,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
       v: PROTOCOL_VERSION,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff30',
       ts: new Date().toISOString(),
-      type: 'task.offer', // recognized type ...
+      type: 'task.offer_for_agent', // recognized type ...
       task_id: 'bad-task',
       seq: 2,
       payload: {}, // ... but missing required fields -> EnvelopeValidationError
@@ -101,10 +101,10 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
       v: PROTOCOL_VERSION,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff31',
       ts: new Date().toISOString(),
-      type: 'task.offer',
+      type: 'task.offer_for_agent',
       task_id: 'good-task',
       seq: 3,
-      payload: { instruction: 'do it' },
+      payload: { agentRef: { agentId: 'agent-long-poll', profileRevision: 'rev-1' }, instruction: 'do it' },
     };
 
     // Every poll returns the SAME [bad, valid] batch — matches the server's

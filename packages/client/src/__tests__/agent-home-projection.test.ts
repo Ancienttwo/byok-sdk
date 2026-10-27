@@ -147,7 +147,6 @@ describe('task-free Agent-home projection', () => {
   it('keeps the mailbox cursor behind exact completion and redelivers after daemon restart without starting a runtime', async () => {
     const real = await startRealServer({ productId: 'agent-home-projection-test', longPollHoldMs: 200 });
     servers.push(real);
-    const workspaceRoot = await makeRoot();
     const storeDir = await makeRoot();
     const hostStorageRoot = await makeRoot();
     const hookCwds: string[] = [];
@@ -160,7 +159,6 @@ describe('task-free Agent-home projection', () => {
       productName: 'Test',
       productId: 'agent-home-projection-test',
       serverUrl: real.url,
-      workspaceRoot,
       storeDir,
       agentHome: { hostStorageRoot, projection },
     }, [adapterA], {
@@ -237,7 +235,6 @@ describe('task-free Agent-home projection', () => {
       productName: 'Test',
       productId: 'agent-home-projection-test',
       serverUrl: real.url,
-      workspaceRoot,
       storeDir,
       agentHome: { hostStorageRoot, projection },
     }, [adapterB], {

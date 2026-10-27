@@ -25,7 +25,7 @@ const target = { confirmed: true as const, expectedDeviceId: 'device-a', expecte
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-operators-'));
   config = { productName: 'Operator fixture', productId: 'operator-fixture', localAgentRelease: { version: 'test' },
-    serverUrl: 'https://redacted.example.invalid/secret', workspaceRoot: root, storeDir: path.join(root, 'store'),
+    serverUrl: 'https://redacted.example.invalid/secret', storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'homes') } };
   vi.mocked(connectControlClient).mockReset();
   vi.mocked(connectControlClient).mockResolvedValue({ ok: false, reason: 'offline' });

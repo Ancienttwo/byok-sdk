@@ -23,7 +23,6 @@ export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 
   const capabilities = computeCapabilities(
     adapters,
     config.agentHome !== undefined,
-    config.strictAgentOnly === true,
     agentHomeManager?.supportsTaskFreeProjection() === true,
     config.agentEgress !== undefined,
     agentContentReadPolicies,

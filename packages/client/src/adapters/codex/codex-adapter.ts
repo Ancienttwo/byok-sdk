@@ -1,4 +1,5 @@
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
+import type { RuntimeTaskInput } from '../../types';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
 import { CodexNativeInteractions } from './native-interactions';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
@@ -7,7 +8,6 @@ import { promises as fs } from 'node:fs';
 import type {
   AgentEvent,
   TaskFailure,
-  TaskOfferPayload,
 } from '@byok-sdk/protocol';
 import {
   freezeRuntimeAdapterDescriptor,
@@ -530,7 +530,7 @@ class CodexSession implements Session {
       throw error;
     }
   }
-  async followUp(task: TaskOfferPayload): Promise<void> {
+  async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string')
       throw new PolicyUnsupportedError('codex requires a string instruction');
     const model = subscriptionModel(task.dispatchSelection);
@@ -618,7 +618,7 @@ class CodexSession implements Session {
   }
 }
 function subscriptionModel(
-  selection: TaskOfferPayload['dispatchSelection'],
+  selection: RuntimeTaskInput['dispatchSelection'],
 ): string | undefined {
   if (!selection) return undefined;
   if (selection.lane !== 'subscription' || selection.runtimeId !== 'codex')

@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -38,7 +39,7 @@ async function baseConfig(serverUrl = 'http://127.0.0.1:9'): Promise<DaemonConfi
     storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'result-gating',
     serverUrl,
-    workspaceRoot: await tmpDir('byok-result-gating-workspace-'),
+    agentHome: testAgentHomeConfig(),
     storeDir: await tmpDir('byok-result-gating-store-'),
   };
 }
@@ -64,9 +65,16 @@ describe('removed DaemonConfig fields (TE-B)', () => {
     ['mcpLaunchCwd', { mcpLaunchCwd: '/tmp' }],
     ['toolImplementationAuthority', { toolImplementationAuthority: {} }],
     ['maxConcurrentMutableSessionsPerAgentHome', { maxConcurrentMutableSessionsPerAgentHome: 1 }],
+    ['gitWorkspace', { gitWorkspace: { mode: 'local-checkpoints' } }],
+    ['workspaceRoot', { workspaceRoot: '/tmp' }],
   ])('%s throws DaemonConfigFieldRemovedError with its path', async (field, extra) => {
     const config = { ...(await baseConfig()), ...extra } as unknown as DaemonConfig;
     expectRemoved(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()]), field);
+  });
+
+  it('refuses the removed overrides.gitWorkspace seam with the typed error', async () => {
+    const config = await baseConfig();
+    expectRemoved(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { gitWorkspace: {} } as never), 'gitWorkspace');
   });
 });
 
@@ -120,8 +128,8 @@ describe('startup refuses a journal of another wire major', () => {
     const { config, identity } = await pairedDaemonStore();
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
     // A v3 row first: scanning before acting means it gets no terminal either.
-    await seedOffer(journal, identity, 'v3-task', 1, encodeEnvelope(createEnvelope('task.offer', { instruction: 'current' }, { taskId: 'v3-task', seq: 1 })));
-    await seedOffer(journal, identity, 'v2-task', 2, v2Bytes(encodeEnvelope(createEnvelope('task.offer', { instruction: 'old' }, { taskId: 'v2-task', seq: 2 }))));
+    await seedOffer(journal, identity, 'v3-task', 1, encodeEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'current' }, { taskId: 'v3-task', seq: 1 })));
+    await seedOffer(journal, identity, 'v2-task', 2, v2Bytes(encodeEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'old' }, { taskId: 'v2-task', seq: 2 }))));
     await journal.close();
     await expectStartupRefused(config, { taskId: 'v2-task', record: 'recovery-offer' });
     expect(snapshot(config.storeDir!).journal_terminal).toEqual([]);
@@ -130,7 +138,7 @@ describe('startup refuses a journal of another wire major', () => {
   it('a v2 pending terminal stops startup before replay', async () => {
     const { server, config, identity } = await pairedDaemonStore();
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
-    await seedOffer(journal, identity, 'done-task', 1, encodeEnvelope(createEnvelope('task.offer', { instruction: 'done' }, { taskId: 'done-task', seq: 1 })));
+    await seedOffer(journal, identity, 'done-task', 1, encodeEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'done' }, { taskId: 'done-task', seq: 1 })));
     const terminal = v2Bytes(encodeEnvelope(createEnvelope('task.complete', { summary: 'old', sessionRef: 's' }, { taskId: 'done-task', sessionRef: 's' })));
     await journal.recordTerminal({ taskId: 'done-task', terminalType: 'complete', bytes: terminal, payloadHash: journalHash(terminal),
       truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });

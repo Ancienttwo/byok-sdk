@@ -62,7 +62,6 @@ export interface SupportBundle {
   /** Issue #392: the last `start`'s `environment-resolved` record — closed values and a shell basename only. */
   environment: DiagnosticsSnapshot['environment'];
   journal: DiagnosticsSnapshot['journal'];
-  workspace: DiagnosticsSnapshot['workspace'];
   quarantine: {
     status: DiagnosticsSnapshot['quarantine']['status'];
     count: number;
@@ -240,7 +239,6 @@ export async function createSupportBundle(
     health: snapshot.health,
     environment: snapshot.environment,
     journal: snapshot.journal,
-    workspace: snapshot.workspace,
     quarantine: {
       status: snapshot.quarantine.status,
       count: snapshot.quarantine.count,

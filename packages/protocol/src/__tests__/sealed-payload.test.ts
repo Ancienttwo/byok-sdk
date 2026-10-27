@@ -32,15 +32,13 @@ import {
 
 type Json = { [key: string]: unknown };
 
-const corpus = readFileSync(new URL('golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; ts: string; payload: Json });
 const sealedLines = corpus.filter((line) => line.payload.sealed !== undefined);
 const SEALED_TYPES = Object.keys(SEALED_SPLIT_TABLE) as SealedMessageType[];
 const SEALED_OFFERS = [
-  'task.offer_sealed',
-  'task.offer_with_toolsets_sealed',
   'task.offer_for_agent_sealed',
   'task.offer_for_agent_with_egress_sealed',
   'task.offer_for_agent_with_egress_fresh_sealed',
@@ -53,7 +51,7 @@ function sealedLine(type: SealedMessageType, inline = true): Json {
   return structuredClone(line.payload);
 }
 
-function sealedMember(type: SealedMessageType = 'task.offer_sealed', inline = true): Json {
+function sealedMember(type: SealedMessageType = 'task.offer_for_agent_sealed', inline = true): Json {
   return sealedLine(type, inline).sealed as Json;
 }
 
@@ -107,7 +105,7 @@ describe('sealed payload v1: canonical base64url', () => {
 
 describe('sealed payload v1: the sealed member', () => {
   it('accepts the corpus members, inline and by reference', () => {
-    expect(SealedPayloadSchema.safeParse(sealedMember('task.offer_sealed', true)).success).toBe(true);
+    expect(SealedPayloadSchema.safeParse(sealedMember('task.offer_for_agent_sealed', true)).success).toBe(true);
     expect(SealedPayloadSchema.safeParse(sealedMember('task.complete_sealed', false)).success).toBe(true);
   });
 
@@ -262,7 +260,7 @@ describe('sealed payload v1: the sealed steer and output types', () => {
     expect(parse('task.complete_sealed', { ...complete, summary: 'x' })).toBe(false);
     expect(parse('task.complete_sealed', { ...complete, finalMessage: 'x' })).toBe(false);
     expect(parse('task.complete_sealed', { ...complete, document: { a: 1 } })).toBe(false);
-    expect(parse('task.complete_sealed', { ...complete, sealed: sealedMember('task.offer_sealed') }), 'task-input member').toBe(false);
+    expect(parse('task.complete_sealed', { ...complete, sealed: sealedMember('task.offer_for_agent_sealed') }), 'task-input member').toBe(false);
     const preparedObservation = corpus.find((line) => line.type === 'task.complete' && line.payload.preparedObservation !== undefined)?.payload.preparedObservation;
     expect(preparedObservation).toBeDefined();
     expect(parse('task.complete_sealed', { ...complete, preparedObservation }), 'prepared observation').toBe(false);
@@ -303,7 +301,7 @@ describe('sealed payload v1: the sealed steer and output types', () => {
     for (const type of SEALED_TYPES) {
       const payload = sealedLine(type);
       expect(parse(type, { ...payload, sealed: undefined }), `${type} without sealed`).toBe(false);
-      const other = SEALED_SPLIT_TABLE[type].category === 'task-input' ? sealedMember('task.complete_sealed') : sealedMember('task.offer_sealed');
+      const other = SEALED_SPLIT_TABLE[type].category === 'task-input' ? sealedMember('task.complete_sealed') : sealedMember('task.offer_for_agent_sealed');
       expect(parse(type, { ...payload, sealed: other }), `${type} with the other category`).toBe(false);
     }
   });
@@ -339,7 +337,7 @@ describe('sealed payload v1: plaintext types never carry sealed content', () => 
   });
 
   it('refuses a sealed member or a sealing policy under each plaintext type, and never strips it (#654)', () => {
-    const sealedOffer = sealedLines.find((line) => line.type === 'task.offer_sealed')!.payload;
+    const sealedOffer = sealedLines.find((line) => line.type === 'task.offer_for_agent_sealed')!.payload;
     for (const type of plainTypes) {
       const plain = corpus.find((line) => line.type === type && line.payload.sealed === undefined)!;
       for (const field of ['sealed', 'sealing'] as const) {
@@ -352,7 +350,7 @@ describe('sealed payload v1: plaintext types never carry sealed content', () => 
   it('refuses a non-enumerable sealed member or sealing policy under each plaintext type (#654)', () => {
     // A strict schema checks unknown keys by enumeration, so only a declared
     // field catches a non-enumerable own property.
-    const sealedOffer = sealedLines.find((line) => line.type === 'task.offer_sealed')!.payload;
+    const sealedOffer = sealedLines.find((line) => line.type === 'task.offer_for_agent_sealed')!.payload;
     for (const type of plainTypes) {
       const plain = corpus.find((line) => line.type === type && line.payload.sealed === undefined)!;
       for (const field of ['sealed', 'sealing'] as const) {
@@ -364,10 +362,10 @@ describe('sealed payload v1: plaintext types never carry sealed content', () => 
     }
   });
 
-  it('refuses an output-only sealed offer tagged as task.offer, so it cannot run as plaintext', () => {
-    const outputOnly = corpus.find((line) => line.type === 'task.offer_sealed' && line.payload.sealed === undefined)!;
-    expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(outputOnly.payload).success).toBe(false);
-    expect(() => createEnvelope('task.offer', outputOnly.payload as never, { taskId: 'task-downgrade', seq: 1 })).toThrow();
+  it('refuses an output-only sealed offer tagged as task.offer_for_agent, so it cannot run as plaintext', () => {
+    const outputOnly = corpus.find((line) => line.type === 'task.offer_for_agent_sealed' && line.payload.sealed === undefined)!;
+    expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer_for_agent'].safeParse(outputOnly.payload).success).toBe(false);
+    expect(() => createEnvelope('task.offer_for_agent', outputOnly.payload as never, { taskId: 'task-downgrade', seq: 1 })).toThrow();
   });
 });
 
@@ -415,7 +413,7 @@ describe('sealed payload v1: capability gates (§8.4)', () => {
     }
     // The corpus has sealed offers whose plaintext fields carry other gates.
     expect(sealedLines.some((line) => requiredReceiverCapabilities(line.type, line.payload).includes('agent-home-contract'))).toBe(true);
-    expect(sealedLines.some((line) => requiredReceiverCapabilities(line.type, line.payload).includes('custom-harness'))).toBe(true);
+    expect(sealedLines.some((line) => requiredReceiverCapabilities(line.type, line.payload).includes('agent-egress-policy'))).toBe(true);
   });
 
   it('inherits no row of a moved or dropped field', () => {

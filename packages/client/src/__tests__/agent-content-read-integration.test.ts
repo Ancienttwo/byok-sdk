@@ -123,7 +123,6 @@ async function startDaemon(
     productName: 'Content test',
     productId: 'content-test',
     serverUrl: currentServer.url,
-    workspaceRoot: await tmpDir('byok-content-workspace-'),
     storeDir,
     agentHome: { hostStorageRoot },
     agentEgress: {

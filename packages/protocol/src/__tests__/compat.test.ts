@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import * as previousRelease from 'byok-protocol-previous';
+import * as v3Release from 'byok-protocol-previous';
 import * as currentModule from '../index';
 import {
   AgentMemorySelectionSchema,
@@ -12,14 +12,13 @@ import {
   EnvelopeSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
   EnvelopeValidationError,
+  UnknownMessageTypeError,
   MESSAGE_TYPES,
   PROTOCOL_VERSION,
-  SEALED_PAYLOAD_CAPABILITY,
   WIRE_ADDITIONS,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
-  isSealedMessageType,
   isServerToDaemonType,
   parseMessage,
   requiredReceiverCapabilities,
@@ -29,24 +28,26 @@ import {
 } from '../index';
 
 /**
- * Executable wire-major-3 compatibility evidence (docs/protocol.md "Freeze
+ * Executable wire-major-4 compatibility evidence (docs/protocol.md "Freeze
  * rule", docs/releases/README.md).
  *
- * v3 has no v2 reader. The first stable v3 decoder is published at 0.27.0.
- * Cross-release checks live in published-compat.test.ts. This file keeps:
+ * v4 has no v3 reader, and no v4 release has been published yet, so there is
+ * no published v4 decoder to prove additions against. This file keeps:
  *
  * 1. Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
  *    and the v2 release registry `golden/releases.json` are byte-identical to
  *    what v2 shipped. They are a negative oracle: the current decoder rejects
  *    every v2 envelope on its protocol version and nothing else.
- * 2. v3 self-consistency. `golden/v3.envelopes.ndjson` and
- *    `golden/v3.http.ndjson` are append-only and the current decoder reads
- *    them exactly. `golden/v3.releases.json` pins each stable envelope and
- *    HTTP prefix. The published-decoder suite pins the registry floor.
- * 3. Published rejection oracle. `byok-protocol-previous` (0.26.1, the last
- *    registered v2 release) rejects every v3 corpus line and a v3
- *    `conn.hello`: a v2 peer cannot read v3 bytes. None of its bytes is v3
- *    evidence.
+ * 2. Retired v3 evidence. `golden/v3.envelopes.ndjson`, `golden/v3.http.ndjson`
+ *    and `golden/v3.releases.json` (0.27.0 through 0.30.2) are byte-identical
+ *    to what v3 shipped. The current decoder rejects every v3 envelope on its
+ *    protocol version.
+ * 3. v4 self-consistency. `golden/v4.envelopes.ndjson` and
+ *    `golden/v4.http.ndjson` are append-only and the current decoder reads
+ *    them exactly. `golden/v4.releases.json` has no release and no floor yet.
+ * 4. Published rejection oracle. `byok-protocol-previous` (0.30.2, the last
+ *    v3 release) rejects every v4 corpus line and a v4 `conn.hello`: a v3
+ *    peer cannot read v4 bytes. None of its bytes is v4 evidence.
  */
 
 const require = createRequire(import.meta.url);
@@ -148,6 +149,26 @@ function undecodedEntries(line: HttpCorpusLine, decoded: Record<string, unknown>
   return entries;
 }
 
+/**
+ * A retired-major line is rejected on its protocol version. A type a later
+ * major removed (v4: the handshake answer and the runtime-only offers) is unknown to the
+ * current decoder before its version is read.
+ */
+function expectRetiredMajorRejected(line: CorpusLine, message: string): void {
+  let error: unknown;
+  try {
+    decodeEnvelope(line.raw);
+  } catch (caught) {
+    error = caught;
+  }
+  if (!MESSAGE_TYPES.includes(line.type)) {
+    expect(error, message).toBeInstanceOf(UnknownMessageTypeError);
+    return;
+  }
+  expect(error, message).toBeInstanceOf(EnvelopeValidationError);
+  expect((error as EnvelopeValidationError).issues.issues.some((issue) => issue.path[0] === 'v')).toBe(true);
+}
+
 // ---------------------------------------------------------------------------
 // 1. Retired v2 evidence: frozen bytes, negative oracle
 // ---------------------------------------------------------------------------
@@ -189,19 +210,10 @@ describe('compat: retired v2 evidence is frozen', () => {
   });
 });
 
-describe('compat: the current (v3) decoder rejects every v2 envelope on its protocol version', () => {
+describe('compat: the current decoder rejects every v2 envelope on its protocol version', () => {
   it.each(v2Corpus.map((line) => [line.index + 1, line.type, line] as const))(
     'v2 line %i (%s) is rejected at the retired wire-major boundary',
-    (_n, _type, line) => {
-      let error: unknown;
-      try {
-        decodeEnvelope(line.raw);
-      } catch (caught) {
-        error = caught;
-      }
-      expect(error, 'there is no v2 reader').toBeInstanceOf(EnvelopeValidationError);
-      expect((error as EnvelopeValidationError).issues.issues.some((issue) => issue.path[0] === 'v')).toBe(true);
-    },
+    (_n, _type, line) => expectRetiredMajorRejected(line, 'there is no v2 reader'),
   );
 
   it.each(v2HttpCorpus.filter(carriesEnvelopes).map((line) => [line.index + 1, line.surface, line] as const))(
@@ -230,28 +242,82 @@ describe('compat: the current (v3) decoder rejects every v2 envelope on its prot
 });
 
 // ---------------------------------------------------------------------------
-// 2. v3: current-decoder consistency and frozen published prefixes
+// 2. Retired v3 evidence: frozen bytes, negative oracle
 // ---------------------------------------------------------------------------
 
-const v3Lines = ndjsonLines(readGolden('v3.envelopes.ndjson'));
+const V3_ENVELOPES = readGolden('v3.envelopes.ndjson');
+const V3_HTTP = readGolden('v3.http.ndjson');
+const V3_REGISTRY = readGolden('v3.releases.json');
+const v3Lines = ndjsonLines(V3_ENVELOPES);
 const v3Corpus = corpusOf(v3Lines);
-const v3HttpText = readGolden('v3.http.ndjson');
-const v3HttpLines = ndjsonLines(v3HttpText);
-const v3HttpCorpus = httpCorpusOf(v3HttpLines);
-const v3Registry = JSON.parse(readGolden('v3.releases.json')) as { readonly floor: string; readonly releases: readonly ReleaseEntry[] };
+const v3HttpCorpus = httpCorpusOf(ndjsonLines(V3_HTTP));
+const v3Registry = JSON.parse(V3_REGISTRY) as { readonly floor: string; readonly releases: readonly ReleaseEntry[] };
 
-describe('compat v3 registry: frozen published prefixes', () => {
-  it('the v3 registry pins the first supported stable release as its floor', () => {
-    expect(Object.keys(v3Registry)).toEqual(['floor', 'releases']);
-    expect(v3Registry.floor).toBe(v3Registry.releases[0]?.version);
-    expect(Array.isArray(v3Registry.releases)).toBe(true);
-    expect(v3Registry.releases.map((entry) => entry.version).filter((version) => V2_RELEASES.some((v2) => v2.version === version)),
-      'a v2 release is never v3 evidence').toEqual([]);
+describe('compat: retired v3 evidence is frozen', () => {
+  it('the v3 corpora and the v3 release registry are byte-identical to the last v3 release (0.30.2)', () => {
+    expect(sha256(V3_ENVELOPES), 'golden/v3.envelopes.ndjson is retired v3 evidence and read-only').toBe(
+      '3d31c5d4c539d09cac4de2b481501bec30bf83cbad7d1857b41e2eb9c0df4102',
+    );
+    expect(sha256(V3_HTTP), 'golden/v3.http.ndjson is retired v3 evidence and read-only').toBe(
+      'c24f0d3e67aa8712a8f2c5f651363bcc87d62744c0e946122d47dfd39a95e43d',
+    );
+    expect(sha256(V3_REGISTRY), 'golden/v3.releases.json is the retired v3 registry and read-only').toBe(
+      '6803cb12d6c3e3e170ad87b4943bb9827fcc105bb4296c52ea71a3305367e941',
+    );
   });
 
-  it('registered v3 releases are stable, ascending, pin both corpora, and their prefixes are unchanged', () => {
-    let previous: ReleaseEntry | undefined;
+  it('the v3 registry still pins the prefixes v3 releases shipped with', () => {
+    expect(v3Registry.floor).toBe('0.27.0');
+    expect(v3Registry.releases.at(-1)?.version).toBe('0.30.2');
     for (const entry of v3Registry.releases) {
+      expect(prefixHash(v3Lines, entry.envelopes.lines), `v3 envelope lines shipped with ${entry.version}`).toEqual(entry.envelopes);
+      expect(prefixHash(ndjsonLines(V3_HTTP), entry.http!.lines), `v3 HTTP lines shipped with ${entry.version}`).toEqual(entry.http);
+    }
+  });
+});
+
+describe('compat: the current decoder rejects every v3 envelope on its protocol version', () => {
+  it.each(v3Corpus.map((line) => [line.index + 1, line.type, line] as const))(
+    'v3 line %i (%s) is rejected at the retired wire-major boundary',
+    (_n, _type, line) => expectRetiredMajorRejected(line, 'there is no v3 reader'),
+  );
+
+  it.each(v3HttpCorpus.filter(carriesEnvelopes).map((line) => [line.index + 1, line.surface, line] as const))(
+    'v3 HTTP line %i (%s) carries v3 envelopes and is rejected by the current decoder',
+    (_n, surface, line) => {
+      const decoded = httpSchema(currentModule, surface).safeParse(JSON.parse(line.body));
+      if (!decoded.success) return;
+      // The page carries its entries undecoded; each v3 entry is rejected on its own.
+      const entries = undecodedEntries(line, decoded.data as Record<string, unknown>);
+      expect(entries, `${surface} decoded v3 envelopes in its body schema`).toBeDefined();
+      for (const entry of entries!) expect(() => parseMessage(entry), 'there is no v3 reader').toThrow();
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 3. v4: self-consistency only — no published v4 decoder exists yet
+// ---------------------------------------------------------------------------
+
+const v4Lines = ndjsonLines(readGolden('v4.envelopes.ndjson'));
+const v4Corpus = corpusOf(v4Lines);
+const v4HttpText = readGolden('v4.http.ndjson');
+const v4HttpLines = ndjsonLines(v4HttpText);
+const v4HttpCorpus = httpCorpusOf(v4HttpLines);
+const v4Registry = JSON.parse(readGolden('v4.releases.json')) as { readonly releases: readonly ReleaseEntry[] };
+
+describe('compat v4 registry: no published v4 decoder exists yet, so cross-release gates are unproven', () => {
+  it('the v4 registry has releases only, and no floor until a v4 release is supported', () => {
+    expect(Object.keys(v4Registry)).toEqual(['releases']);
+    expect(Array.isArray(v4Registry.releases)).toBe(true);
+    expect(v4Registry.releases.map((entry) => entry.version).filter((version) =>
+      V2_RELEASES.some((v2) => v2.version === version) || v3Registry.releases.some((v3) => v3.version === version)),
+    'a v2 or v3 release is never v4 evidence').toEqual([]);
+  });
+
+  it('registered v4 releases are stable, ascending, pin both corpora, and their prefixes are unchanged', () => {
+    let previous: ReleaseEntry | undefined;
+    for (const entry of v4Registry.releases) {
       expect(entry.version, 'prereleases are not registered').toMatch(/^\d+\.\d+\.\d+$/);
       if (previous !== undefined) {
         expect(compareVersions(previous.version, entry.version)).toBeLessThan(0);
@@ -259,37 +325,46 @@ describe('compat v3 registry: frozen published prefixes', () => {
         expect(entry.http!.lines).toBeGreaterThanOrEqual(previous.http!.lines);
       }
       expect(entry.http, `HTTP prefix required for ${entry.version}`).toBeDefined();
-      expect(prefixHash(v3Lines, entry.envelopes.lines), `v3 envelope lines shipped with ${entry.version} are append-only`).toEqual(entry.envelopes);
-      expect(prefixHash(v3HttpLines, entry.http!.lines), `v3 HTTP lines shipped with ${entry.version} are append-only`).toEqual(entry.http);
+      expect(prefixHash(v4Lines, entry.envelopes.lines), `v4 envelope lines shipped with ${entry.version} are append-only`).toEqual(entry.envelopes);
+      expect(prefixHash(v4HttpLines, entry.http!.lines), `v4 HTTP lines shipped with ${entry.version} are append-only`).toEqual(entry.http);
       previous = entry;
     }
   });
 
-  it('the current stable package version is registered in v3, unless the manifest still names the last v2 release', () => {
+  it('the current stable package version is registered in v4, unless the manifest still names a v3 release', () => {
     const version = (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
     if (!/^\d+\.\d+\.\d+$/.test(version)) return;
-    // Feature PRs leave the manifest at the current train; v3 bytes have not
-    // been released while it still names a v2 release.
-    if (V2_RELEASES.some((entry) => entry.version === version)) return;
+    // Feature PRs leave the manifest at the current train; v4 bytes have not
+    // been released while it still names a v3 release.
+    if (v3Registry.releases.some((entry) => entry.version === version)) return;
     expect(
-      v3Registry.releases.find((entry) => entry.version === version),
-      `@byok-sdk/protocol ${version} is not in golden/v3.releases.json. Append this entry: ${JSON.stringify({
-        version, envelopes: prefixHash(v3Lines, v3Lines.length), http: prefixHash(v3HttpLines, v3HttpLines.length),
+      v4Registry.releases.find((entry) => entry.version === version),
+      `@byok-sdk/protocol ${version} is not in golden/v4.releases.json. Append this entry: ${JSON.stringify({
+        version, envelopes: prefixHash(v4Lines, v4Lines.length), http: prefixHash(v4HttpLines, v4HttpLines.length),
       })}`,
     ).toBeDefined();
   });
 });
 
-describe('compat v3: the current decoder reads every v3 corpus line exactly (self-consistency; published-decoder checks are in published-compat.test.ts)', () => {
-  it.each(v3Corpus.map((line) => [line.index + 1, line.type, line] as const))(
-    'v3 line %i (%s) decodes, round-trips and deep-equals the committed JSON',
+describe('compat v4: the current decoder reads every v4 corpus line exactly (self-consistency; no published v4 decoder yet)', () => {
+  it.each(v4Corpus.map((line) => [line.index + 1, line.type, line] as const))(
+    'v4 line %i (%s) decodes, round-trips and deep-equals the committed JSON',
     (_n, _type, line) => {
       const decoded = decodeEnvelope(line.raw);
-      expect(decoded.v).toBe(3);
+      expect(decoded.v).toBe(4);
       expect(decodeEnvelope(encodeEnvelope(decoded))).toEqual(decoded);
       expect(decoded, 'the current decoder dropped or changed a committed field').toEqual(JSON.parse(line.raw));
     },
   );
+
+  it('every approval request and decision names its approval', () => {
+    for (const type of ['task.await_approval', 'task.approve', 'task.reject'] as const) {
+      const lines = v4Corpus.filter((line) => line.type === type);
+      expect(lines.length, type).toBeGreaterThan(0);
+      for (const line of lines) expect(typeof line.payload.approvalId, `${type} line ${line.index + 1}`).toBe('string');
+      expect(MESSAGE_PAYLOAD_SCHEMAS[type].safeParse({ summary: 'x', reason: 'x' }).success, `${type} without approvalId`).toBe(false);
+    }
+  });
 });
 
 function carries(line: CorpusLine, entry: WireAddition): boolean {
@@ -306,11 +381,7 @@ function carries(line: CorpusLine, entry: WireAddition): boolean {
   return entry.rule !== 'gated' || entry.value === undefined || value === entry.value;
 }
 
-describe('compat v3: corpus coverage and WIRE_ADDITIONS', () => {
-  it('strips the optional messageDraft runtime field in the previous capability reader', () => {
-    expect(previousRelease.RuntimeCapabilitiesSchema.parse({ steer: true, messageDraft: true })).toEqual({ steer: true });
-  });
-
+describe('compat v4: corpus coverage and WIRE_ADDITIONS', () => {
   it('declares exactly one server gate for draft frames', () => {
     expect(WIRE_ADDITIONS.filter(entry => entry.surface === 'agent.message.draft')).toEqual([
       { kind: 'envelope', rule: 'gated', surface: 'agent.message.draft', capability: 'agent-message-draft', advertisedBy: 'server' },
@@ -318,19 +389,19 @@ describe('compat v3: corpus coverage and WIRE_ADDITIONS', () => {
     expect(requiredReceiverCapabilities('agent.message.draft', {})).toEqual(['agent-message-draft']);
   });
 
-  it('every message type appears in the v3 corpus', () => {
-    const seen = new Set(v3Corpus.map((line) => line.type));
+  it('every message type appears in the v4 corpus', () => {
+    const seen = new Set(v4Corpus.map((line) => line.type));
     expect(MESSAGE_TYPES.filter((type) => !seen.has(type))).toEqual([]);
   });
 
   it('every Agent offer carrying terminalProjection has a result-document line with a schema, and a task.complete carries a document', () => {
     for (const type of ['task.offer_for_agent', 'task.offer_for_agent_with_egress', 'task.offer_for_agent_with_egress_fresh', 'task.offer_prepared'] as const) {
-      expect(v3Corpus.some((line) => {
+      expect(v4Corpus.some((line) => {
         const projection = line.payload.terminalProjection as { mode?: string; schema?: unknown } | undefined;
         return line.type === type && projection?.mode === 'result-document' && projection.schema !== undefined;
       }), `${type} result-document line`).toBe(true);
     }
-    expect(v3Corpus.some((line) => line.type === 'task.complete' && line.payload.document !== undefined)).toBe(true);
+    expect(v4Corpus.some((line) => line.type === 'task.complete' && line.payload.document !== undefined)).toBe(true);
   });
 
   it('every entry names a current message type and capability, in the right direction', () => {
@@ -348,13 +419,13 @@ describe('compat v3: corpus coverage and WIRE_ADDITIONS', () => {
     }
   });
 
-  it('every entry is exercised by a v3 corpus line', () => {
+  it('every entry is exercised by a v4 corpus line', () => {
     const unused = WIRE_ADDITIONS.filter((entry) => entry.kind === 'envelope'
-      ? !v3Corpus.some((line) => carries(line, entry))
-      : !v3HttpCorpus.some((line) => line.surface === entry.surface && Object.hasOwn(line.value, entry.field))).map(
+      ? !v4Corpus.some((line) => carries(line, entry))
+      : !v4HttpCorpus.some((line) => line.surface === entry.surface && Object.hasOwn(line.value, entry.field))).map(
       (entry) => `${entry.surface}${entry.field === undefined ? '' : `.${entry.field}`}${entry.rule === 'gated' && entry.value !== undefined ? `=${entry.value}` : ''}`,
     );
-    expect(unused, 'append a v3 corpus line that carries each of these (golden/v3.envelopes.ndjson is append-only)').toEqual([]);
+    expect(unused, 'append a v4 corpus line that carries each of these (golden/v4.envelopes.ndjson is append-only)').toEqual([]);
   });
 
   it('gates the per-task agentMemory selection on the ordinary Agent offers only (#614)', () => {
@@ -426,7 +497,7 @@ function assertBatchCounts(line: HttpCorpusLine, decoded: Record<string, unknown
   expect((decoded.accepted as number) + (decoded.rejected === undefined ? 0 : decoded.rejected as number),
     'accepted + rejected must account for the entire submitted batch').toBe(line.batchLength);
   const outcomes = decoded.outcomes as readonly { readonly outcome: string }[];
-  // Outcomes are required in v3 and must agree with the authoritative counts.
+  // Outcomes are required and must agree with the authoritative counts.
   expect(outcomes.length, 'outcomes must correlate every submitted envelope').toBe(line.batchLength);
   expect(outcomes.filter((entry) => entry.outcome !== 'rejected').length,
     'accepted counts accepted and duplicate outcomes').toBe(decoded.accepted);
@@ -443,13 +514,13 @@ function assertCurrentHttp(line: HttpCorpusLine): void {
   assertBatchCounts(line, decoded);
 }
 
-describe('compat v3: HTTP corpus (self-consistency; published-decoder checks are in published-compat.test.ts)', () => {
+describe('compat v4: HTTP corpus (self-consistency; no published v4 decoder yet)', () => {
   it('covers all eight scoped HTTP route schemas with owned bodies and independent expected values', () => {
     const surfaces: readonly HttpSurface[] = ['ChallengeRequest', 'ChallengeResponse', 'TokenRequest', 'TokenResponse',
       'EventsPollQuery', 'EventsPollResponse', 'MessagesSendRequest', 'MessagesSendResponse'];
-    expect([...new Set(v3HttpCorpus.map((line) => line.surface))].sort()).toEqual([...surfaces].sort());
-    expect(v3HttpText.endsWith('\n'), 'literal corpus lines must be newline terminated').toBe(true);
-    for (const line of v3HttpCorpus) {
+    expect([...new Set(v4HttpCorpus.map((line) => line.surface))].sort()).toEqual([...surfaces].sort());
+    expect(v4HttpText.endsWith('\n'), 'literal corpus lines must be newline terminated').toBe(true);
+    for (const line of v4HttpCorpus) {
       expect(typeof line.body).toBe('string');
       expect(JSON.parse(line.body)).toEqual(line.value);
       if (line.surface === 'MessagesSendResponse') {
@@ -459,70 +530,66 @@ describe('compat v3: HTTP corpus (self-consistency; published-decoder checks are
     }
   });
 
-  it.each(v3HttpCorpus.map((line) => [line.index + 1, line.surface, line] as const))(
-    'v3 HTTP line %i (%s) deep-equals its independent expected value and accounts for its batch',
+  it.each(v4HttpCorpus.map((line) => [line.index + 1, line.surface, line] as const))(
+    'v4 HTTP line %i (%s) deep-equals its independent expected value and accounts for its batch',
     (_index, _surface, line) => assertCurrentHttp(line),
   );
 
   it('detects a changed literal body independently of the expected value', () => {
-    const line = v3HttpCorpus.find((entry) => entry.surface === 'ChallengeResponse')!;
+    const line = v4HttpCorpus.find((entry) => entry.surface === 'ChallengeResponse')!;
     expect(() => assertCurrentHttp({ ...line, body: JSON.stringify({ nonce: 'changed-nonce' }) })).toThrow('independently committed');
   });
 
   it('rejects unaccounted batch members', () => {
-    const line = v3HttpCorpus.find((entry) => entry.surface === 'MessagesSendResponse' && entry.batchLength === 2)!;
+    const line = v4HttpCorpus.find((entry) => entry.surface === 'MessagesSendResponse' && entry.batchLength === 2)!;
     expect(() => assertCurrentHttp({ ...line, batchLength: 3 })).toThrow('entire submitted batch');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 3. Published rejection oracle: the last v2 release cannot read v3 bytes
+// 4. Published rejection oracle: a published v3 decoder cannot read v4 bytes
 // ---------------------------------------------------------------------------
 
-describe('compat: published 0.26.1 (byok-protocol-previous) is a rejection oracle only', () => {
-  it('the alias pins the last registered v2 release and never enters the v3 registry', () => {
+describe('compat: published 0.30.2 (byok-protocol-previous) is the v4 rejection oracle', () => {
+  it('the alias pins the last registered v3 release and never enters the v4 registry', () => {
     const version = packageVersion('byok-protocol-previous');
-    expect(version).toBe('0.26.1');
-    expect(V2_RELEASES.at(-1)?.version).toBe(version);
-    expect(v3Registry.releases.some((entry) => entry.version === version)).toBe(false);
-    expect(previousRelease.PROTOCOL_VERSION).toBe(2);
+    expect(version).toBe('0.30.2');
+    expect(v3Registry.releases.at(-1)?.version).toBe(version);
+    expect(v4Registry.releases.some((entry) => entry.version === version)).toBe(false);
+    expect(v3Release.PROTOCOL_VERSION).toBe(3);
   });
 
-  it.each(v3Corpus.map((line) => [line.index + 1, line.type, line] as const))(
-    'rejects v3 line %i (%s)',
+  it.each(v4Corpus.map((line) => [line.index + 1, line.type, line] as const))(
+    'rejects v4 line %i (%s)',
     (_n, _type, line) => {
-      if (line.type === 'agent.message.draft') {
-        expect(requiredReceiverCapabilities(line.type, line.payload)).toEqual(['agent-message-draft']);
-        expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.UnknownMessageTypeError);
-      } else if (isSealedMessageType(line.type)) {
-        // #654: a sealed type is new in v3 and gated as a whole type.
-        expect(requiredReceiverCapabilities(line.type, line.payload)[0]).toBe(SEALED_PAYLOAD_CAPABILITY);
-        expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.UnknownMessageTypeError);
-      } else if (line.type === 'e2ee.key_package.available') {
-        // #654 E2c-3: the key package notice is new in v3 and gated as a whole type.
-        expect(requiredReceiverCapabilities(line.type, line.payload)).toEqual([SEALED_PAYLOAD_CAPABILITY]);
-        expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.UnknownMessageTypeError);
+      if ((v3Release.MESSAGE_TYPES as readonly string[]).includes(line.type)) {
+        expect(() => v3Release.decodeEnvelope(line.raw)).toThrow(v3Release.EnvelopeValidationError);
       } else {
-        expect(() => previousRelease.decodeEnvelope(line.raw)).toThrow(previousRelease.EnvelopeValidationError);
+        // A type added after 0.30.2 is unknown to it before its version is read.
+        expect(() => v3Release.decodeEnvelope(line.raw)).toThrow(v3Release.UnknownMessageTypeError);
       }
     },
   );
 
-  it('rejects a v3 conn.hello: a v2 server cannot admit a v3 daemon', () => {
+  it('rejects a v4 conn.hello: a v3 server cannot admit a v4 daemon', () => {
     const hello = createEnvelope('conn.hello', {
       protocolVersions: [PROTOCOL_VERSION],
       capabilities: [],
-      deviceId: 'device-v3',
+      deviceId: 'device-v4',
       productId: 'acme-agent',
     });
-    expect(hello.v).toBe(3);
-    expect(() => previousRelease.decodeEnvelope(encodeEnvelope(hello))).toThrow(previousRelease.EnvelopeValidationError);
+    expect(hello.v).toBe(4);
+    expect(() => v3Release.decodeEnvelope(encodeEnvelope(hello))).toThrow(v3Release.EnvelopeValidationError);
   });
 
-  it.each(v3HttpCorpus.filter(carriesEnvelopes).map((line) => [line.index + 1, line.surface, line] as const))(
-    'rejects v3 HTTP line %i (%s), which carries v3 envelopes',
+  it.each(v4HttpCorpus.filter(carriesEnvelopes).map((line) => [line.index + 1, line.surface, line] as const))(
+    'rejects v4 HTTP line %i (%s), which carries v4 envelopes',
     (_n, surface, line) => {
-      expect(httpSchema(previousRelease, surface).safeParse(JSON.parse(line.body)).success).toBe(false);
+      const decoded = httpSchema(v3Release, surface).safeParse(JSON.parse(line.body));
+      if (!decoded.success) return;
+      const entries = undecodedEntries(line, decoded.data as Record<string, unknown>);
+      expect(entries, `${surface} decoded v4 envelopes in its body schema`).toBeDefined();
+      for (const entry of entries!) expect(() => v3Release.parseMessage(entry)).toThrow();
     },
   );
 });
@@ -790,19 +857,19 @@ function completeness(): { missingPaths: string[]; missingValues: string[]; unus
     const root = schemaNode(jsonSchema(MESSAGE_PAYLOAD_SCHEMAS[type]))!;
     const prefix = `envelope:${type}`;
     merge(required, requiredCoverage(root, prefix, exempt));
-    merge(seen, observedCoverage(root, prefix, v3Corpus.filter((line) => line.type === type).map((line) => line.payload)));
+    merge(seen, observedCoverage(root, prefix, v4Corpus.filter((line) => line.type === type).map((line) => line.payload)));
   }
   const header = envelopeHeaderRoot();
   merge(required, requiredCoverage(header, HEADER_PREFIX, () => false));
-  merge(seen, observedCoverage(header, HEADER_PREFIX, v3Corpus.map((line) => {
+  merge(seen, observedCoverage(header, HEADER_PREFIX, v4Corpus.map((line) => {
     const { payload: _payload, ...fields } = JSON.parse(line.raw) as Record<string, unknown>;
     return fields;
   })));
-  for (const surface of [...new Set(v3HttpCorpus.map((line) => line.surface))]) {
+  for (const surface of [...new Set(v4HttpCorpus.map((line) => line.surface))]) {
     const root = schemaNode(jsonSchema(httpSchema(currentModule, surface)))!;
     const prefix = `http:${surface}`;
     merge(required, requiredCoverage(root, prefix, exempt));
-    merge(seen, observedCoverage(root, prefix, v3HttpCorpus.filter((line) => line.surface === surface).map((line) => JSON.parse(line.body) as unknown)));
+    merge(seen, observedCoverage(root, prefix, v4HttpCorpus.filter((line) => line.surface === surface).map((line) => JSON.parse(line.body) as unknown)));
   }
   return {
     missingPaths: [...required.paths].filter((path) => !seen.paths.has(path)).sort(),

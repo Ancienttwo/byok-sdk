@@ -14,7 +14,7 @@
 // observable input is appended to FAKE_HERMES_RECEIPT as one JSON line.
 // FAKE_HERMES_REPLY_GATE=<dir>: the closing reply streams as `Do`, `ne`,
 // then waits for `<dir>/release` before its last chunk `.`.
-// On Windows, ci.yml's windows-git-workspace job runs it under hermes-adapter.test.ts and hermes-custody.test.ts (#712).
+// On Windows, ci.yml's windows-client job runs it under hermes-adapter.test.ts and hermes-custody.test.ts (#712).
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';

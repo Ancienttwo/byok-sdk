@@ -8,7 +8,6 @@ import { AgentSessionHandoffStore } from '../../daemon/agent-session-handoff-sto
 import { ApprovalRegistry } from '../../daemon/approvals';
 import type { BlobResolver } from '../../daemon/blob-client';
 import { buildRuntimeEnv } from '../../daemon/environment';
-import { SessionWorkspaceStore } from '../../daemon/session-workspace-store';
 import { TaskRunner } from '../../daemon/task-runner';
 import {
   InputPreparationStore,
@@ -72,7 +71,6 @@ interface Config {
   readonly storeDir: string;
   /** The task runner's own store directory. Shared too, so a redelivered task resolves the same workspace. */
   readonly runnerStoreDir: string;
-  readonly workspaceRoot: string;
   readonly agentHomeDir: string;
   /** The MCP toolset server file the test created; both lifetimes name this same path. */
   readonly serverCommand: string;
@@ -180,16 +178,13 @@ const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE)
 const sent: Envelope[] = [];
 
 await fs.mkdir(config.runnerStoreDir, { recursive: true });
-await fs.mkdir(config.workspaceRoot, { recursive: true });
 await fs.mkdir(config.agentHomeDir, { recursive: true });
 
 const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: new ScratchRoot(config.scratchRoot),
   adapters: [adapter],
-  workspaceRoot: config.workspaceRoot,
   deviceId: DEVICE_ID,
   send: (envelope) => sent.push(envelope),
   blobClient: unusedBlobClient,
-  sessionWorkspaces: new SessionWorkspaceStore(config.runnerStoreDir),
   approvalRegistry: new ApprovalRegistry(),
   storeDir: config.runnerStoreDir,
   productId: PRODUCT_ID,

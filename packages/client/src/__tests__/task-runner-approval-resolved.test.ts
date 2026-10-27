@@ -1,12 +1,10 @@
+import type { RuntimeTaskInput } from '../types';
+import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from "./fixtures/execution-scratch";
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type AgentEvent, type Envelope, type TaskOfferPayload } from '@byok-sdk/protocol';
+import { createEnvelope, type AgentEvent, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { freezeRuntimeAdapterDescriptor } from '../types';
 import type {
@@ -36,10 +34,6 @@ import { testIngressBudget } from './fixtures/activity-ingress';
  * `real-server-approval-resolved-e2e.test.ts`.
  */
 
-async function tmpDir(prefix: string): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
-}
-
 const unusedBlobClient: BlobResolver = {
   resolveInstruction: async () => {
     throw new Error('not used in this test');
@@ -57,13 +51,12 @@ async function makeRunner(
   const approvalRegistry = overrides.approvalRegistry ?? new ApprovalRegistry();
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
-    workspaceRoot: await tmpDir('byok-taskrunner-approval-resolved-workspace-'),
+    ...testAgentHomeDeps(),
     deviceId: 'device-1',
     send: (envelope) => {
       sent.push(envelope);
     },
     blobClient: unusedBlobClient,
-    sessionWorkspaces: new SessionWorkspaceStore(await tmpDir('byok-taskrunner-approval-resolved-store-')),
     approvalRegistry,
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
@@ -75,7 +68,7 @@ async function makeRunner(
 
 async function offerAndActivate(runner: TaskRunner, taskId: string): Promise<void> {
   await runner.handleEnvelope(
-    createEnvelope('task.offer', { instruction: 'do gated work' }, { taskId, seq: 1 }),
+    createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'do gated work' }, { taskId, seq: 1 }),
   );
 }
 
@@ -155,9 +148,7 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
   it('local approve (approvalRegistry.resolve directly, simulating the control-socket approvals.resolve RPC) sends task.approval_resolved with the right payload', async () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
-    const { runner, approvalRegistry } = await makeRunner(adapter, sent, {
-      getServerCapabilities: () => ['approval_resolved'],
-    });
+    const { runner, approvalRegistry } = await makeRunner(adapter, sent);
     const taskId = 'task-local-approve-1';
     await offerAndActivate(runner, taskId);
 
@@ -185,9 +176,7 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
   it('local reject sends task.approval_resolved with decision: reject', async () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
-    const { runner, approvalRegistry } = await makeRunner(adapter, sent, {
-      getServerCapabilities: () => ['approval_resolved'],
-    });
+    const { runner, approvalRegistry } = await makeRunner(adapter, sent);
     const taskId = 'task-local-reject-1';
     await offerAndActivate(runner, taskId);
 
@@ -204,9 +193,7 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
   it('wire-resolved (server-sent task.approve, routed through session.resolveApproval -> ctx.approvalChannel.resolve) does NOT send task.approval_resolved', async () => {
     const adapter = new RelayingAdapter();
     const sent: Envelope[] = [];
-    const { runner } = await makeRunner(adapter, sent, {
-      getServerCapabilities: () => ['approval_resolved'],
-    });
+    const { runner, approvalRegistry } = await makeRunner(adapter, sent);
     const taskId = 'task-wire-1';
     await offerAndActivate(runner, taskId);
 
@@ -215,7 +202,8 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
     // session.resolveApproval(true), which (only for THIS test's adapter)
     // forwards to ctx.approvalChannel.resolve -> approvalRegistry.resolve(...,
     // 'wire').
-    await runner.handleEnvelope(createEnvelope('task.approve', {}, { taskId, seq: 0 }));
+    const approvalId = approvalRegistry.list()[0]!.approvalId;
+    await runner.handleEnvelope(createEnvelope('task.approve', { approvalId }, { taskId, seq: 0 }));
     await expect(outcomePromise).resolves.toEqual({ approved: true, reason: undefined });
 
     expect(adapter.sessions[0]?.resolveApprovalCalls).toEqual([{ approved: true }]);
@@ -225,14 +213,13 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
   it('wire-resolved reject also does NOT send task.approval_resolved', async () => {
     const adapter = new RelayingAdapter();
     const sent: Envelope[] = [];
-    const { runner } = await makeRunner(adapter, sent, {
-      getServerCapabilities: () => ['approval_resolved'],
-    });
+    const { runner, approvalRegistry } = await makeRunner(adapter, sent);
     const taskId = 'task-wire-2';
     await offerAndActivate(runner, taskId);
 
     const outcomePromise = runner.requestApproval(taskId, 'Write: /etc/shadow');
-    await runner.handleEnvelope(createEnvelope('task.reject', { reason: 'server said no' }, { taskId, seq: 0 }));
+    const approvalId = approvalRegistry.list()[0]!.approvalId;
+    await runner.handleEnvelope(createEnvelope('task.reject', { reason: 'server said no', approvalId }, { taskId, seq: 0 }));
     await outcomePromise;
 
     expect(sent.some((e) => e.type === 'task.approval_resolved')).toBe(false);
@@ -243,7 +230,6 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
     const sent: Envelope[] = [];
     const { runner } = await makeRunner(adapter, sent, {
       approvalTimeoutMs: 20,
-      getServerCapabilities: () => ['approval_resolved'],
     });
     const taskId = 'task-timeout-1';
     await offerAndActivate(runner, taskId);
@@ -257,14 +243,14 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
     expect(resolved?.payload.resolvedBy).toBe('local');
   });
 
-  it('capability absent (getServerCapabilities not supplied at all) -> task.approval_resolved is never sent, even for a local resolution', async () => {
+  it.each([
+    ['getServerCapabilities not supplied', undefined],
+    ['a server list without any approval flag', () => ['steer', 'blob-upload']],
+  ] as const)('a local resolution sends task.approval_resolved whatever the server advertises (%s): it is wire v4 baseline', async (_label, getServerCapabilities) => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
-    // No getServerCapabilities override — TaskRunnerDeps.getServerCapabilities
-    // is entirely omitted, exactly like a minimal test harness that doesn't
-    // care about this gate (see that field's own doc comment).
-    const { runner, approvalRegistry } = await makeRunner(adapter, sent);
-    const taskId = 'task-no-cap-1';
+    const { runner, approvalRegistry } = await makeRunner(adapter, sent, getServerCapabilities === undefined ? {} : { getServerCapabilities });
+    const taskId = 'task-any-server-1';
     await offerAndActivate(runner, taskId);
 
     const outcomePromise = runner.requestApproval(taskId, 'Bash: echo hi');
@@ -272,32 +258,13 @@ describe('TaskRunner: task.approval_resolved send decision', () => {
     approvalRegistry.resolve(pending[0]!.approvalId, 'approve');
     await outcomePromise;
 
-    expect(sent.some((e) => e.type === 'task.approval_resolved')).toBe(false);
-  });
-
-  it("capability list present but WITHOUT approval_resolved (e.g. an old server's conn.ack) -> still not sent", async () => {
-    const adapter = new StubRuntimeAdapter();
-    const sent: Envelope[] = [];
-    const { runner, approvalRegistry } = await makeRunner(adapter, sent, {
-      getServerCapabilities: () => ['steer', 'blob-upload'],
-    });
-    const taskId = 'task-old-server-1';
-    await offerAndActivate(runner, taskId);
-
-    const outcomePromise = runner.requestApproval(taskId, 'Bash: echo hi');
-    const pending = approvalRegistry.list();
-    approvalRegistry.resolve(pending[0]!.approvalId, 'approve');
-    await outcomePromise;
-
-    expect(sent.some((e) => e.type === 'task.approval_resolved')).toBe(false);
+    expect(findApprovalResolved(sent)?.payload).toMatchObject({ approvalId: pending[0]!.approvalId, decision: 'approve', resolvedBy: 'local' });
   });
 
   it('ordering: task.approval_resolved is queued before any progress the resumed session goes on to produce', async () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
-    const { runner, approvalRegistry } = await makeRunner(adapter, sent, {
-      getServerCapabilities: () => ['approval_resolved'],
-    });
+    const { runner, approvalRegistry } = await makeRunner(adapter, sent);
     const taskId = 'task-ordering-1';
     await offerAndActivate(runner, taskId);
 

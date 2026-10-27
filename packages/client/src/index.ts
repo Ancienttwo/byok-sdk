@@ -2,6 +2,7 @@ export type {
   RuntimeAdapter,
   RuntimeAdapterDescriptor,
   RuntimeAdapterPrepareInput,
+  RuntimeTaskInput,
   RuntimeAdapterPrepareResult,
   RuntimeAdapterRejectedOperation,
   RuntimeAdapterPreparedOperation,
@@ -15,7 +16,6 @@ export type {
   Session,
   MessageDraftDelta,
   SessionEvidence,
-  GitWorkspaceConfig,
   McpStdioServerConfig,
   McpToolsetConfig,
   McpToolsetLifecycleState,
@@ -114,10 +114,6 @@ export type {
   RuntimeRetryDisposition,
 } from './runtime-failure';
 
-export { GitWorkspaceManager, GitWorkspaceError, isGitWorkspaceConfig, prependGitWorkspaceGuidance } from './daemon/git-workspace';
-export type { GitWorkspaceObservation, GitWorkspaceLease, GitWorkspaceOptions, GitErrorCategory } from './daemon/git-workspace';
-export { GitWorkspaceStore } from './daemon/git-workspace-store';
-export type { GitWorkspaceLedger, GitWorkspaceLedgerRecord, GitWorkspacePhase } from './daemon/git-workspace-store';
 
 
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon';

@@ -9,7 +9,6 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -44,7 +43,6 @@ describe('fresh Agent egress session authority', () => {
   it('starts fresh without a resume argument, fsyncs the runtime session handoff, and accepts only exact reliable append/ack', async () => {
     server = await TestServer.start();
     server.setAckCapabilities(['agent-egress-reliable-ack']);
-    const workspaceRoot = await tmpDir('byok-fresh-egress-workspace-');
     const storeDir = await tmpDir('byok-fresh-egress-store-');
     const hostStorageRoot = await tmpDir('byok-fresh-egress-home-');
     const adapter = new StubRuntimeAdapter('pi');
@@ -54,7 +52,6 @@ describe('fresh Agent egress session authority', () => {
         productName: 'Fresh egress test',
         productId: 'fresh-egress-test',
         serverUrl: server.url,
-        workspaceRoot,
         storeDir,
         agentHome: { hostStorageRoot },
         agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
@@ -207,7 +204,6 @@ describe('fresh Agent egress session authority', () => {
     const sent: Envelope[] = [];
     const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter],
-      workspaceRoot: await tmpDir('byok-fresh-fsync-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentSessionHandoffs: handoffs,
@@ -217,7 +213,6 @@ describe('fresh Agent egress session authority', () => {
         resolveInstruction: async () => { throw new Error('not used'); },
         uploadArtifact: async () => { throw new Error('not used'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(storeDir),
       approvalRegistry: new ApprovalRegistry(),
       storeDir,
       productId: 'fresh-fsync-test',

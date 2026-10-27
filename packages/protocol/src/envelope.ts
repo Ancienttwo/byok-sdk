@@ -73,16 +73,12 @@ function envelopeShape<
  *   `conn.hello.cursor` in `messages.ts`).
  */
 export const EnvelopeSchema = z.discriminatedUnion('type', [
-  // conn.* — task_id stays optional (no task routing). conn.hello is
-  // daemon -> server (no cursor to satisfy on this leg); conn.ack is
-  // server -> daemon and therefore carries the required redelivery `seq`.
+  // conn.hello: task_id stays optional (no task routing); it is
+  // daemon -> server, so there is no cursor to satisfy on this leg.
   envelopeShape('conn.hello', OPTIONAL_TASK_ID, OPTIONAL_SEQ),
-  envelopeShape('conn.ack', OPTIONAL_TASK_ID, REQUIRED_SEQ),
 
   // task.* server -> daemon: task_id required (routing key) + seq required
   // (per-device redelivery cursor).
-  envelopeShape('task.offer', REQUIRED_TASK_ID, REQUIRED_SEQ),
-  envelopeShape('task.offer_with_toolsets', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.offer_for_agent', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.offer_for_agent_with_egress', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.offer_for_agent_with_egress_fresh', REQUIRED_TASK_ID, REQUIRED_SEQ),
@@ -119,8 +115,6 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
 
   // Sealed payload v1 (#654). Appended last, so every released branch keeps
   // its position in the union.
-  envelopeShape('task.offer_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
-  envelopeShape('task.offer_with_toolsets_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.offer_for_agent_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.offer_for_agent_with_egress_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.offer_for_agent_with_egress_fresh_sealed', REQUIRED_TASK_ID, REQUIRED_SEQ),

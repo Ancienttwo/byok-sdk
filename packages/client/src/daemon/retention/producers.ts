@@ -24,7 +24,6 @@ interface ProducerOptions {
   readonly preparation: () => InputPreparationService | undefined;
   readonly home?: AgentHomeManager;
   readonly handoffs?: AgentSessionHandoffStore;
-  readonly workspaceRoot?: string;
   readonly piSessionDir?: string;
   readonly clock: () => Date;
   /** Entries one usage walk visits before it stops and reports truncated classes. */
@@ -232,7 +231,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       }
     }
     const homes = options.home === undefined ? undefined : path.join(options.home.layout.hostRootInput(), 'agents');
-    const roots = [...new Set([storeDir, scratch.root, ...config.skillPackDataDirs.map(skillPacksRoot), homes, options.workspaceRoot, options.piSessionDir].filter((root): root is string => root !== undefined))];
+    const roots = [...new Set([storeDir, scratch.root, ...config.skillPackDataDirs.map(skillPacksRoot), homes, options.piSessionDir].filter((root): root is string => root !== undefined))];
     const topRoots = roots.filter(root => !roots.some(other => other !== root && inside(other, root)));
     const replicaStates = new Map<string, Promise<boolean>>();
     async function classify(file: string, stat: Stats): Promise<RetentionClassId> {
@@ -271,7 +270,6 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         if (HOME_TEMP.test(path.basename(file)) && !relative.startsWith('.byok/runtime-sessions/')) return 'home-temp';
         return relative.startsWith('.byok/') ? 'byok-authority' : 'agent-content';
       }
-      if (options.workspaceRoot !== undefined && inside(options.workspaceRoot, file)) return 'workspace';
       return 'store-authority';
     }
     async function walk(file: string): Promise<void> {
@@ -302,7 +300,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       const unreached = truncated && related.every(root => unfinished.get(root) === false);
       // Empty SDK-owned classes were measured too; external unconfigured scopes and unreached roots stay explicit.
       const previous = result.get(id)!;
-      result.set(id, { ...previous, truncated, measured: !unreached && (previous.measured || !['workspace', 'pi-session-dir', 'agent-content', 'byok-authority', 'agent-home-lease', 'terminal-evidence', 'retired-namespace', 'confirmed-journal'].includes(id)) });
+      result.set(id, { ...previous, truncated, measured: !unreached && (previous.measured || !['pi-session-dir', 'agent-content', 'byok-authority', 'agent-home-lease', 'terminal-evidence', 'retired-namespace', 'confirmed-journal'].includes(id)) });
     }
     const journal = options.journal();
     if (journal !== undefined) { const usage = await journal.measureUsage();
@@ -322,13 +320,12 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       : id === 'daemon-temp' ? [daemonRoot] : replicaScoped ? [replicas]
       : homeScoped ? (options.home === undefined ? [] : [path.join(options.home.layout.hostRootInput(), 'agents')])
       : skillScoped ? config.skillPackDataDirs.map(skillPacksRoot)
-      : id === 'workspace' ? (options.workspaceRoot === undefined ? [] : [options.workspaceRoot])
       : id === 'pi-session-dir' ? (options.piSessionDir === undefined ? [] : [options.piSessionDir])
       : id === 'input-preparation' ? [path.join(storeDir, 'input-preparation')]
       : id === 'quarantine' ? [path.join(storeDir, 'quarantine')]
       : id === 'owned-processes' ? [path.join(storeDir, 'owned-processes')] : [storeDir];
-    return Object.freeze({ roots: Object.freeze(roots), owner: ['workspace','pi-session-dir','agent-content'].includes(id) ? 'host' : 'sdk',
-      scope: homeScoped ? 'agent-home' : replicaScoped ? 'replica' : ['workspace','pi-session-dir'].includes(id) ? 'host' : 'store',
+    return Object.freeze({ roots: Object.freeze(roots), owner: ['pi-session-dir','agent-content'].includes(id) ? 'host' : 'sdk',
+      scope: homeScoped ? 'agent-home' : replicaScoped ? 'replica' : id === 'pi-session-dir' ? 'host' : 'store',
       ...(expiring ? { ttlMs: config.ttlMs[id as ExpiringClassId] } : {}), ...(id === 'reader-run' ? { maxEntries: AGENT_HOME_READER_RUN_MAX_RETAINED } : {}),
       ...(id === 'agent-result' ? { maxEntries: AGENT_RESULT_MAX_RETAINED } : {}) });
   }

@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -78,7 +79,6 @@ describe('Agent provider profile binding admission', () => {
 
   it('declines a stale binding before claim, runtime spawn, or workspace creation', async () => {
     const server = await TestServer.start();
-    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-profile-binding-workspace-'));
     const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-profile-binding-store-'));
     const spawnFn = vi.fn(() => {
       throw new Error('runtime spawn is forbidden before provider admission');
@@ -100,14 +100,14 @@ describe('Agent provider profile binding admission', () => {
       productName: 'Provider binding test',
       productId: 'provider-binding-test',
       serverUrl: server.url,
-      workspaceRoot,
+      agentHome: testAgentHomeConfig(),
       storeDir,
     }, [adapter]);
     try {
       await daemon.pair('pairing-code');
       await daemon.start();
       const taskId = 'task-stale-provider-profile';
-      server.send(createEnvelope('task.offer', {
+      server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),
         instruction: 'inspect image',
         dispatchSelection: {
           lane: 'byok-profile',
@@ -120,7 +120,6 @@ describe('Agent provider profile binding admission', () => {
       expect(decline.type === 'task.decline' && decline.payload.reason).toMatch(/hash mismatch/);
       expect(server.received.some((envelope) => envelope.type === 'task.claim' && envelope.task_id === taskId)).toBe(false);
       expect(spawnFn).not.toHaveBeenCalled();
-      await expect(fs.stat(path.join(workspaceRoot, taskId))).rejects.toThrow();
     } finally {
       await daemon.stop();
       await server.close();

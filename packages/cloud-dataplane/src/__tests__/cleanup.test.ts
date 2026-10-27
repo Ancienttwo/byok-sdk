@@ -52,8 +52,8 @@ function replayableOffer(seed: number) {
   return (seq: number) => {
     const body = encodeEnvelope(
       createEnvelope(
-        'task.offer',
-        { instruction: `cleanup offer ${seed}` },
+        'task.offer_for_agent',
+        { instruction: `cleanup offer ${seed}`, agentRef: { agentId: `agent-cleanup-${seed}`, profileRevision: 'rev-1' } },
         {
           id: `00000000-0000-4000-8000-${String(seed).padStart(12, '0')}`,
           ts: '2026-01-01T00:00:00.000Z',
@@ -969,6 +969,32 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         [TENANT, 'device-replay-limit'],
       );
       expect(stream.rows[0]?.next_seq).toBe(BigInt(original.seq + 1));
+    } finally {
+      await scope.dispose();
+    }
+  });
+
+  it('refuses to replay a wire v3 dead letter under v4 and keeps it until an operator discards it (#925)', async () => {
+    const scope = await createDataplaneScope(4);
+    const clock = new MutableClock('2026-01-01T00:00:00.000Z');
+    try {
+      await migrate(scope.pool, DEPLOY_SQL);
+      const cleanup = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: new FakeObjectMaintenance() });
+      const body = JSON.stringify({ v: 3, id: 'v3-dead-letter', ts: clock.now().toISOString(), type: 'task.cancel', task_id: 'task-v3', seq: 1, payload: {} });
+      await scope.pool.query(
+        `INSERT INTO outbox (tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at)
+         VALUES ($1, 'device-v3', 1, 'v3-dead-letter', $2, $3, $4, 'expired', $5)`,
+        [TENANT, body, `sha256:${'0'.repeat(64)}`, body.length, clock.now()],
+      );
+      const rows = () => scope.pool.query('SELECT * FROM outbox WHERE tenant_id = $1 ORDER BY seq', [TENANT]).then((result) => result.rows);
+      const before = await rows();
+
+      await expect(cleanup.replayDeadLetter(TENANT, { deviceId: 'device-v3', seq: 1, replayMessageId: 'v3-replay' }))
+        .rejects.toMatchObject({ code: 'cleanup_invalid_input' });
+      expect(await rows()).toEqual(before);
+
+      await cleanup.discardDeadLetter(TENANT, { deviceId: 'device-v3', seq: 1 });
+      expect(await rows()).toEqual([]);
     } finally {
       await scope.dispose();
     }

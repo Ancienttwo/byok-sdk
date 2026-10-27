@@ -13,10 +13,10 @@ import { decodeEnvelope } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { createHmacTokenSigner } from '../auth/tokens';
 import { fullCapabilityDeclaration } from '../capabilities';
-import { createByokCloud } from '../cloud';
+import { AGENT_HOME_CONTRACT_CAPABILITY, createByokCloud } from '../cloud';
 import { createInMemoryByokCloud } from '../composition/in-memory';
 import { isCloudError } from '../errors';
-import { TENANT_A, createHarness, decodeEventsPage, offerPayload, type DecodedEventsPage } from './support/harness';
+import { TENANT_A, createHarness, decodeEventsPage, grantAgentHome, offerPayload, TEST_AGENT_REF, type DecodedEventsPage } from './support/harness';
 
 async function poll(
   harness: ReturnType<typeof createHarness>,
@@ -30,29 +30,16 @@ async function poll(
 }
 
 describe('GET /byok/events cursor semantics', () => {
-  it('refuses both explicit legacy producer variants before durable mailbox/task side effects for strict devices', async () => {
+  it('delivers a logical-toolset Agent offer with its gated requiredToolsets field', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
-      capabilities: ['strict-agent-only'],
+      capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'toolset-selection'],
     });
-
-    await expect(harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('legacy') }))
-      .rejects.toMatchObject({ code: 'agent_capability_missing' });
-    await expect(harness.cloud.enqueueToolsetOffer(TENANT_A, device.deviceId, {
-      payload: { ...offerPayload('legacy tools'), requiredToolsets: ['salesko'] },
-    })).rejects.toMatchObject({ code: 'agent_capability_missing' });
-    expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages).toEqual([]);
-    expect(await harness.cloud.readTaskAttempt(TENANT_A, 'task-never-created')).toBeUndefined();
-  });
-
-  it('delivers a logical-toolset offer as its distinct fail-closed message type', async () => {
-    const harness = createHarness();
-    const device = await harness.pairDevice(TENANT_A);
-    const enqueued = await harness.cloud.enqueueToolsetOffer(TENANT_A, device.deviceId, {
+    const enqueued = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: {
-        instruction: 'find qualified leads',
+        ...offerPayload('find qualified leads'),
         runtime: 'claude',
         requiredToolsets: ['salesko'],
       },
@@ -62,7 +49,7 @@ describe('GET /byok/events cursor semantics', () => {
     // Wire v3 folded the former `result-document` flag into the baseline.
     expect(page.capabilities).not.toContain('result-document');
     expect(page.events).toHaveLength(1);
-    expect(page.events[0]?.type).toBe('task.offer_with_toolsets');
+    expect(page.events[0]?.type).toBe('task.offer_for_agent');
     expect(page.events[0]).toEqual(enqueued.envelope);
     expect(JSON.stringify(page.events[0])).not.toMatch(/command|args|secret/i);
   });
@@ -70,7 +57,8 @@ describe('GET /byok/events cursor semantics', () => {
   it('replays the same page for as long as the daemon keeps reporting the same cursor', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('first') });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload('first') });
 
     const first = await poll(harness, device.authorization);
     const second = await poll(harness, device.authorization, 0);
@@ -84,7 +72,8 @@ describe('GET /byok/events cursor semantics', () => {
   it('treats the cursor the daemon brings back on its NEXT poll as the only ack', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
 
     const first = await poll(harness, device.authorization);
     expect(first.cursor).toBe(offer.seq);
@@ -97,8 +86,9 @@ describe('GET /byok/events cursor semantics', () => {
   it('hands back events in seq order, and only the ones past the cursor', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const one = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('one') });
-    const two = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('two') });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const one = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload('one') });
+    const two = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload('two') });
 
     const all = await poll(harness, device.authorization);
     expect(all.events.map((event) => event.seq)).toEqual([one.seq, two.seq]);
@@ -110,7 +100,8 @@ describe('GET /byok/events cursor semantics', () => {
   it('scans past a filtered cancelled offer so a one-row page still delivers the following cancel', async () => {
     const harness = createHarness({ eventsPageLimit: 1 });
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'stop before lease');
 
     const page = await poll(harness, device.authorization);
@@ -124,7 +115,8 @@ describe('GET /byok/events cursor semantics', () => {
   it('does not treat a cursor at or below the ack position as an ack attempt', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     const delivered = await poll(harness, device.authorization);
     expect(delivered.cursor).toBe(offer.seq);
     await poll(harness, device.authorization, delivered.cursor);
@@ -139,7 +131,8 @@ describe('GET /byok/events cursor semantics', () => {
   it('leaves the store as the authority on an actual cursor regression', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     await harness.core.mailbox.recordDelivery(TENANT_A, {
       deviceId: device.deviceId,
       deliveredSeq: 1,
@@ -169,6 +162,7 @@ describe('GET /byok/events cursor semantics', () => {
   it('rejects unsafe and future cursors before they can acknowledge or strand a later envelope', async () => {
     const harness = createHarness({ longPollHoldMs: 0 });
     const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
     const futureCursor = Number.MAX_SAFE_INTEGER;
 
     // On unfixed source, this is accepted as an acknowledgement despite never
@@ -176,7 +170,7 @@ describe('GET /byok/events cursor semantics', () => {
     // cursor thereafter cannot read the later envelope at its lower sequence.
     const forged = await harness.json(`/byok/events?cursor=${futureCursor}`, { headers: device.authorization });
     const cursorAfterForge = await harness.core.mailbox.readCursor(TENANT_A, device.deviceId);
-    const later = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('later') });
+    const later = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload('later') });
     const delivered = await poll(harness, device.authorization, 0);
 
     // Keep the failure artifact causal: the unfixed route returns the forged
@@ -236,7 +230,8 @@ describe('GET /byok/events cursor semantics', () => {
   it('returns an envelope that still round-trips through the frozen v1 decoder', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('frozen bytes'),
     });
 
@@ -249,14 +244,15 @@ describe('GET /byok/events cursor semantics', () => {
   });
 });
 
-describe('enqueueOffer', () => {
+describe('enqueueAgentOffer', () => {
   it('never re-enqueues a delivered task id after its mailbox row is retired', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
     const taskId = 'task-immutable-execution';
     const input = { taskId, payload: offerPayload('execute once') };
-    const first = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, input);
-    await harness.stores.tasks.recordStatus(TENANT_A, { taskId, status: 'complete' });
+    const first = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, input);
+    await harness.stores.tasks.recordStatus(TENANT_A, { taskId, status: 'complete', agentRef: TEST_AGENT_REF });
 
     await harness.core.mailbox.recordDelivery(TENANT_A, {
       deviceId: device.deviceId,
@@ -275,8 +271,8 @@ describe('enqueueOffer', () => {
       afterSeq: first.seq,
     })).messages).toEqual([]);
 
-    await expect(harness.cloud.enqueueOffer(TENANT_A, device.deviceId, input))
-      .rejects.toSatisfy((error: unknown) => isCloudError(error, 'coordination_input_invalid'));
+    await expect(harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, input))
+      .rejects.toSatisfy((error: unknown) => isCloudError(error, 'agent_task_already_exists'));
     expect((await harness.core.mailbox.readAfter(TENANT_A, {
       deviceId: device.deviceId,
       afterSeq: first.seq,
@@ -291,9 +287,10 @@ describe('enqueueOffer', () => {
   it('numbers the envelope with the same seq the mailbox row gets', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
 
-    const first = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const second = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    const first = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    const second = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     expect([first.seq, second.seq]).toEqual([1, 2]);
 
     const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
@@ -338,15 +335,17 @@ describe('enqueueOffer', () => {
       deviceId: 'dev_whoever', productId: 'probe', deviceName: 'fixture',
       devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1,
     });
+    await base.stores.devices.recordCapabilities(TENANT_A, { deviceId: 'dev_whoever', capabilities: [AGENT_HOME_CONTRACT_CAPABILITY] });
     await expect(
-      skewed.enqueueOffer(TENANT_A, 'dev_whoever', { payload: offerPayload() }),
+      skewed.enqueueAgentOffer(TENANT_A, 'dev_whoever', { payload: offerPayload() }),
     ).rejects.toSatisfy((error: unknown) => isCloudError(error, 'mailbox_seq_mismatch'));
   });
 
   it('opens the task attempt with no owner until a device claims it', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
 
     const attempt = await harness.cloud.readTaskAttempt(TENANT_A, taskId);
     expect(attempt?.deviceId).toBe(device.deviceId);
@@ -359,7 +358,8 @@ describe('bounded read-ahead navigation', () => {
   it('reads later pages without ACK and replays from the durable cursor after reconnect', async () => {
     const harness = createHarness({ eventsPageLimit: 2, longPollHoldMs: 1, mailboxWake: createInProcessMailboxWake({ fallbackMs: 1 }) });
     const device = await harness.pairDevice(TENANT_A);
-    for (let i = 0; i < 4; i++) await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload(String(i)) });
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    for (let i = 0; i < 4; i++) await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload(String(i)) });
     const first = await poll(harness, device.authorization, 0);
     expect(first.events.map(event => event.seq)).toEqual([1, 2]);
     const second = await harness.request('/byok/events?cursor=0&afterSeq=2', { headers: device.authorization });

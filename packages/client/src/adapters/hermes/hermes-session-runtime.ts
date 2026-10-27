@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { RuntimeTaskInput } from '../../types';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import type { Session, PolicyUnsupportedError, SteerUnsupportedError } from '../../types';
 import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import type { RuntimeExecutionFailure, RuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
@@ -190,7 +191,7 @@ export function createHermesSession(scratch: ExecutionScratch, root: string, liv
       })();
     }
 
-    async followUp(task: TaskOfferPayload): Promise<void> {
+    async followUp(task: RuntimeTaskInput): Promise<void> {
       if (typeof task.instruction !== 'string') throw new PolicyUnsupportedError('hermes requires a string instruction');
       if (task.dispatchSelection !== undefined) throw new PolicyUnsupportedError('hermes does not accept a dispatch selection');
       this.prompt(task.instruction);

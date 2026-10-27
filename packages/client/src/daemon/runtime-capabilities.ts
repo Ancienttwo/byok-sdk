@@ -20,11 +20,6 @@ import type { RuntimeCapabilities } from '../types';
  * `create-daemon.ts` would make `task-runner.ts` import back into it and close
  * a cycle. A leaf module with no local imports beyond `../types` is the one
  * place both can reach.
- *
- * The connection-level `interactive-approval` flag (`CAPABILITY_FLAGS`,
- * `@byok-sdk/protocol`) is a separate, connection-scoped signal and is NOT derived
- * from this: `create-daemon.ts`'s `computeCapabilities` keeps its own
- * semantics.
  */
 export function toRuntimeInfoCapabilities(caps: RuntimeCapabilities): ProtocolRuntimeCapabilities {
   return {

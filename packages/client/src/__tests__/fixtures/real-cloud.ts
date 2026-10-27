@@ -14,8 +14,9 @@ import { serve } from '@hono/node-server';
 // for canonical device-proof bytes and truth selector contracts; it still does
 // not make the daemon depend on the hosted implementation.
 import type { PresenceHint } from '@byok-sdk/core';
-import type { AgentRef, TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { AGENT_EGRESS_FRESH_SESSION_CAPABILITY, type AgentRef, type RuntimeId } from '@byok-sdk/protocol';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
+import { freshTestAgentRef } from './test-agent';
 import {
   AgentExecutionInputSchema,
   createInMemoryByokCloud,
@@ -54,20 +55,19 @@ export interface RealCloudHandle {
   readonly tenant: TenantId;
   /** Mint a pairing code carrying this fixture's tenant and the product the handle was started with. */
   createPairingCode(): Promise<PairingCodeInfo>;
-  /** The hosted control-plane input: hand a device a frozen-v1 `task.offer`. No `TaskHandle` exists on this surface. */
-  enqueueOffer(deviceId: string, instruction: string): Promise<EnqueuedOffer>;
-  /** Additive hosted offer whose logical toolset ids must resolve on the target device before claim. */
-  enqueueToolsetOffer(deviceId: string, payload: TaskOfferWithToolsetsPayload): Promise<EnqueuedOffer>;
   /**
-   * Fresh Agent execution through its one hosted entry, `submitAgentExecution` (#470/#484),
-   * admitted only after the daemon's authenticated capability snapshot is durable. Runs with the
-   * default egress policy and `terminalProjection: none`; select a built-in `runtime` or a `harnessId`.
+   * Fresh Agent execution through its one hosted entry, `submitAgentExecution` (#470/#484). No
+   * `TaskHandle` exists on this surface. Waits until the device's authenticated capability snapshot
+   * durably carries the Agent egress capabilities, then submits with the default egress policy and
+   * `terminalProjection: none`. Targets `harnessId` when given, else `runtime` (default `pi`, the
+   * stub adapter's id); `agentRef` defaults to a new Agent per call.
    */
   submitFreshAgent(deviceId: string, input: {
     readonly instruction: string;
-    readonly agentRef: AgentRef;
-    readonly runtime?: 'pi';
+    readonly agentRef?: AgentRef;
+    readonly runtime?: RuntimeId;
     readonly harnessId?: string;
+    readonly requiredToolsets?: readonly string[];
     readonly taskId?: string;
   }): Promise<EnqueuedOffer>;
   /** Accept a host cancellation and durably enqueue the frozen-v1 `task.cancel` message. */
@@ -99,6 +99,19 @@ export interface StartRealCloudOptions {
   readonly presenceTtlMs?: number;
   /** Hosted throttle between accepted publications. `0` disables it, for tests that beat faster than a deployment would. */
   readonly presenceMinimumIntervalMs?: number;
+}
+
+/** The daemon publishes its capabilities on its first long-poll `conn.hello`; admission reads them from the durable device row. */
+async function waitForAgentEgressCapabilities(cloud: ByokCloud, tenant: TenantId, deviceId: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    const device = (await cloud.listDevices(tenant)).find((candidate) => candidate.deviceId === deviceId);
+    if (device?.capabilities?.includes(AGENT_EGRESS_FRESH_SESSION_CAPABILITY)) return;
+    if (Date.now() >= deadline) {
+      throw new Error(`device ${deviceId} never advertised ${AGENT_EGRESS_FRESH_SESSION_CAPABILITY}; configure the daemon with agentHome and agentEgress`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 /**
@@ -150,16 +163,20 @@ export async function startRealCloud(opts: StartRealCloudOptions): Promise<RealC
         url: `http://${LOOPBACK}:${info.port}`,
         tenant,
         createPairingCode: () => cloud.createPairingCode(tenant, { productId: opts.productId }),
-        enqueueOffer: (deviceId, instruction) =>
-          cloud.enqueueOffer(tenant, deviceId, { payload: { instruction } }),
-        enqueueToolsetOffer: (deviceId, payload) =>
-          cloud.enqueueToolsetOffer(tenant, deviceId, { payload }),
-        submitFreshAgent: (deviceId, { taskId, ...fields }) =>
-          cloud.submitAgentExecution(tenant, AgentExecutionInputSchema.parse({
+        submitFreshAgent: async (deviceId, { taskId, agentRef, runtime, harnessId, ...fields }) => {
+          await waitForAgentEgressCapabilities(cloud, tenant, deviceId);
+          return cloud.submitAgentExecution(tenant, AgentExecutionInputSchema.parse({
             taskId: taskId ?? globalThis.crypto.randomUUID(),
             deviceId,
-            payload: { ...fields, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' } },
-          })),
+            payload: {
+              ...fields,
+              ...(harnessId === undefined ? { runtime: runtime ?? 'pi' } : { harnessId, ...(runtime === undefined ? {} : { runtime }) }),
+              agentRef: agentRef ?? freshTestAgentRef(),
+              egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+              terminalProjection: { mode: 'none' },
+            },
+          }));
+        },
         cancelTask: (taskId, reason) => cloud.cancelTask(tenant, taskId, reason),
         readTaskAttempt: (taskId) => cloud.readTaskAttempt(tenant, taskId),
         readTerminalBody: async (taskId) => (await cloud.readTerminalReceipt(tenant, taskId))?.body,

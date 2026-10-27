@@ -1,3 +1,5 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -7,7 +9,7 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { SteerUnsupportedError } from '../types';
-import { startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
+import { dispatchResumedAgentTask, startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
 import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -53,12 +55,11 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
   it('a polled task.steer whose handler throws leaves the persisted cursor unadvanced; a re-poll redelivers it and only then advances', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
@@ -77,21 +78,24 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({ deviceId: record.deviceId, instruction: 'run over long-poll' });
-    await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
-    const session = adapter.sessions[0]!;
-
-    // The task.offer itself is now the daemon's one successfully-processed
-    // envelope; its seq is the "before" baseline the steer's seq must sit
-    // strictly above. Read it via `vi.waitFor` — the on-disk write is
-    // fire-and-forget from `advanceCursor`'s point of view (see
-    // `connection-manager.ts`), so it may still be landing.
+    // The resumed offer's seq is the "before" baseline the steer's seq must
+    // sit strictly above, and it is above every seq of the seed run. Read it
+    // via `vi.waitFor` — the on-disk write is fire-and-forget from
+    // `advanceCursor`'s point of view (see `connection-manager.ts`), so it
+    // may still be landing.
     const cursorStore = new CursorStore(storeDir);
+    let seedCursor = 0;
+    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, instruction: 'run over long-poll' }, {
+      beforeResume: async () => {
+        await vi.waitFor(async () => expect(await cursorStore.load(real.url, record.deviceId)).toBeGreaterThan(0));
+        seedCursor = (await cursorStore.load(real.url, record.deviceId))!;
+      },
+    });
+    await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
     let baseline: number | undefined;
     await vi.waitFor(async () => {
       baseline = await cursorStore.load(real.url, record.deviceId);
-      expect(baseline).toBeGreaterThan(0);
+      expect(baseline).toBeGreaterThan(seedCursor);
     });
 
     // Force the NEXT steer to throw — a genuine, uncaught handler failure
@@ -146,12 +150,11 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
   it('a polled task.steer whose handler throws SteerUnsupportedError is recorded and acked: the cursor advances and it is never redelivered', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
 
-    const workspaceRoot = await tmpDir('byok-e2e-workspace-');
     const storeDir = await tmpDir('byok-e2e-store-');
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, storeDir, agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },
@@ -168,20 +171,24 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
         expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
       });
 
-      const handle = await real.byok.dispatch({ deviceId: record.deviceId, instruction: 'run over long-poll' });
-      await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
-      const session = adapter.sessions[0]!;
-
       const cursorStore = new CursorStore(storeDir);
+      let seedCursor = 0;
+      const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, instruction: 'run over long-poll' }, {
+        beforeResume: async () => {
+          await vi.waitFor(async () => expect(await cursorStore.load(real.url, record.deviceId)).toBeGreaterThan(0));
+          seedCursor = (await cursorStore.load(real.url, record.deviceId))!;
+        },
+      });
+      await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
+
       let baseline: number | undefined;
       await vi.waitFor(async () => {
         baseline = await cursorStore.load(real.url, record.deviceId);
-        // Strictly positive, not merely "a number": the task is already
-        // Running, so the offer's own handler has succeeded and its seq is
-        // already persisted. Reading a 0/undefined baseline here would let the
-        // OFFER's advance satisfy the post-steer assertion below.
-        expect(baseline).toBeGreaterThan(0);
+        // Above the seed run's cursor, not merely "a number": the task is
+        // already Running, so the resumed offer's own handler has succeeded
+        // and its seq is persisted. A baseline below it would let the OFFER's
+        // advance satisfy the post-steer assertion below.
+        expect(baseline).toBeGreaterThan(seedCursor);
       });
 
       // Persistent (never auto-clearing) so a redelivery would fail again —

@@ -8,7 +8,6 @@ import { AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
@@ -92,7 +91,6 @@ describe('a startup-deadline decline hands the canonical Agent home back to the 
     it(`${phase}: the replacement on the same runner is admitted, never declined busy`, async () => {
       const hostStorageRoot = await makeRoot();
       const storeDir = await makeRoot();
-      const workspaceRoot = await makeRoot();
       const adapter = new StubRuntimeAdapter('pi');
       const agentHome = new AgentHomeManager({ hostStorageRoot });
       const sent: Envelope[] = [];
@@ -101,13 +99,11 @@ describe('a startup-deadline decline hands the canonical Agent home back to the 
       // runner re-reads `startupTimeoutMs` off this exact object per offer.
       const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
         adapters: [adapter],
-        workspaceRoot,
         agentHome,
         agentSessionHandoffs: new AgentSessionHandoffStore(),
         deviceId: 'device-deadline-release',
         send: (envelope) => sent.push(envelope),
         blobClient: unusedBlobClient,
-        sessionWorkspaces: new SessionWorkspaceStore(storeDir),
         approvalRegistry: new ApprovalRegistry(),
         storeDir,
         productId: 'deadline-release-guard',

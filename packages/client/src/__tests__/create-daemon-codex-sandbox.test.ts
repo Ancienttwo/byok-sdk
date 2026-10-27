@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import os from 'node:os';
 import path from 'node:path';
@@ -28,7 +29,7 @@ function config(extra: Partial<DaemonConfig> = {}): DaemonConfig {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
     productId: 'codex-sandbox-config-test',
     serverUrl: 'http://127.0.0.1:1',
-    workspaceRoot: path.join(os.tmpdir(), 'byok-codex-sandbox-workspaces'),
+    agentHome: testAgentHomeConfig(),
     storeDir: path.join(os.tmpdir(), 'byok-codex-sandbox-store'),
     runtimeAllowlist: ['codex'],
     ...extra,

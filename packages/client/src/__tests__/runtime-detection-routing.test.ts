@@ -1,3 +1,4 @@
+import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createEnvelope } from '@byok-sdk/protocol';
 import { runStatusCommand } from '../bin/commands/status';
@@ -22,7 +23,7 @@ async function config(): Promise<DaemonConfig> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-detect-routing-'));
   dirs.push(root);
   return { localAgentRelease: { version: '0.0.0-test' }, productName: 'Observation', productId: 'observation',
-    workspaceRoot: root, storeDir: path.join(root, 'store'), serverUrl: 'http://example.invalid', runtimeAllowlist: ['codex'] };
+    storeDir: path.join(root, 'store'), serverUrl: 'http://example.invalid', runtimeAllowlist: ['codex'] };
 }
 function refusingAdapter() {
   const adapter = new StubRuntimeAdapter('codex');
@@ -56,7 +57,7 @@ it('real daemon registration does not advertise a refused runtime', async () => 
   const server = await TestServer.start(); servers.push(server);
   cfg.serverUrl = server.url;
   const adapter = refusingAdapter();
-  const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter]);
+  const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter]);
   daemons.push(daemon);
   await daemon.pair('pairing-code'); await daemon.start();
   const hello = await server.waitFor(e => e.type === 'conn.hello');
@@ -68,10 +69,10 @@ it('real daemon registration does not advertise a refused runtime', async () => 
 it.each(['explicit', 'automatic'] as const)('real TaskRunner %s selection declines a refused runtime without starting it', async mode => {
   const cfg = await config(); const server = await TestServer.start(); servers.push(server); cfg.serverUrl = server.url;
   const adapter = refusingAdapter();
-  const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter]); daemons.push(daemon);
+  const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(),  storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter]); daemons.push(daemon);
   await daemon.pair('pairing-code'); await daemon.start();
   const before = vi.mocked(adapter.detect).mock.calls.length;
-  server.send(createEnvelope('task.offer', { instruction: 'no start', ...(mode === 'explicit' ? { runtime: 'codex' as const } : {}) },
+  server.send(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'no start', ...(mode === 'explicit' ? { runtime: 'codex' as const } : {}) },
     { taskId: `refuse-${mode}`, seq: server.nextSeq() }));
   const declined = await server.waitFor(e => e.type === 'task.decline');
   expect(declined.payload).toMatchObject({ retryable: true }); // diagnostic reason does not rewrite task policy

@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -8,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { startRealCloud, type RealCloudHandle } from './fixtures/real-cloud';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 const SALESKO_MCP_FIXTURE = fileURLToPath(new URL('./fixtures/fake-salesko-mcp.mjs', import.meta.url));
@@ -40,7 +42,8 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Salesko Personal Agent',
         productId: 'salesko',
         serverUrl: cloud.url,
-        workspaceRoot: await tmpDir('byok-hosted-salesko-mcp-workspace-'),
+        agentHome: testAgentHomeConfig(),
+        agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
         storeDir: await tmpDir('byok-hosted-salesko-mcp-store-'),
         runtimeAllowlist: ['claude'],
         runtimePreference: ['claude'],
@@ -75,13 +78,13 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
       expect(JSON.stringify(presence)).not.toContain(SALESKO_MCP_FIXTURE);
     });
 
-    const offer = await cloud.enqueueToolsetOffer(device.deviceId, {
+    const offer = await cloud.submitFreshAgent(device.deviceId, {
       instruction: 'salesko:find-leads',
       runtime: 'claude',
       requiredToolsets: ['salesko.connectors'],
     });
     expect(offer.envelope).toMatchObject({
-      type: 'task.offer_with_toolsets',
+      type: 'task.offer_for_agent_with_egress_fresh',
       payload: { runtime: 'claude', requiredToolsets: ['salesko.connectors'] },
     });
     // The host sends logical ids only. Local commands remain device authority.
@@ -96,8 +99,9 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
     expect(terminalBody).not.toContain(SALESKO_MCP_FIXTURE);
     const terminal = decodeEnvelope(terminalBody ?? '');
     expect(terminal).toMatchObject({ type: 'task.complete', task_id: offer.taskId });
+    // Fake Claude returns this result only from the configured `salesko` server's `find_leads` tool. Agent
+    // egress coalesces activity to its latest value, so the tool call itself is not kept in the activity tail.
     expect(JSON.stringify(terminal)).toContain('Ada Lead');
     expect(JSON.stringify(terminal)).toContain('salesko-fake');
-    expect(JSON.stringify(await cloud.readActivity(offer.taskId))).toContain('mcp__salesko__find_leads');
   }, 15_000);
 });

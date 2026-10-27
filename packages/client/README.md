@@ -57,7 +57,7 @@ it cannot select a task id or product destination.
 
 It also installs the SDK-reserved `byok-agent-result-mcp` helper, the
 structured outcome channel of a `terminalProjection.mode: 'result-document'`
-offer (wire v3). Its one tool, `submit_result`, advertises the offer's frozen
+offer. Its one tool, `submit_result`, advertises the offer's frozen
 schema, which the helper fetches from the daemon over the authenticated
 control socket under its single-task context token; it forwards the model's
 arguments unvalidated. The daemon validates them against that schema, stages
@@ -271,7 +271,7 @@ descriptor and side-effect-free `prepare()` that returns one prepared
 operation; the old direct `start()` surface is removed. A published
 `Session.close()` is a bounded quiescent-disposal receipt. It resolves only
 after the adapter-owned process tree and task resources are gone, or rejects
-with `RuntimeDisposalFailure`. The daemon keeps active/Git ownership after a
+with `RuntimeDisposalFailure`. The daemon keeps active ownership after a
 rejection and never rewrites the task's already-established terminal result.
 
 Claude, Codex and Pi tasks can select operator-owned local stdio MCP servers by logical id.
@@ -395,13 +395,17 @@ repairs a file write that such a loss undid. A process crash can leave a
 when its process has ended.
 
 Startup materializes and write-probes the canonical root before publishing
-`agent-home-contract`. `agentHome` and `gitWorkspace` are mutually exclusive;
-strict Agent execution has one workspace authority and never falls back to a
-task-scoped Git workspace.
+`agent-home-contract`. The Agent home is the only workspace a task runs in.
 
-Successful startup with this configuration advertises `agent-home-contract`. Agent offers are distinct
-from legacy task offers and fail closed when identity, profile revision, or
-session/runtime/cwd evidence does not match. Within one daemon process,
+Successful startup with this configuration advertises `agent-home-contract`.
+Since wire v4 every offer is an Agent offer, and the daemon runs Agent offers
+only: a daemon without `agentHome` advertises no `agent-home-contract` and
+declines every offer. `DaemonConfig.strictAgentOnly` is removed and raises
+`DaemonConfigFieldRemovedError`. Wire v4 also removed Git workspace mode
+(#925): `DaemonConfig.gitWorkspace` and `DaemonConfig.workspaceRoot` raise
+`DaemonConfigFieldRemovedError`, and the `byok-agent workspaces` command is
+gone. Agent offers fail closed when identity, profile
+revision, or session/runtime/cwd evidence does not match. Within one daemon process,
 execution leases are scoped to `(agentId, sessionRef)`: different sessions of
 one Agent may run concurrently in the same canonical home, while the same
 session remains serialized. Fresh

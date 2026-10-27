@@ -1,3 +1,4 @@
+import { testAgentHomeConfig } from './fixtures/test-agent';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 /**
@@ -43,6 +44,7 @@ import {
 import { openJournalDatabase } from '../daemon/journal/sqlite-support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startRealCloud, type RealCloudHandle } from './fixtures/real-cloud';
+import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
 const IDENTITY: JournalIdentity = { tenantId: 'tenant-a', productId: 'test-product', deviceId: 'dev_1' };
 
@@ -51,7 +53,7 @@ async function tmpDir(prefix: string): Promise<string> {
 }
 
 function offerRecord(taskId: string, seq: number): ReceivedEnvelopeRecord {
-  const bytes = JSON.stringify({ v: 1, id: `env-${taskId}`, type: 'task.offer', task_id: taskId, seq });
+  const bytes = JSON.stringify({ v: 1, id: `env-${taskId}`, type: 'task.offer_for_agent', task_id: taskId, seq });
   return {
     identity: IDENTITY,
     envelopeId: `env-${taskId}`,
@@ -277,7 +279,6 @@ describe('S3.4 crash matrix, points 1-6', () => {
     }> {
       cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, mailboxFallbackMs: 20 });
       const storeDir = await store('byok-crash-cloud-store-');
-      const workspaceRoot = await store('byok-crash-cloud-workspace-');
       const adapter = new StubRuntimeAdapter();
       // The journal is injected so this test owns its lifetime — it has to
       // outlive the daemon that used it, which is the whole point of a crash.
@@ -288,7 +289,8 @@ describe('S3.4 crash matrix, points 1-6', () => {
           localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
           productId: 'test-product',
           serverUrl: cloud.url,
-          workspaceRoot,
+          agentHome: testAgentHomeConfig(),
+          agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
           storeDir,
         },
         [adapter],
@@ -302,7 +304,7 @@ describe('S3.4 crash matrix, points 1-6', () => {
       const record = await daemon.pair(pairing.code);
       await daemon.start();
 
-      const offer = await cloud.enqueueOffer(record.deviceId, 'do it, then crash around it');
+      const offer = await cloud.submitFreshAgent(record.deviceId, { instruction: 'do it, then crash around it' });
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1), { timeout: 10_000 });
       adapter.sessions[0]?.emit({ type: 'progress', text: 'working' });
       adapter.sessions[0]?.emit({ type: 'turn_end' });

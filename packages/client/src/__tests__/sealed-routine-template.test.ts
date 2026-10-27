@@ -15,7 +15,6 @@ import { AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SealedTasks, type SealedScopeKeyring } from '../daemon/sealed-task';
-import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { testIngressBudget } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
@@ -35,7 +34,7 @@ type Payload = Record<string, unknown> & {
 };
 type Line = { type: MessageType; task_id: string; ts: string; payload: Payload };
 
-const routineLines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v3.envelopes.ndjson', import.meta.url), 'utf8')
+const routineLines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v4.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as Line)
@@ -87,13 +86,13 @@ async function device(keyring: SealedScopeKeyring = new GoldenKeyring()) {
   const adapter = new StubRuntimeAdapter('pi');
   const runner = new TaskRunner({
     getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
-    adapters: [adapter], workspaceRoot: path.join(root, 'workspace'),
+    adapters: [adapter],
     agentHome: new AgentHomeManager({ hostStorageRoot: path.join(root, 'home') }),
     agentEgressPolicy: first.payload.egressPolicy as never, agentSessionHandoffs: new AgentSessionHandoffStore(),
     deviceId: 'device-golden-1', tenantId: GOLDEN_TENANT, productId: 'sealed-routine', storeDir,
     getServerCapabilities: () => ['sealed-payload-v1'], send: (envelope) => { sent.push(envelope); },
     blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
-    sessionWorkspaces: new SessionWorkspaceStore(storeDir), approvalRegistry: new ApprovalRegistry(),
+    approvalRegistry: new ApprovalRegistry(),
     agentMessageMcpBin: { command: process.execPath, args: ['/sdk/byok-agent-message-mcp.js'] },
     agentMessageMcpPreflight: async () => {},
     sealedTasks: new SealedTasks({
