@@ -775,11 +775,6 @@ async function direct(name: string, instruction = 'fixture direct input') {
   expect(response.status).toBe(200);
   return response.text();
 }
-async function oldMembershipStore(name: string) {
-  await sql(name, 'DROP TABLE cloud_run_turns');
-  await sql(name, 'ALTER TABLE cloud_executions DROP COLUMN membershipPending');
-  await sql(name, 'UPDATE cloud_executions SET settlementAck=NULL');
-}
 async function allTranscript(name: string, limit = 2) {
   const runs: TranscriptPage['runs'] = []; const items: Row[] = [];
   let page = await transcript(name, { limit }); const horizon = page.next.horizon;
@@ -1207,65 +1202,8 @@ describe('4e-2 native text handoff, transcript paging and legacy history', () =>
     const exhausted = await transcript(name, { limit: 3, after: page.next }); expect(exhausted.runs).toEqual([]); expect(exhausted.items).toEqual([]); expect(exhausted.next).toEqual(page.next);
   });
 
-  it('restores a purged legacy turn from true committed native input and repeats no migration writes', async () => {
-    const name = await setup({ audit: true }); const item = await enqueue(name, { dedupKey: 'legacy-purged', text: 'original legacy durable text' }); const before = await waitAck(name);
-    const runId = before.cloud_executions![0]!.conversationId;
-    expect(entries(before).find(entry => entry.kind === 'byok.run-input')).toMatchObject({ data: { items: [{ seq: item.seq, text: 'original legacy durable text' }] } });
-    await sql(name, 'DELETE FROM cloud_inbox WHERE seq=?', [Number(item.seq)]); await oldMembershipStore(name);
-    await restart('alarm'); await json(name, 'ready'); let page = await transcript(name); const migrated = await dump(name);
-    expect(page.items).toEqual([]); expect(page.runs[0]!.turns).toMatchObject([{ seq: item.seq, text: 'original legacy durable text', state: null, revision: null }]);
-    expect(migrated.cloud_run_turns).toEqual([{ runId, seq: item.seq, claimEvent: null, releaseEvent: null }]);
-    expect(migrated.cloud_executions).toMatchObject([{ membershipPending: 0, settlementAck: null }]);
-    expect(migrated.fixture_settlements).toEqual(before.fixture_settlements);
-    await restart('alarm'); await json(name, 'ready'); page = await transcript(name); const second = await dump(name);
-    expect(second.cloud_run_turns).toEqual(migrated.cloud_run_turns); expect(second.cloud_events).toEqual(migrated.cloud_events);
-    expect(page.runs[0]!.turns).toHaveLength(1); expect(calls).toHaveLength(1); await json(name, 'release-alarm');
-  });
 
-  for (const outcome of ['reclaim', 'queued', 'expiry-purge'] as const) it(`preserves the historical native input and correct legacy ownership after requeue -> ${outcome}`, async () => {
-    const name = await setup({ audit: true, nativePause: 'request' }); const item = await enqueue(name, { dedupKey: 'legacy-requeue', text: 'requeued historical input' });
-    await eventually(async () => expect(tasks(await dump(name)).some(task => ((task.state as Row).checkpoint as Row)?.phase === 'request')).toBe(true));
-    const originalId = (await dump(name)).cloud_executions![0]!.conversationId;
-    await restart('alarm'); await json(name, 'ready');
-    expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'queued', runId: null, attempts: 1 }]);
-    if (outcome === 'reclaim') { await json(name, 'release-alarm'); await waitAck(name, 2); await sql(name, 'DELETE FROM cloud_inbox WHERE seq=?', [Number(item.seq)]); }
-    if (outcome === 'expiry-purge') {
-      await sql(name, 'UPDATE cloud_inbox SET expiresAt=? WHERE seq=?', [Date.now() - 1, Number(item.seq)]);
-      await json(name, 'release-alarm'); await json(name, 'alarm');
-      expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'expired', runId: null }]);
-      await sql(name, 'UPDATE cloud_inbox SET settledAt=? WHERE seq=?', [Date.now() - 8 * DAY, Number(item.seq)]);
-      await json(name, 'alarm'); expect((await dump(name)).cloud_inbox).toHaveLength(0);
-    }
-    await oldMembershipStore(name); await restart('alarm'); await json(name, 'ready'); const page = await transcript(name); const rows = await dump(name);
-    const allTurns = page.runs.flatMap(run => run.turns.map(turn => ({ ...turn, sourceRun: run.nativeRunId })));
-    if (outcome === 'queued') { expect(allTurns).toHaveLength(0); expect(page.items).toMatchObject([{ seq: item.seq, runId: null, text: 'requeued historical input' }]); }
-    else {
-      expect(page.items).toHaveLength(0); expect(allTurns).toHaveLength(1);
-      expect(allTurns[0]).toMatchObject({ seq: item.seq, text: 'requeued historical input', state: null, revision: null });
-      if (outcome === 'reclaim') { expect(allTurns[0]!.sourceRun).not.toBe(originalId); expect(page.runs.find(run => run.nativeRunId === originalId)!.turns).toHaveLength(0); }
-      else expect(allTurns[0]).toMatchObject({ sourceRun: originalId, runId: null, state: null, revision: null });
-    }
-    expect(rows.cloud_executions!.every(row => row.membershipPending === 0)).toBe(true);
-    expect(calls).toHaveLength(outcome === 'reclaim' ? 1 : 0);
-    // Keep the queued case paused. Its next real alarm must not mutate this legacy projection assertion.
-    if (outcome !== 'queued') await json(name, 'release-alarm');
-  });
 
-  it('resumes a failed middle-run backfill without duplicate rows or invented clocks', async () => {
-    const name = await setup({ audit: true });
-    for (let i = 0; i < 3; i++) { await enqueue(name, { dedupKey: `legacy-resume:${i}`, text: `legacy source ${i}` }); await waitAck(name, i + 1); }
-    const before = await dump(name); const ids = before.cloud_executions!.map(row => Number(row.conversationId));
-    await sql(name, 'DELETE FROM cloud_inbox'); await oldMembershipStore(name);
-    await sql(name, `CREATE TRIGGER fixture_backfill_fail BEFORE UPDATE ON cloud_executions WHEN NEW.membershipPending=0 AND OLD.membershipPending=1 AND NEW.conversationId=${ids[1]} BEGIN SELECT RAISE(ABORT,'middle-backfill-failure'); END`);
-    await restart('alarm'); await code(name, 'ready', {}, 'CLOUD_MODEL_REQUEST_FAILED'); const failed = await dump(name);
-    expect(failed.cloud_executions!.map(row => row.membershipPending)).toEqual([1, 1, 0]);
-    expect(failed.cloud_run_turns).toHaveLength(1); expect(failed.cloud_run_turns![0]!.runId).toBe(ids[2]);
-    await sql(name, 'DROP TRIGGER fixture_backfill_fail'); await restart('alarm'); await json(name, 'ready'); const recovered = await dump(name);
-    expect(recovered.cloud_executions!.map(row => row.membershipPending)).toEqual([0, 0, 0]);
-    expect([...recovered.cloud_run_turns!].sort((a, b) => Number(a.runId) - Number(b.runId))).toEqual(ids.map((runId, i) => ({ runId, seq: before.cloud_inbox![i]!.seq, claimEvent: null, releaseEvent: null })));
-    expect((await transcript(name)).runs.map(run => run.turns[0]!.text)).toEqual(['legacy source 2', 'legacy source 1', 'legacy source 0']);
-    await restart('alarm'); await json(name, 'ready'); expect((await dump(name)).cloud_run_turns).toEqual(recovered.cloud_run_turns); expect(calls).toHaveLength(3); await json(name, 'release-alarm');
-  });
 });
 
 describe('4e-2 remaining native budget and legacy controls', () => {
@@ -1276,36 +1214,7 @@ describe('4e-2 remaining native budget and legacy controls', () => {
     expect(receipts(rows)).toMatchObject([{ compensated: 1 }]);
   });
 
-  for (const missing of [false, true]) it(`clears a legacy pending flag when ${missing ? 'the native conversation is missing' : 'an empty claim has no committed input'}`, async () => {
-    const name = await setup({ audit: true, ...(!missing ? { pauseAdmission: true } : {}) });
-    const item = await enqueue(name, { dedupKey: 'legacy-no-source', text: 'no legacy source after control' });
-    if (!missing) {
-      await eventually(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
-      await json(name, 'cancel-item', { seq: item.seq }); await json(name, 'release');
-    }
-    const before = await waitAck(name); const id = Number(before.cloud_executions![0]!.conversationId);
-    if (missing) { await sql(name, 'DELETE FROM cloud_inbox'); await sql(name, 'DELETE FROM pi_conversations WHERE id=?', [id]); }
-    else expect(entries(before).filter(entry => entry.kind === 'byok.run-input')).toHaveLength(0);
-    await oldMembershipStore(name); await restart('alarm'); await json(name, 'ready'); const rows = await dump(name);
-    expect(rows.cloud_run_turns).toHaveLength(0); expect(rows.cloud_executions).toMatchObject([{ membershipPending: 0, settlementAck: null }]);
-    const page = await transcript(name); expect(page.runs[0]!.turns).toHaveLength(0);
-    expect(rows.fixture_settlements).toEqual(before.fixture_settlements); await json(name, 'release-alarm');
-  });
 
-  it('delivers a restored active legacy run once with a null admission digest', async () => {
-    const name = await setup({ audit: true, pauseTool: true }); scenario = { tools: [1] };
-    await enqueue(name, { dedupKey: 'legacy-active', text: 'active old run' });
-    await eventually(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
-    await oldMembershipStore(name); await sql(name, 'UPDATE cloud_executions SET admissionDigest=NULL,admittedSeqs=NULL');
-    await restart('alarm'); await json(name, 'ready'); const recovered = await dump(name);
-    expect(recovered.cloud_executions).toMatchObject([{ state: 'interrupted', settlementAck: 0, membershipPending: 0 }]);
-    expect(recovered.fixture_settlements).toHaveLength(0);
-    await json(name, 'release-alarm'); const rows = await waitAck(name);
-    expect(receipts(rows)).toMatchObject([{ run: { admissionDigest: null, admittedSeqs: [] } }]);
-    expect(rows.fixture_settlements).toHaveLength(1); expect(calls).toHaveLength(1);
-    await restart('alarm'); await json(name, 'ready'); await json(name, 'release-alarm');
-    expect((await dump(name)).fixture_settlements).toHaveLength(1);
-  });
 });
 
 describe('4e-2 zero-dispatch credential compensation', () => {
@@ -1473,33 +1382,4 @@ describe('4e-2 review fixes: independent consumer closes and legacy reads', () =
     expect(recovered.cloud_executions!.find(row => row.trigger === 'wake')).toMatchObject({ steps: 1, sentRequests: 1, inputTokens: 23, outputTokens: 5 });
   }, 15_000);
 
-  it('skips one unreadable native legacy input, serves healthy work, then retries that input at the next boot', async () => {
-    const name = await setup({ audit: true });
-    for (let i = 0; i < 3; i++) { await enqueue(name, { dedupKey: `legacy-read-isolation:${i}`, text: `readable legacy text ${i}` }); await waitAck(name, i + 1); }
-    const original = await dump(name); const ids = original.cloud_executions!.map(row => Number(row.conversationId));
-    const input = (await sql(name, "SELECT id,record FROM pi_entries WHERE conversation_id=? AND json_extract(record,'$.kind')='byok.run-input'", [ids[1]!]))[0]!;
-    await sql(name, 'DELETE FROM cloud_inbox'); await oldMembershipStore(name);
-    // JSON remains valid for SQLite. The native model contribution must be an array; this real row is unreadable.
-    await sql(name, "UPDATE pi_entries SET record=json_set(record,'$.model',json('{}')) WHERE id=?", [Number(input.id)]);
-    await restart('alarm'); await json(name, 'ready');
-    const skipped = await dump(name);
-    expect(skipped.cloud_executions!.map(row => row.membershipPending)).toEqual([0, 1, 0]);
-    expect(skipped.cloud_run_turns).toHaveLength(2);
-    expect(skipped.cloud_run_turns!.map(row => row.runId).sort((a, b) => Number(a) - Number(b))).toEqual([ids[0], ids[2]]);
-    await code(name, 'context', { id: ids[1] }, 'CLOUD_MODEL_REQUEST_FAILED');
-    const page = await transcript(name);
-    expect(page.runs.find(run => run.nativeRunId === ids[1])!.turns).toHaveLength(0);
-    expect(page.runs.flatMap(run => run.turns.map(turn => turn.text)).sort()).toEqual(['readable legacy text 0', 'readable legacy text 2']);
-    await enqueue(name, { dedupKey: 'healthy-after-bad-legacy', text: 'new work after unreadable legacy input' });
-    await json(name, 'release-alarm'); await waitAck(name);
-    expect(calls).toHaveLength(4); expect(wakeInput(3).history).toHaveLength(2);
-    expect((await dump(name)).cloud_executions!.find(row => row.conversationId === ids[1])).toMatchObject({ membershipPending: 1 });
-    await sql(name, 'UPDATE pi_entries SET record=? WHERE id=?', [String(input.record), Number(input.id)]);
-    await restart('alarm'); await json(name, 'ready'); const recovered = await dump(name);
-    expect(recovered.cloud_executions!.filter(row => ids.includes(Number(row.conversationId))).every(row => row.membershipPending === 0)).toBe(true);
-    expect(recovered.cloud_run_turns!.filter(row => ids.includes(Number(row.runId)))).toHaveLength(3);
-    expect(recovered.cloud_run_turns!.find(row => row.runId === ids[1])).toEqual({ runId: ids[1], seq: original.cloud_inbox![1]!.seq, claimEvent: null, releaseEvent: null });
-    expect((await transcript(name)).runs.find(run => run.nativeRunId === ids[1])!.turns).toMatchObject([{ text: 'readable legacy text 1' }]);
-    expect(calls).toHaveLength(4); await json(name, 'release-alarm');
-  });
 });

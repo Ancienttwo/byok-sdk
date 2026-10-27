@@ -104,7 +104,7 @@ export class InvocationLedger {
         trigger TEXT NOT NULL DEFAULT 'submit', requestId TEXT, submissionId INTEGER,
         state TEXT NOT NULL DEFAULT 'interrupted', errorCode TEXT, startedAt INTEGER, settledAt INTEGER,
         reservation TEXT NOT NULL DEFAULT 'none', eligibilityJson TEXT,
-        admissionDigest TEXT, admittedSeqs TEXT, settlementAck INTEGER, revision INTEGER, membershipPending INTEGER
+        admissionDigest TEXT, admittedSeqs TEXT, settlementAck INTEGER, revision INTEGER
       );
       CREATE TABLE IF NOT EXISTS cloud_counted_tools (
         conversationId INTEGER NOT NULL, taskId TEXT NOT NULL,

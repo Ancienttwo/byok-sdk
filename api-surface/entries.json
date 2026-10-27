@@ -1490,7 +1490,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Durable Object session runtime",
-      "budgetBytes": 196394,
+      "budgetBytes": 175227,
       "zod": false,
       "codegen": true,
       "nodeBuiltins": {

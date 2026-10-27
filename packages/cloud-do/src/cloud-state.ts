@@ -16,7 +16,7 @@ export interface RunRow extends ExecutionRow {
   state: 'starting' | 'running' | 'completed' | 'failed' | 'interrupted';
   errorCode: CloudDoErrorCode | null; startedAt: number | null; settledAt: number | null;
   reservation: 'none' | 'pending' | 'held' | 'released'; eligibilityJson: string | null;
-  admissionDigest: string | null; admittedSeqs: string | null; settlementAck: number | null; revision: number | null; membershipPending: number | null;
+  admissionDigest: string | null; admittedSeqs: string | null; settlementAck: number | null; revision: number | null;
 }
 export interface TranscriptCursor { horizon: number; run: number | null; item: number | null }
 export interface TranscriptTurn {
@@ -200,18 +200,6 @@ export class CloudState {
   markInputDurable(id: number, seqs: readonly number[]): void {
     this.storage.transactionSync(() => {
       for (const seq of seqs) this.storage.sql.exec("UPDATE cloud_inbox SET inputDurable=1 WHERE seq=? AND runId=? AND state='running'",seq,id);
-    });
-  }
-  pendingBackfills(before = Number.MAX_SAFE_INTEGER): RunRow[] {
-    return this.rows<RunRow>('SELECT * FROM cloud_executions WHERE membershipPending=1 AND conversationId<? ORDER BY conversationId DESC LIMIT 25',before);
-  }
-  applyBackfill(id: number, seqs: readonly number[]): void {
-    this.storage.transactionSync(() => {
-      if (this.run(id)?.membershipPending !== 1) return;
-      for (const seq of seqs) this.storage.sql.exec(`INSERT INTO cloud_run_turns(runId,seq)
-        SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM cloud_run_turns WHERE seq=?)
-        AND NOT EXISTS(SELECT 1 FROM cloud_inbox WHERE seq=?)`,id,seq,seq,seq);
-      this.storage.sql.exec('UPDATE cloud_executions SET membershipPending=0 WHERE conversationId=?',id);
     });
   }
   unackedRuns(): RunRow[] {

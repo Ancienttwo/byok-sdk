@@ -5,7 +5,7 @@ import { Harness, ToolTask, createRegistry, defineExtension, hook, type AgentCha
 import { validateToolArguments } from '@earendil-works/pi-ai/utils/validation';
 import { CloudDoError, safeCloudError, type CloudDoErrorCode } from './errors';
 import { admitCloudPayload, prepareCloudGuard, type CloudOperationGuard } from './input-guard';
-import { CloudState, CLOUD_CONTEXT_BYTES, runInputSeqs, type RunRow } from './cloud-state';
+import { CloudState, CLOUD_CONTEXT_BYTES, type RunRow } from './cloud-state';
 import { InvocationLedger, type ExecutionRow, type InvocationRow, type InvocationTerminalState } from './invocation-ledger';
 import { createPlatformModels, type CloudModelAccount } from './platform-provider';
 import { PLATFORM_PROFILES, platformCredentialReader, type PlatformProfileId } from './platform-credentials';
@@ -712,27 +712,8 @@ export class SessionRuntime {
       clearTimeout(this.#active.timer);
       this.#active = undefined;
     }
-    await this.#backfillTurns(harness);
     await this.cloud.rearmAlarm({ busy: false, repairRetrying: false });
     this.#recovered = true;
-  }
-
-  async #backfillTurns(harness: Harness): Promise<void> {
-    let before = Number.MAX_SAFE_INTEGER;
-    for (;;) {
-      const runs = this.cloud.pendingBackfills(before);
-      if (!runs.length) return;
-      for (const run of runs) {
-        let seqs: number[];
-        try {
-          const conversation = await harness.conversation(run.conversationId as ConversationId, BACKGROUND_CONTEXT);
-          const view = conversation ? await conversation.context(BACKGROUND_CONTEXT) : undefined;
-          seqs = view ? runInputSeqs(view.entries) : [];
-        } catch { continue; } // Keep this run pending. A later boot retries its native read.
-        this.cloud.applyBackfill(run.conversationId, seqs);
-      }
-      before = runs[runs.length - 1]!.conversationId;
-    }
   }
 
   async #execute(name: string, args: Record<string, unknown>, api: ToolExecutionApi, context: Context): Promise<ToolExecutionResult> {
