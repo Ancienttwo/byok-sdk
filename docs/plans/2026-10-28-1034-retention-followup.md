@@ -87,6 +87,16 @@ bun _ops/1034-repro/repro.ts
 - `bun run build`、`bun run typecheck`、`bun run check:api-surface`、`bun run check:version-authority`：全部 exit 0。九包 declaration golden 匹配，未提高任何预算。
 - `bun run test`：exit 1，client 为 4,935 passed / 109 skipped，唯一失败是 `agent-memory-entry-constraints.test.ts` 的精确模块名单缺少新提取的 `agent-home-reader-retention.ts`，命令在此停止，未跑后续 workspaces。
 - 名单仅增加该一个模块，保留等值断言、禁止依赖与 runtime exports 检查。原因：原 reader-run eligibility 被提取为两条实际路径共用的内部 policy；没有把 daemon/control/transport 加入 entry。新增两行原因注释。该文件随后 9/9 passed；built entry check exit 0；agent-memory 发布 JS 与冻结 base 的 `cmp` exit 0、closure 仍为 74,254 B。
-- 此清单调整发生在第二轮审查后，尚待用户决定是否进行第三轮、仅针对这三行的只读审查。不会静默追加审查轮次。
+- 此清单调整经用户授权的限定第三轮只读审查通过；精确名单与发布 bundle 不变的证据均获确认。
 - 同一冻结 base 的已知范围外阻塞：`examples/bot-collaboration/src/cross-bot-join.test.ts` 的 “spent 9 + fan-out 2…” 在 clean base 单独执行也 exit 1，失败于 `cross-bot.test-support.ts:11:135`。未修改该例或产品路径。日志 `/tmp/byok-baseline-cross-bot.log`。
 - 未把定向通过与公共声明通过写成全仓通过；最终 CI 和上述审查仍未完成。
+
+## CI 体积修复
+
+用户要求直接修复 #1054 的预算失败。先合入固定 main `875eb002034017b3af665df336c0c35513304c82`；合并后同一构建仍复现 client 超限。client 主 tsup 构建增加 `minifyWhitespace: true`，只收紧生成 JS 的普通注释与空白；不启用 identifier 或 syntax minification。
+
+构建前后对照：330 个 client declaration 文件逐字节相同；23 个 JS 文件经 Acorn 解析、去位置与字面量 raw 拼写后的 AST 相同，CLI shebang 相同。检查脚本和 baseline 位于 `_ops/1054-budget/`，结果 `/tmp/byok-1054-budget-equivalence.log`。source maps 仍由原工具链生成。
+
+最终 closure：client 1,833,448 / 2,304,426 B；byok-agent 1,778,082 / 2,232,941 B。`api-surface/entries.json` 仅同步同三个 opaque import 的新行号（245、5109、5167）；预算、规则、依赖、公开声明没有变更。build、typecheck、API surface、version authority 均 exit 0。
+
+此改动解决本 PR 的 client 主构建体积阻塞。其他包的发布注释策略和统一重测仍属于 M；本稿不声明全局 M 已完成。最终提交的 workspace tests 与远端 CI 由本轮 PR 验证记录给出。

@@ -38,6 +38,8 @@ export default defineConfig({
   clean: true,
   splitting: false,
   treeshake: true,
+  // Strip source comments and formatting without renaming symbols or rewriting syntax.
+  minifyWhitespace: true,
   // Let our plugin annotate these external edges before tsup short-circuits them.
   noExternal: ['pi-web-access', /^@byok-sdk\//],
   esbuildPlugins: [workspaceExternals(), subagentsBuild(false), {
