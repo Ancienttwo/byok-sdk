@@ -7,7 +7,7 @@ import pg from 'pg';
 import { createByokCloud, createHmacTokenSigner, createInProcessMailboxWake, createWebCrypto, fullCapabilityDeclaration, tenantId,
   type ByokCloud, type ByokCloudObserver } from '@byok-sdk/cloud';
 import { createPostgresCloudStores, createPostgresCoreStores, migrate, migrationsDir } from '@byok-sdk/cloud-dataplane';
-import { PostgresE2eeMemberStore } from '@byok-sdk/cloud-dataplane/runtime';
+import { createByokPool, PostgresE2eeMemberStore } from '@byok-sdk/cloud-dataplane/runtime';
 import { createAgentHomeProjectionConsumer, createDaemonWithAdapters } from '@byok-sdk/client';
 import type { FrozenSubmitPort } from '@byok-sdk/example-host-execution-core';
 import { policy } from '@byok-sdk/example-host-execution-core/test-support';
@@ -54,7 +54,8 @@ export async function openHostedCloud(options: HostedCloudOptions = {}) {
   const schema = `hosted_sdk_${randomBytes(6).toString('hex')}`;
   const admin = new pg.Pool({ connectionString: POSTGRES_URL, max: 1 });
   await admin.query(`CREATE SCHEMA "${schema}"`);
-  const pool = new pg.Pool({ connectionString: POSTGRES_URL, max: 8, options: `-c search_path=${schema}` });
+  // The stores read int8 columns as bigint, which only the pool from createByokPool parses.
+  const pool = createByokPool({ connectionString: POSTGRES_URL!, max: 8, options: `-c search_path=${schema}` });
   const root = await mkdtemp(path.join(tmpdir(), 'hosted-cloud-'));
   const close: (() => Promise<unknown>)[] = [];
   try {
@@ -76,7 +77,8 @@ export async function openHostedCloud(options: HostedCloudOptions = {}) {
     await core.quota.writeEntitlement(tenant, { version: 1n, hardLimitBytes: 1_000_000_000n, maxObjectBytes: 100_000_000n,
       maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'test' });
 
-    const http = serve({ fetch: request => cloud.fetch(request), port: 0, hostname: '127.0.0.1' });
+    // The R2 store signs with aws4fetch, which accepts only the global Request class, so the server must not replace it.
+    const http = serve({ fetch: request => cloud.fetch(request), port: 0, hostname: '127.0.0.1', overrideGlobalObjects: false });
     close.unshift(() => new Promise<void>((resolve, reject) => {
       http.close(error => error ? reject(error) : resolve()); if ('closeAllConnections' in http) http.closeAllConnections();
     }));
