@@ -22,3 +22,17 @@ The execution path remains schema validation -> capability admission -> attempt 
 This lane owns only `packages/cloud/src/cloud.ts`, `packages/cloud/src/api/`, and this plan. No test, budget, version, or changelog changes. `.ai/context/capabilities.json` and `.ai/context/context-map.json` are absent in this checkout; no scoped agent context is added.
 
 This changes source organization only. Store and mailbox I/O remain the first likely throughput constraint at 10x load; no runtime performance improvement is claimed.
+
+## Integration and acceptance — 2026-10-28
+
+Implementation commit: `b121531826921a981da52ae1d45bc58c7b226826`.
+Verification candidate: `504cf1b7097ed71ed713e8b3b7d8123e7829590c`, incorporating frozen main `2fd42d4502693001aa6b9942342731c4d748a84a`.
+
+- `bun install --frozen-lockfile`, `bun run build`, `bun run typecheck`, and `bun run check:version-authority`: exit 0.
+- Built `packages/cloud/dist/cloud.d.ts` and `dist/index.d.ts` compared with independently built frozen main using `cmp`: both exit 0. No golden or test assertion changes relative to that base.
+- Read-only acceptance review found no correctness/security issue in the method movement, dependency capture, or method binding.
+- `bun run check:api-surface`: exit 1 solely on closure budgets. Frozen base passes the same command. The candidate adds 4,147 B to each of cloud, cloud-dataplane, cloud-dataplane/runtime, server and ui-runtime; no declaration snapshot drift.
+- Owner selected waiting for the existing lane M to remove published JS comments and remeasure budgets. Keep this lane unmerged; do not increase budgets or change API goldens to bypass the gate.
+- Full workspace test result is recorded in the PR after completion. Local command logs: `/tmp/byok-1012-{build,typecheck,api,version,test}.log`; base API log `/tmp/byok-1012-base-api.log`.
+
+Remaining acceptance: final workspace test exit and lane M budget evidence on the integrated head. New main commits do not retroactively change the pinned verification subject above.
