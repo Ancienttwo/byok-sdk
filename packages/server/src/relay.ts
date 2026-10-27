@@ -90,7 +90,9 @@ export interface TaskEventRelayOptions {
  * a restart) from now on, without reconstructing earlier events; only a host
  * read creates such a feed. `seed` gives an attached feed that no transition
  * has reached yet its first `state` entry, read back from the durable stores;
- * once a transition arrived, the feed already says more than that would.
+ * once a transition arrived, the feed already says more than that would. A
+ * seed waits behind an in-flight dispatch like any delivery, so `Offered`
+ * still comes first.
  * `detach` drops an `attached` feed that turned out
  * to have nothing to deliver, and never one a dispatch owns. `entries` reads a feed after a cursor, or from the start of what is
  * retained, and refuses a cursor that names no position of the feed with
@@ -180,9 +182,11 @@ export class TaskEventRelay implements ByokCloudObserver {
   }
 
   seed(feed: TaskFeed, event: ServerTaskEvent): void {
-    if (feed.current.length > 0) return;
-    const entry = feed.queue.push(event);
-    if (entry !== undefined) feed.current = [entry];
+    this.#deliver(feed, () => {
+      if (feed.current.length > 0) return;
+      const entry = feed.queue.push(event);
+      if (entry !== undefined) feed.current = [entry];
+    });
   }
 
   detach(taskId: string, feed: TaskFeed): void {

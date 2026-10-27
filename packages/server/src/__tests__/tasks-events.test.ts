@@ -511,6 +511,22 @@ describe('TaskEventRelay dispatch phases', () => {
     relay.stop();
   });
 
+  it('holds a seed from a read that attached to a feed whose dispatch is in flight, so Offered stays first', async () => {
+    const relay = new TaskEventRelay({});
+    const firstRead = deferred<StateRead>();
+    const reads = [firstRead.promise, Promise.resolve<StateRead>(stateRead('Offered'))];
+    const reader = readTaskEvents({ relay, readState: () => reads.shift()! }, 'racing')[Symbol.asyncIterator]();
+    const firstEntry = reader.next();
+    relay.provision('racing');
+    firstRead.resolve(stateRead('Offered'));
+    await vi.waitFor(() => { expect(reads).toHaveLength(0); });
+    await Promise.resolve();
+    relay.noteDispatched('racing', '2026-10-27T00:00:09.000Z');
+    expect((await firstEntry).value?.event).toEqual({ kind: 'state', state: 'Offered', at: '2026-10-27T00:00:09.000Z' });
+    await reader.return!();
+    relay.stop();
+  });
+
   it('holds a Host transition made while a dispatch is in flight until Offered', async () => {
     const relay = new TaskEventRelay({});
     relay.provision('cancelled-early');
