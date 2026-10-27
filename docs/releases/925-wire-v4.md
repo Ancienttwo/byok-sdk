@@ -12,10 +12,11 @@ capability negotiation between the two majors.
 
 ## What changes on the wire
 
-- Every offer is Agent-bound. `conn.ack`, `task.offer`,
-  `task.offer_with_toolsets`, `task.offer_sealed` and
-  `task.offer_with_toolsets_sealed` are gone. The long-poll response carries
-  the server's capabilities, as it already did.
+- Every offer is Agent-bound. `conn.ack` and the runtime-only offers (the
+  v3 `task.offer`, `task.offer_with_toolsets`, `task.offer_sealed` and
+  `task.offer_with_toolsets_sealed`) are gone; v4 reuses the name
+  `task.offer` for the merged Agent offer (below). The long-poll response
+  carries the server's capabilities, as it already did.
 - `approvalId` is required on `task.await_approval`, `task.approve` and
   `task.reject`. A decision resolves only the approval it names; one that
   names no pending approval is stale and resolves nothing.
