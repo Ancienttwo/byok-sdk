@@ -1,9 +1,10 @@
-// #978 one-off evidence, reverted before merge: the step-6 hard kill against the
-// published @byok-sdk/*@0.30.2 packages. AiphaBee's kill9-smoke.ts on the
-// public API: pair a daemon child with a hanging runtime, submit one task,
-// hard-kill the daemon after the runtime starts (taskkill /F on Windows),
-// restart it and read the device terminal. Run from a directory whose
-// node_modules holds @byok-sdk/client@0.30.2 and @byok-sdk/server@0.30.2.
+// #978 one-off evidence, reverted before merge: the step-6 hard kill, one
+// script for the published @byok-sdk/*@0.30.2 packages and for this branch's
+// build. AiphaBee's kill9-smoke.ts on the public API: pair a daemon child with
+// a hanging runtime, submit one task, hard-kill the daemon after the runtime
+// starts (taskkill /F on Windows), restart it and read the device terminal.
+// Run from a directory whose node_modules holds @byok-sdk/client and
+// @byok-sdk/server.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -13,7 +14,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { deserialize, serialize } from 'node:v8';
 import { createDaemonWithAdapters } from '@byok-sdk/client';
-import { createByokServer, createHmacTokenSigner } from '@byok-sdk/server';
+import * as byokServer from '@byok-sdk/server';
 
 const PRODUCT_ID = 'byok-978-taskkill-smoke';
 const AGENT_REF = { agentId: 'bot_taskkill', profileRevision: '1' };
@@ -25,6 +26,10 @@ const EGRESS_POLICY = {
   transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
 };
 const TERMINAL_TYPES = new Set(['task.complete', 'task.fail', 'task.cancelled']);
+const { createByokServer, createHmacTokenSigner } = byokServer;
+// Wire v4 removed DaemonConfig.workspaceRoot, which 0.30.2 requires; only
+// builds with wire v4 export its SQLite migration.
+const WIRE_V4 = 'migrateSqliteToWireV4' in byokServer;
 
 function fileCredentials(path) {
   const load = () => (existsSync(path) ? deserialize(readFileSync(path)) : undefined);
@@ -60,7 +65,7 @@ async function daemonMain(root, serverUrl, pairCode) {
   const credentials = fileCredentials(join(root, 'credentials.bin'));
   const daemon = createDaemonWithAdapters({
     productId: PRODUCT_ID, productName: 'byok-sdk #978 taskkill smoke', serverUrl,
-    storeDir: join(root, 'device'), workspaceRoot: join(root, 'workspaces'),
+    storeDir: join(root, 'device'), ...(WIRE_V4 ? {} : { workspaceRoot: join(root, 'workspaces') }),
     localAgentRelease: { version: '0.0.0', buildId: '0'.repeat(64) },
     agentHome: { hostStorageRoot: join(root, 'homes') }, agentMemoryMcp: 'off',
     agentEgress: { policy: EGRESS_POLICY },
@@ -165,7 +170,7 @@ async function hostMain() {
   await server.close();
 
   const summary = {
-    node: process.version, platform: process.platform, arch: process.arch,
+    node: process.version, platform: process.platform, arch: process.arch, wireV4: WIRE_V4,
     kill, killed, before, terminal: terminal.envelope, after, acceptedTerminalPosts,
     runtimeStarts: { run1: events.filter((e) => e.run === 1 && e.event === 'runtime_started').length, run2: events.filter((e) => e.run === 2 && e.event === 'runtime_started').length },
     daemonEvents: events,

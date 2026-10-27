@@ -1815,6 +1815,43 @@ jobs:
           node smoke.mjs
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
+  # TEMPORARY (#978): the same smoke script against this branch's build.
+  # Reverted before merge.
+  tmp-978-taskkill-branch:
+    name: "TEMP #978 taskkill /F smoke against this branch's build"
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+      - name: Install frozen dependencies and build
+        run: |
+          bun ci
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          bun run build
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Link the built client and server beside the smoke
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "byok-branch"
+          $scope = Join-Path $dir "node_modules\@byok-sdk"
+          New-Item -ItemType Directory $scope | Out-Null
+          New-Item -ItemType Junction -Path (Join-Path $scope "client") -Target (Resolve-Path packages/client) | Out-Null
+          New-Item -ItemType Junction -Path (Join-Path $scope "server") -Target (Resolve-Path packages/server) | Out-Null
+          Copy-Item scripts/ci/tmp-978-taskkill-0302.mjs (Join-Path $dir "smoke.mjs")
+      - name: Hard-kill the branch daemon with taskkill /F and restart it
+        run: |
+          Set-Location (Join-Path $env:RUNNER_TEMP "byok-branch")
+          node --version
+          bun --version
+          node smoke.mjs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
   ci-required:
     name: CI required
     if: ${{ always() }}
