@@ -177,7 +177,8 @@ State is in memory by default. `storage: { kind: 'sqlite', path }` persists:
 - objects and blobs.
 
 Everything else stays in the process and is lost on restart, in SQLite mode as
-well: device presence, `TaskHandle` promises and the task-event relay, the
+well: device presence, `TaskHandle` promises and the task-event relay (so
+`tasks.events` cursors), the
 approval timeline, inbound dedup, nonces, Agent egress receipt readback
 (`egress.get`), activity, unredeemed pairing codes, storage quota accounting,
 and the token signing key when you do not pass `tokenSigner`.
@@ -244,6 +245,9 @@ What a restart does not keep:
   devices; recover server coordination after restart with `tasks.offer(taskId)`
   and `tasks.get(taskId)` (see
   [Persistent host request identity](#persistent-host-request-identity));
+- task event history and cursors. `tasks.events` refuses a cursor from before
+  the restart, and starts a task that is still live at its current state (see
+  [Task event feed](#task-event-feed));
 - with memory storage, everything, including enrollment: devices must pair
   again.
 
@@ -548,6 +552,57 @@ must preserve its original binding and its separate consumer authority.
 and relay notification as a live handle; it does not require a connected device.
 Missing tasks reject. A host must separately persist cancellation intent if it
 can crash before this call, and prevent dispatch of a cancelled prepared request.
+
+## Task event feed
+
+`tasks.events(taskId, { after?, from?, signal? })` follows one task's notifications:
+state changes, Agent progress, artifacts (inline, or a `blobRef` for
+`blobs.getDownloadUrl`) and approval requests, whose `approvalId`
+`tasks.approve` and `tasks.reject` take. It works for a task
+`executions.submit` created; `TaskHandle.events()` reads the same feed without
+cursors.
+
+```ts
+const start = lastCursor === undefined ? { from: 'state' as const } : { after: lastCursor };
+for await (const { cursor, event } of byok.tasks.events(taskId, { ...start, signal })) {
+  send({ id: cursor, data: event }); // e.g. an SSE message; resume with `after: cursor`
+}
+```
+
+- Without `after`, a read starts at the oldest retained entry. With
+  `from: 'state'` it starts at the task's current state: its latest `state`
+  entry, after the pending `await_approval` request while it awaits approval.
+  Those entries are kept even after the buffer dropped them, so a reader that
+  just needs "now, then live" always gets them first. Give `after` or `from`,
+  not both.
+
+- Order is this instance's arrival order. Progress, artifacts and approvals
+  have no protocol-level total order, so do not infer causality from adjacent
+  entries.
+- The feed ends after the terminal state, when `signal` aborts, or on
+  `close()`. Read the terminal result with `tasks.get`.
+- A cursor is valid only for this instance's current feed of the task. Each
+  feed holds at most `taskEventBufferLimit` entries (default 1000); a reader
+  that resumes behind the oldest one first gets one
+  `{ kind: 'error', reason: 'events_truncated' }`. A terminal task's feed is
+  kept for `taskEventRetentionMs` (default 5 minutes).
+- The first `next()` throws, before any entry: a `TypeError` for `after` and
+  `from` together, `ByokCloudError` `task_not_found` for an unknown task, `TaskEventsUnavailableError` with
+  `reason: 'cursor_unknown'` for a cursor this feed never handed out (after a
+  restart, another task's, malformed), or `reason: 'feed_expired'` for a
+  terminal task whose feed is gone. After `cursor_unknown`, read again with
+  `from: 'state'`; after `feed_expired`, `tasks.get` has the final state.
+- After a restart, a task that is still live gets a feed that starts with its
+  current state read back from the stores, after the pending plaintext
+  approval request while it awaits one; earlier events are not reconstructed,
+  and those entries can appear twice. A sealed approval request is not
+  announced, as on a live feed. A task whose Host cancellation was accepted
+  counts as terminal here, as in `tasks.get`.
+- Authorization is the Host's: the feed carries raw tool input and output, so
+  authenticate the user and redact before forwarding it to a browser.
+
+The feed is a notification stream, not a record; task facts stay with
+`tasks.get`, `tasks.attempt` and `TaskHandle.result()`.
 
 The [protocol contract](../../docs/protocol.md) and
 [coordination specification](../../docs/spec.md) define the durable facts behind

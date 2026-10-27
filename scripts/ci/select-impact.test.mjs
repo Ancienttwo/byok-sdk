@@ -389,6 +389,13 @@ test('#794 D3: a direct Worker example path selects only that example and the da
   assert.throws(() => selectImpact(['examples/hosted-bot-collaboration-worker/wrangler.json']), /reviewed CI mapping required/i);
 });
 
+test('the #1022 task events route selects only examples/basic', () => {
+  for (const path of ['examples/basic/task-events-route.ts', 'examples/basic/task-events-route.test.ts']) {
+    assert.deepEqual(selectImpact([path]).dirs, ['examples/basic'], path);
+  }
+  assert.throws(() => selectImpact(['examples/basic/task-events-other.ts']));
+});
+
 test('wire v4 (#925) reviewed paths select only their owners', () => {
   assert.deepEqual(selectImpact(['examples/packaging/launcher.ts']).families, ['packageability-smoke']);
   assert.ok(selectImpact(['examples/packaging/launcher.ts']).dirs.includes('examples/packaging'));
