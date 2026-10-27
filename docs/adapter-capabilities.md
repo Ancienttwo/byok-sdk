@@ -197,7 +197,7 @@ task's and the SDK's MCP servers. It changes MCP servers only; the user's
 `AGENTS.md` still loads. A run without an `agentRef`, and the default
 `'inherit'`, are unchanged. The adapter works on the session's own
 app server, through two caller-owned steps of the
-[vendored session](../packages/client/vendor/oar/c88a514/PROVENANCE.md):
+[vendored session](../packages/client/vendor/oar/51b83c9/PROVENANCE.md):
 
 - Before the thread opens, `config/read` for the task cwd lists the servers of
   the user and project `config.toml` layers. Each one that is not a task
@@ -249,7 +249,7 @@ other app-server error does.
 
 ### Grok: user-level configuration
 
-The [vendored launch profile](../packages/client/vendor/oar/c88a514/runtimes/grok/session.ts)
+The [vendored launch profile](../packages/client/vendor/oar/51b83c9/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
 environment. `grok agent` 1.0.52 has no flag for rule loading or folder trust.
 Grok's [Project rules guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md)
@@ -395,7 +395,7 @@ none in this release.
 | Runtime | Where an Agent task's session record goes | Can the SDK turn it off? |
 | --- | --- | --- |
 | Claude | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded cwd>/<session>.jsonl`, outside the Agent home | Yes: `agentSessionPersistence: 'disabled'`, below |
-| Codex | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`. The adapter does not set `CODEX_HOME`, so normally under `~/.codex` | No. The 0.164.0 app-server schema has `ephemeral` on `thread/start` (a thread that "should not be materialized on disk"), and `codex exec --help` lists `--ephemeral`. The [launch](../packages/client/vendor/oar/c88a514/runtimes/codex/open.ts) does not send it. Inferred: 0.160.0 has the field, and an ephemeral thread leaves the other `CODEX_HOME` files alone |
+| Codex | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`. The adapter does not set `CODEX_HOME`, so normally under `~/.codex` | No. The 0.164.0 app-server schema has `ephemeral` on `thread/start` (a thread that "should not be materialized on disk"), and `codex exec --help` lists `--ephemeral`. The [launch](../packages/client/vendor/oar/51b83c9/runtimes/codex/open.ts) does not send it. Inferred: 0.160.0 has the field, and an ephemeral thread leaves the other `CODEX_HOME` files alone |
 | Grok | `$GROK_HOME/sessions/<encoded cwd>/<session id>/`, and the `sessions/session_search.sqlite` index. The adapter does not set `GROK_HOME`, so normally under `~/.grok` | No. `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta` keys of its agent-mode guide have none. From the 1.0.62 guide and local folders; not probed with an SDK session or on 1.0.52 |
 | Pi, ordinary, Pi login | The settings `sessionDir`, else `<agent dir>/sessions/--<encoded cwd>--/<time>_<id>.jsonl`. The agent directory is `$PI_CODING_AGENT_DIR`, else `~/.pi/agent` | No. Pi 1.4.0 has `SessionManager.inMemory` and the CLI flag `--no-session` ("Don't save session (ephemeral)"). The SDK [host](../packages/client/src/bin/pi-session-runtime.ts) opens a saved session and accepts no such flag |
 | Pi, ordinary, Keys profile | `DaemonConfig.piByokLauncher.sessionDir/<time>_<id>.jsonl`, one folder for every execution, which the Host chooses | No, as above |
@@ -490,7 +490,7 @@ tracks that remaining work; adding persona text alone does not establish isolati
 
 `GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
 --no-leader stdio`, through the vendored OAR Grok profile
-(`packages/client/vendor/oar/c88a514`). The ACP stack is a private entry that
+(`packages/client/vendor/oar/51b83c9`). The ACP stack is a private entry that
 loads at session start, so `@byok-sdk/client/adapters` carries no ACP
 dependency.
 
