@@ -93,3 +93,7 @@ collecting evidence.
 - This standalone case does not cover SDK helper grants (PR #1066), real-runtime resume, other Codex versions or all background services. Fresh/resume timing and unchanged default/non-Agent behavior are covered by the focused regression suite; full issue #1060 remains broader than this patch.
 
 Logs: `/tmp/byok-1060-build.log`, `byok-1060-typecheck.log`, `byok-1060-tests.log`, `byok-1060-api-final.log`, `byok-1060-version.log`, `byok-1060-real-startup.log`. Final integrated-head CI remains required.
+
+## Integration with approval-channel main
+
+Integrated main `bab299384` at candidate `4b6a37191`. Build and root typecheck pass; the same three focused files pass 87 tests (main removed the obsolete resolveApproval case). Version authority passes. The tighter main budgets expose exactly 53 added bytes in each of client, adapters, testing and byok-agent; coordinator wB:p4 signs these four measured limits under #1008 delegated budget authority. No blanket headroom or other budget change. Final API check and PR CI bind the resulting commit.
