@@ -266,7 +266,8 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
   const scripts = JSON.parse(readFileSync(new URL('package.json', root), 'utf8')).scripts;
   assert.deepEqual(Object.keys(reviewedScripts).sort(), [
     'scripts/api-surface/check-version-authority.mjs', 'scripts/api-surface/check-version-authority.test.mjs',
-    'scripts/release/beta-release.test.mjs', 'scripts/release/check-package-graph.mjs', 'scripts/release/pack-and-smoke.mjs',
+    'scripts/release/beta-release.test.mjs', 'scripts/release/check-package-graph.mjs', 'scripts/release/execution-submit-smoke.mjs',
+    'scripts/release/pack-and-smoke.mjs',
     'scripts/release/pack-and-smoke.test.mjs',
     'scripts/release/publish.mjs', 'scripts/release/registry-readback.mjs',
   ]);
