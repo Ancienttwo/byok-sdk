@@ -75,18 +75,23 @@ describe('Agent egress typed wire contract', () => {
     expect(() => parseMessage(malformed)).toThrow(/failed validation/u);
   });
 
-  it('requires policy consumption on the separate Agent offer and keeps reliable payload content opaque', () => {
+  // B2: policy consumption on the separate Agent egress offer type -> the resume variant of task.offer carrying egressPolicy
+  it('requires policy consumption on the Agent offer and keeps reliable payload content opaque', () => {
     const offer = createEnvelope(
-      'task.offer_for_agent_with_egress',
+      'task.offer',
       {
         instruction: 'strict Agent egress offer',
         agentRef: AGENT_REF,
-        sessionRef: 'session-protocol',
+        session: { mode: 'resume', sessionRef: 'session-protocol' },
         egressPolicy: POLICY,
       },
       { taskId: 'task-egress-protocol', seq: 32 },
     );
-    expect(offer.payload).toMatchObject({ agentRef: AGENT_REF, sessionRef: 'session-protocol', egressPolicy: POLICY });
+    expect(offer.payload).toMatchObject({
+      agentRef: AGENT_REF,
+      session: { mode: 'resume', sessionRef: 'session-protocol' },
+      egressPolicy: POLICY,
+    });
     expect(() =>
       createEnvelope('agent.egress.reliable', {
         agentRef: AGENT_REF,
@@ -102,21 +107,24 @@ describe('Agent egress typed wire contract', () => {
     ).toThrow(/invalid envelope/u);
   });
 
-  it('keeps exact resume sessionRef required while the distinct fresh offer forbids it', () => {
+  // B2: a distinct fresh offer type forbids sessionRef -> session is required, resume needs sessionRef, fresh carries none and needs egressPolicy
+  it('keeps exact resume sessionRef required while the fresh session carries none', () => {
     const freshOffer = createEnvelope(
-      'task.offer_for_agent_with_egress_fresh',
+      'task.offer',
       {
         instruction: 'start typed egress Agent work',
         agentRef: AGENT_REF,
+        session: { mode: 'fresh' },
         egressPolicy: POLICY,
       },
       { taskId: 'task-egress-fresh-protocol', seq: 33 },
     );
-    expect(freshOffer.payload).not.toHaveProperty('sessionRef');
+    expect(freshOffer.payload).toMatchObject({ session: { mode: 'fresh' } });
+    expect(freshOffer.payload).not.toHaveProperty('session.sessionRef');
 
     expect(() =>
       createEnvelope(
-        'task.offer_for_agent_with_egress',
+        'task.offer',
         {
           instruction: 'resume typed egress Agent work',
           agentRef: AGENT_REF,
@@ -127,14 +135,37 @@ describe('Agent egress typed wire contract', () => {
     ).toThrow(/invalid envelope/u);
     expect(() =>
       createEnvelope(
-        'task.offer_for_agent_with_egress_fresh',
+        'task.offer',
+        {
+          instruction: 'resume typed egress Agent work',
+          agentRef: AGENT_REF,
+          session: { mode: 'resume' },
+          egressPolicy: POLICY,
+        } as never,
+        { taskId: 'task-egress-resume-missing-session-ref', seq: 34 },
+      ),
+    ).toThrow(/invalid envelope/u);
+    expect(() =>
+      createEnvelope(
+        'task.offer',
         {
           instruction: 'fresh typed egress Agent work',
           agentRef: AGENT_REF,
-          sessionRef: 'forbidden-prestart-session',
+          session: { mode: 'fresh', sessionRef: 'forbidden-prestart-session' },
           egressPolicy: POLICY,
         } as never,
         { taskId: 'task-egress-fresh-forbidden-session', seq: 35 },
+      ),
+    ).toThrow(/invalid envelope/u);
+    expect(() =>
+      createEnvelope(
+        'task.offer',
+        {
+          instruction: 'fresh Agent work without a policy',
+          agentRef: AGENT_REF,
+          session: { mode: 'fresh' },
+        } as never,
+        { taskId: 'task-egress-fresh-missing-policy', seq: 36 },
       ),
     ).toThrow(/invalid envelope/u);
   });
