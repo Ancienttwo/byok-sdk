@@ -10,6 +10,8 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 function deferred() {
   let resolve!: () => void;
@@ -27,7 +29,7 @@ async function makeRunner(overrides: Partial<Pick<TaskRunnerDeps, 'awaitTerminal
   directories.push(directory);
   const adapter = new StubRuntimeAdapter();
   const sent: Envelope[] = [];
-  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'close-receipt-device',
@@ -42,7 +44,7 @@ async function makeRunner(overrides: Partial<Pick<TaskRunnerDeps, 'awaitTerminal
     ...overrides,
   });
   const taskId = 'close-receipt-task';
-  await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: freshTestAgentRef(),  instruction: 'run' }, { taskId, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'run' }, { taskId, seq: 1 }));
   const session = adapter.sessions[0]!;
   const terminals = () => sent.filter(event => ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type));
   return { runner, session, taskId, terminals };

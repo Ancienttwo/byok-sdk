@@ -13,6 +13,8 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -33,7 +35,7 @@ async function makeRunner(
   withRelease = true,
 ): Promise<TaskRunner> {
   const release = Object.freeze({ version: '0.6.0' });
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-terminal-usage',
@@ -50,8 +52,8 @@ async function makeRunner(
 async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'claude' | 'codex'): Promise<void> {
   await runner.handleEnvelope(
     createEnvelope(
-      'task.offer_for_agent',
-      { agentRef: freshTestAgentRef(),
+      'task.offer',
+      { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
         instruction: 'observe terminal usage',
         runtime,
         // This requested selection must NOT become provider/model terminal
@@ -181,8 +183,8 @@ describe('TaskRunner terminal inference usage projection', () => {
       await daemon.start();
       const taskId = 'terminal-composition-release-identity';
       server.send(createEnvelope(
-        'task.offer_for_agent',
-        { agentRef: freshTestAgentRef(),  instruction: 'finish', runtime: 'codex' },
+        'task.offer',
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'finish', runtime: 'codex' },
         { taskId, seq: server.nextSeq() },
       ));
       await server.waitFor((event) => event.type === 'task.started' && event.task_id === taskId);

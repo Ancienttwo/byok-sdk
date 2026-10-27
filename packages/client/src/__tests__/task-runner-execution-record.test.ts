@@ -11,6 +11,8 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter, type StubSession } from './fixtures/stub-adapter';
 import { testIngressBudget } from './fixtures/activity-ingress';
+import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
+import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const RECORD_AGENT = { agentId: 'record-agent', profileRevision: 'rev-1' } as const;
 
@@ -43,7 +45,7 @@ async function makeRunner(options: RunnerOptions = {}) {
   const adapter = new StubRuntimeAdapter('pi', undefined, undefined, undefined, options.declared === true ? 'event-stream' : undefined);
   const sent: Envelope[] = [];
   const records: ExecutionRecord[] = [];
-  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'execution-record-device',
@@ -58,7 +60,7 @@ async function makeRunner(options: RunnerOptions = {}) {
     ...(options.withoutRecords === true ? {} : { onExecutionRecord: (record: ExecutionRecord) => { records.push(record); } }),
     ...options.deps,
   });
-  await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: RECORD_AGENT,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: RECORD_AGENT, ...FRESH_OFFER,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
   const session = adapter.sessions[0]!;
   const terminals = () => sent.filter(envelope => TERMINAL_TYPES.includes(envelope.type));
   const finished = () => vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
@@ -192,14 +194,14 @@ describe('TaskRunner execution record', () => {
     adapter.startError = new RuntimeExecutionFailure({ phase: 'start', category: 'infrastructure', retry: 'retryable', reason: 'spawn failed' });
     const sent: Envelope[] = [];
     const onExecutionRecord = vi.fn();
-    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
       adapters: [adapter], deviceId: 'execution-record-device',
       send: envelope => { sent.push(envelope); },
       blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },
       approvalRegistry: new ApprovalRegistry(),
       storeDir: directory, productId: 'execution-record-product', onExecutionRecord,
     });
-    await runner.handleEnvelope(createEnvelope('task.offer_for_agent', { agentRef: RECORD_AGENT,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
+    await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: RECORD_AGENT, ...FRESH_OFFER,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
     expect(sent.filter(envelope => TERMINAL_TYPES.includes(envelope.type)).map(envelope => envelope.type)).toEqual(['task.fail']);
     expect(onExecutionRecord).not.toHaveBeenCalled();
   });
