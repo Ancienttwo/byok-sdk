@@ -31,7 +31,7 @@ import type { McpToolsetConfig, RuntimeCapabilities } from '../../types';
 import { StubRuntimeAdapter } from './stub-adapter';
 import { observationOf } from './mcp-observation';
 import { testIngressBudget } from './activity-ingress';
-import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
+import { advertiseEveryDeviceFlag } from '../support/advertised-capabilities';
 
 /**
  * One daemon LIFETIME of the prepared-offer lane, as its own operating-system

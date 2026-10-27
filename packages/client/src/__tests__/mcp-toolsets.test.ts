@@ -727,6 +727,8 @@ describe('TaskRunner host toolset context nonce injection', () => {
           instruction: 'qualify the inbound lead',
           runtime: 'pi',
           agentRef: { agentId: 'salesko-agent', profileRevision: 'profile-rev-1' },
+          session: { mode: 'fresh' },
+          egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
           requiredToolsets,
         },
         { taskId, seq: 1 },
