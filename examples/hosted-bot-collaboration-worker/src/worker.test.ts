@@ -21,7 +21,7 @@ describe.skipIf(!RUN)('H Host on local workerd (#794 D3)', () => {
     await until(async () => (await h.worker.passes(), (await h.turn(turnId))?.status === 'succeeded' || undefined));
     expect(await h.intent(turnId)).toMatchObject({ tries: 1, submission: 'delivered', conclusion: 'succeeded' });
     expect(await h.commands()).toContain(task);
-    expect(await h.mailbox(task)).toEqual(['task.offer_for_agent_with_egress_fresh']);
+    expect(await h.mailbox(task)).toEqual(['task.offer']);
   });
 
   it('rejects a request with no valid owner session, and writes nothing', async () => {

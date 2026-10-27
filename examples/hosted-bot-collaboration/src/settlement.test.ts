@@ -343,7 +343,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
       const task = input!.input.taskId;
       // The SDK side of B's task: the frozen offer, a claimed attempt and a busy decline.
       const port: HostedTaskPort = {
-        offer: async () => ({ taskId: task, deviceId: input!.input.deviceId, type: 'task.offer_for_agent_with_egress_fresh',
+        offer: async () => ({ taskId: task, deviceId: input!.input.deviceId, type: 'task.offer',
           payload: structuredClone(input!.input.payload), delivered: true, messageId: `offer-${task}` }) as never,
         attempt: async () => ({ taskId: task, deviceId: input!.input.deviceId, agentRef: input!.input.payload.agentRef, status: 'complete',
           ownerDeviceId: input!.input.deviceId, updatedAt: 'now' }) as TaskAttempt,
