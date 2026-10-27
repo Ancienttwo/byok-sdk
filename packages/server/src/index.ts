@@ -57,7 +57,7 @@ import {
 import { TaskEventRelay } from './relay';
 import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot';
 import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
-import { approvePendingApproval, createTaskHandle, rejectPendingApproval } from './task-handle';
+import { approvePendingApproval, createTaskHandle, readTaskEvents, rejectPendingApproval } from './task-handle';
 import type {
   ByokServerEvent,
   AgentContentReadRequest,
@@ -70,6 +70,8 @@ import type {
   DispatchInput,
   HubStats,
   MachineInfo,
+  ServerTaskEvent,
+  TaskEventEntry,
   TaskHandle,
   TaskResult,
   TaskSnapshot,
@@ -88,10 +90,12 @@ export type {
   HubStats,
   MachineInfo,
   ServerTaskEvent,
+  TaskEventEntry,
   TaskHandle,
   TaskResult,
   TaskSnapshot,
 } from './types';
+export { TaskEventsUnavailableError } from './types';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
@@ -240,6 +244,35 @@ export interface ByokServer {
     approve(taskId: string, opts?: { approvalId?: string }): Promise<void>;
     /** Reject the task's pending approval; the same decision and refusals as {@link TaskHandle.reject}. */
     reject(taskId: string, reason?: string, opts?: { approvalId?: string }): Promise<void>;
+    /**
+     * Follow one task's notifications (state, Agent progress, artifacts,
+     * approval requests) in this instance's arrival order. It starts after the
+     * entry `after` names; with `from: 'state'`, at the entries where the
+     * task's current state began (its latest `state` entry, preceded by the
+     * pending `await_approval` request while it awaits approval), which are
+     * kept even after the buffer dropped them; otherwise at the start of what
+     * is retained. An `events_truncated` entry stands for entries dropped
+     * before the reader reached them. Ends after the terminal state, when
+     * `signal` aborts, or when the server closes. A notification stream, not a
+     * record: read task facts with {@link tasks.get}.
+     *
+     * A live task this instance did not dispatch (after a restart) gets a feed
+     * that starts with its current state read back from the stores, after the
+     * pending approval request while it awaits a plaintext one, and no earlier
+     * events. Those entries can appear twice when the read saw a commit the
+     * feed had not received yet. Once attached, the feed stays until the
+     * task's terminal plus `taskEventRetentionMs` however its readers leave,
+     * so a reconnecting reader resumes with its cursor, unless the read that
+     * attached it finds the task gone or finished; a read stopped before its
+     * first store read completed attaches nothing.
+     *
+     * The first `next()` throws, before any entry: a `TypeError` when both
+     * `after` and `from` are given, `ByokCloudError` `task_not_found` for an
+     * unknown task, or {@link TaskEventsUnavailableError} when `after` is
+     * unknown to this instance's feed or the terminal task's feed is no longer
+     * retained.
+     */
+    events(taskId: string, options?: { after?: string; from?: 'state'; signal?: AbortSignal }): AsyncIterable<TaskEventEntry>;
     /**
      * One bounded page, keyset-paged by task id. Paged rather than "all of
      * them" because the underlying store is: an unbounded `list()` would have
@@ -442,9 +475,20 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
    * refused steer reports the same `TaskState` the snapshot does, because it is
    * literally the snapshot's, read at the moment of the refusal.
    */
-  async function readTaskState(taskId: string): Promise<TaskState | undefined> {
+  async function readTaskState(taskId: string): Promise<{ state: TaskState; at: string } | undefined> {
     const attempt = await cloud.readTaskAttempt(tenant, taskId);
-    return attempt === undefined ? undefined : (await projectTask(attempt)).state;
+    if (attempt === undefined) return undefined;
+    const { state, updatedAt } = await projectTask(attempt);
+    return { state, at: updatedAt };
+  }
+
+  async function readApprovalRequest(taskId: string): Promise<ServerTaskEvent | undefined> {
+    const timeline = await cloud.readApprovalTimeline(tenant, taskId);
+    const pending = pendingApproval(timeline);
+    const event = timeline?.entries.find((entry) => entry.revision === pending?.revision)?.event;
+    return event?.type === 'approval_requested' && 'summary' in event && event.approvalId !== undefined
+      ? { kind: 'await_approval', summary: event.summary, approvalId: event.approvalId }
+      : undefined;
   }
 
   async function deviceCapabilities(deviceId: string): Promise<readonly string[] | undefined> {
@@ -557,7 +601,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     // A known id lets the relay exist before enqueue can make the offer
     // observable. Inbound claim/terminal traffic racing append is buffered by
-    // that provisional relay state and reconciled once the offer succeeds.
+    // the dispatching relay feed and delivered once the offer succeeds.
     const taskId = input.taskId ?? globalThis.crypto.randomUUID();
     relay.provision(taskId);
     let enqueued: EnqueuedOffer;
@@ -616,6 +660,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       cloud,
       relay,
       readState: readTaskState,
+      readApprovalRequest,
       readResult: async (id) => toTaskResult(await readTerminal(id)),
     });
   }
@@ -791,6 +836,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       },
       approve(taskId, opts) { return approvePendingApproval({ tenant, cloud, relay }, taskId, opts); },
       reject(taskId, reason, opts) { return rejectPendingApproval({ tenant, cloud, relay }, taskId, reason, opts); },
+      events(taskId, options) { return readTaskEvents({ relay, readState: readTaskState, readApprovalRequest }, taskId, options); },
       async get(taskId: string): Promise<TaskSnapshot | undefined> {
         const attempt = await cloud.readTaskAttempt(tenant, taskId);
         return attempt === undefined ? undefined : projectTask(attempt);

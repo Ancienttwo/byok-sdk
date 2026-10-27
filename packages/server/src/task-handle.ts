@@ -1,12 +1,14 @@
 import {
+  ByokCloudError,
   SteerRejectedError as KernelSteerRejectedError,
   type ByokCloud,
   type SteerRejectionCode,
   type TenantId,
 } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
+import type { QueueEntry } from './event-queue';
 import type { TaskEventRelay } from './relay';
-import type { ServerTaskEvent, TaskHandle, TaskResult } from './types';
+import { TaskEventsUnavailableError, type ServerTaskEvent, type TaskEventEntry, type TaskHandle, type TaskResult } from './types';
 
 function steerRejectionMessage(
   taskId: string,
@@ -98,15 +100,134 @@ export interface TaskHandleDeps {
   readonly cloud: ByokCloud;
   readonly relay: TaskEventRelay;
   /**
-   * The task's current `TaskSnapshot.state`, or `undefined` when the attempt is
-   * gone. The snapshot projection itself — never a second derivation.
+   * The task's current `TaskSnapshot.state` and `updatedAt`, or `undefined`
+   * when the attempt is gone. The snapshot projection itself — never a second
+   * derivation.
    */
-  readonly readState: (taskId: string) => Promise<TaskState | undefined>;
+  readonly readState: (taskId: string) => Promise<{ readonly state: TaskState; readonly at: string } | undefined>;
+  /**
+   * The pending approval request as the relay would have announced it: a
+   * plaintext request with an `approvalId`. A sealed request, which the relay
+   * never announces, reads as none.
+   */
+  readonly readApprovalRequest: (taskId: string) => Promise<ServerTaskEvent | undefined>;
   /** The read-back this handle's `result()` answers with. */
   readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
 }
 
 type ApprovalDeps = Pick<TaskHandleDeps, 'tenant' | 'cloud' | 'relay'>;
+type EventDeps = Pick<TaskHandleDeps, 'relay' | 'readState' | 'readApprovalRequest'>;
+
+/** Where a task event read starts, and what stops it; see `ByokServer.tasks.events`. */
+export interface TaskEventReadOptions {
+  readonly after?: string;
+  readonly from?: 'state';
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * One task's event feed from the relay, shared by `ByokServer.tasks.events`
+ * and {@link TaskHandle.events}. Every refusal is thrown by the first `next()`,
+ * before any entry; once entries flow, the read only ends (terminal, `signal`,
+ * `return()`, server close).
+ *
+ * `return()` also releases a pending `next()`, as the relay queue's own
+ * iterator does. An async generator cannot: it queues `return()` behind the
+ * outstanding `next()`, so a reader stopping an idle feed would hang. Here
+ * `return()` aborts the read's own signal first, which wakes the queue.
+ * `project` shapes each entry: `TaskHandle.events()` yields the event alone.
+ */
+export function readTaskEvents<T = TaskEventEntry>(
+  deps: EventDeps,
+  taskId: string,
+  options: TaskEventReadOptions = {},
+  project: (entry: TaskEventEntry) => T = (entry) => entry as T,
+): AsyncIterable<T> {
+  return {
+    [Symbol.asyncIterator](): AsyncIterator<T> {
+      const stop = new AbortController();
+      const entries = followTaskEvents(deps, taskId, options, AbortSignal.any([stop.signal, options.signal ?? stop.signal]));
+      return {
+        async next(): Promise<IteratorResult<T>> {
+          const next = await entries.next();
+          return next.done ? next : { value: project(next.value), done: false };
+        },
+        return(): Promise<IteratorResult<T>> {
+          stop.abort();
+          // A generator's return() always reports done.
+          return entries.return() as Promise<IteratorReturnResult<void>>;
+        },
+      };
+    },
+  };
+}
+
+/**
+ * Liveness is judged by the projection `tasks.get` answers with, never by the
+ * attempt status: an accepted host cancellation is terminal there at once
+ * while the attempt still reads `cancel_requested`, and a feed attached on that
+ * basis would wait for a device message that may never come.
+ */
+async function* followTaskEvents(
+  deps: EventDeps,
+  taskId: string,
+  { after, from }: TaskEventReadOptions,
+  signal: AbortSignal,
+): AsyncGenerator<TaskEventEntry, void, undefined> {
+  if (after !== undefined && from !== undefined) throw new TypeError('tasks.events takes after or from, not both');
+  const { relay, readState } = deps;
+  if (relay.stopped || signal.aborted) return;
+  let feed = relay.feed(taskId);
+  let read = await readState(taskId);
+  // A feed a dispatch opened is the dispatch's until a read of the stored task attaches to it.
+  if (feed === undefined || feed.phase === 'dispatching') {
+    // Refuse before attaching, so a read of a reclaimed or unknown task never
+    // recreates relay state for it.
+    if (read === undefined) throw taskNotFound(taskId);
+    if (TERMINAL_STATES.has(read.state)) throw new TaskEventsUnavailableError(taskId, 'feed_expired');
+    // A reader stopped during that read must not leave a feed behind.
+    feed = signal.aborted ? undefined : relay.attach(taskId);
+    if (feed === undefined) return;
+    // A terminal committed between the read and the attach never reached the
+    // new feed, which would then never end: read again now that it listens.
+    // A live task's feed starts with what this read found.
+    read = await readState(taskId);
+    if (read !== undefined && !TERMINAL_STATES.has(read.state)) {
+      const request = read.state === 'AwaitApproval' ? await deps.readApprovalRequest(taskId) : undefined;
+      relay.seed(feed, read.state, read.at, request);
+    }
+  }
+  if (read === undefined) {
+    relay.detach(taskId, feed);
+    throw taskNotFound(taskId);
+  }
+  if (TERMINAL_STATES.has(read.state) && feed.phase !== 'dispatched' && !feed.terminalSettled) {
+    relay.detach(taskId, feed);
+    throw new TaskEventsUnavailableError(taskId, 'feed_expired');
+  }
+  // `from: 'state'` starts with the entries where the present state began,
+  // kept by the relay even when the queue dropped them, then reads on after them.
+  const start = from === 'state' ? feed.current : [];
+  const entries = (from === 'state' ? feed.queue.entries(start.at(-1)?.sequence) : relay.entries(taskId, feed, after))[Symbol.asyncIterator]();
+  const { feedId } = feed;
+  const entry = ({ sequence, value }: QueueEntry<ServerTaskEvent>): TaskEventEntry => ({ cursor: `${feedId}.${sequence}`, event: value });
+  // The queue's own return() also releases a pending next(), which this
+  // generator's return() could not do while it is suspended in one.
+  const stop = () => { void entries.return!(); };
+  signal.addEventListener('abort', stop, { once: true });
+  try {
+    if (signal.aborted) return;
+    for (const kept of start) yield entry(kept);
+    for (let next = await entries.next(); !next.done; next = await entries.next()) yield entry(next.value);
+  } finally {
+    signal.removeEventListener('abort', stop);
+    await entries.return!();
+  }
+}
+
+function taskNotFound(taskId: string): ByokCloudError {
+  return new ByokCloudError('task_not_found', `Task ${taskId} was not found for this tenant.`);
+}
 
 /**
  * The host's approval decision, shared by {@link TaskHandle.approve} and
@@ -153,7 +274,7 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
     taskId,
 
     events(): AsyncIterable<ServerTaskEvent> {
-      return deps.relay.events(taskId);
+      return readTaskEvents(deps, taskId, {}, (entry) => entry.event);
     },
 
     async cancel(reason?: string): Promise<void> {
@@ -178,7 +299,7 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
         await deps.cloud.steerTask(deps.tenant, taskId, { text });
       } catch (caught) {
         if (!(caught instanceof KernelSteerRejectedError)) throw caught;
-        const state = await deps.readState(taskId);
+        const state = (await deps.readState(taskId))?.state;
         // A refused steer is a non-event, so nothing it did could have removed
         // the attempt between the gate and this read. If the attempt is gone
         // anyway, the store lost it: report the kernel's own refusal rather

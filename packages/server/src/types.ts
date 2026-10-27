@@ -75,9 +75,10 @@ export interface CreateByokServerOptions {
   /** Override the reference {@link TokenSigner} (e.g. an org-wide/KMS-backed signer). */
   tokenSigner?: TokenSigner;
   /**
-   * How many {@link ServerTaskEvent}s one task's `TaskHandle.events()` buffer
-   * retains before the OLDEST are dropped and a single
-   * `{ kind: 'error', reason: 'events_truncated' }` marker is appended. The
+   * How many {@link ServerTaskEvent}s one task's event feed (`tasks.events`,
+   * `TaskHandle.events()`) retains before the OLDEST are dropped. A reader
+   * whose next entry was dropped receives one
+   * `{ kind: 'error', reason: 'events_truncated' }` marker in its place. The
    * feed is a notification relay, not a second record of what happened — the
    * durable facts stay in the cloud stores (`tasks.get`, `result()`) — so a
    * consumer that stops reading costs bounded memory rather than unbounded
@@ -86,14 +87,15 @@ export interface CreateByokServerOptions {
   taskEventBufferLimit?: number;
   /**
    * How long after a task reaches a terminal its relay buffer and terminal
-   * promise are RETAINED before being reclaimed, ms. A late `events()` reader
+   * promise are RETAINED before being reclaimed, ms. A late event reader
    * within this window still replays the retained feed; past it, new event
-   * reads complete empty. Use the durable read model (`tasks.get`, `result()`)
-   * for terminal facts after expiry. Default 5 minutes.
+   * reads throw {@link TaskEventsUnavailableError} (`feed_expired`). Use the
+   * durable read model (`tasks.get`, `result()`) for terminal facts after
+   * expiry. Default 5 minutes.
    *
-   * Retention never decides when a feed ENDS: {@link TaskHandle.events}
-   * completes at the terminal event itself, whenever that happens, so a
-   * `for await` over it is never left waiting on this timer.
+   * Retention never decides when a feed ENDS: an event read completes at the
+   * terminal event itself, whenever that happens, so a `for await` over it is
+   * never left waiting on this timer.
    *
    * A positive integer of at most `2_147_483_647` (the largest delay one
    * timer can hold, ~24.8 days); a larger value is refused at construction.
@@ -314,17 +316,58 @@ export type ServerTaskEvent =
   | { kind: 'state'; state: TaskState; at: string }
   | { kind: 'agent'; event: AgentEventOrUnknown }
   | { kind: 'artifact'; artifact: TaskArtifactPayload }
-  | { kind: 'await_approval'; summary: string }
+  | { kind: 'await_approval'; summary: string; approvalId: string }
   | { kind: 'error'; reason: string; retryable?: boolean };
+
+/**
+ * One notification of a task's event feed, and the position to resume after
+ * it. The feed is a notification stream, not a record: task facts stay with
+ * `ByokServer.tasks.get` and `TaskHandle.result()`.
+ */
+export interface TaskEventEntry {
+  /**
+   * Opaque. Pass it as `after` to resume after this entry. Valid only for this
+   * server instance's current feed of this task: a restart or a reclaimed feed
+   * makes it unknown.
+   */
+  readonly cursor: string;
+  readonly event: ServerTaskEvent;
+}
+
+/**
+ * Thrown by the first `next()` of `ByokServer.tasks.events` or
+ * {@link TaskHandle.events}, before any entry, when the read cannot continue
+ * from where the caller asked. Read the task's current facts with
+ * `ByokServer.tasks.get` instead.
+ *
+ * - `cursor_unknown`: `after` names no position in this instance's current
+ *   feed of the task (a restart, another task's cursor, or a malformed one).
+ * - `feed_expired`: the task is terminal and this instance retains no feed for
+ *   it, because retention reclaimed it or the task ended before this instance
+ *   started.
+ */
+export class TaskEventsUnavailableError extends Error {
+  readonly taskId: string;
+  readonly reason: 'cursor_unknown' | 'feed_expired';
+
+  constructor(taskId: string, reason: 'cursor_unknown' | 'feed_expired') {
+    super(`events of task ${taskId} unavailable: ${reason}`);
+    this.name = 'TaskEventsUnavailableError';
+    this.taskId = taskId;
+    this.reason = reason;
+  }
+}
 
 /** Handle returned by {@link ByokServer.dispatch} for one in-flight task. */
 export interface TaskHandle {
   readonly taskId: string;
   /**
-   * Replay retained notifications and follow live updates until terminal.
-   * New reads after terminal retention expires or the server stops complete
-   * empty; they never reopen a feed. Durable terminal facts remain available
-   * through `result()` and `ByokServer.tasks.get`.
+   * Replay retained notifications and follow live updates until terminal: the
+   * events of `ByokServer.tasks.events(taskId)`, without cursors. A read after
+   * terminal retention expires throws {@link TaskEventsUnavailableError}
+   * (`feed_expired`) on its first `next()`; a read after the server stops
+   * completes empty. Durable terminal facts remain available through
+   * `result()` and `ByokServer.tasks.get`.
    */
   events(): AsyncIterable<ServerTaskEvent>;
   cancel(reason?: string): Promise<void>;
