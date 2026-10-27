@@ -197,7 +197,7 @@ describe('inbound lifecycle recovery', () => {
       payload: {
         instruction: 'send one message',
         agentRef,
-        sessionRef: 'recovery-session',
+        session: { mode: 'resume', sessionRef: 'recovery-session' },
         egressPolicy: {
           policyRevision: 'recovery-policy',
           activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
