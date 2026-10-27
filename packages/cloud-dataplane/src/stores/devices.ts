@@ -28,6 +28,7 @@ import {
 } from '@byok-sdk/core';
 import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
 import type { Pool, PoolClient } from 'pg';
+import type { ByokPool } from '../pool';
 
 interface DeviceRow {
   readonly tenant_id: string;
@@ -233,7 +234,7 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
   readonly #pool: Pool;
   readonly #clock: Clock | undefined;
 
-  constructor(pool: Pool, clock?: Clock) {
+  constructor(pool: ByokPool, clock?: Clock) {
     this.#pool = pool;
     this.#clock = clock;
   }

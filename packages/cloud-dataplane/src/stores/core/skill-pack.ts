@@ -45,6 +45,7 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import type { Pool, PoolClient } from 'pg';
+import type { ByokPool } from '../../pool';
 
 const DEFAULT_LIST_LIMIT = 50;
 
@@ -86,7 +87,7 @@ function toFile(row: FileRow): SkillPackFile {
 export class PostgresSkillPackStore implements SkillPackStore {
   readonly #pool: Pool;
 
-  constructor(pool: Pool) {
+  constructor(pool: ByokPool) {
     this.#pool = pool;
   }
 

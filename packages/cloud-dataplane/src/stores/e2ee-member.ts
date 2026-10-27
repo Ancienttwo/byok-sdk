@@ -13,7 +13,8 @@ import type {
   E2eeScopeKeyPackageRow,
 } from '@byok-sdk/cloud';
 import { parseRecordedWriteResult } from '@byok-sdk/cloud';
-import type { Pool, PoolClient } from 'pg';
+import type { PoolClient } from 'pg';
+import type { ByokPool } from '../pool';
 
 type PackageRow = { scope_id: string; epoch: string; recipient: string; key_id: string; sender: string; package: string };
 
@@ -86,7 +87,7 @@ async function lockEach(client: PoolClient, kind: 'e2ee-scope' | 'e2ee-member-ke
  * request receipt store, in the append transaction.
  */
 export class PostgresE2eeMemberStore implements E2eeMemberStore {
-  constructor(private readonly pool: Pool, private readonly clock: Clock) {}
+  constructor(private readonly pool: ByokPool, private readonly clock: Clock) {}
 
   async #transaction<T>(operation: (client: PoolClient) => Promise<T | undefined>): Promise<T> {
     const client = await this.pool.connect();

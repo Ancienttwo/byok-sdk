@@ -13,7 +13,8 @@ import {
 } from '@byok-sdk/core';
 import type { BlobObservation } from '@byok-sdk/cloud';
 import { createEnvelope, decodeEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
-import type { Pool, PoolClient } from 'pg';
+import type { PoolClient } from 'pg';
+import type { ByokPool } from '../pool';
 import { PostgresCloudCleanup } from '../cleanup';
 import { PostgresRetentionPolicyStore } from '../stores/retention-policy';
 import { migrate } from '../migrate';
@@ -176,7 +177,7 @@ async function seedCommittedObject(
   });
 }
 
-async function configurePolicy(pool: Pool, clock: Clock): Promise<void> {
+async function configurePolicy(pool: ByokPool, clock: Clock): Promise<void> {
   await new PostgresRetentionPolicyStore(pool, clock).writeRetentionPolicy(TENANT, {
     policyId: 'default',
     mailboxAckedRetentionMs: 1_000n,
@@ -186,7 +187,7 @@ async function configurePolicy(pool: Pool, clock: Clock): Promise<void> {
   });
 }
 
-function interceptCleanupDelete(pool: Pool, beforeDelete: () => Promise<void>): Pool {
+function interceptCleanupDelete(pool: ByokPool, beforeDelete: () => Promise<void>): ByokPool {
   let intercepted = false;
   return interceptClientQueries(pool, async (sql) => {
     if (!intercepted && sql.includes('WITH acked AS')) {
@@ -196,11 +197,12 @@ function interceptCleanupDelete(pool: Pool, beforeDelete: () => Promise<void>): 
   });
 }
 
+// Built on the real pool so it still carries the createByokPool brand.
 function interceptClientQueries(
-  pool: Pool,
+  pool: ByokPool,
   beforeQuery: (sql: string) => Promise<void>,
-): Pool {
-  return {
+): ByokPool {
+  return Object.assign(Object.create(pool) as ByokPool, {
     query: async (...args: unknown[]) => { const query = args[0]; const sql = typeof query === 'string' ? query : ((query as { text?: string } | undefined)?.text ?? ''); await beforeQuery(sql); return Reflect.apply(pool.query, pool, args); },
     connect: async (): Promise<PoolClient> => {
       const client = await pool.connect();
@@ -222,10 +224,10 @@ function interceptClientQueries(
         },
       });
     },
-  } as unknown as Pool;
+  });
 }
 
-async function maintenanceCloud(pool: Pool, clock: Clock, storage: R2ObjectMaintenance) {
+async function maintenanceCloud(pool: ByokPool, clock: Clock, storage: R2ObjectMaintenance) {
   const objectStorage = (await createObjectStorageScope()).config;
   const core = createPostgresCoreStores({ pool, clock, objectStorage });
   return createByokCloud({

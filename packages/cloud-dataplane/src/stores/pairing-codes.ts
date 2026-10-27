@@ -24,6 +24,7 @@ import type {
   PairingEnrollmentInput,
 } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 import { getDeviceOnClient, registerDeviceOnClient } from './devices';
 
 interface PairingCodeRow {
@@ -109,7 +110,7 @@ export class PostgresPairingCodeStore implements PairingCodeStore {
   readonly #pool: Pool;
   readonly #clock: Clock;
 
-  constructor(pool: Pool, clock: Clock) {
+  constructor(pool: ByokPool, clock: Clock) {
     this.#pool = pool;
     this.#clock = clock;
   }

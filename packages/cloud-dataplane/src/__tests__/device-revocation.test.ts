@@ -27,6 +27,7 @@ import { PostgresDeviceAssertionReplayAuthority } from '../stores/device-asserti
 import { createPostgresCoreStores } from '../stores/core/index';
 import { createDataplaneScope, SKIP_DATAPLANE } from './support/dataplane';
 import type { Pool } from 'pg';
+import type { ByokPool } from '../pool';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const TENANT_A = tenantId('device-revocation-a');
@@ -66,7 +67,7 @@ interface Fixture {
   seed(tenant: string, deviceId: string, machineId?: string): Promise<void>;
 }
 
-async function fixture(pool: Pool): Promise<Fixture> {
+async function fixture(pool: ByokPool): Promise<Fixture> {
   const clock = createMutableClock();
   const crypto = createWebCrypto();
   const core = createPostgresCoreStores({ pool, clock, objectStorage: (await createObjectStorageScope()).config });
