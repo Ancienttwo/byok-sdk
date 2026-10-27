@@ -407,7 +407,8 @@ export function selectImpact(paths, context = {}) {
       for (const dir of ['examples/basic', 'examples/host-execution-core', 'examples/bot-collaboration']) dirs.add(dir);
       continue;
     }
-    if (path === 'examples/basic/clarification.test.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts'
+    if (path === 'examples/basic/clarification.ts' || path === 'examples/basic/clarification.test.ts'
+      || path === 'examples/basic/goal-btw.ts' || path === 'examples/basic/goal-btw.test.ts' || path === 'examples/basic/goal-btw-close.test.ts'
       || path === 'examples/basic/quickstart-smoke.test.ts' || path === 'examples/basic/server.ts'
       || path === 'examples/basic/task-events-route.ts' || path === 'examples/basic/task-events-route.test.ts') {
       dirs.add('examples/basic'); continue;

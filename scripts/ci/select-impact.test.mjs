@@ -400,7 +400,7 @@ test('the #1022 task events route selects only examples/basic', () => {
 test('wire v4 (#925) reviewed paths select only their owners', () => {
   assert.deepEqual(selectImpact(['examples/packaging/launcher.ts']).families, ['packageability-smoke']);
   assert.ok(selectImpact(['examples/packaging/launcher.ts']).dirs.includes('examples/packaging'));
-  for (const path of ['examples/basic/quickstart-smoke.test.ts', 'examples/basic/server.ts']) {
+  for (const path of ['examples/basic/quickstart-smoke.test.ts', 'examples/basic/server.ts', 'examples/basic/clarification.ts', 'examples/basic/goal-btw.ts']) {
     assert.deepEqual(selectImpact([path]).dirs, ['examples/basic'], path);
   }
   for (const path of ['scripts/integration/salesko-recurring.test.ts', 'packages/client/scripts/fixtures/packed-cli-mcp-codex.mjs']) {
